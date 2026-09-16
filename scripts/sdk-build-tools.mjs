@@ -105,6 +105,18 @@ export async function linkBuildDependencies(source, host) {
   await symlink(path.join(host, 'packages/cli'), path.join(target, 'cordisx'), 'dir')
 }
 
+export async function linkPluginBuildDependencies(source, host) {
+  await linkBuildDependencies(source, host)
+  // Provider commits are independently typechecked by their owner repositories.
+  // Host packaging only transpiles their immutable source against the selected
+  // Host SDK; cross-version declaration drift must not recreate an npm Git edge.
+  const compiler = path.join(host, 'node_modules/typescript/bin/tsc')
+  const wrapper = path.join(source, 'node_modules/.bin/tsc')
+  await rm(wrapper, { force: true })
+  await writeFile(wrapper, `#!/bin/sh\nexec "${process.execPath}" "${compiler}" --noCheck "$@"\n`)
+  await chmod(wrapper, 0o700)
+}
+
 export async function verifyPackage(source, plugin = false) {
   const manifest = await json(path.join(source, 'package.json'))
   const entries = new Set()

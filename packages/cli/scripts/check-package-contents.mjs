@@ -1,5 +1,3 @@
-// The check skips prepack's rebuild, but must perform its runtime bundling.
-import './prepare-bundled-runtime-dependencies.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
@@ -33,23 +31,16 @@ try {
 
   const sourceSkillRoot = path.join(repositoryRoot, 'skills/cordisx-plugin-development')
   const bundledSkillRoot = path.join(repositoryRoot, 'packages/cli/dist/skills/cordisx-plugin-development')
-  const sourceMarkdownEditorStyle = path.join(
-    repositoryRoot,
-    'packages/cli/src/renderer/host-ui/public-markdown-editor.css',
-  )
-  const bundledMarkdownEditorStyle = path.join(
-    repositoryRoot,
-    'packages/cli/dist/src/renderer/host-ui/public-markdown-editor.css',
-  )
+  const preservedRendererStyles = [
+    'renderer/host-ui/public-markdown-editor.css',
+    'renderer/model-providers.css',
+    'renderer/manager/pages/model-services.css',
+  ]
   const extractedRoot = path.join(packRoot, 'extracted')
   mkdirSync(extractedRoot)
   if (typeof packItem.filename !== 'string') throw new Error('npm pack did not report a tarball filename')
   await extractTar({ cwd: extractedRoot, file: path.join(packRoot, packItem.filename) })
   const tarballSkillRoot = path.join(extractedRoot, 'package/dist/skills/cordisx-plugin-development')
-  const tarballMarkdownEditorStyle = path.join(
-    extractedRoot,
-    'package/dist/src/renderer/host-ui/public-markdown-editor.css',
-  )
   const packagedSkillModule = await import(
     pathToFileURL(
       path.join(extractedRoot, 'package/dist/src/launcher/builtin-skill.js'),
@@ -71,12 +62,16 @@ try {
   if (deployment.status !== 'installed' || deployment.effectiveHome !== deploymentHome) {
     throw new Error('tarball CordisX Skill deployment smoke returned an unexpected projection')
   }
-  const markdownEditorStyle = readFileSync(sourceMarkdownEditorStyle)
-  if (!markdownEditorStyle.equals(readFileSync(bundledMarkdownEditorStyle))) {
-    throw new Error('bundled public Markdown editor stylesheet differs from source')
-  }
-  if (!markdownEditorStyle.equals(readFileSync(tarballMarkdownEditorStyle))) {
-    throw new Error('public Markdown editor stylesheet differs in the cordisx tarball')
+  for (const relative of preservedRendererStyles) {
+    const sourceStyle = readFileSync(path.join(repositoryRoot, 'packages/cli/src', relative))
+    const bundledStyle = readFileSync(path.join(repositoryRoot, 'packages/cli/dist/src', relative))
+    const tarballStyle = readFileSync(path.join(extractedRoot, 'package/dist/src', relative))
+    if (!sourceStyle.equals(bundledStyle)) {
+      throw new Error(`bundled renderer stylesheet differs from source: ${relative}`)
+    }
+    if (!sourceStyle.equals(tarballStyle)) {
+      throw new Error(`renderer stylesheet differs in the cordisx tarball: ${relative}`)
+    }
   }
   const deployedMarker = JSON.parse(
     readFileSync(path.join(deployment.targetDir, packagedSkillModule.CORDISX_SKILL_MARKER_FILE), 'utf8'),
@@ -140,21 +135,16 @@ try {
     'THIRD_PARTY_NOTICES.md',
     'package.json',
   ]
-  const bundledRoots = [
-    '@cordisx/schemastery-ui',
-    '@cordisx/channel',
-    '@cordisx/plugin-cli-proxy-api',
-  ]
-    .map(name => `node_modules/${name}/`)
+  const bundledRoots = ['@cordisx/schemastery-ui'].map(name => `node_modules/${name}/`)
   for (
     const required of [
-      '@cordisx/channel/dist/channel.js',
-      '@cordisx/channel/dist/channel.d.ts',
-      '@cordisx/channel/dist/service.mjs',
-      '@cordisx/plugin-cli-proxy-api/dist/runtime/module.js',
+      'dist/bundled-plugins/@cordisx/channel/dist/channel.js',
+      'dist/bundled-plugins/@cordisx/channel/dist/channel.d.ts',
+      'dist/bundled-plugins/@cordisx/channel/dist/service.mjs',
+      'dist/bundled-plugins/@cordisx/plugin-cli-proxy-api/dist/runtime/module.js',
     ]
   ) {
-    if (!files.includes(`node_modules/${required}`)) throw new Error(`missing bundled runtime: ${required}`)
+    if (!files.includes(required)) throw new Error(`missing bundled runtime: ${required}`)
   }
   const leaked = files.filter(file => (
     !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
@@ -202,6 +192,8 @@ try {
       'dist/src/vite.d.ts',
       'dist/src/launcher/builtin-skill.js',
       'dist/src/renderer/host-ui/public-markdown-editor.css',
+      'dist/src/renderer/model-providers.css',
+      'dist/src/renderer/manager/pages/model-services.css',
       'dist/skills/cordisx-plugin-development/SKILL.md',
       'dist/skills/cordisx-plugin-development/agents/openai.yaml',
       'dist/skills/cordisx-plugin-development/references/feasibility-assessment.md',
@@ -211,6 +203,8 @@ try {
       'dist/assets/brand/cordisx-mark-dark.svg',
       'dist/assets/brand/cordisx-mark-animated-light.svg',
       'dist/assets/brand/cordisx-mark-animated-dark.svg',
+      'dist/assets/launcher/native-provider-credential-helper.mjs',
+      'dist/assets/launcher/native-app-server-intermediary.mjs',
       'node_modules/@cordisx/schemastery-ui/package.json',
       'node_modules/@cordisx/schemastery-ui/LICENSE',
       'node_modules/@cordisx/schemastery-ui/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',

@@ -20,8 +20,20 @@ import {
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-// Exact local-wallet Protocol candidate; consumers may supply the verified companion tarball.
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#15e0d7b63228624477890b48bb091a5f88d45dbe'
+const sourceCordisXManifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
+const expectedGitDependencies = {
+  '@cordisx/channel': sourceCordisXManifest.cordisxSources?.['@cordisx/channel'],
+  '@cordisx/plugin-cli-proxy-api': sourceCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api'],
+}
+for (const [name, spec] of Object.entries(expectedGitDependencies)) {
+  if (typeof spec !== 'string' || !/^github:cordisx\/[a-z0-9-]+#[0-9a-f]{40}$/.test(spec)) {
+    throw new Error(`source cordisx must pin ${name} to an exact Git commit`)
+  }
+}
+const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
+if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#55621cd211d48783eb0f729f2925b54bd621a810') {
+  throw new Error('source cordisx must consume the merged wallet pool Protocol revision')
+}
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -85,8 +97,11 @@ try {
     installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@cordisx/protocol'] !== expectedProtocolSpec
+    || installedCordisXManifest.cordisxSources?.['@cordisx/channel'] !== expectedGitDependencies['@cordisx/channel']
+    || installedCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api']
+      !== expectedGitDependencies['@cordisx/plugin-cli-proxy-api']
   ) {
-    throw new Error('installed cordisx must pin its Host-owned renderers and canonical Protocol')
+    throw new Error('installed cordisx must retain the formal Protocol beta and canonical plugin sources')
   }
   const protocolPaths = (await run('npm', ['ls', '--parseable', '--all', '@cordisx/protocol'], {
     cwd: runnerDirectory,
@@ -458,7 +473,7 @@ createElement(AgentAvatar, props)
   )
   if (
     installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
-    || installedSchemasteryUiManifest.version !== '0.1.0-beta.2'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.3'
   ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }

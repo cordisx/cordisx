@@ -19,6 +19,7 @@ import {
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
 import { localDevelopmentPluginIdentity } from '../launcher/development.js'
+import { equivalentPluginActivation } from '../launcher/plugin-activation.js'
 import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
 import {
   DirectPublisherGrantAuthority,
@@ -34,6 +35,7 @@ import {
   resolveCordisXProjectConfig,
 } from '../launcher/config.js'
 import {
+  acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
   findFreeLoopbackPort,
   type IsolatedCodexProfile,
@@ -52,7 +54,11 @@ import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { WorkUsageProfileHost, type WorkUsageProfileLocation } from '../launcher/work-usage-profile.js'
 import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
-import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/service-config.js'
+import {
+  type HostSecretState,
+  HostServiceConfigNarrowApi,
+  type HostServiceConfigPersistence,
+} from '../launcher/service-config.js'
 import type { PlatformProviderServiceReconfigureRuntime } from '../launcher/platform-provider-service-batch.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
 import {
@@ -159,6 +165,10 @@ export interface CordisXCliRuntime {
   readonly internalBuiltinSkillSourceDir?: string
   /** Repository-only HOME seam that prevents launch tests from touching the user's real HOME. */
   readonly internalSharedHomeDir?: string
+  /** Repository-only launch seam for proving CLI assembly without starting a native Host. */
+  readonly internalRunInjectedHost?: typeof runInjectedHost
+  /** Repository-only factory seam for proving pre-handoff launch assembly failures. */
+  readonly internalAgentHistoryHost?: typeof agentHistoryHost
 }
 
 export async function deployBuiltinSkillWithoutOverwritingUserChanges(
@@ -229,6 +239,11 @@ export interface RendererComposition {
   readonly permissionBridgeToken?: string
   readonly iconThemePreferenceBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  readonly managedServiceUICapabilities?: readonly {
+    readonly pluginId: string
+    readonly pluginGeneration: string
+    readonly token: string
+  }[]
   readonly rebuild: (
     config: CordisXConfig,
     pluginActivation: CordisXPluginActivationRecordV1,
@@ -237,6 +252,11 @@ export interface RendererComposition {
       permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
       pluginBundles: CordisXPluginBundleManagerSnapshotV1
       channelManager?: ChannelManagerBundleProjection
+      managedServiceUICapabilities?: readonly {
+        readonly pluginId: string
+        readonly pluginGeneration: string
+        readonly token: string
+      }[]
     }>,
   ) => Promise<Readonly<{ source: string; newDocumentSource?: string }>>
 }
@@ -248,6 +268,20 @@ export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbac
 }
 
 export type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
+
+export function assertProductionGraphBootstrapSnapshot(
+  expectedActive: CordisXPluginActivationRecordV1,
+  expectedRegistryEpoch: number,
+  current: Readonly<{
+    active: CordisXPluginActivationRecordV1
+    registryEpoch: number
+  }>,
+): void {
+  if (
+    !equivalentPluginActivation(current.active, expectedActive)
+    || current.registryEpoch !== expectedRegistryEpoch
+  ) throw new Error('browser graph admission activation snapshot is stale')
+}
 
 /** Build the exact renderer composition that the launcher will inject through CDP. */
 export async function buildRendererComposition(
@@ -278,6 +312,11 @@ export async function buildRendererComposition(
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
+    readonly managedServiceUICapabilities?: readonly {
+      readonly pluginId: string
+      readonly pluginGeneration: string
+      readonly token: string
+    }[]
     readonly internalBuildRendererBundle?: typeof buildRendererBundle
     /** Opt-in development transport; normal launches keep immutable package delivery. */
     readonly developmentBuild?: typeof buildRendererBundle
@@ -315,6 +354,9 @@ export async function buildRendererComposition(
     ...(options.channelActionsBridgeToken === undefined
       ? {}
       : { channelActionsBridgeToken: options.channelActionsBridgeToken }),
+    ...(options.managedServiceUICapabilities === undefined
+      ? {}
+      : { managedServiceUICapabilities: options.managedServiceUICapabilities }),
     ...(options.permission === undefined
       ? (options.profileId === undefined ? {} : { profileId: options.profileId })
       : {
@@ -364,18 +406,29 @@ export async function buildRendererComposition(
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    ...(options.managedServiceUICapabilities === undefined
+      ? {}
+      : { managedServiceUICapabilities: options.managedServiceUICapabilities }),
     rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch, current) => {
       const currentBundleOptions: BuildRendererBundleOptions = current === undefined
         ? bundleOptions
         : (() => {
-          const { channelManager: _channelManager, pluginBundleSnapshot: _pluginBundleSnapshot, ...stable } =
-            bundleOptions
+          const {
+            channelManager: _channelManager,
+            managedServiceUICapabilities: _managedServiceUICapabilities,
+            pluginBundleSnapshot: _pluginBundleSnapshot,
+            ...stable
+          } = bundleOptions
           void _channelManager
+          void _managedServiceUICapabilities
           void _pluginBundleSnapshot
           return {
             ...stable,
             pluginBundleSnapshot: current.pluginBundles,
             ...(current.channelManager === undefined ? {} : { channelManager: current.channelManager }),
+            ...(current.managedServiceUICapabilities === undefined
+              ? {}
+              : { managedServiceUICapabilities: current.managedServiceUICapabilities }),
           }
         })()
       const rebuildOptions: BuildRendererBundleOptions = {
@@ -465,6 +518,7 @@ export function cliProxyServiceConfigApis(input: {
   readonly environment: NodeJS.ProcessEnv
   readonly fleet: ProviderFleet
   readonly platformProviderServices?: PlatformProviderServiceReconfigureRuntime
+  readonly persistence?: HostServiceConfigPersistence
 }): readonly { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }[] {
   const secretState = (reference: string | undefined): HostSecretState => {
     if (reference === undefined || reference === '') return 'missing'
@@ -481,6 +535,7 @@ export function cliProxyServiceConfigApis(input: {
     writable: true,
     authorize: () => true,
     secretState,
+    ...(input.persistence === undefined ? {} : { persistence: input.persistence }),
   })
   const runtime = new HostServiceConfigNarrowApi({
     contract: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
@@ -491,8 +546,9 @@ export function cliProxyServiceConfigApis(input: {
     writable: true,
     authorize: () => true,
     secretState,
+    ...(input.persistence === undefined ? {} : { persistence: input.persistence }),
     restartService: async candidate => {
-      const startupState = await readServiceConfigState({
+      const startupState = await (input.persistence?.read ?? readServiceConfigState)({
         profileId: input.profileId,
         pluginId: 'cli-proxy-api',
         serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
@@ -561,6 +617,7 @@ export async function waitForHostExitAfterReadiness(input: {
 }
 
 export async function runInjectedHost(input: {
+  readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
   readonly source: string | (() => string)
   readonly newDocumentSource?: string | (() => string)
   readonly providerFleet?: ProviderFleet
@@ -590,14 +647,17 @@ export async function runInjectedHost(input: {
     profileId: string
     runtimeGeneration: string
   }>
+  readonly managedServiceUI?: WatchInjectionOptions['managedServiceUI']
   readonly executable?: string
   readonly debugPort: number
   readonly hostArgs: readonly string[]
   readonly launcher: CordisXLauncherOptions
   readonly profile?: IsolatedCodexProfile
+  /** Product launch may acquire before profile preparation and hand ownership to this lifecycle. */
+  readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
-  readonly onReady?: () => void
+  readonly onReady?: () => void | Promise<void>
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
@@ -609,6 +669,7 @@ export async function runInjectedHost(input: {
   })
   let reportedReady = false
   const watcher = watchAndInject({
+    ...(input.nativeSubmission === undefined ? {} : { nativeSubmission: input.nativeSubmission }),
     port: input.debugPort,
     source: input.source,
     ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
@@ -639,16 +700,18 @@ export async function runInjectedHost(input: {
       : { productionGraphBootstrap: input.productionGraphBootstrap }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
-    onReady: () => {
+    ...(input.managedServiceUI === undefined ? {} : { managedServiceUI: input.managedServiceUI }),
+    onReady: async () => {
       if (reportedReady) return
       reportedReady = true
+      await input.onReady?.()
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
-      input.onReady?.()
     },
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
   let launched: ChildProcess | undefined
+  let profileLease = input.profileLease
   let primaryError: unknown
   try {
     if (input.launcher.attach) {
@@ -656,6 +719,9 @@ export async function runInjectedHost(input: {
       return
     }
     if (input.executable === undefined) throw new Error('host executable was not resolved')
+    if (input.profile !== undefined && profileLease === undefined) {
+      profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir)
+    }
     input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
     launched = launchCodex(
       input.executable,
@@ -689,11 +755,25 @@ export async function runInjectedHost(input: {
         ? {}
         : { terminateHost: async () => await terminateIsolatedCodex(launchedHost, input.profile) }),
     })
+    const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
+    const leaseCleanup = hostTermination?.status === 'rejected'
+      ? []
+      : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
+    if (primaryError !== undefined) {
+      for (const result of [...cleanup, ...leaseCleanup]) {
+        if (result.status === 'rejected') {
+          input.stdout(`[cordisx] cleanup failed: ${String((result as PromiseRejectedResult).reason)}`)
+        }
+      }
+    }
     if (primaryError === undefined) {
       const rejected = cleanup.find((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (rejected !== undefined) throw rejected.reason
+      for (const result of leaseCleanup) {
+        if (result.status === 'rejected') throw result.reason
+      }
     }
   }
 }

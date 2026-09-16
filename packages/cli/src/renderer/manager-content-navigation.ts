@@ -2,6 +2,7 @@ import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
 import type { AgentPageComposerCommandAdapter } from '@cordisx/protocol/agent-page-admission/v2'
+import type { BrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
 import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
@@ -127,7 +128,7 @@ export function sameStructuredValue(left: unknown, right: unknown): boolean {
 export interface ManagerContentPresentation {
   readonly title: string
   readonly description: string
-  readonly icon?: CordisXIconToken
+  readonly icon?: BrandIconV1
   readonly parent?: CordisXRouteReference
   readonly recordSummary?: Readonly<{
     readonly leadingVisual: Readonly<{ readonly kind: 'agent-avatar'; readonly avatar: AgentAvatarRef }>
@@ -144,7 +145,7 @@ export interface ManagerContentPresentation {
   readonly tabs: readonly Readonly<{
     readonly id: string
     readonly label: string
-    readonly icon: CordisXIconToken
+    readonly icon: BrandIconV1
     readonly route: CordisXRouteReference
     readonly active: boolean
   }>[]

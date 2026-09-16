@@ -1,5 +1,6 @@
 import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 import type { ExtensionPointVisualPresentationV1 } from '@cordisx/protocol/extension-point-visual/v1'
+import type { BrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
 import type { Disposable, Effect } from '@deepseek-ai/cordis'
 
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
@@ -32,9 +33,9 @@ import type {
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 
 import type {
-  ManagerSettingsNavigationGroupReferenceV1,
-  ManagerSettingsNavigationRuntimeIdentityV2,
-} from '@cordisx/protocol/manager-settings-navigation/v2'
+  ManagerSettingsNavigationGroupIdV2,
+  ManagerSettingsNavigationRuntimeIdentityV3,
+} from '@cordisx/protocol/manager-settings-navigation/v3'
 
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
 
@@ -54,6 +55,8 @@ import type {
 } from '@cordisx/protocol/manager-content-navigation/v5'
 
 import type { ComponentType } from 'react'
+
+export type { CordisXManagerOpenResult, CordisXManagerService } from '@cordisx/protocol/manager-self-configuration/v1'
 
 import type { CordisXExtensionPointControlResultV1 } from './control-contracts.js'
 
@@ -126,11 +129,14 @@ export type CordisXManagerSettingsTabItem = CordisXManagerSettingsContentTabItem
 
 export interface CordisXManagerSettingsNavigationItem {
   readonly route: CordisXRouteReference
-  readonly navigationGroup?: ManagerSettingsNavigationGroupReferenceV1
+  readonly navigationGroup?: Readonly<{ readonly id: ManagerSettingsNavigationGroupIdV2 }>
 }
 
 export const CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v9.schema.json' as const
+
+export const CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v11.schema.json' as const
 
 export interface CordisXPresenterItem {
   readonly kind: 'banner' | 'status' | 'chip' | 'progress'
@@ -331,7 +337,7 @@ export type CordisXManagerSettingsNavigationGroup = 'before-settings' | 'after-s
 export type CordisXManagerSettingsNavigationContributionOptions =
   & CordisXContributionOptionsBase<'manager.settings.navigation-items'>
   & { readonly group: CordisXManagerSettingsNavigationGroup }
-  & ManagerSettingsNavigationRuntimeIdentityV2
+  & ManagerSettingsNavigationRuntimeIdentityV3
 
 export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> =
   & CordisXContributionOptionsBase<Name>
@@ -522,9 +528,6 @@ export type CordisXPageHeaderActionV4 =
     readonly menu: readonly CordisXPageHeaderAction[]
   })
 
-export const CORDISX_PAGE_SCHEMA_V4 =
-  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v4.schema.json' as const
-
 export const CORDISX_PAGE_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v1.schema.json' as const
 
@@ -533,6 +536,9 @@ export const CORDISX_PAGE_SCHEMA_V2 =
 
 export const CORDISX_PAGE_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v3.schema.json' as const
+
+export const CORDISX_PAGE_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v4.schema.json' as const
 
 export const CORDISX_ROUTE_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/route.v1.schema.json' as const
@@ -663,7 +669,7 @@ export interface CordisXPageMetadata {
   readonly title: CordisXLocalizedText
   /** User-facing purpose and applicable context; never an implementation note. */
   readonly description?: CordisXLocalizedText
-  readonly icon?: CordisXIconToken
+  readonly icon?: BrandIconV1
   /** Host-rendered chrome policy. Body-only remains subject to the target outlet policy. */
   readonly chrome?: CordisXPageChrome
   /** Page v4 Host body inset; omission preserves the existing standard padding. */
@@ -678,21 +684,26 @@ export interface CordisXPageMetadata {
 export type CordisXPageMetadataV3 =
   & Omit<
     CordisXPageMetadata,
-    '$schema' | 'schemaVersion' | 'description' | 'localeNamespace' | 'headerActions' | 'contentInset'
+    '$schema' | 'schemaVersion' | 'description' | 'icon' | 'localeNamespace' | 'headerActions' | 'contentInset'
   >
   & {
     readonly $schema: typeof CORDISX_PAGE_SCHEMA_V3
     readonly schemaVersion: 3
     readonly headerActions?: readonly CordisXPageHeaderAction[]
     readonly description: CordisXLocalizedText
+    readonly icon?: CordisXIconToken
   }
 
-export type CordisXPageMetadataV4 = Omit<CordisXPageMetadataV3, '$schema' | 'schemaVersion' | 'headerActions'> & {
-  readonly $schema: typeof CORDISX_PAGE_SCHEMA_V4
-  readonly schemaVersion: 4
-  readonly contentInset?: 'standard' | 'none'
-  readonly headerActions?: readonly CordisXPageHeaderActionV4[]
-}
+export type CordisXPageMetadataV4 =
+  & Omit<
+    CordisXPageMetadata,
+    '$schema' | 'schemaVersion' | 'description' | 'localeNamespace'
+  >
+  & {
+    readonly $schema: typeof CORDISX_PAGE_SCHEMA_V4
+    readonly schemaVersion: 4
+    readonly description: CordisXLocalizedText
+  }
 
 export interface CordisXPageNavigation {
   /** Additive route-link-resolution/v1 capability; absent on older Hosts. No clipboard side effects. */

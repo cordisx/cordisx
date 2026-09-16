@@ -6,6 +6,8 @@ export function isolateRuntimeOwnerServices(ctx: Context): Context {
     const name of [
       'connectors',
       'agentLoop',
+      'managedServices',
+      'modelProviders',
       'agents',
       'sessions',
       'agentSessionDetailReferences',

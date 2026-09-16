@@ -31,6 +31,7 @@ import {
 import type { CordisXPluginActivationRecordV1, CordisXPluginLifecycleResultV1 } from '../plugin-lifecycle-contracts.js'
 import { loadStagedPluginPackage, type StagedPluginPackage } from './plugin-package.js'
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
+import { isPermissionReviewV4ManifestVersion } from './plugin-lifecycle-model.js'
 import { PluginPackageSourceSnapshotter } from './packages/integrity.js'
 import { resolvePluginPackageSourceV1 } from './packages/source.js'
 import {
@@ -487,20 +488,15 @@ export class PluginBundleCoordinatorCore {
         decision,
       })
     }
-    if (
-      staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
-      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
-      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
-    ) {
-      throw new Error('bundle members must use runtime manifest v1, v4, v5, v6, v7, or v8')
+    if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
+      throw new Error('bundle members must use runtime manifest v1, v4, or v5 through v14')
     }
     const plan = await this.options.pluginLifecycle.permissionReviewPlanV4({
       requestId: `bundle-plan-${randomUUID()}`,
       ...common,
       target: { kind: 'candidate', candidateId: planned.candidateId },
     })
-    if (plan === undefined) throw new Error('manifest-v5/v6/v7/v8 permission plan is unavailable')
+    if (plan === undefined) throw new Error('manifest-v5 through manifest-v14 permission plan is unavailable')
     const decision: CordisXPermissionAuthorizationDecisionV4 = {
       $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
       schemaVersion: 4,
@@ -617,20 +613,15 @@ export class PluginBundleCoordinatorCore {
         decision,
       })
     }
-    if (
-      staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
-      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
-      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
-    ) {
-      throw new Error('bundle members must use runtime manifest v1, v4, v5, v6, v7, or v8')
+    if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
+      throw new Error('bundle members must use runtime manifest v1, v4, or v5 through v14')
     }
     const plan = await this.options.pluginLifecycle.permissionReviewPlanV4({
       requestId: `bundle-enable-plan-${randomUUID()}`,
       ...common,
       target: { kind: 'enable', pluginId: staged.manifest.id },
     })
-    if (plan === undefined) throw new Error('manifest-v5/v6/v7/v8 enable permission plan is unavailable')
+    if (plan === undefined) throw new Error('manifest-v5 through manifest-v14 enable permission plan is unavailable')
     const decision: CordisXPermissionAuthorizationDecisionV4 = {
       $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
       schemaVersion: 4,

@@ -2,6 +2,7 @@ import type { Disposable, Effect } from '@deepseek-ai/cordis'
 
 import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
 import type { ManagerSettingsNavigationGroupCatalogV1 } from '@cordisx/protocol/manager-settings-navigation/v2'
+import type { ManagerSettingsNavigationGroupCatalogV2 } from '@cordisx/protocol/manager-settings-navigation/v3'
 
 import type {
   NavigationCollectionAction,
@@ -256,6 +257,9 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8 =
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v9.schema.json' as const
 
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v11.schema.json' as const
+
 export const CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-runtime-context.v1.schema.json' as const
 
@@ -430,6 +434,12 @@ export interface CordisXHostExtensionPointCatalogV9 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9
   readonly schemaVersion: 9
   readonly points: readonly CordisXHostExtensionPointDescriptorV9[]
+}
+
+export interface CordisXManagerSettingsNavigationDescriptorV11
+  extends Omit<CordisXManagerSettingsNavigationDescriptorV9, 'navigationGroups'>
+{
+  readonly navigationGroups: ManagerSettingsNavigationGroupCatalogV2
 }
 
 export interface CordisXExtensionPointAnchorCurrentContextV1 {
@@ -690,4 +700,15 @@ export interface CordisXHostExtensionPointCatalogV10 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10
   readonly schemaVersion: 10
   readonly points: readonly (CordisXHostExtensionPointDescriptorV9 | CordisXComposerVisualDescriptorV10)[]
+}
+
+export type CordisXHostExtensionPointDescriptorV11 =
+  | Exclude<CordisXHostExtensionPointDescriptorV9, CordisXManagerSettingsNavigationDescriptorV9>
+  | CordisXManagerSettingsNavigationDescriptorV11
+  | CordisXComposerVisualDescriptorV10
+
+export interface CordisXHostExtensionPointCatalogV11 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11
+  readonly schemaVersion: 11
+  readonly points: readonly CordisXHostExtensionPointDescriptorV11[]
 }

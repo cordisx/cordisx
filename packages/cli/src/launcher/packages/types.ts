@@ -1,4 +1,5 @@
 import type { EntityTemplateDeclaration } from '@cordisx/protocol/entities/v1'
+import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginActivationRecordV1, CordisXPluginDependencyV1 } from '../../plugin-lifecycle-contracts.js'
 
 export type LocalPackageSourceKind = 'local-directory' | 'local-package' | 'downloaded-tarball'
@@ -71,11 +72,15 @@ export interface HostPlatformProviderServiceDeclaration {
 
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]
-  readonly services?: readonly (HostRuntimeServiceDeclaration | HostPlatformProviderServiceDeclaration)[]
+  readonly services?: readonly (
+    | HostRuntimeServiceDeclaration
+    | HostPlatformProviderServiceDeclaration
+    | PluginManifestManagedBackendServiceV14
+  )[]
   readonly execution?: Readonly<
     { readonly realm: 'isolated-worker'; readonly interfaces: readonly ['ui.transient-canvas/v1'] }
   >

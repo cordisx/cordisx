@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -7,18 +6,19 @@ import { expect, it } from 'vitest'
 import { CODEX_APP_SERVER_PLATFORM_BINDINGS_V1 } from '../packages/cli/src/providers/codex-app-server-platform-broker.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
-  normalizePluginManifestV13,
-} from '../packages/cli/src/runtime-exact-request-permissions.js'
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  normalizeLatestRuntimeManifest,
+} from '../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { stagePluginPackageSourceV1 } from '../packages/cli/src/launcher/packages/index.js'
 import { platformProviderRuntimeServiceAccess } from '../packages/cli/src/launcher/packages/platform-provider-service-access.js'
 import {
   HostPlatformProviderConfigurationRegistryV1,
   PlatformProviderServiceHostV1,
 } from '../packages/cli/src/launcher/platform-provider-service.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
-it('stages and activates the formal external CLIProxy package-v13 service in the Host Fleet', async () => {
-  const entry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+it('stages and activates the external CLIProxy package-v14 service in the Host Fleet', async () => {
+  const entry = bundledPluginEntry('plugin-cli-proxy-api')
   const packageRoot = path.resolve(path.dirname(entry), '..', '..')
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-external-cli-proxy-'))
   const staged = await stagePluginPackageSourceV1({
@@ -27,7 +27,7 @@ it('stages and activates the formal external CLIProxy package-v13 service in the
   }, {
     homeDir,
     runtimeValidators: {
-      [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, 'cli-proxy-api'),
+      [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizeLatestRuntimeManifest(value, 'cli-proxy-api'),
     },
   })
   const item = {

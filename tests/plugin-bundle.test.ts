@@ -19,6 +19,7 @@ import {
   type PluginLifecycleRuntime,
   type PluginRuntimeMutation,
 } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { writeLocalPackageV14 } from './suites/plugin-lifecycle.fixtures.js'
 
 const packageSchema =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json'
@@ -296,6 +297,63 @@ describe('Host plugin bundle coordinator', () => {
       pluginOverrides: [],
     })
     expect(installed.outcome).toBe('applied')
+  })
+
+  it('installs and re-enables a manifest-v14 managed backend bundle member through V4 review', async () => {
+    const { root, pluginLifecycle, coordinator } = await harness()
+    const directory = await bundleFixture({ root, id: 'managed-v14-workflow' })
+    await writeLocalPackageV14(path.join(directory, 'plugins', 'notes'), 'notes')
+    const planned = await request(coordinator, {
+      kind: 'inspect-source',
+      source: { kind: 'local-directory', location: pathToFileURL(directory).href },
+    })
+    expect(planned).toMatchObject({
+      outcome: 'planned',
+      plan: { permissionRequests: [] },
+    })
+    const installed = await request(coordinator, {
+      kind: 'install',
+      candidateId: planned.candidateId!,
+      impactToken: planned.impactToken!,
+      bundlePermissions: [],
+      pluginOverrides: [],
+    })
+    expect(installed).toMatchObject({ outcome: 'applied', affectedPluginIds: ['notes'] })
+    expect(await pluginLifecycle.store.loadActive()).toMatchObject({
+      revision: 1,
+      plugins: [{ id: 'notes', enabled: true }],
+    })
+
+    const disablePlan = await request(coordinator, {
+      kind: 'disable',
+      bundleId: 'managed-v14-workflow',
+      impactToken: '',
+    })
+    expect(
+      await request(coordinator, {
+        kind: 'disable',
+        bundleId: 'managed-v14-workflow',
+        impactToken: disablePlan.impactToken!,
+      }),
+    ).toMatchObject({ outcome: 'applied', affectedPluginIds: ['notes'] })
+    expect((await pluginLifecycle.store.loadActive()).plugins[0]).toMatchObject({ enabled: false })
+
+    const enablePlan = await request(coordinator, {
+      kind: 'enable',
+      bundleId: 'managed-v14-workflow',
+      impactToken: '',
+    })
+    expect(
+      await request(coordinator, {
+        kind: 'enable',
+        bundleId: 'managed-v14-workflow',
+        impactToken: enablePlan.impactToken!,
+      }),
+    ).toMatchObject({ outcome: 'applied', affectedPluginIds: ['notes'] })
+    expect(await pluginLifecycle.store.loadActive()).toMatchObject({
+      revision: 3,
+      plugins: [{ id: 'notes', enabled: true }],
+    })
   })
 
   it('installs exact members dependency-first and binds required permissions to explicit bundle choices', async () => {

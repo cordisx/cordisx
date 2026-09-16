@@ -11,10 +11,16 @@ vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
     return node
   },
 }))
+vi.mock('../packages/cli/src/renderer/host-ui/HostForm.js', () => ({
+  HOST_FORM_REACT_STYLES: '',
+  HostForm: ({ plugin }: { readonly plugin: { readonly id: string } }) => <div data-plugin-config-form={plugin.id} />,
+}))
 import type { ManagerModel, ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
 import type { ManagedManagerPageMount, ManagerContentPresentation } from '../packages/cli/src/renderer/navigation.js'
 import { installReactCordisXManager } from '../packages/cli/src/renderer/manager/install.js'
 import { HostManagerNavigationController } from '../packages/cli/src/renderer/manager/navigation-controller.js'
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
 
 const previous = {
   window: globalThis.window,
@@ -31,7 +37,32 @@ afterEach(() => Object.assign(globalThis, previous))
 function snapshot(): ManagerSnapshot {
   return {
     version: '0.1.0',
-    plugins: [],
+    plugins: [{
+      id: 'gateway',
+      source: 'file:///gateway',
+      name: 'Gateway',
+      inject: [],
+      config: { endpoint: 'http://localhost' },
+      status: 'active',
+      configuration: {
+        namespace: 'gateway',
+        schemaKind: 'schemastery',
+        applies: 'live',
+        writable: true,
+        revision: 1,
+        lastGoodRevision: 1,
+        value: { endpoint: 'http://localhost' },
+        fields: [{
+          namespace: 'gateway',
+          path: ['endpoint'],
+          type: 'string',
+          value: 'http://localhost',
+          disabled: false,
+          required: true,
+        }],
+        secrets: [],
+      },
+    }],
     registrations: [],
     commands: [],
     navigation: { routes: [], pages: [], outlets: [] },
@@ -50,7 +81,20 @@ function snapshot(): ManagerSnapshot {
       description: 'Entities',
       pageTitle: 'Team Architecture',
       pageDescription: 'Entities',
-      icon: 'host:layers',
+      icon: {
+        kind: 'raster-image',
+        image: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json',
+          contract: 'cordisx.raster-image-snapshot/v1',
+          schemaVersion: 1,
+          mediaType: 'image/png',
+          encoding: 'base64',
+          data: PNG,
+          width: 1,
+          height: 1,
+        },
+      },
       route: { id: 'team' },
     }],
     platform: {
@@ -133,6 +177,17 @@ describe('programmatic Manager identity detail navigation', () => {
           controller.openManagerContent({
             contributionId: 'chatroom:team',
             root: { id: 'team' },
+            target: { id: 'team' },
+          })
+          await Promise.resolve()
+        })
+        expect(dom.window.document.querySelector('[data-settings-navigation-item="chatroom:team"] img')).not.toBeNull()
+        expect(dom.window.document.querySelector('.cxr-header-seat [data-brand-icon-kind="raster-image"] img'))
+          .not.toBeNull()
+        await act(async () => {
+          controller.openManagerContent({
+            contributionId: 'chatroom:team',
+            root: { id: 'team' },
             target: { id: 'entity-overview', params: { entityId: 'lead' } },
           })
           await Promise.resolve()
@@ -154,6 +209,11 @@ describe('programmatic Manager identity detail navigation', () => {
           await Promise.resolve()
         })
         expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
+        await act(async () => {
+          controller.openRoute({ kind: 'plugin', pluginId: 'gateway', page: 'config' })
+          await Promise.resolve()
+        })
+        expect(dom.window.document.querySelector('[data-plugin-config-form="gateway"]')).not.toBeNull()
         await act(async () =>
           dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Close CordisX Manager"]')!
             .click()

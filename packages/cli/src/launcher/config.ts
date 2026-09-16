@@ -1,9 +1,9 @@
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
 import type { CliProxyProviderConfig } from '../providers/contracts.js'
@@ -17,6 +17,11 @@ import {
   resolveCliProxyProviderConfigs,
 } from '../providers/cli-proxy-service-config.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  normalizeLatestRuntimeManifest,
+  normalizePluginManifestV14,
+} from './latest-runtime-manifest.js'
 import { JsonPackageManifestV2Resolver } from './packages/manifest.js'
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -29,6 +34,7 @@ import type {
   CordisXPluginManifestV8,
   CordisXPluginManifestV9,
 } from '../permission-contracts.js'
+import { bundledPluginEntry } from './bundled-plugin.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -51,6 +57,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
@@ -196,10 +203,10 @@ function nonEmptyString(value: unknown, label: string): string {
 function pluginEntry(value: unknown, label: string, rootDir: string): string {
   const entry = nonEmptyString(value, label)
   if (entry === 'cordisx:cli-proxy-api') {
-    return createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+    return bundledPluginEntry('plugin-cli-proxy-api')
   }
   if (entry === 'cordisx:channel') {
-    return createRequire(import.meta.url).resolve('@cordisx/channel')
+    return bundledPluginEntry('channel')
   }
   if (entry.startsWith('cordisx:')) throw new Error(`${label} uses an unknown built-in plugin`)
   return path.resolve(rootDir, entry)
@@ -341,9 +348,14 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
     const resolved = await new JsonPackageManifestV2Resolver({
       runtimeValidators: {
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, plugin.id),
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizePluginManifestV14(value, plugin.id),
       },
     }).resolve(packageRoot)
-    return { ...plugin, manifest: normalizePluginManifestV13(resolved.runtimeManifest, plugin.id) }
+    const manifest = normalizeLatestRuntimeManifest(resolved.runtimeManifest, plugin.id)
+    if (manifest === undefined) {
+      throw new Error(`unsupported CLIProxy runtime manifest: ${resolved.runtimeManifest.$schema}`)
+    }
+    return { ...plugin, manifest }
   }))
   return { ...config, plugins }
 }

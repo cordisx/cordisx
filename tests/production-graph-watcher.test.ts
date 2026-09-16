@@ -4,6 +4,77 @@ import { describe, expect, it, vi } from 'vitest'
 import { watchAndInject } from '../packages/cli/src/launcher/cdp.js'
 
 describe('production graph watcher', () => {
+  it('waits for asynchronous readiness work before publishing ready', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        const item = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        const params = item.params ?? {}
+        socket.send(JSON.stringify({
+          id: item.id,
+          result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'production-bootstrap' }
+            : {
+              result: {
+                value: String(params.expression).includes('document.readyState === "complete"')
+                  ? true
+                  : { ok: true, result: true },
+              },
+            },
+        }))
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async input =>
+      String(input).endsWith('/json/version')
+        ? new Response(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/browser` }))
+        : new Response(JSON.stringify([{
+          id: 'native-production',
+          title: 'Codex',
+          type: 'page',
+          url: 'app://-/index.html',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/native`,
+        }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    let finishReady!: () => void
+    const readyWork = new Promise<void>(resolve => {
+      finishReady = resolve
+    })
+    const enteredReady = vi.fn()
+    const status = vi.fn()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'globalThis.__cordisxCompositionBoot = Promise.resolve(globalThis.__cordisxRuntime = {})',
+      hasLoopbackGraph: true,
+      launcherOwnedNativeTarget: true,
+      pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      signal: controller.signal,
+      onReady: async () => {
+        enteredReady()
+        await readyWork
+      },
+      onStatus: status,
+    })
+    try {
+      await vi.waitFor(() => expect(enteredReady).toHaveBeenCalledOnce(), { timeout: 10_000 })
+      expect(status).not.toHaveBeenCalled()
+      finishReady()
+      await vi.waitFor(() => expect(status).toHaveBeenCalledWith(expect.stringContaining('injected target')), {
+        timeout: 10_000,
+      })
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  }, 30_000)
+
   it('removes a disconnected production target and restores its browser-scoped permission', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')

@@ -5,8 +5,14 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
-import { isNpmRegistryPropagationError, npmViewItem } from './npm-pack-report.mjs'
-import { betaReleasePackages } from './beta-release-scope.mjs'
+import { npmViewItem } from './npm-pack-report.mjs'
+import { releasePackageNames } from './release-packages.mjs'
+import { releaseFromTag } from './release-version.mjs'
+import {
+  markRegistryPropagationError,
+  registryAttemptCache,
+  retryRegistryPropagation,
+} from './registry-release-propagation.mjs'
 
 const execute = promisify(execFile)
 let npmCache
@@ -16,13 +22,10 @@ function argument(name) {
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
-const packages = betaReleasePackages(argument('--scope'))
-const includesCreator = packages.includes('create-cordisx-plugin')
-const version = argument('--version')
+const packages = releasePackageNames()
+const release = releaseFromTag(argument('--tag'))
+const { version, distTag } = release
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
-if (typeof version !== 'string' || !/^0\.1\.0-beta\.\d+$/.test(version)) {
-  throw new Error('--version must be an exact 0.1.0 beta prerelease')
-}
 if (registry !== 'https://registry.npmjs.org') throw new Error('registry must be https://registry.npmjs.org')
 
 async function run(file, args, options = {}) {
@@ -45,18 +48,6 @@ async function run(file, args, options = {}) {
     const wrapped = new Error(`${file} ${args.join(' ')} failed\n${stdout}${stderr}`, { cause: error })
     wrapped.commandOutput = `${stdout}${stderr}`
     throw wrapped
-  }
-}
-
-async function retryRegistryPropagation(label, operation) {
-  for (let attempt = 1; attempt <= 12; attempt += 1) {
-    try {
-      return await operation()
-    } catch (error) {
-      if (!isNpmRegistryPropagationError(error) || attempt === 12) throw error
-      console.log(`[registry] ${label} is still propagating (attempt ${attempt}/12)`)
-      await new Promise(resolve => setTimeout(resolve, 5000))
-    }
   }
 }
 
@@ -87,7 +78,13 @@ async function verifyGeneratedViteGraph(graphRoot, label) {
 async function verifyInstalledPackage(runner, packageName) {
   const packageRoot = path.join(runner, 'node_modules', packageName)
   const manifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
-  if (manifest.version !== version) throw new Error(`${packageName} installed version mismatch`)
+  if (manifest.version !== version) {
+    const error = new Error(
+      `${packageName} installed version mismatch: expected ${version}, received ${manifest.version}`,
+    )
+    error.code = 'VERSION_MISMATCH'
+    throw error
+  }
   if (manifest.license !== 'AGPL-3.0-or-later') throw new Error(`${packageName} installed license mismatch`)
   await access(path.join(packageRoot, 'README.md'))
   await access(path.join(packageRoot, 'LICENSE'))
@@ -181,38 +178,55 @@ async function verifyGeneratedEmbedded(project, pluginIds, integrated) {
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
 }
 
-const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-registry-beta-'))
+function assertReleaseTag(packageName, tags) {
+  if (tags[distTag] !== version) {
+    throw new Error(`${packageName} ${distTag} dist-tag does not point to ${version}`)
+  }
+  if (distTag !== 'latest' && tags.latest === version) {
+    throw new Error(`${packageName} prerelease must not move latest`)
+  }
+}
+
+const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-registry-release-'))
 try {
-  npmCache = path.join(temporaryRoot, 'npm-cache')
   const runner = path.join(temporaryRoot, 'runner')
   const cordisxHome = path.join(temporaryRoot, 'cordisx-home')
   await mkdir(runner, { recursive: true })
   await writeFile(path.join(runner, 'package.json'), `${JSON.stringify({ private: true }, null, 2)}\n`, 'utf8')
-  await retryRegistryPropagation('beta package metadata', async () => {
+  await retryRegistryPropagation('release package metadata', async attempt => {
+    npmCache = registryAttemptCache(temporaryRoot, 'metadata', attempt)
     for (const packageName of packages) {
       const tags = await npmViewJson([packageName, 'dist-tags'], runner)
-      if (tags.latest !== '0.0.0') throw new Error(`${packageName} latest must remain 0.0.0`)
-      if (tags.beta !== version) {
-        const error = new Error(`${packageName} beta dist-tag is still propagating`)
+      try {
+        assertReleaseTag(packageName, tags)
+      } catch (error) {
         error.commandOutput = 'ETARGET'
         throw error
       }
     }
   })
-  await retryRegistryPropagation('beta package installation', async () => {
+  await retryRegistryPropagation('release package installation', async attempt => {
+    npmCache = registryAttemptCache(temporaryRoot, 'install', attempt)
     await rm(path.join(runner, 'node_modules'), { recursive: true, force: true })
     await rm(path.join(runner, 'package-lock.json'), { force: true })
     await run('npm', [
       'install',
+      '--no-save',
       '--no-audit',
       '--no-fund',
       '--loglevel=error',
-      ...packages.map(name => `${name}@beta`),
+      ...packages.map(name => `${name}@${distTag}`),
       `--registry=${registry}`,
     ], { cwd: runner })
+    for (const packageName of packages) {
+      try {
+        await verifyInstalledPackage(runner, packageName)
+      } catch (error) {
+        if (error?.code === 'VERSION_MISMATCH') throw markRegistryPropagationError(error)
+        throw error
+      }
+    }
   })
-  await verifyInstalledPackage(runner, 'cordisx')
-  if (includesCreator) await verifyInstalledPackage(runner, 'create-cordisx-plugin')
 
   const bin = path.join(
     runner,
@@ -245,120 +259,118 @@ try {
     env: cliEnvironment,
   })
 
-  if (includesCreator) {
-    const createTarget = path.join(temporaryRoot, 'from-npm-create')
-    const npxTarget = path.join(temporaryRoot, 'from-npx')
-    const workspaceTarget = path.join(temporaryRoot, 'plugin-workspace')
-    const embeddedWorkspaceTarget = path.join(temporaryRoot, 'embedded-workspace')
-    const embeddedIsolatedTarget = path.join(temporaryRoot, 'embedded-isolated')
-    const creatorBin = path.join(
-      runner,
-      'node_modules',
-      '.bin',
-      process.platform === 'win32' ? 'create-cordisx-plugin.cmd' : 'create-cordisx-plugin',
-    )
-    await run('npm', [
-      'create',
-      'cordisx-plugin@beta',
-      createTarget,
-    ], { cwd: runner })
-    await run('npx', ['--yes', 'create-cordisx-plugin@beta', npxTarget], { cwd: runner })
-    await verifyGeneratedProject(createTarget)
-    await verifyGeneratedProject(npxTarget)
+  const createTarget = path.join(temporaryRoot, 'from-npm-create')
+  const npxTarget = path.join(temporaryRoot, 'from-npx')
+  const workspaceTarget = path.join(temporaryRoot, 'plugin-workspace')
+  const embeddedWorkspaceTarget = path.join(temporaryRoot, 'embedded-workspace')
+  const embeddedIsolatedTarget = path.join(temporaryRoot, 'embedded-isolated')
+  const creatorBin = path.join(
+    runner,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'create-cordisx-plugin.cmd' : 'create-cordisx-plugin',
+  )
+  await run('npm', [
+    'create',
+    `cordisx-plugin@${distTag}`,
+    createTarget,
+  ], { cwd: runner })
+  await run('npx', ['--yes', `create-cordisx-plugin@${distTag}`, npxTarget], { cwd: runner })
+  await verifyGeneratedProject(createTarget)
+  await verifyGeneratedProject(npxTarget)
 
-    await run(creatorBin, [
-      '--mode',
-      'workspace',
-      workspaceTarget,
-      '--plugin',
-      'alpha',
-      '--plugin',
-      'beta',
-    ], { cwd: runner })
-    await verifyGeneratedWorkspace(workspaceTarget, ['alpha', 'beta'])
+  await run(creatorBin, [
+    '--mode',
+    'workspace',
+    workspaceTarget,
+    '--plugin',
+    'alpha',
+    '--plugin',
+    'beta',
+  ], { cwd: runner })
+  await verifyGeneratedWorkspace(workspaceTarget, ['alpha', 'beta'])
 
-    for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
-      await mkdir(project, { recursive: true })
-    }
-    await writeFile(
-      path.join(embeddedWorkspaceTarget, 'package.json'),
-      `${
-        JSON.stringify(
-          {
-            name: 'embedded-workspace-fixture',
-            private: true,
-            workspaces: [],
-          },
-          null,
-          2,
-        )
-      }\n`,
-      'utf8',
-    )
-    await writeFile(
-      path.join(embeddedIsolatedTarget, 'package.json'),
-      `${
-        JSON.stringify(
-          {
-            name: 'embedded-isolated-fixture',
-            private: true,
-          },
-          null,
-          2,
-        )
-      }\n`,
-      'utf8',
-    )
-    await run(creatorBin, [
-      '--mode',
-      'embedded',
-      embeddedWorkspaceTarget,
-      '--plugin',
-      'alpha',
-      '--package-manager',
-      'npm',
-    ], { cwd: runner })
-    await run(creatorBin, [
-      '--mode',
-      'embedded',
-      embeddedWorkspaceTarget,
-      '--plugin',
-      'beta',
-      '--package-manager',
-      'npm',
-    ], { cwd: runner })
-    await run(creatorBin, [
-      '--mode',
-      'embedded',
-      embeddedIsolatedTarget,
-      '--plugin',
-      'solo',
-      '--integration',
-      'isolated',
-      '--package-manager',
-      'npm',
-    ], { cwd: runner })
-    await verifyGeneratedEmbedded(embeddedWorkspaceTarget, ['alpha', 'beta'], true)
-    await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false)
+  for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
+    await mkdir(project, { recursive: true })
   }
+  await writeFile(
+    path.join(embeddedWorkspaceTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-workspace-fixture',
+          private: true,
+          workspaces: [],
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(embeddedIsolatedTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-isolated-fixture',
+          private: true,
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
+  await run(creatorBin, [
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'alpha',
+    '--package-manager',
+    'npm',
+  ], { cwd: runner })
+  await run(creatorBin, [
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'beta',
+    '--package-manager',
+    'npm',
+  ], { cwd: runner })
+  await run(creatorBin, [
+    '--mode',
+    'embedded',
+    embeddedIsolatedTarget,
+    '--plugin',
+    'solo',
+    '--integration',
+    'isolated',
+    '--package-manager',
+    'npm',
+  ], { cwd: runner })
+  await verifyGeneratedEmbedded(embeddedWorkspaceTarget, ['alpha', 'beta'], true)
+  await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false)
 
   for (const packageName of packages) {
     const tags = await npmViewJson([packageName, 'dist-tags'], runner)
-    if (tags.beta !== version) throw new Error(`${packageName} beta dist-tag mismatch`)
-    if (tags.latest !== '0.0.0') throw new Error(`${packageName} latest must remain 0.0.0`)
+    assertReleaseTag(packageName, tags)
   }
 
   console.log(JSON.stringify({
     status: 'verified',
     source: 'registry',
     channelEntry: 'verified',
+    tag: release.tag,
     version,
+    distTag,
     license: 'AGPL-3.0-or-later',
     pluginException: true,
     packages,
-    creatorForms: includesCreator ? ['npm create cordisx-plugin@beta', 'npx create-cordisx-plugin@beta'] : [],
-    creatorModes: includesCreator ? ['single', 'workspace', 'embedded-workspace', 'embedded-isolated'] : [],
-    latest: '0.0.0',
+    creatorForms: [`npm create cordisx-plugin@${distTag}`, `npx create-cordisx-plugin@${distTag}`],
+    creatorModes: ['single', 'workspace', 'embedded-workspace', 'embedded-isolated'],
   }))
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

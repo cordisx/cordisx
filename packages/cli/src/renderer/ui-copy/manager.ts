@@ -1,6 +1,7 @@
 import type { ProductCopyCatalog } from './types.js'
 
 export const MANAGER_NAVIGATION_COPY = {
+  'manager.nav.model-services': { en: 'Model services', 'zh-CN': '模型服务' },
   'manager.nav.plugins': { en: 'Plugins', 'zh-CN': '插件' },
   'manager.nav.plugin-bundles': { en: 'Plugin bundles', 'zh-CN': '插件包' },
   'manager.nav.extension-points': { en: 'Extension points', 'zh-CN': '扩展点' },
@@ -10,6 +11,7 @@ export const MANAGER_NAVIGATION_COPY = {
   'manager.nav.group.resources': { en: 'Resources', 'zh-CN': '资源' },
   'manager.nav.group.development': { en: 'Development', 'zh-CN': '开发' },
   'manager.nav.group.collaboration': { en: 'Collaboration', 'zh-CN': '协作' },
+  'manager.nav.group.external-accounts': { en: 'External accounts', 'zh-CN': '外部账号' },
   'manager.nav.group.other': { en: 'Other', 'zh-CN': '其他' },
   'manager.trigger.manage': { en: 'Manage CordisX plugins', 'zh-CN': '管理 CordisX 插件' },
   'manager.close': { en: 'Close CordisX Manager', 'zh-CN': '关闭 CordisX 管理器' },

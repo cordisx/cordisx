@@ -96,6 +96,42 @@ describe('public Select and PanZoomCanvas', () => {
       )
       expect(dom.window.document.querySelector('[data-host-icon="host:history"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-host-icon="host:hierarchy"]')).not.toBeNull()
+
+      await act(async () =>
+        root.render(
+          <>
+            <runtime.ui.Icon name="account" aria-label="Account" />
+            <runtime.ui.Icon name="refresh" />
+            <runtime.ui.Icon name="logout" />
+            <runtime.ui.Icon name="runtime" />
+            <runtime.ui.Icon name="readiness" />
+            <runtime.ui.Icon name="health" />
+          </>,
+        )
+      )
+      for (
+        const token of [
+          'host:people',
+          'action.refresh',
+          'action.disable',
+          'action.resume',
+          'status.success',
+          'navigation.runtime',
+        ]
+      ) {
+        const icon = dom.window.document.querySelector(`[data-host-icon="${token}"]`)
+        expect(icon).not.toBeNull()
+        expect(
+          [...icon!.querySelectorAll('path')].every(path =>
+            path.getAttribute('fill') === 'currentColor' || path.getAttribute('stroke') === 'currentColor'
+          ),
+        ).toBe(true)
+      }
+      expect(dom.window.document.querySelector('.cxr-ui-icon[aria-label="Account"]')?.getAttribute('aria-hidden'))
+        .toBe('false')
+      expect(dom.window.document.querySelector('.cxr-ui-icon:not([aria-label])')?.getAttribute('aria-hidden')).toBe(
+        'true',
+      )
     } finally {
       await act(async () => root.unmount())
       runtime.dispose()

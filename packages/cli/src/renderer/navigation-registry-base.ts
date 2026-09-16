@@ -19,6 +19,7 @@ import {
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
 } from '../contracts.js'
@@ -52,6 +53,7 @@ import { mountManagerContentConfigForm } from './manager-content-config-form.js'
 import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
+import { createHostBrandIcon } from './brand-icon.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
@@ -119,13 +121,13 @@ import type {
 import { buildPath, matchPath, routeParameters, sameRouteParams } from './navigation-model.js'
 import { assertKeys, pageChromeButton, STANDARD_PAGE_CLIP_PATH } from './navigation-pages.js'
 import type { ManagerSettingsNavigationRouteResolution, ManagerSettingsRouteResolution } from './navigation-pages.js'
+import { projectNavigationProductMetadata } from './navigation-metadata.js'
 
 export class NavigationRegistryBase {
   protected readonly records = new Map<string, RouteRecord>()
   protected readonly states = new Map<string, OutletNavigationState>()
   protected readonly listeners = new Set<() => void>()
   readonly managerContent: ManagerContentNavigationRegistry
-  /** Host-protected page mount lifecycle; no plugin receives this registry directly. */
   /** Host-protected page mount lifecycle; no plugin receives this registry directly. */
   readonly pageAdmissionBindings: PageAdmissionBindingRegistry
   protected pageComposerAdapterFactory: PageComposerAdapterFactory | undefined
@@ -181,30 +183,7 @@ export class NavigationRegistryBase {
     description: CordisXPageMetadata['description'] | undefined,
     sites: Map<string, string>,
   ): NavigationProductMetadata {
-    const diagnostics: NavigationMetadataDiagnostic[] = []
-    const project = (
-      field: 'title' | 'description',
-      value: CordisXPageMetadata['title'] | undefined,
-    ): string | undefined => {
-      if (value === undefined) {
-        diagnostics.push(Object.freeze({
-          code: `metadata.missing-${field}`,
-          field,
-          message: `${kind} ${qualifiedId} should declare localized ${field} metadata`,
-        }) as NavigationMetadataDiagnostic)
-        return undefined
-      }
-      const site = `navigation:${kind}:${qualifiedId}:${field}`
-      sites.set(site, owner)
-      return this.i18n.resolveFor(owner, value, site).text
-    }
-    const projectedTitle = project('title', title)
-    const projectedDescription = project('description', description)
-    return Object.freeze({
-      ...(projectedTitle === undefined ? {} : { title: projectedTitle }),
-      ...(projectedDescription === undefined ? {} : { description: projectedDescription }),
-      diagnostics: Object.freeze(diagnostics),
-    })
+    return projectNavigationProductMetadata(this.i18n, kind, owner, qualifiedId, title, description, sites)
   }
 
   protected enqueue(action: () => void | Promise<void>): Promise<void> {
@@ -269,10 +248,13 @@ export class NavigationRegistryBase {
         return 'manager.content routes require route-v2 title and description'
       }
       if (
-        (page.metadata.schemaVersion !== 3 && page.metadata.schemaVersion !== 4)
+        !(
+          (page.metadata.schemaVersion === 3 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V3)
+          || (page.metadata.schemaVersion === 4 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V4)
+        )
         || page.metadata.description === undefined
       ) {
-        return `page ${page.qualifiedId} requires page-v3 title and description`
+        return `page ${page.qualifiedId} requires page-v3/page-v4 title and description`
       }
       if (page.metadata.chrome === 'body-only') {
         return `page ${page.qualifiedId} must use standard chrome for manager.content`
@@ -592,7 +574,7 @@ export class NavigationRegistryBase {
           })
           leading.append(back)
         } else if (page.metadata.icon !== undefined) {
-          leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
+          leading.append(createHostBrandIcon(content.ownerDocument, page.metadata.icon))
         }
         breadcrumbs = mountLocalizedPageHeaderBreadcrumbs({
           leading,

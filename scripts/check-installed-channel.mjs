@@ -16,10 +16,10 @@ export async function verifyInstalledChannel(input) {
   const config = await input.loadConfig(input.configPath)
   const channel = config.plugins.find(plugin => plugin.id === 'channel')
   if (channel === undefined) throw new Error('installed cordisx:channel alias is missing')
-  const packageRoot = path.dirname(path.dirname(channel.entry))
+  const packageRoot = path.resolve(path.dirname(channel.entry), '..')
   const manifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
   if (channel.entry !== path.join(packageRoot, 'dist', 'channel.js') || manifest.name !== '@cordisx/channel') {
-    throw new Error('installed cordisx:channel alias did not resolve the external package export')
+    throw new Error('installed cordisx:channel alias did not resolve the bundled package export')
   }
   await access(path.join(packageRoot, 'dist', 'service.mjs'))
   return config

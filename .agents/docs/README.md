@@ -75,13 +75,14 @@ implementation of those contracts, not a second public specification.
 
 ## Understand authority, Agent, Channel, and Marketplace features
 
-| Document                                              | Type      | Use it for                                                                      |
-| ----------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| [platform-capabilities](platform-capabilities.md)     | Reference | Platform service, Permission Broker, adapter availability, and transport        |
-| [publisher-grants](publisher-grants.md)               | Reference | Device-bound PublisherGrant authority, persistence, and optional registry       |
-| [multi-provider-sessions](multi-provider-sessions.md) | Reference | Provider Fleet, structured identities, independent connections, and CLIProxyAPI |
-| [agent-events](agent-events.md)                       | Reference | Session/Agent events, messaging, permissions, and private adapter boundary      |
-| [native-agent-context](native-agent-context.md)       | Reference | Native definition delivery, resume, event correlation, and evidence boundaries  |
+| Document                                              | Type                   | Use it for                                                                                             |
+| ----------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| [platform-capabilities](platform-capabilities.md)     | Reference              | Platform service, Permission Broker, adapter availability, and transport                               |
+| [publisher-grants](publisher-grants.md)               | Reference              | Device-bound PublisherGrant authority, persistence, and optional registry                              |
+| [multi-provider-sessions](multi-provider-sessions.md) | Reference              | Provider Fleet, structured identities, independent connections, and CLIProxyAPI                        |
+| [native-model-providers](native-model-providers.md)   | Experimental reference | Managed native providers, Model services settings, composer selection, and plugin supplemental actions |
+| [agent-events](agent-events.md)                       | Reference              | Session/Agent events, messaging, permissions, and private adapter boundary                             |
+| [native-agent-context](native-agent-context.md)       | Reference              | Native definition delivery, resume, event correlation, and evidence boundaries                         |
 
 - [Host Agent task creation](agent-task-creation.md): execution context, durable operation correlation, and native audit.
   | [agent-history](agent-history.md) | Reference | Read-only durable history, paging, deduplication, redaction, and ownership |
@@ -97,6 +98,7 @@ implementation of those contracts, not a second public specification.
 | [development-plan](development-plan.md)                                                     | Historical plan             | Recorded stages and feasibility observations; not the current roadmap |
 | [manager-feedback-ledger-2026-08-26](manager-feedback-ledger-2026-08-26.md)                 | Historical delivery record  | 2026-08-26 requirement batch and its retained evidence states         |
 | [certified-dom-permission-ledger-2026-08-30](certified-dom-permission-ledger-2026-08-30.md) | Historical candidate record | 2026-08-30 candidate SHAs, local checks, and pending gates            |
+| [managed-service-runtime-handoff-2026-09-09](managed-service-runtime-handoff-2026-09-09.md) | Historical candidate record | 2026-09-09 local checkpoint, focused evidence, and pending gates      |
 
 - [Unified notifications delivery, 2026-09-10](notification-delivery-2026-09-10.md): dated candidate implementation and verification evidence.
 

@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ManagerModel } from '../../manager.js'
-import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
+import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
 import { HostAgentAvatar } from '../../host-ui/avatar/AgentAvatar.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
@@ -123,7 +123,7 @@ export function ManagerContentPage(
                 onKeyDown={event => onTabKeyDown(event, index)}
                 onClick={() => router.replace({ kind: 'manager-content', id: contributionId, reference: tab.route })}
               >
-                <HostSurfaceIcon token={tab.icon} />
+                <HostBrandIcon icon={tab.icon} />
                 <span>{tab.label}</span>
               </button>
             ))}

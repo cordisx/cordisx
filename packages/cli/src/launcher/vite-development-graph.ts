@@ -1,6 +1,7 @@
 import { type ModuleNode, normalizePath, type ViteDevServer } from 'vite'
 
 export const SHARED_MODULES = new Set([
+  '@cordisx/protocol/managed-service-ui/v1',
   'cordisx/react',
   'cordisx/react/jsx-runtime',
   'cordisx/react/jsx-dev-runtime',

@@ -105,6 +105,10 @@ describe('Codex Desktop Agent/Session transport', () => {
         detail: { kind: 'host', ref: 'codex-thread:native-thread-1' },
       })
     expect(
+      (sent.find(item => (item.request as Record<string, unknown> | undefined)?.method === 'thread/start')!
+        .request as Record<string, unknown>).params,
+    ).not.toHaveProperty('modelProvider')
+    expect(
       await transport.submit({
         sessionId: 'session-1',
         message: user('m-1', 'first'),
@@ -310,6 +314,43 @@ describe('Codex Desktop Agent/Session transport', () => {
       sendMessageFromView: async () => {},
     })
     expect(await CodexDesktopAgentSessionTransport.connect(emptyRecovery())).toBeDefined()
+  })
+
+  it('scopes an explicit provider to the CordisX-owned native thread creation request', async () => {
+    const view = new TestWindow()
+    const requests: Record<string, unknown>[] = []
+    install('window', view)
+    install('location', view.location)
+    install('codexWindowType', 'electron')
+    install('electronBridge', {
+      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+      sendMessageFromView: async (envelope: { request?: Record<string, unknown> }) => {
+        if (envelope.request === undefined) return
+        requests.push(structuredClone(envelope.request))
+        queueMicrotask(() =>
+          view.message({
+            type: 'mcp-response',
+            hostId: 'local',
+            message: { id: envelope.request!.id, result: { thread: { id: 'provider-thread' } } },
+          })
+        )
+      },
+    })
+    const transport = await CodexDesktopAgentSessionTransport.connect(emptyRecovery())
+    if (transport === undefined) throw new Error('transport unavailable')
+    expect(
+      await transport.create({
+        owner: nativeOwner,
+        sessionId: 'provider-session',
+        options: { provider: 'provider-b', model: 'model-b' },
+      }),
+    ).toMatchObject({ status: 'accepted' })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      method: 'thread/start',
+      params: { modelProvider: 'provider-b', model: 'model-b' },
+    })
+    transport.dispose()
   })
 })
 
@@ -793,7 +834,7 @@ it('passes explicit native project identity or null and verifies returned task m
   let wrongProject = false
   let sequence = 0
   const bridge = {
-    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[2] }),
+    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS.at(-1)! }),
     sendMessageFromView: async (value: any) => {
       const request = value.request
       if (value.type !== 'mcp-request') return

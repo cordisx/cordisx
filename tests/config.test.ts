@@ -7,6 +7,7 @@ import {
   loadConfig,
   resolveCordisXProjectConfig,
 } from '../packages/cli/src/launcher/config.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
 describe('loadConfig', () => {
   it('resolves plugin entries relative to the config', async () => {
@@ -192,7 +193,7 @@ describe('loadConfig', () => {
     await expect(loadConfig(configPath)).rejects.toThrow('reserved plugin id: host')
   })
 
-  it('resolves the Channel convenience alias to the external package export', async () => {
+  it('resolves the Channel convenience alias to the bundled package export', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
     await writeFile(
@@ -204,10 +205,10 @@ describe('loadConfig', () => {
     )
     const config = await loadConfig(configPath)
     expect(config.plugins[0]).toMatchObject({ id: 'channel', enabled: true, config: {} })
-    expect(config.plugins[0]?.entry).toMatch(/node_modules\/@cordisx\/channel\/dist\/channel\.js$/)
+    expect(config.plugins[0]?.entry).toBe(bundledPluginEntry('channel'))
   })
 
-  it('resolves the CLIProxy convenience alias to the external package export', async () => {
+  it('resolves the CLIProxy convenience alias to the bundled package export', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-proxy-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
     await writeFile(
@@ -223,15 +224,13 @@ describe('loadConfig', () => {
       enabled: true,
       config: {},
       manifest: {
-        schemaVersion: 13,
+        schemaVersion: 14,
         capabilities: expect.arrayContaining([
           expect.objectContaining({ name: 'tasks.create', scope: { runtime: 'exact-request' } }),
           expect.objectContaining({ name: 'turns.submit', scope: { runtime: 'exact-request' } }),
         ]),
       },
     })
-    expect(config.plugins[0]?.entry).toMatch(
-      /node_modules\/@cordisx\/plugin-cli-proxy-api\/dist\/runtime\/module\.js$/,
-    )
+    expect(config.plugins[0]?.entry).toBe(bundledPluginEntry('plugin-cli-proxy-api'))
   })
 })

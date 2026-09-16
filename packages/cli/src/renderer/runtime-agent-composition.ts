@@ -1,10 +1,15 @@
 import { isNativeRequiredTaskSession } from './native-agent-session-recovery.js'
 import { historicalNativeSessionDetails } from './native-agent-session-recovery.js'
 import { CordisXEntitySettingsNavigationService } from './entity-settings-navigation.js'
-import { resolveHostManagerRouteOpenRequest } from './manager/navigation-controller.js'
+import { CordisXManagerSelfConfigurationService } from './manager-self-configuration.js'
 import { installUsageService } from './usage.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
+import { installModelProviderSelector } from './install-model-provider-selector.js'
+import type {
+  NativeProviderSelectionCommandChannel,
+  NativeProviderSelectionOwner,
+} from './native-provider-selection-client.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -112,8 +117,10 @@ import {
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
 import {
+  createHostManagerSelfConfigurationNavigationOptions,
   HostManagerNavigationController,
   resolveHostManagerAgentDefinitionOpenRequest,
+  resolveHostManagerRouteOpenRequest,
 } from './manager/navigation-controller.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
@@ -550,6 +557,13 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       open: (request: import('./manager/navigation-controller.js').HostManagerContentOpenRequest) =>
         runtimeScope.managerNavigationController()!.openManagerContent(request),
     })
+    await runtimeScope.ctx.plugin(CordisXManagerSelfConfigurationService, {
+      console: runtimeScope.pluginConsole()!,
+      ...createHostManagerSelfConfigurationNavigationOptions(
+        runtimeScope.managerModel()!,
+        runtimeScope.managerNavigationController()!,
+      ),
+    })
     runtimeScope.agentConversationShellFiber = runtimeScope.ctx.plugin(CordisXAgentConversationShellService, {
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
@@ -849,6 +863,25 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
         }
         : {}),
     })
+    if (runtimeScope.metadata()!.hostKind !== 'playground') {
+      const native = globalThis as typeof globalThis & {
+        __cordisxNativeProviderOwner?: NativeProviderSelectionOwner
+        __cordisxNativeProviderCommandChannel?: NativeProviderSelectionCommandChannel
+        __cordisxNativeSubmissionReady?: Promise<boolean>
+      }
+      const nativeReady = native.__cordisxNativeSubmissionReady === undefined
+        ? false
+        : await native.__cordisxNativeSubmissionReady
+      const disposeModelProviderSelector = await installModelProviderSelector(
+        document,
+        runtimeScope.modelProviders()!,
+        () => runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
+        nativeReady,
+        native.__cordisxNativeProviderOwner,
+        native.__cordisxNativeProviderCommandChannel,
+      )
+      runtimeScope.registrySubscriptions()!.push(disposeModelProviderSelector)
+    }
   } catch (error) {
     await runtimeScope.dispose()!()
     throw error

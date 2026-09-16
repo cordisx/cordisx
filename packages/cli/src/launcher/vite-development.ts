@@ -42,6 +42,7 @@ import {
   validateNativeVitePlugin,
   VITE_CLIENT_DISPOSER_SOURCE,
 } from './vite-development-graph.js'
+import { NativeViteSourceMapStore } from './vite-development-source-maps.js'
 
 const ENTRY = 'virtual:cordisx-native-entry'
 const BOOT = 'virtual:cordisx-native-boot'
@@ -117,6 +118,13 @@ export interface NativeViteServerOptions {
   readonly cacheRoot?: string
   /** Crawl the full Host and plugin entries before opening the native window. */
   readonly prebundleHostDependencies?: boolean
+}
+
+export function nativeViteHotPayload(payload: unknown, timestamp = Date.now()): unknown {
+  if (typeof payload !== 'object' || payload === null || !('type' in payload) || payload.type !== 'full-reload') {
+    return payload
+  }
+  return { type: 'custom', event: 'cordisx:restart-host', data: { timestamp } }
 }
 
 async function ensurePrivateCacheDirectory(directory: string): Promise<void> {
@@ -202,7 +210,7 @@ export async function startNativeViteServer(
     readonly pluginId: string
     readonly moduleGeneration: string
   }>()
-  const sourceMaps = new Map<string, string>()
+  const sourceMaps = new NativeViteSourceMapStore()
   const fileHashes = new Map<string, string>()
 
   const waitForDependencyOptimization = async (): Promise<void> => {
@@ -811,20 +819,9 @@ if (import.meta.hot) {
       // Native pages must never receive Vite's window.location.reload fallback.
       const send = hot.send.bind(hot)
       hot.send = ((payload: unknown, data?: unknown) => {
-        if (typeof payload === 'object' && payload !== null && 'type' in payload && payload.type === 'full-reload') {
-          const timestamp = Date.now()
-          const graph = vite.moduleGraph
-          const seen = new Set<Parameters<typeof graph.invalidateModule>[0]>()
-          for (const module of graph.idToModuleMap.values()) {
-            if (
-              module.url.includes('/@vite/') || module.url.endsWith('/@react-refresh')
-              || module.id === '\0' + BOOT || module.id === '\0' + PREAMBLE || module.id === '\0' + REACT_PREPARE
-            ) continue
-            graph.invalidateModule(module, seen, timestamp, true)
-          }
-          send({ type: 'custom', event: 'cordisx:restart-host', data: { timestamp } })
-        } else if (typeof payload === 'string') send(payload, data)
-        else send(payload as Parameters<typeof send>[0])
+        const normalized = nativeViteHotPayload(payload)
+        if (typeof normalized === 'string') send(normalized, data)
+        else send(normalized as Parameters<typeof send>[0])
       }) as typeof hot.send
       vite.middlewares.use((request, response, next) => {
         const pathname = new URL(request.url ?? '/', origin).pathname
@@ -863,11 +860,9 @@ if (import.meta.hot) {
                 source,
               )
             if (match !== null) {
-              const contents = Buffer.from(match[1]!, 'base64').toString('utf8')
-              const mapPath = base + 'maps/' + createHash('sha256').update(contents).digest('hex') + '.map'
-              sourceMaps.set(mapPath, contents)
-              if (sourceMaps.size > 256) sourceMaps.delete(sourceMaps.keys().next().value!)
-              chunk = source.slice(0, match.index) + '\n//# sourceMappingURL=' + origin + mapPath + '\n'
+              const mapPath = sourceMaps.remember(base, match[1]!)
+              chunk = source.slice(0, match.index)
+                + (mapPath === undefined ? '\n' : '\n//# sourceMappingURL=' + origin + mapPath + '\n')
               response.setHeader('content-length', Buffer.byteLength(chunk as string))
             }
           }
@@ -939,7 +934,9 @@ if (import.meta.hot) {
             ...config.plugins.map(item => path.dirname(item.entry)),
           ],
         },
-        watch: nativeViteWatchOptions(sourceMode ? generatedRoot : undefined),
+        watch: nativeViteWatchOptions(sourceMode ? generatedRoot : undefined, [
+          path.join(initialConfig.rootDir, 'packages', '.source-staging'),
+        ]),
       },
       clearScreen: false,
     })

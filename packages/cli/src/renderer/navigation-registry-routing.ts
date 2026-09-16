@@ -11,6 +11,7 @@ import {
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
 } from '../contracts.js'
@@ -506,10 +507,13 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
       return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
     }
     if (
-      (page.metadata.schemaVersion !== 3 && page.metadata.schemaVersion !== 4)
+      !(
+        (page.metadata.schemaVersion === 3 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V3)
+        || (page.metadata.schemaVersion === 4 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V4)
+      )
       || page.metadata.description === undefined
     ) {
-      return { state: 'invalid', detail: `page ${page.qualifiedId} requires page-v3 title and description` }
+      return { state: 'invalid', detail: `page ${page.qualifiedId} requires page-v3/page-v4 title and description` }
     }
     if (page.metadata.chrome === 'body-only') {
       return { state: 'invalid', detail: `page ${page.qualifiedId} must use standard chrome` }

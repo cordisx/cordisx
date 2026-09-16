@@ -5,56 +5,62 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { npmMaintainerNames, npmPackItem, npmViewItem } from './npm-pack-report.mjs'
-import { betaReleasePackages } from './beta-release-scope.mjs'
+import { releasePackageDefinitions } from './release-packages.mjs'
+import { releaseFromTag } from './release-version.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const packageDefinitions = [
-  { name: 'cordisx', workspace: 'cordisx', directory: 'packages/cli' },
-  { name: 'create-cordisx-plugin', workspace: 'create-cordisx-plugin', directory: 'packages/create-cordisx-plugin' },
-]
 
 function argument(name) {
   const index = process.argv.indexOf(name)
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
-const packages = packageDefinitions.filter(pkg => betaReleasePackages(argument('--scope')).includes(pkg.name))
-const version = argument('--version')
+const release = releaseFromTag(argument('--tag'))
+const { tag, version, distTag } = release
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
-if (typeof version !== 'string' || !/^0\.1\.0-beta\.\d+$/.test(version)) {
-  throw new Error('--version must be an immutable 0.1.0 beta prerelease')
-}
 if (registry !== 'https://registry.npmjs.org') throw new Error('release registry must be https://registry.npmjs.org')
-if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('beta publication is restricted to GitHub Actions')
+if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('publication is restricted to GitHub Actions')
 if (process.env.GITHUB_REPOSITORY?.toLowerCase() !== 'cordisx/cordisx') {
-  throw new Error('beta publication is restricted to cordisx/cordisx')
+  throw new Error('publication is restricted to cordisx/cordisx')
 }
-if (process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('beta publication is restricted to main')
-if (!process.env.GITHUB_WORKFLOW_REF?.includes('/.github/workflows/release-beta.yml@')) {
-  throw new Error('beta publication is restricted to release-beta.yml')
+if (process.env.GITHUB_REF !== `refs/tags/${tag}`) throw new Error('publication requires the matching Git tag')
+if (!process.env.GITHUB_WORKFLOW_REF?.includes('/.github/workflows/release.yml@')) {
+  throw new Error('publication is restricted to release.yml')
 }
 if (!process.env.ACTIONS_ID_TOKEN_REQUEST_URL || !process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) {
   throw new Error('GitHub OIDC environment is unavailable')
 }
 if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN) {
-  throw new Error('long-lived npm tokens are forbidden in the beta release job')
+  throw new Error('long-lived npm tokens are forbidden in the release job')
 }
 
-async function runNpm(args, options = {}) {
+async function run(file, args, options = {}) {
   try {
-    return await execute('npm', [...args, `--registry=${registry}`], {
+    return await execute(file, args, {
       cwd: options.cwd ?? repositoryRoot,
-      env: { ...process.env, npm_config_registry: registry },
+      env: options.env ?? process.env,
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,
     })
   } catch (error) {
     const stdout = typeof error.stdout === 'string' ? error.stdout : ''
     const stderr = typeof error.stderr === 'string' ? error.stderr : ''
-    const wrapped = new Error(`npm ${args.join(' ')} failed\n${stdout}${stderr}`, { cause: error })
-    wrapped.npmOutput = `${stdout}${stderr}`
+    const wrapped = new Error(`${file} ${args.join(' ')} failed\n${stdout}${stderr}`, { cause: error })
+    wrapped.commandOutput = `${stdout}${stderr}`
     throw wrapped
+  }
+}
+
+async function runNpm(args, options = {}) {
+  try {
+    return await run('npm', [...args, `--registry=${registry}`], {
+      cwd: options.cwd ?? repositoryRoot,
+      env: { ...process.env, npm_config_registry: registry },
+    })
+  } catch (error) {
+    error.npmOutput = error.commandOutput
+    throw error
   }
 }
 
@@ -89,9 +95,6 @@ async function assertRegistryPackage(pkg) {
   if (!npmMaintainerNames(metadata.maintainers).includes('yijie4188')) {
     throw new Error(`${pkg.name} registry owner yijie4188 is missing`)
   }
-  if (metadata['dist-tags']?.latest !== '0.0.0') {
-    throw new Error(`${pkg.name} latest must remain 0.0.0`)
-  }
   return metadata
 }
 
@@ -114,9 +117,16 @@ function sameRepository(actual, expected) {
   return url === expected.repository.url
 }
 
-function assertPublishedMetadata(pkg, manifest, packed, metadata) {
+function hasProvenance(metadata) {
+  return typeof metadata.dist?.attestations?.url === 'string'
+    && typeof metadata.dist?.attestations?.provenance?.predicateType === 'string'
+}
+
+function assertPublishedMetadata(pkg, manifest, packed, metadata, expectedGitHead) {
   if (metadata.version !== version) throw new Error(`${pkg.name} registry version mismatch`)
   if (metadata.dist?.integrity !== packed.integrity) throw new Error(`${pkg.name} registry tarball integrity mismatch`)
+  if (metadata.gitHead !== expectedGitHead) throw new Error(`${pkg.name} registry gitHead mismatch`)
+  if (!hasProvenance(metadata)) throw new Error(`${pkg.name} registry provenance is missing`)
   if (metadata.license !== manifest.license) throw new Error(`${pkg.name} registry license mismatch`)
   if (!sameRepository(metadata.repository, manifest)) throw new Error(`${pkg.name} registry repository mismatch`)
   if (JSON.stringify(metadata.bin) !== JSON.stringify(manifest.bin)) {
@@ -127,27 +137,44 @@ function assertPublishedMetadata(pkg, manifest, packed, metadata) {
   }
 }
 
-async function readBack(pkg, manifest, packed) {
+function assertReleaseTag(pkg, tags) {
+  if (tags[distTag] !== version) {
+    throw new Error(`${pkg.name} ${distTag} dist-tag does not point to ${version}`)
+  }
+  if (distTag !== 'latest' && tags.latest === version) {
+    throw new Error(`${pkg.name} prerelease must not move latest`)
+  }
+}
+
+async function readBack(pkg, manifest, packed, expectedGitHead) {
   let metadata
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     metadata = await viewVersion(pkg.name, version)
-    if (metadata?.dist?.integrity === packed.integrity) break
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    if (
+      metadata?.dist?.integrity === packed.integrity
+      && metadata.gitHead === expectedGitHead
+      && hasProvenance(metadata)
+    ) break
+    await new Promise(resolve => setTimeout(resolve, 5000))
   }
   if (metadata === undefined) throw new Error(`${pkg.name}@${version} is missing after publish`)
-  assertPublishedMetadata(pkg, manifest, packed, metadata)
-  const registryPackage = await assertRegistryPackage(pkg)
-  if (registryPackage['dist-tags']?.beta !== version) {
-    throw new Error(`${pkg.name} beta dist-tag does not point to ${version}`)
-  }
-  return metadata
+  assertPublishedMetadata(pkg, manifest, packed, metadata, expectedGitHead)
+  await assertRegistryPackage(pkg)
+  const tags = await npmViewJson([pkg.name, 'dist-tags'])
+  assertReleaseTag(pkg, tags)
+  return { metadata, tags }
 }
+
+const expectedGitHead = (await run('git', ['rev-parse', 'HEAD'])).stdout.trim()
+const tagGitHead = (await run('git', ['rev-list', '-n', '1', tag])).stdout.trim()
+if (tagGitHead !== expectedGitHead) throw new Error('release tag must resolve to the checked-out commit')
+await run('git', ['merge-base', '--is-ancestor', expectedGitHead, 'refs/remotes/origin/main'])
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-release-'))
 try {
   const manifests = new Map()
   const packs = new Map()
-  for (const pkg of packages) {
+  for (const pkg of releasePackageDefinitions) {
     const manifest = await readManifest(pkg)
     if (manifest.version !== version) throw new Error(`${pkg.name} manifest version does not match ${version}`)
     if (manifest.license !== 'AGPL-3.0-or-later') {
@@ -156,37 +183,42 @@ try {
     manifests.set(pkg.name, manifest)
     await assertRegistryPackage(pkg)
   }
-  for (const pkg of packages) packs.set(pkg.name, await pack(pkg, temporaryRoot))
+  const manifestVersions = new Set([...manifests.values()].map(manifest => manifest.version))
+  if (manifestVersions.size !== 1) throw new Error('repository release package versions must match')
 
-  for (const pkg of packages) {
+  for (const pkg of releasePackageDefinitions) packs.set(pkg.name, await pack(pkg, temporaryRoot))
+
+  const published = []
+  for (const pkg of releasePackageDefinitions) {
     const manifest = manifests.get(pkg.name)
     const packed = packs.get(pkg.name)
     const existing = await viewVersion(pkg.name, version)
     if (existing !== undefined) {
-      assertPublishedMetadata(pkg, manifest, packed, existing)
+      assertPublishedMetadata(pkg, manifest, packed, existing, expectedGitHead)
       const tags = await npmViewJson([pkg.name, 'dist-tags'])
-      if (tags.beta !== version) {
-        throw new Error(`${pkg.name}@${version} already exists but beta does not point to it`)
-      }
+      assertReleaseTag(pkg, tags)
       console.log(`[release] ${pkg.name}@${version} already matches; skipping publish`)
     } else {
       await runNpm([
         'publish',
         `--workspace=${pkg.workspace}`,
-        '--tag=beta',
+        `--tag=${distTag}`,
         '--access=public',
+        '--provenance',
       ])
-      console.log(`[release] published ${pkg.name}@${version}`)
+      console.log(`[release] published ${pkg.name}@${version} with ${distTag}`)
     }
-    await readBack(pkg, manifest, packed)
+    const readback = await readBack(pkg, manifest, packed, expectedGitHead)
+    published.push({ name: pkg.name, latest: readback.tags.latest })
   }
 
   console.log(JSON.stringify({
     status: 'published',
+    tag,
     version,
-    distTag: 'beta',
-    latest: '0.0.0',
-    packages: packages.map(pkg => pkg.name),
+    distTag,
+    gitHead: expectedGitHead,
+    packages: published,
   }))
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

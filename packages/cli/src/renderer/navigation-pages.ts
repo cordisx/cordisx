@@ -2,6 +2,7 @@ import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
 import type { AgentPageComposerCommandAdapter } from '@cordisx/protocol/agent-page-admission/v2'
+import { type BrandIconV1, cloneBrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
 import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
@@ -150,6 +151,13 @@ export function assertPageMetadataVersion(metadata: CordisXPageMetadata): void {
     }
     return
   }
+  if (metadata.schemaVersion === 4 && metadata.$schema === CORDISX_PAGE_SCHEMA_V4) {
+    if (metadata.description === undefined) throw new Error('page.v4 requires localized description metadata')
+    if (metadata.localeNamespace !== undefined) {
+      throw new Error('page.v4 uses owner-default i18n and cannot declare localeNamespace')
+    }
+    return
+  }
   throw new Error('page metadata has an unsupported $schema/schemaVersion tuple')
 }
 
@@ -260,11 +268,25 @@ export interface PageComposerAdapterFactory {
   }): AgentPageComposerCommandAdapter | undefined
 }
 
-function assertHostIcon(icon: string | undefined, label: string): void {
+function assertHostIcon(icon: unknown, label: string): asserts icon is CordisXIconToken | undefined {
   if (icon === undefined) return
-  if (!ICON_TOKEN_PATTERN.test(icon) || !(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)) {
+  if (
+    typeof icon !== 'string' || !ICON_TOKEN_PATTERN.test(icon)
+    || !(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)
+  ) {
     throw new Error(`${label} uses unknown host icon token ${icon}`)
   }
+}
+
+function clonePageIcon(metadata: CordisXPageMetadata): BrandIconV1 | undefined {
+  if (metadata.icon === undefined) return undefined
+  if (metadata.schemaVersion !== 4) {
+    assertHostIcon(metadata.icon, 'page')
+    return metadata.icon
+  }
+  const icon = cloneBrandIconV1(metadata.icon)
+  if (typeof icon === 'string') assertHostIcon(icon, 'page')
+  return icon
 }
 
 export function assertPageHeaderAction(action: CordisXPageHeaderActionV4, label: string, v4 = false): void {
@@ -411,7 +433,7 @@ export class PageRegistry {
     assertLocalId(metadata.id, 'page id')
     assertLocalizedText(metadata.title, 'page title')
     if (metadata.description !== undefined) assertLocalizedText(metadata.description, 'page description')
-    assertHostIcon(metadata.icon, 'page')
+    const icon = clonePageIcon(metadata)
     if (metadata.contentInset !== undefined && !['standard', 'none'].includes(metadata.contentInset)) {
       throw new Error(`page ${metadata.id} content inset is invalid`)
     }
@@ -464,7 +486,10 @@ export class PageRegistry {
       qualifiedId,
       generation,
       ...(candidateView === undefined ? {} : { candidateView }),
-      metadata: immutableSnapshot(metadata),
+      metadata: immutableSnapshot({
+        ...metadata,
+        ...(icon === undefined ? {} : { icon }),
+      }),
       mount,
       ...(agentConversation ? { presentation: 'agent-conversation' as const } : {}),
     })

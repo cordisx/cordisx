@@ -49,12 +49,24 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import { normalizePermissionScope } from '../permissions.js'
 import type { ResolvedPackageCandidate } from './packages/types.js'
+import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
 import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-server.js'
 import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 import { normalizeLatestRuntimeManifest, runtimeManifestHasServices } from './latest-runtime-manifest.js'
+import {
+  collectManagedServicePackageResources,
+  type ManagedServicePackageResource,
+  managedServiceResourceManifest,
+  readStoredManagedServicePackageResources,
+} from './managed-service-package-resources.js'
+import {
+  collectManagedResourceDirectories,
+  repairManagedServiceResourceModes,
+} from './plugin-package-resource-modes.js'
+import { readStoredServiceModules } from './stored-plugin-services.js'
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION =
   /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -329,7 +341,7 @@ async function buildArtifact(root: string, entry: string): Promise<{
 
 async function buildServiceArtifact(
   root: string,
-  declaration: CordisXPluginServiceDeclarationV9,
+  declaration: CordisXPluginServiceDeclarationV9 | PluginManifestManagedBackendServiceV14,
 ): Promise<StagedPluginServiceModule> {
   const entry = await regularContainedFile(root, declaration.entry, `service ${declaration.id} entry`)
   const result = await build({
@@ -359,6 +371,7 @@ function artifactDigest(
   moduleSource: string,
   artifactSource: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
+  managedServiceResources: readonly ManagedServicePackageResource[] = [],
   entityTemplatesText?: string,
   browserArtifact?: BuiltPluginGenerationArtifact,
 ): `sha256:${string}` {
@@ -375,6 +388,16 @@ function artifactDigest(
       .update(JSON.stringify(service.declaration))
       .update('\0')
       .update(service.moduleSource)
+  }
+  for (const resource of [...managedServiceResources].sort((left, right) => left.path.localeCompare(right.path))) {
+    digest.update('\0managed-service-resource\0')
+      .update(resource.path)
+      .update('\0')
+      .update(resource.mode)
+      .update('\0')
+      .update(resource.digest)
+      .update('\0')
+      .update(resource.contents)
   }
   if (entityTemplatesText !== undefined) digest.update('\0entity-templates\0').update(entityTemplatesText)
   if (browserArtifact !== undefined) {
@@ -433,6 +456,7 @@ async function publishPackage(
   readme: string | undefined,
   runtimeManifestText?: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
+  managedServiceResources: readonly ManagedServicePackageResource[] = [],
   entityTemplatesText?: string,
   browserArtifact?: BuiltPluginGenerationArtifact,
 ): Promise<void> {
@@ -445,21 +469,29 @@ async function publishPackage(
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new Error('existing plugin package target is not a real directory')
     }
-    const [storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates, storedBrowserArtifact] =
-      await Promise.all([
-        readFile(path.join(destination, 'manifest.json'), 'utf8'),
-        readFile(path.join(destination, 'module.js'), 'utf8'),
-        readFile(path.join(destination, 'artifact.js'), 'utf8'),
-        readStoredServiceModules(destination),
-        readOptionalFile(path.join(destination, 'entity-templates.json')),
-        readStoredBrowserArtifact(path.join(destination, 'browser')),
-      ])
+    const storedServices = await readStoredServiceModules(destination)
+    const [
+      storedManifest,
+      storedModule,
+      storedArtifact,
+      storedManagedResources,
+      storedEntityTemplates,
+      storedBrowserArtifact,
+    ] = await Promise.all([
+      readFile(path.join(destination, 'manifest.json'), 'utf8'),
+      readFile(path.join(destination, 'module.js'), 'utf8'),
+      readFile(path.join(destination, 'artifact.js'), 'utf8'),
+      readStoredManagedServicePackageResources(destination, storedServices),
+      readOptionalFile(path.join(destination, 'entity-templates.json')),
+      readStoredBrowserArtifact(path.join(destination, 'browser')),
+    ])
     if (
       artifactDigest(
         storedManifest,
         storedModule,
         storedArtifact,
         storedServices,
+        storedManagedResources,
         storedEntityTemplates,
         storedBrowserArtifact,
       ) !== digest
@@ -475,6 +507,10 @@ async function publishPackage(
   let published = false
   try {
     if (serviceModules.length > 0) await mkdir(path.join(temporary, 'services'), { mode: 0o700 })
+    const managedResourceDirectories = collectManagedResourceDirectories(managedServiceResources)
+    for (const directory of [...managedResourceDirectories].sort((left, right) => left.length - right.length)) {
+      await mkdir(path.join(temporary, directory), { mode: 0o700 })
+    }
     const browserDirectories = new Set<string>()
     if (browserArtifact !== undefined) {
       await mkdir(path.join(temporary, 'browser'), { mode: 0o700 })
@@ -512,6 +548,15 @@ async function publishPackage(
       ...(entityTemplatesText === undefined
         ? []
         : [writeFileSynced(path.join(temporary, 'entity-templates.json'), entityTemplatesText)]),
+      ...(managedServiceResources.length === 0 ? [] : [
+        writeFileSynced(
+          path.join(temporary, 'managed-service-resources.json'),
+          managedServiceResourceManifest(managedServiceResources)!,
+        ),
+        ...managedServiceResources.map(resource =>
+          writeFileSynced(path.join(temporary, resource.path.slice(2)), resource.contents)
+        ),
+      ]),
       ...(serviceModules.length === 0 ? [] : [
         writeFileSynced(
           path.join(temporary, 'services.json'),
@@ -544,6 +589,15 @@ async function publishPackage(
         ...(runtimeManifestText === undefined ? [] : [chmod(path.join(destination, 'runtime-manifest.json'), 0o444)]),
         ...(readme === undefined ? [] : [chmod(path.join(destination, 'README.md'), 0o444)]),
         ...(entityTemplatesText === undefined ? [] : [chmod(path.join(destination, 'entity-templates.json'), 0o444)]),
+        ...(managedServiceResources.length === 0 ? [] : [
+          chmod(path.join(destination, 'managed-service-resources.json'), 0o444),
+          ...managedServiceResources.map(resource =>
+            chmod(path.join(destination, resource.path.slice(2)), resource.mode === 'executable' ? 0o500 : 0o444)
+          ),
+          ...[...managedResourceDirectories]
+            .sort((left, right) => right.length - left.length)
+            .map(directory => chmod(path.join(destination, directory), 0o555)),
+        ]),
         ...(serviceModules.length === 0 ? [] : [
           chmod(path.join(destination, 'services.json'), 0o444),
           ...serviceModules.map(service =>
@@ -635,71 +689,6 @@ async function readOptionalFile(file: string): Promise<string | undefined> {
   })
 }
 
-async function readStoredServiceModules(directory: string): Promise<readonly StagedPluginServiceModule[]> {
-  const declarations = await readFile(path.join(directory, 'services.json'), 'utf8')
-    .then(text => JSON.parse(text) as unknown)
-    .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []
-      throw error
-    })
-  if (!Array.isArray(declarations)) throw new Error('stored plugin service index is invalid')
-  const seen = new Set<string>()
-  return await Promise.all(declarations.map(async (value, index) => {
-    const declaration = serviceDeclarationFromStored(value, `stored service[${index}]`)
-    if (seen.has(declaration.id)) throw new Error(`duplicate stored service module: ${declaration.id}`)
-    seen.add(declaration.id)
-    const moduleSource = await readFile(path.join(directory, 'services', `${declaration.id}.mjs`), 'utf8')
-    return Object.freeze({ declaration, moduleSource })
-  }))
-}
-
-function serviceDeclarationFromStored(value: unknown, label: string): CordisXPluginServiceDeclarationV9 {
-  const service = object(value, label)
-  const id = localId(service.id, `${label}.id`)
-  const entry = string(service.entry, `${label}.entry`, 512)
-  if (!/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:cjs|mjs|js)$/.test(entry) || entry.includes('..')) {
-    throw new Error(`${label}.entry is invalid`)
-  }
-  if (service.kind === 'platform-provider') {
-    exactKeys(service, ['id', 'kind', 'owner', 'schema', 'applicationMode', 'entry'], label)
-    const schema = string(service.schema, `${label}.schema`, 512)
-    if (
-      service.owner !== 'host'
-      || !/^https:\/\/raw\.githubusercontent\.com\/cordisx\/cordisx-protocol\/main\/schemas\/[a-z0-9][a-z0-9.-]*\.v[1-9][0-9]*\.schema\.json$/
-        .test(schema)
-      || (service.applicationMode !== 'service-restart' && service.applicationMode !== 'app-restart')
-    ) throw new Error(`${label} is unsupported`)
-    return Object.freeze({
-      id,
-      kind: 'platform-provider',
-      owner: 'host',
-      schema:
-        schema as `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${string}.v${number}.schema.json`,
-      applicationMode: service.applicationMode,
-      entry,
-    })
-  }
-  exactKeys(service, ['id', 'kind', 'entry', 'configuration'], label)
-  if (service.kind !== 'channel-adapter') throw new Error(`${label}.kind is unsupported`)
-  const configuration = object(service.configuration, `${label}.configuration`)
-  if (configuration.kind === 'none') {
-    exactKeys(configuration, ['kind'], `${label}.configuration`)
-    return Object.freeze({ id, kind: 'channel-adapter', entry, configuration: Object.freeze({ kind: 'none' }) })
-  }
-  exactKeys(configuration, ['kind', 'schema', 'configApplies'], `${label}.configuration`)
-  const schema =
-    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
-  if (configuration.kind !== 'host' || configuration.schema !== schema || configuration.configApplies !== 'restart') {
-    throw new Error(`${label}.configuration is unsupported`)
-  }
-  return Object.freeze({
-    id,
-    kind: 'channel-adapter',
-    entry,
-    configuration: Object.freeze({ kind: 'host', schema, configApplies: 'restart' }),
-  })
-}
-
 interface StoredSeparatedPackageV2 {
   readonly contract: 'cordisx.launcher-staged-package/v2'
   readonly package: ResolvedPackageCandidate['packageManifest']
@@ -765,6 +754,10 @@ export async function stageResolvedPluginPackage(
   const serviceModules = runtimeManifestHasServices(runtimeManifest)
     ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
     : []
+  const resourceDeclarations = serviceModules.flatMap(service =>
+    service.declaration.kind === 'managed-backend' ? [service.declaration.runtimeResources] : []
+  )
+  const managedServiceResources = await collectManagedServicePackageResources(root, resourceDeclarations)
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
     await readEntityTemplatePayload(root, declaration)
   )))
@@ -785,6 +778,7 @@ export async function stageResolvedPluginPackage(
     built.moduleSource,
     built.artifactSource,
     serviceModules,
+    managedServiceResources,
     entityTemplatesText,
     built.browserArtifact,
   )
@@ -797,6 +791,7 @@ export async function stageResolvedPluginPackage(
     readme,
     runtimeManifestText,
     serviceModules,
+    managedServiceResources,
     entityTemplatesText,
     built.browserArtifact,
   )
@@ -833,6 +828,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     built.moduleSource,
     built.artifactSource,
     [],
+    [],
     undefined,
     built.browserArtifact,
   )
@@ -845,6 +841,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     readme,
     undefined,
     [],
+    [],
     undefined,
     built.browserArtifact,
   )
@@ -856,6 +853,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     artifactSource: built.artifactSource,
     browserArtifact: built.browserArtifact,
     serviceModules: [],
+    managedServiceResources: [],
     entityTemplates: [],
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
@@ -868,25 +866,42 @@ export async function loadStagedPluginPackage(
   digest: `sha256:${string}`,
 ): Promise<StagedPluginPackage> {
   const directory = packageDirectory(homeDir, digest)
-  const [manifestText, moduleSource, artifactSource, readme, serviceModules, entityTemplatesText, browserArtifact] =
-    await Promise.all([
-      readFile(path.join(directory, 'manifest.json'), 'utf8'),
-      readFile(path.join(directory, 'module.js'), 'utf8'),
-      readFile(path.join(directory, 'artifact.js'), 'utf8'),
-      readFile(path.join(directory, 'README.md'), 'utf8').catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined
-        throw error
-      }),
-      readStoredServiceModules(directory),
-      readOptionalFile(path.join(directory, 'entity-templates.json')),
-      readStoredBrowserArtifact(path.join(directory, 'browser')),
-    ])
+  const serviceModules = await readStoredServiceModules(directory)
+  const [
+    manifestText,
+    moduleSource,
+    artifactSource,
+    readme,
+    managedServiceResources,
+    entityTemplatesText,
+    browserArtifact,
+  ] = await Promise.all([
+    readFile(path.join(directory, 'manifest.json'), 'utf8'),
+    readFile(path.join(directory, 'module.js'), 'utf8'),
+    readFile(path.join(directory, 'artifact.js'), 'utf8'),
+    readFile(path.join(directory, 'README.md'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    }),
+    readStoredManagedServicePackageResources(directory, serviceModules),
+    readOptionalFile(path.join(directory, 'entity-templates.json')),
+    readStoredBrowserArtifact(path.join(directory, 'browser')),
+  ])
   if (
-    artifactDigest(manifestText, moduleSource, artifactSource, serviceModules, entityTemplatesText, browserArtifact)
+    artifactDigest(
+      manifestText,
+      moduleSource,
+      artifactSource,
+      serviceModules,
+      managedServiceResources,
+      entityTemplatesText,
+      browserArtifact,
+    )
       !== digest
   ) {
     throw new Error('plugin package failed integrity readback')
   }
+  await repairManagedServiceResourceModes(directory, managedServiceResources)
   const parsed = JSON.parse(manifestText) as unknown
   const entityTemplates = entityTemplatesText === undefined
     ? []
@@ -943,6 +958,7 @@ export async function loadStagedPluginPackage(
     artifactSource,
     ...(browserArtifact === undefined ? {} : { browserArtifact }),
     serviceModules,
+    managedServiceResources,
     entityTemplates: immutableEntityTemplates(entityTemplates),
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,

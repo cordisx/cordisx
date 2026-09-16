@@ -1,8 +1,9 @@
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import { createRoot } from 'react-dom/client'
-import type { DialogProps, DialogProviderProps, DialogViewProps } from '../../ui.js'
+import type { DialogProps, DialogProviderProps, DialogViewProps, ManagedDialogProps } from '../../ui.js'
 import type { DialogHandleV1, DialogMountV1, DialogsV1 } from '../../dialog-contracts.js'
+import { HostDialog } from '../host-ui/HostDialog.js'
 import { dialogBindings, dialogHandleOwners } from './model.js'
 
 const OwnerContext = React.createContext<DialogsV1 | null>(null)
@@ -37,7 +38,7 @@ class BodyBoundary extends React.Component<{ children: React.ReactNode; report: 
       : this.props.children
   }
 }
-export function Dialog(props: DialogProps) {
+function ManagedDialog(props: ManagedDialogProps) {
   const contextService = React.useContext(OwnerContext)
   const service = props.service ?? contextService
   if (!service) throw new Error('Dialog requires DialogProvider or service')
@@ -94,6 +95,10 @@ export function Dialog(props: DialogProps) {
       seat,
     )
     : null
+}
+
+export function Dialog(props: DialogProps) {
+  return 'onClose' in props ? <HostDialog {...props} /> : <ManagedDialog {...props} />
 }
 /** Adapts a React body to the framework-neutral registration seat. */
 export function defineDialog(Component: React.ComponentType<DialogViewProps>): DialogMountV1 {

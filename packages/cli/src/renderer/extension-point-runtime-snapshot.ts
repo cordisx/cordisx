@@ -29,7 +29,7 @@ import type {
   CordisXPluginIdentity,
   CordisXPointPolicy,
 } from '../contracts.js'
-import type { ManagerSettingsNavigationProjectionV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
+import type { ManagerSettingsNavigationProjectionV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
 import {
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
@@ -306,7 +306,7 @@ export interface ExtensionPointRuntimeSnapshot {
   readonly descriptorDiagnostics: readonly ExtensionPointDescriptorDiagnostic[]
   readonly policyDiagnostics: readonly ExtensionPointPolicyDiagnostic[]
   readonly accessDiagnostics: readonly ExtensionPointAccessDiagnostic[]
-  readonly managerSettingsNavigation: ManagerSettingsNavigationProjectionV2
+  readonly managerSettingsNavigation: ManagerSettingsNavigationProjectionV3
 }
 
 interface ExtensionPointSnapshotPlugin {
@@ -531,7 +531,9 @@ export function buildExtensionPointRuntimeSnapshot(input: {
       const navigationGroup = item.navigationGroup?.id
       if (
         navigationGroup !== undefined
-        && !['resources', 'development', 'collaboration', 'other'].includes(String(navigationGroup))
+        && !['resources', 'development', 'collaboration', 'external-accounts', 'other'].includes(
+          String(navigationGroup),
+        )
       ) return []
       return [{
         owner: registration.owner,
@@ -539,7 +541,12 @@ export function buildExtensionPointRuntimeSnapshot(input: {
         group: registration.group,
         order: registration.order,
         ...(navigationGroup === undefined ? {} : {
-          navigationGroup: navigationGroup as 'resources' | 'development' | 'collaboration' | 'other',
+          navigationGroup: navigationGroup as
+            | 'resources'
+            | 'development'
+            | 'collaboration'
+            | 'external-accounts'
+            | 'other',
         }),
         surfaceProvenance: registration.managerSettingsNavigationSurfaceProvenance,
       }]

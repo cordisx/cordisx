@@ -28,7 +28,7 @@ import type {
   CordisXPermissionCapabilityV4,
   CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
-import { type CodexAdapterHandle } from './adapter.js'
+import type { CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXHostAgentRuntime } from './agent.js'
@@ -73,6 +73,8 @@ import {
 } from './configuration.js'
 import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
+import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
+import { ModelProviderRegistry } from './model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
@@ -113,11 +115,12 @@ import {
 } from './runtime-shared.js'
 import * as runtimeClosures1 from './runtime-foundation.js'
 import * as runtimeClosures2 from './runtime-plugin-mount.js'
+import * as runtimeDisposeClosures from './runtime-plugin-dispose.js'
+import * as runtimePrincipalClosures from './runtime-plugin-principal.js'
 import * as runtimeClosures3 from './runtime-manager-actions.js'
 import * as runtimeClosures4 from './runtime-authorization-mutations.js'
 import * as runtimeClosures5 from './runtime-lifecycle-handle.js'
 import * as runtimeClosures6 from './runtime-agent-composition.js'
-
 export async function start(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
@@ -200,6 +203,10 @@ export async function start(
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
+  const managedServiceBridge = metadata.managedServiceCapabilities === undefined
+    ? undefined
+    : BrowserManagedServiceUIBridge.connect(metadata.managedServiceCapabilities, metadata.profileId, generation)
+  const modelProviders = new ModelProviderRegistry(async () => await managedServiceBridge?.nativeProviders() ?? [])
   const channelCredentialBridge = metadata.channelCredentialBridgeToken === undefined
     ? undefined
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)
@@ -459,6 +466,8 @@ export async function start(
         (value: any) => scenarioSessionScopeAuthority = value,
       ],
       serviceConfigBridge: () => serviceConfigBridge,
+      managedServiceBridge: () => managedServiceBridge,
+      modelProviders: () => modelProviders,
       setExtensionPointControlAuthorization: () => setExtensionPointControlAuthorization,
       setExtensionPointControlGroupChoice: () => setExtensionPointControlGroupChoice,
       setExtensionPointPolicies: () => setExtensionPointPolicies,
@@ -558,9 +567,7 @@ export async function start(
       ? undefined
       : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence)
     const agentLoopBrokerV4 = runtimeClosures1.createRuntimeAgentLoopBrokerV4(closureScope)
-    // One Host-private authority backs all three public Agent/Session services.
-    // The environment chooses a transport before plugin activation; no public
-    // backend selector, raw bridge, or second app-server connection is exposed.
+    // One Host-private authority backs all public Agent/Session services; the environment selects its transport.
     const desktopAgentSessionTransport = metadata.hostKind === 'playground'
       ? undefined
       : await CodexDesktopAgentSessionTransport.connect()
@@ -768,13 +775,13 @@ export async function start(
     const disposeControllerFiber = async (
       controller: PluginController,
       reason: 'owner-disposed' | 'generation-replaced',
-    ): Promise<void> => runtimeClosures2.createRuntimeDisposeControllerFiber(closureScope, controller, reason)
+    ): Promise<void> => runtimeDisposeClosures.createRuntimeDisposeControllerFiber(closureScope, controller, reason)
 
     const renewPrincipal = (controller: PluginController): void =>
-      runtimeClosures2.createRuntimeRenewPrincipal(closureScope, controller)
+      runtimePrincipalClosures.createRuntimeRenewPrincipal(closureScope, controller)
 
     const retirePrincipal = (controller: PluginController, message: string): void =>
-      runtimeClosures2.createRuntimeRetirePrincipal(closureScope, controller, message)
+      runtimePrincipalClosures.createRuntimeRetirePrincipal(closureScope, controller, message)
 
     const mountPlugin = async (controller: PluginController): Promise<void> =>
       runtimeClosures2.createRuntimeMountPlugin(closureScope, controller)

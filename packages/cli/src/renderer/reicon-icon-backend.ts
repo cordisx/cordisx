@@ -44,6 +44,8 @@ import Key from 'reicon/icons/Key'
 import Layers from 'reicon/icons/Layers'
 import Link from 'reicon/icons/Link'
 import Logout4 from 'reicon/icons/Logout4'
+import Loader from 'reicon/icons/Loader'
+import Login from 'reicon/icons/Login'
 import MinusCircle from 'reicon/icons/MinusCircle'
 import MoreH from 'reicon/icons/MoreH'
 import Palette from 'reicon/icons/Palette'
@@ -160,6 +162,8 @@ export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
   'host:hierarchy',
   'host:link',
   'host:log-out',
+  'host:loader',
+  'host:log-in',
   'host:marketplace',
   'host:people',
   'host:pin',
@@ -186,6 +190,8 @@ const HOST_SURFACE_GLYPHS = Object.freeze(
     'host:hierarchy': DiagramTree,
     'host:link': Link,
     'host:log-out': Logout4,
+    'host:loader': Loader,
+    'host:log-in': Login,
     'host:marketplace': Shop,
     'host:people': People,
     'host:pin': PinTack,
@@ -435,7 +441,7 @@ export function resolveBuiltinHostSurfaceIconDescriptor(
   variant: IconVariant,
   _state: IconState,
 ): NormalizedVectorDescriptor {
-  return resolveReiconGlyphDescriptor(key, HOST_SURFACE_GLYPHS[key], variant)
+  return resolveReiconGlyphDescriptor(key, HOST_SURFACE_GLYPHS[key], key === 'host:loader' ? 'filled' : variant)
 }
 
 export function clearBuiltinReiconDescriptorCacheForTests(): void {

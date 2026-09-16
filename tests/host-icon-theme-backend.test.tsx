@@ -240,6 +240,16 @@ describe('Host Reicon normalized backend', () => {
     dom.window.close()
   })
 
+  it('renders dedicated login and loader Host surface glyphs', () => {
+    const dom = new JSDOM('<!doctype html>')
+    const login = renderHostSurfaceIconSvg(dom.window.document, 'host:log-in')
+    const loader = renderHostSurfaceIconSvg(dom.window.document, 'host:loader')
+    expect(login.resolution).toMatchObject({ key: 'host:log-in', provider: 'builtin:reicon', fallback: 'none' })
+    expect(loader.resolution).toMatchObject({ key: 'host:loader', provider: 'builtin:reicon', fallback: 'none' })
+    expect(login.svg.innerHTML).not.toBe(loader.svg.innerHTML)
+    dom.window.close()
+  })
+
   it('uses a Host neutral descriptor for an unknown key', () => {
     const dom = new JSDOM('<!doctype html>')
     const unknown = renderHostIconSvg(dom.window.document, 'provider.private-key')

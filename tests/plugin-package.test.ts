@@ -105,13 +105,34 @@ describe('local plugin package store', () => {
   it('compiles shared React imports into the immutable plugin artifact without bundling React', async () => {
     const { home, source } = await fixture(`
       import { createElement } from 'cordisx/react'
-      import { Button } from 'cordisx/ui'
-      export function apply() { globalThis.__fixtureElement = createElement(Button, null, 'Ready') }
+      import { Button, Dialog, Disclosure, FieldList, StatusBadge } from 'cordisx/ui'
+      export function apply() {
+        globalThis.__fixtureElement = createElement(Dialog, {
+          open: true,
+          title: 'Ready',
+          onClose() {},
+          children: createElement(FieldList, {
+            items: [{ id: 'state', label: 'State', value: createElement(StatusBadge, { tone: 'success' }, 'Ready') }],
+          }),
+          actions: createElement(Disclosure, { summary: 'Details' }, createElement(Button, null, 'Close')),
+        })
+      }
     `)
     const staged = await stageLocalPluginPackage(home, source)
     expect(staged.moduleSource).toContain('__cordisxSharedReactRuntime')
     expect(staged.moduleSource).not.toContain('react.production.js')
     expect(staged.moduleSource).not.toContain('react.development.js')
+  })
+
+  it('keeps the managed service UI protocol import as a Host shared builtin', async () => {
+    const { home, source } = await fixture(`
+      import '@cordisx/protocol/managed-service-ui/v1'
+      export function apply() {}
+    `)
+    const staged = await stageLocalPluginPackage(home, source)
+    expect(staged.browserArtifact?.manifest.sharedImports).toContain('@cordisx/protocol/managed-service-ui/v1')
+    expect(staged.browserArtifact?.manifest.files.map(file => file.path)).toEqual(['./module.js'])
+    expect(staged.moduleSource).not.toContain('@cordisx/protocol/managed-service-ui/v1')
   })
 
   it('publishes a browser-native graph while keeping lazy chunks, CSS, and assets out of the entry', async () => {

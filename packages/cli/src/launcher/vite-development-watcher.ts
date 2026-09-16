@@ -1,13 +1,21 @@
-import type { ServerOptions, ViteDevServer } from 'vite'
+import { normalizePath, type ServerOptions, type ViteDevServer } from 'vite'
 
 /** Backend and readiness belong together: startup must cover the first edit. */
-export function nativeViteWatchOptions(generatedRoot?: string): NonNullable<ServerOptions['watch']> {
+export function nativeViteWatchOptions(
+  generatedRoot?: string,
+  ignoredDirectories: readonly string[] = [],
+): NonNullable<ServerOptions['watch']> {
   return {
     // Chokidar's macOS FSEvents path emits ready before its asynchronous
     // native registration completes. fs.watch registers before readiness.
     ...(process.platform === 'darwin' ? { useFsEvents: false } : {}),
     ignoreInitial: true,
-    ignored: [...(generatedRoot === undefined ? [] : [`${generatedRoot}**`]), '**/node_modules/**', '**/.git/**'],
+    ignored: [
+      ...(generatedRoot === undefined ? [] : [`${normalizePath(generatedRoot)}**`]),
+      ...ignoredDirectories.map(directory => `${normalizePath(directory).replace(/\/?$/u, '/')}**`),
+      '**/node_modules/**',
+      '**/.git/**',
+    ],
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "cordisx",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "An experimental Cordis-powered UI plugin host for Codex Desktop",
   "type": "module",
   "files": [
@@ -12,9 +12,7 @@
     "third_party"
   ],
   "bundledDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ],
   "bin": {
     "cordisx": "dist/src/cli.js"
@@ -63,7 +61,7 @@
     "generate:contributors": "node scripts/generate-contributors.mjs",
     "predev": "npm run prepare:dev",
     "prepare:dev": "npm run build",
-    "prepack": "npm run build && node scripts/prepare-bundled-runtime-dependencies.mjs",
+    "prepack": "npm run build && node ../../scripts/prepare-bundled-runtime-plugins.mjs",
     "smoke": "node scripts/live-smoke.mjs",
     "smoke:desktop-agents": "node scripts/run-codex-desktop-agent-session-harness.mjs",
     "typecheck": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"
@@ -88,13 +86,11 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "beta",
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/channel": "0.1.0",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#15e0d7b63228624477890b48bb091a5f88d45dbe",
-    "@cordisx/schemastery-ui": "0.1.0-beta.2",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#55621cd211d48783eb0f729f2925b54bd621a810",
+    "@cordisx/schemastery-ui": "0.1.0-beta.3",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
@@ -122,13 +118,14 @@
     "reicon": "1.2.1",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
+    "smol-toml": "1.8.0",
     "style-to-js": "1.1.21",
     "swr": "2.5.1",
     "tar": "7.5.22",
     "tdesign-react": "1.18.2",
     "vite": "8.2.2",
     "ws": "^8.18.3",
-    "@cordisx/plugin-cli-proxy-api": "0.1.0"
+    "yaml": "2.8.1"
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
@@ -144,12 +141,10 @@
     "vitest": "^3.2.4"
   },
   "bundleDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ],
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37"
   }
 }

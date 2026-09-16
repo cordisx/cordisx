@@ -4,7 +4,7 @@ import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../
 import { managerCopy } from '../../ui-copy.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { BrandMark } from '../../host-ui/BrandMark.js'
-import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
+import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
 import type { ManagerIconToken } from '../../icons.js'
 import {
   CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG,
@@ -20,6 +20,7 @@ const core: readonly {
   readonly group: ManagerNavigationVisualGroup
 }[] = [
   { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins', group: 'resources' },
+  { page: 'model-services', icon: 'settings', copy: 'manager.nav.model-services', group: 'resources' },
   { page: 'marketplace', icon: 'marketplace', copy: 'manager.nav.marketplace', group: 'resources' },
   { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points', group: 'development' },
   { page: 'routes', icon: 'routes', copy: 'manager.nav.routes', group: 'development' },
@@ -30,20 +31,38 @@ export interface NavigationProps {
   readonly router: ManagerRouter
 }
 
-function contributed(item: ManagerSettingsNavigationItemSnapshot, router: ManagerRouter) {
-  const active = router.route.kind === 'manager-content' && router.route.id === item.id
+function contributed(item: ManagerSettingsNavigationItemSnapshot, router: ManagerRouter, locale: string) {
+  const review = item.permissionReview
+  const active = (router.route.kind === 'manager-content' && router.route.id === item.id)
+    || (review !== undefined && router.route.kind === 'permission'
+      && router.route.pluginId === item.owner && router.route.fingerprint === review.fingerprint)
   return (
     <button
       key={item.id}
       type="button"
       disabled={item.disabled}
-      title={item.disabledReason}
+      title={review === undefined ? item.disabledReason : `${managerCopy(locale, 'permission.review')} · ${item.title}`}
       data-settings-navigation-item={item.id}
+      data-permission-review={review === undefined ? undefined : 'pending'}
       {...(active ? { 'aria-current': 'page' as const } : {})}
-      onClick={() => router.navigate({ kind: 'manager-content', id: item.id, reference: item.route })}
+      onClick={() => {
+        if (review !== undefined) {
+          router.navigate({
+            kind: 'permission',
+            pluginId: item.owner,
+            capability: review.capability,
+            fingerprint: review.fingerprint,
+          })
+          return
+        }
+        router.navigate({ kind: 'manager-content', id: item.id, reference: item.route })
+      }}
     >
-      <HostSurfaceIcon token={item.icon} state={active ? 'active' : 'default'} />
-      <span>{item.title}</span>
+      <HostBrandIcon icon={item.icon} state={active ? 'active' : 'default'} />
+      <span className="cxr-nav-item-copy">
+        <span>{item.title}</span>
+        {review === undefined ? null : <small>{managerCopy(locale, 'permission.review')}</small>}
+      </span>
     </button>
   )
 }
@@ -55,8 +74,15 @@ function groupLabel(locale: string, group: ManagerNavigationVisualGroup): string
 export function Navigation({ snapshot, router }: NavigationProps) {
   const navigation = useRef<HTMLElement>(null)
   const locale = snapshot.localization.locale
-  const primary = router.route.kind === 'manager-content' ? undefined : primaryFor(router.route)
   const contributions = sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
+  const permissionRoute = router.route.kind === 'permission' ? router.route : undefined
+  const reviewingContribution = permissionRoute !== undefined
+    && contributions.some(item =>
+      item.owner === permissionRoute.pluginId && item.permissionReview?.fingerprint === permissionRoute.fingerprint
+    )
+  const primary = router.route.kind === 'manager-content' || reviewingContribution
+    ? undefined
+    : primaryFor(router.route)
   const groups = CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG.groups.flatMap(group => {
     const coreItems = core.filter(item => item.group === group.id)
     const contributedItems = contributions.filter(item => (item.navigationGroup ?? 'other') === group.id)
@@ -97,7 +123,7 @@ export function Navigation({ snapshot, router }: NavigationProps) {
             key={group.id}
           >
             <span id={headingId} className="cxr-nav-group-label" role="heading" aria-level={2}>{label}</span>
-            {before.map(item => contributed(item, router))}
+            {before.map(item => contributed(item, router, locale))}
             {coreItems.map(item => (
               <button
                 key={item.page}
@@ -110,7 +136,7 @@ export function Navigation({ snapshot, router }: NavigationProps) {
                 <span>{managerCopy(locale, item.copy)}</span>
               </button>
             ))}
-            {after.map(item => contributed(item, router))}
+            {after.map(item => contributed(item, router, locale))}
           </section>
         )
       })}

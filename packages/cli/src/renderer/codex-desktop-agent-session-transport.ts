@@ -30,6 +30,12 @@ export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze(
       hostId: 'local',
     }),
     Object.freeze({
+      appVersion: '26.820.60940',
+      buildNumber: '7119',
+      buildFlavor: 'prod',
+      hostId: 'local',
+    }),
+    Object.freeze({
       appVersion: '26.901.41600',
       buildNumber: '7982',
       buildFlavor: 'prod',
@@ -196,6 +202,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       const result = object(
         await this.request('thread/start', {
           model,
+          ...(input.options.provider === undefined ? {} : { modelProvider: input.options.provider }),
           cwd: input.executionContext?.cwd ?? '',
           ...(this.pin.buildNumber === '8109' && input.executionContext !== undefined
             ? { projectId: input.executionContext.projectId ?? null }

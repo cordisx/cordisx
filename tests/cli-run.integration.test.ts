@@ -254,6 +254,56 @@ describe('functional CordisX CLI', () => {
     expect(config).not.toContain('work')
   })
 
+  it('binds renderer-ready reconciliation for attach and launcher-owned Host paths', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-ready-reconciliation-'))
+    const home = path.join(root, 'home')
+    const sharedHome = path.join(root, 'shared-home')
+    const launches: Array<{ readonly attach: boolean; readonly onReady?: () => void | Promise<void> }> = []
+    const internalRunInjectedHost = vi.fn(async input => {
+      launches.push({ attach: input.launcher.attach, onReady: input.onReady })
+      await input.onReady?.()
+    })
+    const runtime = {
+      env: { CORDISX_HOME: home },
+      internalRunInjectedHost,
+      internalSharedHomeDir: sharedHome,
+      stdout: () => undefined,
+    }
+
+    await runCordisXCli(['codex', '--attach'], runtime)
+    await runCordisXCli(['codex', '--executable', process.execPath], runtime)
+
+    expect(launches).toHaveLength(2)
+    expect(launches.map(item => item.attach)).toEqual([true, false])
+    expect(launches.every(item => typeof item.onReady === 'function')).toBe(true)
+  })
+
+  it('keeps an injected Host ready when startup reconciliation persistence fails', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-ready-warning-'))
+    const home = path.join(root, 'home')
+    const configPath = path.join(home, 'config.json')
+    const output: string[] = []
+    await runCordisXCli(['setup'], { env: { CORDISX_HOME: home }, stdout: () => undefined })
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as { plugins: unknown[] }
+    config.plugins = [{ id: 'cli-proxy-api', entry: 'cordisx:cli-proxy-api', enabled: true, config: {} }]
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`)
+
+    await runCordisXCli(['codex', '--attach'], {
+      env: { CORDISX_HOME: home },
+      internalRunInjectedHost: async input => {
+        await writeFile(configPath, '{ invalid json\n')
+        await input.onReady?.()
+      },
+      stdout: line => {
+        output.push(line)
+      },
+    })
+
+    expect(output).toContainEqual(expect.stringContaining(
+      '[cordisx] failed to mark CLIProxy startup configuration applied:',
+    ))
+  })
+
   it('reports a system Chromium projection without creating an unused profile directory', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const home = path.join(root, 'home')
@@ -305,6 +355,33 @@ describe('functional CordisX CLI', () => {
       },
     })
     expect(output.join('\n')).toContain(path.join(root, 'private-profile'))
+  })
+
+  it('releases the profile lease when Host input assembly fails before handoff', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-handoff-failure-'))
+    const home = path.join(root, 'home')
+    const profile = path.join(root, 'profiles', 'fresh', 'chromium')
+    const runtime = {
+      env: { CORDISX_HOME: home },
+      internalSharedHomeDir: path.join(root, 'shared-home'),
+      internalAgentHistoryHost: () => {
+        throw new Error('history assembly failed')
+      },
+      stdout: () => undefined,
+    }
+    const launch = async (): Promise<void> =>
+      await runCordisXCli([
+        'codex',
+        '--profile-dir',
+        profile,
+        '--executable',
+        process.execPath,
+      ], runtime)
+
+    await expect(launch()).rejects.toThrow('history assembly failed')
+    await expect(access(`${profile}.cordisx-launch-lock`)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(launch()).rejects.toThrow('history assembly failed')
+    await expect(access(`${profile}.cordisx-launch-lock`)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('fails instead of claiming readiness when the launched Host exits before injection', async () => {

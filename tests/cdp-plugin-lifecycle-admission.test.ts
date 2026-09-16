@@ -30,6 +30,7 @@ import {
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 import { OwnerDocumentLeaseRegistry } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import type { PluginGenerationGraphLease } from '../packages/cli/src/launcher/plugin-generation-loader.js'
+import { assertProductionGraphBootstrapSnapshot } from '../packages/cli/src/cli/run-support.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
   return { id, title, url, type: 'page', webSocketDebuggerUrl: `ws://127.0.0.1/${id}` }
@@ -153,9 +154,14 @@ describe('CdpPluginLifecycleRuntime', () => {
   })
 
   it('publishes candidate graph resources transactionally and retires only the losing generation', async () => {
-    const previous = activation(0, 'demo-old')
+    const previous = { ...activation(0, 'demo-old'), revision: 7, lastGoodRevision: 7 }
     const candidateBase = activation(1, 'demo-new')
-    const candidate = { ...candidateBase, plugins: candidateBase.plugins.map(plugin => ({ ...plugin, enabled: true })) }
+    const candidate = {
+      ...candidateBase,
+      revision: 8,
+      lastGoodRevision: 7,
+      plugins: candidateBase.plugins.map(plugin => ({ ...plugin, enabled: true })),
+    }
     const graphLease = (name: string, generation: string) => {
       const retire = vi.fn()
       return {
@@ -185,6 +191,35 @@ describe('CdpPluginLifecycleRuntime', () => {
     const bootstrapRefresh = vi.fn(async (active: CordisXPluginActivationRecordV1, registryEpoch: number) => {
       expect(active).toEqual(candidate)
       expect(registryEpoch).toBe(1)
+      const { transactionId: _transactionId, ...candidateWithoutTransaction } = candidate
+      const committed = {
+        ...candidateWithoutTransaction,
+        recordKind: 'active' as const,
+        lastGoodRevision: candidate.revision,
+      }
+      const current = {
+        active: committed,
+        registryEpoch,
+        managedServiceUICapabilities: [{
+          pluginId: 'demo',
+          pluginGeneration: 'demo-new',
+          token: 'candidate-managed-token',
+        }],
+      }
+      expect(() => assertProductionGraphBootstrapSnapshot(active, registryEpoch, current)).not.toThrow()
+      expect(() => assertProductionGraphBootstrapSnapshot(active, registryEpoch + 1, current)).toThrow('stale')
+      expect(() =>
+        assertProductionGraphBootstrapSnapshot(
+          { ...active, plugins: active.plugins.map(plugin => ({ ...plugin, moduleGeneration: 'stale-generation' })) },
+          registryEpoch,
+          current,
+        )
+      ).toThrow('stale')
+      expect(current.managedServiceUICapabilities).toEqual([{
+        pluginId: 'demo',
+        pluginGeneration: 'demo-new',
+        token: 'candidate-managed-token',
+      }])
       expect(runtime.activeBrowserGraph('demo', 'demo-new')?.loadSource).toBe(next.lease.importSource)
       expect(old.retire).not.toHaveBeenCalled()
     })

@@ -2,24 +2,26 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import type { ManagerSettingsNavigationProjectionV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
+import type { ManagerSettingsNavigationProjectionV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
 import type { ManagerModel, ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
 import type { ManagerRouter } from '../packages/cli/src/renderer/manager/model/routes.js'
 
 const pointId = 'manager.settings.navigation-items'
 const surfaceSchema =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v9.schema.json' as const
+const surfaceSchemaV11 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v11.schema.json' as const
 
 const navigationProjection = {
   $schema:
-    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-projection.v2.schema.json',
-  contract: 'cordisx.manager-settings-navigation-projection/v2',
-  schemaVersion: 2,
+    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-projection.v3.schema.json',
+  contract: 'cordisx.manager-settings-navigation-projection/v3',
+  schemaVersion: 3,
   catalog: {
     $schema:
-      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-groups.v1.schema.json',
-    contract: 'cordisx.manager-settings-navigation-groups/v1',
-    schemaVersion: 1,
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-groups.v2.schema.json',
+    contract: 'cordisx.manager-settings-navigation-groups/v2',
+    schemaVersion: 2,
     fallbackGroup: 'other',
     groups: [
       { id: 'resources', label: { namespace: 'host', key: 'resources', fallback: 'Raw resources' }, order: 100 },
@@ -33,6 +35,11 @@ const navigationProjection = {
         label: { namespace: 'host', key: 'collaboration', fallback: 'Raw collaboration' },
         order: 300,
       },
+      {
+        id: 'external-accounts',
+        label: { namespace: 'host', key: 'external-accounts', fallback: 'Raw external accounts' },
+        order: 400,
+      },
       { id: 'other', label: { namespace: 'host', key: 'other', fallback: 'Raw other' }, order: 1000 },
     ],
   },
@@ -45,6 +52,15 @@ const navigationProjection = {
     effectiveGroup: 'collaboration',
     assignment: 'declared',
     order: 20,
+  }, {
+    owner: 'accounts',
+    id: 'connections',
+    surfaceProvenance: { kind: 'versioned', $schema: surfaceSchemaV11, schemaVersion: 11 },
+    insertionGroup: 'after-settings',
+    declaredGroup: 'external-accounts',
+    effectiveGroup: 'external-accounts',
+    assignment: 'declared',
+    order: 25,
   }, {
     owner: 'legacy',
     id: 'tool',
@@ -62,7 +78,7 @@ const navigationProjection = {
     assignment: 'unassigned-fallback',
     order: 30,
   }],
-} satisfies ManagerSettingsNavigationProjectionV2
+} satisfies ManagerSettingsNavigationProjectionV3
 
 function snapshot(locale = 'zh-CN'): ManagerSnapshot {
   return {
@@ -138,10 +154,11 @@ describe('Manager navigation extension point diagnostics', () => {
       )
       await clickTab('信息')
       const contract = dom.window.document.querySelector('[data-manager-navigation-contract]')
-      expect(contract?.textContent).toContain('Surface contribution v9')
+      expect(contract?.textContent).toContain('Surface contribution v9/v11')
       expect(contract?.textContent).toContain('两者互不替代')
-      expect(dom.window.document.querySelectorAll('[data-manager-navigation-group]')).toHaveLength(4)
+      expect(dom.window.document.querySelectorAll('[data-manager-navigation-group]')).toHaveLength(5)
       expect(contract?.textContent).toContain('资源resources · 顺序 100')
+      expect(contract?.textContent).toContain('外部账号external-accounts · 顺序 400')
       expect(contract?.textContent).not.toContain('Raw resources')
 
       await clickTab('诊断')
@@ -150,7 +167,7 @@ describe('Manager navigation extension point diagnostics', () => {
       )
       expect(declared?.textContent).toContain('所有者chatroom')
       expect(declared?.textContent).toContain('本地 contribution IDteam-architecture')
-      expect(declared?.textContent).toContain('versioned（精确 v9） · schemaVersion 9')
+      expect(declared?.textContent).toContain('versioned（精确 v9/v11） · schemaVersion 9')
       expect(declared?.textContent).toContain('surface-contribution.v9.schema.json')
       expect(declared?.textContent).toContain('插入位置after-settings')
       expect(declared?.textContent).toContain('声明的视觉分组collaboration')
@@ -158,12 +175,19 @@ describe('Manager navigation extension point diagnostics', () => {
       expect(declared?.textContent).toContain('declared · 使用声明的视觉分组')
       expect(declared?.textContent).toContain('顺序20')
 
+      const external = dom.window.document.querySelector(
+        '[data-manager-navigation-contribution="accounts:connections"]',
+      )
+      expect(external?.textContent).toContain('versioned（精确 v9/v11） · schemaVersion 11')
+      expect(external?.textContent).toContain('surface-contribution.v11.schema.json')
+      expect(external?.textContent).toContain('声明的视觉分组external-accounts')
+
       const legacy = dom.window.document.querySelector('[data-manager-navigation-contribution="legacy:tool"]')
       expect(legacy?.textContent).toContain('legacy-unversioned（运行时未声明 schema 版本）')
       expect(legacy?.textContent).not.toContain('v5-v8')
       expect(legacy?.textContent).toContain('legacy-fallback · legacy-unversioned 注册未声明视觉分组，归入兜底分组')
       const unassigned = dom.window.document.querySelector('[data-manager-navigation-contribution="modern:ungrouped"]')
-      expect(unassigned?.textContent).toContain('unassigned-fallback · v9 注册未声明视觉分组，归入兜底分组')
+      expect(unassigned?.textContent).toContain('unassigned-fallback · v9/v11 注册未声明视觉分组，归入兜底分组')
 
       await act(async () =>
         root.render(
@@ -173,6 +197,9 @@ describe('Manager navigation extension point diagnostics', () => {
       await clickTab('信息')
       expect(dom.window.document.querySelector('[data-manager-navigation-contract]')?.textContent).toContain(
         'Resourcesresources · Order 100',
+      )
+      expect(dom.window.document.querySelector('[data-manager-navigation-contract]')?.textContent).toContain(
+        'External accountsexternal-accounts · Order 400',
       )
       expect(dom.window.document.body.textContent).toContain('They are independent fields.')
     } finally {

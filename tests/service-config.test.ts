@@ -244,6 +244,7 @@ describe('Host service configuration narrow API', () => {
         throw new Error('disk full')
       }),
       abort: abortServiceConfigCandidate,
+      markAppRestartApplied: markServiceConfigAppRestartApplied,
     }
     const service = api(target, CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT, { restart, persistence })
     expect(

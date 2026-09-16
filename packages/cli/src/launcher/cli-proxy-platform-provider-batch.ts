@@ -15,6 +15,7 @@ import { loadStagedPluginPackage } from './plugin-package.js'
 import { platformProviderRuntimeServiceAccess } from './packages/platform-provider-service-access.js'
 import { HostPlatformProviderConfigurationRegistryV1 } from './platform-provider-authority.js'
 import { PlatformProviderServiceBatchRuntime } from './platform-provider-service-batch.js'
+import type { HostServiceConfigPersistence } from './service-config.js'
 
 export function createCliProxyPlatformProviderBatch(input: {
   readonly homeDir: string
@@ -25,7 +26,9 @@ export function createCliProxyPlatformProviderBatch(input: {
   readonly environment: NodeJS.ProcessEnv
   readonly activation: () => Promise<CordisXPluginActivationRecordV1>
   readonly launcherCandidates?: CordisXPluginActivationRecordV1['plugins']
+  readonly serviceConfigPersistence?: HostServiceConfigPersistence
 }): PlatformProviderServiceBatchRuntime {
+  const readServiceConfig = input.serviceConfigPersistence?.read ?? readServiceConfigState
   const configurations = new HostPlatformProviderConfigurationRegistryV1()
   configurations.register({
     protocolVersion: 2,
@@ -48,7 +51,7 @@ export function createCliProxyPlatformProviderBatch(input: {
   const brokers = new CodexAppServerPlatformBrokerAuthority({
     serviceSchemas: [CLI_PROXY_PROVIDER_RUNTIME_CONFIG_SCHEMA_V1],
     open: async authority => {
-      const startup = await readServiceConfigState({
+      const startup = await readServiceConfig({
         profileId: input.profileId,
         pluginId: authority.owner.pluginId,
         serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
@@ -81,7 +84,7 @@ export function createCliProxyPlatformProviderBatch(input: {
             service.declaration.kind !== 'platform-provider'
             || service.declaration.schema !== CLI_PROXY_PROVIDER_RUNTIME_CONFIG_SCHEMA_V1
           ) continue
-          const state = await readServiceConfigState({
+          const state = await readServiceConfig({
             profileId: input.profileId,
             pluginId: item.id,
             serviceId: service.declaration.id,

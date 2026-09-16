@@ -9,6 +9,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
 } from '../extension-point-interaction-permissions.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14, normalizePluginManifestV14 } from './latest-runtime-manifest.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
@@ -262,6 +263,11 @@ export class PluginLifecycleCoordinatorCore {
     return await stagePluginPackageSourceV1(source, {
       homeDir: this.options.homeDir,
       runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV14(value, id)
+        },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V12]: value => {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')

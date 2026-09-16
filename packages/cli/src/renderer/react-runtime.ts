@@ -25,7 +25,10 @@ import { PublicMarkdownEditor } from './host-ui/PublicMarkdownEditor.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
 import { HostAgentAvatar } from './host-ui/avatar/AgentAvatar.js'
+import { HOST_DIALOG_STYLES } from './host-ui/HostDialog.js'
 import { HostIcon } from './host-ui/HostIcon.js'
+import { Disclosure, FieldList, PUBLIC_INFORMATION_STYLES, StatusBadge } from './host-ui/PublicInformation.js'
+import type { DisclosureProps, FieldListProps, StatusBadgeProps } from '../ui.js'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
 type StackDirection = 'row' | 'column'
@@ -75,6 +78,12 @@ type IconName =
   | 'relationship'
   | 'fit'
   | 'reset'
+  | 'account'
+  | 'refresh'
+  | 'logout'
+  | 'runtime'
+  | 'readiness'
+  | 'health'
 
 interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
@@ -165,6 +174,8 @@ const SHARED_REACT_STYLES = `
 .cxr-ui-markdown p,.cxr-ui-markdown ul,.cxr-ui-markdown ol,.cxr-ui-markdown blockquote,.cxr-ui-markdown pre,.cxr-ui-markdown table{margin:0 0 1em}.cxr-ui-markdown ul,.cxr-ui-markdown ol{padding-left:1.65em}.cxr-ui-markdown li+li{margin-top:.3em}
 .cxr-ui-markdown a{color:var(--cx-primary);text-decoration-thickness:1px;text-underline-offset:2px}.cxr-ui-markdown code{border-radius:5px;padding:.15em .35em;background:var(--cx-hover);font:.9em/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}.cxr-ui-markdown pre{max-width:100%;overflow:auto;border:1px solid var(--cx-border);border-radius:9px;padding:12px;background:var(--cx-surface-raised)}.cxr-ui-markdown pre code{padding:0;background:transparent;color:inherit;white-space:pre}.cxr-ui-markdown pre code[data-shiki-theme]{display:block}.cxr-ui-markdown .cxm-readme-code-line{display:block;min-height:1.45em}
 .cxr-ui-markdown blockquote{border-left:3px solid var(--cx-border);padding-left:12px;color:var(--cx-muted)}.cxr-ui-markdown table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}.cxr-ui-markdown th,.cxr-ui-markdown td{border:1px solid var(--cx-border);padding:6px 9px;text-align:left}.cxr-ui-markdown picture{display:block;max-width:100%;margin:0 0 1em}.cxr-ui-markdown img,.cxr-ui-markdown video{display:block;max-width:100%;height:auto;border-radius:9px;background:var(--cx-surface-raised)}.cxr-ui-markdown picture>img{margin:0 auto}.cxr-ui-markdown video{width:100%}
+${PUBLIC_INFORMATION_STYLES}
+${HOST_DIALOG_STYLES}
 `
 
 function joinClassName(...values: (string | undefined)[]): string {
@@ -259,6 +270,18 @@ export function Icon({ name, className, ...props }: IconProps): React.ReactEleme
     ? 'host:fit'
     : name === 'reset'
     ? 'host:reset'
+    : name === 'account'
+    ? 'host:people'
+    : name === 'refresh'
+    ? 'action.refresh'
+    : name === 'logout'
+    ? 'action.disable'
+    : name === 'runtime'
+    ? 'action.resume'
+    : name === 'readiness'
+    ? 'status.success'
+    : name === 'health'
+    ? 'navigation.runtime'
     : undefined
   if (hostSurfaceToken !== undefined) {
     return React.createElement('span', {
@@ -458,7 +481,9 @@ export interface SharedReactRuntime {
     AgentAvatar: typeof AgentAvatar
     Button: typeof Button
     Card: typeof Card
+    Disclosure: (props: DisclosureProps) => React.ReactElement
     EmptyState: typeof EmptyState
+    FieldList: (props: FieldListProps) => React.ReactElement
     FilterToolbar: typeof FilterToolbar
     Heading: typeof Heading
     HorizontalSplitPane: typeof HorizontalSplitPane
@@ -472,6 +497,7 @@ export interface SharedReactRuntime {
     SchemaForm: typeof SchemaForm
     SelectionRail: typeof PublicSelectionRail
     Stack: typeof Stack
+    StatusBadge: (props: StatusBadgeProps) => React.ReactElement
     Text: typeof Text
   }>
   readonly defineReactVisual: typeof defineReactVisual
@@ -482,7 +508,6 @@ export interface SharedReactRuntime {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cordisxSharedReactRuntime: SharedReactRuntime | undefined
 }
 
@@ -560,7 +585,9 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       AgentAvatar,
       Button,
       Card,
+      Disclosure,
       EmptyState,
+      FieldList,
       FilterToolbar,
       Heading,
       HorizontalSplitPane,
@@ -574,6 +601,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       SchemaForm,
       SelectionRail: PublicSelectionRail,
       Stack,
+      StatusBadge,
       Text,
     }),
     defineReactVisual,

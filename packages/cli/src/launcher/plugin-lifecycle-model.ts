@@ -112,6 +112,7 @@ export interface PluginRuntimeMutation {
   readonly candidate: CordisXPluginActivationRecordV1
   readonly targetId: string
   readonly affectedPluginIds: readonly string[]
+  readonly managedServiceUICapabilities?: readonly ManagedServiceUICapabilityMutation[]
   readonly package?: StagedPluginPackage
   /** Host-private candidate for one explicitly selected local development entry. */
   readonly developmentPackage?: {
@@ -141,6 +142,12 @@ export interface PluginRuntimeMutation {
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
     | CordisXPermissionAuthorizationDecisionV4
+}
+
+export interface ManagedServiceUICapabilityMutation {
+  readonly pluginId: string
+  readonly pluginGeneration: string
+  readonly token: string
 }
 
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
@@ -441,15 +448,10 @@ export function authorizationPlanV4(
   policiesV4: readonly CordisXPermissionPolicyRecordV4[],
   certification?: CordisXCertifiedPermissionProjectionV1,
 ): CordisXPermissionAuthorizationPlanV4 {
-  if (
-    staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-    && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
-    && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
-    && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
-  ) {
+  if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
     throw new LifecycleFailure(
       'permission-denied',
-      'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7 through manifest-v12.',
+      'Permission V4 review requires manifest-v5 through manifest-v14.',
     )
   }
   const catalog = new CapabilityRiskCatalog()
@@ -471,6 +473,10 @@ export function authorizationPlanV4(
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
   }, catalog)
+}
+
+export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {
+  return schemaVersion >= 5 && schemaVersion <= 14
 }
 
 export function isLegacyPermissionDeclarationV4(

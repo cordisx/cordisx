@@ -7,6 +7,7 @@ import type {
   PackageIdentity,
   PackageImpactToken,
 } from './types.js'
+import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 
 export interface PreparedCandidate {
   readonly transactionId: string
@@ -53,4 +54,25 @@ export interface PlatformProviderRuntimeServiceModuleAccess {
   readonly applicationMode: 'service-restart' | 'app-restart'
   readonly artifactDirectory: string
   readonly runtimeEntry: `./services/${string}.mjs`
+}
+
+export interface ManagedBackendRuntimeServiceModuleAccess {
+  readonly packageIdentity: PackageIdentity
+  readonly pluginIdentity: {
+    readonly source: string
+    readonly pluginId: string
+    readonly generation: string
+  }
+  readonly serviceId: string
+  readonly hostGeneration: string
+  readonly serviceKind: 'managed-backend'
+  readonly declaration: PluginManifestManagedBackendServiceV14
+  readonly artifactDirectory: string
+  readonly runtimeEntry: `./services/${string}.mjs`
+  readonly runtimeResources?: readonly {
+    readonly path: `./${string}`
+    readonly mode: 'executable' | 'data'
+    readonly byteLength: number
+    readonly digest: `sha256:${string}`
+  }[]
 }

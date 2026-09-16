@@ -667,6 +667,15 @@ export const createRuntimeStagePluginMutation = (
     const candidates: PluginController[] = []
     runtimeScope.notificationsSuppressed = true
     try {
+      const managedServiceBridge = runtimeScope.managedServiceBridge()
+      if (managedServiceBridge === undefined && (mutation.managedServiceUICapabilities?.length ?? 0) > 0) {
+        throw new Error('plugin dependencies are unavailable: managedServices')
+      }
+      managedServiceBridge?.stage(
+        mutation.transactionId,
+        handle.affectedPluginIds,
+        mutation.managedServiceUICapabilities ?? [],
+      )
       for (const id of handle.affectedPluginIds) {
         if (!mutation.candidate.plugins.some(item => item.id === id)) {
           continue
@@ -800,6 +809,7 @@ export const createRuntimePublishPluginMutation = (
       runtimeScope.notificationsSuppressed = true
       try {
         runtimeScope.orderControllersFor()!(transaction.candidateActivation)
+        runtimeScope.managedServiceBridge()?.publish(transactionId)
         transaction.publication = runtimeScope.generationVisibility()!.publish(barrier)
         runtimeScope.currentActivation = transaction.candidateActivation
         await runtimeScope.routeService?.settled()
@@ -865,6 +875,7 @@ export const createRuntimeFinalizePluginMutation = (
       throw new Error('plugin generation cleanup is incomplete')
     }
     runtimeScope.generationVisibility()!.completeLastGood(transaction.publication)
+    runtimeScope.managedServiceBridge()?.complete(transactionId)
     runtimeScope.currentActivation = committedActivation(transaction.candidateActivation)
     runtimeScope.generationTransactions()!.delete(transactionId)
     runtimeScope.rememberFinalizedTransaction()!(transactionId, transaction)
@@ -901,6 +912,7 @@ export const createRuntimeRollbackPluginMutation = (
     if (transaction.publication === undefined) {
       runtimeScope.notificationsSuppressed = true
       try {
+        runtimeScope.managedServiceBridge()?.rollback(transactionId)
         await runtimeScope.disposeControllers()!(
           transaction.candidates,
           transaction.candidateActivation,
@@ -908,6 +920,7 @@ export const createRuntimeRollbackPluginMutation = (
         )
         await runtimeScope.drainSuppressedNotifications()!()
         const registryEpoch = runtimeScope.generationVisibility()!.rollbackUnpublished(transaction.handle)
+        runtimeScope.managedServiceBridge()?.completeRollback(transactionId)
         runtimeScope.generationTransactions()!.delete(transactionId)
         return runtimeScope.rememberRollbackReceipt()!({
           transactionId,
@@ -922,6 +935,7 @@ export const createRuntimeRollbackPluginMutation = (
     } else {
       runtimeScope.notificationsSuppressed = true
       try {
+        runtimeScope.managedServiceBridge()?.rollback(transactionId)
         if (finalizedTransaction !== undefined && transaction.finalizedRollbackStarted !== true) {
           runtimeScope.generationVisibility()!.rollbackLastGood(transaction.publication)
           runtimeScope.currentActivation = transaction.previousActivation
@@ -954,6 +968,7 @@ export const createRuntimeRollbackPluginMutation = (
         if (finalizedTransaction === undefined) {
           runtimeScope.generationVisibility()!.completeRollback(transaction.publication)
         }
+        runtimeScope.managedServiceBridge()?.completeRollback(transactionId)
         await runtimeScope.drainSuppressedNotifications()!()
         runtimeScope.notifyBatch()!()
         await runtimeScope.drainBatchSubscriberMicrotasks()!()

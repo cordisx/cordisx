@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CLI_PROXY_COMMIT = '5857dac38a1d3d0f0a45b43150fe69b92321dab4'
+const CLI_PROXY_COMMIT = 'c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37'
 const CLI_PROXY_DEPENDENCY = `github:cordisx/plugin-cli-proxy-api#${CLI_PROXY_COMMIT}`
 
 /** Verify the installed convenience alias and its sibling service artifact. */
@@ -22,7 +22,7 @@ export async function verifyInstalledCliProxy(input) {
     plugin.entry !== path.join(packageRoot, 'dist', 'runtime', 'module.js')
     || manifest.name !== '@cordisx/plugin-cli-proxy-api'
   ) {
-    throw new Error('installed cordisx:cli-proxy-api alias did not resolve the external package export')
+    throw new Error('installed cordisx:cli-proxy-api alias did not resolve the bundled package export')
   }
   const exact = new Set([
     'tasks.content.read',
@@ -32,7 +32,7 @@ export async function verifyInstalledCliProxy(input) {
     'turns.control',
   ])
   if (
-    packageManifest.schemaVersion !== 13 || runtimeManifest.schemaVersion !== 13
+    packageManifest.schemaVersion !== 14 || runtimeManifest.schemaVersion !== 14
     || packageManifest.runtimeManifest.schema !== runtimeManifest.$schema
     || packageManifest.runtimeManifest.digest !== `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`
     || runtimeManifest.capabilities.length !== 7
@@ -43,7 +43,7 @@ export async function verifyInstalledCliProxy(input) {
           : {},
       )
     ))
-  ) throw new Error('installed CLIProxy package-v13 permission artifact is invalid')
-  await access(path.join(packageRoot, runtimeManifest.services[0].entry))
+  ) throw new Error('installed CLIProxy package-v14 permission artifact is invalid')
+  await Promise.all(runtimeManifest.services.map(service => access(path.join(packageRoot, service.entry))))
   return config
 }

@@ -249,138 +249,6 @@ import {
   pluginFromModule,
 } from './runtime-shared.js'
 
-// Cordis erases its const enum from runtime exports; renderer bundling needs a local value.
-const ACTIVE_PLUGIN_FIBER_STATE: FiberState = 2
-
-export const createRuntimeDisposeControllerFiber = async (
-  runtimeScope: RuntimeClosureScope,
-  controller: PluginController,
-  reason: 'owner-disposed' | 'generation-replaced',
-): Promise<void> => {
-  runtimeScope.rememberRegistrations()!(controller.item.id)
-  runtimeScope.agentRuntime()!.releaseOwner(controller.identity, reason, runtimeScope.moduleGenerationOf()!(controller))
-  let failure: unknown
-  try {
-    await controller.hostDomWorker?.dispose()
-    await controller.fiber?.dispose()
-  } catch (error) {
-    failure = error
-  }
-  try {
-    await runtimeScope.routeService?.settled()
-  } catch (error) {
-    failure ??= error
-  } finally {
-    const owner = `${controller.item.source}:${controller.item.id}`
-    runtimeScope.agentRouteScopes()!.revoke(owner, 'plugin-generation-replaced')
-    runtimeScope.agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
-    await controller.agentPageFreshRoomNavigationFiber?.dispose()
-    delete controller.agentPageFreshRoomNavigationFiber
-    await controller.agentPageAdmissionRouteReservationFiber?.dispose()
-    delete controller.agentPageAdmissionRouteReservationFiber
-    await controller.agentPageAdmissionRouteDeclarationFiber?.dispose()
-    delete controller.agentPageAdmissionRouteDeclarationFiber
-    await controller.agentPageAdmissionReservationFiber?.dispose()
-    delete controller.agentPageAdmissionReservationFiber
-    await controller.agentPageAdmissionTargetFiber?.dispose()
-    delete controller.agentPageAdmissionTargetFiber
-    await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
-    delete controller.agentAdmissionBootstrapRouteReservationFiber
-    await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
-    delete controller.agentAdmissionBootstrapRouteDeclarationFiber
-    await controller.agentAdmissionBootstrapReservationFiber?.dispose()
-    delete controller.agentAdmissionBootstrapReservationFiber
-    await controller.agentAdmissionBootstrapTargetFiber?.dispose()
-    delete controller.agentAdmissionBootstrapTargetFiber
-    await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
-    delete controller.agentAdmissionBootstrapRoomReservationFiber
-    await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
-    delete controller.agentAdmissionBootstrapRoomTargetFiber
-    await controller.agentAdmissionTargetReservationFiber?.dispose()
-    delete controller.agentAdmissionTargetReservationFiber
-    await controller.agentAdmissionTargetOriginFiber?.dispose()
-    delete controller.agentAdmissionTargetOriginFiber
-    await controller.agentAdmissionReservationFiber?.dispose()
-    delete controller.agentAdmissionReservationFiber
-    await controller.approvalServiceFiber?.dispose()
-    delete controller.approvalServiceFiber
-    await controller.agentDetailNavigationFiber?.dispose()
-    delete controller.agentDetailNavigationFiber
-    await controller.agentSessionDetailReferenceFiber?.dispose()
-    delete controller.agentSessionDetailReferenceFiber
-    await controller.sessionRegistryFiber?.dispose()
-    delete controller.sessionRegistryFiber
-    await controller.agentRegistryFiber?.dispose()
-    delete controller.agentRegistryFiber
-    await controller.entityRegistryFiber?.dispose()
-    delete controller.entityRegistryFiber
-    controller.unregisterAgentSessionMigration?.()
-    delete controller.unregisterAgentSessionMigration
-    controller.agentLoopClient?.dispose()
-    delete controller.agentLoopClient
-    await disposePluginTransports(controller)
-    controller.unregisterDialogs?.()
-    delete controller.unregisterDialogs
-    controller.unregisterNotifications?.()
-    delete controller.unregisterNotifications
-    await disposePluginProfileSurfaces(controller)
-    controller.agentLoopControl?.dispose()
-    await controller.unregisterAgentLoopControl?.()
-    delete controller.agentLoopControl
-    delete controller.unregisterAgentLoopControl
-    await controller.unregisterAgentLoop?.()
-    delete controller.unregisterAgentLoop
-    controller.documentsClient?.dispose()
-    delete controller.documentsClient
-    controller.unregisterAgentTools?.()
-    delete controller.unregisterAgentTools
-    await controller.unregisterDocuments?.()
-    delete controller.unregisterDocuments
-    controller.connectorClient?.dispose()
-    delete controller.connectorClient
-    await controller.unregisterConnector?.()
-    delete controller.unregisterConnector
-    runtimeScope.retirePrincipal()!(controller, `Plugin disposed: ${reason}`)
-    delete controller.hostDomWorker
-    delete controller.fiber
-  }
-  if (failure !== undefined) {
-    throw failure
-  }
-}
-
-export const createRuntimeRenewPrincipal = (runtimeScope: RuntimeClosureScope, controller: PluginController): void => {
-  if (controller.principalLive) {
-    return
-  }
-  controller.activation += 1
-  controller.principal = runtimeScope.pluginConsole()!.issue(
-    controller.identity,
-    runtimeScope.moduleGenerationOf()!(controller),
-  )
-  controller.principalLive = true
-  const module = controller.item.isolatedArtifactSource === undefined
-    ? controller.item.moduleFactory?.(runtimeScope.pluginConsole()!.consoleFacade(controller.principal))
-      ?? controller.item.module
-    : undefined
-  controller.item = module === undefined || module === controller.item.module
-    ? controller.item
-    : { ...controller.item, module }
-  controller.manifest = normalizePluginManifest(controller.item.manifest ?? module?.manifest, controller.item.id)
-}
-
-export const createRuntimeRetirePrincipal = (
-  runtimeScope: RuntimeClosureScope,
-  controller: PluginController,
-  message: string,
-): void => {
-  if (!controller.principalLive) {
-    return
-  }
-  runtimeScope.pluginConsole()!.deactivate(controller.principal, message)
-  controller.principalLive = false
-}
-
 export const createRuntimeMountPlugin = async (
   runtimeScope: RuntimeClosureScope,
   controller: PluginController,
@@ -708,6 +576,23 @@ export const createRuntimeMountPlugin = async (
   installPluginProfileSurfaces(pluginContext, controller, document, agentLoopOptions)
   controller.documentsClient = documentsClient
   controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
+  const managedServices = runtimeScope.managedServiceBridge()?.bind({
+    pluginId: controller.item.id,
+    pluginGeneration: runtimeScope.moduleGenerationOf()!(controller),
+  })
+  const modelProviderBinding = runtimeScope.modelProviders()!.bind(
+    controller.item.id,
+    runtimeScope.moduleGenerationOf()!(controller),
+    () => controller.principalLive,
+  )
+  const unprovideModelProviders = pluginContext.reflect.provide('modelProviders', modelProviderBinding.facade)
+  controller.unregisterModelProviders = async () => {
+    modelProviderBinding.dispose()
+    await unprovideModelProviders()
+  }
+  if (managedServices !== undefined) {
+    controller.unregisterManagedServices = pluginContext.reflect.provide('managedServices', managedServices)
+  }
   try {
     const owner = runtimeScope.agentSessionRuntime.ownerFromContext(pluginContext)
     const entityPrincipal = runtimeScope.entityPrincipalBindings()!.get(JSON.stringify([
@@ -886,8 +771,20 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.configuration()!.get(controller.item.id, runtimeScope.generationVisibility()!.view(pluginContext)),
     )
     await controller.fiber
-    if (controller.fiber.state !== ACTIVE_PLUGIN_FIBER_STATE) {
-      throw new Error('Plugin activation did not become active; required services may be unavailable')
+    // Cordis publishes FiberState as a const enum (ACTIVE = 2) so the value is
+    // inlined at compile time. When a plugin fails to activate because an
+    // inject is missing, the fiber settles in FAILED/LOADING without throwing;
+    // surface the unavailable injects to make the failure actionable.
+    const fiber = controller.fiber
+    if (fiber === undefined) {
+      throw new Error('plugin activation fiber is unavailable')
+    }
+    const CORDIS_FIBER_ACTIVE = 2
+    if (fiber.state !== CORDIS_FIBER_ACTIVE) {
+      const missing = Object.keys(fiber.inject).filter(name => fiber.ctx.reflect.get(name) === undefined)
+      throw new Error(
+        `plugin dependencies are unavailable${missing.length === 0 ? '' : `: ${missing.join(', ')}`}`,
+      )
     }
     runtimeScope.agentRouteScopes()!.validateInstalledRoutes(owner)
     controller.status = 'active'
@@ -972,6 +869,10 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
+    await controller.unregisterManagedServices?.()
+    delete controller.unregisterManagedServices
+    await controller.unregisterModelProviders?.()
+    delete controller.unregisterModelProviders
     connectorClient.dispose()
     delete controller.connectorClient
     await controller.unregisterConnector?.()

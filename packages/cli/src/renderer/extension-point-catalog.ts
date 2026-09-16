@@ -15,6 +15,7 @@ import type {
   CordisXHostExtensionPointAnchorDescriptorV2,
   CordisXHostExtensionPointAnchorDescriptorV5,
   CordisXHostExtensionPointCatalogV1,
+  CordisXHostExtensionPointCatalogV11,
   CordisXHostExtensionPointCatalogV2,
   CordisXHostExtensionPointCatalogV3,
   CordisXHostExtensionPointCatalogV5,
@@ -23,6 +24,7 @@ import type {
   CordisXHostExtensionPointCatalogV8,
   CordisXHostExtensionPointCatalogV9,
   CordisXHostExtensionPointDescriptor,
+  CordisXHostExtensionPointDescriptorV11,
   CordisXHostExtensionPointDescriptorV3,
   CordisXHostExtensionPointDescriptorV5,
   CordisXHostExtensionPointDescriptorV9,
@@ -37,6 +39,7 @@ import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
@@ -559,8 +562,8 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
 }) satisfies CordisXHostExtensionPointCatalogV8
 
 export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
-  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
-  schemaVersion: 9,
+  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11,
+  schemaVersion: 11,
   points: Object.freeze([
     Object.freeze({
       id: 'manager.settings.tabs',
@@ -644,9 +647,12 @@ export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
       routePathFamily: 'manager',
     }),
   ]),
-}) satisfies CordisXHostExtensionPointCatalogV9
+}) satisfies CordisXHostExtensionPointCatalogV11
 
-const ALL_EXTENSION_POINT_DESCRIPTORS: readonly CordisXHostExtensionPointDescriptorV9[] = [
+const ALL_EXTENSION_POINT_DESCRIPTORS: readonly (
+  | CordisXHostExtensionPointDescriptorV9
+  | CordisXHostExtensionPointDescriptorV11
+)[] = [
   ...CORDISX_BUILTIN_EXTENSION_POINT_CATALOG.points,
   ...CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points,
 ] as const
@@ -748,6 +754,7 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'manager.settings.navigation-group.resources': '资源',
   'manager.settings.navigation-group.development': '开发',
   'manager.settings.navigation-group.collaboration': '协作',
+  'manager.settings.navigation-group.external-accounts': '外部账号',
   'manager.settings.navigation-group.other': '其他',
   'manager.content.title': '管理器内容',
   'manager.content.description': '在宿主拥有的标准管理器页面标题下挂载受控的可信本地插件正文。',

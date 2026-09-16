@@ -1,13 +1,13 @@
 import { access, readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { ChannelManagerProjectionV1 } from '../packages/cli/src/renderer/channel-manager.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
-const entry = createRequire(import.meta.url).resolve('@cordisx/channel')
-const packageRoot = path.dirname(path.dirname(entry))
+const entry = bundledPluginEntry('channel')
+const packageRoot = path.resolve(path.dirname(entry), '..')
 
 const projection: ChannelManagerProjectionV1 = {
   contract: 'cordisx.channel-manager-projection/v1',

@@ -28,12 +28,15 @@ development lockfile was installed.
 
 The `packages` directory contains the CLI, creator, Protocol, Channel, and
 CLIProxy tarballs. The CLI bundles complete Channel and CLIProxy runtimes plus Schemastery UI;
-The CLI declares their exact bundled versions; `cordisxSources` in its manifest
-and `cordisxSource` in each bundled plugin retain canonical Git commit refs.
-The root build manifest continues to pin the Git dependencies. This avoids npm
-marking bundled Git edges invalid when its lockfile omits their resolved URLs.
+The CLI carries the built plugin packages under `dist/bundled-plugins` and
+`cordisxSources` in both Host manifests plus `cordisxSource` in each bundled
+plugin retain canonical Git commit refs. Channel and CLIProxy are deliberately
+absent from Host dependencies: both plugin repositories use Host as a build
+dependency, so declaring either plugin as a Host Git dependency creates an
+unbounded prepare cycle for external Git consumers.
 Protocol remains a shared dependency because its unique-symbol types must have
-one module identity across Host and consumer imports. Protocol has no prepare
+one module identity across Host and consumer imports. The SDK repacks the exact
+registry Protocol version installed by the Host lockfile; Protocol has no prepare
 hook. Consumers can install the CLI without rebuilding the Git plugins. When
 using the generated Protocol tarball directly, consumers must apply one npm
 override for that same package throughout the dependency graph.

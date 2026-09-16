@@ -4,8 +4,9 @@ import { isWalletSpendRequest } from './wallet-spend-authority.js'
 import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
-import { waitForInitialDocument } from './cdp-document-ready.js'
+import { createDocumentInstallationState, installDocumentBootstrap } from './cdp-installation-bootstrap.js'
 import * as support from './cdp-installation-support.js'
+import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 
 export async function install(
   target: support.CdpTarget,
@@ -39,6 +40,10 @@ export async function install(
   viteLoopbackPermissions?: support.ViteLoopbackPermissionCoordinator,
   signal?: AbortSignal,
   hostMutationGate?: support.CdpLifecycleRequestGate,
+  managedServiceUI?: {
+    readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+  },
+  nativeSubmission?: NativeSubmissionInstallation,
 ): Promise<support.InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
@@ -61,6 +66,7 @@ export async function install(
   const iconThemePreferenceController = iconThemePreference === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
+  const managedServiceUIController = managedServiceUI === undefined ? undefined : new AbortController()
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
@@ -91,10 +97,11 @@ export async function install(
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<support.CdpPluginLifecycleRuntime['beginJoin']> | undefined
   let removePublisherGrantBindingListener = (): void => {}
+  let removeManagedServiceUIBindingListener = (): void => {}
   let certifiedPermissionChannel: support.CdpCertifiedPermissionChannel | undefined
-  let identifier: string | undefined
+  const documentInstallation = createDocumentInstallationState()
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
-  let loopbackReloadStarted = false
+  let nativeChannel: { dispose(): Promise<void> } | undefined
   try {
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new support.CdpCertifiedPermissionChannel(session, {
@@ -104,6 +111,7 @@ export async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    if (nativeSubmission !== undefined) nativeChannel = await nativeSubmission.authority.install(session, target)
     if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
         ? await support.enableViteLoopbackPermission(session, target)
@@ -135,6 +143,9 @@ export async function install(
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: support.PLUGIN_LIFECYCLE_BINDING })
     if (publisherGrant !== undefined) {
       await session.send('Runtime.addBinding', { name: support.PUBLISHER_GRANT_BINDING })
+    }
+    if (managedServiceUI !== undefined) {
+      await session.send('Runtime.addBinding', { name: support.MANAGED_SERVICE_UI_BINDING })
     }
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -743,52 +754,38 @@ export async function install(
         })()
       })
     }
-    const generationRuntime = lifecycle?.runtime ?? developmentRuntime
-    const reloadInstallId = viteDevelopment || loopbackModules ? randomUUID() : undefined
-    const documentSource = newDocumentSource ?? source
-    const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
-      ? undefined
-      : support.productionBootstrapSource(documentSource, reloadInstallId)
-    const added = await support.abortable(
-      session.send(
-        'Page.addScriptToEvaluateOnNewDocument',
-        {
-          source: reloadInstallId === undefined
-            ? documentSource
-            : viteDevelopment
-            ? `globalThis.__cordisxViteInstallId = ${JSON.stringify(reloadInstallId)};\n${documentSource}`
-            : productionDocumentSource!,
-        },
-        support.CDP_INJECTION_TIMEOUT_MS,
-      ),
-      signal,
-    )
-    identifier = added.identifier as string | undefined
-    if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
-    if (viteDevelopment || loopbackModules) {
-      const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
-      await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
-      loopbackReloadStarted = true
-      await support.abortable(
-        session.send('Page.reload', viteDevelopment ? { ignoreCache: true } : {}, support.CDP_INJECTION_TIMEOUT_MS),
-        signal,
-      )
-      if (viteDevelopment) await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
-      else await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal)
-    } else {
-      const evaluated = await session.send(
-        'Runtime.evaluate',
-        {
-          expression: source,
-          allowUnsafeEvalBlockedByCSP: true,
-        },
-        support.CDP_INJECTION_TIMEOUT_MS,
-      )
-      const exception = support.runtimeEvaluationException(evaluated)
-      if (exception !== undefined) {
-        throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
-      }
+    if (managedServiceUI !== undefined) {
+      removeManagedServiceUIBindingListener = session.onEvent('Runtime.bindingCalled', params => {
+        if (params.name !== support.MANAGED_SERVICE_UI_BINDING || typeof params.payload !== 'string') return
+        const payload = params.payload
+        const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
+        if (managedServiceUIController?.signal.aborted === true) return
+        void managedServiceUI.handleBindingValue(payload).then(
+          async response => await support.sendManagedServiceUIBindingResponse(session, response, executionContextId),
+          async () =>
+            await support.sendManagedServiceUIBindingResponse(session, {
+              requestId: 'invalid',
+              ok: false,
+              code: 'managed-service-ui-unavailable',
+            }, executionContextId),
+        ).catch(() => undefined)
+      })
     }
+    const generationRuntime = lifecycle?.runtime ?? developmentRuntime
+    const documentSource = newDocumentSource ?? source
+    await installDocumentBootstrap(
+      {
+        session,
+        target,
+        documentSource,
+        evaluationSource: source,
+        viteDevelopment,
+        loopbackModules,
+        ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
+        ...(signal === undefined ? {} : { signal }),
+      },
+      documentInstallation,
+    )
     if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await support.evaluateRuntimeOperation(
         session,
@@ -840,7 +837,7 @@ export async function install(
       ...(viteDevelopment ? { viteDevelopment: true } : {}),
       ...(loopbackModules ? { loopbackModules: true } : {}),
       ...(viteLoopbackPermission === undefined ? {} : { viteLoopbackPermission }),
-      identifier,
+      identifier: documentInstallation.identifier!,
       documentSource,
       session,
       marketplaceController,
@@ -874,8 +871,18 @@ export async function install(
         : { publisherGrantController, removePublisherGrantBindingListener }),
       publisherGrantBindingInstalled: publisherGrant !== undefined,
       ...(certifiedPermissionChannel === undefined ? {} : { certifiedPermissionChannel }),
+      ...(managedServiceUIController === undefined
+        ? {}
+        : { managedServiceUIController, removeManagedServiceUIBindingListener }),
+      managedServiceUIBindingInstalled: managedServiceUI !== undefined,
+      ...(nativeChannel === undefined ? {} : { nativeChannel }),
+      ...(documentInstallation.nativeInterception === undefined
+        ? {}
+        : { nativeInterception: documentInstallation.nativeInterception }),
     }
   } catch (error) {
+    await nativeChannel?.dispose().catch(() => undefined)
+    await documentInstallation.nativeInterception?.dispose().catch(() => undefined)
     const strictProductionCleanup = loopbackModules && !viteDevelopment
     const cleanupFailures: unknown[] = []
     const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
@@ -899,6 +906,7 @@ export async function install(
     iconThemePreferenceController?.abort()
     lifecycleController?.abort()
     publisherGrantController?.abort()
+    managedServiceUIController?.abort()
     removeBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
@@ -914,9 +922,12 @@ export async function install(
     generationJoin?.abort()
     unregisterLifecycleSession()
     removePublisherGrantBindingListener()
+    removeManagedServiceUIBindingListener()
     await certifiedPermissionChannel?.dispose()
-    const scriptRemoved = identifier === undefined
-      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }))
+    const scriptRemoved = documentInstallation.identifier === undefined
+      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', {
+        identifier: documentInstallation.identifier,
+      }))
     if (viteDevelopment) {
       await attemptCleanup(session.send('Runtime.evaluate', {
         expression: support.VITE_DISPOSE_EXPRESSION,
@@ -937,7 +948,9 @@ export async function install(
     if (viteLoopbackPermissions === undefined) {
       await attemptCleanup(support.restoreViteLoopbackPermission(session, viteLoopbackPermission))
     } else await attemptCleanup(viteLoopbackPermissions.release(session, viteLoopbackPermission))
-    if (loopbackModules && !viteDevelopment && loopbackReloadStarted && scriptRemoved && cspRestored) {
+    if (
+      loopbackModules && !viteDevelopment && documentInstallation.loopbackReloadStarted && scriptRemoved && cspRestored
+    ) {
       await attemptCleanup(session.send('Page.reload', {}, support.CDP_INJECTION_TIMEOUT_MS))
     }
     session.close()

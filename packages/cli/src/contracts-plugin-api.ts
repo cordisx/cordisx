@@ -22,6 +22,7 @@ import type {
   CordisXCommands,
   CordisXConfigAppliesInput,
   CordisXManagerContentNavigation,
+  CordisXManagerService,
   CordisXPages,
   CordisXRoutes,
   CordisXSlots,
@@ -200,6 +201,8 @@ declare module '@deepseek-ai/cordis' {
     routes: CordisXRoutes
     /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
     managerContent: CordisXManagerContentNavigation
+    /** Opens this exact live plugin generation's own actionable configuration. */
+    manager: CordisXManagerService
     /** Fiber-owned locale dictionaries and typed translator seats. */
     i18n: CordisXI18n
     /** Owner-bound config snapshots and live subscriptions. */

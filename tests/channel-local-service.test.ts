@@ -1,14 +1,14 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
 const temporary = new Set<string>()
-const channelEntry = createRequire(import.meta.url).resolve('@cordisx/channel')
+const channelEntry = bundledPluginEntry('channel')
 const channelArtifactDirectory = path.dirname(channelEntry)
 
 afterEach(async () => {

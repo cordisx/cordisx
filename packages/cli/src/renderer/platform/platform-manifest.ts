@@ -53,6 +53,9 @@ import {
   normalizePluginManifestV9,
 } from '../../permission-model-v4.js'
 
+const CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v14.schema.json'
+
 export const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 
 export const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
@@ -141,6 +144,18 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 || manifest.schemaVersion === 14) {
+    if (!Array.isArray(manifest.services)) throw new Error(`plugin ${expectedId} manifest services must be an array`)
+    return normalizePluginManifestV13({
+      ...manifest,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+      schemaVersion: 13,
+      services: manifest.services.filter(service =>
+        service === null || typeof service !== 'object' || Array.isArray(service)
+        || (service as { readonly kind?: unknown }).kind !== 'managed-backend'
+      ),
+    }, expectedId)
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 || manifest.schemaVersion === 12) {
     return normalizePluginManifestV12(manifest, expectedId)
   }
