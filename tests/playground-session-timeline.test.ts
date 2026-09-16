@@ -185,8 +185,12 @@ describe('Playground Session timeline information architecture', () => {
     expect(styles).toMatch(
       /\.pg-event-raw-details\s*>\s*summary:focus-visible\s*\{\s*outline:\s*2px\s+solid\s+var\(--pg-accent\);/u,
     )
-    expect(styles).toContain('.pg-event-timeline-item[data-trace-presentation="tool-use"] .pg-event-bubble')
-    expect(styles).toContain('.pg-event-timeline-item[data-trace-presentation="tool-result"] .pg-event-bubble')
+    expect(styles).toMatch(
+      /\.pg-event-timeline-item\[data-trace-presentation="tool-use"\]\s+\.pg-event-bubble\s*\{/u,
+    )
+    expect(styles).toMatch(
+      /\.pg-event-timeline-item\[data-trace-presentation="tool-result"\]\s+\.pg-event-bubble\s*\{/u,
+    )
     expect(styles).toContain('html[data-theme="light"]')
     expect(styles).toContain('--pg-panel-raised: #252525;')
     expect(styles).toContain('--pg-panel-raised: #fff;')
