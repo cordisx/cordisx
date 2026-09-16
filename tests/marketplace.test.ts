@@ -32,6 +32,10 @@ const PLUGIN_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json'
 const FEED_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json'
+const PLUGIN_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json'
+const FEED_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json'
 const OFFICIAL_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
 const CERTIFICATION_SCHEMA =
@@ -230,7 +234,10 @@ describe('marketplace feed', () => {
     expect(normalizeMarketplaceSource('https://EXAMPLE.com:443/feed.json?channel=stable')).toBe(
       'https://example.com/feed.json?channel=stable',
     )
-    expect(() => normalizeMarketplaceSource('http://example.com/feed.json')).toThrow('HTTPS URL')
+    expect(normalizeMarketplaceSource('http://192.168.1.20:8080/feed.json')).toBe(
+      'http://192.168.1.20:8080/feed.json',
+    )
+    expect(() => normalizeMarketplaceSource('file:///tmp/feed.json')).toThrow('HTTP 或 HTTPS URL')
     expect(() => normalizeMarketplaceSource('https://user@example.com/feed.json')).toThrow('无凭据')
   })
 
@@ -333,6 +340,66 @@ describe('marketplace feed', () => {
     ;((priced.plugins[0] as Record<string, unknown>).commerce as Record<string, unknown>).price = '9.99'
     expect(() => parseMarketplaceFeed(priced, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }))
       .toThrow('不支持的字段: price')
+  })
+
+  it('accepts and localizes version 5 source descriptions', () => {
+    const value = {
+      $schema: FEED_SCHEMA_V5,
+      schemaVersion: 5,
+      generatedAt: '2026-09-16T00:00:00Z',
+      trust: {
+        authority: 'cordisx.marketplace.codeowners/v1',
+        root: 'https://catalog.example/feed.json',
+        grantModel: 'protected-merge-chain-v1',
+        cryptographicAttestation: 'unsupported',
+      },
+      fallbackLocale: 'en',
+      name: 'CordisX Internal Marketplace',
+      description:
+        'Official internal CordisX plugin marketplace for ByteDance, providing approved internal plugins and updates.',
+      localizations: {
+        'zh-CN': {
+          name: '字节内部官方 CordisX 插件商店',
+          description: '面向字节内部的官方 CordisX 插件商店，提供经审核的内部插件与版本更新。',
+        },
+      },
+      homepage: 'https://catalog.example/',
+      official: [],
+      certifications: [],
+      plugins: [{
+        $schema: PLUGIN_SCHEMA_V5,
+        schemaVersion: 5,
+        id: 'internal-example',
+        fallbackLocale: 'en',
+        name: 'Internal Example',
+        description: 'An internal example plugin.',
+        version: '1.0.0',
+        source: 'https://github.com/example/internal-example',
+        license: 'UNLICENSED',
+        compatibility: { cordisx: '^0.1.0' },
+        authors: [{ name: 'ByteDance' }],
+      }],
+    }
+    const source = 'https://catalog.example/feed.json'
+    const parsed = parseMarketplaceFeed(value, { feedUrl: source, trustedRoots: [] })
+    expect(parsed).toMatchObject({
+      schemaVersion: 5,
+      description: value.description,
+      localizations: { 'zh-CN': { description: value.localizations['zh-CN'].description } },
+    })
+
+    const model = new BrowserMarketplaceModel(undefined, fetcher(new Map([[source, JSON.stringify(value)]])))
+    return model.setSourceRecords([{ url: source, enabled: true }]).then(() => {
+      expect(projectMarketplaceSource(model.snapshot().sourceStates[1]!, 'zh-CN')).toEqual(expect.objectContaining({
+        name: value.localizations['zh-CN'].name,
+        description: value.localizations['zh-CN'].description,
+      }))
+      expect(projectMarketplaceSource(model.snapshot().sourceStates[1]!, 'en')).toEqual(expect.objectContaining({
+        name: value.name,
+        description: value.description,
+      }))
+      model.dispose()
+    })
   })
 })
 
@@ -745,6 +812,22 @@ describe('BrowserMarketplaceModel', () => {
       description: 'Local introduction.',
       note: 'Team preview.',
       searchValues: expect.arrayContaining(['My catalog', 'CordisX 插件商店', source, 'catalog.example']),
+    }))
+    model.dispose()
+  })
+
+  it('summarizes a loaded source when the feed contract has no source description', async () => {
+    const source = 'https://catalog.example/local.json'
+    const model = new BrowserMarketplaceModel(undefined, fetcher(new Map([[source, JSON.stringify(localizedFeed())]])))
+    await model.setSourceRecords([{ url: source, enabled: true }])
+
+    expect(projectMarketplaceSource(model.snapshot().sourceStates[1]!, 'zh-CN')).toEqual(expect.objectContaining({
+      name: 'CordisX 插件商店',
+      description: '包含 1 个插件 · marketplace.example',
+    }))
+    expect(projectMarketplaceSource(model.snapshot().sourceStates[1]!, 'en')).toEqual(expect.objectContaining({
+      name: 'CordisX Marketplace',
+      description: '1 plugin · marketplace.example',
     }))
     model.dispose()
   })

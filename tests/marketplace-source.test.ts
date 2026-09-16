@@ -70,6 +70,10 @@ describe('Marketplace source store', () => {
       url: 'https://plugins.example/catalog.json?channel=preview',
       enabled: true,
     })
+    expect(parseMarketplaceSourceImport(' http://localhost:3000/marketplace.json ')).toEqual({
+      url: 'http://localhost:3000/marketplace.json',
+      enabled: true,
+    })
     expect(parseMarketplaceSourceImport(JSON.stringify({
       $schema: MARKETPLACE_SOURCE_SCHEMA_V1,
       schemaVersion: 1,

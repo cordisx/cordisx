@@ -79,12 +79,14 @@ const PLUGIN_SCHEMAS = Object.freeze({
   2: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
   3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json',
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json',
+  5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json',
 })
 const FEED_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
   2: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
   3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json',
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json',
+  5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json',
 })
 
 function record(value: unknown): Record<string, unknown> {
@@ -177,6 +179,7 @@ function parsePluginLocalizations(
 function parseFeedLocalizations(
   value: unknown,
   fallbackLocale: string,
+  schemaVersion: 1 | 2 | 3 | 4 | 5,
   label: string,
 ): Readonly<Record<string, MarketplaceFeedLocalization>> {
   if (value === undefined) return Object.freeze({})
@@ -190,9 +193,19 @@ function parseFeedLocalizations(
     const locale = canonicalLocale(localeValue, `${label}.${localeValue}`)
     if (locale === fallbackLocale) throw new Error(`${label} 不得重复 fallbackLocale ${locale}`)
     const localization = record(rawLocalization)
-    assertKeys(localization, ['name'], `${label}.${locale}`)
-    if (localization.name === undefined) throw new Error(`${label}.${locale}.name 是必填字符串`)
-    parsed[locale] = Object.freeze({ name: requiredString(localization.name, `${label}.${locale}.name`, 100) })
+    assertKeys(localization, schemaVersion >= 5 ? ['name', 'description'] : ['name'], `${label}.${locale}`)
+    if (schemaVersion < 5 && localization.name === undefined) {
+      throw new Error(`${label}.${locale}.name 是必填字符串`)
+    }
+    if (Object.keys(localization).length === 0) throw new Error(`${label}.${locale} 不能为空`)
+    parsed[locale] = Object.freeze({
+      ...(localization.name === undefined
+        ? {}
+        : { name: requiredString(localization.name, `${label}.${locale}.name`, 100) }),
+      ...(localization.description === undefined
+        ? {}
+        : { description: requiredString(localization.description, `${label}.${locale}.description`, 280) }),
+    })
   }
   return Object.freeze(parsed)
 }
@@ -294,7 +307,7 @@ export function marketplacePluginIdentity(source: string, id: string): string {
 function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const plugin = record(value)
   const schemaVersion = plugin.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5) {
     throw new Error(`plugins[${index}].schemaVersion 不受支持`)
   }
   assertKeys(plugin, [
@@ -314,7 +327,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
     'keywords',
     ...(schemaVersion >= 2 ? ['fallbackLocale', 'localizations'] : []),
     ...(schemaVersion >= 3 ? ['artifact'] : []),
-    ...(schemaVersion === 4 ? ['commerce'] : []),
+    ...(schemaVersion >= 4 ? ['commerce'] : []),
   ], `plugins[${index}]`)
   if (plugin.$schema !== PLUGIN_SCHEMAS[schemaVersion]) throw new Error(`plugins[${index}].$schema 不受支持`)
   const id = requiredString(plugin.id, `plugins[${index}].id`, 96)
@@ -364,7 +377,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const icon = optionalHttpsUrl(plugin.icon, `plugins[${index}].icon`)
   const manifest = optionalHttpsUrl(plugin.manifest, `plugins[${index}].manifest`)
   const artifact = schemaVersion >= 3 ? parseArtifact(plugin.artifact, `plugins[${index}].artifact`) : undefined
-  const commerce = schemaVersion === 4 ? parseCommerce(plugin.commerce, `plugins[${index}].commerce`) : undefined
+  const commerce = schemaVersion >= 4 ? parseCommerce(plugin.commerce, `plugins[${index}].commerce`) : undefined
   return {
     schemaVersion,
     id,
@@ -389,13 +402,14 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
 export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedParseOptions): ParsedFeed {
   const feed = record(value)
   const schemaVersion = feed.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5) {
     throw new Error('schemaVersion 不受支持')
   }
   assertKeys(feed, [
     '$schema',
     'schemaVersion',
     'name',
+    ...(schemaVersion >= 5 ? ['description'] : []),
     'homepage',
     'plugins',
     ...(schemaVersion >= 2 ? ['fallbackLocale', 'localizations'] : []),
@@ -404,8 +418,9 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
   if (feed.$schema !== FEED_SCHEMAS[schemaVersion]) throw new Error('$schema 不受支持')
   const fallbackLocale = schemaVersion >= 2 ? canonicalLocale(feed.fallbackLocale, 'fallbackLocale') : 'en'
   const name = requiredString(feed.name, 'name', 100)
+  const description = schemaVersion >= 5 ? requiredString(feed.description, 'description', 280) : undefined
   const localizations = schemaVersion >= 2
-    ? parseFeedLocalizations(feed.localizations, fallbackLocale, 'localizations')
+    ? parseFeedLocalizations(feed.localizations, fallbackLocale, schemaVersion, 'localizations')
     : Object.freeze({})
   const homepage = optionalHttpsUrl(feed.homepage, 'homepage')
   if (homepage === undefined) throw new Error('homepage 是必填 HTTPS URL')
@@ -442,6 +457,7 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
     schemaVersion,
     fallbackLocale,
     name,
+    ...(description === undefined ? {} : { description }),
     localizations,
     homepage,
     plugins,
@@ -593,6 +609,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
         revalidating: true,
         attempts: 0,
         ...(previous?.state.name === undefined ? {} : { name: previous.state.name }),
+        ...(previous?.state.description === undefined ? {} : { description: previous.state.description }),
         ...(previous?.state.fallbackLocale === undefined ? {} : { fallbackLocale: previous.state.fallbackLocale }),
         ...(previous?.state.localizations === undefined ? {} : { localizations: previous.state.localizations }),
         ...(previous?.state.homepage === undefined ? {} : { homepage: previous.state.homepage }),
@@ -710,6 +727,7 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       revalidating: false,
       attempts,
       name: feed.name,
+      ...(feed.description === undefined ? {} : { description: feed.description }),
       fallbackLocale: feed.fallbackLocale,
       localizations: feed.localizations,
       homepage: feed.homepage,

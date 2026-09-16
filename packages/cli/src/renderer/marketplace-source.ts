@@ -76,8 +76,13 @@ function normalizeLocal(value: unknown, label = 'local'): MarketplaceSourceLocal
 /** Canonical configured feed identity. Query parameters are allowed; credentials and fragments are not. */
 export function normalizeMarketplaceSource(value: string): string {
   const url = new URL(value)
-  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.hash !== '') {
-    throw new Error('插件商店地址必须是无凭据、无 fragment 的 HTTPS URL')
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:')
+    || url.username !== ''
+    || url.password !== ''
+    || url.hash !== ''
+  ) {
+    throw new Error('插件商店地址必须是无凭据、无 fragment 的 HTTP 或 HTTPS URL')
   }
   return url.href
 }
@@ -143,12 +148,12 @@ function persistedSources(value: unknown): MarketplaceSourceRecord[] | undefined
 export function parseMarketplaceSourceImport(value: string): MarketplaceSourceRecord {
   const text = value.trim()
   if (text === '') throw new Error('剪贴板中没有插件商店地址')
-  if (/^https:/iu.test(text)) return normalizeMarketplaceSourceRecord({ url: text, enabled: true })
+  if (/^https?:/iu.test(text)) return normalizeMarketplaceSourceRecord({ url: text, enabled: true })
   let parsed: unknown
   try {
     parsed = JSON.parse(text) as unknown
   } catch {
-    throw new Error('剪贴板内容必须是 HTTPS 地址或 marketplace-source.v1 JSON')
+    throw new Error('剪贴板内容必须是 HTTP/HTTPS 地址或 marketplace-source.v1 JSON')
   }
   const source = record(parsed, 'marketplace source import')
   assertKeys(source, ['$schema', 'schemaVersion', 'url', 'enabled', 'local'], 'marketplace source import')

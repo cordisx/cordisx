@@ -681,15 +681,16 @@ never publish a change.
 
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP
-binding for marketplace JSON retrieval. It accepts only configured public
-HTTPS URLs, resolves and rejects non-public network addresses, follows a small
-number of individually revalidated HTTPS redirects, applies timeout/response
-size/concurrency limits, and returns text to the manager for protocol
-validation. The binding is reserved host infrastructure rather than a plugin
-API and catalog code is never evaluated. This reserved name is not capability
-enforcement: plugins are still trusted renderer code and can inspect globals,
-so the public-HTTPS, address, redirect, concurrency, timeout, and size limits
-are damage-reduction boundaries rather than isolation from a malicious bundled
+binding for marketplace JSON retrieval. It accepts configured HTTP and HTTPS
+URLs, including loopback, LAN, and organization-internal sources, follows a
+small number of redirects, applies timeout/response-size/concurrency limits,
+and returns text to the manager for protocol validation. A manually configured
+source is treated as a trusted user choice; the launcher does not classify its
+hostname or resolved IP address. The binding is reserved host infrastructure
+rather than a plugin API and catalog code is never evaluated. This reserved
+name is not capability enforcement: plugins are still trusted renderer code
+and can inspect globals, so the redirect, concurrency, timeout, and size limits
+are operational boundaries rather than isolation from a malicious bundled
 plugin.
 
 ### Marketplace trust and Host DOM isolation
@@ -701,7 +702,7 @@ objects, or primordials before Manager initialization. Exact Certified
 eligibility is instead evaluated by
 `launcher/marketplace-certified-authority.ts`. It loads at most eight enabled
 roots from Host-owned home config, fetches and parses feeds in the Launcher
-realm with bounded public-HTTPS requests, and exposes only strict
+realm with bounded requests, and exposes only strict
 `source + pluginId + version + sha256 integrity` lookup plus revision-only
 subscription. Official identity never enters this API.
 

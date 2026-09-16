@@ -14,7 +14,7 @@ export const MARKETPLACE_SOURCE_COPY = {
   'marketplace.remove': { en: 'Remove', 'zh-CN': '移除' },
   'marketplace.restore-official': { en: 'Restore official marketplace', 'zh-CN': '恢复官方商店' },
   'marketplace.reload': { en: 'Reload', 'zh-CN': '重新加载' },
-  'marketplace.invalid-url': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
+  'marketplace.invalid-url': { en: 'Enter an HTTP or HTTPS URL', 'zh-CN': '请输入 HTTP 或 HTTPS 地址' },
   'marketplace.duplicate-source': { en: 'This marketplace is already configured', 'zh-CN': '这个商店地址已经配置' },
 } satisfies ProductCopyCatalog<'marketplace'>
 
@@ -46,8 +46,8 @@ export const MARKETPLACE_CATALOG_COPY = {
   'marketplace.source-menu.clipboard': { en: 'Import from clipboard', 'zh-CN': '从剪贴板导入' },
   'marketplace.source-menu.manage': { en: 'Manage sources', 'zh-CN': '管理来源' },
   'marketplace.source.clipboard-prompt': {
-    en: 'Paste an HTTPS URL or source file',
-    'zh-CN': '粘贴 HTTPS 地址或来源文件',
+    en: 'Paste an HTTP or HTTPS URL or source file',
+    'zh-CN': '粘贴 HTTP 或 HTTPS 地址或来源文件',
   },
   'marketplace.source.clipboard-unavailable': { en: 'Clipboard unavailable', 'zh-CN': '剪贴板不可用' },
   'marketplace.source.imported': { en: 'Source imported', 'zh-CN': '已导入来源' },
@@ -83,7 +83,7 @@ export const MARKETPLACE_CATALOG_COPY = {
   'marketplace.source.create-heading': { en: 'Add source', 'zh-CN': '添加来源' },
   'marketplace.source.edit-heading': { en: 'Source details', 'zh-CN': '来源详情' },
   'marketplace.source.url-section': { en: 'Source URL', 'zh-CN': '来源地址' },
-  'marketplace.source.url-help': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
+  'marketplace.source.url-help': { en: 'Enter an HTTP or HTTPS URL', 'zh-CN': '请输入 HTTP 或 HTTPS 地址' },
   'marketplace.source.readonly-url-help': { en: 'This URL cannot be changed', 'zh-CN': '此地址不可修改' },
   'marketplace.source.url-label': { en: 'Marketplace URL', 'zh-CN': '商店地址' },
   'marketplace.source.local-section': { en: 'Display details', 'zh-CN': '显示信息' },
@@ -97,7 +97,10 @@ export const MARKETPLACE_CATALOG_COPY = {
   'marketplace.source.create': { en: 'Add source', 'zh-CN': '添加来源' },
   'marketplace.source.save': { en: 'Save details', 'zh-CN': '保存信息' },
   'marketplace.source.url-required': { en: 'Enter a marketplace URL', 'zh-CN': '请输入商店地址' },
-  'marketplace.source.url-invalid': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入有效的 HTTPS 地址' },
+  'marketplace.source.url-invalid': {
+    en: 'Enter an HTTP or HTTPS URL',
+    'zh-CN': '请输入有效的 HTTP 或 HTTPS 地址',
+  },
   'marketplace.source.duplicate': { en: 'This source is already configured', 'zh-CN': '这个来源已经配置' },
   'marketplace.source.added': { en: 'Source added', 'zh-CN': '已添加来源' },
   'marketplace.source.saved': { en: 'Details saved', 'zh-CN': '已保存信息' },

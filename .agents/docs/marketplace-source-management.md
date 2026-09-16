@@ -11,8 +11,10 @@ lifecycle activation.
 
 The public clipboard shape is
 `cordisx-protocol/schemas/marketplace-source.v1.schema.json`. The Host also
-accepts a bare canonical HTTPS URL as a quick-import shorthand. Imported data
-cannot claim `official`, `trusted`, `certified`, or any installation authority.
+accepts a bare canonical HTTP or HTTPS URL as a quick-import shorthand, including
+loopback, LAN, and organization-internal sources explicitly configured by the
+user. Imported data cannot claim `official`, `trusted`, `certified`, or any
+installation authority.
 
 The built-in CordisX source is derived from the Host's configured trust root,
 not from persisted or imported metadata. Its record is always present. Users

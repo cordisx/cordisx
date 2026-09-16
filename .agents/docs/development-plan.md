@@ -92,8 +92,8 @@ suite, DOM integration coverage for trigger placement, tabs, search,
 list-to-detail navigation, block/restore, slot attribution, generation
 disposal, feed validation, ordered-source persistence, failure isolation, and
 cross-feed deduplication. Because the live `app://` renderer rejects direct
-remote fetches, validation also covers the launcher's private, public-HTTPS-only
-feed bridge, non-public-address and redirect rejection, response limits, and an
+remote fetches, validation also covers the launcher's private HTTP/HTTPS feed
+bridge, redirect limits, response limits, and an
 opt-in live smoke and screenshot against the current isolated Codex host.
 Manager navigation validation additionally checks identical primary/back
 leading-control geometry, accessible icon-only back navigation, README

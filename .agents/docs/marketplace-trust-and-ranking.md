@@ -69,8 +69,8 @@ similar remain unknown manifest fields and cannot establish trust.
 
 Each refresh re-reads Host config and evaluates fresh feeds with at most eight
 roots, two concurrent fetches by default, a ten-second timeout, and the existing
-two-MiB public-HTTPS/SSRF boundary. Redirecting to an unconfigured final URL is
-not accepted. A newer valid feed atomically replaces the last-good snapshot;
+two-MiB response boundary. Redirecting to an unconfigured final URL is not
+accepted. A newer valid feed atomically replaces the last-good snapshot;
 revoked, removed, mismatched, and expired records are not projected. An older
 feed cannot cross the durable `generatedAt` fence. Two different bodies at one
 revision tombstone the root and require a strictly newer valid feed. A

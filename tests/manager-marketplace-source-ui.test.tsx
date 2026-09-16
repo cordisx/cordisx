@@ -47,8 +47,13 @@ describe('React Marketplace source controls', () => {
     await marketplace.reload()
     try {
       await fixture.render(<MarketplaceSourcesPage marketplace={marketplace} locale="en" />)
+      const officialCard = fixture.element(`[data-marketplace-source="${OFFICIAL_MARKETPLACE_SOURCE}"]`)
+      expect(officialCard.querySelector('.cxr-card-title')?.textContent).toBe('Fixture')
+      expect(officialCard.querySelector('.cxr-card-description')?.textContent).toBe(
+        'The default plugin discovery source maintained by CordisX.',
+      )
       expect(
-        fixture.element(`[data-marketplace-source="${OFFICIAL_MARKETPLACE_SOURCE}"] [aria-label^="删除"]`).classList
+        officialCard.querySelector<HTMLElement>('[aria-label^="删除"]')!.classList
           .contains('t-is-disabled'),
       ).toBe(true)
       await fixture.click('.cxr-page-head button')

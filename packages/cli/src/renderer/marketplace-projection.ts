@@ -144,24 +144,44 @@ export function projectMarketplaceSource(
       currentLocale,
       source.fallbackLocale ?? 'en',
     )
+  const remoteDescription = source.description === undefined
+    ? undefined
+    : projectLocalizedField(
+      source.description,
+      source.localizations ?? Object.freeze({}),
+      'description',
+      currentLocale,
+      source.fallbackLocale ?? 'en',
+    )
   const officialChinese = canonicalDisplayLocale(currentLocale).toLowerCase().startsWith('zh')
   const name = source.local?.name
     ?? remoteName
     ?? (source.official
       ? (officialChinese ? 'CordisX 官方插件商店' : 'CordisX Official Marketplace')
       : new URL(source.url).hostname)
+  const sourceHomepage = source.homepage === undefined ? undefined : new URL(source.homepage).hostname
+  const loadedDescription = source.status !== 'loaded' || source.pluginCount === undefined
+    ? undefined
+    : officialChinese
+    ? `包含 ${source.pluginCount} 个插件${sourceHomepage === undefined ? '。' : ` · ${sourceHomepage}`}`
+    : `${source.pluginCount} plugin${source.pluginCount === 1 ? '' : 's'}${
+      sourceHomepage === undefined ? '.' : ` · ${sourceHomepage}`
+    }`
   const description = source.local?.description
+    ?? remoteDescription
     ?? (source.official
       ? (officialChinese
         ? '由 CordisX 维护的默认插件发现来源。'
         : 'The default plugin discovery source maintained by CordisX.')
-      : undefined)
+      : loadedDescription)
   const searchValues = [
     name,
     description ?? '',
     source.local?.note ?? '',
     remoteName ?? '',
+    remoteDescription ?? '',
     source.name ?? '',
+    source.description ?? '',
     source.url,
     new URL(source.url).hostname,
   ].filter(value => value !== '')
