@@ -5,6 +5,7 @@ import { readSupervisorState, supervisorPaths, writeSupervisorState } from './su
 /** Binds a detached supervisor child to the normal foreground Host lifecycle. */
 export async function createSupervisorRuntime(environment: NodeJS.ProcessEnv): Promise<{
   readonly markReady: (debugPort: number) => Promise<void>
+  readonly markHostLaunched: (pid: number) => Promise<void>
   readonly close: () => Promise<void>
 }> {
   const home = environment.CORDISX_SUPERVISOR_HOME
@@ -24,6 +25,19 @@ export async function createSupervisorRuntime(environment: NodeJS.ProcessEnv): P
     })
   }
   return {
+    async markHostLaunched(pid): Promise<void> {
+      if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
+      const current = await readSupervisorState(supervisorPaths(home, app, profile))
+      if (current === undefined || current.pid !== process.pid || current.effectiveConfig !== fingerprint) return
+      const { processStartIdentity } = await import('./supervisor-state.js')
+      const hostProcessStartedAt = await processStartIdentity(pid)
+      if (hostProcessStartedAt === undefined) throw new Error('launched Host exited before identity capture')
+      await writeSupervisorState(supervisorPaths(home, app, profile), {
+        ...current,
+        hostPid: pid,
+        hostProcessStartedAt,
+      })
+    },
     async markReady(debugPort): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
       const current = await readSupervisorState(supervisorPaths(home, app, profile))

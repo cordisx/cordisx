@@ -840,6 +840,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
             await markCliProxyStartupConfigApplied()
             await supervisorRuntime.markReady(debugPort)
           },
+          onHostLaunched: async pid => await supervisorRuntime.markHostLaunched(pid),
           stdout,
         })
       } finally {
@@ -962,6 +963,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           await markCliProxyStartupConfigApplied()
           await supervisorRuntime.markReady(debugPort)
         },
+        onHostLaunched: async pid => await supervisorRuntime.markHostLaunched(pid),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)

@@ -10,6 +10,7 @@ import {
   acquireSupervisorStartLock,
   effectiveConfigFingerprint,
   hasMatchingProcess,
+  hasMatchingProcessIdentity,
   processStartIdentity,
   readSupervisorState,
   removeSupervisorState,
@@ -110,6 +111,37 @@ async function stopSupervisorProcessGroup(
     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
   }
   if (await hasMatchingProcess(state)) throw new Error('timed out stopping the CordisX-owned process group')
+}
+
+async function hostStillRunning(state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>): Promise<boolean> {
+  return state.hostPid !== undefined
+    && state.hostProcessStartedAt !== undefined
+    && await hasMatchingProcessIdentity(state.hostPid, state.hostProcessStartedAt)
+}
+
+async function waitForOwnedShutdown(
+  state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
+): Promise<boolean> {
+  const deadline = Date.now() + SUPERVISOR_STOP_TIMEOUT_MS
+  while (await hasMatchingProcess(state) || await hostStillRunning(state)) {
+    if (Date.now() > deadline) return false
+    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+  }
+  return true
+}
+
+async function terminateOwnedGroups(
+  state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
+): Promise<void> {
+  if (await hostStillRunning(state) && state.hostPid !== undefined) {
+    try {
+      process.kill(-state.hostPid, 'SIGTERM')
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
+    }
+  }
+  await stopSupervisorProcessGroup(state)
+  if (!await waitForOwnedShutdown(state)) throw new Error('timed out stopping the CordisX-owned process groups')
 }
 
 async function waitForState(
@@ -227,8 +259,8 @@ export async function runSupervisorCommand(
     if (state !== undefined) {
       // Ask a ready supervisor to close normally, then fence any remaining
       // launcher-owned helpers through the detached group.
-      await requestSupervisorStop(paths.socket, state.instanceToken)
-      await stopSupervisorProcessGroup(state)
+      const requested = await requestSupervisorStop(paths.socket, state.instanceToken)
+      if (requested ? !(await waitForOwnedShutdown(state)) : true) await terminateOwnedGroups(state)
       await removeSupervisorState(paths)
     }
     if (invocation.action === 'stop') {

@@ -184,9 +184,11 @@ describe('supervisor management commands', () => {
   it('stops only the fenced detached process group for the selected instance', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
+    const host = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
     const paths = supervisorPaths(root, 'codex', 'default')
     try {
       const startedAt = await processStartIdentity(child.pid!)
+      const hostStartedAt = await processStartIdentity(host.pid!)
       await writeSupervisorState(paths, {
         schemaVersion: 1,
         appId: 'codex',
@@ -198,6 +200,8 @@ describe('supervisor management commands', () => {
         createdAt: new Date().toISOString(),
         version: '0.1.0-beta.4',
         effectiveConfig: 'current',
+        hostPid: host.pid!,
+        hostProcessStartedAt: hostStartedAt!,
       })
       const output: string[] = []
       await runSupervisorCommand(parseCordisXCli(['stop', '--json']), {
@@ -206,9 +210,13 @@ describe('supervisor management commands', () => {
       })
       expect(JSON.parse(output[0]!)).toEqual({ app: 'codex', profile: 'default', status: 'stopped' })
       await expect(readSupervisorState(paths)).resolves.toBeUndefined()
+      expect(() => process.kill(host.pid!, 0)).toThrow()
     } finally {
       try {
         process.kill(-child.pid!, 'SIGTERM')
+      } catch { /* already stopped */ }
+      try {
+        process.kill(-host.pid!, 'SIGTERM')
       } catch { /* already stopped */ }
     }
   })
