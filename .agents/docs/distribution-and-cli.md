@@ -237,7 +237,7 @@ defined below; no additional empty public packages may be invented.
 Repository ownership does not change:
 
 - `cordisx-protocol` continues to own normative schemas and conformance; its
-  future npm package is `@cordisx/protocol` and is published from that repo;
+  public npm package is `@cordisx/protocol` and is published from that repo;
 - `marketplace` continues to own catalog data and feed generation;
 - `cordisx` owns the launcher, product runtime, adapters, SDK implementation,
   scaffolder, and release automation.
@@ -546,10 +546,11 @@ Publishing is allowed only from merged `main` through
 `npm-beta` GitHub environment. Each npm package configures that exact repository,
 workflow filename, environment, and the `npm publish` action as its trusted
 publisher. The workflow carries no npm token. It pins npm `11.11.0`, which
-supports OIDC and the repository's exact Git dependencies. npm 12 defaults to
+supports OIDC and the repository's remaining exact Git dependencies. npm 12 defaults to
 rejecting Git dependencies (`EALLOWGIT`); adoption requires explicit validation
 of clean installs and installed consumers before changing this toolchain.
-Release and registry installs retain normal lifecycle preparation, matching
+The Host consumes the same immutable `@cordisx/protocol` beta version from npm
+in its root, CLI, and private Channel runtime workspaces. Release and registry installs retain normal lifecycle preparation, matching
 ordinary `npm ci` / `npx` behavior. In particular, the exact Channel Git
 dependency builds its distribution in `prepare`; `--ignore-scripts` leaves its
 public entry missing. The registry gate resolves and checks that installed

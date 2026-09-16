@@ -24,14 +24,16 @@ const sourceCordisXManifest = JSON.parse(await readFile(path.join(repositoryRoot
 const expectedGitDependencies = {
   '@cordisx/channel': sourceCordisXManifest.cordisxSources?.['@cordisx/channel'],
   '@cordisx/plugin-cli-proxy-api': sourceCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api'],
-  '@cordisx/protocol': sourceCordisXManifest.dependencies?.['@cordisx/protocol'],
 }
 for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   if (typeof spec !== 'string' || !/^github:cordisx\/[a-z0-9-]+#[0-9a-f]{40}$/.test(spec)) {
     throw new Error(`source cordisx must pin ${name} to an exact Git commit`)
   }
 }
-const expectedProtocolSpec = expectedGitDependencies['@cordisx/protocol']
+const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
+if (expectedProtocolSpec !== '0.1.0-beta.3') {
+  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.3')
+}
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -99,7 +101,7 @@ try {
     || installedCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api']
       !== expectedGitDependencies['@cordisx/plugin-cli-proxy-api']
   ) {
-    throw new Error('installed cordisx must pin its Host-owned renderers and canonical Git dependencies')
+    throw new Error('installed cordisx must retain the formal Protocol beta and canonical plugin sources')
   }
   const protocolPaths = (await run('npm', ['ls', '--parseable', '--all', '@cordisx/protocol'], {
     cwd: runnerDirectory,
@@ -471,7 +473,7 @@ createElement(AgentAvatar, props)
   )
   if (
     installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
-    || installedSchemasteryUiManifest.version !== '0.1.0-beta.2'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.3'
   ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }

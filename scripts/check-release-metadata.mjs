@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
-const expectedVersion = '0.1.0-beta.2'
+const expectedVersion = '0.1.0-beta.3'
+const expectedProtocolVersion = '0.1.0-beta.3'
+const expectedCliProxySource =
+  'github:cordisx/plugin-cli-proxy-api#c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
 
 async function json(relative) {
@@ -36,8 +39,10 @@ function validatePackage(manifest, input) {
 }
 
 const [
+  root,
   cli,
   creator,
+  channelRuntime,
   rootReadme,
   rootReadmeZh,
   cliReadme,
@@ -45,8 +50,10 @@ const [
   gettingStarted,
   workflow,
 ] = await Promise.all([
+  json('package.json'),
   json('packages/cli/package.json'),
   json('packages/create-cordisx-plugin/package.json'),
+  json('packages/channel-runtime/package.json'),
   readFile(path.join(repositoryRoot, 'README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'README.zh-CN.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/cli/README.md'), 'utf8'),
@@ -69,6 +76,27 @@ validatePackage(creator, {
   binPath: 'dist/cli.js',
   files: ['dist', 'template', 'README.md'],
 })
+assert(root.version === expectedVersion, `root version must be ${expectedVersion}`)
+assert(
+  root.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
+  `root must consume @cordisx/protocol@${expectedProtocolVersion}`,
+)
+assert(
+  cli.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
+  `cordisx must consume @cordisx/protocol@${expectedProtocolVersion}`,
+)
+assert(
+  channelRuntime.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
+  `channel runtime must consume @cordisx/protocol@${expectedProtocolVersion}`,
+)
+assert(
+  root.cordisxSources?.['@cordisx/plugin-cli-proxy-api'] === expectedCliProxySource,
+  'root CLIProxy source must pin canonical main',
+)
+assert(
+  cli.cordisxSources?.['@cordisx/plugin-cli-proxy-api'] === expectedCliProxySource,
+  'cordisx CLIProxy source must pin canonical main',
+)
 assert(JSON.stringify(creator.exports) === '{}', 'creator must not expose its executable as an import API')
 
 for (

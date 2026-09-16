@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -92,8 +92,8 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#a0e765d6ae3e2baba0b97dda60b7f62439a570aa",
-    "@cordisx/schemastery-ui": "0.1.0-beta.2",
+    "@cordisx/protocol": "0.1.0-beta.3",
+    "@cordisx/schemastery-ui": "0.1.0-beta.3",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
@@ -130,7 +130,7 @@
   },
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#a6d2503df7aea0cfaaf33a0895a2e43cb7f37765"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",

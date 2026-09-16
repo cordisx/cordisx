@@ -35,7 +35,8 @@ absent from Host dependencies: both plugin repositories use Host as a build
 dependency, so declaring either plugin as a Host Git dependency creates an
 unbounded prepare cycle for external Git consumers.
 Protocol remains a shared dependency because its unique-symbol types must have
-one module identity across Host and consumer imports. Protocol has no prepare
+one module identity across Host and consumer imports. The SDK repacks the exact
+registry Protocol version installed by the Host lockfile; Protocol has no prepare
 hook. Consumers can install the CLI without rebuilding the Git plugins. When
 using the generated Protocol tarball directly, consumers must apply one npm
 override for that same package throughout the dependency graph.

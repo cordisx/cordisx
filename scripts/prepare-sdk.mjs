@@ -100,12 +100,13 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-const protocolRecord = records.find(item => item.location === 'node_modules/@cordisx/protocol')
-if (!protocolRecord || !protocolRecord.spec.endsWith(`#${protocolSpec.split('#')[1]}`)) {
-  throw new Error('Unpinned output: @cordisx/protocol')
+if (protocolSpec !== '0.1.0-beta.3') {
+  throw new Error('Host SDK must consume @cordisx/protocol@0.1.0-beta.3')
 }
-await verifyPackage(protocolRecord.source)
-await pack(protocolRecord.source, artifacts)
+const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')
+const protocolManifest = await verifyPackage(protocolSource)
+if (protocolManifest.version !== protocolSpec) throw new Error('Installed Protocol version mismatch')
+await pack(protocolSource, artifacts)
 await run(process.execPath, ['scripts/prepare-bundled-runtime-plugins.mjs'], host)
 const cliTarball = await pack(cli, artifacts)
 const packedFiles = (await run('tar', ['-tf', cliTarball], host)).split('\n')
@@ -130,7 +131,11 @@ await save(path.join(output, 'sdk-evidence.json'), {
   hostCommit: commit,
   node: process.version,
   npm: await run('npm', ['--version'], host),
-  sources: [...records.map(({ location, spec }) => ({ location, spec })), ...pluginRecords],
+  sources: [
+    ...records.map(({ location, spec }) => ({ location, spec })),
+    ...pluginRecords,
+    { location: 'node_modules/@cordisx/protocol', spec: protocolSpec },
+  ],
   packages,
 })
 console.log(`[sdk] verified packages and hashes: ${path.join(output, 'sdk-evidence.json')}`)
