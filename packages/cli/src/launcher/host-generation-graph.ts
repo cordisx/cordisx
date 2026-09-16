@@ -161,6 +161,10 @@ export async function buildHostGenerationGraph(
     }
     response.statusCode = 200
     response.setHeader('content-type', file.contentType)
+    // The exact native app:// document reads this launch-scoped immutable
+    // graph after CDP grants loopback access. No other origin receives a
+    // route, but CORS is still required for the browser Fetch gate.
+    response.setHeader('access-control-allow-origin', '*')
     response.setHeader('cache-control', 'public, max-age=31536000, immutable')
     response.setHeader('content-length', String(file.body.byteLength))
     response.end(request.method === 'HEAD' ? undefined : file.body)
