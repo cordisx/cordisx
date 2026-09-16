@@ -17,6 +17,7 @@ import {
 } from './react-virtual-modules.js'
 
 const ENTRY = 'virtual:cordisx-host-generation-entry'
+const COMPOSITION = 'virtual:cordisx-host-generation-composition'
 const MAX_BOOTLOADER_BYTES = 16 * 1024
 
 interface RollupOutputFile {
@@ -62,12 +63,6 @@ export async function buildHostGenerationGraph(
     `../renderer/react-runtime.${runtimeExtension}`,
   )
   const baseComposition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
-  const composition = {
-    ...baseComposition,
-    source: `import { installSharedReactRuntime } from ${JSON.stringify(reactRuntimeImport)};
-if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
-${baseComposition.source}`,
-  }
   const virtualModules = new Set([
     CORDISX_MANAGED_SERVICE_UI_MODULE,
     CORDISX_REACT_MODULE,
@@ -80,6 +75,7 @@ ${baseComposition.source}`,
     enforce: 'pre',
     async resolveId(id, importer) {
       if (id === ENTRY) return `\0${ENTRY}`
+      if (id === COMPOSITION) return `\0${COMPOSITION}`
       if (id === 'cordisx/contracts') return CONTRACTS_MODULE_PATH
       if (virtualModules.has(id)) return `\0cordisx-host:${id}`
       // Vite 8's Rolldown production adapter currently does not materialize
@@ -92,7 +88,12 @@ ${baseComposition.source}`,
       return undefined
     },
     load(id) {
-      if (id === `\0${ENTRY}`) return composition.source
+      if (id === `\0${ENTRY}`) {
+        return `import { installSharedReactRuntime } from ${JSON.stringify(reactRuntimeImport)};
+if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
+export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
+      }
+      if (id === `\0${COMPOSITION}`) return baseComposition.source
       if (id.startsWith('\0cordisx-host:')) return cordisXSharedModuleSource(id.slice('\0cordisx-host:'.length))
       return undefined
     },
