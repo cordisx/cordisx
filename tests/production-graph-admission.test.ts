@@ -3,6 +3,7 @@ import {
   CdpLifecycleRequestGate,
   type ProductionGraphOperations,
   type ProductionGraphRecord,
+  promoteProductionGraph,
   refreshProductionGraphBootstraps,
 } from '../packages/cli/src/launcher/production-graph-admission.js'
 
@@ -161,5 +162,59 @@ describe('production graph admission coordination', () => {
       { method: 'Page.removeScriptToEvaluateOnNewDocument', signal },
     ])
     expect(replace).toHaveBeenCalledWith(current, expect.objectContaining({ identifier: 'next' }))
+  })
+
+  it('commits a manifest bootloader only after CDP ready and restores the prior loader on rollback', async () => {
+    const calls: string[] = []
+    const session = {
+      send: vi.fn(async (method: string) => {
+        calls.push(method)
+        return {}
+      }),
+      isClosed: () => false,
+    }
+    const current: ProductionGraphRecord = {
+      target: { id: 'native', url: 'app://-/index.html' },
+      session,
+      identifier: 'old-script',
+      documentSource: 'old-loader',
+      loopbackModules: true,
+    }
+    const replaced: Array<Record<string, unknown>> = []
+    const released: string[] = []
+    const promotion = await promoteProductionGraph([current], { source: 'manifest-loader' }, {
+      injectionTimeoutMs: 1_000,
+      signal: new AbortController().signal,
+      isNativeTarget: target => target.url.startsWith('app://-/'),
+      permissions: {
+        acquire: async () => ({ name: 'loopback-network', origin: 'app://-' }),
+        release: async (_session, permission) => {
+          if (permission !== undefined) released.push(permission.name)
+        },
+      },
+      mutateDocumentScript: async (_session, method, params) => {
+        calls.push(method)
+        if (method === 'Page.addScriptToEvaluateOnNewDocument') {
+          expect(String(params.source)).toMatch(/manifest-loader|old-loader/u)
+          return { identifier: calls.includes('Page.removeScriptToEvaluateOnNewDocument') ? 'restored' : 'next-script' }
+        }
+        return {}
+      },
+      replace: (_current, replacement) => replaced.push(replacement),
+      disposeRenderer: async () => {
+        calls.push('dispose')
+      },
+      waitForBootstrap: async () => {
+        calls.push('ready')
+      },
+    })
+
+    expect(replaced).toContainEqual(
+      expect.objectContaining({ identifier: 'next-script', documentSource: 'manifest-loader' }),
+    )
+    expect(calls).toContain('ready')
+    await promotion.rollback()
+    expect(replaced).toContainEqual(expect.objectContaining({ documentSource: 'old-loader' }))
+    expect(released).toEqual(['loopback-network'])
   })
 })
