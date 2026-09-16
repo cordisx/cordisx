@@ -2,13 +2,9 @@ import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
-import { waitForInitialDocument } from './cdp-document-ready.js'
+import { createDocumentInstallationState, installDocumentBootstrap } from './cdp-installation-bootstrap.js'
 import * as support from './cdp-installation-support.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
-import {
-  installNativeResourceInterception,
-  type NativeResourceInterception,
-} from './native-predispatch-interception.js'
 
 export async function install(
   target: support.CdpTarget,
@@ -101,11 +97,9 @@ export async function install(
   let removePublisherGrantBindingListener = (): void => {}
   let removeManagedServiceUIBindingListener = (): void => {}
   let certifiedPermissionChannel: support.CdpCertifiedPermissionChannel | undefined
-  let identifier: string | undefined
+  const documentInstallation = createDocumentInstallationState()
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
-  let loopbackReloadStarted = false
   let nativeChannel: { dispose(): Promise<void> } | undefined
-  let nativeInterception: NativeResourceInterception | undefined
   try {
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new support.CdpCertifiedPermissionChannel(session, {
@@ -757,70 +751,20 @@ export async function install(
       })
     }
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
-    const reloadInstallId = viteDevelopment || loopbackModules ? randomUUID() : undefined
     const documentSource = newDocumentSource ?? source
-    const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
-      ? undefined
-      : support.productionBootstrapSource(documentSource, reloadInstallId)
-    const added = await support.abortable(
-      session.send(
-        'Page.addScriptToEvaluateOnNewDocument',
-        {
-          source: reloadInstallId === undefined
-            ? documentSource
-            : viteDevelopment
-            ? `globalThis.__cordisxViteInstallId = ${JSON.stringify(reloadInstallId)};\n${documentSource}`
-            : productionDocumentSource!,
-        },
-        support.CDP_INJECTION_TIMEOUT_MS,
-      ),
-      signal,
+    await installDocumentBootstrap(
+      {
+        session,
+        target,
+        documentSource,
+        evaluationSource: source,
+        viteDevelopment,
+        loopbackModules,
+        ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
+        ...(signal === undefined ? {} : { signal }),
+      },
+      documentInstallation,
     )
-    identifier = added.identifier as string | undefined
-    if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
-    if (viteDevelopment || loopbackModules || nativeSubmission !== undefined) {
-      const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
-      await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
-      loopbackReloadStarted = true
-      const reloadDocument = async (): Promise<void> => {
-        await support.abortable(
-          session.send(
-            'Page.reload',
-            viteDevelopment || nativeSubmission !== undefined ? { ignoreCache: true } : {},
-            support.CDP_INJECTION_TIMEOUT_MS,
-          ),
-          signal,
-        )
-      }
-      if (nativeSubmission !== undefined) {
-        nativeInterception = await installNativeResourceInterception({
-          session,
-          target,
-          transforms: nativeSubmission.transforms,
-          reloadDocument,
-          timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
-          ...(signal === undefined ? {} : { signal }),
-        })
-        if (nativeInterception.status !== 'active') {
-          throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
-        }
-      } else await reloadDocument()
-      if (viteDevelopment) await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
-      else if (loopbackModules) await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal)
-    } else {
-      const evaluated = await session.send(
-        'Runtime.evaluate',
-        {
-          expression: source,
-          allowUnsafeEvalBlockedByCSP: true,
-        },
-        support.CDP_INJECTION_TIMEOUT_MS,
-      )
-      const exception = support.runtimeEvaluationException(evaluated)
-      if (exception !== undefined) {
-        throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
-      }
-    }
     if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await support.evaluateRuntimeOperation(
         session,
@@ -872,7 +816,7 @@ export async function install(
       ...(viteDevelopment ? { viteDevelopment: true } : {}),
       ...(loopbackModules ? { loopbackModules: true } : {}),
       ...(viteLoopbackPermission === undefined ? {} : { viteLoopbackPermission }),
-      identifier,
+      identifier: documentInstallation.identifier!,
       documentSource,
       session,
       marketplaceController,
@@ -911,11 +855,13 @@ export async function install(
         : { managedServiceUIController, removeManagedServiceUIBindingListener }),
       managedServiceUIBindingInstalled: managedServiceUI !== undefined,
       ...(nativeChannel === undefined ? {} : { nativeChannel }),
-      ...(nativeInterception === undefined ? {} : { nativeInterception }),
+      ...(documentInstallation.nativeInterception === undefined
+        ? {}
+        : { nativeInterception: documentInstallation.nativeInterception }),
     }
   } catch (error) {
     await nativeChannel?.dispose().catch(() => undefined)
-    await nativeInterception?.dispose().catch(() => undefined)
+    await documentInstallation.nativeInterception?.dispose().catch(() => undefined)
     const strictProductionCleanup = loopbackModules && !viteDevelopment
     const cleanupFailures: unknown[] = []
     const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
@@ -957,8 +903,10 @@ export async function install(
     removePublisherGrantBindingListener()
     removeManagedServiceUIBindingListener()
     await certifiedPermissionChannel?.dispose()
-    const scriptRemoved = identifier === undefined
-      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }))
+    const scriptRemoved = documentInstallation.identifier === undefined
+      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', {
+        identifier: documentInstallation.identifier,
+      }))
     if (viteDevelopment) {
       await attemptCleanup(session.send('Runtime.evaluate', {
         expression: support.VITE_DISPOSE_EXPRESSION,
@@ -979,7 +927,9 @@ export async function install(
     if (viteLoopbackPermissions === undefined) {
       await attemptCleanup(support.restoreViteLoopbackPermission(session, viteLoopbackPermission))
     } else await attemptCleanup(viteLoopbackPermissions.release(session, viteLoopbackPermission))
-    if (loopbackModules && !viteDevelopment && loopbackReloadStarted && scriptRemoved && cspRestored) {
+    if (
+      loopbackModules && !viteDevelopment && documentInstallation.loopbackReloadStarted && scriptRemoved && cspRestored
+    ) {
       await attemptCleanup(session.send('Page.reload', {}, support.CDP_INJECTION_TIMEOUT_MS))
     }
     session.close()

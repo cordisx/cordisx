@@ -98,12 +98,12 @@ describe('CDP injection timeout configuration', () => {
 
   it('uses the injection budget and abort boundary for the large future-document bootstrap', async () => {
     const source = await readFile(
-      new URL('../packages/cli/src/launcher/cdp-installation.ts', import.meta.url),
+      new URL('../packages/cli/src/launcher/cdp-installation-bootstrap.ts', import.meta.url),
       'utf8',
     )
     const registration = source.slice(
       source.indexOf("'Page.addScriptToEvaluateOnNewDocument'"),
-      source.indexOf('identifier = added.identifier'),
+      source.indexOf('const identifier = added.identifier'),
     )
     expect(registration).toContain('CDP_INJECTION_TIMEOUT_MS')
     expect(registration).toMatch(/CDP_INJECTION_TIMEOUT_MS,\s*\),\s*signal,\s*\)/u)
@@ -120,15 +120,17 @@ describe('CDP injection timeout configuration', () => {
       },
     })).toBe('SyntaxError: fixture graph bootstrap failed (line 9, column 3)')
 
-    const source = await readFile(
-      new URL('../packages/cli/src/launcher/cdp-installation.ts', import.meta.url),
-      'utf8',
+    const [installationSource, bootstrapSource] = await Promise.all([
+      readFile(new URL('../packages/cli/src/launcher/cdp-installation.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../packages/cli/src/launcher/cdp-installation-bootstrap.ts', import.meta.url), 'utf8'),
+    ])
+    expect(bootstrapSource).toContain('CordisX renderer injection evaluation failed:')
+    expect(installationSource).toContain('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')
+    expect(installationSource).toContain(
+      'CordisX renderer composition and runtime boot promises are undefined after injection',
     )
-    expect(source).toContain('CordisX renderer injection evaluation failed:')
-    expect(source).toContain('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')
-    expect(source).toContain('CordisX renderer composition and runtime boot promises are undefined after injection')
-    expect(source).toContain('CordisX renderer runtime is undefined after boot')
-    expect(source).toContain('error.stack ?? error.message')
+    expect(installationSource).toContain('CordisX renderer runtime is undefined after boot')
+    expect(installationSource).toContain('error.stack ?? error.message')
   })
 
   it('emits an executable renderer cleanup that reports failures after clearing production markers', async () => {
