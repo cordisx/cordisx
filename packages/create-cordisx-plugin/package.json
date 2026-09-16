@@ -43,7 +43,6 @@
   ],
   "publishConfig": {
     "access": "public",
-    "tag": "beta",
     "provenance": true
   },
   "devDependencies": {

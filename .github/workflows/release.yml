@@ -1,0 +1,39 @@
+name: Release npm packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: npm-release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
+      - run: npm ci --registry=https://registry.npmjs.org
+      - run: npm run test:release
+      - run: npm run build
+      - run: npm run check:release
+      - run: npm run check:package
+      - name: Publish repository release
+        run: node scripts/release.mjs --tag "${GITHUB_REF_NAME}" --registry https://registry.npmjs.org
+      - name: Verify clean registry installation
+        run: node scripts/check-registry-release.mjs --tag "${GITHUB_REF_NAME}" --registry https://registry.npmjs.org

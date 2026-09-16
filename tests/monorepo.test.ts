@@ -61,7 +61,7 @@ describe('npm workspace boundary', () => {
         'third_party',
       ],
       bin: { cordisx: 'dist/src/cli.js' },
-      publishConfig: { access: 'public', tag: 'beta', provenance: true },
+      publishConfig: { access: 'public', provenance: true },
       dependencies: { reicon: '1.2.1' },
     })
     expect(cli.private).toBeUndefined()
@@ -71,7 +71,7 @@ describe('npm workspace boundary', () => {
       license: 'AGPL-3.0-or-later',
       files: ['dist', 'template', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'],
       bin: { 'create-cordisx-plugin': 'dist/cli.js' },
-      publishConfig: { access: 'public', tag: 'beta', provenance: true },
+      publishConfig: { access: 'public', provenance: true },
     })
     expect(creator.private).toBeUndefined()
     await expect(access(path.join(repositoryRoot, 'packages/cli/src/cli.ts'))).resolves.toBeUndefined()

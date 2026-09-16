@@ -541,53 +541,52 @@ Broker remains the authority for every non-matching extension-point request.
 The grant is bundled only into the launcher-created renderer composition and
 is omitted from public runtime/control snapshots.
 
-Publishing is allowed only from merged `main` through
-`.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the
-`npm-beta` GitHub environment. Each npm package configures that exact repository,
-workflow filename, environment, and the `npm publish` action as its trusted
-publisher. The workflow carries no npm token. It pins npm `11.11.0`, which
-supports OIDC and the repository's remaining exact Git dependencies. npm 12 defaults to
-rejecting Git dependencies (`EALLOWGIT`); adoption requires explicit validation
-of clean installs and installed consumers before changing this toolchain.
-The Host consumes the same immutable `@cordisx/protocol` beta version from npm
-in its root, CLI, and private Channel runtime workspaces. Release and registry installs retain normal lifecycle preparation, matching
+Publishing is allowed only from a merged `main` commit tagged as
+`v<semver>`. The single `.github/workflows/release.yml` workflow runs on that
+tag in the `npm-release` GitHub environment, on a GitHub-hosted runner with
+OIDC and no long-lived npm token. Each npm package configures that exact
+repository, workflow filename, environment, and the `npm publish` action as
+its trusted publisher.
+
+One Git tag represents one repository release. The tag version must exactly
+match both `cordisx` and `create-cordisx-plugin`, and those two public package
+versions must match each other. They always publish together, in dependency
+order. The release interface has no manual version or package-scope input.
+
+The tag determines the npm dist-tag: a stable version publishes to `latest`;
+an `alpha`, `beta`, or `rc` prerelease publishes to the matching channel.
+Package `publishConfig` does not select a channel. The publisher passes both
+the derived `--tag` and `--provenance` explicitly. A prerelease must not move
+`latest`.
+
+The workflow pins npm `11.11.0`, which supports OIDC and the repository's
+remaining exact Git dependencies. npm 12 defaults to rejecting Git dependencies
+(`EALLOWGIT`); adoption requires explicit validation of clean installs and
+installed consumers before changing this toolchain. The Host consumes one exact
+`@cordisx/protocol` registry version in its root, CLI, and private Channel
+runtime workspaces.
+
+Release and registry installs retain normal lifecycle preparation, matching
 ordinary `npm ci` / `npx` behavior. In particular, the exact Channel Git
-dependency builds its distribution in `prepare`; `--ignore-scripts` leaves its
-public entry missing. The registry gate resolves and checks that installed
-entry as well as the CLI smoke.
-It validates the requested
-version against the selected package manifests, the clean pack allowlists,
-install smokes, repository metadata, registry owner, version absence, and the
-selected `latest` values before the first publish. The default `coordinated`
-scope publishes both packages. An explicitly CLI-only release selects `cli`;
-it publishes only `cordisx`, leaves the scaffolder and its tags untouched, and
-retains the complete owner gate. Neither scope publishes private workspaces or
-moves `latest`.
+source builds its distribution in `prepare`; `--ignore-scripts` leaves its
+public entry missing. Before publication, the workflow installs the lockfile,
+runs the focused release-tag test, builds all release workspaces, validates
+release metadata, and checks package allowlists.
 
-The registry cannot atomically publish two packages. In coordinated scope the workflow therefore
-publishes and reads back `cordisx` first, then publishes and reads back the
-scaffolder that depends on it. A retry may skip an already published first
-package only after its registry tarball integrity and metadata match the local
-merged commit exactly. Any mismatched existing version, owner, tag, integrity,
-or repository metadata stops the workflow; recovery advances to a new
-prerelease unless the already published artifact is proven identical.
+The registry cannot atomically publish two packages. The workflow publishes and
+reads back `cordisx` first, then publishes and reads back the scaffolder that
+depends on it. A retry may skip an already published package only after its
+registry tarball integrity, Git head, provenance, repository metadata, and
+selected dist-tag match the tagged commit exactly. Any mismatch stops the
+workflow.
 
-Coordinated completion requires remote readback, not only `npm pack`: both `beta` tags must
-resolve to the requested versions, both `latest` tags must still resolve to
-`0.0.0`, and a clean temporary directory must install/run `cordisx@beta`, invoke
-both scaffolder package command forms and all three creator modes, install each
-generated environment, run its check/build/test scripts, and validate its entry
-graph with the published
-`cordisx dev --dry-run`. Package tests also assert that the tarball includes its
-README, license, bin, built output, and complete template while excluding repo-
-private docs, tests, source-only bins, tokens, and developer configuration.
-
-For CLI-only completion, `cordisx@beta` must resolve to the requested version
-and `latest` must remain `0.0.0`. The registry smoke installs the CLI into a
-fresh temporary directory and verifies its metadata, `--help`, isolated setup,
-and launch-plan dry-run without starting Codex. The complete package gate still
-verifies the bundled Skill tree and installed consumers. Scaffolder registry
-smokes apply only when that package participates in publication.
+Completion requires remote readback, not only `npm pack`: both selected
+channel tags must resolve to the tagged version, prereleases must leave
+`latest` on another version, and a stable release must move `latest` to the
+tagged version. A clean temporary directory installs and runs both packages from
+that channel, verifies the CLI setup and dry-run paths, invokes both scaffolder
+command forms and all creator modes, installs each generated environment, runs
+its checks, and validates its generated entry graph.
 
 ### Beta licensing boundary
 

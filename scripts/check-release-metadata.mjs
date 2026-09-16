@@ -1,13 +1,13 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { releaseFromTag } from './release-version.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
 const expectedVersion = '0.1.0-beta.3'
 const expectedProtocolVersion = '0.1.0-beta.3'
-const expectedCliProxySource =
-  'github:cordisx/plugin-cli-proxy-api#c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37'
+const expectedCliProxySource = 'github:cordisx/plugin-cli-proxy-api#c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
 
 async function json(relative) {
@@ -34,7 +34,7 @@ function validatePackage(manifest, input) {
     assert(manifest.files.includes(required), `${input.name} files is missing ${required}`)
   }
   assert(manifest.publishConfig?.access === 'public', `${input.name} publish access must be public`)
-  assert(manifest.publishConfig?.tag === 'beta', `${input.name} publish tag must be beta`)
+  assert(manifest.publishConfig?.tag === undefined, `${input.name} publish tag must be selected by the release`)
   assert(manifest.publishConfig?.provenance === true, `${input.name} provenance must be enabled`)
 }
 
@@ -49,6 +49,8 @@ const [
   creatorReadme,
   gettingStarted,
   workflow,
+  releaseScript,
+  registryScript,
 ] = await Promise.all([
   json('package.json'),
   json('packages/cli/package.json'),
@@ -59,7 +61,9 @@ const [
   readFile(path.join(repositoryRoot, 'packages/cli/README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, 'packages/create-cordisx-plugin/README.md'), 'utf8'),
   readFile(path.join(repositoryRoot, '.agents/docs/getting-started.md'), 'utf8'),
-  readFile(path.join(repositoryRoot, '.github/workflows/release-beta.yml'), 'utf8'),
+  readFile(path.join(repositoryRoot, '.github/workflows/release.yml'), 'utf8'),
+  readFile(path.join(repositoryRoot, 'scripts/release.mjs'), 'utf8'),
+  readFile(path.join(repositoryRoot, 'scripts/check-registry-release.mjs'), 'utf8'),
 ])
 
 validatePackage(cli, {
@@ -77,6 +81,10 @@ validatePackage(creator, {
   files: ['dist', 'template', 'README.md'],
 })
 assert(root.version === expectedVersion, `root version must be ${expectedVersion}`)
+assert(cli.version === creator.version, 'repository release package versions must match')
+const expectedRelease = releaseFromTag(`v${expectedVersion}`)
+assert(expectedRelease.version === expectedVersion, 'release tag parser must preserve the package version')
+assert(expectedRelease.distTag === 'beta', 'current prerelease must derive the beta channel')
 assert(
   root.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
   `root must consume @cordisx/protocol@${expectedProtocolVersion}`,
@@ -130,14 +138,29 @@ assert(cliReadme.includes('AGPL-3.0-or-later'), 'cordisx package README must exp
 assert(creatorReadme.includes('Independent Plugin Exception'), 'creator README must explain the template exception')
 
 assert(workflow.includes('id-token: write'), 'release workflow must grant OIDC id-token permission')
-assert(workflow.includes('environment: npm-beta'), 'release workflow must use the npm-beta environment')
+assert(workflow.includes("tags:\n      - 'v*'"), 'release workflow must be triggered by repository version tags')
+assert(!workflow.includes('workflow_dispatch'), 'release workflow must not create a second manual version interface')
+assert(workflow.includes('environment: npm-release'), 'release workflow must use the npm-release environment')
 assert(workflow.includes('npm@11.11.0'), 'release workflow must pin an OIDC-capable npm CLI')
 assert(
   workflow.includes('npm ci --registry=https://registry.npmjs.org'),
-  'release install must prepare Git dependencies',
+  'release install must prepare registry and remaining Git dependencies',
 )
 assert(!workflow.includes('npm ci --ignore-scripts'), 'release install must not skip Git dependency preparation')
-assert(workflow.includes('check-registry-beta.mjs'), 'release workflow must verify clean registry installation')
+for (const command of ['npm run test:release', 'npm run build', 'npm run check:release', 'npm run check:package']) {
+  assert(workflow.includes(command), `release workflow must run ${command}`)
+}
+assert(!workflow.includes('npm run check\n'), 'release workflow must not expand into the full regression gate')
+assert(workflow.includes('scripts/release.mjs --tag'), 'release workflow must publish from the Git tag')
+assert(workflow.includes('check-registry-release.mjs --tag'), 'release workflow must verify a clean tagged install')
+assert(workflow.includes('${GITHUB_REF_NAME}'), 'release workflow must derive the version from the pushed tag')
+assert(!workflow.includes(expectedVersion), 'release workflow must not hard-code the current version')
+assert(!workflow.includes('release-beta') && !workflow.includes('--scope'), 'release workflow must remain generic')
+assert(releaseScript.includes('./release-version.mjs'), 'publisher must derive version and channel from the tag')
+assert(releaseScript.includes('`--tag=${distTag}`'), 'publisher must pass the dynamic npm dist-tag')
+assert(releaseScript.includes("'--provenance'"), 'publisher must request npm provenance explicitly')
+assert(!releaseScript.includes('--tag=beta'), 'publisher must not hard-code the beta channel')
+assert(registryScript.includes('./release-version.mjs'), 'registry verification must derive the selected channel')
 assert(!/NPM_TOKEN|NODE_AUTH_TOKEN|_authToken/.test(workflow), 'release workflow must not reference npm tokens')
 
 if (!allowPendingLicense) {
