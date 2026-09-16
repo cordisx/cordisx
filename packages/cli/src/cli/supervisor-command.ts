@@ -18,7 +18,7 @@ import {
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
 
-const VERSION = '0.1.0-beta.3'
+const VERSION = '0.1.0-beta.4'
 const RETRY_DELAY = 50
 const START_TIMEOUT = 30_000
 

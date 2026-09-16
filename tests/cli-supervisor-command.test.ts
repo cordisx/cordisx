@@ -27,7 +27,7 @@ describe('supervisor management commands', () => {
       status: 'stopped',
       pid: null,
       uptime: 0,
-      version: '0.1.0-beta.3',
+      version: '0.1.0-beta.4',
       cdpEndpoint: null,
     })
     const paths = supervisorPaths(root, 'codex', 'default')
@@ -40,7 +40,7 @@ describe('supervisor management commands', () => {
       processStartedAt: 'reused pid',
       instanceToken: 'a'.repeat(32),
       createdAt: new Date().toISOString(),
-      version: '0.1.0-beta.3',
+      version: '0.1.0-beta.4',
       effectiveConfig: 'old',
     })
     await runSupervisorCommand(parseCordisXCli(['status', '--json']), {
@@ -63,7 +63,7 @@ describe('supervisor management commands', () => {
       processStartedAt: startedAt!,
       instanceToken: 'b'.repeat(32),
       createdAt: new Date().toISOString(),
-      version: '0.1.0-beta.3',
+      version: '0.1.0-beta.4',
       effectiveConfig: 'different',
     })
     await expect(runSupervisorCommand(parseCordisXCli(['start']), { env: { CORDISX_HOME: root } }))
@@ -160,7 +160,7 @@ describe('supervisor management commands', () => {
         processStartedAt: startedAt!,
         instanceToken: 'd'.repeat(32),
         createdAt: new Date().toISOString(),
-        version: '0.1.0-beta.3',
+        version: '0.1.0-beta.4',
         effectiveConfig: 'current',
       })
       const output: string[] = []

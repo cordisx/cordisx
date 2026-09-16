@@ -15,12 +15,10 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolVersion = '0.1.0-beta.3'
-const protocolCommit = '55621cd211d48783eb0f729f2925b54bd621a810'
-const protocolSpec = `github:cordisx/cordisx-protocol#${protocolCommit}`
-const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
+const protocolVersion = '0.1.0-beta.4'
+const protocolResolvedSource = `https://registry.npmjs.org/@cordisx/protocol/-/protocol-${protocolVersion}.tgz`
 const protocolIntegrity =
-  'sha512-pBZAKfgka7IzMp1x5z2ewdEelmGHHxnjwlBM5gZ2kaWRWj8VOSKHyQigeBQ25e+euyo6MS/KkElp3aLVNNC7/g=='
+  'sha512-cMaFOKNdFgFA3srd6/oDEvpT4eMFUw+dTEKAO9sDKnAc7///y0PwDtCC1o/7tYPJZ8Xmwv8A7c7PQiqS+zesyw=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -67,7 +65,7 @@ function expectedProtocolEdge(label: string): string | undefined {
   if (label.includes('devDependencies')) return undefined
   if (label === 'package-lock installed resolution') return protocolResolvedSource
   if (label === 'package-lock installed integrity') return protocolIntegrity
-  return label === 'package-lock installed version' ? protocolVersion : protocolSpec
+  return protocolVersion
 }
 
 function protocolPinViolations(documents: ProtocolPinDocuments): string[] {
@@ -93,7 +91,7 @@ type FormalConnectorConsumerSurface = readonly [
 const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsumerSurface
 
 describe('formal Connector Protocol public type import', () => {
-  it('pins the Host root, publishable CLI, and lockfile to one exact canonical Protocol source', async () => {
+  it('pins the Host root, publishable CLI, and lockfile to one exact registry dependency', async () => {
     const [rootManifestText, cliManifestText, lockfileText] = await Promise.all([
       readFile(path.join(root, 'package.json'), 'utf8'),
       readFile(path.join(root, 'packages/cli/package.json'), 'utf8'),
@@ -107,13 +105,13 @@ describe('formal Connector Protocol public type import', () => {
     expect(protocolEdges(documents)).toHaveLength(11)
     expect(protocolPinViolations(documents)).toEqual([])
     expect(`${rootManifestText}\n${cliManifestText}\n${lockfileText}`).not.toContain(staleProtocolVersion)
-    expect(lockfileText).toContain(protocolResolvedSource)
+    expect(lockfileText).not.toContain('github:cordisx/cordisx-protocol')
     expect(formalConnectorConsumerSurface).toBeNull()
   })
 
   it('rejects stale manifest, lock, and integrity edges', () => {
     const currentManifest: PackageManifest = {
-      dependencies: { '@cordisx/protocol': protocolSpec },
+      dependencies: { '@cordisx/protocol': protocolVersion },
     }
     const current: ProtocolPinDocuments = {
       rootManifest: currentManifest,

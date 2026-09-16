@@ -110,12 +110,12 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-if (protocolSpec !== 'github:cordisx/cordisx-protocol#55621cd211d48783eb0f729f2925b54bd621a810') {
-  throw new Error('Host SDK must consume the merged wallet pool Protocol revision')
+if (protocolSpec !== '0.1.0-beta.4') {
+  throw new Error('Host SDK must consume @cordisx/protocol@0.1.0-beta.4')
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')
 const protocolManifest = await verifyPackage(protocolSource)
-if (protocolManifest.version !== '0.1.0-beta.3') throw new Error('Installed Protocol version mismatch')
+if (protocolManifest.version !== protocolSpec) throw new Error('Installed Protocol version mismatch')
 await pack(protocolSource, artifacts)
 await run(process.execPath, ['scripts/prepare-bundled-runtime-plugins.mjs'], host)
 const cliTarball = await pack(cli, artifacts)
