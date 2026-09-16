@@ -119,6 +119,7 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
   const result = await build({
     configFile: false,
     root: config.rootDir,
+    base: './',
     plugins: [plugin],
     build: {
       write: false,
