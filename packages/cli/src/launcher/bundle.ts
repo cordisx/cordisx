@@ -497,7 +497,6 @@ export async function buildRendererBundle(
     minifyIdentifiers: false,
     legalComments: 'inline',
     loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
-    plugins: [cordisXReactVirtualModules(runtimeImport)],
     write: false,
     logLevel: 'silent',
   })
