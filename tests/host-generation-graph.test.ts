@@ -32,6 +32,13 @@ describe('Host generation graph', () => {
     expect(value.digest).toMatch(/^sha256:[a-f0-9]{64}$/u)
     expect(await fetch(graph.entryUrl).then(response => response.status)).toBe(200)
     expect(graph.files.some(file => file.path === value.entry)).toBe(true)
+    const graphBase = new URL('.', graph.manifestUrl)
+    const source = (await Promise.all(
+      graph.files
+        .filter(file => file.path.endsWith('.js'))
+        .map(async file => await fetch(new URL(file.path.slice(1), graphBase)).then(response => response.text())),
+    )).join('\n')
+    expect(source.match(/<line\b/gu)?.length).toBeGreaterThanOrEqual(1_440)
     // Accounting is intentionally observable. Its current value is not a
     // phase-2 pass criterion; feature-boundary reduction belongs to phase 3.
     expect(graph.eagerBytes).toBeGreaterThan(0)

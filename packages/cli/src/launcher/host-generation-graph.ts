@@ -108,11 +108,13 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
       return undefined
     },
     transform(source, id) {
-      // Keep the established renderer CSS-text contract while moving the graph
-      // producer from esbuild to Rollup. CSS remains Host-owned, never a page
-      // side effect injected by a plugin.
+      // Preserve the legacy esbuild loader contract: Host styles and SVG
+      // marks are source text, not emitted asset URLs. BrandMark parses SVG
+      // geometry during startup, so URL semantics are observably incorrect.
       if (!/\.[cm]?[jt]sx?(?:\?|$)/u.test(id)) return undefined
-      const code = source.replace(/(from\s+['"][^'"]+\.css)(['"])/gu, '$1?raw$2')
+      const code = source
+        .replace(/(from\s+['"][^'"]+\.css)(['"])/gu, '$1?raw$2')
+        .replace(/(from\s+['"][^'"]+\.svg)(['"])/gu, '$1?raw$2')
       return code === source ? undefined : { code, map: null }
     },
   }
