@@ -710,6 +710,17 @@ if (import.meta.hot) {
       return []
     },
     configureServer(vite) {
+      // Development and frozen production generations share the same loader
+      // shape: the CDP bootstrap fetches a launch-scoped manifest and imports
+      // its exact entry. Vite remains the development artifact provider/HMR
+      // transport; it is not a parallel renderer bootstrap protocol.
+      vite.middlewares.use(`${base}host-manifest.json`, (_request, response) => {
+        const body = JSON.stringify({ version: 1, entry: url(BOOT) })
+        response.statusCode = 200
+        response.setHeader('content-type', 'application/json')
+        response.setHeader('cache-control', 'no-store')
+        response.end(body)
+      })
       const hot = vite.environments.client!.hot
       hot.on?.('vite:invalidate', data => {
         void (async () => {
@@ -959,12 +970,13 @@ if (import.meta.hot) {
           validateNativeVitePlugin(server, PLUGIN_PREFIX + plugin.id, plugin.id)
         ),
       )
-      // CDP installs only this stable entry. Source modules and updates use Vite.
-      return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = (async () => { await import(${
+      // CDP installs only the canonical manifest loader. Source modules and
+      // updates remain Vite-owned after that first graph admission.
+      return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = fetch(${
+        JSON.stringify(url('host-manifest.json'))
+      }).then(r => { if (!r.ok) throw new Error('CordisX Vite Host manifest unavailable'); return r.json(); }).then(async manifest => { await import(${
         JSON.stringify(url(PREAMBLE))
-      }); const boot = await import(${
-        JSON.stringify(url(BOOT))
-      }); return await boot.start(); })(); globalThis.__cordisxViteBoot.catch(error => { console.error('[cordisx] Vite bootstrap failed', error); }); }`
+      }); const boot = await import(/* @vite-ignore */ manifest.entry); return await boot.start(); }); globalThis.__cordisxViteBoot.catch(error => { console.error('[cordisx] Vite bootstrap failed', error); }); }`
     },
     async synchronizePluginGenerations(handler) {
       generationHandler = handler
