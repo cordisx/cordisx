@@ -43,6 +43,7 @@ import {
   VITE_CLIENT_DISPOSER_SOURCE,
 } from './vite-development-graph.js'
 import { NativeViteSourceMapStore } from './vite-development-source-maps.js'
+import { installNativeViteHostManifest } from './vite-development-manifest.js'
 
 const ENTRY = 'virtual:cordisx-native-entry'
 const BOOT = 'virtual:cordisx-native-boot'
@@ -710,17 +711,7 @@ if (import.meta.hot) {
       return []
     },
     configureServer(vite) {
-      // Development and frozen production generations share the same loader
-      // shape: the CDP bootstrap fetches a launch-scoped manifest and imports
-      // its exact entry. Vite remains the development artifact provider/HMR
-      // transport; it is not a parallel renderer bootstrap protocol.
-      vite.middlewares.use(`${base}host-manifest.json`, (_request, response) => {
-        const body = JSON.stringify({ version: 1, entry: url(BOOT) })
-        response.statusCode = 200
-        response.setHeader('content-type', 'application/json')
-        response.setHeader('cache-control', 'no-store')
-        response.end(body)
-      })
+      installNativeViteHostManifest(vite, base, url(BOOT))
       const hot = vite.environments.client!.hot
       hot.on?.('vite:invalidate', data => {
         void (async () => {
