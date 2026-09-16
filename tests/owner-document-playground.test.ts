@@ -12,7 +12,9 @@ afterEach(async () => {
 })
 
 function tokenFrom(source: string): string {
-  const token = source.match(/"token":\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"/)?.[1]
+  const token = source.match(
+    /ownerDocumentBindings\s*:\s*\[\{[^}]*?token\s*:\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"/,
+  )?.[1]
   if (token === undefined) throw new Error('Playground owner document metadata is missing')
   return token
 }
