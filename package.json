@@ -87,7 +87,7 @@
     "test:browser": "vitest run --project browser",
     "test:all": "vitest run",
     "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-test-projects.mjs",
-    "test:release": "vitest run tests/release-version.test.ts"
+    "test:release": "vitest run tests/release-version.test.ts tests/registry-release-propagation.test.ts"
   },
   "engines": {
     "node": ">=22.19"

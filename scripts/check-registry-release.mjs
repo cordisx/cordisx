@@ -5,9 +5,14 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
-import { isNpmRegistryPropagationError, npmViewItem } from './npm-pack-report.mjs'
+import { npmViewItem } from './npm-pack-report.mjs'
 import { releasePackageNames } from './release-packages.mjs'
 import { releaseFromTag } from './release-version.mjs'
+import {
+  markRegistryPropagationError,
+  registryAttemptCache,
+  retryRegistryPropagation,
+} from './registry-release-propagation.mjs'
 
 const execute = promisify(execFile)
 let npmCache
@@ -46,18 +51,6 @@ async function run(file, args, options = {}) {
   }
 }
 
-async function retryRegistryPropagation(label, operation) {
-  for (let attempt = 1; attempt <= 12; attempt += 1) {
-    try {
-      return await operation()
-    } catch (error) {
-      if (!isNpmRegistryPropagationError(error) || attempt === 12) throw error
-      console.log(`[registry] ${label} is still propagating (attempt ${attempt}/12)`)
-      await new Promise(resolve => setTimeout(resolve, 5000))
-    }
-  }
-}
-
 async function npmJson(args, cwd) {
   const result = await run('npm', [...args, '--json', `--registry=${registry}`], { cwd })
   return JSON.parse(result.stdout)
@@ -85,7 +78,13 @@ async function verifyGeneratedViteGraph(graphRoot, label) {
 async function verifyInstalledPackage(runner, packageName) {
   const packageRoot = path.join(runner, 'node_modules', packageName)
   const manifest = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
-  if (manifest.version !== version) throw new Error(`${packageName} installed version mismatch`)
+  if (manifest.version !== version) {
+    const error = new Error(
+      `${packageName} installed version mismatch: expected ${version}, received ${manifest.version}`,
+    )
+    error.code = 'VERSION_MISMATCH'
+    throw error
+  }
   if (manifest.license !== 'AGPL-3.0-or-later') throw new Error(`${packageName} installed license mismatch`)
   await access(path.join(packageRoot, 'README.md'))
   await access(path.join(packageRoot, 'LICENSE'))
@@ -190,12 +189,12 @@ function assertReleaseTag(packageName, tags) {
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-registry-release-'))
 try {
-  npmCache = path.join(temporaryRoot, 'npm-cache')
   const runner = path.join(temporaryRoot, 'runner')
   const cordisxHome = path.join(temporaryRoot, 'cordisx-home')
   await mkdir(runner, { recursive: true })
   await writeFile(path.join(runner, 'package.json'), `${JSON.stringify({ private: true }, null, 2)}\n`, 'utf8')
-  await retryRegistryPropagation('release package metadata', async () => {
+  await retryRegistryPropagation('release package metadata', async attempt => {
+    npmCache = registryAttemptCache(temporaryRoot, 'metadata', attempt)
     for (const packageName of packages) {
       const tags = await npmViewJson([packageName, 'dist-tags'], runner)
       try {
@@ -206,20 +205,28 @@ try {
       }
     }
   })
-  await retryRegistryPropagation('release package installation', async () => {
+  await retryRegistryPropagation('release package installation', async attempt => {
+    npmCache = registryAttemptCache(temporaryRoot, 'install', attempt)
     await rm(path.join(runner, 'node_modules'), { recursive: true, force: true })
     await rm(path.join(runner, 'package-lock.json'), { force: true })
     await run('npm', [
       'install',
+      '--no-save',
       '--no-audit',
       '--no-fund',
       '--loglevel=error',
       ...packages.map(name => `${name}@${distTag}`),
       `--registry=${registry}`,
     ], { cwd: runner })
+    for (const packageName of packages) {
+      try {
+        await verifyInstalledPackage(runner, packageName)
+      } catch (error) {
+        if (error?.code === 'VERSION_MISMATCH') throw markRegistryPropagationError(error)
+        throw error
+      }
+    }
   })
-  await verifyInstalledPackage(runner, 'cordisx')
-  await verifyInstalledPackage(runner, 'create-cordisx-plugin')
 
   const bin = path.join(
     runner,
