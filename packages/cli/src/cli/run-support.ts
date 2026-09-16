@@ -627,6 +627,7 @@ export async function runInjectedHost(input: {
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
   readonly onReady?: () => void | Promise<void>
+  readonly onHostLaunched?: (pid: number) => void | Promise<void>
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
@@ -700,6 +701,8 @@ export async function runInjectedHost(input: {
       input.launcher.onlineDevtools,
       input.environment,
     )
+    if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
+    await input.onHostLaunched?.(launched.pid)
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),
