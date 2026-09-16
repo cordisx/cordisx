@@ -71,7 +71,6 @@ export async function startUiPlayground(options: UiPlaygroundOptions): Promise<U
   const session = await createPlaygroundSession(options.configPath, {
     ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
   })
-  let activeSource: string | undefined
   const server: Server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost')
@@ -81,9 +80,23 @@ export async function startUiPlayground(options: UiPlaygroundOptions): Promise<U
         return
       }
       if (request.method === 'GET' && url.pathname === '/api/bundle') {
-        activeSource = (await session.buildBundle()).source
+        const { source } = await session.buildBundle()
         response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
-        response.end(activeSource)
+        response.end(source)
+        return
+      }
+      if (request.method === 'GET' && url.pathname === '/api/bundle-audit') {
+        const { source, generation } = await session.buildBundle()
+        const serviceConfigBridgeToken = /serviceConfigBridgeToken:\s*"([a-f0-9]{64})"/.exec(source)?.[1]
+        json(response, 200, {
+          generation,
+          bytes: Buffer.byteLength(source),
+          hostKind: source.includes('hostKind:"playground"'),
+          installsRuntime: source.includes('installCordisX'),
+          includesPluginBundleSnapshot: source.includes('pluginBundleSnapshot:'),
+          includesWorkflowEssentials: source.includes('Workflow Essentials'),
+          ...(serviceConfigBridgeToken === undefined ? {} : { serviceConfigBridgeToken }),
+        })
         return
       }
       if (request.method === 'POST' && url.pathname === '/api/config') {
@@ -118,7 +131,6 @@ export async function startUiPlayground(options: UiPlaygroundOptions): Promise<U
       }
       if (request.method === 'POST' && url.pathname === '/api/reset') {
         await session.reset()
-        activeSource = undefined
         json(response, 200, { ok: true })
         return
       }
