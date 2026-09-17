@@ -176,6 +176,21 @@ function canonicalHttpsUrl(value: unknown, label: string): string {
   return text
 }
 
+function canonicalFeedUrl(value: unknown, label: string): string {
+  const text = string(value, label)
+  const url = new URL(text)
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:')
+    || url.username !== ''
+    || url.password !== ''
+    || url.hash !== ''
+  ) {
+    throw new Error(`${label} 必须是无凭据、无 fragment 的 HTTP 或 HTTPS URL`)
+  }
+  if (url.href !== text) throw new Error(`${label} 必须使用 canonical URL`)
+  return text
+}
+
 function localizedText(value: unknown, label: string): MarketplaceLocalizedText {
   const entry = object(value, label)
   assertKeys(entry, ['namespace', 'key', 'params', 'fallback'], ['key', 'fallback'], label)
@@ -480,7 +495,7 @@ export function evaluateMarketplaceTrust(
   const root = canonicalHttpsUrl(trust.root, 'feed.trust.root')
   literal(trust.grantModel, TRUST_GRANT_MODEL, 'feed.trust.grantModel')
   literal(trust.cryptographicAttestation, 'unsupported', 'feed.trust.cryptographicAttestation')
-  const normalizedFeedUrl = canonicalHttpsUrl(options.feedUrl, 'options.feedUrl')
+  const normalizedFeedUrl = canonicalFeedUrl(options.feedUrl, 'options.feedUrl')
   const normalizedTrustedRoots = options.trustedRoots.map((value, index) =>
     canonicalHttpsUrl(value, `options.trustedRoots[${index}]`)
   )

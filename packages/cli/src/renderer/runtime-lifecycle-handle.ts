@@ -232,6 +232,11 @@ import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 import { requestRuntimePluginLifecycle } from './runtime-development-reload.js'
 import {
+  inspectMarketplaceArtifact,
+  marketplaceArtifactBridgeAvailable,
+  previewMarketplaceArtifact,
+} from './marketplace-artifact-binding.js'
+import {
   controllerHasRuntimeModule,
   CordisXRuntimeHandle,
   errorMessage,
@@ -876,6 +881,12 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
   iconThemePreferenceWritable: runtimeScope.iconThemePreferenceBridge()! !== undefined,
+  ...(marketplaceArtifactBridgeAvailable()
+    ? {
+      inspectMarketplaceArtifact: (request, signal) => inspectMarketplaceArtifact(request, signal),
+      previewMarketplaceArtifact: (request, signal) => previewMarketplaceArtifact(request, signal),
+    }
+    : {}),
   selectIconTheme: (expectedProfileRevision, candidate) =>
     selectAndPersistIconTheme(
       runtimeScope.iconThemeRegistry()!,

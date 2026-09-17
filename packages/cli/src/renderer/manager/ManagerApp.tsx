@@ -251,7 +251,7 @@ function Content(
     return <NavigationDetailPage snapshot={snapshot} router={route} />
   }
   if (current.kind === 'marketplace-plugin') {
-    return <MarketplacePluginPage marketplace={marketplace} snapshot={snapshot} router={route} />
+    return <MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} />
   }
   if (current.kind === 'marketplace-sources') {
     return <MarketplaceSourcesPage marketplace={marketplace} locale={snapshot.localization.locale} />

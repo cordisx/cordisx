@@ -14,6 +14,7 @@ export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function Icon
   ref,
 ) {
   const selected = props['aria-pressed'] === true
+  const title = description === undefined || description === label ? label : `${label} · ${description}`
   return (
     <Button
       {...props}
@@ -24,7 +25,7 @@ export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function Icon
       className={['cxm-manager-icon-action', 'cxr-ui-icon-action', className].filter(Boolean).join(' ')}
       aria-label={label}
       aria-description={description}
-      title={description === undefined ? label : `${label} · ${description}`}
+      title={title}
       icon={<HostIcon token={icon} {...(selected ? { state: 'active' as const } : {})} />}
       data-cordisx-no-drag="true"
     />

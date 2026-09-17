@@ -9,6 +9,7 @@ import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
+import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 import { productLocale } from '../../ui-copy.js'
 
@@ -26,8 +27,14 @@ const COPY = {
     sourcesDescription: '配置插件商店来源',
     open: '打开商店插件详情',
     install: '安装',
+    update: '更新',
     installed: '已安装',
     installUnavailable: '当前 Host 尚未发布商店安装服务',
+    artifactUnavailable: '该商店记录没有可安装制品',
+    installing: '正在安装',
+    cancelInstall: '取消安装',
+    installFailed: '插件安装失败',
+    installSucceeded: '插件安装完成',
     unfavorite: '取消收藏',
     favorite: '收藏',
     more: '更多操作',
@@ -49,8 +56,14 @@ const COPY = {
     sourcesDescription: 'Configure Marketplace sources',
     open: 'Open Marketplace plugin details',
     install: 'Install',
+    update: 'Update',
     installed: 'Installed',
     installUnavailable: 'This Host has not published Marketplace installation yet',
+    artifactUnavailable: 'This Marketplace record has no installable artifact',
+    installing: 'Installing',
+    cancelInstall: 'Cancel installation',
+    installFailed: 'Plugin installation failed',
+    installSucceeded: 'Plugin installation complete',
     unfavorite: 'Remove favorite',
     favorite: 'Favorite',
     more: 'more actions',
@@ -75,8 +88,12 @@ export function MarketplacePage(
   const [officialOnly, setOfficialOnly] = useState(false)
   const [certifiedOnly, setCertifiedOnly] = useState(false)
   const [favorites, setFavorites] = useState(readMarketplaceFavorites)
+  const installer = useMarketplaceInstaller(manager, snapshot, {
+    failed: copy.installFailed,
+    succeeded: copy.installSucceeded,
+  })
   const installed = useMemo(
-    () => new Set(snapshot.plugins.map(plugin => `${plugin.source}\0${plugin.id}`)),
+    () => new Map(snapshot.plugins.map(plugin => [`${plugin.source}\0${plugin.id}`, plugin])),
     [snapshot.plugins],
   )
   const results = useMemo(() =>
@@ -148,7 +165,29 @@ export function MarketplacePage(
           const href = result.plugin.homepage ?? result.plugin.source
           const favorite = favorites.has(result.plugin.identity)
           const trustLabels = marketplaceTrustLabels(result.plugin, snapshot.localization.locale)
-          const isInstalled = installed.has(`${result.plugin.source}\0${result.plugin.id}`)
+          const installedPlugin = installed.get(`${result.plugin.source}\0${result.plugin.id}`)
+          const installedVersion = installedPlugin?.package?.version
+          const unmanagedInstalled = installedPlugin !== undefined && installedVersion === undefined
+          const exactVersionInstalled = installedVersion === result.plugin.version
+          const installing = installer.installingIdentity === result.plugin.identity
+          const installDisabled = unmanagedInstalled || exactVersionInstalled || result.plugin.artifact === undefined
+            || !installer.available
+          const installLabel = installing
+            ? copy.cancelInstall
+            : exactVersionInstalled || unmanagedInstalled
+            ? copy.installed
+            : installedVersion === undefined
+            ? copy.install
+            : copy.update
+          const installDescription = installing
+            ? copy.installing
+            : exactVersionInstalled || unmanagedInstalled
+            ? copy.installed
+            : result.plugin.artifact === undefined
+            ? copy.artifactUnavailable
+            : installer.available
+            ? installLabel
+            : copy.installUnavailable
           return (
             <div
               className="cxr-marketplace-card"
@@ -170,7 +209,7 @@ export function MarketplacePage(
                 <span className="cxr-card-body">
                   <span className="cxr-marketplace-title-row">
                     <span className="cxr-card-title">{result.projection.name}</span>
-                    {isInstalled
+                    {installedPlugin !== undefined
                       ? <span className="cxr-badge" data-marketplace-installed="true">{copy.installed}</span>
                       : null}
                     <MarketplaceTrustBadges plugin={result.plugin} locale={snapshot.localization.locale} />
@@ -181,10 +220,16 @@ export function MarketplacePage(
               </button>
               <span className="cxr-marketplace-actions">
                 <IconButton
-                  icon="import-plugin"
-                  label={isInstalled ? copy.installed : copy.install}
-                  disabled
-                  description={isInstalled ? copy.installed : copy.installUnavailable}
+                  icon={installing ? 'close' : 'import-plugin'}
+                  label={installLabel}
+                  disabled={!installing && installDisabled}
+                  description={installDescription}
+                  aria-busy={installing}
+                  onClick={event => {
+                    event.stopPropagation()
+                    if (installing) installer.cancel()
+                    else void installer.run(result.plugin, result.projection.name)
+                  }}
                 />
                 <IconButton
                   icon={favorite ? 'favorite-active' : 'favorite'}

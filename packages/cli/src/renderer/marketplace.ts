@@ -80,6 +80,7 @@ const PLUGIN_SCHEMAS = Object.freeze({
   3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json',
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json',
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json',
+  6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v6.schema.json',
 })
 const FEED_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
@@ -87,6 +88,7 @@ const FEED_SCHEMAS = Object.freeze({
   3: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json',
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json',
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json',
+  6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v6.schema.json',
 })
 
 function record(value: unknown): Record<string, unknown> {
@@ -179,7 +181,7 @@ function parsePluginLocalizations(
 function parseFeedLocalizations(
   value: unknown,
   fallbackLocale: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
   label: string,
 ): Readonly<Record<string, MarketplaceFeedLocalization>> {
   if (value === undefined) return Object.freeze({})
@@ -218,6 +220,21 @@ function optionalHttpsUrl(value: unknown, label: string): string | undefined {
     throw new Error(`${label} 必须是无凭据 HTTPS URL`)
   }
   return url.href
+}
+
+function optionalMarketplaceIcon(value: unknown, schemaVersion: number, label: string): string | undefined {
+  if (value === undefined) return undefined
+  if (schemaVersion < 6 || typeof value !== 'string' || !value.startsWith('data:')) {
+    return optionalHttpsUrl(value, label)
+  }
+  const text = requiredString(value, label, 32_768)
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(text)
+  if (match === null) throw new Error(`${label} 必须是 HTTPS URL 或 PNG data URL`)
+  const payload = match[1]
+  if (payload === undefined || !payload.startsWith('iVBORw0KGgo')) {
+    throw new Error(`${label} 必须包含有效的 PNG base64 数据`)
+  }
+  return text
 }
 
 function parseArtifact(value: unknown, label: string): MarketplaceArtifact | undefined {
@@ -307,7 +324,10 @@ export function marketplacePluginIdentity(source: string, id: string): string {
 function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const plugin = record(value)
   const schemaVersion = plugin.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5) {
+  if (
+    schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
+    && schemaVersion !== 6
+  ) {
     throw new Error(`plugins[${index}].schemaVersion 不受支持`)
   }
   assertKeys(plugin, [
@@ -374,7 +394,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
     ? parsePluginLocalizations(plugin.localizations, fallbackLocale, authors.length, `plugins[${index}].localizations`)
     : Object.freeze({})
   const homepage = optionalHttpsUrl(plugin.homepage, `plugins[${index}].homepage`)
-  const icon = optionalHttpsUrl(plugin.icon, `plugins[${index}].icon`)
+  const icon = optionalMarketplaceIcon(plugin.icon, schemaVersion, `plugins[${index}].icon`)
   const manifest = optionalHttpsUrl(plugin.manifest, `plugins[${index}].manifest`)
   const artifact = schemaVersion >= 3 ? parseArtifact(plugin.artifact, `plugins[${index}].artifact`) : undefined
   const commerce = schemaVersion >= 4 ? parseCommerce(plugin.commerce, `plugins[${index}].commerce`) : undefined
@@ -402,7 +422,10 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
 export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedParseOptions): ParsedFeed {
   const feed = record(value)
   const schemaVersion = feed.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5) {
+  if (
+    schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
+    && schemaVersion !== 6
+  ) {
     throw new Error('schemaVersion 不受支持')
   }
   assertKeys(feed, [

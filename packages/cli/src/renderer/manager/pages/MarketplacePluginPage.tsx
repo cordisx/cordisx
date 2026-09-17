@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { projectPermissionCapabilityName } from '../../../permission-locales.js'
 import { type MarketplaceModel, projectMarketplacePlugin } from '../../marketplace.js'
-import type { ManagerSnapshot } from '../../manager.js'
+import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { SearchField } from '../../host-ui/SearchField.js'
@@ -10,6 +10,7 @@ import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { MarkdownDocument } from '../components/MarkdownDocument.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
+import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 
@@ -20,11 +21,19 @@ const COPY = {
     tabs: { readme: 'README', permissions: '所需权限', authorsSource: '作者与来源' },
     installed: '已安装',
     install: '安装',
+    update: '更新',
     installedDescription: '当前版本已经安装',
     installUnavailable: '当前 Host 尚未发布商店安装服务',
+    artifactUnavailable: '该商店记录没有可安装制品',
+    installing: '正在安装',
+    cancelInstall: '取消安装',
+    installFailed: '插件安装失败',
+    installSucceeded: '插件安装完成',
     favorite: '收藏',
     unfavorite: '取消收藏',
     noReadme: '该商店记录没有提供 README；安装后可在插件详情中查看随包文档。',
+    loadingReadme: '正在读取 README…',
+    readmeUnavailable: 'README 暂时无法读取',
     noPermissions: '该插件未声明平台权限',
     permissionsUnavailable: '该商店记录尚未提供可预览的权限清单；安装前 Host 会显示最终权限授权步骤。',
     searchPermissions: '搜索权限、申请理由或类型…',
@@ -59,11 +68,19 @@ const COPY = {
     tabs: { readme: 'README', permissions: 'Permissions', authorsSource: 'Authors & source' },
     installed: 'Installed',
     install: 'Install',
+    update: 'Update',
     installedDescription: 'This version is already installed',
     installUnavailable: 'This Host has not published Marketplace installation yet',
+    artifactUnavailable: 'This Marketplace record has no installable artifact',
+    installing: 'Installing',
+    cancelInstall: 'Cancel installation',
+    installFailed: 'Plugin installation failed',
+    installSucceeded: 'Plugin installation complete',
     favorite: 'Favorite',
     unfavorite: 'Remove favorite',
     noReadme: 'This catalog record does not provide a README. Packaged documentation appears after installation.',
+    loadingReadme: 'Loading README…',
+    readmeUnavailable: 'README is temporarily unavailable',
     noPermissions: 'This plugin declares no platform permissions',
     permissionsUnavailable:
       'This catalog record does not expose a permission preview. The Host will show the final authorization step before installation.',
@@ -98,6 +115,8 @@ const COPY = {
   },
 } as const
 
+const marketplaceReadmeCache = new Map<string, string | null>()
+
 function tabs(locale: 'zh-CN' | 'en'): readonly ManagerTab<MarketplaceDetailTab>[] {
   const copy = COPY[locale].tabs
   return [
@@ -107,7 +126,8 @@ function tabs(locale: 'zh-CN' | 'en'): readonly ManagerTab<MarketplaceDetailTab>
   ]
 }
 
-export function MarketplacePluginPage({ marketplace, snapshot: managerSnapshot, router }: {
+export function MarketplacePluginPage({ manager, marketplace, snapshot: managerSnapshot, router }: {
+  readonly manager: ManagerModel
   readonly marketplace: MarketplaceModel
   readonly snapshot: ManagerSnapshot
   readonly router: ManagerRouter
@@ -115,20 +135,57 @@ export function MarketplacePluginPage({ marketplace, snapshot: managerSnapshot, 
   const [tab, setTab] = useState<MarketplaceDetailTab>('readme')
   const [permissionQuery, setPermissionQuery] = useState('')
   const [favorites, setFavorites] = useState(readMarketplaceFavorites)
+  const [marketplaceReadme, setMarketplaceReadme] = useState<string | null | undefined>(undefined)
+  const [readmeError, setReadmeError] = useState<string | undefined>(undefined)
   const route = router.route
   const snapshot = useMarketplaceSnapshot(marketplace)
   const identity = route.kind === 'marketplace-plugin' ? route.identity : undefined
+  const plugin = identity === undefined ? undefined : snapshot.plugins.find(item => item.identity === identity)
+  const locale = productLocale(managerSnapshot.localization.locale)
+  const copy = COPY[locale]
+  const installer = useMarketplaceInstaller(manager, managerSnapshot, {
+    failed: copy.installFailed,
+    succeeded: copy.installSucceeded,
+  })
   useEffect(() => {
     setTab('readme')
     setPermissionQuery('')
   }, [identity])
+  useEffect(() => {
+    setReadmeError(undefined)
+    if (plugin === undefined || plugin.artifact === undefined || manager.previewMarketplaceArtifact === undefined) {
+      setMarketplaceReadme(null)
+      return
+    }
+    const cacheKey = `${plugin.identity}\0${plugin.version}\0${plugin.artifact.integrity}`
+    const cached = marketplaceReadmeCache.get(cacheKey)
+    if (cached !== undefined) {
+      setMarketplaceReadme(cached)
+      return
+    }
+    const controller = new AbortController()
+    setMarketplaceReadme(undefined)
+    void manager.previewMarketplaceArtifact({
+      pluginId: plugin.id,
+      version: plugin.version,
+      canonicalSource: plugin.source,
+      artifact: plugin.artifact,
+    }, controller.signal).then(preview => {
+      const readme = preview.readme ?? null
+      marketplaceReadmeCache.set(cacheKey, readme)
+      setMarketplaceReadme(readme)
+    }).catch(error => {
+      if (controller.signal.aborted) return
+      setMarketplaceReadme(null)
+      setReadmeError(error instanceof Error ? error.message : String(error))
+    })
+    return () => controller.abort()
+  }, [manager, plugin])
   if (identity === undefined) return null
-  const plugin = snapshot.plugins.find(item => item.identity === identity)
-  const locale = productLocale(managerSnapshot.localization.locale)
-  const copy = COPY[locale]
   if (plugin === undefined) return <div className="cxr-empty">{copy.missing}</div>
   const projection = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
-  const installed = managerSnapshot.plugins.find(item => item.id === plugin.id)
+  const installed = managerSnapshot.plugins.find(item => item.id === plugin.id && item.source === plugin.source)
+  const readme = installed?.readme ?? marketplaceReadme
   const permissions = installed === undefined
     ? []
     : managerSnapshot.permissions.filter(item =>
@@ -170,6 +227,19 @@ export function MarketplacePluginPage({ marketplace, snapshot: managerSnapshot, 
   const certifiedSummary = plugin.certification === undefined ? undefined : copy.certifiedSummary
     .replace('{policy}', `${plugin.certification.reviewPolicy.id} ${plugin.certification.reviewPolicy.version}`)
     .replace('{version}', plugin.version)
+  const installedVersion = installed?.package?.version
+  const unmanagedInstalled = installed !== undefined && installedVersion === undefined
+  const exactVersionInstalled = installedVersion === plugin.version
+  const installDisabled = unmanagedInstalled || exactVersionInstalled || plugin.artifact === undefined
+    || !installer.available
+  const installDescription = unmanagedInstalled || exactVersionInstalled
+    ? copy.installedDescription
+    : plugin.artifact === undefined
+    ? copy.artifactUnavailable
+    : installer.available
+    ? copy.install
+    : copy.installUnavailable
+  const installing = installer.installingIdentity === plugin.identity
 
   return (
     <section className="cxr-page" data-marketplace-plugin-detail={plugin.id}>
@@ -196,10 +266,18 @@ export function MarketplacePluginPage({ marketplace, snapshot: managerSnapshot, 
         </span>
         <span className="cxr-plugin-identity-actions">
           <IconButton
-            icon="import-plugin"
-            label={installed === undefined ? copy.install : copy.installed}
-            description={installed === undefined ? copy.installUnavailable : copy.installedDescription}
-            disabled
+            icon={installing ? 'close' : 'import-plugin'}
+            label={installing
+              ? copy.cancelInstall
+              : exactVersionInstalled
+              ? copy.installed
+              : installedVersion === undefined
+              ? copy.install
+              : copy.update}
+            description={installing ? copy.installing : installDescription}
+            disabled={!installing && installDisabled}
+            aria-busy={installing}
+            onClick={() => installing ? installer.cancel() : void installer.run(plugin, projection.name)}
           />
           <IconButton
             icon={favorite ? 'favorite-active' : 'favorite'}
@@ -254,9 +332,15 @@ export function MarketplacePluginPage({ marketplace, snapshot: managerSnapshot, 
       <ManagerTabs label="插件商店详情" tabs={tabs(locale)} value={tab} onChange={setTab} />
       {tab === 'readme' && (
         <div role="tabpanel" aria-label={copy.tabs.readme}>
-          {installed?.readme === undefined
-            ? <div className="cxr-empty">{copy.noReadme}</div>
-            : <MarkdownDocument source={installed.readme} />}
+          {readme === undefined
+            ? <div className="cxr-empty" aria-busy="true">{copy.loadingReadme}</div>
+            : readme === null
+            ? (
+              <div className="cxr-empty">
+                {readmeError === undefined ? copy.noReadme : `${copy.readmeUnavailable}：${readmeError}`}
+              </div>
+            )
+            : <MarkdownDocument source={readme} />}
         </div>
       )}
       {tab === 'permissions' && (

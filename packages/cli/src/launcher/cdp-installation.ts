@@ -6,6 +6,7 @@ import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
 import { createDocumentInstallationState, installDocumentBootstrap } from './cdp-installation-bootstrap.js'
 import * as support from './cdp-installation-support.js'
+import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 
 export async function install(
@@ -69,6 +70,7 @@ export async function install(
   const managedServiceUIController = managedServiceUI === undefined ? undefined : new AbortController()
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
   let removeBindingListener = (): void => {}
+  let removeMarketplaceArtifactBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
   let removeConfigBindingListener = (): void => {}
@@ -129,6 +131,9 @@ export async function install(
       )
     }
     await session.send('Runtime.addBinding', { name: support.MARKETPLACE_BINDING })
+    if (lifecycle !== undefined) {
+      await session.send('Runtime.addBinding', { name: support.MARKETPLACE_ARTIFACT_BINDING })
+    }
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: support.PROVIDER_BINDING })
     if (history !== undefined) await session.send('Runtime.addBinding', { name: support.AGENT_HISTORY_BINDING })
     if (config !== undefined) await session.send('Runtime.addBinding', { name: support.CONFIG_BINDING })
@@ -181,6 +186,14 @@ export async function install(
         }
       })()
     })
+    if (lifecycle !== undefined) {
+      removeMarketplaceArtifactBindingListener = installMarketplaceArtifactBinding({
+        session,
+        handler: lifecycle.handler,
+        gate: lifecycleRequests,
+        signal: marketplaceController.signal,
+      })
+    }
     let activeProviderRequests = 0
     if (provider !== undefined) {
       removeProviderBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -841,7 +854,10 @@ export async function install(
       documentSource,
       session,
       marketplaceController,
-      removeBindingListener,
+      removeBindingListener: () => {
+        removeBindingListener()
+        removeMarketplaceArtifactBindingListener()
+      },
       ...(providerController === undefined ? {} : { providerController, removeProviderBindingListener }),
       providerBindingInstalled: provider !== undefined,
       ...(historyController === undefined ? {} : { historyController, removeHistoryBindingListener }),
@@ -908,6 +924,7 @@ export async function install(
     publisherGrantController?.abort()
     managedServiceUIController?.abort()
     removeBindingListener()
+    removeMarketplaceArtifactBindingListener()
     removeProviderBindingListener()
     removeHistoryBindingListener()
     removeConfigBindingListener()

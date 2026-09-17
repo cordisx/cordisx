@@ -26,6 +26,7 @@ import {
   MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
   parseManagedServiceUIBindingRequest,
 } from './managed-service-ui-rpc.js'
+import { MARKETPLACE_ARTIFACT_BINDING } from './marketplace-artifact-cdp.js'
 
 export type { ProviderFleet } from '../providers/fleet.js'
 export type { CdpTarget } from './cdp-session.js'
@@ -65,6 +66,13 @@ export {
 } from './icon-theme-rpc.js'
 export type { LauncherMarketplaceCertifiedAuthority } from './marketplace-certified-authority.js'
 export { fetchMarketplaceFeed } from './marketplace.js'
+export { MARKETPLACE_ARTIFACT_BINDING, MARKETPLACE_ARTIFACT_RECEIVER } from './marketplace-artifact-cdp.js'
+export {
+  inspectMarketplaceArtifactPackage,
+  type MarketplaceArtifactBindingRequest,
+  parseMarketplaceArtifactBindingRequest,
+  previewMarketplaceArtifactPackage,
+} from './marketplace-artifact.js'
 export {
   MAX_OWNER_DOCUMENT_REQUEST_BYTES,
   MAX_OWNER_DOCUMENT_REQUESTS,
@@ -480,6 +488,7 @@ export async function waitForProductionBootstrap(
 export function installedBindingNames(installed: InstalledScript): readonly string[] {
   return [
     MARKETPLACE_BINDING,
+    ...(installed.lifecycleBindingInstalled ? [MARKETPLACE_ARTIFACT_BINDING] : []),
     ...(installed.providerBindingInstalled ? [PROVIDER_BINDING] : []),
     ...(installed.historyBindingInstalled ? [AGENT_HISTORY_BINDING] : []),
     ...(installed.configBindingInstalled ? [CONFIG_BINDING] : []),
@@ -826,6 +835,9 @@ export async function uninstall(
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
       evaluateRuntimeOperation(installed.session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
       installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
+      ...(installed.lifecycleBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_ARTIFACT_BINDING })]
+        : []),
       ...(installed.providerBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PROVIDER_BINDING })]
         : []),

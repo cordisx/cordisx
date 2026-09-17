@@ -47,6 +47,10 @@ import type {
   ConfigRendererMountHandle,
   ManagerPluginConfigSnapshot,
 } from './configuration.js'
+import type {
+  MarketplaceArtifactInspectionRequest,
+  MarketplaceArtifactPreview,
+} from './marketplace-artifact-binding.js'
 import type { ControlledSurfaceGroupChoice, ControlledSurfaceManagerSnapshot } from './controlled-surfaces.js'
 import type { ExtensionPointRuntimeSnapshot } from './extension-points.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
@@ -265,6 +269,16 @@ export interface ManagerModel {
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
+  /** Host-private artifact transfer; the renderer never receives tarball bytes or temporary paths. */
+  inspectMarketplaceArtifact?(
+    request: MarketplaceArtifactInspectionRequest,
+    signal: AbortSignal,
+  ): Promise<CordisXPluginLifecycleResultV1>
+  /** Host-private artifact metadata preview; it never creates an install candidate. */
+  previewMarketplaceArtifact?(
+    request: MarketplaceArtifactInspectionRequest,
+    signal: AbortSignal,
+  ): Promise<MarketplaceArtifactPreview>
   requestPluginBundleLifecycle?(
     operation: CordisXPluginBundleLifecycleOperationV1,
   ): Promise<CordisXPluginBundleLifecycleResultV1>

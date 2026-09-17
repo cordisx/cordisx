@@ -36,6 +36,10 @@ const PLUGIN_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json'
 const FEED_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json'
+const PLUGIN_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v6.schema.json'
+const FEED_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v6.schema.json'
 const OFFICIAL_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
 const CERTIFICATION_SCHEMA =
@@ -241,6 +245,16 @@ describe('marketplace feed', () => {
     expect(() => normalizeMarketplaceSource('https://user@example.com/feed.json')).toThrow('无凭据')
   })
 
+  it('loads a trust-bearing feed from a local HTTP development source without trusting it', () => {
+    const parsed = parseMarketplaceFeed(trustedFeed(), {
+      feedUrl: 'http://127.0.0.1:64510/marketplace.json',
+      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+    })
+
+    expect(parsed.plugins).toHaveLength(1)
+    expect(parsed.trust?.trusted).toBe(false)
+  })
+
   it('accepts v2 localized discovery metadata and rejects identity-shifting locale data', () => {
     const parsed = parseMarketplaceFeed(localizedFeed())
     expect(parsed).toMatchObject({ schemaVersion: 2, fallbackLocale: 'en', name: 'CordisX Marketplace' })
@@ -400,6 +414,50 @@ describe('marketplace feed', () => {
       }))
       model.dispose()
     })
+  })
+
+  it('accepts self-contained PNG icons in version 6 feeds', () => {
+    const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=='
+    const value = {
+      $schema: FEED_SCHEMA_V6,
+      schemaVersion: 6,
+      generatedAt: '2026-09-17T00:00:00Z',
+      trust: {
+        authority: 'cordisx.marketplace.codeowners/v1',
+        root: 'https://catalog.example/feed.json',
+        grantModel: 'protected-merge-chain-v1',
+        cryptographicAttestation: 'unsupported',
+      },
+      fallbackLocale: 'en',
+      name: 'Inline Marketplace',
+      description: 'Marketplace with self-contained artwork.',
+      homepage: 'https://catalog.example/',
+      official: [],
+      certifications: [],
+      plugins: [{
+        $schema: PLUGIN_SCHEMA_V6,
+        schemaVersion: 6,
+        id: 'inline-icon',
+        fallbackLocale: 'en',
+        name: 'Inline Icon',
+        description: 'A plugin with inline artwork.',
+        icon,
+        version: '1.0.0',
+        source: 'https://github.com/example/inline-icon',
+        license: 'MIT',
+        compatibility: { cordisx: '^0.1.0' },
+        authors: [{ name: 'Example' }],
+      }],
+    }
+
+    expect(
+      parseMarketplaceFeed(value, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }).plugins[0]
+        ?.icon,
+    ).toBe(icon)
+    const invalid = structuredClone(value)
+    ;(invalid.plugins[0] as Record<string, unknown>).icon = 'data:image/svg+xml;base64,PHN2Zy8+'
+    expect(() => parseMarketplaceFeed(invalid, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }))
+      .toThrow('必须是 HTTPS URL 或 PNG data URL')
   })
 })
 

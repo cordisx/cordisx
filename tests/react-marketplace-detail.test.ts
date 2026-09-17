@@ -17,20 +17,35 @@ describe('React Marketplace plugin detail', () => {
   })
 
   it('uses an installed-style identity header with honest install and persistent favorite actions', async () => {
-    const [page, list, app] = await Promise.all([
+    const [page, list, app, installer] = await Promise.all([
       read('packages/cli/src/renderer/manager/pages/MarketplacePluginPage.tsx'),
       read('packages/cli/src/renderer/manager/pages/MarketplacePage.tsx'),
       read('packages/cli/src/renderer/manager/ManagerApp.tsx'),
+      read('packages/cli/src/renderer/manager/model/use-marketplace-installer.ts'),
     ])
     expect(page).toContain('cxr-plugin-identity cxr-marketplace-identity')
-    expect(page).toContain('icon="import-plugin"')
     expect(page).toContain("favorite ? 'favorite-active' : 'favorite'")
     expect(page).toContain('writeMarketplaceFavorites(next)')
-    expect(page).toContain('installUnavailable')
+    expect(page).toContain('useMarketplaceInstaller')
+    expect(page).toContain("icon={installing ? 'close' : 'import-plugin'}")
+    expect(page).toContain('const installedVersion = installed?.package?.version')
+    expect(page).toContain('item.id === plugin.id && item.source === plugin.source')
+    expect(page).toContain('const unmanagedInstalled = installed !== undefined && installedVersion === undefined')
+    expect(page).toContain('const installDisabled = unmanagedInstalled || exactVersionInstalled')
+    expect(page).toContain(': installedVersion === undefined')
+    expect(page).toContain(': copy.update}')
+    expect(page).toContain('disabled={!installing && installDisabled}')
+    expect(page).toContain('plugin.artifact === undefined')
     expect(page).not.toContain('<Button tag="a"')
     expect(list).toContain('readMarketplaceFavorites')
     expect(list).toContain('writeMarketplaceFavorites(next)')
-    expect(app).toContain('<MarketplacePluginPage marketplace={marketplace} snapshot={snapshot} router={route} />')
+    expect(list).toContain('useMarketplaceInstaller')
+    expect(list).toContain('void installer.run(result.plugin, result.projection.name)')
+    expect(app).toContain(
+      '<MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} />',
+    )
+    expect(installer).toContain('item.identity.source === planV4.identity.source')
+    expect(installer).toContain('item.identity.source === planV2.identity.source')
   })
 
   it('projects README, required permissions, and accessible source links as detail tabs', async () => {
@@ -39,7 +54,9 @@ describe('React Marketplace plugin detail', () => {
       read('packages/cli/src/renderer/manager/styles.ts'),
     ])
     expect(page).toContain("type MarketplaceDetailTab = 'readme' | 'permissions' | 'authors-source'")
-    expect(page).toContain('<MarkdownDocument source={installed.readme} />')
+    expect(page).toContain('manager.previewMarketplaceArtifact')
+    expect(page).toContain('const readme = installed?.readme ?? marketplaceReadme')
+    expect(page).toContain('<MarkdownDocument source={readme} />')
     expect(page).toContain('managerSnapshot.permissions.filter')
     expect(page).toContain('searchPermissionsLabel')
     expect(page).toContain('visiblePermissions.map')
