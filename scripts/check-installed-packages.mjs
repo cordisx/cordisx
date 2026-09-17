@@ -473,7 +473,7 @@ createElement(AgentAvatar, props)
   )
   if (
     installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
-    || installedSchemasteryUiManifest.version !== '0.1.0-beta.4'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.5'
   ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
