@@ -172,6 +172,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
+  let rendererComposition: RendererComposition | undefined
   try {
     pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
     const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
@@ -403,7 +404,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const managedServiceActivation = managedServiceLifecycleRuntime.nativeActivation()
     const managedServiceUICapabilities = managedServiceLifecycleRuntime.capabilities()
     const managedServiceUI = managedServiceLifecycleRuntime.managedServiceUI
-    const rendererComposition = await buildRendererComposition(composition, stdout, {
+    rendererComposition = await buildRendererComposition(composition, stdout, {
       appId,
       profileId: selection.profileId,
       ...(selection.profile.iconTheme === undefined ? {} : { iconThemePreference: selection.profile.iconTheme }),
@@ -430,6 +431,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
     })
+    const activeRendererComposition = rendererComposition
     const initialConfiguredTopology = configuredPluginTopology(configuredComposition)
     const loadCurrentProductionProjection = async () => {
       const active = await lifecycleStore.loadActive()
@@ -493,7 +495,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ) => {
       const before = await loadCurrentProductionProjection()
       assertProductionGraphBootstrapSnapshot(expectedActive, expectedRegistryEpoch, before)
-      const rebuilt = await rendererComposition.rebuild(
+      const rebuilt = await activeRendererComposition.rebuild(
         before.currentComposition,
         before.active,
         expectedRegistryEpoch,
@@ -584,7 +586,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: entityBridge })
     lifecycleRuntime.setOwnerDocumentAuthority({ leases: documentLeases, issue: ownerDocuments.issue })
     lifecycleRuntime.setEntityAuthority(selection.profileId, entityAuthority)
-    await runtime.internalObserveOwnerDocuments?.({ source: rendererComposition.source, handler: ownerDocuments })
+    await runtime.internalObserveOwnerDocuments?.({
+      bootstrapSource: rendererComposition.source,
+      source: rendererComposition.authoritySource(),
+      handler: ownerDocuments,
+    })
     const permissionPersistence = rendererComposition.permissionBridgeToken === undefined ? undefined : {
       configPath,
       profileId: selection.profileId,
@@ -975,7 +981,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       profileLeaseHandedOff = profileLease !== undefined
       await runHost(runHostInput)
     } finally {
-      await rendererComposition.close()
       ownerDocuments.walletSpend?.dispose()
       await ownerDocuments.http.dispose()
       if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release()
@@ -984,6 +989,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
     }
   } finally {
+    await rendererComposition?.close().catch(() => undefined)
     await supervisorRuntime.close()
     await nativeSubmission?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)

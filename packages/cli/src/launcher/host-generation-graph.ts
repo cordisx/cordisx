@@ -32,9 +32,61 @@ export interface HostGenerationGraph {
   readonly entryUrl: string
   readonly manifestUrl: string
   readonly bootloader: string
+  /** Materialize exact served JavaScript only for repository integration audits. */
+  readonly authoritySource: () => string
   readonly eagerBytes: number
   readonly files: readonly { readonly path: string; readonly bytes: number }[]
   close(): Promise<void>
+}
+
+export interface HostGenerationGraphSource {
+  readonly source: string
+  readonly authoritySource: () => string
+}
+
+export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
+  if (attach && hasLoopbackGraph) {
+    throw new Error('production browser graphs require a launcher-owned native Host; --attach is unsupported')
+  }
+}
+
+/** Retain every graph admitted by one launch and roll back only graphs from a failed build transaction. */
+export class HostGenerationGraphOwner {
+  readonly #graphs: HostGenerationGraph[] = []
+  #closeTask: Promise<void> | undefined
+  #closed = false
+
+  async build(config: CordisXConfig, options: BuildRendererBundleOptions): Promise<HostGenerationGraphSource> {
+    if (this.#closed) throw new Error('Host generation graph owner is closed')
+    const graph = await buildHostGenerationGraph(config, options)
+    if (this.#closed) {
+      await graph.close()
+      throw new Error('Host generation graph owner closed during build')
+    }
+    this.#graphs.push(graph)
+    return { source: graph.bootloader, authoritySource: graph.authoritySource }
+  }
+
+  async transaction<Result>(task: () => Promise<Result>): Promise<Result> {
+    const checkpoint = this.#graphs.length
+    try {
+      return await task()
+    } catch (error) {
+      await this.#closeFrom(checkpoint)
+      throw error
+    }
+  }
+
+  close(): Promise<void> {
+    this.#closed = true
+    this.#closeTask ??= this.#closeFrom(0)
+    return this.#closeTask
+  }
+
+  async #closeFrom(index: number): Promise<void> {
+    const graphs = this.#graphs.splice(index)
+    await Promise.allSettled(graphs.map(graph => graph.close()))
+  }
 }
 
 function digest(bytes: string | Uint8Array): string {
@@ -193,6 +245,11 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
     response.setHeader('content-length', String(file.body.byteLength))
     response.end(request.method === 'HEAD' ? undefined : file.body)
   })
+  const close = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+  }
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
@@ -206,22 +263,24 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
   };const p=fetch(m).then(r=>{if(!r.ok)throw Error('CordisX Host manifest unavailable');return r.json()}).then(x=>import(${
     JSON.stringify(origin)
   }+x.entry)).then(x=>x.runtime);globalThis.__cordisxCompositionBoot=p;void p.catch(e=>console.error('[cordisx] Host graph boot failed',e))})()`
-  if (Buffer.byteLength(bootloader) >= MAX_BOOTLOADER_BYTES) throw new Error('Host graph bootloader exceeds 16 KiB')
+  if (Buffer.byteLength(bootloader) >= MAX_BOOTLOADER_BYTES) {
+    await close()
+    throw new Error('Host graph bootloader exceeds 16 KiB')
+  }
   return {
     entryUrl: `${origin}/${entry.fileName}`,
     manifestUrl: `${origin}/manifest.json`,
     bootloader,
+    authoritySource: () =>
+      [...files.entries()]
+        .filter(([name]) => name.endsWith('.js'))
+        .map(([, file]) => new TextDecoder().decode(file.body))
+        .join('\n'),
     eagerBytes: [...files.entries()].filter(([name]) => name.endsWith('.js')).reduce(
       (total, [, file]) => total + file.body.byteLength,
       0,
     ),
     files: [...files.entries()].map(([file, value]) => ({ path: file, bytes: value.body.byteLength })),
-    async close() {
-      if (closed) return
-      closed = true
-      await new Promise<void>((resolve, reject) =>
-        server.close(error => error === undefined ? resolve() : reject(error))
-      )
-    },
+    close,
   }
 }

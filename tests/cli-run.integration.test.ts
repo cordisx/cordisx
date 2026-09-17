@@ -12,8 +12,10 @@ import {
 } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { createServer } from 'node:net'
 import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
@@ -25,6 +27,7 @@ import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
+const execFileAsync = promisify(execFile)
 
 async function mkdtemp(prefix: string): Promise<string> {
   const root = await createTemporaryDirectory(prefix)
@@ -168,7 +171,7 @@ describe('functional CordisX CLI', () => {
       ...runtime,
       internalObserveOwnerDocuments: async ({ source, handler }) => {
         const token = source.match(
-          /ownerDocumentBindings\s*:\s*\[\{[^}]*?token\s*:\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"/,
+          /ownerDocumentBindings\s*:\s*\[\{[^}]*?token\s*:\s*[`'"]([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)[`'"]/,
         )?.[1]
         if (token === undefined) throw new Error('configured plugin binding is missing')
         const moduleGeneration =
@@ -205,6 +208,32 @@ describe('functional CordisX CLI', () => {
     })
     expect(result).toMatchObject({ status: 'accepted', snapshot: { revision: 1 } })
   }, 30_000)
+
+  it('lets a production dry-run process exit after closing its launch-scoped Host graphs', async () => {
+    const source = `
+      import { mkdtemp, rm } from 'node:fs/promises';
+      import os from 'node:os';
+      import path from 'node:path';
+      import { runCordisXCli } from './packages/cli/src/cli/run.ts';
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-graph-exit-'));
+      try {
+        const runtime = { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: () => undefined };
+        await runCordisXCli(['setup'], runtime);
+        await runCordisXCli(['codex', 'work', '--dry-run', '--executable', process.execPath], runtime);
+        console.log('dry-run-exited');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    `
+    const result = await execFileAsync(process.execPath, [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '--eval',
+      source,
+    ], { cwd: process.cwd(), timeout: 30_000 })
+    expect(result.stdout).toContain('dry-run-exited')
+  }, 35_000)
 
   it('shares setup with first launch, ignores cwd composition, and reuses an independent shared profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))

@@ -17,7 +17,8 @@ import {
   resolveHomeConfigPath,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
-import { buildHostGenerationGraph } from '../launcher/host-generation-graph.js'
+import { HostGenerationGraphOwner, type HostGenerationGraphSource } from '../launcher/host-generation-graph.js'
+export { assertProductionGraphLaunchOwnership } from '../launcher/host-generation-graph.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
 import { localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { equivalentPluginActivation } from '../launcher/plugin-activation.js'
@@ -169,6 +170,7 @@ export interface CordisXCliRuntime {
   readonly internalBuildRendererBundle?: typeof buildRendererBundle
   /** Repository-only proof that the production composition and authority agree. */
   readonly internalObserveOwnerDocuments?: (input: {
+    readonly bootstrapSource: string
     readonly source: string
     readonly handler: OwnerDocumentBridgeHandler
   }) => void | Promise<void>
@@ -239,6 +241,8 @@ export function providerConfigs(config: CordisXConfig, environment: NodeJS.Proce
 
 export interface RendererComposition {
   readonly source: string
+  /** Exact production graph source used only by repository authority integration probes. */
+  readonly authoritySource: () => string
   readonly newDocumentSource?: string
   readonly hasLoopbackGraph: boolean
   readonly providerBridgeToken?: string
@@ -272,12 +276,6 @@ export interface RendererComposition {
   ) => Promise<Readonly<{ source: string; newDocumentSource?: string }>>
   /** Releases every launch-scoped Host graph after the launcher drains CDP. */
   close(): Promise<void>
-}
-
-export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
-  if (attach && hasLoopbackGraph) {
-    throw new Error('production browser graphs require a launcher-owned native Host; --attach is unsupported')
-  }
 }
 
 export type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
@@ -394,28 +392,32 @@ export async function buildRendererComposition(
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
   }
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
-  const hostGraphs: { close(): Promise<void> }[] = []
+  const hostGraphs = new HostGenerationGraphOwner()
   const buildProductionSource = async (
     nextConfig: CordisXConfig,
     nextOptions: BuildRendererBundleOptions,
-  ): Promise<string> => {
+  ): Promise<HostGenerationGraphSource> => {
     if (
       options.productionGraph !== true || options.developmentBuild !== undefined
       || options.internalBuildRendererBundle !== undefined
     ) {
-      return await buildBundle(nextConfig, nextOptions)
+      const source = await buildBundle(nextConfig, nextOptions)
+      return { source, authoritySource: () => source }
     }
-    const graph = await buildHostGenerationGraph(nextConfig, nextOptions)
-    hostGraphs.push(graph)
-    return graph.bootloader
+    return await hostGraphs.build(nextConfig, nextOptions)
   }
-  const source = await buildProductionSource(config, bundleOptions)
-  const newDocumentSource = options.certifiedPermissionChannelToken === undefined
-    ? undefined
-    : await buildProductionSource(config, {
-      ...bundleOptions,
-      certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
-    })
+  const { built, newDocumentBuild } = await hostGraphs.transaction(async () => {
+    const built = await buildProductionSource(config, bundleOptions)
+    const newDocumentBuild = options.certifiedPermissionChannelToken === undefined
+      ? undefined
+      : await buildProductionSource(config, {
+        ...bundleOptions,
+        certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+      })
+    return { built, newDocumentBuild }
+  })
+  const source = built.source
+  const newDocumentSource = newDocumentBuild?.source
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
   const hasLoopbackGraph = options.productionGraph === true && options.developmentBuild === undefined
       && options.internalBuildRendererBundle === undefined
@@ -427,6 +429,7 @@ export async function buildRendererComposition(
   )
   return {
     source,
+    authoritySource: built.authoritySource,
     ...(newDocumentSource === undefined ? {} : { newDocumentSource }),
     hasLoopbackGraph,
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
@@ -474,20 +477,23 @@ export async function buildRendererComposition(
         pluginActivation,
         initialRegistryEpoch,
       }
-      const rebuiltSource = await buildProductionSource(nextConfig, rebuildOptions)
-      const rebuiltNewDocumentSource = options.certifiedPermissionChannelToken === undefined
-        ? undefined
-        : await buildProductionSource(nextConfig, {
-          ...rebuildOptions,
-          certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
-        })
+      const { rebuilt, rebuiltNewDocument } = await hostGraphs.transaction(async () => {
+        const rebuilt = await buildProductionSource(nextConfig, rebuildOptions)
+        const rebuiltNewDocument = options.certifiedPermissionChannelToken === undefined
+          ? undefined
+          : await buildProductionSource(nextConfig, {
+            ...rebuildOptions,
+            certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+          })
+        return { rebuilt, rebuiltNewDocument }
+      })
       return {
-        source: rebuiltSource,
-        ...(rebuiltNewDocumentSource === undefined ? {} : { newDocumentSource: rebuiltNewDocumentSource }),
+        source: rebuilt.source,
+        ...(rebuiltNewDocument === undefined ? {} : { newDocumentSource: rebuiltNewDocument.source }),
       }
     },
     async close() {
-      await Promise.allSettled(hostGraphs.map(graph => graph.close()))
+      await hostGraphs.close()
     },
   }
 }

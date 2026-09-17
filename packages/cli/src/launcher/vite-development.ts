@@ -26,7 +26,6 @@ import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincip
 import {
   type NativeVitePluginGeneration,
   type NativeVitePluginGenerationHandler,
-  type NativeVitePluginGenerationTransaction,
 } from './vite-development-generation.js'
 export { createNativeViteEntityGenerationHandler } from './vite-development-generation.js'
 export type {
@@ -40,10 +39,14 @@ import {
   SHARED_MODULES,
   SHARED_REACT_INTEROP_LEAVES,
   validateNativeVitePlugin,
-  VITE_CLIENT_DISPOSER_SOURCE,
 } from './vite-development-graph.js'
 import { NativeViteSourceMapStore } from './vite-development-source-maps.js'
-import { installNativeViteHostManifest } from './vite-development-manifest.js'
+import {
+  configureNativeViteServer,
+  type NativeViteGenerationTransactionRecord,
+  nativeViteHotPayload,
+} from './vite-development-server-adapter.js'
+export { nativeViteHotPayload } from './vite-development-server-adapter.js'
 
 const ENTRY = 'virtual:cordisx-native-entry'
 const BOOT = 'virtual:cordisx-native-boot'
@@ -94,17 +97,6 @@ interface DevelopmentGeneration {
   readonly watchFiles: readonly string[]
 }
 
-interface ReloadPluginRequest {
-  readonly pluginId?: unknown
-  readonly requestId?: unknown
-}
-
-interface GenerationTransactionRequest extends ReloadPluginRequest {
-  readonly action?: unknown
-  readonly moduleGeneration?: unknown
-  readonly transactionId?: unknown
-}
-
 export interface NativeViteServer {
   readonly url: string
   readonly cacheDir: string
@@ -119,13 +111,6 @@ export interface NativeViteServerOptions {
   readonly cacheRoot?: string
   /** Crawl the full Host and plugin entries before opening the native window. */
   readonly prebundleHostDependencies?: boolean
-}
-
-export function nativeViteHotPayload(payload: unknown, timestamp = Date.now()): unknown {
-  if (typeof payload !== 'object' || payload === null || !('type' in payload) || payload.type !== 'full-reload') {
-    return payload
-  }
-  return { type: 'custom', event: 'cordisx:restart-host', data: { timestamp } }
 }
 
 async function ensurePrivateCacheDirectory(directory: string): Promise<void> {
@@ -205,12 +190,7 @@ export async function startNativeViteServer(
   const generations = new Map<string, DevelopmentGeneration>()
   const pendingGenerations = new Map<string, Map<string, DevelopmentGeneration>>()
   let generationHandler: NativeVitePluginGenerationHandler | undefined
-  const generationTransactions = new Map<string, {
-    readonly handle: NativeVitePluginGenerationTransaction
-    readonly timeout: ReturnType<typeof setTimeout>
-    readonly pluginId: string
-    readonly moduleGeneration: string
-  }>()
+  const generationTransactions = new Map<string, NativeViteGenerationTransactionRecord>()
   const sourceMaps = new NativeViteSourceMapStore()
   const fileHashes = new Map<string, string>()
 
@@ -711,166 +691,18 @@ if (import.meta.hot) {
       return []
     },
     configureServer(vite) {
-      installNativeViteHostManifest(vite, base, url(BOOT))
-      const hot = vite.environments.client!.hot
-      hot.on?.('vite:invalidate', data => {
-        void (async () => {
-          const requestedPath = data.path.split('?')[0]
-          const invalidated = await vite.moduleGraph.getModuleByUrl(data.path)
-            ?? [...vite.moduleGraph.urlToModuleMap.entries()]
-              .find(([moduleUrl]) => moduleUrl.split('?')[0] === requestedPath)?.[1]
-          if (invalidated === undefined) return
-          const timestamp = Date.now()
-          for (const pluginId of await owningPluginIds(invalidated)) {
-            await invalidatePlugin(pluginId, timestamp)
-            hot.send({ type: 'custom', event: 'cordisx:replace-plugin', data: { pluginId, timestamp } })
-          }
-        })().catch(error =>
-          vite.config.logger.error(
-            `[cordisx] failed to replace invalidated plugin: ${error instanceof Error ? error.message : String(error)}`,
-          )
-        )
-      })
-      hot.on?.('cordisx:reload-plugin', (data: ReloadPluginRequest, client) => {
-        const requestId = typeof data.requestId === 'string' ? data.requestId : ''
-        const pluginId = typeof data.pluginId === 'string' ? data.pluginId : ''
-        const timestamp = Date.now()
-        void invalidatePlugin(pluginId, timestamp).then(() => {
-          client.send({
-            type: 'custom',
-            event: 'cordisx:reload-plugin-result',
-            data: { requestId, pluginId, timestamp },
-          })
-        }, error => {
-          client.send({
-            type: 'custom',
-            event: 'cordisx:reload-plugin-result',
-            data: { requestId, pluginId, timestamp, error: error instanceof Error ? error.message : String(error) },
-          })
-        })
-      })
-      hot.on?.('cordisx:plugin-generation-transaction', (data: GenerationTransactionRequest, client) => {
-        const requestId = typeof data.requestId === 'string' ? data.requestId : ''
-        const pluginId = typeof data.pluginId === 'string' ? data.pluginId : ''
-        const moduleGeneration = typeof data.moduleGeneration === 'string' ? data.moduleGeneration : ''
-        const transactionId = typeof data.transactionId === 'string' ? data.transactionId : ''
-        const action = data.action
-        const task = (async () => {
-          if (action === 'stage') {
-            // A different native window may already have committed this snapshot.
-            // Keep the current generation stageable without accepting retired ones.
-            const current = generations.get(pluginId)
-            const generation = pendingGenerations.get(pluginId)?.get(moduleGeneration)
-              ?? (current?.moduleGeneration === moduleGeneration ? current : undefined)
-            if (generation === undefined) throw new Error('Unknown or stale Vite plugin generation')
-            if (generationTransactions.has(transactionId)) {
-              throw new Error('Vite plugin generation transaction already exists')
-            }
-            const transaction = generationHandler === undefined
-              ? { commit: async () => undefined, rollback: async () => undefined }
-              : await generationHandler(generationSnapshot(pluginId, generation))
-            const timeout = setTimeout(() => {
-              const staged = generationTransactions.get(transactionId)
-              if (staged === undefined) return
-              generationTransactions.delete(transactionId)
-              void staged.handle.rollback().catch(error =>
-                vite.config.logger.error(
-                  `[cordisx] failed to roll back abandoned plugin generation: ${
-                    error instanceof Error ? error.message : String(error)
-                  }`,
-                )
-              )
-            }, 15_000)
-            generationTransactions.set(transactionId, { handle: transaction, timeout, pluginId, moduleGeneration })
-            return
-          }
-          const transaction = generationTransactions.get(transactionId)
-          if (transaction === undefined) throw new Error('Unknown Vite plugin generation transaction')
-          if (transaction.pluginId !== pluginId || transaction.moduleGeneration !== moduleGeneration) {
-            throw new Error('Vite plugin generation transaction scope mismatch')
-          }
-          if (action === 'commit') {
-            await transaction.handle.commit()
-            pendingGenerations.get(pluginId)?.delete(moduleGeneration)
-          } else if (action === 'rollback') await transaction.handle.rollback()
-          else throw new Error('Unknown Vite plugin generation transaction action')
-          clearTimeout(transaction.timeout)
-          generationTransactions.delete(transactionId)
-        })()
-        void task.then(() => {
-          client.send({
-            type: 'custom',
-            event: 'cordisx:plugin-generation-transaction-result',
-            data: { requestId, pluginId, moduleGeneration, transactionId, action },
-          })
-        }, error => {
-          client.send({
-            type: 'custom',
-            event: 'cordisx:plugin-generation-transaction-result',
-            data: {
-              requestId,
-              pluginId,
-              moduleGeneration,
-              transactionId,
-              action,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          })
-        })
-      })
-      // Native pages must never receive Vite's window.location.reload fallback.
-      const send = hot.send.bind(hot)
-      hot.send = ((payload: unknown, data?: unknown) => {
-        const normalized = nativeViteHotPayload(payload)
-        if (typeof normalized === 'string') send(normalized, data)
-        else send(normalized as Parameters<typeof send>[0])
-      }) as typeof hot.send
-      vite.middlewares.use((request, response, next) => {
-        const pathname = new URL(request.url ?? '/', origin).pathname
-        if (!pathname.startsWith(base)) {
-          response.writeHead(404)
-          response.end()
-          return
-        }
-        const map = sourceMaps.get(pathname)
-        if (map !== undefined) {
-          response.writeHead(200, {
-            'content-type': 'application/json',
-            'cache-control': 'no-store',
-            'access-control-allow-origin': '*',
-          })
-          response.end(map)
-          return
-        }
-        const end = response.end.bind(response)
-        response.end = ((chunk: unknown, ...args: unknown[]) => {
-          if (
-            (typeof chunk === 'string' || Buffer.isBuffer(chunk))
-            && String(response.getHeader('content-type')).includes('javascript')
-          ) {
-            let source = String(chunk)
-            if (pathname === base + '@vite/client') {
-              const sourceMapIndex = source.lastIndexOf('\n//# sourceMappingURL=')
-              source = sourceMapIndex < 0
-                ? source + VITE_CLIENT_DISPOSER_SOURCE
-                : source.slice(0, sourceMapIndex) + VITE_CLIENT_DISPOSER_SOURCE + source.slice(sourceMapIndex)
-              chunk = source
-              response.setHeader('content-length', Buffer.byteLength(source))
-            }
-            const match =
-              /\n\/\/# sourceMappingURL=data:application\/json;(?:charset=utf-8;)?base64,([A-Za-z0-9+/=]+)\s*$/.exec(
-                source,
-              )
-            if (match !== null) {
-              const mapPath = sourceMaps.remember(base, match[1]!)
-              chunk = source.slice(0, match.index)
-                + (mapPath === undefined ? '\n' : '\n//# sourceMappingURL=' + origin + mapPath + '\n')
-              response.setHeader('content-length', Buffer.byteLength(chunk as string))
-            }
-          }
-          return Reflect.apply(end, response, [chunk, ...args])
-        }) as typeof response.end
-        next()
+      configureNativeViteServer(vite, {
+        base,
+        origin,
+        bootUrl: url(BOOT),
+        sourceMaps,
+        generations,
+        pendingGenerations,
+        generationTransactions,
+        generationHandler: () => generationHandler,
+        generationSnapshot,
+        owningPluginIds,
+        invalidatePlugin,
       })
     },
   }
