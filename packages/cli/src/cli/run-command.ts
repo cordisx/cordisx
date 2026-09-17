@@ -16,7 +16,7 @@ import {
   loadHomeConfig,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
-import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
+import { CdpPluginLifecycleRuntime } from '../launcher/cdp.js'
 import { findPackageRoot, localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
 import {
@@ -68,13 +68,7 @@ import {
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
 } from '../providers/cli-proxy-service-config.js'
-import {
-  CHANNEL_SERVICE_CONFIG_INITIAL,
-  createChannelHostServiceConfigContract,
-  createLocalChannelService,
-  type LocalChannelService,
-  projectLocalChannelManager,
-} from '../launcher/channel-service.js'
+import { createChannelHostServiceConfigContract } from '../launcher/channel-service.js'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
@@ -84,7 +78,6 @@ import type { IconThemePreferencePersistenceContext } from '../launcher/icon-the
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
-import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -96,7 +89,7 @@ import { bundledPluginEntry } from '../launcher/bundled-plugin.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
-import { loadStagedPluginPackage, stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import {
   type PluginGenerationArtifactServer,
   startPluginGenerationArtifactServer,
@@ -127,13 +120,9 @@ import { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-servic
 
 import {
   agentHistoryHost,
-  assertProductionGraphBootstrapSnapshot,
   assertProductionGraphLaunchOwnership,
-  buildRendererComposition,
-  type ChannelManagerBundleProjection,
   cliProxyServiceConfigApis,
   codexHome,
-  configuredPluginTopology,
   type CordisXCliRuntime,
   deployBuiltinSkillWithoutOverwritingUserChanges,
   localDevelopmentHostConfig,
@@ -141,15 +130,21 @@ import {
   printPlan,
   providerConfigs,
   recoveredActivation,
-  type RendererComposition,
   rootFromConfigPath,
   runInjectedHost,
-  usesIsolatedPackageWorker,
   waitForAbort,
   waitForExit,
   waitForHostExitAfterReadiness,
 } from './run-support.js'
+import {
+  attachActiveBrowserGraphs,
+  buildRendererComposition,
+  createProductionGraphBootstrap,
+  createRendererLifecycleProjection,
+  type RendererComposition,
+} from './renderer-composition.js'
 import { prepareCliCommand } from './run-command-dispatch.js'
+import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
@@ -289,43 +284,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const activatedPackagePlugins = initialActivation === undefined
       ? await loadActivatedPluginComposition(lifecycleStore)
       : await loadPluginComposition(lifecycleStore, initialActivation)
-    const activatedPlugins = await Promise.all(activatedPackagePlugins.map(async plugin => {
-      const manifest = plugin.manifest
-      const isolatedWorker = manifest?.schemaVersion === 7
-        || ((manifest?.schemaVersion === 5 || manifest?.schemaVersion === 6)
-          && manifest.capabilities.some(capability => (
-            capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
-          )))
-      if (!plugin.enabled || plugin.package === undefined || isolatedWorker) return plugin
-      const staged = await loadStagedPluginPackage(rootFromConfigPath(configPath), plugin.package.digest)
-      if (staged.browserArtifact === undefined) return plugin
-      const lease = await activePluginGenerationArtifactServer.lease(
-        {
-          packageIdentity: {
-            pluginId: plugin.id,
-            version: plugin.package.version,
-            integrity: plugin.package.digest,
-          },
-          artifactDirectory: stagedPluginBrowserArtifactDirectory(
-            rootFromConfigPath(configPath),
-            plugin.package.digest,
-          ),
-          runtimeEntry: staged.browserArtifact.manifest.entry,
-        },
-        plugin.package.moduleGeneration,
-        staged.browserArtifact.manifest,
-      )
-      lifecycleRuntime.registerActivePluginGenerationLease(lease)
-      return {
-        ...plugin,
-        runtimeGraph: {
-          moduleGeneration: lease.moduleGeneration,
-          loadSource: lease.importSource,
-          publishSource: lease.publishSource,
-          retireSource: lease.retireSource,
-        },
-      }
-    }))
+    const activatedPlugins = await attachActiveBrowserGraphs({
+      plugins: activatedPackagePlugins,
+      homeDir: rootFromConfigPath(configPath),
+      artifactServer: activePluginGenerationArtifactServer,
+      lifecycleRuntime,
+    })
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
     await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     const permissionIdentities = new PluginPermissionIdentityRegistry([
@@ -339,71 +303,34 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...configuredComposition,
       plugins: [...configuredComposition.plugins, ...activatedPlugins],
     }
-    const channelPlugin = composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
-    const channelCredentialBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
-    const channelActionsBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
-    let channelService: LocalChannelService | undefined
-    let channelManager: ChannelManagerBundleProjection | undefined
-    const loadChannelManagerProjection = async (): Promise<ChannelManagerBundleProjection | undefined> => {
-      if (channelPlugin === undefined || channelService === undefined) return undefined
-      const state = await readServiceConfigState({
-        profileId: selection.profileId,
-        pluginId: 'channel',
-        serviceId: 'runtime',
-        initialConfig: CHANNEL_SERVICE_CONFIG_INITIAL as unknown as Parameters<
-          typeof readServiceConfigState
-        >[0]['initialConfig'],
-      }, configPath)
-      return projectLocalChannelManager({
-        configuration: state.config,
-        revision: state.revision,
-        lastGoodRevision: state.lastGoodRevision,
-        writable: true,
-        ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
-        audit: channelService.auditSnapshot(),
-      })
-    }
-    if (channelPlugin !== undefined) {
-      const state = await readServiceConfigState({
-        profileId: selection.profileId,
-        pluginId: 'channel',
-        serviceId: 'runtime',
-        initialConfig: CHANNEL_SERVICE_CONFIG_INITIAL as unknown as Parameters<
-          typeof readServiceConfigState
-        >[0]['initialConfig'],
-      }, configPath)
-      channelService = createLocalChannelService({
-        artifactDirectory: path.dirname(channelPlugin.entry),
-        dataDir: path.join(rootFromConfigPath(configPath), 'cache', 'channel-runtime'),
-        source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
-        environment: runtime.env ?? process.env,
-      })
-      await channelService.start(state.config)
-      channelManager = await loadChannelManagerProjection()
-    }
-    const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
-    const pluginBundleCoordinator = new PluginBundleCoordinator({
+    const channel = await createRendererChannelComposition({
+      composition,
+      profileId: selection.profileId,
+      configPath,
+      homeDir: rootFromConfigPath(configPath),
+      environment: runtime.env ?? process.env,
+    })
+    const channelPlugin = channel.plugin
+    const channelService = channel.service
+    const channelManager = channel.manager
+    const channelCredentialBridgeToken = channel.credentialBridgeToken
+    const channelActionsBridgeToken = channel.actionsBridgeToken
+    const rendererLifecycle = createRendererLifecycleProjection({
       homeDir: rootFromConfigPath(configPath),
       profileId: selection.profileId,
-      runtimeGeneration: lifecycleGeneration,
-      pluginLifecycle: pluginLifecycleCoordinator,
+      generation: lifecycleGeneration,
+      pluginLifecycleCoordinator,
+      lifecycleRuntime,
+      managedServiceLifecycleRuntime,
     })
-    pluginLifecycleCoordinator.setBundleClaimGuard(async pluginId =>
-      await pluginBundleCoordinator.bundleClaims(pluginId)
-    )
-    const pluginLifecycle = {
-      handler: {
-        token: pluginLifecycleBridgeToken,
-        profileId: selection.profileId,
-        generation: lifecycleGeneration,
-        coordinator: pluginLifecycleCoordinator,
-        bundleCoordinator: pluginBundleCoordinator,
-      },
-      runtime: lifecycleRuntime,
-    }
-    const managedServiceActivation = managedServiceLifecycleRuntime.nativeActivation()
-    const managedServiceUICapabilities = managedServiceLifecycleRuntime.capabilities()
-    const managedServiceUI = managedServiceLifecycleRuntime.managedServiceUI
+    const {
+      token: pluginLifecycleBridgeToken,
+      pluginBundleCoordinator,
+      pluginLifecycle,
+      managedServiceActivation,
+      managedServiceUICapabilities,
+      managedServiceUI,
+    } = rendererLifecycle
     rendererComposition = await buildRendererComposition(composition, stdout, {
       appId,
       profileId: selection.profileId,
@@ -431,87 +358,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
     })
-    const activeRendererComposition = rendererComposition
-    const initialConfiguredTopology = configuredPluginTopology(configuredComposition)
-    const loadCurrentProductionProjection = async () => {
-      const active = await lifecycleStore.loadActive()
-      const registryEpoch = lifecycleRuntime.currentRegistryEpoch()
-      const [freshConfigured, packagePlugins, freshHomeConfig, pluginBundles, freshChannelManager] = await Promise.all([
-        loadConfig(configPath, {
-          profileId: selection.profileId,
-          projectRoot: rootFromConfigPath(configPath),
-        }),
-        loadPluginComposition(lifecycleStore, active),
-        loadHomeConfig(configPath),
-        pluginBundleCoordinator.snapshot(),
-        loadChannelManagerProjection(),
-      ])
-      if (configuredPluginTopology(freshConfigured) !== initialConfiguredTopology) {
-        throw new Error('launcher-configured plugin topology changed during browser graph admission')
-      }
-      if (pluginBundles.pluginRevision !== active.revision) {
-        throw new Error('plugin bundle projection does not match the active plugin revision')
-      }
-      const currentPackagePlugins = await Promise.all(packagePlugins.map(async plugin => {
-        if (!plugin.enabled || plugin.package === undefined || usesIsolatedPackageWorker(plugin)) return plugin
-        const staged = await loadStagedPluginPackage(rootFromConfigPath(configPath), plugin.package.digest)
-        if (staged.browserArtifact === undefined) return plugin
-        const runtimeGraph = lifecycleRuntime.activeBrowserGraph(plugin.id, plugin.package.moduleGeneration)
-        if (runtimeGraph === undefined) {
-          throw new Error(`active browser graph lease is unavailable for plugin ${plugin.id}`)
-        }
-        return { ...plugin, runtimeGraph }
-      }))
-      const permissionPolicies = freshHomeConfig.permissions.filter(policy =>
-        policy.key.profileId === selection.profileId
-      )
-      const managedServiceUICapabilities = managedServiceLifecycleRuntime!.capabilities()
-      const currentComposition: CordisXConfig = {
-        ...freshConfigured,
-        plugins: [...freshConfigured.plugins, ...currentPackagePlugins],
-      }
-      return {
-        active,
-        registryEpoch,
-        currentComposition,
-        permissionPolicies,
-        pluginBundles,
-        freshChannelManager,
-        managedServiceUICapabilities,
-        fingerprint: JSON.stringify({
-          active,
-          registryEpoch,
-          currentComposition,
-          permissionPolicies,
-          pluginBundles,
-          freshChannelManager,
-          managedServiceUICapabilities,
-        }),
-      }
-    }
-    const productionGraphBootstrap: NonNullable<WatchInjectionOptions['productionGraphBootstrap']> = async (
-      expectedActive,
-      expectedRegistryEpoch,
-    ) => {
-      const before = await loadCurrentProductionProjection()
-      assertProductionGraphBootstrapSnapshot(expectedActive, expectedRegistryEpoch, before)
-      const rebuilt = await activeRendererComposition.rebuild(
-        before.currentComposition,
-        before.active,
-        expectedRegistryEpoch,
-        {
-          permissionPolicies: before.permissionPolicies,
-          pluginBundles: before.pluginBundles,
-          managedServiceUICapabilities: before.managedServiceUICapabilities,
-          ...(before.freshChannelManager === undefined ? {} : { channelManager: before.freshChannelManager }),
-        },
-      )
-      const after = await loadCurrentProductionProjection()
-      if (after.fingerprint !== before.fingerprint) {
-        throw new Error('browser graph admission projection changed during source rebuild')
-      }
-      return rebuilt
-    }
+    const productionGraphBootstrap = createProductionGraphBootstrap({
+      rendererComposition,
+      configuredComposition,
+      configPath,
+      profileId: selection.profileId,
+      lifecycleStore,
+      lifecycleRuntime,
+      pluginBundleCoordinator,
+      managedServiceLifecycleRuntime,
+      loadChannelManagerProjection: channel.loadManagerProjection,
+    })
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: pluginIdentities(configuredComposition).map(identity => ({
         source: identity.source,
