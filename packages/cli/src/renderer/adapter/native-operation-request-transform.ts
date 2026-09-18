@@ -28,6 +28,10 @@ function token(context: string): string {
   return `typeof ${value}===\`string\`&&${value}.length>=16&&${value}.length<=256&&!/[\\0\\r\\n]/u.test(${value})?${value}:void 0`
 }
 
+function tokenValue(value: string): string {
+  return `typeof ${value}===\`string\`&&${value}.length>=16&&${value}.length<=256&&!/[\\0\\r\\n]/u.test(${value})?${value}:void 0`
+}
+
 function configToken(context: string): string {
   const value = `${context}.config?.[${JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)}]`
   return `typeof ${value}===\`string\`&&${value}.length>=16&&${value}.length<=256&&!/[\\0\\r\\n]/u.test(${value})?${value}:void 0`
@@ -114,5 +118,109 @@ export function transformNativeOperationRequest(source: string) {
 export const NATIVE_OPERATION_REQUEST_TRANSFORM = Object.freeze({
   ...NATIVE_OPERATION_REQUEST_RESOURCE,
   transform: transformNativeOperationRequest,
+  requiredForDocumentReady: false,
+})
+
+export const NATIVE_OPERATION_REQUEST_RESOURCE_9275 = Object.freeze({
+  url: 'app://-/assets/app-initial-4d7ea7f81c2d.js',
+  sha256: '5dcf4a29db25b086f9bd11d053eec60cf0c50bfd988494969cec452e03f19245',
+})
+
+const NEW_THREAD_DECLARATION_ANCHOR_9275 =
+  'additionalDeveloperInstructions:j,requiresThreadReferences:M}=e;if(D===`projectless`'
+const NEW_THREAD_REQUEST_ANCHOR_9275 = 'collaborationMode:h,multiAgentMode:Y_n,serviceTier:g,daybreakEnabled:_,'
+const NEW_THREAD_CONFIG_ANCHOR_9275 = 'threadSource:T,threadStartKind:E,config:c,...D===`projectless`?'
+const EXISTING_THREAD_DECLARATION_ANCHOR_9275 =
+  'async function lQt(e,t,n,r,i,a,o){let s=n.request,{inheritThreadSettings:c=!0,useAppServerPermissionDefault:l,usePermissionSelection:u=!1}=n.context??{},'
+const EXISTING_THREAD_REQUEST_ANCHOR_9275 =
+  'model:P,cyberAccessProgram:s.cyberAccessProgram,serviceTier:Te,effort:F,multiAgentMode:gQt,'
+const EXISTING_THREAD_PARAMS_ANCHOR_9275 = 'model:P??null,serviceTier:Te,effort:F??null,multiAgentMode:gQt,'
+const FINAL_TURN_DECLARATION_ANCHOR_9275 =
+  'function T$t({manager:e,conversationId:t,operation:n,capabilities:r,origin:i,clientUserMessageId:a,createId:o,ownerWindowError:s,onOutcomeUnknown:c,onMessageAdded:l,onInitialTitleRequested:u,readPersistedValue:d},f){let p=n.request,{'
+const FINAL_TURN_DISPATCH_ANCHOR_9275 =
+  'let n=C.markRequestDispatched?.(),r=Ite(E.request,e.requestClient.getAppServerVersion());M=e.getConversation(t)?.environmentSelectionEvidence;'
+const MARKER_9275 = '__cordisxNativeOperationRequestTransformBuild9275V1'
+const VERSION_9275 = 'app-initial-4d7ea7f81c2d:normalized-operation-request-v1'
+const SERVICE_TIER_OVERRIDE_9275 =
+  'globalThis.__cordisxNativeServiceTierOverride===`priority`?`priority`:globalThis.__cordisxNativeServiceTierOverride===`default`?null:'
+
+const NEW_THREAD_DECLARATION_REPLACEMENT_9275 =
+  `additionalDeveloperInstructions:j,requiresThreadReferences:M,__cordisxOperationToken:__cxRawOperationToken}=e;let __cxOperationToken=${
+    tokenValue('__cxRawOperationToken')
+  };if(D===\`projectless\``
+const NEW_THREAD_REQUEST_REPLACEMENT_9275 = NEW_THREAD_REQUEST_ANCHOR_9275.replace(
+  'serviceTier:g',
+  `serviceTier:${SERVICE_TIER_OVERRIDE_9275}g`,
+)
+const NEW_THREAD_CONFIG_REPLACEMENT_9275 =
+  `threadSource:T,threadStartKind:E,config:__cxOperationToken===void 0?c:{...c,${
+    JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
+  }:__cxOperationToken},...D===\`projectless\`?`
+const EXISTING_THREAD_DECLARATION_REPLACEMENT_9275 =
+  `async function lQt(e,t,n,r,i,a,o){let __cxOperationContext=n.context??{},s=n.request,{inheritThreadSettings:c=!0,useAppServerPermissionDefault:l,usePermissionSelection:u=!1}=__cxOperationContext,__cxOperationToken=${
+    token('__cxOperationContext')
+  },`
+const EXISTING_THREAD_REQUEST_REPLACEMENT_9275 = `${
+  EXISTING_THREAD_REQUEST_ANCHOR_9275.replace(
+    'serviceTier:Te',
+    `serviceTier:${SERVICE_TIER_OVERRIDE_9275}Te`,
+  )
+}...(__cxOperationToken===void 0?{}:{config:{${
+  JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
+}:__cxOperationToken}}),`
+const EXISTING_THREAD_PARAMS_REPLACEMENT_9275 = EXISTING_THREAD_PARAMS_ANCHOR_9275.replace(
+  'serviceTier:Te',
+  `serviceTier:${SERVICE_TIER_OVERRIDE_9275}Te`,
+)
+const FINAL_TURN_DECLARATION_REPLACEMENT_9275 =
+  `function T$t({manager:e,conversationId:t,operation:n,capabilities:r,origin:i,clientUserMessageId:a,createId:o,ownerWindowError:s,onOutcomeUnknown:c,onMessageAdded:l,onInitialTitleRequested:u,readPersistedValue:d},f){let p=n.request,__cxOperationToken=${
+    configToken('p')
+  },{`
+const FINAL_TURN_DISPATCH_REPLACEMENT_9275 =
+  `let n=C.markRequestDispatched?.(),r=Ite(E.request,e.requestClient.getAppServerVersion());__cxOperationToken!==void 0&&(r={...r,config:{...r.config,${
+    JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
+  }:__cxOperationToken}});M=e.getConversation(t)?.environmentSelectionEvidence;`
+
+export const NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9275 = `globalThis.${MARKER_9275}===${
+  JSON.stringify(VERSION_9275)
+}`
+export const NATIVE_OPERATION_REQUEST_FENCE_9275 = `(delete globalThis.${MARKER_9275},true)`
+
+/** Exact-pinned build-9275 transform; source mismatch fails closed. */
+export function transformNativeOperationRequest9275(source: string) {
+  for (
+    const [name, anchor] of [
+      ['new-thread declaration', NEW_THREAD_DECLARATION_ANCHOR_9275],
+      ['new-thread request', NEW_THREAD_REQUEST_ANCHOR_9275],
+      ['new-thread config', NEW_THREAD_CONFIG_ANCHOR_9275],
+      ['existing-thread declaration', EXISTING_THREAD_DECLARATION_ANCHOR_9275],
+      ['existing-thread request', EXISTING_THREAD_REQUEST_ANCHOR_9275],
+      ['existing-thread params', EXISTING_THREAD_PARAMS_ANCHOR_9275],
+      ['final turn declaration', FINAL_TURN_DECLARATION_ANCHOR_9275],
+      ['final turn dispatch', FINAL_TURN_DISPATCH_ANCHOR_9275],
+    ]
+  ) {
+    const count = source.split(anchor!).length - 1
+    if (count !== 1) throw new Error(`Expected one build-9275 ${name} anchor, found ${count}`)
+  }
+  return {
+    source: source.replace(NEW_THREAD_DECLARATION_ANCHOR_9275, NEW_THREAD_DECLARATION_REPLACEMENT_9275)
+      .replace(NEW_THREAD_REQUEST_ANCHOR_9275, NEW_THREAD_REQUEST_REPLACEMENT_9275)
+      .replace(NEW_THREAD_CONFIG_ANCHOR_9275, NEW_THREAD_CONFIG_REPLACEMENT_9275)
+      .replace(EXISTING_THREAD_DECLARATION_ANCHOR_9275, EXISTING_THREAD_DECLARATION_REPLACEMENT_9275)
+      .replace(EXISTING_THREAD_REQUEST_ANCHOR_9275, EXISTING_THREAD_REQUEST_REPLACEMENT_9275)
+      .replace(EXISTING_THREAD_PARAMS_ANCHOR_9275, EXISTING_THREAD_PARAMS_REPLACEMENT_9275)
+      .replace(FINAL_TURN_DECLARATION_ANCHOR_9275, FINAL_TURN_DECLARATION_REPLACEMENT_9275)
+      .replace(FINAL_TURN_DISPATCH_ANCHOR_9275, FINAL_TURN_DISPATCH_REPLACEMENT_9275)
+      + `\n;globalThis.${MARKER_9275}=${JSON.stringify(VERSION_9275)};`,
+    anchorMatches: 1,
+    acknowledgementExpression: NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9275,
+    fenceExpression: NATIVE_OPERATION_REQUEST_FENCE_9275,
+  }
+}
+
+export const NATIVE_OPERATION_REQUEST_TRANSFORM_9275 = Object.freeze({
+  ...NATIVE_OPERATION_REQUEST_RESOURCE_9275,
+  transform: transformNativeOperationRequest9275,
   requiredForDocumentReady: false,
 })

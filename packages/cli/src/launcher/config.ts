@@ -61,6 +61,7 @@ export interface CordisXConfigPlugin {
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
+    readonly artifactIntegrity?: `sha256:${string}`
     readonly moduleGeneration: string
     readonly dependencies: readonly CordisXPluginDependencyV1[]
     readonly canonicalSource?: string

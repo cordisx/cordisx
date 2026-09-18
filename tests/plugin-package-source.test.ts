@@ -113,9 +113,41 @@ describe('formal source-v1 and package-v2 edge adapter', () => {
       )
       expect(stored).toContain('cordisx.launcher-staged-package/v3')
       expect(stored).not.toContain('"capabilities"')
+      expect(staged).not.toHaveProperty('artifactIntegrity')
       await removeStagedPluginPackage(homeDir, staged.digest)
     },
   )
+
+  it('preserves only a reverified downloaded distribution digest as certification provenance', async () => {
+    const { root, homeDir, source } = await fixture()
+    const archive = path.join(root, 'certified.tgz')
+    await createTar({ cwd: source, file: archive, gzip: true }, ['.'])
+    const artifactIntegrity = `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}` as const
+    const staged = await stagePluginPackageSourceV1({
+      kind: 'downloaded-tarball',
+      location: pathToFileURL(archive).href,
+      downloadedFrom: 'https://downloads.example/plugin.tgz',
+      distributionIntegrity: artifactIntegrity,
+    }, { homeDir, runtimeValidators })
+    expect(staged.artifactIntegrity).toBe(artifactIntegrity)
+    expect(staged.digest).not.toBe(artifactIntegrity)
+    expect((await loadStagedPluginPackage(homeDir, staged.digest)).artifactIntegrity).toBe(artifactIntegrity)
+    const stored = await readFile(
+      path.join(homeDir, 'packages', 'sha256', staged.digest.slice(7), 'manifest.json'),
+      'utf8',
+    )
+    expect(JSON.parse(stored)).toMatchObject({
+      contract: 'cordisx.launcher-staged-package/v4',
+      distributionArtifact: { integrity: artifactIntegrity },
+    })
+
+    await expect(stagePluginPackageSourceV1({
+      kind: 'downloaded-tarball',
+      location: pathToFileURL(archive).href,
+      downloadedFrom: 'https://downloads.example/plugin.tgz',
+      distributionIntegrity: `sha256:${'0'.repeat(64)}`,
+    }, { homeDir, runtimeValidators })).rejects.toMatchObject({ code: 'integrity-mismatch' })
+  })
 
   it('keeps source and normalized runtime digests distinct across immutable readback', async () => {
     const { homeDir, source, runtime } = await fixture()

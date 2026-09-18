@@ -24,7 +24,11 @@ export async function stagePluginPackageSourceV1(
   try {
     const resolver = new JsonPackageManifestV2Resolver(options)
     const resolved = await resolver.resolve(snapshot.payloadDirectory)
-    return await stageResolvedPluginPackage(options.homeDir, snapshot.payloadDirectory, resolved)
+    return await stageResolvedPluginPackage(options.homeDir, snapshot.payloadDirectory, resolved, {
+      ...(snapshot.source.distributionIntegrity === undefined
+        ? {}
+        : { artifactIntegrity: snapshot.source.distributionIntegrity }),
+    })
   } finally {
     await rm(snapshot.stagingDirectory, { recursive: true, force: true })
   }

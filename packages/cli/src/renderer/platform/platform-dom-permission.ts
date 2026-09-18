@@ -2,6 +2,7 @@ import { PlatformAgentRuntimeBroker } from './platform-agent-runtime.js'
 import type { CordisXPluginIdentity } from '../../contracts.js'
 import type { PluginGenerationView } from '../generation-visibility.js'
 import {
+  certifiedPermissionProjectionSource,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
   CORDISX_PERMISSION_POLICY_SCHEMA_V3,
 } from '../../permission-contracts.js'
@@ -100,13 +101,13 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
     for (const projection of snapshot.projections) {
       const normalized = normalizeCertifiedPermissionProjectionV1(
         projection,
-        { source: projection.source, pluginId: projection.pluginId },
+        { source: certifiedPermissionProjectionSource(projection), pluginId: projection.pluginId },
         { version: projection.version, integrity: projection.integrity },
         this.now(),
       )
       if (normalized === undefined) throw new Error('Certified permission snapshot contains an invalid projection')
       const key = certifiedArtifactKey(
-        { source: normalized.source, pluginId: normalized.pluginId },
+        { source: certifiedPermissionProjectionSource(normalized), pluginId: normalized.pluginId },
         normalized,
       )
       if (next.has(key)) throw new Error('Certified permission snapshot contains a duplicate exact artifact')

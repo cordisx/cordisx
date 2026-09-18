@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { access, chmod, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
+import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
 
@@ -229,6 +229,69 @@ async function firstExecutable(paths: readonly string[]): Promise<string | undef
   }
 }
 
+function appBundleRoot(executable: string): string | undefined {
+  const normalized = path.resolve(executable)
+  const marker = `${path.sep}Contents${path.sep}MacOS${path.sep}`
+  const markerIndex = normalized.lastIndexOf(marker)
+  if (markerIndex === -1) return undefined
+  const root = normalized.slice(0, markerIndex)
+  return root.endsWith('.app') ? root : undefined
+}
+
+function numericVersion(value: string): readonly bigint[] | undefined {
+  const trimmed = value.trim()
+  if (!/^\d+(?:\.\d+)*$/u.test(trimmed)) return undefined
+  return trimmed.split('.').map(part => BigInt(part))
+}
+
+function compareNumericVersions(left: readonly bigint[], right: readonly bigint[]): number {
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left[index] ?? 0n
+    const rightPart = right[index] ?? 0n
+    if (leftPart > rightPart) return 1
+    if (leftPart < rightPart) return -1
+  }
+  return 0
+}
+
+async function macOSAppBuildVersion(executable: string): Promise<readonly bigint[] | undefined> {
+  const bundleRoot = appBundleRoot(executable)
+  if (bundleRoot === undefined) return undefined
+  return await new Promise(resolve => {
+    execFile(
+      '/usr/bin/plutil',
+      ['-extract', 'CFBundleVersion', 'raw', '-o', '-', path.join(bundleRoot, 'Contents', 'Info.plist')],
+      { encoding: 'utf8' },
+      (error, stdout) => resolve(error === null ? numericVersion(stdout) : undefined),
+    )
+  })
+}
+
+async function newestExecutable(
+  paths: readonly string[],
+  versionFor: (executable: string) => Promise<readonly bigint[] | undefined>,
+): Promise<string | undefined> {
+  const available = await Promise.all(paths.map(async (candidate, index) => ({
+    candidate,
+    index,
+    valid: await executableFile(candidate).then(() => true).catch(() => false),
+  })))
+  const versioned = await Promise.all(
+    available.filter(item => item.valid).map(async item => ({
+      ...item,
+      version: await versionFor(item.candidate),
+    })),
+  )
+  versioned.sort((left, right) => {
+    if (left.version === undefined && right.version === undefined) return left.index - right.index
+    if (left.version === undefined) return 1
+    if (right.version === undefined) return -1
+    return compareNumericVersions(right.version, left.version) || left.index - right.index
+  })
+  return versioned[0]?.candidate
+}
+
 /** Return trusted platform candidates without deriving paths from the cwd. */
 export function codexExecutableCandidates(
   platform: NodeJS.Platform = process.platform,
@@ -260,12 +323,16 @@ export function codexExecutableCandidates(
 export async function resolveCodexExecutable(
   explicit?: string,
   candidates: readonly string[] = codexExecutableCandidates(),
+  versionFor: (executable: string) => Promise<readonly bigint[] | undefined> = macOSAppBuildVersion,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string> {
   if (explicit !== undefined) {
     const resolved = path.resolve(explicit)
     return await executableFile(resolved)
   }
-  const found = await firstExecutable(candidates)
+  const found = platform === 'darwin'
+    ? await newestExecutable(candidates, versionFor)
+    : await firstExecutable(candidates)
   if (found === undefined) {
     throw new Error('Codex/ChatGPT executable not found; pass --executable <path> or use --attach')
   }

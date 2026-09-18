@@ -475,6 +475,15 @@ export const createRuntimeCandidateController = (
     package: {
       version: activation.version,
       digest: activation.digest,
+      ...(replacesTarget
+        ? mutation.package?.artifactIntegrity === undefined ? {} : {
+          artifactIntegrity: mutation.package.artifactIntegrity,
+        }
+        : existing!.item.package?.artifactIntegrity === undefined
+        ? {}
+        : {
+          artifactIntegrity: existing!.item.package.artifactIntegrity,
+        }),
       moduleGeneration: activation.moduleGeneration,
       dependencies: activation.dependencies,
       ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),

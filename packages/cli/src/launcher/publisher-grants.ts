@@ -356,7 +356,7 @@ export class DirectPublisherGrantAuthority {
   async challenge(now = new Date()): Promise<DeviceChallenge> {
     return await createDeviceChallenge(this.device, now)
   }
-  async import(value: unknown): Promise<DirectPublisherGrantProjection> {
+  async import(value: unknown, now = new Date()): Promise<DirectPublisherGrantProjection> {
     const statement = await verifyPublisherGrantStatement(value, this.keys)
     if (statement.kind === 'grant' || statement.kind === 'renew') {
       const current = await this.device.current()
@@ -370,7 +370,7 @@ export class DirectPublisherGrantAuthority {
     }
     if (statement.kind === 'transfer') return { status: 'unavailable', features: [] }
     const grant = grantPayload(statement)
-    const evaluated = evaluatePublisherGrantTime(grant, await this.store.read())
+    const evaluated = evaluatePublisherGrantTime(grant, await this.store.read(), now)
     return evaluated.state === 'active'
       ? {
         status: evaluated.refreshDue ? 'refresh-due' : 'authorized',

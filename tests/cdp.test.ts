@@ -15,7 +15,10 @@ import {
   serviceConfigResponseEvaluation,
   watchAndInject,
 } from '../packages/cli/src/launcher/cdp.js'
-import { sendManagedServiceUIBindingResponse } from '../packages/cli/src/launcher/cdp-installation-support.js'
+import {
+  pluginLifecycleBridgeError,
+  sendManagedServiceUIBindingResponse,
+} from '../packages/cli/src/launcher/cdp-installation-support.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
 import {
@@ -187,5 +190,27 @@ describe('managed service UI CDP responses', () => {
         allowUnsafeEvalBlockedByCSP: true,
       }),
     )
+  })
+})
+
+describe('plugin lifecycle CDP errors', () => {
+  it('preserves a lifecycle code and safely exposes the actionable diagnostic', () => {
+    const error = Object.assign(
+      new Error(
+        'managed service candidate activation failed: token=secret-value credential:abc /Users/example/private/file',
+      ),
+      { code: 'readiness-failed' },
+    )
+    expect(pluginLifecycleBridgeError(error)).toEqual({
+      code: 'readiness-failed',
+      error: 'managed service candidate activation failed: token=[redacted] credential:[redacted] [path redacted]',
+    })
+  })
+
+  it('uses a generic code while retaining a sanitized validation message', () => {
+    expect(pluginLifecycleBridgeError(new Error('plugin lifecycle request scope is stale\nretry'))).toEqual({
+      code: 'rejected',
+      error: 'plugin lifecycle request scope is stale retry',
+    })
   })
 })

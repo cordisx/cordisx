@@ -732,11 +732,11 @@ export async function install(
                 ),
               async value => await support.sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value }),
             )
-          } catch {
+          } catch (error) {
             await support.sendPluginLifecycleBindingResponse(session, {
               requestId,
               ok: false,
-              error: 'Plugin lifecycle request was rejected',
+              ...support.pluginLifecycleBridgeError(error),
             }).catch(() => undefined)
           }
         })()

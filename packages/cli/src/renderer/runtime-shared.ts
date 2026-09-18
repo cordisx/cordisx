@@ -297,7 +297,11 @@ export interface CordisXRuntimeMetadata {
   readonly playgroundSessionScenarios?: PlaygroundSessionScenarioCatalogV1
 }
 
-export interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
+export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'package'> {
+  /** Host-private distribution provenance; never injected into plugin Contexts. */
+  readonly package?: NonNullable<CordisXBrowserPlugin['package']> & {
+    readonly artifactIntegrity?: `sha256:${string}`
+  }
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
   /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
@@ -469,6 +473,7 @@ export interface RendererPluginMutation {
   readonly package?: {
     readonly manifest: CordisXPluginPackageManifestV1
     readonly digest: `sha256:${string}`
+    readonly artifactIntegrity?: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
   }

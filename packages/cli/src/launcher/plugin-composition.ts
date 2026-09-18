@@ -42,6 +42,7 @@ export async function loadPluginComposition(
       package: {
         version: item.version,
         digest: item.digest,
+        ...(staged.artifactIntegrity === undefined ? {} : { artifactIntegrity: staged.artifactIntegrity }),
         moduleGeneration: item.moduleGeneration,
         dependencies: item.dependencies,
         ...(item.canonicalSource === undefined ? {} : { canonicalSource: item.canonicalSource }),

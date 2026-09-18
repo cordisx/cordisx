@@ -12,6 +12,9 @@ export interface ViteDevelopmentPlugin {
 }
 
 export interface ViteDevelopmentGenerationTransaction {
+  readonly managedServiceUICapabilities?: readonly NonNullable<
+    RendererPluginMutation['managedServiceUICapabilities']
+  >[number][]
   commit(): Promise<void>
   rollback(): Promise<void>
 }
@@ -104,33 +107,36 @@ export class NativeViteDevelopmentClient {
           ? previous.plugins.map(value => value.id === plugin.id ? item : value)
           : [...previous.plugins, item],
       }
-      const mutation: RendererPluginMutation = {
-        transactionId,
-        operation: previous.plugins.some(value => value.id === plugin.id) ? 'update' : 'install',
-        previous,
-        candidate,
-        targetId: plugin.id,
-        affectedPluginIds: [plugin.id],
-        developmentPackage: {
-          id: plugin.id,
-          version: plugin.package!.version,
-          digest: plugin.package!.digest,
-          identitySource: plugin.source,
-          development: plugin.development!,
-          ...(plugin.readme === undefined ? {} : { readme: plugin.readme }),
-          ...(plugin.readmes === undefined ? {} : { readmes: plugin.readmes }),
-          ...(plugin.manifest === undefined ? {} : { manifest: plugin.manifest }),
-        },
-        ...(plugin.isolatedArtifactSource === undefined ? {} : {
-          isolatedArtifactSource: plugin.isolatedArtifactSource,
-        }),
-        ownerDocumentBindings: artifact.ownerDocumentBindings,
-      }
       await runtime.settleRegistryProjection()
       let generationTransaction: ViteDevelopmentGenerationTransaction | undefined
       let rendererTransactionStarted = false
       try {
         generationTransaction = await this.stagePluginGeneration?.(plugin.id, plugin.package!.moduleGeneration)
+        const mutation: RendererPluginMutation = {
+          transactionId,
+          operation: previous.plugins.some(value => value.id === plugin.id) ? 'update' : 'install',
+          previous,
+          candidate,
+          targetId: plugin.id,
+          affectedPluginIds: [plugin.id],
+          developmentPackage: {
+            id: plugin.id,
+            version: plugin.package!.version,
+            digest: plugin.package!.digest,
+            identitySource: plugin.source,
+            development: plugin.development!,
+            ...(plugin.readme === undefined ? {} : { readme: plugin.readme }),
+            ...(plugin.readmes === undefined ? {} : { readmes: plugin.readmes }),
+            ...(plugin.manifest === undefined ? {} : { manifest: plugin.manifest }),
+          },
+          ...(plugin.isolatedArtifactSource === undefined ? {} : {
+            isolatedArtifactSource: plugin.isolatedArtifactSource,
+          }),
+          ownerDocumentBindings: artifact.ownerDocumentBindings,
+          ...(generationTransaction?.managedServiceUICapabilities === undefined
+            ? {}
+            : { managedServiceUICapabilities: generationTransaction.managedServiceUICapabilities }),
+        }
         rendererTransactionStarted = true
         await runtime.stagePluginMutation(mutation, plugin.module, plugin.moduleFactory)
         await runtime.publishPluginMutation(transactionId)

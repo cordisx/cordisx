@@ -214,6 +214,15 @@ export class PluginPackageSourceSnapshotter {
             `${source.kind} source must be a file or explicit package directory`,
           )
         }
+        if (source.distributionIntegrity !== undefined) {
+          const archiveIntegrity = `sha256:${createHash('sha256').update(await readFile(canonicalPath)).digest('hex')}`
+          if (archiveIntegrity !== source.distributionIntegrity) {
+            throw new PackageLifecycleError(
+              'integrity-mismatch',
+              `expected ${source.distributionIntegrity}; received ${archiveIntegrity}`,
+            )
+          }
+        }
         await extractArchiveStrict(canonicalPath, stagingDirectory)
       }
       const digest = await hashPackageTree(payloadDirectory)
@@ -230,6 +239,9 @@ export class PluginPackageSourceSnapshotter {
           kind: source.kind,
           url: pathToFileURL(canonicalPath).href,
           ...(source.downloadedFrom === undefined ? {} : { downloadedFrom: source.downloadedFrom }),
+          ...(source.distributionIntegrity === undefined
+            ? {}
+            : { distributionIntegrity: source.distributionIntegrity }),
         },
         integrity: `sha256:${digest}`,
         digest,

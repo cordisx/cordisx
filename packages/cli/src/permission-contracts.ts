@@ -37,6 +37,8 @@ export const CORDISX_PERMISSION_CAPABILITY_CATALOG_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-capability-catalog.v2.schema.json'
 export const CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json'
+export const CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v2.schema.json'
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V4 =
@@ -318,13 +320,9 @@ export interface CordisXPermissionAuthorizationDecisionV2 {
   readonly decisions: readonly CordisXPermissionAuthorizationDecisionItemV2[]
 }
 
-/** Host-owned exact-artifact projection; schema validity alone never establishes trust. */
-export interface CordisXCertifiedPermissionProjectionV1 {
-  readonly $schema: typeof CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1
-  readonly schemaVersion: 1
+interface CordisXCertifiedPermissionProjectionBase {
   readonly kind: 'cordisx-certified-permission-eligibility'
   readonly status: 'active'
-  readonly source: string
   readonly pluginId: string
   readonly version: string
   readonly integrity: `sha256:${string}`
@@ -335,10 +333,52 @@ export interface CordisXCertifiedPermissionProjectionV1 {
   readonly feed: Readonly<{
     readonly generatedAt: string
     readonly root: string
-    readonly authority: 'cordisx.marketplace.codeowners/v1'
+    readonly authority: string
   }>
   readonly fingerprint: `sha256:${string}`
   readonly revision: string
+}
+
+/** Host-owned exact-artifact projection; schema validity alone never establishes trust. */
+export type CordisXCertifiedPermissionProjection =
+  | CordisXCertifiedPermissionProjectionBase & {
+    readonly $schema: typeof CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1
+    readonly schemaVersion: 1
+    readonly source: string
+    readonly feed: CordisXCertifiedPermissionProjectionBase['feed'] & {
+      readonly authority: 'cordisx.marketplace.codeowners/v1'
+    }
+  }
+  | CordisXCertifiedPermissionProjectionBase & {
+    readonly $schema: typeof CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2
+    readonly schemaVersion: 2
+    readonly canonicalSource: 'https://code.byted.org/fe/cordisx-plugins'
+    readonly packageName: `@byted/cordisx-plugin-${string}`
+    readonly downloadUrl: string
+    readonly sourceEvidence: Readonly<{
+      readonly repository: 'https://code.byted.org/fe/cordisx-plugins'
+      readonly sourceCommit: string
+      readonly mergeRequest: string
+      readonly mergeCommit: string
+    }>
+    readonly eligibilityCeiling: Readonly<{
+      readonly capability: 'ui.extension-points.render'
+      readonly scope: Readonly<{
+        readonly extensionPoints: readonly ['manager.settings.navigation-items', 'manager.content']
+      }>
+    }>
+    readonly feed: CordisXCertifiedPermissionProjectionBase['feed'] & {
+      readonly authority: 'byted.cordisx-marketplace.codeowners/v1'
+    }
+  }
+
+/** Compatibility name retained for existing Broker and launcher consumers. */
+export type CordisXCertifiedPermissionProjectionV1 = CordisXCertifiedPermissionProjection
+
+export function certifiedPermissionProjectionSource(
+  projection: CordisXCertifiedPermissionProjection,
+): string {
+  return projection.schemaVersion === 1 ? projection.source : projection.canonicalSource
 }
 
 export interface CordisXPermissionAuthorizationKeyV3 {

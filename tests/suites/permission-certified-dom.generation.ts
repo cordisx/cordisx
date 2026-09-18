@@ -109,13 +109,13 @@ export function registerGenerationTests() {
       { version: '1.2.3', integrity: digest },
     )
 
-    expect(value.domAccess(identity, 'main', candidateView)).toMatchObject({
+    expect(value.domAccess(identity, 'manager.content', candidateView)).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
-    expect(value.domAccess(identity, 'main')).toMatchObject({ authorized: false, state: 'pending' })
-    const activeBeforeReview = value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'main')
-    expect(activeBeforeReview).toMatchObject({ scope: { extensionPoints: ['main'] } })
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: false, state: 'pending' })
+    const activeBeforeReview = value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'manager.content')
+    expect(activeBeforeReview).toMatchObject({ scope: { extensionPoints: ['manager.content'] } })
     expect(activeBeforeReview).not.toHaveProperty('authorizationOrigin')
 
     await expect(value.reviewPendingDomAccess(identity, 'module-1')).resolves.toContainEqual(expect.objectContaining({
@@ -124,13 +124,13 @@ export function registerGenerationTests() {
     }))
     expect(prompted[0]?.binding.moduleGeneration).toBe('module-1')
     expect(value.snapshots()).toContainEqual(expect.objectContaining({
-      scope: { extensionPoints: ['main'] },
+      scope: { extensionPoints: ['manager.content'] },
       authorizationOrigin: 'explicit-user',
     }))
 
     unregisterCandidate()
     expect(value.snapshots()).toContainEqual(expect.objectContaining({
-      scope: { extensionPoints: ['main'] },
+      scope: { extensionPoints: ['manager.content'] },
       authorizationOrigin: 'explicit-user',
     }))
     unregisterActive()
@@ -188,7 +188,7 @@ export function registerGenerationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    expect(value.domAccess(identity, 'main')).toMatchObject({
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
@@ -212,17 +212,20 @@ export function registerGenerationTests() {
       candidateView,
       { version: '1.2.3', integrity: newDigest },
     )
-    expect(value.domAccess(identity, 'main', candidateView)).toMatchObject({ authorized: false, state: 'pending' })
+    expect(value.domAccess(identity, 'manager.content', candidateView)).toMatchObject({
+      authorized: false,
+      state: 'pending',
+    })
 
     const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
-    expect(value.domAccess(identity, 'main')).toMatchObject({ authorized: false, state: 'pending' })
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: false, state: 'pending' })
     value.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
     visibility.rollback(publication)
 
-    expect(value.domAccess(identity, 'main')).toMatchObject({ authorized: false, state: 'pending' })
-    expect(value.snapshots().filter(item => item.scope.extensionPoints?.[0] === 'main'))
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: false, state: 'pending' })
+    expect(value.snapshots().filter(item => item.scope.extensionPoints?.[0] === 'manager.content'))
       .not.toContainEqual(expect.objectContaining({ authorizationOrigin: 'certified-implicit' }))
-    await expect(value.requestDomAccess(identity, 'main')).resolves.toMatchObject({
+    await expect(value.requestDomAccess(identity, 'manager.content')).resolves.toMatchObject({
       authorized: true,
       authorizationOrigin: 'explicit-user',
     })
@@ -265,7 +268,7 @@ export function registerGenerationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    const pending = value.requestDomAccess(identity, 'main')
+    const pending = value.requestDomAccess(identity, 'manager.content')
     await Promise.resolve()
     expect(requestedPlan).toBeDefined()
 
@@ -323,7 +326,7 @@ export function registerGenerationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    const pending = value.requestDomAccess(identity, 'main')
+    const pending = value.requestDomAccess(identity, 'manager.content')
     await persistStarted
 
     unregister()
@@ -334,8 +337,8 @@ export function registerGenerationTests() {
       reason: 'permission.generation-invalidated',
     })
     expect(persisted).toHaveLength(1)
-    expect(value.domPolicy(identity, 'main')).toBe('allow')
-    expect(value.domAccess(identity, 'main')).toMatchObject({ authorized: false, state: 'denied' })
+    expect(value.domPolicy(identity, 'manager.content')).toBe('allow')
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: false, state: 'denied' })
     expect(value.snapshots()).toEqual([])
   })
 
@@ -367,12 +370,12 @@ export function registerGenerationTests() {
       { version: '1.2.3', integrity: digest },
     )
 
-    await expect(value.requestDomAccess(identity, 'main')).resolves.toMatchObject({
+    await expect(value.requestDomAccess(identity, 'manager.content')).resolves.toMatchObject({
       authorized: false,
       state: 'denied',
       reason: 'permission.generation-invalidated',
     })
-    expect(value.domAccess(identity, 'main')).toMatchObject({ authorized: false, state: 'denied' })
+    expect(value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: false, state: 'denied' })
     expect(value.snapshots()).toEqual([])
   })
 
@@ -405,7 +408,7 @@ export function registerGenerationTests() {
     try {
       let pending!: ReturnType<PermissionBroker['requestDomAccess']>
       await act(async () => {
-        pending = value.requestDomAccess(identity, 'main')
+        pending = value.requestDomAccess(identity, 'manager.content')
         await Promise.resolve()
         await Promise.resolve()
       })
@@ -428,14 +431,14 @@ export function registerGenerationTests() {
   it('expires a certified lease and falls back to explicit review', async () => {
     let now = new Date('2026-08-30T12:00:00.000Z')
     const context = broker({ certified: certification(), now: () => now })
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
     expect(context.domPrompts()).toBe(0)
     now = new Date('2026-10-01T00:00:00.000Z')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       state: 'pending',
     })
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
     expect(context.domPrompts()).toBe(1)
   })
 
@@ -460,7 +463,7 @@ export function registerGenerationTests() {
       revision: generatedAt,
     }
     const context = broker({ certified: expiring, now: () => new Date() })
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
     expect(context.value.snapshots()).toContainEqual(expect.objectContaining({
       authorizationOrigin: 'certified-implicit',
       certification: expect.objectContaining({ fingerprint: expiring.fingerprint }),
@@ -476,7 +479,7 @@ export function registerGenerationTests() {
     expect(context.value.snapshots().find(item => item.capability === 'ui.extension-points.render')).not.toHaveProperty(
       'certification',
     )
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       state: 'pending',
     })
@@ -535,13 +538,13 @@ export function registerGenerationTests() {
       policy: 'inherit',
       reason: 'extension point sidebar.workspace.menu adapter support is unverified',
     })
-    expect(context.value.domAccess(identity, 'sidebar.workspace.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
     expect(context.value.snapshots()).toContainEqual(expect.objectContaining({
       capability: 'ui.extension-points.render',
-      scope: { extensionPoints: ['sidebar.workspace.menu'] },
+      scope: { extensionPoints: ['manager.content'] },
       authorizationOrigin: 'certified-implicit',
     }))
     // A valid grant never turns an unavailable adapter into a renderable point.

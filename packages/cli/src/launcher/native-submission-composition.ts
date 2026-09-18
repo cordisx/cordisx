@@ -1,6 +1,8 @@
 import { constants } from 'node:fs'
 import { access, realpath } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
@@ -13,8 +15,32 @@ import {
 } from './native-submission-cdp-channel.js'
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
-import { NATIVE_OPERATION_REQUEST_TRANSFORM } from '../renderer/adapter/native-operation-request-transform.js'
-import { NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM } from '../renderer/adapter/native-submit-orchestrator-transform.js'
+import {
+  NATIVE_OPERATION_REQUEST_TRANSFORM,
+  NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
+} from '../renderer/adapter/native-operation-request-transform.js'
+import {
+  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM,
+  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
+} from '../renderer/adapter/native-submit-orchestrator-transform.js'
+
+const execFileAsync = promisify(execFile)
+
+const NATIVE_SUBMISSION_TRANSFORMS = Object.freeze([
+  Object.freeze({
+    appVersion: '26.901.51231',
+    buildNumber: '8109',
+    transforms: Object.freeze([NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM, NATIVE_OPERATION_REQUEST_TRANSFORM]),
+  }),
+  Object.freeze({
+    appVersion: '26.908.70816',
+    buildNumber: '9275',
+    transforms: Object.freeze([
+      NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
+      NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
+    ]),
+  }),
+])
 
 export interface NativeSubmissionInstallation {
   readonly authority: NativeSubmissionCdpAuthority
@@ -29,6 +55,32 @@ export function nativeAppServerIntermediaryPath(): string {
   return fileURLToPath(new URL('../../assets/launcher/native-app-server-intermediary.mjs', import.meta.url))
 }
 
+export function nativeSubmissionTransformsForApp(
+  appVersion: string,
+  buildNumber: string,
+): readonly NativeResourceTransform[] | undefined {
+  return NATIVE_SUBMISSION_TRANSFORMS.find(pin => (
+    pin.appVersion === appVersion && pin.buildNumber === buildNumber
+  ))?.transforms
+}
+
+async function nativeSubmissionTransforms(contents: string): Promise<readonly NativeResourceTransform[]> {
+  const info = path.join(contents, 'Info.plist')
+  const [appVersion, buildNumber] = await Promise.all([
+    execFileAsync('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', info]),
+    execFileAsync('/usr/bin/plutil', ['-extract', 'CFBundleVersion', 'raw', '-o', '-', info]),
+  ])
+  const identity = {
+    appVersion: appVersion.stdout.trim(),
+    buildNumber: buildNumber.stdout.trim(),
+  }
+  const transforms = nativeSubmissionTransformsForApp(identity.appVersion, identity.buildNumber)
+  if (transforms === undefined) {
+    throw new Error(`Native submission has not audited Codex Desktop ${identity.appVersion} (${identity.buildNumber})`)
+  }
+  return transforms
+}
+
 export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
@@ -39,9 +91,11 @@ export async function createNativeSubmissionComposition(
   if (path.basename(macos) !== 'MacOS' || path.basename(path.dirname(macos)) !== 'Contents') {
     throw new Error('Native routing requires an app-bundle executable')
   }
-  const cli = await realpath(path.join(path.dirname(macos), 'Resources', 'codex'))
+  const contents = path.dirname(macos)
+  const cli = await realpath(path.join(contents, 'Resources', 'codex'))
   await access(cli, constants.X_OK)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
+  const transforms = await nativeSubmissionTransforms(contents)
   const control = await startNativeSubmissionControlServer()
   const credentials = createNativeProviderCredentialBroker({ resolve: id => activation.prepareNativeConnection(id) })
   let controller: NativeSubmissionController | undefined
@@ -77,7 +131,7 @@ export async function createNativeSubmissionComposition(
     return {
       installation: {
         authority: cdp,
-        transforms: [NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM, NATIVE_OPERATION_REQUEST_TRANSFORM],
+        transforms,
       },
       environment: {
         CODEX_CLI_PATH: nativeAppServerIntermediaryPath(),

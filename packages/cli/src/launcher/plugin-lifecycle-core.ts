@@ -224,22 +224,26 @@ export class PluginLifecycleCoordinatorCore {
   ): Promise<CordisXCertifiedPermissionProjectionV1 | undefined> {
     const lookup = this.options.certifiedPermissionForArtifact
     if (
-      lookup === undefined || !staged.manifest.runtimeManifest.capabilities.some(declaration => {
+      lookup === undefined || staged.artifactIntegrity === undefined
+      || !staged.manifest.runtimeManifest.capabilities.some(declaration => {
         if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false
         const name = (declaration as { readonly name?: unknown }).name
         return name === 'ui.extension-points.render' || name === 'ui.host-dom.read' || name === 'ui.host-dom.modify'
       })
     ) return undefined
+    const artifact = {
+      version: staged.manifest.version,
+      integrity: staged.artifactIntegrity,
+    } as const
     const projection = await lookup({
       source: staged.identitySource,
       pluginId: staged.manifest.id,
-      version: staged.manifest.version,
-      integrity: staged.digest,
+      ...artifact,
     }).catch(() => undefined)
     return normalizeCertifiedPermissionProjectionV1(
       projection,
       { source: staged.identitySource, pluginId: staged.manifest.id },
-      { version: staged.manifest.version, integrity: staged.digest },
+      artifact,
       new Date(),
     )
   }

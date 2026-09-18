@@ -1,6 +1,7 @@
 import type { HostDomModifyOperation, HostDomOperation, HostDomReadOperation } from '@cordisx/protocol/host-dom/v1'
 import {
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
+  CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PERMISSION_CAPABILITIES_V2,
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
@@ -37,6 +38,18 @@ import {
   normalizePermissionSecurityV2,
   sha256Hex,
 } from './permission-model-v2.js'
+import {
+  CERTIFIED_EXTENSION_POINTS,
+  dateTimeEpoch,
+  GIT_COMMIT,
+  INTERNAL_MARKETPLACE_SOURCE,
+  INTERNAL_PACKAGE,
+  INTERNAL_SOURCE_MERGE_REQUEST,
+  isHttpsUri,
+  isSemanticVersion,
+  PROJECTION_LOCAL_ID,
+  uniqueSortedStrings,
+} from './permission-model-v4-validation.js'
 
 const FINGERPRINT = /^sha256:[a-f0-9]{64}$/u
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
@@ -120,23 +133,6 @@ function nonEmpty(value: unknown, label: string, maximum: number): string {
   return value
 }
 
-function uniqueSortedStrings(
-  value: unknown,
-  label: string,
-  maximum: number,
-  validate: (item: string) => boolean,
-): readonly string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > maximum) {
-    throw new Error(`${label} must contain 1 to ${maximum} items`)
-  }
-  const values = value.map((item, index) => {
-    if (typeof item !== 'string' || !validate(item)) throw new Error(`${label}[${index}] is invalid`)
-    return item
-  })
-  if (new Set(values).size !== values.length) throw new Error(`${label} contains duplicates`)
-  return Object.freeze([...values].sort())
-}
-
 export function isHostDomPermissionCapability(
   value: unknown,
 ): value is 'ui.host-dom.read' | 'ui.host-dom.modify' {
@@ -152,35 +148,77 @@ export function normalizeCertifiedPermissionProjectionV1(
 ): CordisXCertifiedPermissionProjectionV1 | undefined {
   if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const input = value as Record<string, unknown>
-  const expected = [
-    '$schema',
-    'schemaVersion',
-    'kind',
-    'status',
-    'source',
-    'pluginId',
-    'version',
-    'integrity',
-    'reviewPolicy',
-    'reviewedAt',
-    'expiresAt',
-    'evidence',
-    'feed',
-    'fingerprint',
-    'revision',
-  ]
+  const profile = input.schemaVersion === 1 && input.$schema === CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1
+    ? {
+      schema: CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
+      version: 1 as const,
+      authority: 'cordisx.marketplace.codeowners/v1' as const,
+      evidence: /^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u,
+    }
+    : input.schemaVersion === 2 && input.$schema === CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2
+    ? {
+      schema: CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V2,
+      version: 2 as const,
+      authority: 'byted.cordisx-marketplace.codeowners/v1' as const,
+      evidence:
+        /^https:\/\/code\.byted\.org\/fe\/cordisx-marketplace\/(?:merge_requests\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u,
+    }
+    : undefined
+  if (profile === undefined) return undefined
+  const expected = profile.version === 1
+    ? [
+      '$schema',
+      'schemaVersion',
+      'kind',
+      'status',
+      'source',
+      'pluginId',
+      'version',
+      'integrity',
+      'reviewPolicy',
+      'reviewedAt',
+      'expiresAt',
+      'evidence',
+      'feed',
+      'fingerprint',
+      'revision',
+    ]
+    : [
+      '$schema',
+      'schemaVersion',
+      'kind',
+      'status',
+      'canonicalSource',
+      'pluginId',
+      'packageName',
+      'version',
+      'downloadUrl',
+      'integrity',
+      'sourceEvidence',
+      'reviewPolicy',
+      'reviewedAt',
+      'expiresAt',
+      'evidence',
+      'eligibilityCeiling',
+      'feed',
+      'revision',
+      'fingerprint',
+    ]
+  const source = profile.version === 1 ? input.source : input.canonicalSource
   if (
-    Object.keys(input).some(key => !expected.includes(key))
-    || input.$schema !== CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1
-    || input.schemaVersion !== 1
+    Object.keys(input).some(key => !expected.includes(key)) || expected.some(key => !Object.hasOwn(input, key))
     || input.kind !== 'cordisx-certified-permission-eligibility'
     || input.status !== 'active'
-    || input.source !== identity.source
+    || source !== identity.source
     || input.pluginId !== identity.pluginId
     || input.version !== artifact.version
     || input.integrity !== artifact.integrity
-    || typeof input.reviewedAt !== 'string'
-    || typeof input.expiresAt !== 'string'
+    || !isHttpsUri(source) || (profile.version === 2 && source !== INTERNAL_MARKETPLACE_SOURCE)
+    || typeof input.pluginId !== 'string' || !PROJECTION_LOCAL_ID.test(input.pluginId)
+    || !isSemanticVersion(input.version)
+    || typeof input.integrity !== 'string' || !FINGERPRINT.test(input.integrity)
+    || dateTimeEpoch(input.reviewedAt) === undefined
+    || dateTimeEpoch(input.expiresAt) === undefined
     || typeof input.fingerprint !== 'string'
     || typeof input.revision !== 'string'
   ) return undefined
@@ -194,52 +232,114 @@ export function normalizeCertifiedPermissionProjectionV1(
   const feed = input.feed !== null && typeof input.feed === 'object' && !Array.isArray(input.feed)
     ? input.feed as Record<string, unknown>
     : undefined
+  const sourceEvidence = profile.version === 2 && input.sourceEvidence !== null
+      && typeof input.sourceEvidence === 'object' && !Array.isArray(input.sourceEvidence)
+    ? input.sourceEvidence as Record<string, unknown>
+    : undefined
+  const eligibilityCeiling = profile.version === 2 && input.eligibilityCeiling !== null
+      && typeof input.eligibilityCeiling === 'object' && !Array.isArray(input.eligibilityCeiling)
+    ? input.eligibilityCeiling as Record<string, unknown>
+    : undefined
+  const ceilingScope = eligibilityCeiling?.scope !== null && typeof eligibilityCeiling?.scope === 'object'
+      && !Array.isArray(eligibilityCeiling.scope)
+    ? eligibilityCeiling.scope as Record<string, unknown>
+    : undefined
   if (
     reviewPolicy === undefined || evidence === undefined || feed === undefined
     || Object.keys(reviewPolicy).some(key => !['id', 'version'].includes(key))
-    || reviewPolicy.id !== 'cordisx-marketplace-review' || typeof reviewPolicy.version !== 'string'
-    || !/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(
-      reviewPolicy.version,
-    )
+    || reviewPolicy.id !== 'cordisx-marketplace-review' || !isSemanticVersion(reviewPolicy.version)
     || Object.keys(evidence).some(key => !['kind', 'reference'].includes(key))
     || evidence.kind !== 'protected-marketplace-review' || typeof evidence.reference !== 'string'
-    || !/^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u.test(
-      evidence.reference,
-    )
+    || evidence.reference.length > 2_048 || !isHttpsUri(evidence.reference)
+    || !profile.evidence.test(evidence.reference)
     || Object.keys(feed).some(key => !['generatedAt', 'root', 'authority'].includes(key))
-    || typeof feed.generatedAt !== 'string' || typeof feed.root !== 'string'
-    || !/^https:\/\/[^?#]+$/u.test(feed.root) || feed.root.length > 2048
-    || feed.authority !== 'cordisx.marketplace.codeowners/v1'
+    || dateTimeEpoch(feed.generatedAt) === undefined || !isHttpsUri(feed.root) || feed.root.includes('?')
+    || feed.root.includes('#')
+    || feed.authority !== profile.authority
     || input.revision !== feed.generatedAt
+    || dateTimeEpoch(input.revision) === undefined
     || !/^sha256:[a-f0-9]{64}$/u.test(input.fingerprint)
   ) return undefined
-  const reviewedAt = Date.parse(input.reviewedAt)
-  const expiresAt = Date.parse(input.expiresAt)
-  const generatedAt = Date.parse(feed.generatedAt)
   if (
-    !Number.isFinite(reviewedAt) || !Number.isFinite(expiresAt) || !Number.isFinite(generatedAt)
+    profile.version === 2 && (
+      typeof input.packageName !== 'string' || !INTERNAL_PACKAGE.test(input.packageName)
+      || !isHttpsUri(input.downloadUrl) || (input.downloadUrl as string).includes('?')
+      || (input.downloadUrl as string).includes('#')
+      || sourceEvidence === undefined
+      || Object.keys(sourceEvidence).some(key =>
+        !['repository', 'sourceCommit', 'mergeRequest', 'mergeCommit'].includes(key)
+      )
+      || Object.keys(sourceEvidence).length !== 4
+      || sourceEvidence.repository !== INTERNAL_MARKETPLACE_SOURCE
+      || typeof sourceEvidence.sourceCommit !== 'string' || !GIT_COMMIT.test(sourceEvidence.sourceCommit)
+      || typeof sourceEvidence.mergeRequest !== 'string'
+      || !INTERNAL_SOURCE_MERGE_REQUEST.test(sourceEvidence.mergeRequest)
+      || typeof sourceEvidence.mergeCommit !== 'string' || !GIT_COMMIT.test(sourceEvidence.mergeCommit)
+      || eligibilityCeiling === undefined
+      || Object.keys(eligibilityCeiling).some(key => !['capability', 'scope'].includes(key))
+      || Object.keys(eligibilityCeiling).length !== 2
+      || eligibilityCeiling.capability !== 'ui.extension-points.render'
+      || ceilingScope === undefined
+      || Object.keys(ceilingScope).length !== 1 || !Object.hasOwn(ceilingScope, 'extensionPoints')
+      || JSON.stringify(ceilingScope.extensionPoints) !== JSON.stringify(CERTIFIED_EXTENSION_POINTS)
+    )
+  ) return undefined
+  const reviewedAt = dateTimeEpoch(input.reviewedAt)
+  const expiresAt = dateTimeEpoch(input.expiresAt)
+  const generatedAt = dateTimeEpoch(feed.generatedAt)
+  if (
+    reviewedAt === undefined || expiresAt === undefined || generatedAt === undefined
     || reviewedAt > generatedAt || generatedAt > now.getTime() || now.getTime() >= expiresAt
   ) return undefined
-  const payload = {
-    source: input.source,
-    pluginId: input.pluginId,
-    version: input.version,
-    integrity: input.integrity,
-    reviewPolicy: { id: reviewPolicy.id, version: reviewPolicy.version },
-    reviewedAt: input.reviewedAt,
-    expiresAt: input.expiresAt,
-    evidence: { kind: evidence.kind, reference: evidence.reference },
-    feed: { generatedAt: feed.generatedAt, root: feed.root, authority: feed.authority },
+  const common = {
+    pluginId: input.pluginId as string,
+    version: input.version as string,
+    integrity: input.integrity as `sha256:${string}`,
+    reviewPolicy: { id: reviewPolicy.id as 'cordisx-marketplace-review', version: reviewPolicy.version as string },
+    reviewedAt: input.reviewedAt as string,
+    expiresAt: input.expiresAt as string,
+    evidence: { kind: evidence.kind as 'protected-marketplace-review', reference: evidence.reference as string },
+    feed: {
+      generatedAt: feed.generatedAt as string,
+      root: feed.root as string,
+      authority: feed.authority as typeof profile.authority,
+    },
   }
+  const payload = profile.version === 1
+    ? { source: source as string, ...common }
+    : {
+      canonicalSource: INTERNAL_MARKETPLACE_SOURCE,
+      pluginId: common.pluginId,
+      packageName: input.packageName as `@byted/cordisx-plugin-${string}`,
+      version: common.version,
+      downloadUrl: input.downloadUrl as string,
+      integrity: common.integrity,
+      sourceEvidence: {
+        repository: INTERNAL_MARKETPLACE_SOURCE,
+        sourceCommit: sourceEvidence!.sourceCommit as string,
+        mergeRequest: sourceEvidence!.mergeRequest as string,
+        mergeCommit: sourceEvidence!.mergeCommit as string,
+      },
+      reviewPolicy: common.reviewPolicy,
+      reviewedAt: common.reviewedAt,
+      expiresAt: common.expiresAt,
+      evidence: common.evidence,
+      eligibilityCeiling: {
+        capability: 'ui.extension-points.render' as const,
+        scope: { extensionPoints: CERTIFIED_EXTENSION_POINTS },
+      },
+      feed: common.feed,
+      revision: input.revision as string,
+    }
   if (input.fingerprint !== `sha256:${sha256Hex(JSON.stringify(payload))}`) return undefined
   return Object.freeze({
-    $schema: CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
-    schemaVersion: 1,
+    $schema: profile.schema,
+    schemaVersion: profile.version,
     kind: 'cordisx-certified-permission-eligibility',
     status: 'active',
     ...payload,
     fingerprint: input.fingerprint,
-    revision: input.revision,
+    ...(profile.version === 1 ? { revision: input.revision as string } : {}),
   }) as CordisXCertifiedPermissionProjectionV1
 }
 

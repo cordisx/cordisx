@@ -116,6 +116,7 @@ export function broker(input: {
   readonly generation?: string
   readonly moduleGeneration?: string
   readonly capabilities?: CordisXPluginManifestV4['capabilities']
+  readonly artifact?: Readonly<{ readonly version: string; readonly integrity: `sha256:${string}` }>
   readonly now?: () => Date
 }) {
   let domPrompts = 0
@@ -149,7 +150,7 @@ export function broker(input: {
     manifest(input.capabilities),
     { pluginId: identity.id, moduleGeneration: input.moduleGeneration ?? 'module-1' },
     undefined,
-    { version: '1.2.3', integrity: digest },
+    input.artifact ?? { version: '1.2.3', integrity: digest },
   )
   return { value, unregister, domPrompts: () => domPrompts, nonDomPrompts: () => nonDomPrompts }
 }

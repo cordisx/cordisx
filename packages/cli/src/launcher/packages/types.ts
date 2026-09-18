@@ -9,12 +9,15 @@ export interface LocalPackageSource {
   readonly path: string
   readonly downloadedFrom?: string
   readonly expectedIntegrity?: `sha256:${string}`
+  /** Host-verified digest of the exact downloaded distribution archive. */
+  readonly distributionIntegrity?: `sha256:${string}`
 }
 
 export interface CanonicalPackageSource {
   readonly kind: LocalPackageSourceKind
   readonly url: string
   readonly downloadedFrom?: string
+  readonly distributionIntegrity?: `sha256:${string}`
 }
 
 export interface PackageIdentity {

@@ -136,10 +136,43 @@ export {
 export const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 export const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
 export const MAX_MARKETPLACE_REQUESTS = 4
+const PLUGIN_LIFECYCLE_ERROR_CODES = new Set([
+  'invalid-source',
+  'invalid-manifest',
+  'incompatible-runtime',
+  'integrity-failed',
+  'dependency-missing',
+  'dependency-version',
+  'dependency-cycle',
+  'permission-denied',
+  'build-failed',
+  'readiness-failed',
+  'stale-revision',
+  'stale-generation',
+  'activation-failed',
+  'rollback-failed',
+  'operation-unavailable',
+])
 const DEFAULT_CDP_INJECTION_TIMEOUT_MS = 60_000
 const MIN_CDP_INJECTION_TIMEOUT_MS = 5_000
 const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
 const MAX_RENDERER_DIAGNOSTIC_BYTES = 8_192
+
+export function pluginLifecycleBridgeError(error: unknown): { readonly code: string; readonly error: string } {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/[\r\n\u0000-\u001f\u007f]/gu, ' ')
+    .replace(/((?:api[-_ ]?key|token|password|secret|credential)\s*[:=]\s*)[^\s,;]+/giu, '$1[redacted]')
+    .replace(/(^|\s)(\/(?:[^\s/]+\/)*[^\s]+)/gu, '$1[path redacted]')
+    .trim()
+    .slice(0, 512)
+  const candidate = error !== null && typeof error === 'object' && 'code' in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined
+  return {
+    code: typeof candidate === 'string' && PLUGIN_LIFECYCLE_ERROR_CODES.has(candidate) ? candidate : 'rejected',
+    error: message || 'Plugin lifecycle request failed',
+  }
+}
 
 export function resolveCdpInjectionTimeoutMs(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_CDP_INJECTION_TIMEOUT_MS

@@ -298,6 +298,7 @@ async function stageMarketplaceArtifactPackage(
       kind: 'downloaded-tarball',
       location: pathToFileURL(archive).href,
       downloadedFrom: request.artifact.downloadUrl,
+      distributionIntegrity: request.artifact.integrity,
     })
     if (
       staged.manifest.id !== request.pluginId || staged.manifest.version !== request.version

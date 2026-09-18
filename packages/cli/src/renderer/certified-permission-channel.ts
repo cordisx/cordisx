@@ -1,4 +1,7 @@
-import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
+import {
+  certifiedPermissionProjectionSource,
+  type CordisXCertifiedPermissionProjectionV1,
+} from '../permission-contracts.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../permission-model-v4.js'
 
 export const CERTIFIED_PERMISSION_CHANNEL_CONTRACT = 'cordisx.launcher-certified-permission-channel/v1'
@@ -47,19 +50,26 @@ function object(value: unknown): Record<string, unknown> | undefined {
 }
 
 function snapshotKey(projection: CordisXCertifiedPermissionProjectionV1): string {
-  return [projection.source, projection.pluginId, projection.version, projection.integrity].join('\u0000')
+  return [
+    certifiedPermissionProjectionSource(projection),
+    projection.pluginId,
+    projection.version,
+    projection.integrity,
+  ]
+    .join('\u0000')
 }
 
 function parseProjection(value: unknown, now: Date): CordisXCertifiedPermissionProjectionV1 | undefined {
   const candidate = object(value)
+  const source = candidate?.schemaVersion === 2 ? candidate.canonicalSource : candidate?.source
   if (
-    candidate === undefined || typeof candidate.source !== 'string' || typeof candidate.pluginId !== 'string'
+    candidate === undefined || typeof source !== 'string' || typeof candidate.pluginId !== 'string'
     || typeof candidate.version !== 'string' || typeof candidate.integrity !== 'string'
     || !/^sha256:[a-f0-9]{64}$/u.test(candidate.integrity)
   ) return undefined
   return normalizeCertifiedPermissionProjectionV1(
     value,
-    { source: candidate.source, pluginId: candidate.pluginId },
+    { source, pluginId: candidate.pluginId },
     { version: candidate.version, integrity: candidate.integrity as `sha256:${string}` },
     now,
   )

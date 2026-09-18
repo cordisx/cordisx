@@ -2,7 +2,6 @@ import {
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
 } from './adapter/native-model-provider-seat.js'
-import { CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS } from './codex-desktop-agent-session-transport.js'
 import type { ProviderSelectionSnapshot, ProviderSelectionTransport } from './model-provider-selector.js'
 import {
   NativeProviderSelectionClient,
@@ -18,6 +17,16 @@ type NativeHookGlobal = typeof globalThis & {
   __cordisxNativeSubmissionAuthority?: { snapshot: () => { scope: NativeSubmissionScope; idle: boolean } }
   __cordisxNativeServiceTierOverride?: 'priority' | 'default'
 }
+
+export const CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS = Object.freeze(
+  [
+    Object.freeze({ appVersion: '26.818.61809', buildNumber: '7019', buildFlavor: 'prod', hostId: 'local' }),
+    Object.freeze({ appVersion: '26.820.60940', buildNumber: '7119', buildFlavor: 'prod', hostId: 'local' }),
+    Object.freeze({ appVersion: '26.901.41600', buildNumber: '7982', buildFlavor: 'prod', hostId: 'local' }),
+    Object.freeze({ appVersion: '26.901.51231', buildNumber: '8109', buildFlavor: 'prod', hostId: 'local' }),
+    Object.freeze({ appVersion: '26.908.70816', buildNumber: '9275', buildFlavor: 'prod', hostId: 'local' }),
+  ] as const,
+)
 
 interface ElectronBridge {
   readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
@@ -236,7 +245,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     ) return undefined
     try {
       const options = record(await bridge.getSentryInitOptions())
-      const pin = CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS.find(candidate => (
+      const pin = CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.find(candidate => (
         options?.appVersion === candidate.appVersion
         && options.buildNumber === candidate.buildNumber
         && options.buildFlavor === candidate.buildFlavor

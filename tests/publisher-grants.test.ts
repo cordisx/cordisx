@@ -217,7 +217,7 @@ describe('PublisherGrant launcher gate', () => {
         devices,
         await DirectPublisherGrantStore.open(path.join(root, 'one')),
       )
-      await expect(authority.import(statement())).resolves.toMatchObject({
+      await expect(authority.import(statement(), new Date('2026-08-27T00:00:00Z'))).resolves.toMatchObject({
         status: 'authorized',
         grantId: 'grant-000000000001',
       })

@@ -4,8 +4,10 @@ import {
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
 } from '../packages/cli/src/renderer/adapter/native-model-provider-seat.js'
-import { CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS } from '../packages/cli/src/renderer/codex-desktop-agent-session-transport.js'
-import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
+import {
+  CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS,
+  CodexDesktopNativeModelProviderTransport,
+} from '../packages/cli/src/renderer/native-model-provider-transport.js'
 import type {
   NativeProviderSelectionCommandChannel,
   NativeProviderSelectionProjection,
@@ -129,7 +131,7 @@ async function harness(handler?: (request: Record<string, unknown>, view: Window
   install('location', dom.window.location)
   install('codexWindowType', 'electron')
   install('electronBridge', {
-    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS[1] }),
     sendMessageFromView: async (envelope: { request?: Record<string, unknown> }) => {
       if (envelope.request === undefined) return
       requests.push(structuredClone(envelope.request))
@@ -277,7 +279,7 @@ describe('native model provider transport', () => {
     install('location', dom.window.location)
     install('codexWindowType', 'electron')
     install('electronBridge', {
-      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS[1] }),
       sendMessageFromView,
     })
 

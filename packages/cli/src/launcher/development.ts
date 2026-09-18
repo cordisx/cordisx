@@ -17,6 +17,7 @@ import {
   normalizePluginManifestV13,
 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
+import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import { createHash } from 'node:crypto'
 import { access, readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -32,6 +33,7 @@ import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-
 import {
   PLUGIN_PACKAGE_SCHEMA_V12,
   PLUGIN_PACKAGE_SCHEMA_V13,
+  PLUGIN_PACKAGE_SCHEMA_V14,
   PLUGIN_PACKAGE_SCHEMA_V5,
   PLUGIN_PACKAGE_SCHEMA_V6,
   PLUGIN_PACKAGE_SCHEMA_V7,
@@ -54,6 +56,11 @@ import {
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14,
+  normalizePluginManifestV14,
+} from './latest-runtime-manifest.js'
+import { declaredRuntimeManifestSchema, localDevelopmentManifestIdentity } from './development-manifest-identity.js'
 
 const WATCH_INTERVAL_MS = 200
 const DEBOUNCE_MS = 120
@@ -93,6 +100,7 @@ export interface LocalDevelopmentBuild {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
 }
 
 interface LocalDevelopmentBuildOptions {
@@ -103,6 +111,7 @@ interface LocalDevelopmentBuildOptions {
 }
 
 interface LocalDevelopmentEntry {
+  readonly id: string
   readonly entry: string
   readonly sourceRoot: string
   readonly identitySource: string
@@ -147,6 +156,7 @@ export interface LocalDevelopmentPackageInfo {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
 }
 
 export async function localDevelopmentPackageInfo(entry: string): Promise<LocalDevelopmentPackageInfo> {
@@ -178,9 +188,10 @@ async function resolveLocalDevelopmentEntry(rawEntry: string): Promise<LocalDeve
   const entry = path.resolve(rawEntry)
   await access(entry)
   const root = await findPackageRoot(entry)
-  const id = pluginId(entry)
+  const id = await localDevelopmentManifestIdentity(root) ?? pluginId(entry)
   const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
   return {
+    id,
     entry,
     sourceRoot: root,
     identitySource: `file:///cordisx-local-dev/${sourceKey}/${id}.js`,
@@ -192,7 +203,7 @@ export async function localDevelopmentPluginIdentity(
   rawEntry: string,
 ): Promise<{ readonly id: string; readonly source: string }> {
   const resolved = await resolveLocalDevelopmentEntry(rawEntry)
-  return { id: pluginId(resolved.entry), source: resolved.identitySource }
+  return { id: resolved.id, source: resolved.identitySource }
 }
 
 async function readReadmes(root: string): Promise<{
@@ -234,6 +245,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
 }> {
   const manifestPath = path.join(root, 'cordisx-package.json')
   const text = await readFile(manifestPath, 'utf8').catch(error => {
@@ -256,29 +268,10 @@ async function readRendererOnlyPackage(root: string): Promise<{
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
     | undefined
   let runtimeManifestFile: string | undefined
-  const declaredRuntimeSchema = manifest.runtimeManifest !== null && typeof manifest.runtimeManifest === 'object'
-      && !Array.isArray(manifest.runtimeManifest)
-    ? (manifest.runtimeManifest as Record<string, unknown>).schema
-    : undefined
-  const runtimeManifestSchema = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V9 && manifest.schemaVersion === 9
-    ? declaredRuntimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
-      ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
-      : PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V10 && manifest.schemaVersion === 10
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V11 && manifest.schemaVersion === 11
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 && manifest.schemaVersion === 12
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12
-    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 && manifest.schemaVersion === 13
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13
-    : undefined
+  const runtimeManifestSchema = declaredRuntimeManifestSchema(manifest)
   const declaresVersionedManifest = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 || manifest.schemaVersion === 7
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 || manifest.schemaVersion === 8
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V9 || manifest.schemaVersion === 9
@@ -286,6 +279,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V11 || manifest.schemaVersion === 11
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 || manifest.schemaVersion === 12
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 || manifest.schemaVersion === 13
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 || manifest.schemaVersion === 14
   if (manifest.runtimeManifest !== undefined && runtimeManifestSchema !== undefined) {
     if (
       manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object'
@@ -312,7 +306,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
     if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
     const packageId = manifest.id
     if (typeof packageId !== 'string') throw new Error('local development package id is required')
-    runtimeManifest = runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13
+    runtimeManifest = runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14
+      ? normalizePluginManifestV14(JSON.parse(runtimeText) as unknown, packageId)
+      : runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13
       ? normalizePluginManifestV13(JSON.parse(runtimeText) as unknown, packageId)
       : runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12
       ? normalizePluginManifestV12(JSON.parse(runtimeText) as unknown, packageId)
@@ -346,10 +342,11 @@ async function readRendererOnlyPackage(root: string): Promise<{
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V10 && manifest.schemaVersion === 10)
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V11 && manifest.schemaVersion === 11)
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 && manifest.schemaVersion === 12)
-      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 && manifest.schemaVersion === 13))
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 && manifest.schemaVersion === 13)
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 && manifest.schemaVersion === 14))
   ) {
     throw new Error(
-      'local development entityTemplates require plugin-package.v5 through plugin-package.v13',
+      'local development entityTemplates require plugin-package.v5 through plugin-package.v14',
     )
   }
   const compatibility = manifest.compatibility
@@ -427,7 +424,7 @@ export async function buildLocalDevelopmentPlugin(
   const entry = path.resolve(rawEntry)
   await access(entry)
   const { root, version, packageFiles, entityTemplates, manifest } = await localDevelopmentPackageInfo(entry)
-  const id = pluginId(entry)
+  const id = manifest?.id ?? pluginId(entry)
   const common = {
     absWorkingDir: root,
     bundle: true,
@@ -607,7 +604,7 @@ export class LocalDevelopmentController {
 
   private constructor(private readonly options: LocalDevelopmentControllerOptions, resolved: LocalDevelopmentEntry) {
     this.entry = resolved.entry
-    this.pluginId = pluginId(resolved.entry)
+    this.pluginId = resolved.id
     this.sourceRoot = resolved.sourceRoot
     this.identitySource = resolved.identitySource
     this.watchFiles = [resolved.entry, path.join(resolved.sourceRoot, 'package.json')]

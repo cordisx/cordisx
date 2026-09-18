@@ -101,7 +101,7 @@ export function configureNativeViteServer<Generation extends { readonly moduleGe
     const moduleGeneration = typeof data.moduleGeneration === 'string' ? data.moduleGeneration : ''
     const transactionId = typeof data.transactionId === 'string' ? data.transactionId : ''
     const action = data.action
-    const task = (async () => {
+    const task = (async (): Promise<readonly unknown[] | undefined> => {
       if (action === 'stage') {
         // A different native window may already have committed this snapshot.
         // Keep the current generation stageable without accepting retired ones.
@@ -129,7 +129,7 @@ export function configureNativeViteServer<Generation extends { readonly moduleGe
           )
         }, 15_000)
         context.generationTransactions.set(transactionId, { handle: transaction, timeout, pluginId, moduleGeneration })
-        return
+        return transaction.managedServiceUICapabilities
       }
       const transaction = context.generationTransactions.get(transactionId)
       if (transaction === undefined) throw new Error('Unknown Vite plugin generation transaction')
@@ -143,12 +143,20 @@ export function configureNativeViteServer<Generation extends { readonly moduleGe
       else throw new Error('Unknown Vite plugin generation transaction action')
       clearTimeout(transaction.timeout)
       context.generationTransactions.delete(transactionId)
+      return undefined
     })()
-    void task.then(() => {
+    void task.then(managedServiceUICapabilities => {
       client.send({
         type: 'custom',
         event: 'cordisx:plugin-generation-transaction-result',
-        data: { requestId, pluginId, moduleGeneration, transactionId, action },
+        data: {
+          requestId,
+          pluginId,
+          moduleGeneration,
+          transactionId,
+          action,
+          ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),
+        },
       })
     }, error => {
       client.send({

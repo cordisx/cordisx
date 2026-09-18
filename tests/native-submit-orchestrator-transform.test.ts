@@ -2,10 +2,15 @@ import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT,
+  NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9275,
   NATIVE_SUBMIT_ORCHESTRATOR_FENCE,
+  NATIVE_SUBMIT_ORCHESTRATOR_FENCE_BUILD_9275,
   NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE,
+  NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9275,
   NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM,
+  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
   transformNativeSubmitOrchestrator,
+  transformNativeSubmitOrchestratorBuild9275,
 } from '../packages/cli/src/renderer/adapter/native-submit-orchestrator-transform.js'
 
 const anchor = 'skipGoalReplacementConfirmation:se=!1,skipGoalSubmit:ce=!1}=P;a();'
@@ -19,6 +24,14 @@ globalThis.submit=async function(P={}) {
   return De;
 };`
 
+const fixtureBuild9275 = `let dn;dn=(e,t)=>{Ot(e,t)};globalThis.selectModel=dn;
+globalThis.submit=async function(F={}) {
+  let K={type:'worktree'},l,T,m,f='steer',g,J,se;
+  let {${'skipGoalReplacementConfirmation:le=!1,skipGoalSubmit:ue=!1}=F;a();'}
+  let t={input:F.input},n=[],je;je={...t,threadReferences:n,attachments:F.attachments};
+  return je;
+};`
+
 function runtime(hook?: (descriptor: unknown) => unknown) {
   const effects: string[] = []
   const activate = vi.fn()
@@ -28,6 +41,18 @@ function runtime(hook?: (descriptor: unknown) => unknown) {
     __cordisxNativeSubmissionActivate: activate,
   } as Record<string, any>
   runInNewContext(transformNativeSubmitOrchestrator(fixture).source, sandbox)
+  return { sandbox, effects, activate }
+}
+
+function runtimeBuild9275(hook?: (descriptor: unknown) => unknown) {
+  const effects: string[] = []
+  const activate = vi.fn()
+  const sandbox = {
+    a: () => effects.push('send'),
+    __cordisxNativeSubmitHook: hook,
+    __cordisxNativeSubmissionActivate: activate,
+  } as Record<string, any>
+  runInNewContext(transformNativeSubmitOrchestratorBuild9275(fixtureBuild9275).source, sandbox)
   return { sandbox, effects, activate }
 }
 
@@ -122,5 +147,50 @@ describe('native submit orchestrator transform', () => {
     runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_FENCE, run.sandbox)
     expect(runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT, run.sandbox)).toBe(false)
     expect(run.sandbox.__cordisxNativeSubmitHook).toBeUndefined()
+  })
+
+  it('supports the exact audited build-9275 primary resource and fails closed on drift', () => {
+    const result = transformNativeSubmitOrchestratorBuild9275(fixtureBuild9275)
+    expect(NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9275).toEqual({
+      url: 'app://-/assets/app-primary-4af6ed7f68d1.js',
+      sha256: '6d75ae321771510842fbcc303846913f7434bc8a67e0c69fb5adb22c632eb3ac',
+    })
+    expect(NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275).toMatchObject(
+      NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9275,
+    )
+    expect(result.anchorMatches).toBe(1)
+    expect(result.source).toContain('__cxDecision=await __cxHook({')
+    expect(result.source.indexOf('__cordisxNativeSubmitHook')).toBeLessThan(result.source.indexOf('a();'))
+    expect(result.source).toContain(
+      '__cordisxOperationToken:__cxDecision.operationToken}),threadReferences:n,',
+    )
+    expect(() => transformNativeSubmitOrchestratorBuild9275('unrelated')).toThrow('found 0')
+    expect(() => transformNativeSubmitOrchestratorBuild9275(fixtureBuild9275 + fixtureBuild9275)).toThrow('found 2')
+  })
+
+  it('preserves build-9275 model completion and submission admission semantics', async () => {
+    let finish!: (value: boolean) => void
+    const update = new Promise<boolean>(resolve => {
+      finish = resolve
+    })
+    const run = runtimeBuild9275(async () => ({ allow: true, operationToken: 'operation-build-9275' }))
+    run.sandbox.Ot = () => update
+    const modelResult = run.sandbox.selectModel('model-b', 'high')
+    expect(modelResult).toBe(update)
+    finish(true)
+    await expect(modelResult).resolves.toBe(true)
+    await expect(run.sandbox.submit({ input: 'draft' })).resolves.toMatchObject({
+      input: 'draft',
+      __cordisxOperationToken: 'operation-build-9275',
+    })
+    expect(run.effects).toEqual(['send'])
+    expect(run.activate).toHaveBeenCalledWith(true)
+    expect(runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9275, run.sandbox)).toBe(true)
+    runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_FENCE_BUILD_9275, run.sandbox)
+    expect(runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9275, run.sandbox)).toBe(false)
+
+    const denied = runtimeBuild9275(async () => ({ allow: false }))
+    await expect(denied.sandbox.submit({ input: 'blocked' })).resolves.toBeUndefined()
+    expect(denied.effects).toEqual([])
   })
 })

@@ -66,9 +66,11 @@ function handler(expectedSource = SOURCE): {
     readonly location: string
     readonly downloadedFrom?: string
     readonly expectedDigest?: string
+    readonly distributionIntegrity?: string
   }) => {
     archivePaths.push(fileURLToPath(source.location))
     expect(source).toMatchObject({ kind: 'downloaded-tarball', downloadedFrom: DOWNLOAD })
+    expect(source.distributionIntegrity).toMatch(/^sha256:[a-f0-9]{64}$/)
     expect(source).not.toHaveProperty('expectedDigest')
     return {
       manifest: { id: 'marketplace-demo', version: '1.2.3', canonicalSource: expectedSource },
@@ -135,6 +137,9 @@ describe('Marketplace artifact installation boundary', () => {
     await expect(inspectMarketplaceArtifactPackage(lifecycle.value, request(bytes), new AbortController().signal))
       .resolves.toMatchObject({ outcome: 'planned', candidateId: 'candidate' })
     expect(lifecycle.stage).toHaveBeenCalledOnce()
+    expect(lifecycle.stage).toHaveBeenCalledWith(expect.objectContaining({
+      distributionIntegrity: request(bytes).artifact.integrity,
+    }))
     expect(lifecycle.inspect).toHaveBeenCalledOnce()
     await expect(stat(lifecycle.archivePaths[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
   })

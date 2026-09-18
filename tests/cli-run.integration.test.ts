@@ -930,6 +930,7 @@ describe('functional CordisX CLI', () => {
       pluginId: 'demo',
       sourcePath: entry,
     })
+    expect(output).toContainEqual(expect.stringContaining('[cordisx] Vite entry ready:'))
     await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
     await writeFile(dependency, 'export const value =\n')
     await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(

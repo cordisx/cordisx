@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { c as createTar } from 'tar'
 import { expect, it, vi } from 'vitest'
 import { partitionPermissionReviewPlan } from '../../packages/cli/src/capability-risk-catalog.js'
 import {
@@ -28,6 +31,21 @@ import {
 } from './plugin-lifecycle.fixtures.js'
 
 const execFileAsync = promisify(execFile)
+
+async function stageVerifiedArchive(
+  coordinator: PluginLifecycleCoordinator,
+  sourceDirectory: string,
+  archive: string,
+) {
+  await createTar({ cwd: sourceDirectory, file: archive, gzip: true }, ['.'])
+  const integrity = `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}` as const
+  return await coordinator.stagePackageSource({
+    kind: 'downloaded-tarball',
+    location: pathToFileURL(archive).href,
+    downloadedFrom: 'https://registry.example/' + path.basename(archive),
+    distributionIntegrity: integrity,
+  })
+}
 
 export function registerAdmissionTests() {
   it('routes normalized manifest-v5 through manifest-v14 to V4 permission review', () => {
@@ -144,10 +162,9 @@ export function registerAdmissionTests() {
     }
   })
 
-  it('reviews package-v4/manifest-v5 through V4 on the same lifecycle authority and consumes Host-owned exact certification', async () => {
+  it('reviews package-v4/manifest-v5 through V4 without extending Certified beyond the Host allowlist', async () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()
-    let certified = true
     const lookupArtifacts: Array<
       Readonly<{
         source: string
@@ -163,13 +180,21 @@ export function registerAdmissionTests() {
       permissionPolicies: [],
       certifiedPermissionForArtifact: async artifact => {
         lookupArtifacts.push(artifact)
-        return certified ? exactCertification(artifact) : undefined
+        return exactCertification(artifact)
       },
       runtime,
     })
-    const planned = await coordinator.handle(
-      request({ kind: 'inspect-local', sourceDirectory: await localPackageV5(root) }),
+    const source = await localPackageV5(root)
+    const packagePath = path.join(source, 'cordisx-package.json')
+    const packageManifest = JSON.parse(await readFile(packagePath, 'utf8')) as Record<string, unknown>
+    packageManifest.canonicalSource = 'https://github.com/example/permission-v5-certified'
+    await writeFile(packagePath, `${JSON.stringify(packageManifest, null, 2)}\n`)
+    const staged = await stageVerifiedArchive(
+      coordinator,
+      source,
+      path.join(root, 'permission-v5-certified.tgz'),
     )
+    const planned = await coordinator.inspectStagedPackage(staged, 'permission-v5-certified')
     expect(planned).toMatchObject({ outcome: 'planned', operation: 'install', package: { id: 'permission-v5' } })
     expect(planned.authorizationPlan).toBeUndefined()
     expect(
@@ -195,11 +220,11 @@ export function registerAdmissionTests() {
       resourceClass: 'non-dom',
     })
     expect(plan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
-      authorizationMode: 'certified-implicit',
-      decisionRequired: false,
+      authorizationMode: 'explicit-user',
+      decisionRequired: true,
       resourceClass: 'host-dom',
-      certification: { integrity: expect.stringMatching(/^sha256:/) },
     })
+    expect(plan?.declarations.find(item => item.capability === 'ui.host-dom.read')).not.toHaveProperty('certification')
     const decision = {
       $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
       schemaVersion: 4 as const,
@@ -216,15 +241,6 @@ export function registerAdmissionTests() {
         decision: 'allow-persistent' as const,
       })),
     }
-    certified = false
-    await expect(coordinator.applyPermissionReviewV4({
-      requestId: 'v4-apply-revoked',
-      profileId: 'work',
-      runtimeGeneration: 'runtime-1',
-      expectedRevision: 0,
-      decision,
-    })).rejects.toThrow('A required plugin capability was not granted')
-    certified = true
     const applied = await coordinator.applyPermissionReviewV4({
       requestId: 'v4-apply',
       profileId: 'work',
@@ -233,16 +249,100 @@ export function registerAdmissionTests() {
       decision,
     })
     expect(applied).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
-    expect(lookupArtifacts).toHaveLength(3)
-    expect(lookupArtifacts).toEqual([lookupArtifacts[0], lookupArtifacts[0], lookupArtifacts[0]])
+    expect(lookupArtifacts).toHaveLength(2)
+    expect(lookupArtifacts).toEqual([lookupArtifacts[0], lookupArtifacts[0]])
     expect(lookupArtifacts[0]).toMatchObject({
-      source: expect.stringMatching(/^file:\/\/\/cordisx-store\/sha256\/[a-f0-9]{64}\/entry\.js$/),
+      source: 'https://github.com/example/permission-v5-certified',
       pluginId: 'permission-v5',
       version: '1.0.0',
       integrity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
     })
     expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
     expect(runtime.lastStaged?.authorizationDecision).toEqual(decision)
+  })
+
+  it('binds lifecycle certification to the exact downloaded artifact rather than its normalized store digest', async () => {
+    const { root, home } = await workspace()
+    const source = await localPackageV5(root)
+    const canonicalSource = 'https://github.com/example/certified-permission-v5'
+    const packagePath = path.join(source, 'cordisx-package.json')
+    const packageManifest = JSON.parse(await readFile(packagePath, 'utf8')) as Record<string, unknown>
+    packageManifest.canonicalSource = canonicalSource
+    await writeFile(packagePath, `${JSON.stringify(packageManifest, null, 2)}\n`)
+    const archive = path.join(root, 'permission-v5.tgz')
+    await createTar({ cwd: source, file: archive, gzip: true }, ['.'])
+    const artifactIntegrity = `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}` as const
+    const lookup = vi.fn(async artifact => exactCertification(artifact))
+    class CertificationProbeCoordinator extends PluginLifecycleCoordinator {
+      certificationFor(staged: Parameters<PluginLifecycleCoordinator['inspectStagedPackage']>[0]) {
+        return this.certifiedPermission(staged)
+      }
+    }
+    const coordinator = new CertificationProbeCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: lookup,
+      runtime: new FormalRuntime(),
+    })
+    const staged = await coordinator.stagePackageSource({
+      kind: 'downloaded-tarball',
+      location: pathToFileURL(archive).href,
+      downloadedFrom: 'https://registry.example/permission-v5.tgz',
+      distributionIntegrity: artifactIntegrity,
+    })
+    expect(staged.digest).not.toBe(artifactIntegrity)
+    const certification = await coordinator.certificationFor(staged)
+    expect(lookup).toHaveBeenCalledWith({
+      source: canonicalSource,
+      pluginId: 'permission-v5',
+      version: '1.0.0',
+      integrity: artifactIntegrity,
+    })
+    expect(certification).toMatchObject({
+      source: canonicalSource,
+      pluginId: 'permission-v5',
+      version: '1.0.0',
+      integrity: artifactIntegrity,
+    })
+
+    lookup.mockClear()
+    const sourceBuilt = await coordinator.stagePackageSource({
+      kind: 'local-directory',
+      location: pathToFileURL(source).href,
+    })
+    expect(sourceBuilt).not.toHaveProperty('artifactIntegrity')
+    await expect(coordinator.certificationFor(sourceBuilt)).resolves.toBeUndefined()
+    expect(lookup).not.toHaveBeenCalled()
+
+    const mismatched = new CertificationProbeCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: async artifact =>
+        exactCertification({
+          ...artifact,
+          integrity: `sha256:${'0'.repeat(64)}`,
+        }),
+      runtime: new FormalRuntime(),
+    })
+    await expect(mismatched.certificationFor(staged)).resolves.toBeUndefined()
+
+    const wrongVersion = new CertificationProbeCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      certifiedPermissionForArtifact: async artifact =>
+        exactCertification({
+          ...artifact,
+          version: '2.0.0',
+        }),
+      runtime: new FormalRuntime(),
+    })
+    await expect(wrongVersion.certificationFor(staged)).resolves.toBeUndefined()
   })
 
   it('reviews and applies a manifest-v14 managed backend through an exact V4 candidate binding', async () => {
@@ -426,10 +526,14 @@ export function registerAdmissionTests() {
       certifiedPermissionForArtifact: lookup,
       runtime: new FormalRuntime(),
     })
-    const nonDom = await coordinator.handle(request({
-      kind: 'inspect-local',
-      sourceDirectory: await localPackageV5(root, false, false),
-    }))
+    const nonDom = await coordinator.inspectStagedPackage(
+      await stageVerifiedArchive(
+        coordinator,
+        await localPackageV5(root, false, false),
+        path.join(root, 'permission-v5-non-dom.tgz'),
+      ),
+      'permission-v5-non-dom',
+    )
     const nonDomPlan = await coordinator.permissionReviewPlanV4({
       requestId: 'non-dom-v4-plan',
       profileId: 'work',
@@ -445,10 +549,14 @@ export function registerAdmissionTests() {
     })
     expect(lookup).not.toHaveBeenCalled()
 
-    const hostDom = await coordinator.handle(request({
-      kind: 'inspect-local',
-      sourceDirectory: await localPackageV5(root),
-    }))
+    const hostDom = await coordinator.inspectStagedPackage(
+      await stageVerifiedArchive(
+        coordinator,
+        await localPackageV5(root),
+        path.join(root, 'permission-v5-host-dom.tgz'),
+      ),
+      'permission-v5-host-dom',
+    )
     const hostDomPlan = await coordinator.permissionReviewPlanV4({
       requestId: 'host-dom-v4-plan',
       profileId: 'work',

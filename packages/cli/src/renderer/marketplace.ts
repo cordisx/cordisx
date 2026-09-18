@@ -81,6 +81,7 @@ const PLUGIN_SCHEMAS = Object.freeze({
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json',
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json',
   6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v6.schema.json',
+  7: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v7.schema.json',
 })
 const FEED_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
@@ -89,6 +90,7 @@ const FEED_SCHEMAS = Object.freeze({
   4: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json',
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json',
   6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v6.schema.json',
+  7: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v7.schema.json',
 })
 
 function record(value: unknown): Record<string, unknown> {
@@ -181,7 +183,7 @@ function parsePluginLocalizations(
 function parseFeedLocalizations(
   value: unknown,
   fallbackLocale: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
   label: string,
 ): Readonly<Record<string, MarketplaceFeedLocalization>> {
   if (value === undefined) return Object.freeze({})
@@ -326,7 +328,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const schemaVersion = plugin.schemaVersion
   if (
     schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
-    && schemaVersion !== 6
+    && schemaVersion !== 6 && schemaVersion !== 7
   ) {
     throw new Error(`plugins[${index}].schemaVersion 不受支持`)
   }
@@ -424,7 +426,7 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
   const schemaVersion = feed.schemaVersion
   if (
     schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
-    && schemaVersion !== 6
+    && schemaVersion !== 6 && schemaVersion !== 7
   ) {
     throw new Error('schemaVersion 不受支持')
   }

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { createServer, type ModuleNode, normalizePath, type Plugin, type ViteDevServer } from 'vite'
+import { transform as transformWithEsbuild } from 'esbuild'
 import { type BuildRendererBundleOptions, buildRendererCompositionSource } from './bundle.js'
 import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import { findFreeLoopbackPort } from './process.js'
@@ -27,7 +28,12 @@ import {
   type NativeVitePluginGeneration,
   type NativeVitePluginGenerationHandler,
 } from './vite-development-generation.js'
-export { createNativeViteEntityGenerationHandler } from './vite-development-generation.js'
+import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
+export {
+  composeNativeVitePluginGenerationHandlers,
+  createNativeViteEntityGenerationHandler,
+  createNativeViteManagedServiceProjection,
+} from './vite-development-generation.js'
 export type {
   NativeVitePluginGeneration,
   NativeVitePluginGenerationHandler,
@@ -91,6 +97,7 @@ interface DevelopmentGeneration {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
@@ -183,6 +190,7 @@ export async function startNativeViteServer(
   const origin = `http://127.0.0.1:${port}`
   const base = `/cordisx-dev-${randomBytes(24).toString('hex')}/`
   const sessionGeneration = randomBytes(24).toString('base64url')
+  const resourceUrl = (pathname: string): string => origin + base + pathname
   const url = (id: string): string => origin + base.slice(0, -1) + virtualUrl(id)
   let config = initialConfig
   let options: BuildRendererBundleOptions | undefined
@@ -431,8 +439,9 @@ const requestPluginGeneration = (action, pluginId, moduleGeneration, transaction
 });
 const stagePluginGeneration = async (pluginId, moduleGeneration) => {
   const transactionId = crypto.randomUUID();
-  await requestPluginGeneration('stage', pluginId, moduleGeneration, transactionId);
+  const managedServiceUICapabilities = await requestPluginGeneration('stage', pluginId, moduleGeneration, transactionId);
   return {
+    managedServiceUICapabilities,
     commit: () => requestPluginGeneration('commit', pluginId, moduleGeneration, transactionId),
     rollback: () => requestPluginGeneration('rollback', pluginId, moduleGeneration, transactionId),
   };
@@ -474,7 +483,7 @@ if (import.meta.hot) {
     if (!waiter) return;
     generationWaiters.delete(data.requestId);
     clearTimeout(waiter.timeout);
-    if (data.error) waiter.reject(new Error(data.error)); else waiter.resolve();
+    if (data.error) waiter.reject(new Error(data.error)); else waiter.resolve(data.managedServiceUICapabilities);
   });
   import.meta.hot.on('cordisx:replace-plugin', data => {
     void replacePlugin(data.pluginId, data.timestamp).catch(error => console.error('[cordisx] Vite plugin replacement failed', error));
@@ -629,14 +638,30 @@ if (import.meta.hot) {
     async transform(source, id) {
       if (!/\.[cm]?[jt]sx?(?:\?|$)/.test(id)) return undefined
       const sourcePath = id.split('?')[0]!
+      let realFile: string | undefined
       if (path.isAbsolute(sourcePath)) {
-        const realFile = await realpath(sourcePath).catch(() => path.resolve(sourcePath))
+        realFile = await realpath(sourcePath).catch(() => path.resolve(sourcePath))
         // A module request can race ahead of its queued file-change event.
         // Loading must not acknowledge that event or suppress its replacement.
         if (!fileHashes.has(realFile)) fileHashes.set(realFile, hashSource(source))
       }
       const code = source.replace(/(from\s+['"][^'"]+\.css)(['"])/g, '$1?inline$2')
         .replace(/(from\s+['"][^'"]+\.svg)(['"])/g, '$1?raw$2')
+      const generation = realFile === undefined
+        ? undefined
+        : [...generations.values()].find(item => item.realEntry === realFile)
+      if (
+        generation?.manifest?.schemaVersion === 14
+        && code.includes('CORDISX_PLUGIN_RUNTIME_MANIFEST')
+      ) {
+        const transformed = await transformWithEsbuild(code, {
+          define: { CORDISX_PLUGIN_RUNTIME_MANIFEST: JSON.stringify(generation.manifest) },
+          loader: sourcePath.endsWith('x') ? 'tsx' : 'ts',
+          sourcefile: sourcePath,
+          sourcemap: 'inline',
+        })
+        return { code: transformed.code, map: transformed.map }
+      }
       return code === source ? undefined : { code, map: null }
     },
     async handleHotUpdate(context) {
@@ -796,7 +821,7 @@ if (import.meta.hot) {
       // CDP installs only the canonical manifest loader. Source modules and
       // updates remain Vite-owned after that first graph admission.
       return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = fetch(${
-        JSON.stringify(url('host-manifest.json'))
+        JSON.stringify(resourceUrl('host-manifest.json'))
       }).then(r => { if (!r.ok) throw new Error('CordisX Vite Host manifest unavailable'); return r.json(); }).then(async manifest => { await import(${
         JSON.stringify(url(PREAMBLE))
       }); const boot = await import(/* @vite-ignore */ manifest.entry); return await boot.start(); }); globalThis.__cordisxViteBoot.catch(error => { console.error('[cordisx] Vite bootstrap failed', error); }); }`

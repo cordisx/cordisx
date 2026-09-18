@@ -22,6 +22,10 @@ const PACKAGE_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v8.schema.json'
 const RUNTIME_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json'
+const PACKAGE_SCHEMA_V14 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v14.schema.json'
+const RUNTIME_SCHEMA_V14 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v14.schema.json'
 const ENTITY_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 
@@ -42,6 +46,95 @@ afterEach(async () => {
 })
 
 describe('native Vite development transport', () => {
+  it('injects the validated v14 runtime manifest into a source plugin entry', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-runtime-manifest-'))
+    const entry = path.join(root, 'src', 'index.ts')
+    const runtimeManifestPath = path.join(root, 'runtime-manifest.json')
+    await mkdir(path.dirname(entry), { recursive: true })
+    await writeFile(
+      path.join(root, 'package.json'),
+      '{"name":"runtime-manifest-demo","version":"1.0.0","type":"module"}',
+    )
+    const runtimeManifest = {
+      $schema: RUNTIME_SCHEMA_V14,
+      schemaVersion: 14,
+      id: 'runtime-manifest-demo',
+      name: 'Runtime manifest demo',
+      capabilities: [],
+      services: [{
+        id: 'demo-service',
+        kind: 'managed-backend',
+        owner: 'host',
+        entry: './dist/service.js',
+        definitionSchema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-definition.v1.schema.json',
+        runtimeResources: [{
+          path: './schemas/catalog.json',
+          mode: 'data',
+          digest: `sha256:${'1'.repeat(64)}`,
+          byteLength: 27,
+        }],
+        consumerGrants: [{ pluginId: 'runtime-manifest-demo', operations: ['models.list'] }],
+      }],
+    }
+    const runtimeText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
+    await writeFile(runtimeManifestPath, runtimeText)
+    await writeFile(
+      path.join(root, 'cordisx-package.json'),
+      JSON.stringify({
+        $schema: PACKAGE_SCHEMA_V14,
+        schemaVersion: 14,
+        id: 'runtime-manifest-demo',
+        version: '1.0.0',
+        entry: './dist/index.js',
+        distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+        compatibility: { runtimeAbi: 1, protocolSchemas: [RUNTIME_SCHEMA_V14] },
+        dependencies: [],
+        runtimeManifest: {
+          path: './runtime-manifest.json',
+          schema: RUNTIME_SCHEMA_V14,
+          digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+        },
+      }),
+    )
+    await writeFile(
+      entry,
+      'declare const CORDISX_PLUGIN_RUNTIME_MANIFEST: unknown; export const manifest = CORDISX_PLUGIN_RUNTIME_MANIFEST; export function apply() {}\n',
+    )
+    const config = {
+      version: 1 as const,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{ id: 'runtime-manifest-demo', entry, enabled: true, config: {} }],
+    }
+    const vite = await startTestViteServer(config)
+    try {
+      await buildRendererComposition(config, () => {}, {
+        developmentBuild: (config, options) => vite.buildBootstrap(config, options ?? {}),
+      })
+      const wrapper = await fetch(vite.url + '@id/__x00__virtual:cordisx-native-plugin/runtime-manifest-demo', {
+        headers: { Origin: 'null' },
+        signal: AbortSignal.timeout(5000),
+      }).then(response => response.text())
+      const entryUrl = wrapper.match(/import\("([^"]+\/index\.ts\?cordisx-plugin-generation=[^"]+)"\)/)?.[1]
+      expect(entryUrl).toBeDefined()
+      const transformed = await fetch(new URL(entryUrl!, new URL(vite.url).origin), {
+        headers: { Origin: 'null' },
+        signal: AbortSignal.timeout(5000),
+      }).then(async response => {
+        expect(response.status).toBe(200)
+        return await response.text()
+      })
+      expect(transformed).not.toMatch(/=\s*CORDISX_PLUGIN_RUNTIME_MANIFEST\s*;/u)
+      expect(transformed).toContain(JSON.stringify(runtimeManifest.services[0]!.runtimeResources[0]!.digest))
+      expect(transformed).toContain('byteLength: 27')
+    } finally {
+      await vite.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('serves multiple plugin entries from one Vite session and scopes source updates to their owner', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-multi-'))
     const first = path.join(root, 'plugins', 'first.ts')
@@ -77,8 +170,20 @@ describe('native Vite development transport', () => {
         return await response.text()
       })
     try {
-      await buildRendererComposition(config, () => {}, {
+      const composition = await buildRendererComposition(config, () => {}, {
         developmentBuild: (config, options) => vite.buildBootstrap(config, options ?? {}),
+      })
+      expect(composition.source).toContain(JSON.stringify(vite.url + 'host-manifest.json'))
+      const hostManifest = await fetch(vite.url + 'host-manifest.json', {
+        headers: { Origin: 'app://-' },
+        signal: AbortSignal.timeout(5000),
+      }).then(async response => {
+        expect(response.status).toBe(200)
+        return await response.json() as { readonly version: number; readonly entry: string }
+      })
+      expect(hostManifest).toEqual({
+        version: 1,
+        entry: expect.stringContaining('@id/__x00__virtual:cordisx-native-boot'),
       })
       const entrySource = await get('@id/__x00__virtual:cordisx-native-entry')
       expect(entrySource).toContain('virtual:cordisx-native-plugin/first')

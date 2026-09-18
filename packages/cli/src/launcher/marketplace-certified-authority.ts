@@ -4,7 +4,10 @@ import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { type HomeConfigMarketplaceTrustSource, loadHomeConfig } from '../config/home-config.js'
 import { canonicalPluginSource, marketplacePluginIdentity, parseMarketplaceFeed } from '../renderer/marketplace.js'
-import type { MarketplaceCertifiedPermissionProjectionV1 } from '../renderer/marketplace-trust.js'
+import {
+  type MarketplaceCertifiedPermissionProjectionV1,
+  marketplaceCertifiedProjectionSource,
+} from '../renderer/marketplace-trust.js'
 import { fetchMarketplaceFeed, type MarketplaceFetchResult } from './marketplace.js'
 
 export type { MarketplaceCertifiedPermissionProjectionV1 } from '../renderer/marketplace-trust.js'
@@ -130,7 +133,8 @@ function parseExactIdentity(value: unknown): MarketplaceCertifiedArtifactIdentit
 }
 
 function identityKey(value: MarketplaceCertifiedArtifactIdentity | MarketplaceCertifiedPermissionProjectionV1): string {
-  return [value.source, value.pluginId, value.version, value.integrity].join('\u0000')
+  const source = 'schemaVersion' in value ? marketplaceCertifiedProjectionSource(value) : value.source
+  return [source, value.pluginId, value.version, value.integrity].join('\u0000')
 }
 
 function sha256(value: string): `sha256:${string}` {

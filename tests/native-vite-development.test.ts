@@ -299,12 +299,14 @@ describe('native Vite development transport', () => {
       plugins: [],
     }
     const calls: string[] = []
+    const mutations: unknown[] = []
     const runtime = {
       activePluginGeneration: () => activation,
       settleRegistryProjection: async () => {
         calls.push('settle')
       },
-      stagePluginMutation: async () => {
+      stagePluginMutation: async (mutation: unknown) => {
+        mutations.push(mutation)
         calls.push('renderer-stage')
       },
       publishPluginMutation: async () => {
@@ -324,6 +326,11 @@ describe('native Vite development transport', () => {
     const stageGeneration = vi.fn(async () => {
       calls.push('entity-stage')
       return {
+        managedServiceUICapabilities: [{
+          pluginId: 'entity-template',
+          pluginGeneration: 'vite-generation',
+          token: 'managed-token',
+        }],
         async commit() {
           calls.push('entity-commit')
           throw new Error('entity template rejected')
@@ -361,6 +368,13 @@ describe('native Vite development transport', () => {
         ownerDocumentBindings: [],
       } as never)).rejects.toThrow('entity template rejected')
       expect(stageGeneration).toHaveBeenCalledWith('entity-template', 'vite-generation')
+      expect(mutations).toEqual([expect.objectContaining({
+        managedServiceUICapabilities: [{
+          pluginId: 'entity-template',
+          pluginGeneration: 'vite-generation',
+          token: 'managed-token',
+        }],
+      })])
       expect(calls).toEqual([
         'settle',
         'entity-stage',

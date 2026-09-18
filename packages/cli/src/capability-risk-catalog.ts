@@ -1,4 +1,5 @@
 import {
+  certifiedPermissionProjectionSource,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
@@ -437,6 +438,30 @@ export class CapabilityRiskCatalog {
   }
 }
 
+const CERTIFIED_IMPLICIT_EXTENSION_POINTS = Object.freeze(
+  [
+    'manager.content',
+    'manager.settings.navigation-items',
+  ] as const,
+)
+
+/** Exact Host-owned allowlist. Marketplace identity or certification alone never expands it. */
+export function certifiedImplicitApprovalEligible(
+  capability: CordisXPermissionCapabilityV4,
+  scope: CordisXPermissionScopeV4,
+  certification: CordisXCertifiedPermissionProjectionV1,
+): boolean {
+  if (capability !== 'ui.extension-points.render') return false
+  const points = scope.extensionPoints
+  if (
+    points === undefined || points.length === 0
+    || !points.every(point => (CERTIFIED_IMPLICIT_EXTENSION_POINTS as readonly string[]).includes(point))
+  ) return false
+  if (certification.schemaVersion === 1) return true
+  return certification.eligibilityCeiling.capability === capability
+    && points.every(point => certification.eligibilityCeiling.scope.extensionPoints.includes(point as never))
+}
+
 export class PermissionDecisionEngine {
   constructor(private readonly catalog: CapabilityRiskCatalog = new CapabilityRiskCatalog()) {}
 
@@ -606,12 +631,14 @@ export function buildDomPermissionAuthorizationPlanV3(
   const policy = input.policies.map(item => normalizePermissionPolicyRecordV3(item))
     .find(item => permissionRecordKeyV3(item) === exactKey)?.policy ?? 'ask'
   const certification = input.certification !== undefined
-      && input.certification.source === identity.source
+      && certifiedPermissionProjectionSource(input.certification) === identity.source
       && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
   const certifiedImplicitEligible = metadata.resourceClass === 'dom-rendering'
     && metadata.certifiedImplicitApproval
+    && certification !== undefined
+    && certifiedImplicitApprovalEligible(declaration.name, declaration.scope, certification)
   const authorizationMode = policy === 'ask'
     ? certification === undefined || !certifiedImplicitEligible
       ? 'explicit-user' as const
@@ -693,11 +720,14 @@ export function buildHostDomPermissionAuthorizationPlanV4(
   const policy = input.policies.map(item => normalizePermissionPolicyRecordV4(item))
     .find(item => permissionRecordKeyV4(item) === exactKey)?.policy ?? 'ask'
   const certification = input.certification !== undefined
-      && input.certification.source === identity.source
+      && certifiedPermissionProjectionSource(input.certification) === identity.source
       && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
-  const certifiedImplicitEligible = metadata.resourceClass === 'host-dom' && metadata.certifiedImplicitApproval
+  const certifiedImplicitEligible = metadata.resourceClass === 'host-dom'
+    && metadata.certifiedImplicitApproval
+    && certification !== undefined
+    && certifiedImplicitApprovalEligible(declaration.name, declaration.scope, certification)
   const authorizationMode = policy === 'ask'
     ? certification === undefined || !certifiedImplicitEligible
       ? 'explicit-user' as const
@@ -767,7 +797,8 @@ export function buildPermissionAuthorizationPlanV4(
   const identity = normalizePermissionIdentityV2(input.identity, 'permission v4 identity')
   const binding = normalizePermissionAuthorizationBindingV2(input.binding)
   const certification = input.certification !== undefined
-      && input.certification.source === identity.source && input.certification.pluginId === identity.pluginId
+      && certifiedPermissionProjectionSource(input.certification) === identity.source
+      && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
   const seen = new Set<CordisXPermissionCapabilityV4>()
@@ -807,6 +838,8 @@ export function buildPermissionAuthorizationPlanV4(
         .find(record => permissionRecordKeyV2(record) === key)?.policy ?? 'ask'
     }
     const certified = hostDom && metadata.resourceClass === 'host-dom' && metadata.certifiedImplicitApproval
+        && certification !== undefined
+        && certifiedImplicitApprovalEligible(declaration.name, declaration.scope, certification)
       ? certification
       : undefined
     const authorizationMode = policy === 'ask'

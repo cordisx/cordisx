@@ -257,9 +257,9 @@ describe('manifest-v5 Host DOM permission model', () => {
   it.each(
     [
       ['ordinary', false, false, 2, 'explicit-user'],
-      ['certified-only', true, false, 0, 'certified-implicit'],
+      ['certified-only', true, false, 2, 'explicit-user'],
       ['official-only', false, true, 2, 'explicit-user'],
-      ['official-and-certified', true, true, 0, 'certified-implicit'],
+      ['official-and-certified', true, true, 2, 'explicit-user'],
     ] as const,
   )(
     'keeps the %s state composable without letting Official authorize',
@@ -282,7 +282,7 @@ describe('manifest-v5 Host DOM permission model', () => {
       ['official-only', undefined],
       ['official-and-certified', certification()],
     ] as const,
-  )('still prompts for non-DOM access in the %s state', async (_state, certified) => {
+  )('keeps Certified models.read on the explicit-user path in the %s state', async (_state, certified) => {
     const context = setup({
       ...(certified === undefined ? {} : { certified }),
       capabilities: [declaration('models.read', false, { providers: ['codex'] })],
@@ -333,17 +333,17 @@ describe('manifest-v5 Host DOM permission model', () => {
       .rejects.toThrow(/does not permit persistent allow/)
   })
 
-  it('rejects root/operation widening and invalidates Certified leases on refresh and generation unload', async () => {
+  it('keeps Host DOM scope checks and explicit leases independent from Certified refresh', async () => {
     const context = setup({ certified: certification() })
     const allowed = await context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
-    expect(allowed).toMatchObject({ authorized: true, authorizationOrigin: 'certified-implicit' })
+    expect(allowed).toMatchObject({ authorized: true, authorizationOrigin: 'explicit-user' })
     await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'manager.surface', ['read-text']))
       .resolves.toMatchObject({ authorized: false, reason: 'permission.scope-denied' })
     await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-attributes']))
       .resolves.toMatchObject({ authorized: false, reason: 'permission.scope-denied' })
 
     context.broker.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
-    expect(context.broker.isHostDomLeaseActive(identity, allowed.lease!.leaseId)).toBe(false)
+    expect(context.broker.isHostDomLeaseActive(identity, allowed.lease!.leaseId)).toBe(true)
     await context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     expect(context.hostDomPrompts()).toBe(1)
     context.unregister()
@@ -351,37 +351,34 @@ describe('manifest-v5 Host DOM permission model', () => {
     expect(context.broker.snapshots()).toEqual([])
   })
 
-  it('projects the Certified auto approval reason and evidence for Manager audit', async () => {
-    const exact = certification()
-    const context = setup({ certified: exact })
+  it('keeps Host DOM audit explicitly user-authorized even for a Certified artifact', async () => {
+    const context = setup({ certified: certification() })
     await context.broker.authorizeHostDom(identity, 'ui.host-dom.modify', 'app.shell', ['focus'])
     expect(context.broker.snapshots()).toContainEqual(expect.objectContaining({
       capability: 'ui.host-dom.modify',
-      authorizationOrigin: 'certified-implicit',
-      authorizationReason: 'Exact Certified artifact auto-approved by the Host catalog',
-      certification: expect.objectContaining({ fingerprint: exact.fingerprint, revision: exact.revision }),
+      authorizationOrigin: 'explicit-user',
+      authorizationReason: 'Explicit user approval',
     }))
+    expect(context.broker.snapshots().find(item => item.capability === 'ui.host-dom.modify')).not.toHaveProperty(
+      'certification',
+    )
   })
 
-  it.each(['certified', 'explicit'] as const)(
-    'fails closed when a reentrant audit observer invalidates a %s grant',
-    async origin => {
-      let invalidated = false
-      const context = setup({
-        ...(origin === 'certified' ? { certified: certification() } : {}),
-        onAudit: broker => {
-          if (invalidated) return
-          invalidated = true
-          if (origin === 'certified') broker.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
-          else broker.clearOnce(identity)
-        },
-      })
-      await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
-        .resolves.toMatchObject({ authorized: false, state: 'denied', reason: 'permission.grant-invalidated' })
-      expect(context.broker.snapshots().find(item => item.capability === 'ui.host-dom.read')?.authorizationOrigin)
-        .toBeUndefined()
-    },
-  )
+  it('fails closed when a reentrant audit observer invalidates an explicit grant', async () => {
+    let invalidated = false
+    const context = setup({
+      certified: certification(),
+      onAudit: broker => {
+        if (invalidated) return
+        invalidated = true
+        broker.clearOnce(identity)
+      },
+    })
+    await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
+      .resolves.toMatchObject({ authorized: false, state: 'denied', reason: 'permission.grant-invalidated' })
+    expect(context.broker.snapshots().find(item => item.capability === 'ui.host-dom.read')?.authorizationOrigin)
+      .toBeUndefined()
+  })
 
   it('uses unique plan ids and cancels every pending prompt when the generation unloads', async () => {
     const plans: CordisXPermissionAuthorizationPlanV4[] = []
@@ -524,17 +521,17 @@ describe('manifest-v5 Host DOM permission model', () => {
       { version: '1.2.3', integrity: digest },
     )
     await expect(broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'], candidateView))
-      .resolves.toMatchObject({ authorized: true, authorizationOrigin: 'certified-implicit' })
+      .resolves.toMatchObject({ authorized: true, authorizationOrigin: 'explicit-user' })
     const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
     expect(broker.snapshots()).toContainEqual(expect.objectContaining({
       capability: 'ui.host-dom.read',
-      authorizationOrigin: 'certified-implicit',
+      authorizationOrigin: 'explicit-user',
     }))
     unregisterOld()
     expect(broker.snapshots()).toContainEqual(expect.objectContaining({
       capability: 'ui.host-dom.read',
-      authorizationOrigin: 'certified-implicit',
-      authorizationReason: 'Exact Certified artifact auto-approved by the Host catalog',
+      authorizationOrigin: 'explicit-user',
+      authorizationReason: 'Explicit user approval',
     }))
     visibility.completeLastGood(publication)
     unregisterNew()

@@ -15,10 +15,10 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolVersion = '0.1.0-beta.5'
+const protocolVersion = '0.1.0-beta.7'
 const protocolResolvedSource = `https://registry.npmjs.org/@cordisx/protocol/-/protocol-${protocolVersion}.tgz`
 const protocolIntegrity =
-  'sha512-Tu3Ubhm7ZZzPdFE1z4b/eGkrGcdUpC7WGKiOEVXFvKCI3uNv5Dwor7iMaC+fCU9E99T7R0bMxq5XG983raCDnQ=='
+  'sha512-6ZBTAd2O9oiOAjN6w4H7rOhxbr+HDu0ZqsWSeHMZ3jItXZBuHpik6RqXIgpyFtVm2ttLsFu9A/u20SekXx8fKw=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {

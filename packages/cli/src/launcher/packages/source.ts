@@ -7,6 +7,8 @@ export interface PluginPackageSourceV1 {
   readonly location: string
   readonly downloadedFrom?: string
   readonly expectedDigest?: string
+  /** Exact archive digest rechecked by the package snapshotter. */
+  readonly distributionIntegrity?: string
 }
 
 /** Host-only adapter from the formal source descriptor to a snapshot request. */
@@ -33,10 +35,21 @@ export function resolvePluginPackageSourceV1(source: PluginPackageSourceV1): Loc
   if (source.expectedDigest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(source.expectedDigest)) {
     throw new PackageLifecycleError('invalid-package-source', 'expectedDigest must be sha256:<lowercase hex>')
   }
+  if (source.distributionIntegrity !== undefined) {
+    if (source.kind !== 'downloaded-tarball' || !/^sha256:[a-f0-9]{64}$/.test(source.distributionIntegrity)) {
+      throw new PackageLifecycleError(
+        'invalid-package-source',
+        'distributionIntegrity is valid only for downloaded tarballs and must be sha256:<lowercase hex>',
+      )
+    }
+  }
   return {
     kind: source.kind,
     path: fileURLToPath(location),
     ...(source.downloadedFrom === undefined ? {} : { downloadedFrom: source.downloadedFrom }),
     ...(source.expectedDigest === undefined ? {} : { expectedIntegrity: source.expectedDigest as `sha256:${string}` }),
+    ...(source.distributionIntegrity === undefined
+      ? {}
+      : { distributionIntegrity: source.distributionIntegrity as `sha256:${string}` }),
   }
 }

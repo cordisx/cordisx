@@ -9,12 +9,28 @@ import {
   evaluateMarketplaceTrust,
   type MarketplaceTrustPlugin,
 } from '../packages/cli/src/renderer/marketplace-trust.js'
+import { normalizeCertifiedPermissionProjectionV1 } from '../packages/cli/src/permission-model-v4.js'
 
 const ROOT = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
 const SOURCE = 'https://github.com/cordisx/example'
 const DIGEST = `sha256:${'a'.repeat(64)}`
 const OTHER_DIGEST = `sha256:${'b'.repeat(64)}`
 const EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'c'.repeat(40)}`
+const INTERNAL_ROOT =
+  'https://lf0-fast-deliver-inner.bytedance.net/obj/eden-internal/cordisx-marketplace/marketplace.json'
+const INTERNAL_SOURCE = 'https://code.byted.org/fe/cordisx-plugins'
+const INTERNAL_EVIDENCE = 'https://code.byted.org/fe/cordisx-marketplace/merge_requests/2'
+const INTERNAL_DOWNLOAD = 'https://bnpm.byted.org/@byted/cordisx-plugin-aiden/-/cordisx-plugin-aiden-0.1.1.tgz'
+const INTERNAL_SOURCE_EVIDENCE = {
+  repository: INTERNAL_SOURCE,
+  sourceCommit: '7a7885204c874ff2dddf4288fa98402450f7ff64',
+  mergeRequest: 'https://code.byted.org/fe/cordisx-plugins/merge_requests/4',
+  mergeCommit: '033b595570f40f9a370f313e86f546bd84637f5d',
+}
+const INTERNAL_ELIGIBILITY_CEILING = {
+  capability: 'ui.extension-points.render',
+  scope: { extensionPoints: ['manager.settings.navigation-items', 'manager.content'] },
+}
 const require = createRequire(import.meta.url)
 const protocolRoot = path.resolve(path.dirname(require.resolve('@cordisx/protocol/connector-service/v1')), '..')
 
@@ -42,6 +58,7 @@ function plugin(overrides: Partial<MarketplaceTrustPlugin> = {}): MarketplaceTru
       publisherIdentity: 'npm:@cordisx',
       packageNamespace: '@cordisx',
       packageName: '@cordisx/example',
+      downloadUrl: 'https://registry.npmjs.org/@cordisx/example/-/example-1.2.3.tgz',
       integrity: DIGEST,
     },
     ...overrides,
@@ -104,6 +121,78 @@ function feed(
     trust: {
       authority: 'cordisx.marketplace.codeowners/v1',
       root: trustRoot,
+      grantModel: 'protected-merge-chain-v1',
+      cryptographicAttestation: 'unsupported',
+    },
+    official: officialRecords,
+    certifications: certificationRecords,
+  }
+}
+
+function internalPlugin(overrides: Partial<MarketplaceTrustPlugin> = {}): MarketplaceTrustPlugin {
+  return plugin({
+    identity: `${INTERNAL_SOURCE}\u0000aiden`,
+    id: 'aiden',
+    version: '0.1.1',
+    source: INTERNAL_SOURCE,
+    artifact: {
+      publisherIdentity: 'npm:@byted',
+      packageNamespace: '@byted',
+      packageName: '@byted/cordisx-plugin-aiden',
+      downloadUrl: INTERNAL_DOWNLOAD,
+      integrity: DIGEST,
+    },
+    ...overrides,
+  })
+}
+
+function internalOfficial(): Record<string, unknown> {
+  return {
+    ...official(),
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v2.schema.json',
+    schemaVersion: 2,
+    identity: {
+      pluginId: 'aiden',
+      canonicalSource: INTERNAL_SOURCE,
+      publisherIdentity: 'npm:@byted',
+      packageNamespace: '@byted',
+      packageName: '@byted/cordisx-plugin-aiden',
+    },
+    reviewer: { authority: 'byted.cordisx-marketplace.codeowners/v1', evidenceRef: INTERNAL_EVIDENCE },
+  }
+}
+
+function internalCertification(): Record<string, unknown> {
+  return {
+    ...certification(),
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v2.schema.json',
+    schemaVersion: 2,
+    identity: {
+      pluginId: 'aiden',
+      canonicalSource: INTERNAL_SOURCE,
+      packageName: '@byted/cordisx-plugin-aiden',
+      version: '0.1.1',
+      downloadUrl: INTERNAL_DOWNLOAD,
+      integrity: DIGEST,
+      sourceEvidence: INTERNAL_SOURCE_EVIDENCE,
+    },
+    eligibilityCeiling: INTERNAL_ELIGIBILITY_CEILING,
+    reviewer: { authority: 'byted.cordisx-marketplace.codeowners/v1', evidenceRef: INTERNAL_EVIDENCE },
+  }
+}
+
+function internalFeed(
+  officialRecords: unknown[] = [internalOfficial()],
+  certificationRecords: unknown[] = [internalCertification()],
+): Record<string, unknown> {
+  return {
+    schemaVersion: 7,
+    generatedAt: '2026-09-17T08:00:00Z',
+    trust: {
+      authority: 'byted.cordisx-marketplace.codeowners/v1',
+      root: INTERNAL_ROOT,
       grantModel: 'protected-merge-chain-v1',
       cryptographicAttestation: 'unsupported',
     },
@@ -251,5 +340,241 @@ describe('marketplace trust evaluator', () => {
 
     expect(after?.revision).toBe('2026-08-24T00:30:00Z')
     expect(after?.fingerprint).not.toBe(before?.fingerprint)
+  })
+
+  it('projects and normalizes exact internal v2 certification without granting through Official', () => {
+    const options = { feedUrl: INTERNAL_ROOT, trustedRoots: [INTERNAL_ROOT], now: '2026-09-17T09:00:00Z' } as const
+    const result = evaluateMarketplaceTrust(internalFeed(), [internalPlugin()], options)
+    const trust = result.byPluginIdentity.get(`${INTERNAL_SOURCE}\u0000aiden`)
+    const projection = trust?.certifiedPermission
+
+    expect(trust?.official).toEqual(expect.objectContaining({ designation: 'cordisx-official' }))
+    expect(trust?.official).not.toHaveProperty('permissions')
+    expect(projection).toMatchObject({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v2.schema.json',
+      schemaVersion: 2,
+      canonicalSource: INTERNAL_SOURCE,
+      pluginId: 'aiden',
+      packageName: '@byted/cordisx-plugin-aiden',
+      version: '0.1.1',
+      downloadUrl: INTERNAL_DOWNLOAD,
+      integrity: DIGEST,
+      sourceEvidence: INTERNAL_SOURCE_EVIDENCE,
+      eligibilityCeiling: INTERNAL_ELIGIBILITY_CEILING,
+      evidence: { reference: INTERNAL_EVIDENCE },
+      feed: { authority: 'byted.cordisx-marketplace.codeowners/v1', root: INTERNAL_ROOT },
+    })
+    expect(projection).not.toHaveProperty('permissions')
+    expect(projection).not.toHaveProperty('official')
+    const { $schema: _schema, schemaVersion: _version, kind: _kind, status: _status, fingerprint, ...payload } =
+      projection!
+    expect(fingerprint).toBe(`sha256:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`)
+    expect(normalizeCertifiedPermissionProjectionV1(
+      projection,
+      { source: INTERNAL_SOURCE, pluginId: 'aiden' },
+      { version: '0.1.1', integrity: DIGEST },
+      new Date('2026-09-17T09:00:00Z'),
+    )).toEqual(projection)
+  })
+
+  it('accepts the canonical Protocol v2 vector and its revision-bound fingerprint', () => {
+    const canonical = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v2.schema.json',
+      schemaVersion: 2,
+      kind: 'cordisx-certified-permission-eligibility',
+      status: 'active',
+      canonicalSource: INTERNAL_SOURCE,
+      pluginId: 'aiden',
+      packageName: '@byted/cordisx-plugin-aiden',
+      version: '0.1.2',
+      downloadUrl: 'https://bnpm.byted.org/@byted/cordisx-plugin-aiden/-/cordisx-plugin-aiden-0.1.2.tgz',
+      integrity: 'sha256:d330c9289d09ecb99ba4a9d38fcd7b2c3671af6cd6f883b51ca713509f35fccf',
+      sourceEvidence: INTERNAL_SOURCE_EVIDENCE,
+      reviewPolicy: { id: 'cordisx-marketplace-review', version: '1.0.0' },
+      reviewedAt: '2026-09-18T07:06:37.000Z',
+      expiresAt: '2027-09-18T07:06:37.000Z',
+      evidence: {
+        kind: 'protected-marketplace-review',
+        reference: 'https://code.byted.org/fe/cordisx-marketplace/merge_requests/5',
+      },
+      eligibilityCeiling: INTERNAL_ELIGIBILITY_CEILING,
+      feed: {
+        generatedAt: '2026-09-18T08:00:00.000Z',
+        root: INTERNAL_ROOT,
+        authority: 'byted.cordisx-marketplace.codeowners/v1',
+      },
+      revision: '2026-09-18T08:00:00.000Z',
+      fingerprint: 'sha256:70d7b8930625e32a2d6e0a4f04e3759f198a261c322a4f02391ba9613123be65',
+    }
+    expect(normalizeCertifiedPermissionProjectionV1(
+      canonical,
+      { source: INTERNAL_SOURCE, pluginId: 'aiden' },
+      { version: '0.1.2', integrity: canonical.integrity },
+      new Date('2026-09-18T09:00:00.000Z'),
+    )).toEqual(canonical)
+  })
+
+  it('rejects internal/public authority-version pairing and exact identity changes', () => {
+    const options = { feedUrl: INTERNAL_ROOT, trustedRoots: [INTERNAL_ROOT], now: '2026-09-17T09:00:00Z' } as const
+    const publicOfficial = official()
+    expect(() => evaluateMarketplaceTrust(internalFeed([publicOfficial], []), [internalPlugin()], options)).toThrow(
+      'official[0].$schema',
+    )
+
+    const oldFeed = internalFeed([], [])
+    oldFeed.schemaVersion = 6
+    expect(() => evaluateMarketplaceTrust(oldFeed, [internalPlugin()], options)).toThrow('仅支持 feed schemaVersion 7')
+
+    const badPackage = internalOfficial()
+    ;(badPackage.identity as Record<string, unknown>).packageName = '@byted/aiden'
+    expect(() => evaluateMarketplaceTrust(internalFeed([badPackage], []), [internalPlugin()], options)).toThrow(
+      'packageName',
+    )
+
+    const permissionBearingOfficial = internalOfficial()
+    permissionBearingOfficial.permissions = ['models.read']
+    expect(() => evaluateMarketplaceTrust(internalFeed([permissionBearingOfficial], []), [internalPlugin()], options))
+      .toThrow('不支持的字段: permissions')
+
+    const badEvidence = internalCertification()
+    ;(badEvidence.reviewer as Record<string, unknown>).evidenceRef = 'https://code.byted.org/fe/other/merge_requests/2'
+    expect(() => evaluateMarketplaceTrust(internalFeed([], [badEvidence]), [internalPlugin()], options)).toThrow(
+      'evidenceRef',
+    )
+
+    expect(() =>
+      evaluateMarketplaceTrust(
+        internalFeed([], [internalCertification()]),
+        [internalPlugin({ version: '0.1.2' })],
+        options,
+      )
+    ).toThrow('exact artifact 不匹配')
+    expect(() =>
+      evaluateMarketplaceTrust(internalFeed([], [internalCertification()]), [internalPlugin({
+        artifact: { ...internalPlugin().artifact!, integrity: OTHER_DIGEST },
+      })], options)
+    ).toThrow('exact artifact 不匹配')
+  })
+
+  it('rejects internal v2 projections with altered fingerprint, authority, source, version, or digest', () => {
+    const options = { feedUrl: INTERNAL_ROOT, trustedRoots: [INTERNAL_ROOT], now: '2026-09-17T09:00:00Z' } as const
+    const projection = evaluateMarketplaceTrust(
+      internalFeed([], [internalCertification()]),
+      [internalPlugin()],
+      options,
+    )
+      .byPluginIdentity.get(`${INTERNAL_SOURCE}\u0000aiden`)?.certifiedPermission
+    expect(projection).toBeDefined()
+    const normalize = (value: unknown) =>
+      normalizeCertifiedPermissionProjectionV1(
+        value,
+        { source: INTERNAL_SOURCE, pluginId: 'aiden' },
+        { version: '0.1.1', integrity: DIGEST },
+        new Date('2026-09-17T09:00:00Z'),
+      )
+    expect(normalize({ ...projection!, fingerprint: `sha256:${'0'.repeat(64)}` })).toBeUndefined()
+    expect(normalize({ ...projection!, feed: { ...projection!.feed, authority: 'cordisx.marketplace.codeowners/v1' } }))
+      .toBeUndefined()
+    expect(normalize({ ...projection!, canonicalSource: 'https://github.com/cordisx/aiden' })).toBeUndefined()
+    expect(normalize({ ...projection!, source: INTERNAL_SOURCE })).toBeUndefined()
+    expect(normalize({
+      ...projection!,
+      eligibility: {
+        capability: 'ui.extension-points.render',
+        extensionPoints: INTERNAL_ELIGIBILITY_CEILING.scope.extensionPoints,
+      },
+    })).toBeUndefined()
+    expect(normalize({
+      ...projection!,
+      eligibilityCeiling: {
+        ...projection!.eligibilityCeiling,
+        scope: { extensionPoints: [...projection!.eligibilityCeiling.scope.extensionPoints].reverse() },
+      },
+    })).toBeUndefined()
+    expect(normalize({ ...projection!, version: '0.1.2' })).toBeUndefined()
+    expect(normalize({ ...projection!, integrity: OTHER_DIGEST })).toBeUndefined()
+    const { fingerprint: _fingerprint, revision: _revision, ...withoutRevision } = projection!
+    expect(normalize({
+      ...projection!,
+      fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(withoutRevision)).digest('hex')}`,
+    })).toBeUndefined()
+  })
+
+  it.each([
+    ['plugin id', (payload: Record<string, any>) => ({ ...payload, pluginId: 'Bad ID' })],
+    ['version length', (payload: Record<string, any>) => ({ ...payload, version: `1.2.3+${'a'.repeat(65)}` })],
+    ['review policy version', (payload: Record<string, any>) => ({
+      ...payload,
+      reviewPolicy: { ...payload.reviewPolicy, version: '1.0' },
+    })],
+    ['reviewedAt date-time', (payload: Record<string, any>) => ({ ...payload, reviewedAt: '2026-09-16' })],
+    ['expiresAt date-time', (payload: Record<string, any>) => ({ ...payload, expiresAt: '2027-09-16' })],
+    ['generatedAt date-time', (payload: Record<string, any>) => ({
+      ...payload,
+      feed: { ...payload.feed, generatedAt: '2026-09-17' },
+    })],
+    ['feed root URI', (payload: Record<string, any>) => ({
+      ...payload,
+      feed: { ...payload.feed, root: 'https://bad host/path' },
+    })],
+    ['feed root query', (payload: Record<string, any>) => ({
+      ...payload,
+      feed: { ...payload.feed, root: 'https://marketplace.example/feed.json?channel=stable' },
+    })],
+    ['evidence URI', (payload: Record<string, any>) => ({
+      ...payload,
+      evidence: {
+        ...payload.evidence,
+        reference: `https://code.byted.org/fe/cordisx-marketplace/commit/${'g'.repeat(40)}`,
+      },
+    })],
+  ])('rejects a re-fingerprinted v2 projection with invalid %s', (_field, mutate) => {
+    const options = { feedUrl: INTERNAL_ROOT, trustedRoots: [INTERNAL_ROOT], now: '2026-09-17T09:00:00Z' } as const
+    const projection = evaluateMarketplaceTrust(
+      internalFeed([], [internalCertification()]),
+      [internalPlugin()],
+      options,
+    ).byPluginIdentity.get(`${INTERNAL_SOURCE}\u0000aiden`)!.certifiedPermission!
+    const { $schema, schemaVersion, kind, status, fingerprint: _fingerprint, ...payload } = projection
+    const invalidPayload = mutate(structuredClone(payload))
+    const invalid = {
+      $schema,
+      schemaVersion,
+      kind,
+      status,
+      ...invalidPayload,
+      fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(invalidPayload)).digest('hex')}`,
+    }
+    expect(normalizeCertifiedPermissionProjectionV1(
+      invalid,
+      { source: invalid.canonicalSource, pluginId: invalid.pluginId },
+      { version: invalid.version, integrity: invalid.integrity },
+      new Date('2026-09-17T09:00:00Z'),
+    )).toBeUndefined()
+  })
+
+  it('applies the common strict projection formats to public v1', () => {
+    const projection = evaluateMarketplaceTrust(feed([], [certification()]), [plugin()], OPTIONS)
+      .byPluginIdentity.get(`${SOURCE}\u0000example`)!.certifiedPermission!
+    const { fingerprint: _fingerprint, ...invalid } = { ...projection, reviewedAt: '2026-08-20' }
+    const payload = {
+      source: invalid.source,
+      pluginId: invalid.pluginId,
+      version: invalid.version,
+      integrity: invalid.integrity,
+      reviewPolicy: invalid.reviewPolicy,
+      reviewedAt: invalid.reviewedAt,
+      expiresAt: invalid.expiresAt,
+      evidence: invalid.evidence,
+      feed: invalid.feed,
+    }
+    expect(normalizeCertifiedPermissionProjectionV1(
+      { ...invalid, fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}` },
+      { source: SOURCE, pluginId: 'example' },
+      { version: '1.2.3', integrity: DIGEST },
+      new Date('2026-08-24T01:00:00Z'),
+    )).toBeUndefined()
   })
 })

@@ -57,6 +57,12 @@ import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-ser
 import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 import { normalizeLatestRuntimeManifest, runtimeManifestHasServices } from './latest-runtime-manifest.js'
 import {
+  readOptionalFile,
+  separatedPackage,
+  type StoredSeparatedPackageV3,
+  type StoredSeparatedPackageV4,
+} from './plugin-package-storage.js'
+import {
   collectManagedServicePackageResources,
   type ManagedServicePackageResource,
   managedServiceResourceManifest,
@@ -682,38 +688,6 @@ async function readStoredBrowserArtifact(directory: string): Promise<BuiltPlugin
   return Object.freeze({ manifest, files, moduleSource: Buffer.from(moduleBytes).toString('utf8'), inputModules: [] })
 }
 
-async function readOptionalFile(file: string): Promise<string | undefined> {
-  return await readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined
-    throw error
-  })
-}
-
-interface StoredSeparatedPackageV2 {
-  readonly contract: 'cordisx.launcher-staged-package/v2'
-  readonly package: ResolvedPackageCandidate['packageManifest']
-}
-
-interface StoredSeparatedPackageV3 {
-  readonly contract: 'cordisx.launcher-staged-package/v3'
-  readonly package: ResolvedPackageCandidate['packageManifest']
-  readonly runtimeObject: {
-    /** Digest declared by the source package for the original runtime document bytes. */
-    readonly sourceDigest: `sha256:${string}`
-    /** Digest of the normalized bytes persisted in this immutable store object. */
-    readonly storedDigest: `sha256:${string}`
-  }
-}
-
-type StoredSeparatedPackage = StoredSeparatedPackageV2 | StoredSeparatedPackageV3
-
-function separatedPackage(value: unknown): value is StoredSeparatedPackage {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const contract = (value as { contract?: unknown }).contract
-  return contract === 'cordisx.launcher-staged-package/v2'
-    || contract === 'cordisx.launcher-staged-package/v3'
-}
-
 /**
  * Build and publish a package-v2 candidate resolved by the Host-only source
  * adapter. The durable package envelope preserves the source runtime digest and
@@ -723,6 +697,7 @@ export async function stageResolvedPluginPackage(
   homeDir: string,
   sourceDirectory: string,
   resolved: ResolvedPackageCandidate,
+  options: Readonly<{ artifactIntegrity?: `sha256:${string}` }> = {},
 ): Promise<StagedPluginPackage> {
   const root = await realpath(sourceDirectory)
   const runtime = resolved.runtimeManifest
@@ -764,14 +739,24 @@ export async function stageResolvedPluginPackage(
   const entityTemplatesText = entityTemplates.length === 0 ? undefined : `${JSON.stringify(entityTemplates)}\n`
   const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const storedRuntimeDigest = `sha256:${createHash('sha256').update(runtimeManifestText).digest('hex')}` as const
-  const stored: StoredSeparatedPackageV3 = {
-    contract: 'cordisx.launcher-staged-package/v3',
-    package: resolved.packageManifest,
-    runtimeObject: {
-      sourceDigest: resolved.packageManifest.runtimeManifest.digest,
-      storedDigest: storedRuntimeDigest,
-    },
-  }
+  const stored: StoredSeparatedPackageV3 | StoredSeparatedPackageV4 = options.artifactIntegrity === undefined
+    ? {
+      contract: 'cordisx.launcher-staged-package/v3',
+      package: resolved.packageManifest,
+      runtimeObject: {
+        sourceDigest: resolved.packageManifest.runtimeManifest.digest,
+        storedDigest: storedRuntimeDigest,
+      },
+    }
+    : {
+      contract: 'cordisx.launcher-staged-package/v4',
+      package: resolved.packageManifest,
+      runtimeObject: {
+        sourceDigest: resolved.packageManifest.runtimeManifest.digest,
+        storedDigest: storedRuntimeDigest,
+      },
+      distributionArtifact: { integrity: options.artifactIntegrity },
+    }
   const manifestText = `${JSON.stringify(stored, null, 2)}\n`
   const digest = artifactDigest(
     manifestText,
@@ -910,11 +895,11 @@ export async function loadStagedPluginPackage(
   if (separatedPackage(parsed)) {
     const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
     const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
-    const expectedRuntimeDigest = parsed.contract === 'cordisx.launcher-staged-package/v3'
-      ? parsed.runtimeObject.storedDigest
-      : parsed.package.runtimeManifest.digest
+    const expectedRuntimeDigest = parsed.contract === 'cordisx.launcher-staged-package/v2'
+      ? parsed.package.runtimeManifest.digest
+      : parsed.runtimeObject.storedDigest
     if (
-      parsed.contract === 'cordisx.launcher-staged-package/v3'
+      parsed.contract !== 'cordisx.launcher-staged-package/v2'
       && parsed.runtimeObject.sourceDigest !== parsed.package.runtimeManifest.digest
     ) {
       throw new Error('runtime manifest source provenance failed integrity readback')
@@ -950,10 +935,27 @@ export async function loadStagedPluginPackage(
   } else {
     manifest = normalizePluginPackageManifest(parsed)
   }
+  let artifactIntegrity: `sha256:${string}` | undefined
+  if (separatedPackage(parsed) && parsed.contract === 'cordisx.launcher-staged-package/v4') {
+    const distributionArtifact = parsed.distributionArtifact as unknown
+    const integrity = distributionArtifact !== null && typeof distributionArtifact === 'object'
+        && !Array.isArray(distributionArtifact)
+      ? (distributionArtifact as { readonly integrity?: unknown }).integrity
+      : undefined
+    if (
+      distributionArtifact === null || typeof distributionArtifact !== 'object' || Array.isArray(distributionArtifact)
+      || Object.keys(distributionArtifact).some(key => key !== 'integrity')
+      || typeof integrity !== 'string' || !DIGEST.test(integrity)
+    ) {
+      throw new Error('distribution artifact provenance failed integrity readback')
+    }
+    artifactIntegrity = integrity as `sha256:${string}`
+  }
   const hex = digest.slice('sha256:'.length)
   return {
     manifest,
     digest,
+    ...(artifactIntegrity === undefined ? {} : { artifactIntegrity }),
     moduleSource,
     artifactSource,
     ...(browserArtifact === undefined ? {} : { browserArtifact }),

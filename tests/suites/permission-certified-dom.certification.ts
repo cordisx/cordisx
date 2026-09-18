@@ -38,7 +38,7 @@ export function registerCertificationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    const points = ['sidebar.navigation.items', 'main'] as const
+    const points = ['manager.settings.navigation-items', 'manager.content'] as const
     await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
     let changes = 0
     const unsubscribe = value.subscribe(() => {
@@ -97,7 +97,7 @@ export function registerCertificationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    const points = ['sidebar.navigation.items', 'main'] as const
+    const points = ['manager.settings.navigation-items', 'manager.content'] as const
     await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
     let changes = 0
     const unsubscribe = value.subscribe(() => {
@@ -128,12 +128,14 @@ export function registerCertificationTests() {
   )('keeps the %s state independent across trust dimensions', async (_state, certified, _official, prompts, origin) => {
     // Official is deliberately absent from every PermissionBroker input.
     const context = broker({ ...(certified ? { certified: certification() } : {}) })
-    await expect(context.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+    await expect(context.value.requestDomAccess(identity, 'manager.settings.navigation-items')).resolves.toMatchObject({
       authorized: true,
       authorizationOrigin: origin,
     })
     expect(context.domPrompts()).toBe(prompts)
-    expect(context.value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'workspace.toolbar.items'))
+    expect(
+      context.value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'manager.settings.navigation-items'),
+    )
       .toMatchObject({ authorizationOrigin: origin })
   })
 
@@ -153,11 +155,13 @@ export function registerCertificationTests() {
       ok: true,
     })
     expect(context.nonDomPrompts()).toBe(1)
+    const snapshot = context.value.snapshots().find(item => item.capability === 'models.read')
+    expect(snapshot).not.toHaveProperty('certification')
   })
 
   it('binds auto approval to exact artifact evidence and rejects malicious self-claims', async () => {
     const exact = broker({ certified: certification() })
-    await exact.value.requestDomAccess(identity, 'sidebar.footer.menu')
+    await exact.value.requestDomAccess(identity, 'manager.content')
     expect(exact.domPrompts()).toBe(0)
 
     const mismatched = broker({})
@@ -167,7 +171,7 @@ export function registerCertificationTests() {
         projections: [certification({ integrity: `sha256:${'b'.repeat(64)}` })],
       })
     ).toThrow(/invalid projection/)
-    await mismatched.value.requestDomAccess(identity, 'sidebar.footer.menu')
+    await mismatched.value.requestDomAccess(identity, 'manager.content')
     expect(mismatched.domPrompts()).toBe(1)
 
     const forgedFingerprint = broker({})
@@ -177,7 +181,7 @@ export function registerCertificationTests() {
         projections: [certification({ fingerprint: `sha256:${'c'.repeat(64)}` })],
       })
     ).toThrow(/invalid projection/)
-    await forgedFingerprint.value.requestDomAccess(identity, 'sidebar.footer.menu')
+    await forgedFingerprint.value.requestDomAccess(identity, 'manager.content')
     expect(forgedFingerprint.domPrompts()).toBe(1)
 
     expect(() =>
@@ -210,11 +214,23 @@ export function registerCertificationTests() {
       undefined,
       maliciousArtifact,
     )
-    expect(injected.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(injected.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       state: 'pending',
     })
     unregisterInjected()
+  })
+
+  it('keeps task and message side effects outside Certified implicit approval', async () => {
+    const context = broker({
+      certified: certification(),
+      capabilities: [{ name: 'tasks.create', required: false, scope: { providers: ['codex'] } }],
+    })
+    await context.value.authorize(identity, 'tasks.create', { providerId: 'codex' })
+    expect(context.nonDomPrompts()).toBe(1)
+    expect(context.value.snapshots().find(item => item.capability === 'tasks.create')).not.toHaveProperty(
+      'certification',
+    )
   })
 
   it('atomically replaces exact Certified projections and rejects revision replay or equivocation', () => {
@@ -222,7 +238,7 @@ export function registerCertificationTests() {
     const exact = certification()
 
     context.value.replaceCertifiedPermissionSnapshot({ revision: 4, projections: [exact] })
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
@@ -232,7 +248,7 @@ export function registerCertificationTests() {
       .toThrow(/revision regressed/)
     expect(() => context.value.replaceCertifiedPermissionSnapshot({ revision: 4, projections: [] }))
       .toThrow(/equivocated/)
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
@@ -243,21 +259,21 @@ export function registerCertificationTests() {
     const snapshot = { revision: 7, projections: [certification()] } as const
 
     context.value.replaceCertifiedPermissionSnapshot(snapshot)
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
 
     context.value.clearCertifiedPermissionSnapshot()
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: false,
       state: 'pending',
     })
-    expect(context.value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'sidebar.footer.menu'))
+    expect(context.value.snapshots().find(item => item.scope.extensionPoints?.[0] === 'manager.content'))
       .not.toHaveProperty('certification')
 
     context.value.replaceCertifiedPermissionSnapshot(snapshot)
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
@@ -270,8 +286,8 @@ export function registerCertificationTests() {
     const snapshot = { revision: 9, projections: [certification()] } as const
     context.value.replaceCertifiedPermissionSnapshot(snapshot)
 
-    await context.value.setDomPolicy(identity, 'workspace.toolbar.items', 'deny-persistent')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    await context.value.setDomPolicy(identity, 'manager.settings.navigation-items', 'deny-persistent')
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       policy: 'deny',
       reason: 'permission.denied-persistent',
@@ -279,7 +295,7 @@ export function registerCertificationTests() {
 
     context.value.clearCertifiedPermissionSnapshot()
     context.value.replaceCertifiedPermissionSnapshot(snapshot)
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       policy: 'deny',
       reason: 'permission.denied-persistent',
@@ -289,32 +305,32 @@ export function registerCertificationTests() {
 
   it('invalidates leases on trust refresh, scope change, generation replacement, and unload', async () => {
     const context = broker({ certified: certification() })
-    await expect(context.value.requestDomAccess(identity, 'sidebar.footer.menu')).resolves.toMatchObject({
+    await expect(context.value.requestDomAccess(identity, 'manager.content')).resolves.toMatchObject({
       authorized: true,
     })
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({ authorized: true })
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({ authorized: true })
 
     context.value.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: false,
       state: 'pending',
     })
-    await context.value.requestDomAccess(identity, 'sidebar.footer.menu')
+    await context.value.requestDomAccess(identity, 'manager.content')
     expect(context.domPrompts()).toBe(1)
 
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
     expect(context.domPrompts()).toBe(2)
     expect(context.value.snapshots().filter(item => item.capability === 'ui.extension-points.render')).toHaveLength(2)
 
     context.unregister()
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: false,
       state: 'denied',
     })
 
     const replacement = broker({ certified: certification(), generation: 'runtime-2', moduleGeneration: 'module-2' })
     expect(replacement.value.snapshots().filter(item => item.capability === 'ui.extension-points.render')).toEqual([])
-    expect(replacement.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(replacement.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
     })
@@ -323,12 +339,12 @@ export function registerCertificationTests() {
   it('keeps persistent deny and profile-scoped policy authoritative over certification', async () => {
     const store = new MemoryPermissionPolicyStore()
     const first = broker({ certified: certification(), store, domChoice: 'deny-persistent' })
-    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+    await expect(first.value.requestDomAccess(identity, 'manager.settings.navigation-items')).resolves.toMatchObject({
       authorized: true,
     })
     // Certified implicit approval does not create a persistent policy, so the user can still set an exact deny.
-    await first.value.setDomPolicy(identity, 'workspace.toolbar.items', 'deny-persistent')
-    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+    await first.value.setDomPolicy(identity, 'manager.settings.navigation-items', 'deny-persistent')
+    await expect(first.value.requestDomAccess(identity, 'manager.settings.navigation-items')).resolves.toMatchObject({
       authorized: false,
       policy: 'deny',
     })
@@ -339,10 +355,11 @@ export function registerCertificationTests() {
       generation: 'runtime-2',
       moduleGeneration: 'module-2',
     })
-    await expect(sameProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
-      authorized: false,
-      policy: 'deny',
-    })
+    await expect(sameProfile.value.requestDomAccess(identity, 'manager.settings.navigation-items')).resolves
+      .toMatchObject({
+        authorized: false,
+        policy: 'deny',
+      })
     const otherProfile = broker({
       certified: certification(),
       store,
@@ -350,23 +367,24 @@ export function registerCertificationTests() {
       generation: 'runtime-3',
       moduleGeneration: 'module-3',
     })
-    await expect(otherProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
-      authorized: true,
-    })
+    await expect(otherProfile.value.requestDomAccess(identity, 'manager.settings.navigation-items')).resolves
+      .toMatchObject({
+        authorized: true,
+      })
   })
 
   it('keeps allow-once leases exact when another point policy changes', async () => {
     const context = broker({})
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
-    await context.value.requestDomAccess(identity, 'sidebar.footer.menu')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
+    await context.value.requestDomAccess(identity, 'manager.content')
     expect(context.domPrompts()).toBe(2)
 
-    await context.value.setDomPolicy(identity, 'workspace.toolbar.items', 'deny-persistent')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    await context.value.setDomPolicy(identity, 'manager.settings.navigation-items', 'deny-persistent')
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: false,
       policy: 'deny',
     })
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.content')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'explicit-user',
     })
@@ -374,25 +392,25 @@ export function registerCertificationTests() {
 
   it('keeps explicit-user DOM provenance across unrelated certification refreshes', async () => {
     const context = broker({})
-    await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
+    await context.value.requestDomAccess(identity, 'manager.settings.navigation-items')
     expect(context.value.snapshots()).toContainEqual(expect.objectContaining({
-      scope: { extensionPoints: ['workspace.toolbar.items'] },
+      scope: { extensionPoints: ['manager.settings.navigation-items'] },
       authorizationOrigin: 'explicit-user',
     }))
 
     context.value.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certification()] })
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+    expect(context.value.domAccess(identity, 'manager.settings.navigation-items')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'explicit-user',
     })
     expect(context.value.snapshots()).toContainEqual(expect.objectContaining({
-      scope: { extensionPoints: ['workspace.toolbar.items'] },
+      scope: { extensionPoints: ['manager.settings.navigation-items'] },
       authorizationOrigin: 'explicit-user',
     }))
 
     context.value.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
     expect(context.value.snapshots()).toContainEqual(expect.objectContaining({
-      scope: { extensionPoints: ['workspace.toolbar.items'] },
+      scope: { extensionPoints: ['manager.settings.navigation-items'] },
       authorizationOrigin: 'explicit-user',
     }))
   })

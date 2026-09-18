@@ -31,8 +31,8 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== '0.1.0-beta.5') {
-  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.5')
+if (expectedProtocolSpec !== '0.1.0-beta.7') {
+  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.7')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
@@ -473,7 +473,7 @@ createElement(AgentAvatar, props)
   )
   if (
     installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
-    || installedSchemasteryUiManifest.version !== '0.1.0-beta.5'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.6'
   ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }

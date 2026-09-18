@@ -37,6 +37,8 @@ export interface StagedPluginPackage {
       | PluginRuntimeManifestV14
   }
   readonly digest: `sha256:${string}`
+  /** Exact downloaded distribution digest, when independently verified by the Host. */
+  readonly artifactIntegrity?: `sha256:${string}`
   readonly moduleSource: string
   readonly artifactSource: string
   readonly browserArtifact?: BuiltPluginGenerationArtifact

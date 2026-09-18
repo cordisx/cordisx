@@ -72,7 +72,7 @@ describe('isolated Codex process support', () => {
       ])
   })
 
-  it('prefers Codex app bundle executables over the standalone ChatGPT app on macOS', async () => {
+  it('prefers the newest installed Codex app bundle on macOS', async () => {
     const home = '/Users/example'
     const candidates = codexExecutableCandidates('darwin', {}, home)
     expect(candidates).toEqual([
@@ -95,8 +95,31 @@ describe('isolated Codex process support', () => {
       await chmod(bundledChatGpt, 0o755)
       await chmod(standaloneChatGpt, 0o755)
 
-      await expect(resolveCodexExecutable(undefined, [bundledChatGpt, standaloneChatGpt]))
-        .resolves.toBe(bundledChatGpt)
+      const versions = new Map([
+        [bundledChatGpt, [7119n]],
+        [standaloneChatGpt, [9275n]],
+      ])
+      await expect(resolveCodexExecutable(
+        undefined,
+        [bundledChatGpt, standaloneChatGpt],
+        async executable => versions.get(executable),
+        'darwin',
+      )).resolves.toBe(standaloneChatGpt)
+
+      versions.set(bundledChatGpt, [9276n])
+      await expect(resolveCodexExecutable(
+        undefined,
+        [bundledChatGpt, standaloneChatGpt],
+        async executable => versions.get(executable),
+        'darwin',
+      )).resolves.toBe(bundledChatGpt)
+
+      await expect(resolveCodexExecutable(
+        undefined,
+        [bundledChatGpt, standaloneChatGpt],
+        async () => undefined,
+        'darwin',
+      )).resolves.toBe(bundledChatGpt)
     } finally {
       await rm(directory, { recursive: true })
     }

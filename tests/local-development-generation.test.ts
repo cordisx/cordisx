@@ -2,10 +2,15 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { buildLocalDevelopmentPlugin, LocalDevelopmentController } from '../packages/cli/src/launcher/development.js'
+import {
+  buildLocalDevelopmentPlugin,
+  LocalDevelopmentController,
+  localDevelopmentPluginIdentity,
+} from '../packages/cli/src/launcher/development.js'
 import type { CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../packages/cli/src/local-development-contracts.js'
+import { writeLocalPackageV14 } from './suites/plugin-lifecycle.fixtures.js'
 
 async function eventually(assertion: () => void, timeout = 8_000): Promise<void> {
   const deadline = Date.now() + timeout
@@ -107,6 +112,27 @@ class FixtureGenerationRuntime {
 }
 
 describe('local development generations', () => {
+  it('uses a validated package manifest id for a positional src/index.ts entry', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-manifest-identity-'))
+    try {
+      const source = await writeLocalPackageV14(path.join(root, 'aiden'), 'aiden', '0.1.1')
+      const entry = path.join(source, 'src/index.ts')
+      await writeFile(
+        path.join(source, 'package.json'),
+        JSON.stringify({ name: '@byted/cordisx-plugin-aiden', version: '0.1.1' }),
+      )
+
+      await expect(localDevelopmentPluginIdentity(entry)).resolves.toMatchObject({ id: 'aiden' })
+      await expect(buildLocalDevelopmentPlugin(entry)).resolves.toMatchObject({
+        id: 'aiden',
+        version: '0.1.1',
+        manifest: { id: 'aiden' },
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('keeps production graph virtual ids out of the outer Playground watcher', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-graph-watch-'))
     try {
@@ -271,6 +297,7 @@ describe('local development generations', () => {
     await mkdir(source)
     await writeFile(path.join(root, 'package.json'), '{')
     await writeFile(entry, 'export default { apply() {} }\n')
+    await expect(localDevelopmentPluginIdentity(entry)).resolves.toMatchObject({ id: 'first-failure' })
     const runtime = new FixtureGenerationRuntime()
     const controller = await LocalDevelopmentController.create({
       entry,
@@ -403,6 +430,7 @@ describe('local development generations', () => {
       JSON.stringify({ dependencies: [{ id: 'base', version: '1.0.0' }] }),
     )
     await writeFile(entry, 'export default { apply() {} }\n')
+    await expect(localDevelopmentPluginIdentity(entry)).resolves.toMatchObject({ id: 'dependent' })
     const runtime = new FixtureGenerationRuntime()
     const controller = await LocalDevelopmentController.create({
       entry,

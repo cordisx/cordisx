@@ -144,6 +144,7 @@ import {
   type RendererComposition,
 } from './renderer-composition.js'
 import { prepareCliCommand } from './run-command-dispatch.js'
+import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 
@@ -761,13 +762,18 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     let profileLeaseHandedOff = false
     try {
       await adapter.prepareLaunch(plan)
-      if ((runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION === '1') {
-        nativeSubmission = await createNativeSubmissionComposition(managedServiceActivation, plan.executable)
-      }
       if (
-        nativeSubmission === undefined && (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION === '1'
+        shouldEnableNativeSubmission({
+          platform: process.platform,
+          adapterId: adapter.id,
+          preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
+        })
       ) {
-        stdout('[cordisx] native managed Desktop providers unavailable: native submission composition failed')
+        try {
+          nativeSubmission = await createNativeSubmissionComposition(managedServiceActivation, plan.executable)
+        } catch (error) {
+          stdout(`[cordisx] native managed Desktop providers unavailable: ${String(error)}`)
+        }
       }
       await deployBuiltinSkillWithoutOverwritingUserChanges(
         deployBundledCordisXSkill(plan, {
