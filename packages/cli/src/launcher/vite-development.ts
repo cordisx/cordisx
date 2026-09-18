@@ -68,6 +68,12 @@ const reactRuntimePath = fileURLToPath(new URL(`../renderer/react-runtime.${exte
 const require = createRequire(import.meta.url)
 const reactPackageRoot = path.dirname(require.resolve('react/package.json'))
 const reactDomPackageRoot = path.dirname(require.resolve('react-dom/package.json'))
+const hostRendererPackageRoots = [
+  reactPackageRoot,
+  reactDomPackageRoot,
+  path.dirname(require.resolve('@oneworks/avatar-react/package.json')),
+  path.dirname(require.resolve('tdesign-react/package.json')),
+]
 const packageVersion = (specifier: string): string => (require(specifier) as { readonly version: string }).version
 const viteVersion = packageVersion('vite/package.json')
 const reactPluginVersion = packageVersion(
@@ -137,6 +143,14 @@ function inside(file: string, directory: string): boolean {
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))
 }
 
+function owningNodeModulesRoot(packageRoot: string): string | undefined {
+  for (let directory = packageRoot;; directory = path.dirname(directory)) {
+    if (path.basename(directory) === 'node_modules') return directory
+    const parent = path.dirname(directory)
+    if (parent === directory) return undefined
+  }
+}
+
 /** Vite owns source transformation, HTTP module delivery, and the HMR WebSocket. */
 export async function startNativeViteServer(
   initialConfig: CordisXConfig,
@@ -159,6 +173,17 @@ export async function startNativeViteServer(
   const cliRoot = cliPackage.root
   const workspaceRoot = await realpath(initialConfig.projectRoot ?? initialConfig.rootDir)
     .catch(() => path.resolve(initialConfig.projectRoot ?? initialConfig.rootDir))
+  const dependencyRoots = [
+    ...new Set(
+      await Promise.all(
+        [
+          path.join(cliRoot, 'node_modules'),
+          path.join(workspaceRoot, 'node_modules'),
+          ...hostRendererPackageRoots.flatMap(root => owningNodeModulesRoot(root) ?? []),
+        ].map(async directory => await realpath(directory).catch(() => directory)),
+      ),
+    ),
+  ]
   const workspaceRequire = createRequire(path.join(workspaceRoot, 'package.json'))
   const commonJsInteropLeaves = serverOptions.prebundleHostDependencies === true
     ? COMMONJS_INTEROP_LEAVES.flatMap(specifier => {
@@ -789,6 +814,7 @@ if (import.meta.hot) {
           allow: [
             path.resolve(cliRoot, '../..'),
             workspaceRoot,
+            ...dependencyRoots,
             ...roots,
             ...config.plugins.map(item => path.dirname(item.entry)),
           ],

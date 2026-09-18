@@ -16,6 +16,7 @@ import { Navigation } from './components/Navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
 import { useManagerSnapshot } from './model/store.js'
+import { type ManagerPluginManagementBinding, usePluginManagementSnapshot } from './model/plugin-management.js'
 import type { ManagerRoute } from './model/routes.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
 import { AboutPage } from './pages/AboutPage.js'
@@ -231,11 +232,14 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
 }
 
 function Content(
-  { model, marketplace, snapshot, route }: {
+  { model, marketplace, snapshot, route, pluginManagement, pluginManagementSnapshot, pluginManagementError }: {
     readonly model: ManagerModel
     readonly marketplace: MarketplaceModel
     readonly snapshot: ManagerSnapshot
     readonly route: ReturnType<typeof useManagerRouter>
+    readonly pluginManagement: ManagerPluginManagementBinding | undefined
+    readonly pluginManagementSnapshot: import('../../management/contracts.js').PluginManagementSnapshot | undefined
+    readonly pluginManagementError: string | undefined
   },
 ) {
   const current = route.route
@@ -251,10 +255,27 @@ function Content(
     return <NavigationDetailPage snapshot={snapshot} router={route} />
   }
   if (current.kind === 'marketplace-plugin') {
-    return <MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} />
+    return (
+      <MarketplacePluginPage
+        manager={model}
+        marketplace={marketplace}
+        snapshot={snapshot}
+        router={route}
+        pluginManagement={pluginManagement}
+        pluginManagementSnapshot={pluginManagementSnapshot}
+      />
+    )
   }
   if (current.kind === 'marketplace-sources') {
-    return <MarketplaceSourcesPage marketplace={marketplace} locale={snapshot.localization.locale} />
+    return (
+      <MarketplaceSourcesPage
+        marketplace={marketplace}
+        locale={snapshot.localization.locale}
+        pluginManagement={pluginManagement}
+        managementSnapshot={pluginManagementSnapshot}
+        managementError={pluginManagementError}
+      />
+    )
   }
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
   if (current.kind === 'manager-content') {
@@ -271,7 +292,16 @@ function Content(
     return <PluginsPage model={model} snapshot={snapshot} router={route} />
   }
   if (current.page === 'marketplace') {
-    return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />
+    return (
+      <MarketplacePage
+        marketplace={marketplace}
+        manager={model}
+        snapshot={snapshot}
+        router={route}
+        pluginManagement={pluginManagement}
+        pluginManagementSnapshot={pluginManagementSnapshot}
+      />
+    )
   }
   if (current.page === 'model-services') {
     return <ModelServicesPage registry={model.modelProviders} locale={snapshot.localization.locale} />
@@ -286,6 +316,7 @@ export interface ManagerAppProps {
   readonly marketplace: MarketplaceModel
   readonly triggerSeat: HTMLElement
   readonly navigationController?: HostManagerNavigationController
+  readonly pluginManagement?: ManagerPluginManagementBinding
 }
 
 function PlaygroundManagerTrigger({ seat, open, onToggle, locale }: {
@@ -326,8 +357,11 @@ function PlaygroundManagerTrigger({ seat, open, onToggle, locale }: {
   return null
 }
 
-export function ManagerApp({ model, marketplace, triggerSeat, navigationController }: ManagerAppProps) {
+export function ManagerApp(
+  { model, marketplace, triggerSeat, navigationController, pluginManagement }: ManagerAppProps,
+) {
   const snapshot = useManagerSnapshot(model)
+  const management = usePluginManagementSnapshot(pluginManagement)
   const playgroundStorage = useMemo(
     () =>
       triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null
@@ -491,7 +525,15 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
                   />
                 </header>
                 <div className="cxr-content">
-                  <Content model={model} marketplace={marketplace} snapshot={snapshot} route={router} />
+                  <Content
+                    model={model}
+                    marketplace={marketplace}
+                    snapshot={snapshot}
+                    route={router}
+                    pluginManagement={pluginManagement}
+                    pluginManagementSnapshot={management.snapshot}
+                    pluginManagementError={management.error}
+                  />
                 </div>
               </main>
             </section>

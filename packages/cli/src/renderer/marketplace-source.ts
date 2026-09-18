@@ -144,6 +144,25 @@ function persistedSources(value: unknown): MarketplaceSourceRecord[] | undefined
   }))
 }
 
+/** Read legacy browser state without normalizing it back into localStorage. */
+export function readMarketplaceSourceRecords(
+  storage: MarketplaceStorage | undefined,
+): readonly MarketplaceSourceRecord[] {
+  if (storage === undefined) return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
+  try {
+    const stored = storage.getItem(MARKETPLACE_SOURCE_RECORDS_KEY)
+    if (stored !== null) {
+      const sources = persistedSources(JSON.parse(stored) as unknown)
+      if (sources !== undefined) return withOfficialSource(sources, undefined, false)
+    }
+    const legacy = storage.getItem(MARKETPLACE_SOURCES_KEY)
+    if (legacy === null) return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
+    const sources = legacySources(JSON.parse(legacy) as unknown)
+    if (sources !== undefined) return withOfficialSource(sources, undefined, false)
+  } catch { /* malformed legacy state is ignored */ }
+  return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
+}
+
 /** Parse either a bare feed URL or the formal marketplace-source.v1 clipboard payload. */
 export function parseMarketplaceSourceImport(value: string): MarketplaceSourceRecord {
   const text = value.trim()
@@ -232,21 +251,7 @@ export class BrowserMarketplaceSourceStore {
   }
 
   private read(): MarketplaceSourceRecord[] {
-    if (this.storage === undefined) return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
-    try {
-      const stored = this.storage.getItem(MARKETPLACE_SOURCE_RECORDS_KEY)
-      if (stored !== null) {
-        const sources = persistedSources(JSON.parse(stored) as unknown)
-        if (sources !== undefined) return withOfficialSource(sources, undefined, false)
-      }
-      const legacy = this.storage.getItem(MARKETPLACE_SOURCES_KEY)
-      if (legacy === null) return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
-      const sources = legacySources(JSON.parse(legacy) as unknown)
-      if (sources === undefined) return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
-      return withOfficialSource(sources, undefined, false)
-    } catch {
-      return [{ url: OFFICIAL_MARKETPLACE_SOURCE, enabled: true }]
-    }
+    return [...readMarketplaceSourceRecords(this.storage)]
   }
 
   private persist(): void {

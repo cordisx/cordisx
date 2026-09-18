@@ -505,6 +505,7 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.disposeIconThemePreferenceSubscription?.()
   runtimeScope.disposeIconThemePreferenceSubscription = undefined
   runtimeScope.lifecycleBridge()!?.dispose()
+  runtimeScope.pluginManagementBinding()!?.dispose()
   runtimeScope.managerContentConfigAuthority?.dispose()
   runtimeScope.managerContentConfigAuthority = undefined
   runtimeScope.configRenderers()!.dispose()

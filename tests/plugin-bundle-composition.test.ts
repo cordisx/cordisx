@@ -47,6 +47,7 @@ describe('production plugin bundle composition', () => {
       profileId: 'work',
       generation,
       pluginLifecycle: { token: 'bundle-lifecycle-token', activation },
+      pluginManagement: { token: 'management-token', profileId: 'work' },
       pluginBundles: bundles,
       managedServiceUICapabilities,
       internalBuildRendererBundle: async (_config, options) => {
@@ -59,12 +60,14 @@ describe('production plugin bundle composition', () => {
     expect(calls[0]).toMatchObject({
       generation,
       pluginLifecycleBridgeToken: 'bundle-lifecycle-token',
+      pluginManagement: { token: 'management-token', profileId: 'work' },
       pluginBundleSnapshot: { profileId: 'work', runtimeGeneration: generation, operationsAvailable: true },
       managedServiceUICapabilities,
     })
     await composition.rebuild(config, activation, 9)
     expect(calls[1]).toMatchObject({
       pluginLifecycleBridgeToken: 'bundle-lifecycle-token',
+      pluginManagement: { token: 'management-token', profileId: 'work' },
       pluginBundleSnapshot: { profileId: 'work' },
       pluginActivation: { revision: 4 },
       initialRegistryEpoch: 9,

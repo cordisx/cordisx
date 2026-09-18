@@ -33,6 +33,37 @@ cordisx codex
 plugin implicitly. `setup` is idempotent and refuses an unrelated or invalid
 existing file rather than overwriting it.
 
+## Manage plugins and discovery sources
+
+Plugin and source commands use the configured default Host profile unless
+`--profile <profile>` selects another one:
+
+```bash
+cordisx plugin list
+cordisx plugin search calendar --json
+cordisx plugin info com.example.calendar
+cordisx plugin install com.example.calendar --dry-run
+cordisx plugin install com.example.calendar
+cordisx plugin disable com.example.calendar --yes
+
+cordisx source list
+cordisx source add https://plugins.example/catalog.json --name "Team catalog"
+cordisx source edit https://plugins.example/catalog.json --url http://127.0.0.1:43124/catalog.json
+cordisx source refresh http://127.0.0.1:43124/catalog.json
+```
+
+State-changing commands show a plan and request confirmation when applicable.
+Use `--dry-run` to print the plan without changing persistent state, or `--yes`
+to confirm the management change non-interactively. `--yes` does not approve
+plugin permissions. New permissions must still be reviewed in the Host-owned
+permission flow.
+
+These commands can persist profile management changes while the Host App is
+stopped. Their result reports when runtime activation is pending. Catalog
+`hide` and `unhide` affect discovery only; they do not enable, disable, install,
+or uninstall a plugin. Discovery sources are addressed by canonical URL. Local
+testing sources do not become trust roots.
+
 ## Configure CLIProxyAPI providers
 
 Copy [`cordisx.cli-proxy.example.json`](../../cordisx.cli-proxy.example.json) to

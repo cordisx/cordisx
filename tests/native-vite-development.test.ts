@@ -196,6 +196,48 @@ describe('native Vite development transport', () => {
     }
   })
 
+  it('serves Host vendor CSS inline imports as JavaScript through symlinked dependencies', async () => {
+    const nestedProjectRoot = path.resolve('artifacts')
+    const vite = await startTestViteServer({
+      version: 1,
+      rootDir: nestedProjectRoot,
+      projectRoot: nestedProjectRoot,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [],
+    })
+    try {
+      const rendererRoot = path.resolve('packages/cli/src/renderer')
+      for (
+        const modulePath of [
+          path.join(rendererRoot, 'host-ui/tdesign-styles.ts'),
+          path.join(rendererRoot, 'host-ui/avatar/AgentAvatar.tsx'),
+        ]
+      ) {
+        const transformed = await fetch(
+          new URL(`@fs/${modulePath}`, vite.url),
+          { headers: { Origin: 'null' }, signal: AbortSignal.timeout(5_000) },
+        )
+        expect(transformed.status).toBe(200)
+        const source = await transformed.text()
+        const cssUrl = source.match(/from\s+"([^"]+\.css\?inline)"/u)?.[1]
+        expect(cssUrl).toBeDefined()
+        const cssModule = await fetch(new URL(cssUrl!, new URL(vite.url).origin), {
+          headers: { Origin: 'null' },
+          signal: AbortSignal.timeout(5_000),
+        })
+        expect(cssModule.status).toBe(200)
+        expect(cssModule.headers.get('content-type')).toContain('javascript')
+        const cssModuleSource = await cssModule.text()
+        const imported = await import(`data:text/javascript;base64,${Buffer.from(cssModuleSource).toString('base64')}`)
+        expect(imported.default).toBeTypeOf('string')
+        expect(imported.default).toMatch(/(?:--td-brand-color|\.oneworks-avatar)/u)
+      }
+    } finally {
+      await vite.close()
+    }
+  })
+
   it('reuses renderer-only package validation instead of erasing formal dependencies', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-dependencies-'))
     const entry = path.join(root, 'index.ts')

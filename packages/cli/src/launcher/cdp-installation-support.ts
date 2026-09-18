@@ -15,6 +15,7 @@ import { ICON_THEME_PREFERENCE_BINDING, ICON_THEME_PREFERENCE_RECEIVER } from '.
 import { OWNER_DOCUMENT_BINDING, OWNER_DOCUMENT_RECEIVER } from './owner-document-rpc.js'
 import { PERMISSION_BINDING, PERMISSION_RECEIVER } from './permission-rpc.js'
 import { PLUGIN_LIFECYCLE_BINDING, PLUGIN_LIFECYCLE_RECEIVER } from './plugin-lifecycle-rpc.js'
+import { MANAGEMENT_BINDING, MANAGEMENT_RECEIVER } from './management-rpc.js'
 import { PROVIDER_BINDING, PROVIDER_RECEIVER } from './provider-rpc.js'
 import { PUBLISHER_GRANT_BINDING, PUBLISHER_GRANT_RECEIVER } from './publisher-grant-rpc.js'
 import { SERVICE_CONFIG_BINDING, SERVICE_CONFIG_RECEIVER } from './service-config-rpc.js'
@@ -96,6 +97,13 @@ export {
   PLUGIN_LIFECYCLE_BINDING,
   type PluginLifecycleBridgeHandler,
 } from './plugin-lifecycle-rpc.js'
+export {
+  handlePluginManagementRpcRequest,
+  MANAGEMENT_BINDING,
+  MAX_MANAGEMENT_REQUEST_BYTES,
+  parsePluginManagementRpcRequest,
+  type PluginManagementBridgeHandler,
+} from './management-rpc.js'
 export { runPluginLifecycleRequestWithProjection } from './plugin-lifecycle-projection.js'
 export {
   handleProviderBindingRequest,
@@ -290,6 +298,10 @@ export interface InstalledScript {
   readonly lifecycleController?: AbortController
   readonly removeLifecycleBindingListener?: () => void
   readonly lifecycleBindingInstalled: boolean
+  readonly managementController?: AbortController
+  readonly removeManagementBindingListener?: () => void
+  readonly unsubscribeManagement?: () => void
+  readonly managementBindingInstalled: boolean
   readonly unregisterLifecycleSession: () => void
   readonly publisherGrantController?: AbortController
   readonly removePublisherGrantBindingListener?: () => void
@@ -532,6 +544,7 @@ export function installedBindingNames(installed: InstalledScript): readonly stri
     ...(installed.permissionBindingInstalled ? [PERMISSION_BINDING] : []),
     ...(installed.iconThemePreferenceBindingInstalled ? [ICON_THEME_PREFERENCE_BINDING] : []),
     ...(installed.lifecycleBindingInstalled ? [PLUGIN_LIFECYCLE_BINDING] : []),
+    ...(installed.managementBindingInstalled ? [MANAGEMENT_BINDING] : []),
     ...(installed.publisherGrantBindingInstalled ? [PUBLISHER_GRANT_BINDING] : []),
     ...(installed.managedServiceUIBindingInstalled ? [MANAGED_SERVICE_UI_BINDING] : []),
   ]
@@ -806,6 +819,16 @@ export async function sendPluginLifecycleBindingResponse(
   })
 }
 
+export async function sendPluginManagementBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${MANAGEMENT_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
+}
+
 export async function uninstall(
   installed: InstalledScript,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
@@ -825,6 +848,7 @@ export async function uninstall(
   installed.permissionController?.abort()
   installed.iconThemePreferenceController?.abort()
   installed.lifecycleController?.abort()
+  installed.managementController?.abort()
   installed.publisherGrantController?.abort()
   installed.managedServiceUIController?.abort()
   installed.removeBindingListener()
@@ -839,6 +863,8 @@ export async function uninstall(
   installed.removeIconThemePreferenceBindingListener?.()
   installed.unregisterIconThemePreferenceBroadcast?.()
   installed.removeLifecycleBindingListener?.()
+  installed.removeManagementBindingListener?.()
+  installed.unsubscribeManagement?.()
   installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
   installed.removeManagedServiceUIBindingListener?.()
@@ -900,6 +926,9 @@ export async function uninstall(
         : []),
       ...(installed.lifecycleBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
+        : []),
+      ...(installed.managementBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: MANAGEMENT_BINDING })]
         : []),
       ...(installed.publisherGrantBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]

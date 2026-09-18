@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import type { CordisXPluginLifecycleOperationV1 } from '../../../contracts.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { SearchField } from '../../host-ui/SearchField.js'
@@ -7,6 +6,7 @@ import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../..
 import { managerCopy, productLocale } from '../../ui-copy.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
 import type { ManagerRouter } from '../model/routes.js'
+import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
 
 function bundleProvenance(snapshot: ManagerSnapshot): ReadonlyMap<string, readonly string[]> {
   const result = new Map<string, string[]>()
@@ -30,7 +30,7 @@ export function PluginsPage(
 ) {
   const zh = productLocale(snapshot.localization.locale) === 'zh-CN'
   const [query, setQuery] = useState('')
-  const [busyPluginId, setBusyPluginId] = useState<string>()
+  const lifecycle = usePluginLifecycleActions(model, snapshot)
   const normalized = query.trim().toLocaleLowerCase()
   const provenance = useMemo(() => bundleProvenance(snapshot), [snapshot])
   const plugins = useMemo(
@@ -44,31 +44,7 @@ export function PluginsPage(
       }),
     [normalized, provenance, snapshot.plugins],
   )
-  const packageLifecycleAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
   const empty = plugins.length === 0
-
-  const run = async (plugin: ManagerPluginSnapshot, operation: CordisXPluginLifecycleOperationV1) => {
-    if (model.requestPluginLifecycle === undefined) return
-    setBusyPluginId(plugin.id)
-    try {
-      let result = await model.requestPluginLifecycle(operation)
-      if (
-        (operation.kind === 'disable' || operation.kind === 'uninstall') && result.outcome === 'planned'
-        && result.impactToken !== undefined
-      ) {
-        const affected = result.affectedPluginIds.join(zh ? '、' : ', ') || plugin.name
-        if (
-          !window.confirm(zh ? `此操作会影响：${affected}。继续吗？` : `This action affects: ${affected}. Continue?`)
-        ) {
-          return
-        }
-        result = await model.requestPluginLifecycle({ ...operation, impactToken: result.impactToken })
-      }
-      if (result.error !== undefined) window.alert(result.error.message)
-    } finally {
-      setBusyPluginId(undefined)
-    }
-  }
 
   return (
     <section
@@ -147,10 +123,10 @@ export function PluginsPage(
                     snapshot.localization.locale,
                     plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable',
                   )}
-                  loading={busyPluginId === plugin.id}
-                  disabled={!packageLifecycleAvailable || model.requestPluginLifecycle === undefined}
+                  loading={lifecycle.busyPluginId === plugin.id}
+                  disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
                   onClick={() =>
-                    void run(
+                    void lifecycle.run(
                       plugin,
                       plugin.status === 'configured-disabled'
                         ? { kind: 'enable', pluginId: plugin.id }
@@ -160,11 +136,12 @@ export function PluginsPage(
                 <IconButton
                   icon="reload-plugin"
                   label={managerCopy(snapshot.localization.locale, 'plugins.reload')}
-                  loading={busyPluginId === plugin.id}
+                  loading={lifecycle.busyPluginId === plugin.id}
                   disabled={model.requestPluginLifecycle === undefined
-                    || (plugin.developmentReloadAvailable !== true && !packageLifecycleAvailable)
-                    || plugin.status !== 'active'}
-                  onClick={() => void run(plugin, { kind: 'reload', pluginId: plugin.id })}
+                    || (plugin.developmentReloadAvailable !== true && !lifecycle.operationsAvailable)
+                    || plugin.status !== 'active'
+                    || lifecycle.busyPluginId === plugin.id}
+                  onClick={() => void lifecycle.run(plugin, { kind: 'reload', pluginId: plugin.id })}
                 />
                 <MoreMenu
                   label={`${plugin.name} · ${managerCopy(snapshot.localization.locale, 'plugins.more-actions')}`}
@@ -179,8 +156,9 @@ export function PluginsPage(
                       id: 'uninstall',
                       label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'),
                       icon: 'uninstall-plugin',
-                      disabled: !packageLifecycleAvailable || model.requestPluginLifecycle === undefined,
-                      onSelect: () => void run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }),
+                      disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id,
+                      onSelect: () =>
+                        void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }),
                     },
                   ]}
                 />

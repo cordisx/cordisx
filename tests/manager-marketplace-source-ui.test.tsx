@@ -1,6 +1,9 @@
 import React, { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import type { PluginManagementSnapshot } from '../packages/cli/src/management/contracts.js'
 import { BrowserMarketplaceModel, OFFICIAL_MARKETPLACE_SOURCE } from '../packages/cli/src/renderer/marketplace.js'
+import type { ManagerPluginManagementBinding } from '../packages/cli/src/renderer/manager/model/plugin-management.js'
+import { installNotificationHost } from '../packages/cli/src/renderer/notifications/host.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 const feed = {
@@ -12,70 +15,167 @@ const feed = {
   plugins: [],
 }
 
+function managementSnapshot(): PluginManagementSnapshot {
+  return {
+    profileId: 'test',
+    revision: 7,
+    sources: [{
+      url: OFFICIAL_MARKETPLACE_SOURCE,
+      enabled: true,
+      official: true,
+      removable: false,
+      local: { name: 'Managed Marketplace', description: 'Shared profile source' },
+    }],
+    hiddenCatalogEntries: [{ sourceUrl: OFFICIAL_MARKETPLACE_SOURCE, pluginId: 'hidden-demo' }],
+    migrations: { legacyBrowserSourcesV2: true },
+    runtime: { kind: 'active', runtimeGeneration: 'runtime' },
+    activationRevision: 1,
+    plugins: [],
+  }
+}
+
 describe('React Marketplace source controls', () => {
-  it('validates on confirmation, saves normalized URLs and local names, toggles sources and protects the official source', async () => {
+  it('uses shared management snapshot and revisioned mutations without browser-store writes', async () => {
     const fixture = reactManagerFixture()
-    const shadows: ShadowRoot[] = []
-    const attach = fixture.dom.window.HTMLElement.prototype.attachShadow
-    const shadowSpy = vi.spyOn(fixture.dom.window.HTMLElement.prototype, 'attachShadow').mockImplementation(
-      function(this: HTMLElement, options) {
-        const shadow = attach.call(this, options)
-        shadows.push(shadow)
-        return shadow
-      },
-    )
-    fixture.dom.window.HTMLDialogElement.prototype.showModal = function() {
-      this.setAttribute('open', '')
-    }
-    fixture.dom.window.HTMLDialogElement.prototype.close = function() {
-      this.removeAttribute('open')
-    }
-    const { installDialogHost } = await import('../packages/cli/src/renderer/dialogs/host.js')
-    const disposeDialogs = installDialogHost(fixture.document)
-    const confirm = async () =>
-      act(async () => {
-        shadows.at(-1)!.querySelector<HTMLButtonElement>('[data-action=confirm]')!.click()
-        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
-      })
     const { MarketplaceSourcesPage } = await import(
       '../packages/cli/src/renderer/manager/pages/MarketplaceSourcesPage.js'
     )
     const marketplace = new BrowserMarketplaceModel(
-      fixture.dom.window.localStorage,
+      undefined,
       async () => ({ ok: true, status: 200, text: async () => JSON.stringify(feed) }),
     )
     await marketplace.reload()
+    const snapshot = managementSnapshot()
+    const mutate = vi.fn().mockImplementation(async request => ({
+      status: 'applied' as const,
+      request,
+      snapshot,
+      pendingActivation: false,
+    }))
+    const binding: ManagerPluginManagementBinding = {
+      query: vi.fn(async () => snapshot),
+      subscribe: vi.fn(() => () => {}),
+      mutate,
+      migrateLegacySources: vi.fn(async () => ({ migrated: false, clearLegacyStorage: false, snapshot })),
+    }
     try {
-      await fixture.render(<MarketplaceSourcesPage marketplace={marketplace} locale="en" />)
-      const officialCard = fixture.element(`[data-marketplace-source="${OFFICIAL_MARKETPLACE_SOURCE}"]`)
-      expect(officialCard.querySelector('.cxr-card-title')?.textContent).toBe('Fixture')
-      expect(officialCard.querySelector('.cxr-card-description')?.textContent).toBe(
-        'The default plugin discovery source maintained by CordisX.',
+      await fixture.render(
+        <MarketplaceSourcesPage
+          marketplace={marketplace}
+          locale="en"
+          pluginManagement={binding}
+          managementSnapshot={snapshot}
+        />,
       )
-      expect(
-        officialCard.querySelector<HTMLElement>('[aria-label^="删除"]')!.classList
-          .contains('t-is-disabled'),
-      ).toBe(true)
-      await fixture.click('.cxr-page-head button')
-      expect(fixture.document.querySelector('.cxr-dialog-form [role="alert"]')).toBeNull()
-      await fixture.type('.cxr-dialog-form input', 'invalid-source')
-      await confirm()
-      expect(fixture.document.querySelector('.cxr-dialog-form [role="alert"]')?.textContent).toMatch(/\S/u)
-      await fixture.type('.cxr-dialog-form input', ' https://community.example/feed.json ')
-      await fixture.type('.cxr-dialog-form label:nth-child(2) input', ' Community ')
-      await confirm()
-      const saved = marketplace.snapshot().sourceRecords.find(source =>
-        source.url === 'https://community.example/feed.json'
-      )
-      expect(saved).toMatchObject({ enabled: true, local: { name: 'Community' } })
-      await fixture.click('[data-marketplace-source="https://community.example/feed.json"] .t-switch')
-      expect(marketplace.snapshot().sourceRecords.find(source => source.url === saved!.url)?.enabled).toBe(false)
-      await fixture.click('[data-marketplace-source="https://community.example/feed.json"] [aria-label^="删除"]')
-      expect(marketplace.snapshot().sourceRecords.some(source => source.url === saved!.url)).toBe(false)
-      expect(marketplace.snapshot().sourceRecords.some(source => source.url === OFFICIAL_MARKETPLACE_SOURCE)).toBe(true)
+      const source = fixture.element(`[data-marketplace-source="${OFFICIAL_MARKETPLACE_SOURCE}"]`)
+      expect(source.textContent).toContain('Managed Marketplace')
+      expect(source.textContent).toContain('Shared profile source')
+      await fixture.click('.t-switch')
+      expect(mutate).toHaveBeenCalledWith({
+        kind: 'source-set-enabled',
+        url: OFFICIAL_MARKETPLACE_SOURCE,
+        enabled: false,
+      }, 7)
+      expect(fixture.element('[aria-label="Remove source: Managed Marketplace"]').classList.contains('t-is-disabled'))
+        .toBe(true)
+      await fixture.click('[aria-label="Restore hidden-demo"]')
+      expect(mutate).toHaveBeenLastCalledWith({
+        kind: 'catalog-unhide',
+        identity: { sourceUrl: OFFICIAL_MARKETPLACE_SOURCE, pluginId: 'hidden-demo' },
+      }, 7)
     } finally {
-      await act(async () => disposeDialogs())
-      shadowSpy.mockRestore()
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('shows an honest unavailable state when the binding is absent', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplaceSourcesPage } = await import(
+      '../packages/cli/src/renderer/manager/pages/MarketplaceSourcesPage.js'
+    )
+    const marketplace = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(feed),
+    }))
+    try {
+      await fixture.render(
+        <MarketplaceSourcesPage marketplace={marketplace} locale="en" />,
+      )
+      expect(fixture.document.body.textContent).toContain('Plugin management is unavailable')
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('preserves management query failures as a diagnostic error', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplaceSourcesPage } = await import(
+      '../packages/cli/src/renderer/manager/pages/MarketplaceSourcesPage.js'
+    )
+    const marketplace = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(feed),
+    }))
+    try {
+      await fixture.render(
+        <MarketplaceSourcesPage
+          marketplace={marketplace}
+          locale="en"
+          pluginManagement={{} as ManagerPluginManagementBinding}
+          managementError="bridge timed out"
+        />,
+      )
+      expect(fixture.document.querySelector('[data-plugin-management-error="true"]')?.textContent).toContain(
+        'bridge timed out',
+      )
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('refreshes only the selected source and reports failures through Host notifications', async () => {
+    const fixture = reactManagerFixture()
+    let disposeNotifications!: () => void
+    await act(async () => {
+      disposeNotifications = installNotificationHost(fixture.document, 'test')
+    })
+    const { MarketplaceSourcesPage } = await import(
+      '../packages/cli/src/renderer/manager/pages/MarketplaceSourcesPage.js'
+    )
+    const marketplace = new BrowserMarketplaceModel(undefined, async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(feed),
+    }))
+    const snapshot = managementSnapshot()
+    const reloadSource = vi.spyOn(marketplace, 'reloadSource').mockRejectedValue(new Error('Source refresh failed'))
+    const binding: ManagerPluginManagementBinding = {
+      query: vi.fn(async () => snapshot),
+      subscribe: vi.fn(() => () => {}),
+      mutate: vi.fn(),
+      migrateLegacySources: vi.fn(async () => ({ migrated: false, clearLegacyStorage: false, snapshot })),
+    }
+    try {
+      await fixture.render(
+        <MarketplaceSourcesPage
+          marketplace={marketplace}
+          locale="en"
+          pluginManagement={binding}
+          managementSnapshot={snapshot}
+        />,
+      )
+      await fixture.click('[aria-label="Refresh source: Managed Marketplace"]')
+      expect(reloadSource).toHaveBeenCalledExactlyOnceWith(OFFICIAL_MARKETPLACE_SOURCE)
+      expect(fixture.document.querySelector('.cxr-page > [role="status"]')).toBeNull()
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Plugin management action failed')
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Source refresh failed')
+    } finally {
+      await act(async () => disposeNotifications())
       await fixture.dispose()
       marketplace.dispose()
     }

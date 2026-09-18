@@ -1,5 +1,8 @@
-import React from 'react'
-import { describe, expect, it } from 'vitest'
+import React, { act } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import type { ManagerPluginSnapshot } from '../packages/cli/src/renderer/manager.js'
+import type { PluginManagementSnapshot } from '../packages/cli/src/management/contracts.js'
+import type { ManagerPluginManagementBinding } from '../packages/cli/src/renderer/manager/model/plugin-management.js'
 import {
   BrowserMarketplaceModel,
   MARKETPLACE_SOURCES_KEY,
@@ -21,6 +24,47 @@ const CERTIFICATION_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
 const EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
 const DIGEST = `sha256:${'a'.repeat(64)}`
+
+function installedPlugin(source: string): ManagerPluginSnapshot {
+  return {
+    id: 'trusted',
+    name: 'Trusted Booster',
+    source,
+    status: 'active',
+    inject: [],
+    config: {},
+    configuration: {
+      namespace: 'trusted',
+      schemaKind: 'none',
+      applies: 'live',
+      writable: false,
+      revision: 1,
+      lastGoodRevision: 1,
+      value: {},
+      fields: [],
+      secrets: [],
+    },
+    package: {
+      version: '1.2.3',
+      digest: DIGEST,
+      moduleGeneration: 'installed',
+      dependencies: [],
+    },
+  }
+}
+
+function managementSnapshot(hiddenCatalogEntries: PluginManagementSnapshot['hiddenCatalogEntries'] = []) {
+  return {
+    profileId: 'test',
+    revision: 9,
+    sources: [],
+    hiddenCatalogEntries,
+    migrations: { legacyBrowserSourcesV2: true },
+    runtime: { kind: 'active' as const, runtimeGeneration: 'runtime' },
+    activationRevision: 1,
+    plugins: [],
+  }
+}
 
 const feed = {
   $schema: FEED_SCHEMA_V2,
@@ -235,6 +279,170 @@ describe('React Manager Marketplace', () => {
         />,
       )
       expect(fixture.document.querySelector('[aria-label="取消收藏"]')).not.toBeNull()
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('keeps idle install controls enabled for an uninstalled artifact in list and detail views', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    const { MarketplacePluginPage } = await import(
+      '../packages/cli/src/renderer/manager/pages/MarketplacePluginPage.js'
+    )
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({ ok: true, status: 200, text: async () => JSON.stringify(trustedFeed) }),
+    )
+    await marketplace.reload()
+    const state = managerSnapshot({
+      pluginLifecycle: {
+        profileId: 'test',
+        revision: 1,
+        runtimeGeneration: 'runtime',
+        operationsAvailable: true,
+      },
+    })
+    const model = managerModel(state, {
+      inspectMarketplaceArtifact: vi.fn(),
+      requestPluginLifecycle: vi.fn(),
+    })
+    const plugin = marketplace.snapshot().plugins.find(item => item.id === 'trusted')!
+    try {
+      await fixture.render(
+        <MarketplacePage marketplace={marketplace} manager={model} snapshot={state} router={managerRouter()} />,
+      )
+      const listInstall = fixture.element('[data-marketplace-plugin="trusted"] [aria-label="Install"]')
+      expect(listInstall.classList.contains('t-is-disabled')).toBe(false)
+      expect(listInstall).toHaveProperty('disabled', false)
+
+      await fixture.render(
+        <MarketplacePluginPage
+          marketplace={marketplace}
+          manager={model}
+          snapshot={state}
+          router={managerRouter({ kind: 'marketplace-plugin', identity: plugin.identity })}
+        />,
+      )
+      const detailInstall = fixture.element('[data-marketplace-plugin-detail="trusted"] [aria-label="Install"]')
+      expect(detailInstall.classList.contains('t-is-disabled')).toBe(false)
+      expect(detailInstall).toHaveProperty('disabled', false)
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('exposes installed lifecycle actions without conflating them with install or discovery state', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({ ok: true, status: 200, text: async () => JSON.stringify(trustedFeed) }),
+    )
+    await marketplace.reload()
+    const installed = installedPlugin(TRUSTED_SOURCE)
+    const request = vi.fn().mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['trusted'] })
+    const state = managerSnapshot({
+      plugins: [installed],
+      pluginLifecycle: {
+        profileId: 'test',
+        revision: 1,
+        runtimeGeneration: 'runtime',
+        operationsAvailable: true,
+      },
+    })
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(state, { requestPluginLifecycle: request })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      const card = fixture.element(`[data-marketplace-plugin="trusted"]`)
+      expect(card.textContent).toContain('Installed')
+      expect(card.querySelector('[aria-label="Installed"]')).not.toBeNull()
+      await fixture.click(`[data-marketplace-plugin="trusted"] [aria-haspopup="menu"]`)
+      const disable = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Disable'))
+      expect(disable).toBeDefined()
+      await act(async () => {
+        disable!.click()
+        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
+      })
+      expect(request).toHaveBeenCalledWith({ kind: 'disable', pluginId: 'trusted', impactToken: '' })
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
+  it('filters hidden discovery identities and submits hide with the shared management revision', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({ ok: true, status: 200, text: async () => JSON.stringify(trustedFeed) }),
+    )
+    await marketplace.reload()
+    const visibleSnapshot = managementSnapshot()
+    const mutate = vi.fn().mockImplementation(async request => ({
+      status: 'applied' as const,
+      request,
+      snapshot: visibleSnapshot,
+      pendingActivation: false,
+    }))
+    const binding: ManagerPluginManagementBinding = {
+      query: vi.fn(async () => visibleSnapshot),
+      subscribe: vi.fn(() => () => {}),
+      mutate,
+      migrateLegacySources: vi.fn(async () => ({
+        migrated: false,
+        clearLegacyStorage: false,
+        snapshot: visibleSnapshot,
+      })),
+    }
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel()}
+          snapshot={managerSnapshot()}
+          router={managerRouter()}
+          pluginManagement={binding}
+          pluginManagementSnapshot={visibleSnapshot}
+        />,
+      )
+      await fixture.click(`[data-marketplace-plugin="trusted"] [aria-haspopup="menu"]`)
+      const hide = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Hide from Marketplace'))
+      expect(hide).toBeDefined()
+      await act(async () => {
+        hide!.click()
+        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
+      })
+      expect(mutate).toHaveBeenCalledWith({
+        kind: 'catalog-hide',
+        identity: { sourceUrl: OFFICIAL_MARKETPLACE_SOURCE, pluginId: 'trusted' },
+      }, 9)
+      const hiddenSnapshot = managementSnapshot([{ sourceUrl: OFFICIAL_MARKETPLACE_SOURCE, pluginId: 'trusted' }])
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel()}
+          snapshot={managerSnapshot()}
+          router={managerRouter()}
+          pluginManagement={binding}
+          pluginManagementSnapshot={hiddenSnapshot}
+        />,
+      )
+      expect(fixture.document.querySelector('[data-marketplace-plugin="trusted"]')).toBeNull()
     } finally {
       await fixture.dispose()
       marketplace.dispose()

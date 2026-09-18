@@ -7,10 +7,12 @@ import { ManagerApp } from './ManagerApp.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
+import type { PluginManagementBinding } from '../management-binding.js'
 
 export interface ReactManagerInstallOptions {
   readonly triggerTarget?: () => HTMLElement | undefined
   readonly navigationController?: HostManagerNavigationController
+  readonly pluginManagement?: PluginManagementBinding
 }
 
 /** One React root owns the complete Manager shell and every Host-owned page. */
@@ -38,7 +40,7 @@ export function installReactCordisXManager(
   const theme = new HostThemeProjection(document)
   const detachRootTheme = theme.attach(rootSeat)
   const detachTriggerTheme = theme.attach(triggerSeat)
-  const marketplace = createManagerMarketplaceStore(document)
+  const marketplace = createManagerMarketplaceStore(document, options.pluginManagement)
   const root = createRoot(rootSeat)
   // The Manager trigger is part of the Host bootstrap contract. Commit the
   // initial tree before returning so callers never observe a half-installed
@@ -48,6 +50,7 @@ export function installReactCordisXManager(
       <ManagerApp
         model={model}
         marketplace={marketplace.model}
+        {...(options.pluginManagement === undefined ? {} : { pluginManagement: options.pluginManagement })}
         triggerSeat={triggerSeat}
         {...(options.navigationController === undefined ? {} : { navigationController: options.navigationController })}
       />,

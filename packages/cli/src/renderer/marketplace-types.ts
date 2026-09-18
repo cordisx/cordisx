@@ -155,6 +155,7 @@ export interface MarketplaceModel {
   moveSource(url: string, targetIndex: number): Promise<void>
   importSource(value: string): Promise<MarketplaceSourceRecord>
   reload(): Promise<void>
+  reloadSource(url: string): Promise<void>
   subscribe(listener: () => void): () => void
   dispose(): void
 }

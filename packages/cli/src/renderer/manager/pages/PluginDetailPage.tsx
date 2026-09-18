@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { projectPermissionCapabilityName } from '../../../permission-locales.js'
 import { Button } from 'tdesign-react'
-import type { CordisXPluginLifecycleOperationV1 } from '../../../contracts.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
-import { managerCopy, productLocale } from '../../ui-copy.js'
+import { managerCopy } from '../../ui-copy.js'
 import { HostForm } from '../../host-ui/HostForm.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { SearchField } from '../../host-ui/SearchField.js'
@@ -12,6 +11,7 @@ import { MarkdownDocument } from '../components/MarkdownDocument.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
 import type { ManagerRouter, PluginDetailPage as PluginDetailTab } from '../model/routes.js'
+import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
 
 function tabs(locale: string): readonly ManagerTab<PluginDetailTab>[] {
   return [
@@ -126,8 +126,7 @@ export function PluginDetailPage(
   },
 ) {
   const [query, setQuery] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string>()
+  const lifecycle = usePluginLifecycleActions(model, snapshot)
   const route = router.route
   if (route.kind !== 'plugin') return null
   const plugin = snapshot.plugins.find(item => item.id === route.pluginId)
@@ -155,37 +154,7 @@ export function PluginDetailPage(
       item.productMetadata.description ?? ''
     } ${item.qualifiedId} ${item.definition.path}`.toLocaleLowerCase().includes(normalized)
   )
-  const run = async (operation: CordisXPluginLifecycleOperationV1) => {
-    if (model.requestPluginLifecycle === undefined) return
-    setBusy(true)
-    setMessage(undefined)
-    try {
-      let result = await model.requestPluginLifecycle(operation)
-      if (
-        (operation.kind === 'disable' || operation.kind === 'uninstall') && result.outcome === 'planned'
-        && result.impactToken !== undefined
-      ) {
-        const affected =
-          result.affectedPluginIds.join(productLocale(snapshot.localization.locale) === 'zh-CN' ? '、' : ', ')
-          || plugin.name
-        const prompt = productLocale(snapshot.localization.locale) === 'zh-CN'
-          ? `此操作会影响：${affected}。继续吗？`
-          : `This action affects: ${affected}. Continue?`
-        if (!window.confirm(prompt)) return
-        result = await model.requestPluginLifecycle({ ...operation, impactToken: result.impactToken })
-      }
-      setMessage(
-        result.error?.message
-          ?? `${managerCopy(snapshot.localization.locale, 'plugins.operation-result')}: ${result.outcome}`,
-      )
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy(false)
-    }
-  }
   const sourceLink = plugin.package?.canonicalSource
-  const packageLifecycleAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
   return (
     <section className="cxr-page" data-plugin-detail={plugin.id}>
       <section
@@ -219,11 +188,12 @@ export function PluginDetailPage(
             title={managerCopy(snapshot.localization.locale, 'plugins.reload')}
             data-plugin-lifecycle-action="reload"
             icon={<HostIcon token="reload-plugin" />}
-            loading={busy}
+            loading={lifecycle.busyPluginId === plugin.id}
             disabled={model.requestPluginLifecycle === undefined
-              || (plugin.developmentReloadAvailable !== true && !packageLifecycleAvailable)
-              || plugin.status !== 'active'}
-            onClick={() => void run({ kind: 'reload', pluginId: plugin.id })}
+              || (plugin.developmentReloadAvailable !== true && !lifecycle.operationsAvailable)
+              || plugin.status !== 'active'
+              || lifecycle.busyPluginId === plugin.id}
+            onClick={() => void lifecycle.run(plugin, { kind: 'reload', pluginId: plugin.id })}
           />
           {plugin.status === 'configured-disabled'
             ? (
@@ -234,9 +204,9 @@ export function PluginDetailPage(
                 title={managerCopy(snapshot.localization.locale, 'plugins.enable')}
                 data-plugin-lifecycle-action="enable"
                 icon={<HostIcon token="enable-plugin" />}
-                loading={busy}
-                disabled={!packageLifecycleAvailable}
-                onClick={() => void run({ kind: 'enable', pluginId: plugin.id })}
+                loading={lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                onClick={() => void lifecycle.run(plugin, { kind: 'enable', pluginId: plugin.id })}
               />
             )
             : (
@@ -247,9 +217,9 @@ export function PluginDetailPage(
                 title={managerCopy(snapshot.localization.locale, 'plugins.disable')}
                 data-plugin-lifecycle-action="disable"
                 icon={<HostIcon token="disable-plugin" />}
-                loading={busy}
-                disabled={!packageLifecycleAvailable}
-                onClick={() => void run({ kind: 'disable', pluginId: plugin.id, impactToken: '' })}
+                loading={lifecycle.busyPluginId === plugin.id}
+                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+                onClick={() => void lifecycle.run(plugin, { kind: 'disable', pluginId: plugin.id, impactToken: '' })}
               />
             )}
           <Button
@@ -260,13 +230,12 @@ export function PluginDetailPage(
             title={managerCopy(snapshot.localization.locale, 'plugins.uninstall')}
             data-plugin-lifecycle-action="uninstall"
             icon={<HostIcon token="uninstall-plugin" />}
-            loading={busy}
-            disabled={!packageLifecycleAvailable}
-            onClick={() => void run({ kind: 'uninstall', pluginId: plugin.id, impactToken: '' })}
+            loading={lifecycle.busyPluginId === plugin.id}
+            disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === plugin.id}
+            onClick={() => void lifecycle.run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' })}
           />
         </span>
       </section>
-      {message === undefined ? null : <div className="cxr-notice" role="status">{message}</div>}
       <ManagerTabs
         label={managerCopy(snapshot.localization.locale, 'plugins.details-tabs')}
         tabs={tabs(snapshot.localization.locale)}

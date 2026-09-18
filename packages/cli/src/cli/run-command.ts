@@ -79,6 +79,12 @@ import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
+import { openPluginManagementService } from '../management/service.js'
+import {
+  type PluginManagementBridgeHandler,
+  type PluginManagementRpcServer,
+  startPluginManagementRpcServer,
+} from '../launcher/management-rpc.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
@@ -147,6 +153,66 @@ import { prepareCliCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
+import { processStartIdentity } from './supervisor-state.js'
+
+export interface ProductionPluginManagementComposition {
+  readonly handler: PluginManagementBridgeHandler
+  close(): Promise<void>
+}
+
+export async function openProductionPluginManagementComposition(input: {
+  readonly configPath: string
+  readonly homeDir: string
+  readonly appId: string
+  readonly profileId: string
+  readonly runtimeGeneration: string
+  readonly token: string
+  readonly coordinator: PluginLifecycleCoordinator
+  readonly processStartedAt?: string
+}): Promise<ProductionPluginManagementComposition> {
+  const service = await openPluginManagementService({
+    configPath: input.configPath,
+    homeDir: input.homeDir,
+    appId: input.appId,
+    profileId: input.profileId,
+    lifecycle: { coordinator: input.coordinator, runtimeGeneration: input.runtimeGeneration },
+  })
+  let server: PluginManagementRpcServer
+  try {
+    const processStartedAt = input.processStartedAt ?? await processStartIdentity(process.pid)
+    if (processStartedAt === undefined) throw new Error('cannot identify the CordisX management owner process')
+    server = await startPluginManagementRpcServer({
+      homeDir: input.homeDir,
+      appId: input.appId,
+      profileId: input.profileId,
+      configPath: input.configPath,
+      generation: input.runtimeGeneration,
+      processStartedAt,
+      service,
+    })
+  } catch (error) {
+    service.close()
+    throw error
+  }
+  let closed = false
+  return {
+    handler: {
+      token: input.token,
+      profileId: input.profileId,
+      generation: input.runtimeGeneration,
+      service,
+    },
+    async close(): Promise<void> {
+      if (closed) return
+      closed = true
+      try {
+        await server.close()
+      } finally {
+        service.close()
+      }
+    },
+  }
+}
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
   const prepared = await prepareCliCommand(argv, runtime)
@@ -169,6 +235,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
   let rendererComposition: RendererComposition | undefined
+  let productionPluginManagement: ProductionPluginManagementComposition | undefined
   try {
     pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
     const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
@@ -274,6 +341,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         },
       }),
     })
+    const pluginManagementToken = randomBytes(32).toString('hex')
     const recoveryPlans = await pluginLifecycleCoordinator.prepareRecovery()
     if (recoveryPlans.length > 1) {
       throw new Error('multiple shared registry rollback recoveries require separate launcher runs')
@@ -348,6 +416,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         activation: activeLifecycleActivation,
         ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
       },
+      pluginManagement: { token: pluginManagementToken, profileId: selection.profileId },
       pluginBundles: await pluginBundleCoordinator.snapshot(),
       ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
       ...(channelManager === undefined ? {} : { channelManager }),
@@ -661,6 +730,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         await closeProviderFleet()
         return
       }
+      productionPluginManagement = await openProductionPluginManagementComposition({
+        configPath,
+        homeDir: rootFromConfigPath(configPath),
+        appId,
+        profileId: selection.profileId,
+        runtimeGeneration: lifecycleGeneration,
+        token: pluginManagementToken,
+        coordinator: pluginLifecycleCoordinator,
+      })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
         await runHost({
@@ -690,6 +768,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
           ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
           pluginLifecycle,
+          pluginManagement: productionPluginManagement.handler,
           ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
             certifiedPermission: {
               authority: certifiedPermissionAuthority,
@@ -743,7 +822,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
       return
     }
-
     const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
     if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
     const chromiumProfile = plan.chromiumProfile
@@ -786,6 +864,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         }),
         stdout,
       )
+      productionPluginManagement = await openProductionPluginManagementComposition({
+        configPath,
+        homeDir: rootFromConfigPath(configPath),
+        appId,
+        profileId: selection.profileId,
+        runtimeGeneration: lifecycleGeneration,
+        token: pluginManagementToken,
+        coordinator: pluginLifecycleCoordinator,
+      })
       stdout(`[cordisx] loopback CDP port: ${debugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
       const runHostInput: Parameters<typeof runHost>[0] = {
@@ -816,6 +903,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
         ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
         pluginLifecycle,
+        pluginManagement: productionPluginManagement.handler,
         ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
           certifiedPermission: {
             authority: certifiedPermissionAuthority,
@@ -852,6 +940,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
     }
   } finally {
+    await productionPluginManagement?.close().catch(() => undefined)
     await rendererComposition?.close().catch(() => undefined)
     await supervisorRuntime.close()
     await nativeSubmission?.close().catch(() => undefined)

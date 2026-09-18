@@ -1,3 +1,8 @@
+import { type CordisXManagementInvocation, parseManagementCli } from './management-parse.js'
+import { CordisXCliParseError } from './parse-error.js'
+
+export { CordisXCliParseError, type CordisXCliParseErrorCode } from './parse-error.js'
+
 export type CordisXCliAction =
   | 'help'
   | 'launch'
@@ -11,27 +16,8 @@ export type CordisXCliAction =
   | 'config'
   | 'doctor'
   | 'dev'
+  | 'management'
 export type CordisXDataMode = 'shared' | 'host-isolated'
-
-export type CordisXCliParseErrorCode =
-  | 'unknown-option'
-  | 'duplicate-option'
-  | 'missing-option-value'
-  | 'invalid-option-value'
-  | 'unexpected-positional'
-  | 'unexpected-host-arguments'
-  | 'unsupported-option'
-  | 'conflicting-options'
-
-export class CordisXCliParseError extends Error {
-  readonly code: CordisXCliParseErrorCode
-
-  constructor(code: CordisXCliParseErrorCode, message: string) {
-    super(message)
-    this.name = 'CordisXCliParseError'
-    this.code = code
-  }
-}
 
 export interface CordisXLauncherOptions {
   readonly attach: boolean
@@ -106,6 +92,7 @@ export type CordisXCliInvocation =
   | CordisXConfigInvocation
   | CordisXDoctorInvocation
   | CordisXDevInvocation
+  | CordisXManagementInvocation
 
 type BooleanOptionName =
   | 'attach'
@@ -372,6 +359,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
+  if (argv[0] === 'plugin' || argv[0] === 'source') return parseManagementCli(argv)
   const boundary = argv.indexOf('--')
   const cordisArgs = boundary === -1 ? argv : argv.slice(0, boundary)
   const hostArgs = boundary === -1 ? [] : argv.slice(boundary + 1)

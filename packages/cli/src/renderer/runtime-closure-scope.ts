@@ -190,6 +190,7 @@ import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { CORDISX_PERMISSION_LOCALE_CATALOGS } from '../permission-locales.js'
 import { pluginBrandIconDataUrl } from './plugin-branding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
+import type { BrowserPluginManagementBinding } from './management-binding.js'
 import {
   CapabilityAvailabilityRegistry,
   CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
@@ -398,6 +399,7 @@ export interface RuntimeClosureScope {
   readonly knownRegistrations: () => Map<string, readonly SurfaceContributionSnapshot[]>
   readonly legacyExtensionPointPolicies: () => readonly CordisXExtensionPointPolicyRecordV1[]
   readonly lifecycleBridge: () => BrowserPluginLifecycleBridge | undefined
+  readonly pluginManagementBinding: () => BrowserPluginManagementBinding | undefined
   readonly listeners: () => Set<() => void>
   readonly localDevelopment: () => Map<string, CordisXLocalDevelopmentSnapshot>
   managerContentConfigAuthority: ManagerContentConfigAuthority | undefined

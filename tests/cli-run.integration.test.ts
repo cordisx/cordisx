@@ -702,6 +702,53 @@ describe('functional CordisX CLI', () => {
     }
   })
 
+  it('binds development management to the home default profile without publishing an RPC endpoint', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-management-'))
+    const { project, entry } = await createLocalDevelopmentFixture(root)
+    const home = path.join(root, 'home')
+    const configPath = path.join(home, 'config.json')
+    await runCordisXCli(['setup'], { env: { CORDISX_HOME: home }, stdout: () => undefined })
+    const config = JSON.parse(await readFile(configPath, 'utf8')) as {
+      defaultApp: string
+      apps: Record<string, unknown>
+    }
+    config.defaultApp = 'preview-host'
+    config.apps['preview-host'] = {
+      defaultProfile: 'review',
+      profiles: { review: { displayName: 'Review', dataMode: 'shared' } },
+    }
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`)
+
+    await runCordisXCli(['dev', entry, '--executable', process.execPath], {
+      cwd: project,
+      env: { CORDISX_HOME: home },
+      internalSharedHomeDir: root,
+      internalRunInjectedHost: async input => {
+        expect(input.pluginManagement).toMatchObject({ profileId: 'review' })
+        expect(await input.pluginManagement!.service.query()).toMatchObject({
+          profileId: 'review',
+          runtime: { kind: 'inactive' },
+        })
+        const snapshot = await input.pluginManagement!.service.query()
+        await input.pluginManagement!.service.execute({
+          kind: 'source-add',
+          source: { url: 'https://example.com/catalog.json', enabled: true },
+        }, snapshot.revision)
+      },
+      stdout: () => undefined,
+    })
+
+    const persisted = JSON.parse(await readFile(configPath, 'utf8')) as {
+      apps: { 'preview-host': { profiles: { review: { management: { sources: Array<{ url: string }> } } } } }
+    }
+    expect(persisted.apps['preview-host'].profiles.review.management.sources).toContainEqual(
+      expect.objectContaining({ url: 'https://example.com/catalog.json' }),
+    )
+    await expect(access(path.join(home, 'run', 'preview-host', 'review', 'management.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  }, 30_000)
+
   it('deploys the bundled Skill before Vite development and preserves a locally edited copy', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-skill-'))
     const { project, entry, executable } = await createLocalDevelopmentFixture(root)

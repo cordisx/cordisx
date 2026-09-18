@@ -133,6 +133,12 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-policy-select { width: min(180px, 35%); flex: none; }
   .cxr-dialog-form { display: grid; gap: 12px; }
   .cxr-dialog-form label { display: grid; gap: 5px; }
+  .cxr-source-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+  .cxr-source-row { gap: 8px; }
+  .cxr-source-state { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 10px; }
+  .cxr-source-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+  .cxr-hidden-marketplace { display: grid; gap: 9px; }
+  .cxr-hidden-marketplace-heading { display: flex; align-items: center; }
   .cxr-marketplace-tools { display: flex; min-width: 0; align-items: center; overflow: hidden; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; background: var(--cx-surface-raised,#20242b); }
   .cxr-plugins-toolbar { display: flex; width: 100%; min-width: 0; align-items: center; }
   .cxr-plugins-toolbar .cxr-search { min-width: 180px; flex: 1; }

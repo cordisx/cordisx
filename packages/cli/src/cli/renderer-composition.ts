@@ -34,6 +34,7 @@ export interface RendererComposition {
   readonly permissionBridgeToken?: string
   readonly iconThemePreferenceBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  readonly pluginManagementBridgeToken?: string
   readonly managedServiceUICapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string
@@ -75,6 +76,7 @@ export interface BuildRendererCompositionOptions {
     readonly activation: CordisXPluginActivationRecordV1
     readonly registryEpoch?: number
   }
+  readonly pluginManagement?: { readonly token: string; readonly profileId: string }
   readonly pluginBundles?: CordisXPluginBundleManagerSnapshotV1
   readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
@@ -148,6 +150,7 @@ export async function buildRendererComposition(
       }),
     generation,
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    ...(options.pluginManagement === undefined ? {} : { pluginManagement: options.pluginManagement }),
     ...(options.pluginBundles === undefined ? {} : { pluginBundleSnapshot: options.pluginBundles }),
     ...((options.pluginActivation ?? options.pluginLifecycle?.activation) === undefined
       ? {}
@@ -207,6 +210,7 @@ export async function buildRendererComposition(
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    ...(options.pluginManagement === undefined ? {} : { pluginManagementBridgeToken: options.pluginManagement.token }),
     ...(options.managedServiceUICapabilities === undefined
       ? {}
       : { managedServiceUICapabilities: options.managedServiceUICapabilities }),

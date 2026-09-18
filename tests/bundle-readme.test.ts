@@ -13,6 +13,21 @@ afterEach(async () => {
 })
 
 describe('plugin README composition', () => {
+  it('embeds Host-private plugin management metadata in the renderer bootstrap', async () => {
+    const composition = await buildRendererCompositionSource({
+      version: 1,
+      rootDir: process.cwd(),
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [],
+    }, {
+      pluginManagement: { token: 'management-token', profileId: 'review' },
+    })
+    expect(composition.source).toContain(
+      'pluginManagement: {"token":"management-token","profileId":"review"}',
+    )
+  })
+
   it('finds and watches the nearest package README for a source entry', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-readme-'))
     temporaryDirectories.push(root)

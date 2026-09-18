@@ -24,6 +24,8 @@ cordisx setup
 cordisx config
 cordisx doctor
 cordisx dev [plugin-path]
+cordisx plugin list|search|info|install|update|enable|disable|uninstall|hide|unhide [arguments] [options]
+cordisx source list|add|edit|enable|disable|remove|refresh [arguments] [options]
 ```
 
 Examples:
@@ -62,6 +64,26 @@ or contain arbitrary user-facing text.
 
 Arguments after `--` belong to the selected host. CordisX options and host
 arguments never share an ambiguous positional parser.
+
+Plugin and discovery-source management use the selected Host profile, defaulting
+to the configured profile when `--profile <profile>` is omitted. Queries support
+`--json`. Mutations support `--dry-run` to inspect the shared management plan
+without changing persistent state and `--yes` to confirm the management change
+without an interactive prompt. `--yes` never grants plugin permissions. An
+install or update that needs new permissions remains in the Host-owned permission
+review flow. JSON mode emits one JSON value for success or failure. Management
+errors exit nonzero; exit status 2 identifies a required permission review.
+
+Management remains useful while the Host App is stopped. Successful offline
+mutations persist the desired profile state through the same management service
+used by the Manager UI; the result reports pending runtime activation honestly
+until a compatible Host runtime applies it. Hiding a catalog entry only changes
+discovery visibility. It does not disable or uninstall an installed plugin.
+
+Discovery sources are addressed by canonical URL. `source edit` replaces URL,
+name, and description atomically, and canonical source URLs remain unique.
+Local testing sources are allowed as discovery inputs but do not become plugin
+trust roots.
 
 ## Home configuration
 

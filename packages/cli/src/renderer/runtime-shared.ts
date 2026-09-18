@@ -279,6 +279,8 @@ export interface CordisXRuntimeMetadata {
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  /** Host-private Manager transport scope; not projected into plugin Contexts. */
+  readonly pluginManagement?: { readonly token: string; readonly profileId: string }
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   /** Vite-only targeted reload. The callback never enters plugin Contexts. */
   readonly developmentReloadPlugin?: (pluginId: string) => Promise<void>

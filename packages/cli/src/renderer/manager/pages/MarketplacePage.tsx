@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Input } from 'tdesign-react'
+import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import type { MarketplaceModel } from '../../marketplace.js'
 import { searchMarketplaceCatalog } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
@@ -7,11 +8,15 @@ import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
+import type { MoreMenuItem } from '../../host-ui/MoreMenu.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 import { productLocale } from '../../ui-copy.js'
+import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
+import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
+import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
 
 const COPY = {
   'zh-CN': {
@@ -35,10 +40,13 @@ const COPY = {
     cancelInstall: '取消安装',
     installFailed: '插件安装失败',
     installSucceeded: '插件安装完成',
+    enable: '启用',
+    disable: '停用',
+    uninstall: '卸载',
     unfavorite: '取消收藏',
     favorite: '收藏',
     more: '更多操作',
-    block: '屏蔽（Host 能力不可用）',
+    hide: '从商店隐藏',
     share: '分享',
     source: '打开来源',
     empty: '没有匹配的插件',
@@ -64,10 +72,13 @@ const COPY = {
     cancelInstall: 'Cancel installation',
     installFailed: 'Plugin installation failed',
     installSucceeded: 'Plugin installation complete',
+    enable: 'Enable',
+    disable: 'Disable',
+    uninstall: 'Uninstall',
     unfavorite: 'Remove favorite',
     favorite: 'Favorite',
     more: 'more actions',
-    block: 'Block (Host capability unavailable)',
+    hide: 'Hide from Marketplace',
     share: 'Share',
     source: 'Open source',
     empty: 'No matching plugins',
@@ -75,11 +86,13 @@ const COPY = {
 } as const
 
 export function MarketplacePage(
-  { marketplace, manager, snapshot, router }: {
+  { marketplace, manager, snapshot, router, pluginManagement, pluginManagementSnapshot }: {
     readonly marketplace: MarketplaceModel
     readonly manager: ManagerModel
     readonly snapshot: ManagerSnapshot
     readonly router: ManagerRouter
+    readonly pluginManagement?: ManagerPluginManagementBinding | undefined
+    readonly pluginManagementSnapshot?: PluginManagementSnapshot | undefined
   },
 ) {
   const copy = COPY[productLocale(snapshot.localization.locale)]
@@ -92,25 +105,42 @@ export function MarketplacePage(
     failed: copy.installFailed,
     succeeded: copy.installSucceeded,
   })
+  const lifecycle = usePluginLifecycleActions(manager, snapshot)
+  const management = usePluginManagementActions(
+    pluginManagement,
+    pluginManagementSnapshot,
+    snapshot.localization.locale,
+  )
+  const hidden = useMemo(
+    () =>
+      new Set(
+        pluginManagementSnapshot?.hiddenCatalogEntries.map(item => `${item.sourceUrl}\0${item.pluginId}`) ?? [],
+      ),
+    [pluginManagementSnapshot],
+  )
   const installed = useMemo(
     () => new Map(snapshot.plugins.map(plugin => [`${plugin.source}\0${plugin.id}`, plugin])),
     [snapshot.plugins],
   )
-  const results = useMemo(() =>
-    searchMarketplaceCatalog(catalog.plugins, {
-      query,
-      currentLocale: snapshot.localization.locale,
-      officialOnly,
+  const results = useMemo(
+    () =>
+      searchMarketplaceCatalog(catalog.plugins.filter(plugin => !hidden.has(`${plugin.feedUrl}\0${plugin.id}`)), {
+        query,
+        currentLocale: snapshot.localization.locale,
+        officialOnly,
+        certifiedOnly,
+        ...(manager.marketplaceEligibility === undefined ? {} : { eligibility: manager.marketplaceEligibility }),
+      }),
+    [
+      catalog.plugins,
       certifiedOnly,
-      ...(manager.marketplaceEligibility === undefined ? {} : { eligibility: manager.marketplaceEligibility }),
-    }), [
-    catalog.plugins,
-    certifiedOnly,
-    manager.marketplaceEligibility,
-    officialOnly,
-    query,
-    snapshot.localization.locale,
-  ])
+      manager.marketplaceEligibility,
+      hidden,
+      officialOnly,
+      query,
+      snapshot.localization.locale,
+    ],
+  )
   const toggleFavorite = (identity: string) => {
     setFavorites(current => {
       const next = new Set(current)
@@ -188,6 +218,32 @@ export function MarketplacePage(
             : installer.available
             ? installLabel
             : copy.installUnavailable
+          const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
+            ? []
+            : [{
+              id: installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
+              label: installedPlugin.status === 'configured-disabled' ? copy.enable : copy.disable,
+              icon: installedPlugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin',
+              disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
+              onSelect: () =>
+                void lifecycle.run(
+                  installedPlugin,
+                  installedPlugin.status === 'configured-disabled'
+                    ? { kind: 'enable', pluginId: installedPlugin.id }
+                    : { kind: 'disable', pluginId: installedPlugin.id, impactToken: '' },
+                ),
+            }, {
+              id: 'uninstall',
+              label: copy.uninstall,
+              icon: 'uninstall-plugin',
+              disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
+              onSelect: () =>
+                void lifecycle.run(installedPlugin, {
+                  kind: 'uninstall',
+                  pluginId: installedPlugin.id,
+                  impactToken: '',
+                }),
+            }]
           return (
             <div
               className="cxr-marketplace-card"
@@ -222,7 +278,9 @@ export function MarketplacePage(
                 <IconButton
                   icon={installing ? 'close' : 'import-plugin'}
                   label={installLabel}
-                  disabled={!installing && installDisabled}
+                  disabled={!installing && (installDisabled || (
+                    lifecycle.busyPluginId !== undefined && lifecycle.busyPluginId === installedPlugin?.id
+                  ))}
                   description={installDescription}
                   aria-busy={installing}
                   onClick={event => {
@@ -239,7 +297,18 @@ export function MarketplacePage(
                 <MoreMenu
                   label={`${result.projection.name} ${copy.more}`}
                   items={[
-                    { id: 'block', label: copy.block, icon: 'disable-plugin', disabled: true, onSelect: () => {} },
+                    ...lifecycleItems,
+                    {
+                      id: 'hide',
+                      label: copy.hide,
+                      icon: 'disable-plugin',
+                      disabled: pluginManagementSnapshot === undefined || management.busyKey === result.plugin.identity,
+                      onSelect: () =>
+                        void management.mutate(result.plugin.identity, {
+                          kind: 'catalog-hide',
+                          identity: { sourceUrl: result.plugin.feedUrl, pluginId: result.plugin.id },
+                        }).catch(() => undefined),
+                    },
                     {
                       id: 'share',
                       label: copy.share,

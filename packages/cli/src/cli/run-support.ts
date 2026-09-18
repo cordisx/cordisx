@@ -6,6 +6,7 @@ import os from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
+import type { Readable, Writable } from 'node:stream'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
@@ -103,6 +104,8 @@ import { loadActivatedPluginComposition, loadPluginComposition } from '../launch
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
+import type { PluginManagementBridgeHandler } from '../launcher/management-rpc.js'
+import { openPluginManagementService, type PluginManagementService } from '../management/service.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
@@ -140,6 +143,7 @@ import {
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
+import type { OpenManagementCommandService } from './management-command.js'
 
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
@@ -147,6 +151,8 @@ export const HELP = `Usage:
   cordisx config
   cordisx doctor
   cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
+  cordisx plugin <command> [options]
+  cordisx source <command> [options]
 
 Options:
   --attach                 Attach to an existing loopback CDP endpoint
@@ -159,6 +165,8 @@ Options:
   --write-config           Enable plugin saves to an explicit dev --config file
   --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
+  plugin --help            Show plugin management commands
+  source --help            Show source management commands
   -h, --help               Show this help`
 
 export interface CordisXCliRuntime {
@@ -167,6 +175,12 @@ export interface CordisXCliRuntime {
   /** Test/integration seam for the canonical default `~/.cordisx` root. */
   readonly homedir?: string
   readonly stdout?: (line: string) => void
+  readonly stdin?: Readable & { readonly isTTY?: boolean }
+  readonly stderr?: Writable
+  /** Repository-only seam until the shared management service is composed. */
+  readonly internalOpenPluginManagementService?: OpenManagementCommandService
+  /** Test-only confirmation seam. It confirms a mutation, never plugin permissions. */
+  readonly internalManagementConfirm?: (prompt: string) => boolean | Promise<boolean>
   /** Test-only cancellation seam for long-lived `cordisx logs --follow`. */
   readonly internalSignal?: AbortSignal
   /** Repository-only detached-supervisor seam; production always spawns the packaged CLI. */
@@ -406,6 +420,7 @@ export async function runInjectedHost(input: {
     readonly handler: PluginLifecycleBridgeHandler
     readonly runtime: CdpPluginLifecycleRuntime
   }
+  readonly pluginManagement?: PluginManagementBridgeHandler
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly viteDevelopment?: boolean
   readonly hasLoopbackGraph: boolean
@@ -462,6 +477,7 @@ export async function runInjectedHost(input: {
       ? {}
       : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
+    ...(input.pluginManagement === undefined ? {} : { pluginManagement: input.pluginManagement }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
     hasLoopbackGraph: input.hasLoopbackGraph,
@@ -619,6 +635,7 @@ export async function runDevelopment(
   let managedServiceActivation: ManagedServiceNodeActivation | undefined
   let managedServiceProjection: Awaited<ReturnType<typeof createNativeViteManagedServiceProjection>> | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
+  let pluginManagementService: PluginManagementService | undefined
   try {
     vite = await startNativeViteServer(config, {
       cacheRoot: dryRunCacheRoot ?? path.join(cordisxHomeDir, 'cache', 'native-vite'),
@@ -718,6 +735,18 @@ export async function runDevelopment(
       createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
       ...(managedServiceProjection === undefined ? [] : [managedServiceProjection.handler]),
     ]))
+    const homeConfig = await loadHomeConfig(homeConfigPath)
+    const managementAppId = homeConfig.defaultApp
+    const managementApp = ownValue(homeConfig.apps, managementAppId)
+    if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)
+    const managementProfileId = managementApp.defaultProfile
+    pluginManagementService = await openPluginManagementService({
+      configPath: homeConfigPath,
+      homeDir: cordisxHomeDir,
+      appId: managementAppId,
+      profileId: managementProfileId,
+    })
+    const pluginManagementToken = randomBytes(32).toString('hex')
     const composition = await buildRendererComposition(config, stdout, {
       profileId: 'development',
       writable: invocation.options.writeConfig === true,
@@ -727,8 +756,15 @@ export async function runDevelopment(
       ...(managedServiceProjection === undefined
         ? {}
         : { managedServiceUICapabilities: managedServiceProjection.capabilities() }),
+      pluginManagement: { token: pluginManagementToken, profileId: managementProfileId },
       developmentBuild: (nextConfig, options = {}) => activeVite.buildBootstrap(nextConfig, options),
     })
+    const pluginManagement: PluginManagementBridgeHandler = {
+      token: pluginManagementToken,
+      profileId: managementProfileId,
+      generation: composition.generation,
+      service: pluginManagementService,
+    }
     const configBridge = composition.configBridgeToken === undefined
       ? undefined
       : createLauncherConfigBridgeHandler({
@@ -804,6 +840,7 @@ export async function runDevelopment(
         agentHistoryHost: historyHost,
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         ownerDocuments,
+        pluginManagement,
         ...(providerFleet === undefined || composition.providerBridgeToken === undefined ? {} : {
           providerFleet,
           providerBridgeToken: composition.providerBridgeToken,
@@ -843,6 +880,7 @@ export async function runDevelopment(
       await nativeSubmission?.close().catch(() => undefined)
       await managedServiceProjection?.dispose().catch(() => undefined)
       await managedServiceActivation?.dispose().catch(() => undefined)
+      pluginManagementService?.close()
       await vite?.close()
     } finally {
       if (dryRunCacheRoot !== undefined) await rm(dryRunCacheRoot, { recursive: true, force: true })

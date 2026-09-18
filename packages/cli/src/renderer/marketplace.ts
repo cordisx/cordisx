@@ -4,8 +4,10 @@ import {
   type MarketplaceSourceRecord,
   type MarketplaceStorage,
   normalizeMarketplaceSource,
+  normalizeMarketplaceSourceRecord,
   OFFICIAL_MARKETPLACE_SOURCE,
   parseMarketplaceSourceImport,
+  readMarketplaceSourceRecords,
 } from './marketplace-source.js'
 import { evaluateMarketplaceTrust } from './marketplace-trust.js'
 import type {
@@ -68,6 +70,7 @@ export {
   normalizeMarketplaceSource,
   OFFICIAL_MARKETPLACE_SOURCE,
   parseMarketplaceSourceImport,
+  readMarketplaceSourceRecords,
 } from './marketplace-source.js'
 
 const MAX_FEED_BYTES = 2 * 1024 * 1024
@@ -595,6 +598,12 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
     await this.replaceRecords(this.sourceStore.replace(sources))
   }
 
+  /** Host-owned shared configuration projection. This path never writes browser storage. */
+  async setExternalSourceRecords(sources: readonly MarketplaceSourceRecord[]): Promise<void> {
+    const records = sources.map(normalizeMarketplaceSourceRecord)
+    await this.replaceRecords(records)
+  }
+
   async upsertSource(source: MarketplaceSourceRecord): Promise<void> {
     await this.replaceRecords(this.sourceStore.upsert(source))
   }
@@ -666,6 +675,46 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
     } finally {
       if (this.refreshPromise === task) this.refreshPromise = undefined
     }
+  }
+
+  async reloadSource(value: string): Promise<void> {
+    const url = normalizeMarketplaceSource(value)
+    const index = this.sourceRecords.findIndex(source => source.url === url)
+    if (index < 0) throw new Error('插件商店来源不存在')
+    const source = this.sourceRecords[index]!
+    const generation = ++this.generation
+    this.controller?.abort()
+    const controller = new AbortController()
+    this.controller = controller
+    const previous = this.loaded.get(url)
+    this.sourceStates[index] = source.enabled
+      ? {
+        ...sourceIdentity(source),
+        status: previous?.feed === undefined ? 'loading' : 'loaded',
+        phase: 'revalidating',
+        stale: previous?.state.stale ?? false,
+        revalidating: true,
+        attempts: 0,
+        ...(previous?.state.name === undefined ? {} : { name: previous.state.name }),
+        ...(previous?.state.description === undefined ? {} : { description: previous.state.description }),
+        ...(previous?.state.fallbackLocale === undefined ? {} : { fallbackLocale: previous.state.fallbackLocale }),
+        ...(previous?.state.localizations === undefined ? {} : { localizations: previous.state.localizations }),
+        ...(previous?.state.homepage === undefined ? {} : { homepage: previous.state.homepage }),
+        ...(previous?.state.pluginCount === undefined ? {} : { pluginCount: previous.state.pluginCount }),
+        ...(previous?.state.trusted === undefined ? {} : { trusted: previous.state.trusted }),
+        ...(previous?.state.lastSuccessAt === undefined ? {} : { lastSuccessAt: previous.state.lastSuccessAt }),
+      }
+      : this.disabledState(source)
+    this.notify()
+    const result = source.enabled
+      ? await this.load(source, controller.signal, previous)
+      : { state: this.disabledState(source) }
+    if (generation !== this.generation) return
+    if (source.enabled && result.feed !== undefined) this.loaded.set(url, result)
+    else this.loaded.delete(url)
+    this.sourceStates[index] = result.state
+    this.rebuildCatalog()
+    this.notify()
   }
 
   dispose(): void {

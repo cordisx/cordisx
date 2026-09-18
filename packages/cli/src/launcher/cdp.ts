@@ -113,6 +113,7 @@ export interface WatchInjectionOptions {
     readonly handler: support.PluginLifecycleBridgeHandler
     readonly runtime: CdpPluginLifecycleRuntime
   }
+  readonly pluginManagement?: support.PluginManagementBridgeHandler
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: support.PublisherGrantBridgeHandler
@@ -333,6 +334,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.iconThemePreferencePersistence,
               iconThemePreferenceBroadcast,
               options.pluginLifecycle,
+              options.pluginManagement,
               options.developmentRuntime,
               options.publisherGrant,
               options.certifiedPermission,

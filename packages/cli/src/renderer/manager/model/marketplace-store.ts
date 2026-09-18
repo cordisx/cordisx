@@ -2,18 +2,22 @@ import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
 import {
   BrowserMarketplaceModel,
+  MARKETPLACE_SOURCE_RECORDS_KEY,
+  MARKETPLACE_SOURCES_KEY,
   type MarketplaceFetcher,
   type MarketplaceModel,
   type MarketplaceSnapshot,
   type MarketplaceStorage,
+  readMarketplaceSourceRecords,
 } from '../../marketplace.js'
+import type { PluginManagementBinding } from '../../management-binding.js'
 
 interface MarketplaceBridgeWindow extends Window {
   __cordisxMarketplaceRequestV1?: (payload: string) => void
   __cordisxMarketplaceReceiveV1?: (payload: string) => void
 }
 
-function storage(view: Window | null): MarketplaceStorage | undefined {
+function storage(view: Window | null): (MarketplaceStorage & Pick<Storage, 'removeItem'>) | undefined {
   try {
     return view?.localStorage
   } catch {
@@ -103,12 +107,45 @@ export interface ManagerMarketplaceStore {
   readonly dispose: () => void
 }
 
-export function createManagerMarketplaceStore(document: Document): ManagerMarketplaceStore {
+export function createManagerMarketplaceStore(
+  document: Document,
+  pluginManagement?: PluginManagementBinding,
+): ManagerMarketplaceStore {
   const transport = bridgeFetcher(document.defaultView)
-  const model = new BrowserMarketplaceModel(storage(document.defaultView), transport.fetcher)
+  const browserStorage = storage(document.defaultView)
+  const legacySources = pluginManagement === undefined
+    ? undefined
+    : readMarketplaceSourceRecords(browserStorage)
+  const model = new BrowserMarketplaceModel(
+    pluginManagement === undefined ? browserStorage : undefined,
+    transport.fetcher,
+  )
+  let disposed = false
+  let unsubscribe = () => {}
+  if (pluginManagement !== undefined) {
+    const apply = async (snapshot: Awaited<ReturnType<PluginManagementBinding['query']>>): Promise<void> => {
+      if (disposed) return
+      await model.setExternalSourceRecords(snapshot.sources)
+    }
+    unsubscribe = pluginManagement.subscribe(snapshot => void apply(snapshot))
+    void (async () => {
+      let snapshot = await pluginManagement.query()
+      if (!snapshot.migrations.legacyBrowserSourcesV2) {
+        const migration = await pluginManagement.migrateLegacySources({ sources: legacySources ?? [] })
+        snapshot = await pluginManagement.query()
+        if (migration.clearLegacyStorage && snapshot.migrations.legacyBrowserSourcesV2) {
+          browserStorage?.removeItem(MARKETPLACE_SOURCES_KEY)
+          browserStorage?.removeItem(MARKETPLACE_SOURCE_RECORDS_KEY)
+        }
+      }
+      await apply(snapshot)
+    })().catch(error => console.error('[cordisx] plugin management initialization failed', error))
+  }
   return {
     model,
     dispose: () => {
+      disposed = true
+      unsubscribe()
       model.dispose()
       transport.dispose()
     },

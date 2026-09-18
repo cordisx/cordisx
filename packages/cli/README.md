@@ -21,6 +21,20 @@ profile while sharing the existing account and conversations. Use
 npx cordisx@beta codex work --data host-isolated
 ```
 
+Manage the selected profile without launching another Host window:
+
+```bash
+npx cordisx@beta plugin list
+npx cordisx@beta plugin install com.example.plugin --dry-run
+npx cordisx@beta source list --json
+```
+
+State-changing commands request confirmation unless `--yes` is supplied.
+`--yes` confirms only the management change and never approves plugin
+permissions. Offline changes are persisted and report pending runtime activation
+when the Host is not running. JSON commands emit one JSON value; failures exit
+nonzero, with exit status 2 reserved for required Host permission review.
+
 CordisX starts a separate process and does not modify the installed Codex
 application. Plugins are trusted local renderer code; this beta is not a
 security sandbox.

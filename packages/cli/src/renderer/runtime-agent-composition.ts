@@ -854,8 +854,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       }
       await runtimeScope.iconThemePreferenceBridge()!.ready()
     }
+    const pluginManagement = runtimeScope.pluginManagementBinding()
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
+      ...(pluginManagement === undefined ? {} : { pluginManagement }),
       ...(runtimeScope.metadata()!.hostKind === 'playground'
         ? {
           triggerTarget: () =>

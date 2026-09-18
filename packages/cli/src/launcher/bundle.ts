@@ -35,6 +35,8 @@ export interface BuildRendererBundleOptions {
   readonly channelActionsBridgeToken?: string
   readonly generation?: string
   readonly pluginLifecycleBridgeToken?: string
+  /** Host-private Manager bridge; never exposed through plugin Contexts. */
+  readonly pluginManagement?: { readonly token: string; readonly profileId: string }
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   readonly certifiedPermissionChannelToken?: string
   readonly managedServiceUICapabilities?: readonly {
@@ -404,6 +406,10 @@ export async function buildRendererCompositionSource(
     options.pluginLifecycleBridgeToken === undefined
       ? ''
       : `, pluginLifecycleBridgeToken: ${JSON.stringify(options.pluginLifecycleBridgeToken)}`
+  }${
+    options.pluginManagement === undefined
+      ? ''
+      : `, pluginManagement: ${JSON.stringify(options.pluginManagement)}`
   }${
     options.pluginBundleSnapshot === undefined
       ? ''

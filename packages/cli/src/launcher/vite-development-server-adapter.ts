@@ -181,7 +181,8 @@ export function configureNativeViteServer<Generation extends { readonly moduleGe
     else send(normalized as Parameters<typeof send>[0])
   }) as typeof hot.send
   vite.middlewares.use((request, response, next) => {
-    const pathname = new URL(request.url ?? '/', context.origin).pathname
+    const requestUrl = new URL(request.url ?? '/', context.origin)
+    const pathname = requestUrl.pathname
     if (!pathname.startsWith(context.base)) {
       response.writeHead(404)
       response.end()
@@ -195,6 +196,22 @@ export function configureNativeViteServer<Generation extends { readonly moduleGe
         'access-control-allow-origin': '*',
       })
       response.end(map)
+      return
+    }
+    if (pathname.endsWith('.css') && requestUrl.searchParams.has('inline')) {
+      const transformUrl = pathname.slice(context.base.length - 1) + requestUrl.search
+      void vite.transformRequest(transformUrl).then(transformed => {
+        if (transformed === null) {
+          next()
+          return
+        }
+        response.writeHead(200, {
+          'content-type': 'text/javascript',
+          'cache-control': 'no-cache',
+          'access-control-allow-origin': '*',
+        })
+        response.end(transformed.code)
+      }, next)
       return
     }
     const end = response.end.bind(response)

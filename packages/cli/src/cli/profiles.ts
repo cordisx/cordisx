@@ -16,6 +16,8 @@ export interface ResolveProfileSelectionInput {
   readonly appId?: string
   readonly profileId?: string
   readonly dataMode?: CordisXDataMode
+  /** Return a projected config instead of persisting an explicitly missing profile. */
+  readonly persistMissing?: boolean
 }
 
 function displayName(profileId: string): string {
@@ -52,6 +54,29 @@ export async function resolveProfileSelection(
   const profile: HomeConfigProfile = {
     displayName: displayName(profileId),
     dataMode: input.dataMode ?? 'shared',
+  }
+  if (input.persistMissing === false) {
+    const config: HomeConfig = {
+      ...input.config,
+      apps: {
+        ...input.config.apps,
+        [appId]: {
+          ...app,
+          profiles: {
+            ...app.profiles,
+            [profileId]: profile,
+          },
+        },
+      },
+    }
+    return {
+      config,
+      appId,
+      profileId,
+      profile,
+      dataMode: input.dataMode ?? profile.dataMode,
+      created: true,
+    }
   }
   const config = await updateHomeConfigAtomic((current) => {
     const currentApp = ownValue(current.apps, appId)

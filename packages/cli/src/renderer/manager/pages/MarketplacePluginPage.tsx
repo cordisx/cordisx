@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { projectPermissionCapabilityName } from '../../../permission-locales.js'
+import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import { type MarketplaceModel, projectMarketplacePlugin } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
@@ -13,6 +14,9 @@ import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
 import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
+import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
+import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
+import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
 
 type MarketplaceDetailTab = 'readme' | 'permissions' | 'authors-source'
 
@@ -29,6 +33,11 @@ const COPY = {
     cancelInstall: '取消安装',
     installFailed: '插件安装失败',
     installSucceeded: '插件安装完成',
+    enable: '启用',
+    disable: '停用',
+    uninstall: '卸载',
+    hide: '从商店隐藏',
+    unhide: '恢复到商店',
     favorite: '收藏',
     unfavorite: '取消收藏',
     noReadme: '该商店记录没有提供 README；安装后可在插件详情中查看随包文档。',
@@ -76,6 +85,11 @@ const COPY = {
     cancelInstall: 'Cancel installation',
     installFailed: 'Plugin installation failed',
     installSucceeded: 'Plugin installation complete',
+    enable: 'Enable',
+    disable: 'Disable',
+    uninstall: 'Uninstall',
+    hide: 'Hide from Marketplace',
+    unhide: 'Restore to Marketplace',
     favorite: 'Favorite',
     unfavorite: 'Remove favorite',
     noReadme: 'This catalog record does not provide a README. Packaged documentation appears after installation.',
@@ -126,11 +140,20 @@ function tabs(locale: 'zh-CN' | 'en'): readonly ManagerTab<MarketplaceDetailTab>
   ]
 }
 
-export function MarketplacePluginPage({ manager, marketplace, snapshot: managerSnapshot, router }: {
+export function MarketplacePluginPage({
+  manager,
+  marketplace,
+  snapshot: managerSnapshot,
+  router,
+  pluginManagement,
+  pluginManagementSnapshot,
+}: {
   readonly manager: ManagerModel
   readonly marketplace: MarketplaceModel
   readonly snapshot: ManagerSnapshot
   readonly router: ManagerRouter
+  readonly pluginManagement?: ManagerPluginManagementBinding | undefined
+  readonly pluginManagementSnapshot?: PluginManagementSnapshot | undefined
 }) {
   const [tab, setTab] = useState<MarketplaceDetailTab>('readme')
   const [permissionQuery, setPermissionQuery] = useState('')
@@ -147,6 +170,12 @@ export function MarketplacePluginPage({ manager, marketplace, snapshot: managerS
     failed: copy.installFailed,
     succeeded: copy.installSucceeded,
   })
+  const lifecycle = usePluginLifecycleActions(manager, managerSnapshot)
+  const management = usePluginManagementActions(
+    pluginManagement,
+    pluginManagementSnapshot,
+    managerSnapshot.localization.locale,
+  )
   useEffect(() => {
     setTab('readme')
     setPermissionQuery('')
@@ -240,6 +269,11 @@ export function MarketplacePluginPage({ manager, marketplace, snapshot: managerS
     ? copy.install
     : copy.installUnavailable
   const installing = installer.installingIdentity === plugin.identity
+  const catalogIdentity = { sourceUrl: plugin.feedUrl, pluginId: plugin.id }
+  const hidden =
+    pluginManagementSnapshot?.hiddenCatalogEntries.some(item =>
+      item.sourceUrl === catalogIdentity.sourceUrl && item.pluginId === catalogIdentity.pluginId
+    ) === true
 
   return (
     <section className="cxr-page" data-marketplace-plugin-detail={plugin.id}>
@@ -275,15 +309,57 @@ export function MarketplacePluginPage({ manager, marketplace, snapshot: managerS
               ? copy.install
               : copy.update}
             description={installing ? copy.installing : installDescription}
-            disabled={!installing && installDisabled}
+            disabled={!installing && (installDisabled || (
+              lifecycle.busyPluginId !== undefined && lifecycle.busyPluginId === installed?.id
+            ))}
             aria-busy={installing}
             onClick={() => installing ? installer.cancel() : void installer.run(plugin, projection.name)}
           />
+          {installed === undefined
+            ? null
+            : (
+              <IconButton
+                icon={installed.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'}
+                label={installed.status === 'configured-disabled' ? copy.enable : copy.disable}
+                loading={lifecycle.busyPluginId === installed.id}
+                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === installed.id || installing}
+                onClick={() =>
+                  void lifecycle.run(
+                    installed,
+                    installed.status === 'configured-disabled'
+                      ? { kind: 'enable', pluginId: installed.id }
+                      : { kind: 'disable', pluginId: installed.id, impactToken: '' },
+                  )}
+              />
+            )}
+          {installed === undefined
+            ? null
+            : (
+              <IconButton
+                icon="uninstall-plugin"
+                label={copy.uninstall}
+                loading={lifecycle.busyPluginId === installed.id}
+                disabled={!lifecycle.operationsAvailable || lifecycle.busyPluginId === installed.id || installing}
+                onClick={() =>
+                  void lifecycle.run(installed, { kind: 'uninstall', pluginId: installed.id, impactToken: '' })}
+              />
+            )}
           <IconButton
             icon={favorite ? 'favorite-active' : 'favorite'}
             label={favorite ? copy.unfavorite : copy.favorite}
             aria-pressed={favorite}
             onClick={toggleFavorite}
+          />
+          <IconButton
+            icon={hidden ? 'reset-configuration' : 'disable-plugin'}
+            label={hidden ? copy.unhide : copy.hide}
+            loading={management.busyKey === plugin.identity}
+            disabled={pluginManagementSnapshot === undefined || management.busyKey === plugin.identity}
+            onClick={() =>
+              void management.mutate(plugin.identity, {
+                kind: hidden ? 'catalog-unhide' : 'catalog-hide',
+                identity: catalogIdentity,
+              }).catch(() => undefined)}
           />
         </span>
       </section>

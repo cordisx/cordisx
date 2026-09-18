@@ -42,4 +42,19 @@ describe('named CLI profile resolution', () => {
     })
     expect(second).toMatchObject({ profileId: 'work', dataMode: 'shared', created: false })
   })
+
+  it('can project a missing explicit profile without persistence', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-selection-'))
+    const configPath = path.join(root, 'config.json')
+    const selection = await resolveProfileSelection({
+      config: createDefaultHomeConfig(),
+      configPath,
+      appId: 'codex',
+      profileId: 'work',
+      persistMissing: false,
+    })
+    expect(selection).toMatchObject({ profileId: 'work', dataMode: 'shared', created: true })
+    expect(selection.config.apps.codex?.profiles.work).toEqual({ displayName: 'Work', dataMode: 'shared' })
+    await expect(loadHomeConfig(configPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })
