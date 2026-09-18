@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
@@ -13,7 +14,7 @@ import {
 
 describe('plugin management RPC', () => {
   it('awaits async responses over a bounded Unix socket path', async () => {
-    const root = await mkdtemp('/private/tmp/cx-rpc-')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-rpc-'))
     const homeDir = path.join(root, 'a'.repeat(140))
     const snapshot: PluginManagementSnapshot = {
       profileId: 'default',
