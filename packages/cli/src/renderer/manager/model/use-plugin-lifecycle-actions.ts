@@ -6,6 +6,7 @@ import { dialogCenterForDocument } from '../../dialogs/host.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
 import { productLocale } from '../../ui-copy.js'
+import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
 
 export interface PluginLifecycleActions {
   readonly busyPluginId: string | undefined
@@ -79,6 +80,45 @@ export function usePluginLifecycleActions(
         })
         if (confirmation?.status !== 'completed') return
         result = await model.requestPluginLifecycle({ ...operation, impactToken: result.impactToken })
+      }
+      if (operation.kind === 'enable' && result.outcome === 'planned') {
+        const target = { kind: 'enable' as const, pluginId: plugin.id }
+        const planV4 = await model.permissionLifecycleReviewPlanV4?.(target)
+        const planV2 = planV4 === undefined ? await model.permissionLifecycleReviewPlanV2?.(target) : undefined
+        if (planV4 !== undefined) {
+          if (model.applyPermissionLifecycleReviewV4 === undefined) {
+            throw new Error('Permission review v4 is unavailable')
+          }
+          const decision = await requestPluginAuthorizationV4(
+            document,
+            { id: planV4.identity.pluginId, name: plugin.name, source: planV4.identity.source },
+            planV4,
+            snapshot.permissions.filter(item =>
+              item.identity.id === planV4.identity.pluginId && item.identity.source === planV4.identity.source
+            ),
+          )
+          if (decision === undefined) return
+          result = await model.applyPermissionLifecycleReviewV4(decision)
+        } else if (planV2 !== undefined) {
+          if (model.applyPermissionLifecycleReviewV2 === undefined) {
+            throw new Error('Permission review v2 is unavailable')
+          }
+          const decision = await requestPluginAuthorizationV2(
+            document,
+            { id: planV2.identity.pluginId, name: plugin.name, source: planV2.identity.source },
+            planV2,
+            snapshot.permissions.filter(item =>
+              item.identity.id === planV2.identity.pluginId && item.identity.source === planV2.identity.source
+            ),
+          )
+          if (decision === undefined) return
+          result = await model.applyPermissionLifecycleReviewV2(decision)
+        } else {
+          throw new Error('The Host will not enable this plugin without a modern permission review')
+        }
+        if (result.outcome !== 'applied') {
+          throw new Error(result.error?.message ?? `Enable ended with ${result.outcome}`)
+        }
       }
       if (result.error !== undefined) {
         notifications.current?.show({
