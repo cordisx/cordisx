@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect } from 'vitest'
@@ -9,6 +10,9 @@ import { RuntimeHandle, settle } from './bundle.fixtures.js'
 
 export async function bootSurfaces() {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+  const cliManifest = JSON.parse(
+    await readFile(path.join(projectRoot, 'packages/cli/package.json'), 'utf8'),
+  ) as { readonly version: string }
   const sessionId = '01a02d54-8adf-7043-944c-0bc9bb41bfd9'
   const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
   const config = {
@@ -255,7 +259,7 @@ export async function bootSurfaces() {
   }
   const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
   expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-  expect(runtime?.version).toBe('0.1.0-beta.8')
+  expect(runtime?.version).toBe(cliManifest.version)
   const snapshot = runtime!.snapshot()
   expect(snapshot.plugins).toEqual([
     expect.objectContaining({
