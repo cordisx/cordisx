@@ -3,14 +3,18 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT,
   NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9275,
+  NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9647,
   NATIVE_SUBMIT_ORCHESTRATOR_FENCE,
   NATIVE_SUBMIT_ORCHESTRATOR_FENCE_BUILD_9275,
+  NATIVE_SUBMIT_ORCHESTRATOR_FENCE_BUILD_9647,
   NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE,
   NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9275,
+  NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9647,
   NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM,
   NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
   transformNativeSubmitOrchestrator,
   transformNativeSubmitOrchestratorBuild9275,
+  transformNativeSubmitOrchestratorBuild9647,
 } from '../packages/cli/src/renderer/adapter/native-submit-orchestrator-transform.js'
 
 const anchor = 'skipGoalReplacementConfirmation:se=!1,skipGoalSubmit:ce=!1}=P;a();'
@@ -31,6 +35,23 @@ globalThis.submit=async function(F={}) {
   let t={input:F.input},n=[],je;je={...t,threadReferences:n,attachments:F.attachments};
   return je;
 };`
+
+const fixtureBuild9647 =
+  `let Dt;Dt=function(e,t){return(te?.selectModelAndReasoningEffort??J)(Ot(e),t,()=>{})};globalThis.selectModel=Dt;
+globalThis.submit=async function(L={}) {
+  let Y={type:'local'},u='thread-1',E=false,h={type:'local',localConversationId:'thread-1'},p='steer',_,oe,ae;
+  let {${'skipGoalReplacementConfirmation:ce=!1,skipGoalSubmit:le=!1,turnTrigger:ue}=L;s();'}
+  let t={input:L.input},n=[],je=[],Fe;Fe={...t,...ue==null?{}:{turnTrigger:ue},artifactFollowupAttributions:je,threadReferences:n,attachments:L.attachments};
+  return Fe;
+};
+async function Pet({context:t,serviceTier:d}){let b;t.elicitationPluginIds!=null&&t.elicitationPluginIds.length>0&&(b={discoverables:t.elicitationPluginIds.map(e=>({type:\`plugin\`,id:e}))});let x=Net;
+  return {model:null,serviceTier:d,daybreakEnabled:false,configOverrides:b};
+}
+async function Vet({context:i,serviceTier:l}){let f=null,D=false,A=null,_=[];let N=f==null||D?null:Ode({config:A,permissionSelection:f,runtimeWorkspaceRoots:_}),P={request:{
+  threadId:a,turnTrigger:t,clientUserMessageId:h??m?.id,input:w,cwd:o,model:null,effort:null,multiAgentMode:Sse,serviceTier:l,
+  }};return P.request;
+}
+globalThis.Pet=Pet;globalThis.Vet=Vet;`
 
 function runtime(hook?: (descriptor: unknown) => unknown) {
   const effects: string[] = []
@@ -53,6 +74,30 @@ function runtimeBuild9275(hook?: (descriptor: unknown) => unknown) {
     __cordisxNativeSubmissionActivate: activate,
   } as Record<string, any>
   runInNewContext(transformNativeSubmitOrchestratorBuild9275(fixtureBuild9275).source, sandbox)
+  return { sandbox, effects, activate }
+}
+
+function runtimeBuild9647(hook?: (descriptor: unknown) => unknown) {
+  const effects: string[] = []
+  const activate = vi.fn()
+  const sandbox = {
+    s: () => effects.push('send'),
+    te: undefined,
+    J: (_model: string, _effort: string) => Promise.resolve(true),
+    Ot: (model: string) => model,
+    Net: {},
+    Ode: () => null,
+    a: 'thread-1',
+    t: 'composer',
+    h: null,
+    m: null,
+    w: [],
+    o: '/tmp',
+    Sse: null,
+    __cordisxNativeSubmitHook: hook,
+    __cordisxNativeSubmissionActivate: activate,
+  } as Record<string, any>
+  runInNewContext(transformNativeSubmitOrchestratorBuild9647(fixtureBuild9647).source, sandbox)
   return { sandbox, effects, activate }
 }
 
@@ -192,5 +237,39 @@ describe('native submit orchestrator transform', () => {
     const denied = runtimeBuild9275(async () => ({ allow: false }))
     await expect(denied.sandbox.submit({ input: 'blocked' })).resolves.toBeUndefined()
     expect(denied.effects).toEqual([])
+  })
+
+  it('supports build 9647 submission, model completion, token routing and fast mode', async () => {
+    expect(NATIVE_SUBMIT_ORCHESTRATOR_RESOURCE_BUILD_9647).toEqual({
+      url: 'app://-/assets/app-primary-d63a2421d501.js',
+      sha256: 'e381729764540940326372f7785bd5f68bc7dd2e49fad0eed4d8a99bbb3de706',
+    })
+    const run = runtimeBuild9647(async () => ({ allow: true, operationToken: 'operation-build-9647' }))
+    await expect(run.sandbox.submit({ input: 'draft' })).resolves.toMatchObject({
+      input: 'draft',
+      __cordisxOperationToken: 'operation-build-9647',
+    })
+    expect(run.effects).toEqual(['send'])
+    expect(run.activate).toHaveBeenCalledWith(true)
+    await expect(run.sandbox.selectModel('gpt-5.6', 'high')).resolves.toBe(true)
+    run.sandbox.__cordisxNativeServiceTierOverride = 'priority'
+    await expect(run.sandbox.Pet({
+      context: { __cordisxOperationToken: 'operation-build-9647', elicitationPluginIds: [] },
+      serviceTier: null,
+    })).resolves.toMatchObject({
+      serviceTier: 'priority',
+      configOverrides: { 'cordisx.operation_token': 'operation-build-9647' },
+    })
+    await expect(run.sandbox.Vet({
+      context: { __cordisxOperationToken: 'operation-build-9647', input: [] },
+      serviceTier: null,
+    })).resolves.toMatchObject({
+      serviceTier: 'priority',
+      config: { 'cordisx.operation_token': 'operation-build-9647' },
+    })
+    expect(runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9647, run.sandbox)).toBe(true)
+    runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_FENCE_BUILD_9647, run.sandbox)
+    expect(runInNewContext(NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9647, run.sandbox)).toBe(false)
+    expect(() => transformNativeSubmitOrchestratorBuild9647('unrelated')).toThrow('found 0')
   })
 })

@@ -224,3 +224,72 @@ export const NATIVE_OPERATION_REQUEST_TRANSFORM_9275 = Object.freeze({
   transform: transformNativeOperationRequest9275,
   requiredForDocumentReady: false,
 })
+
+export const NATIVE_OPERATION_REQUEST_RESOURCE_9647 = Object.freeze({
+  url: 'app://-/assets/app-initial-b21bd554b363.js',
+  sha256: '01c04b2e5a96e5dd4c97e02ffa183f571a55bef7a221abd99404246c430f2212',
+})
+
+const NORMALIZED_REQUEST_ANCHOR_9647 =
+  'model:P,cyberAccessProgram:s.cyberAccessProgram,serviceTier:ke,effort:F,multiAgentMode:Ibn,'
+const NORMALIZED_PARAMS_ANCHOR_9647 = 'model:P??null,serviceTier:ke,effort:F??null,multiAgentMode:Ibn,'
+const FINAL_TURN_DECLARATION_ANCHOR_9647 =
+  'readPersistedValue:d},f){let p=n.request,{localTurnMetadata:m,attachments:h,commentAttachments:g,'
+const FINAL_TURN_DISPATCH_ANCHOR_9647 =
+  'let c=T.markRequestDispatched?.(),u=V0t(O.request,e.requestClient.getAppServerVersion());L=e.getConversation(t)?.environmentSelectionEvidence;'
+const MARKER_9647 = '__cordisxNativeOperationRequestTransformBuild9647V1'
+const VERSION_9647 = 'app-initial-b21bd554b363:normalized-operation-request-v1'
+const SERVICE_TIER_OVERRIDE_9647 =
+  'globalThis.__cordisxNativeServiceTierOverride===`priority`?`priority`:globalThis.__cordisxNativeServiceTierOverride===`default`?null:'
+
+const NORMALIZED_REQUEST_REPLACEMENT_9647 = NORMALIZED_REQUEST_ANCHOR_9647.replace(
+  'serviceTier:ke',
+  `serviceTier:${SERVICE_TIER_OVERRIDE_9647}ke`,
+)
+const NORMALIZED_PARAMS_REPLACEMENT_9647 = NORMALIZED_PARAMS_ANCHOR_9647.replace(
+  'serviceTier:ke',
+  `serviceTier:${SERVICE_TIER_OVERRIDE_9647}ke`,
+)
+const FINAL_TURN_DECLARATION_REPLACEMENT_9647 = `readPersistedValue:d},f){let p=n.request,__cxOperationToken=${
+  configToken('p')
+},{localTurnMetadata:m,attachments:h,commentAttachments:g,`
+const FINAL_TURN_DISPATCH_REPLACEMENT_9647 =
+  `let c=T.markRequestDispatched?.(),u=V0t(O.request,e.requestClient.getAppServerVersion());__cxOperationToken!==void 0&&(u={...u,config:{...u.config,${
+    JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
+  }:__cxOperationToken}});L=e.getConversation(t)?.environmentSelectionEvidence;`
+
+export const NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9647 = `globalThis.${MARKER_9647}===${
+  JSON.stringify(VERSION_9647)
+}`
+export const NATIVE_OPERATION_REQUEST_FENCE_9647 = `(delete globalThis.${MARKER_9647},true)`
+
+/** Exact-pinned build-9647 transform; source mismatch fails closed. */
+export function transformNativeOperationRequest9647(source: string) {
+  for (
+    const [name, anchor] of [
+      ['normalized request', NORMALIZED_REQUEST_ANCHOR_9647],
+      ['normalized params', NORMALIZED_PARAMS_ANCHOR_9647],
+      ['final turn declaration', FINAL_TURN_DECLARATION_ANCHOR_9647],
+      ['final turn dispatch', FINAL_TURN_DISPATCH_ANCHOR_9647],
+    ]
+  ) {
+    const count = source.split(anchor!).length - 1
+    if (count !== 1) throw new Error(`Expected one build-9647 ${name} anchor, found ${count}`)
+  }
+  return {
+    source: source.replace(NORMALIZED_REQUEST_ANCHOR_9647, NORMALIZED_REQUEST_REPLACEMENT_9647)
+      .replace(NORMALIZED_PARAMS_ANCHOR_9647, NORMALIZED_PARAMS_REPLACEMENT_9647)
+      .replace(FINAL_TURN_DECLARATION_ANCHOR_9647, FINAL_TURN_DECLARATION_REPLACEMENT_9647)
+      .replace(FINAL_TURN_DISPATCH_ANCHOR_9647, FINAL_TURN_DISPATCH_REPLACEMENT_9647)
+      + `\n;globalThis.${MARKER_9647}=${JSON.stringify(VERSION_9647)};`,
+    anchorMatches: 1,
+    acknowledgementExpression: NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9647,
+    fenceExpression: NATIVE_OPERATION_REQUEST_FENCE_9647,
+  }
+}
+
+export const NATIVE_OPERATION_REQUEST_TRANSFORM_9647 = Object.freeze({
+  ...NATIVE_OPERATION_REQUEST_RESOURCE_9647,
+  transform: transformNativeOperationRequest9647,
+  requiredForDocumentReady: false,
+})

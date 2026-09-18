@@ -7,6 +7,7 @@ import {
 import {
   CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS,
   CodexDesktopNativeModelProviderTransport,
+  nativeModelProviderTransportPinForApp,
 } from '../packages/cli/src/renderer/native-model-provider-transport.js'
 import type {
   NativeProviderSelectionCommandChannel,
@@ -25,6 +26,31 @@ afterEach(() => {
     else Object.defineProperty(globalThis, name, descriptor)
   }
   originals.clear()
+})
+
+describe('native model provider transport compatibility', () => {
+  it('uses only exact audited production pins', () => {
+    expect(nativeModelProviderTransportPinForApp({
+      appVersion: '26.908.70816',
+      buildNumber: '9275',
+      buildFlavor: 'prod',
+    })).toEqual(CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.at(-2))
+    expect(nativeModelProviderTransportPinForApp({
+      appVersion: '26.911.61220',
+      buildNumber: '9647',
+      buildFlavor: 'prod',
+    })).toEqual(CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.at(-1))
+    expect(nativeModelProviderTransportPinForApp({
+      appVersion: '26.911.61220',
+      buildNumber: '9647',
+      buildFlavor: 'dev',
+    })).toBeUndefined()
+    expect(nativeModelProviderTransportPinForApp({
+      appVersion: 'future',
+      buildNumber: '9275',
+      buildFlavor: 'prod',
+    })).toBeUndefined()
+  })
 })
 
 function message(view: Window, data: unknown): void {

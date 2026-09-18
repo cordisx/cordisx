@@ -19,7 +19,7 @@ import {
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
 
-const VERSION = '0.1.0-beta.7'
+const VERSION = '0.1.0-beta.8'
 const RETRY_DELAY = 50
 /** Product launch budget; deliberately independent from shutdown escalation. */
 export const RENDERER_READINESS_TIMEOUT_MS = 60_000

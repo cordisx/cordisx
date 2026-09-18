@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT,
   NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9275,
+  NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9647,
   NATIVE_OPERATION_REQUEST_FENCE,
+  NATIVE_OPERATION_REQUEST_FENCE_9647,
   transformNativeOperationRequest,
   transformNativeOperationRequest9275,
+  transformNativeOperationRequest9647,
 } from '../packages/cli/src/renderer/adapter/native-operation-request-transform.js'
 
 const fixture = `
@@ -184,5 +187,50 @@ globalThis.aRa=aRa;globalThis.lQt=lQt;globalThis.T$t=T$t;
   it('fails closed on an incomplete resource and exposes a distinct acknowledgement', () => {
     expect(() => transformNativeOperationRequest9275('')).toThrow('build-9275 new-thread declaration anchor')
     expect(NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9275).not.toBe(NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT)
+  })
+})
+
+describe('native operation request transform build 9647', () => {
+  const fixture9647 = `
+async function kbn(){let s={model:'gpt'},P='gpt',ke=null,F='high';
+  let Ae={model:P,cyberAccessProgram:s.cyberAccessProgram,serviceTier:ke,effort:F,multiAgentMode:Ibn,};
+  let je={model:P??null,serviceTier:ke,effort:F??null,multiAgentMode:Ibn,};return {request:Ae,params:je};}
+function g_o(e){let{config:s,configOverrides:c,input:l,toolOutput:u}=e,O='project',D='default';
+  return {input:l,toolOutput:u,threadStartKind:D,config:c,...O===\`projectless\`?{projectless:true}:{}};}
+function V0t(request,version){return {...request,normalizedVersion:version,config:{normalizerRetained:true}}}
+async function Gxn({manager:e,conversationId:t,operation:n,capabilities:r,origin:i,clientUserMessageId:a,createId:o,ownerWindowError:s,onOutcomeUnknown:c,onMessageAdded:l,onInitialTitleRequested:u,readPersistedValue:d},f){let p=n.request,{localTurnMetadata:m,attachments:h,commentAttachments:g,
+  }=n.context??{};
+  let T={},O={request:p},L,I;{let c=T.markRequestDispatched?.(),u=V0t(O.request,e.requestClient.getAppServerVersion());L=e.getConversation(t)?.environmentSelectionEvidence;
+  I=await e.sendRequest(\`turn/start\`,u);}return I;}
+globalThis.kbn=kbn;globalThis.g_o=g_o;globalThis.Gxn=Gxn;`
+
+  it('preserves the exact token after normalization and applies fast mode', async () => {
+    const sandbox: Record<string, any> = { Ibn: null }
+    runInNewContext(transformNativeOperationRequest9647(fixture9647).source, sandbox)
+    sandbox.__cordisxNativeServiceTierOverride = 'priority'
+    await expect(sandbox.kbn()).resolves.toMatchObject({
+      request: { serviceTier: 'priority' },
+      params: { serviceTier: 'priority' },
+    })
+    const manager = {
+      requestClient: { getAppServerVersion: () => '9647' },
+      getConversation: () => null,
+      sendRequest: async (_method: string, request: unknown) => request,
+    }
+    await expect(sandbox.Gxn({
+      manager,
+      operation: { request: { config: { 'cordisx.operation_token': 'operation-build-9647' } } },
+    })).resolves.toMatchObject({
+      normalizedVersion: '9647',
+      config: { normalizerRetained: true, 'cordisx.operation_token': 'operation-build-9647' },
+    })
+    await expect(sandbox.Gxn({
+      manager,
+      operation: { request: { config: { 'cordisx.operation_token': 'bad' } } },
+    })).resolves.toMatchObject({ config: { normalizerRetained: true } })
+    expect(runInNewContext(NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9647, sandbox)).toBe(true)
+    runInNewContext(NATIVE_OPERATION_REQUEST_FENCE_9647, sandbox)
+    expect(runInNewContext(NATIVE_OPERATION_REQUEST_ACKNOWLEDGEMENT_9647, sandbox)).toBe(false)
+    expect(() => transformNativeOperationRequest9647('unrelated')).toThrow('found 0')
   })
 })

@@ -25,8 +25,23 @@ export const CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS = Object.freeze(
     Object.freeze({ appVersion: '26.901.41600', buildNumber: '7982', buildFlavor: 'prod', hostId: 'local' }),
     Object.freeze({ appVersion: '26.901.51231', buildNumber: '8109', buildFlavor: 'prod', hostId: 'local' }),
     Object.freeze({ appVersion: '26.908.70816', buildNumber: '9275', buildFlavor: 'prod', hostId: 'local' }),
+    Object.freeze({ appVersion: '26.911.61220', buildNumber: '9647', buildFlavor: 'prod', hostId: 'local' }),
   ] as const,
 )
+
+type NativeModelProviderTransportPin = typeof CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS[number]
+
+export function nativeModelProviderTransportPinForApp(input: {
+  readonly appVersion?: unknown
+  readonly buildNumber?: unknown
+  readonly buildFlavor?: unknown
+}): NativeModelProviderTransportPin | undefined {
+  return CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.find(candidate => (
+    input.appVersion === candidate.appVersion
+    && input.buildNumber === candidate.buildNumber
+    && input.buildFlavor === candidate.buildFlavor
+  ))
+}
 
 interface ElectronBridge {
   readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
@@ -245,11 +260,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     ) return undefined
     try {
       const options = record(await bridge.getSentryInitOptions())
-      const pin = CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.find(candidate => (
-        options?.appVersion === candidate.appVersion
-        && options.buildNumber === candidate.buildNumber
-        && options.buildFlavor === candidate.buildFlavor
-      ))
+      const pin = nativeModelProviderTransportPinForApp(options ?? {})
       if (pin === undefined) return undefined
       const transport = new CodexDesktopNativeModelProviderTransport(
         bridge as Required<ElectronBridge>,

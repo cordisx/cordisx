@@ -255,7 +255,7 @@ export async function bootSurfaces() {
   }
   const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
   expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-  expect(runtime?.version).toBe('0.1.0-beta.7')
+  expect(runtime?.version).toBe('0.1.0-beta.8')
   const snapshot = runtime!.snapshot()
   expect(snapshot.plugins).toEqual([
     expect.objectContaining({

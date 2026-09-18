@@ -18,10 +18,12 @@ import type { NativeResourceTransform } from './native-predispatch-interception.
 import {
   NATIVE_OPERATION_REQUEST_TRANSFORM,
   NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
+  NATIVE_OPERATION_REQUEST_TRANSFORM_9647,
 } from '../renderer/adapter/native-operation-request-transform.js'
 import {
   NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM,
   NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
+  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9647,
 } from '../renderer/adapter/native-submit-orchestrator-transform.js'
 
 const execFileAsync = promisify(execFile)
@@ -38,6 +40,14 @@ const NATIVE_SUBMISSION_TRANSFORMS = Object.freeze([
     transforms: Object.freeze([
       NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
       NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
+    ]),
+  }),
+  Object.freeze({
+    appVersion: '26.911.61220',
+    buildNumber: '9647',
+    transforms: Object.freeze([
+      NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9647,
+      NATIVE_OPERATION_REQUEST_TRANSFORM_9647,
     ]),
   }),
 ])
