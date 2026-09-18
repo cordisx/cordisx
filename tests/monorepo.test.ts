@@ -21,7 +21,7 @@ describe('npm workspace boundary', () => {
 
     expect(root).toMatchObject({
       name: 'cordisx-monorepo',
-      version: '0.1.0-beta.6',
+      version: '0.1.0-beta.7',
       private: true,
       workspaces: ['packages/*'],
       files: expect.arrayContaining(['packages/cli/dist', 'packages/cli/package.json']),
@@ -50,7 +50,7 @@ describe('npm workspace boundary', () => {
     expect(cli.dependencies).not.toHaveProperty('@cordisx/plugin-cli-proxy-api')
     expect(cli).toMatchObject({
       name: 'cordisx',
-      version: '0.1.0-beta.6',
+      version: '0.1.0-beta.7',
       license: 'AGPL-3.0-or-later',
       files: [
         'dist',
@@ -65,9 +65,12 @@ describe('npm workspace boundary', () => {
       dependencies: { reicon: '1.2.1' },
     })
     expect(cli.private).toBeUndefined()
+    expect(cli.dependencies).toMatchObject({ ajv: '8.20.0', 'ajv-formats': '3.0.1' })
+    expect(cli.devDependencies).not.toHaveProperty('ajv')
+    expect(cli.devDependencies).not.toHaveProperty('ajv-formats')
     expect(creator).toMatchObject({
       name: 'create-cordisx-plugin',
-      version: '0.1.0-beta.6',
+      version: '0.1.0-beta.7',
       license: 'AGPL-3.0-or-later',
       files: ['dist', 'template', 'README.md', 'LICENSE', 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'],
       bin: { 'create-cordisx-plugin': 'dist/cli.js' },

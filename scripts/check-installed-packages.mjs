@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
@@ -97,11 +98,19 @@ try {
     installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@cordisx/protocol'] !== expectedProtocolSpec
+    || installedCordisXManifest.dependencies?.ajv !== '8.20.0'
+    || installedCordisXManifest.dependencies?.['ajv-formats'] !== '3.0.1'
+    || installedCordisXManifest.devDependencies?.ajv !== undefined
+    || installedCordisXManifest.devDependencies?.['ajv-formats'] !== undefined
     || installedCordisXManifest.cordisxSources?.['@cordisx/channel'] !== expectedGitDependencies['@cordisx/channel']
     || installedCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api']
       !== expectedGitDependencies['@cordisx/plugin-cli-proxy-api']
   ) {
     throw new Error('installed cordisx must retain the formal Protocol beta and canonical plugin sources')
+  }
+  const installedRequire = createRequire(path.join(installedCordisXRoot, 'package.json'))
+  for (const runtimeDependency of ['ajv/dist/2020.js', 'ajv-formats']) {
+    await access(installedRequire.resolve(runtimeDependency))
   }
   const protocolPaths = (await run('npm', ['ls', '--parseable', '--all', '@cordisx/protocol'], {
     cwd: runnerDirectory,
@@ -473,13 +482,14 @@ createElement(AgentAvatar, props)
   )
   if (
     installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
-    || installedSchemasteryUiManifest.version !== '0.1.0-beta.6'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.7'
   ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
   const [
     { loadConfig },
     { buildRendererBundle },
+    { ManagedServiceSchemaRegistry },
     { OwnerDocumentStore },
     { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest },
     { JSDOM },
@@ -489,6 +499,7 @@ createElement(AgentAvatar, props)
   ] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/bundle.js')).href),
+    import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/managed-service-schema.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-store.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/owner-document-rpc.js')).href),
     import('jsdom'),
@@ -496,6 +507,7 @@ createElement(AgentAvatar, props)
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/renderer/playground-mock-agent-loop.js')).href),
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/agent-loop-contracts.js')).href),
   ])
+  new ManagedServiceSchemaRegistry()
   const ownerDocumentScope = {
     profileId: 'installed',
     identity: { source: 'https://plugins.example/chatroom', pluginId: 'chatroom' },

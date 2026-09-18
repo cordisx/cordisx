@@ -1,6 +1,6 @@
 {
   "name": "cordisx",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "An experimental Cordis-powered UI plugin host for Codex Desktop",
   "type": "module",
   "files": [
@@ -90,7 +90,7 @@
   },
   "dependencies": {
     "@cordisx/protocol": "0.1.0-beta.7",
-    "@cordisx/schemastery-ui": "0.1.0-beta.6",
+    "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
@@ -100,6 +100,8 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "debug": "4.4.3",
     "es-module-lexer": "1.7.0",
     "esbuild": "0.28.2",
@@ -133,8 +135,6 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@types/ws": "^8.18.1",
-    "ajv": "8.20.0",
-    "ajv-formats": "3.0.1",
     "jsdom": "^26.1.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
