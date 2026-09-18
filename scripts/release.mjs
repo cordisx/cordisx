@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { npmMaintainerNames, npmPackItem, npmViewItem } from './npm-pack-report.mjs'
 import { releasePackageDefinitions } from './release-packages.mjs'
+import { publishReleasePackages } from './release-publication.mjs'
 import { releaseFromTag } from './release-version.mjs'
+import { retryRegistryPropagation } from './registry-release-propagation.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -102,6 +104,7 @@ async function pack(pkg, destination) {
   const report = await npmJson([
     'pack',
     `--workspace=${pkg.workspace}`,
+    '--ignore-scripts',
     '--pack-destination',
     destination,
   ])
@@ -110,59 +113,6 @@ async function pack(pkg, destination) {
     throw new Error(`${pkg.name} local pack report is incomplete`)
   }
   return item
-}
-
-function sameRepository(actual, expected) {
-  const url = typeof actual === 'string' ? actual : actual?.url
-  return url === expected.repository.url
-}
-
-function hasProvenance(metadata) {
-  return typeof metadata.dist?.attestations?.url === 'string'
-    && typeof metadata.dist?.attestations?.provenance?.predicateType === 'string'
-}
-
-function assertPublishedMetadata(pkg, manifest, packed, metadata, expectedGitHead) {
-  if (metadata.version !== version) throw new Error(`${pkg.name} registry version mismatch`)
-  if (metadata.dist?.integrity !== packed.integrity) throw new Error(`${pkg.name} registry tarball integrity mismatch`)
-  if (metadata.gitHead !== expectedGitHead) throw new Error(`${pkg.name} registry gitHead mismatch`)
-  if (!hasProvenance(metadata)) throw new Error(`${pkg.name} registry provenance is missing`)
-  if (metadata.license !== manifest.license) throw new Error(`${pkg.name} registry license mismatch`)
-  if (!sameRepository(metadata.repository, manifest)) throw new Error(`${pkg.name} registry repository mismatch`)
-  if (JSON.stringify(metadata.bin) !== JSON.stringify(manifest.bin)) {
-    throw new Error(`${pkg.name} registry bin mismatch`)
-  }
-  if (JSON.stringify(metadata.engines) !== JSON.stringify(manifest.engines)) {
-    throw new Error(`${pkg.name} registry engines mismatch`)
-  }
-}
-
-function assertReleaseTag(pkg, tags) {
-  if (tags[distTag] !== version) {
-    throw new Error(`${pkg.name} ${distTag} dist-tag does not point to ${version}`)
-  }
-  if (distTag !== 'latest' && tags.latest === version) {
-    throw new Error(`${pkg.name} prerelease must not move latest`)
-  }
-}
-
-async function readBack(pkg, manifest, packed, expectedGitHead) {
-  let metadata
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    metadata = await viewVersion(pkg.name, version)
-    if (
-      metadata?.dist?.integrity === packed.integrity
-      && metadata.gitHead === expectedGitHead
-      && hasProvenance(metadata)
-    ) break
-    await new Promise(resolve => setTimeout(resolve, 5000))
-  }
-  if (metadata === undefined) throw new Error(`${pkg.name}@${version} is missing after publish`)
-  assertPublishedMetadata(pkg, manifest, packed, metadata, expectedGitHead)
-  await assertRegistryPackage(pkg)
-  const tags = await npmViewJson([pkg.name, 'dist-tags'])
-  assertReleaseTag(pkg, tags)
-  return { metadata, tags }
 }
 
 const expectedGitHead = (await run('git', ['rev-parse', 'HEAD'])).stdout.trim()
@@ -188,29 +138,27 @@ try {
 
   for (const pkg of releasePackageDefinitions) packs.set(pkg.name, await pack(pkg, temporaryRoot))
 
-  const published = []
-  for (const pkg of releasePackageDefinitions) {
-    const manifest = manifests.get(pkg.name)
-    const packed = packs.get(pkg.name)
-    const existing = await viewVersion(pkg.name, version)
-    if (existing !== undefined) {
-      assertPublishedMetadata(pkg, manifest, packed, existing, expectedGitHead)
-      const tags = await npmViewJson([pkg.name, 'dist-tags'])
-      assertReleaseTag(pkg, tags)
-      console.log(`[release] ${pkg.name}@${version} already matches; skipping publish`)
-    } else {
-      await runNpm([
+  const published = await publishReleasePackages({
+    packages: releasePackageDefinitions,
+    manifests,
+    packs,
+    version,
+    distTag,
+    gitHead: expectedGitHead,
+    viewVersion,
+    viewTags: name => npmViewJson([name, 'dist-tags']),
+    assertRegistryPackage,
+    publish: pkg =>
+      runNpm([
         'publish',
         `--workspace=${pkg.workspace}`,
+        '--ignore-scripts',
         `--tag=${distTag}`,
         '--access=public',
         '--provenance',
-      ])
-      console.log(`[release] published ${pkg.name}@${version} with ${distTag}`)
-    }
-    const readback = await readBack(pkg, manifest, packed, expectedGitHead)
-    published.push({ name: pkg.name, latest: readback.tags.latest })
-  }
+      ]),
+    retry: (label, operation) => retryRegistryPropagation(label, operation),
+  })
 
   console.log(JSON.stringify({
     status: 'published',

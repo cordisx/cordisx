@@ -142,6 +142,9 @@ assert(workflow.includes("tags:\n      - 'v*'"), 'release workflow must be trigg
 assert(!workflow.includes('workflow_dispatch'), 'release workflow must not create a second manual version interface')
 assert(workflow.includes('environment: npm-release'), 'release workflow must use the npm-release environment')
 assert(workflow.includes('npm@11.11.0'), 'release workflow must pin an OIDC-capable npm CLI')
+assert(workflow.includes('actions/cache/restore@v4'), 'release workflow must restore exact prepared artifacts')
+assert(workflow.includes('actions/cache/save@v4'), 'release workflow must save prepared artifacts before publication')
+assert(workflow.includes('${{ github.sha }}'), 'release artifact cache must be bound to the exact Git commit')
 assert(
   workflow.includes('npm ci --registry=https://registry.npmjs.org'),
   'release install must prepare registry and remaining Git dependencies',
@@ -153,12 +156,21 @@ for (const command of ['npm run test:release', 'npm run build', 'npm run check:r
 assert(!workflow.includes('npm run check\n'), 'release workflow must not expand into the full regression gate')
 assert(workflow.includes('scripts/release.mjs --tag'), 'release workflow must publish from the Git tag')
 assert(workflow.includes('check-registry-release.mjs --tag'), 'release workflow must verify a clean tagged install')
+assert(
+  workflow.indexOf('actions/cache/save@v4') < workflow.indexOf('scripts/release.mjs --tag'),
+  'prepared release artifacts must be saved before publication can fail',
+)
 assert(workflow.includes('${GITHUB_REF_NAME}'), 'release workflow must derive the version from the pushed tag')
 assert(!workflow.includes(expectedVersion), 'release workflow must not hard-code the current version')
 assert(!workflow.includes('release-beta') && !workflow.includes('--scope'), 'release workflow must remain generic')
 assert(releaseScript.includes('./release-version.mjs'), 'publisher must derive version and channel from the tag')
 assert(releaseScript.includes('`--tag=${distTag}`'), 'publisher must pass the dynamic npm dist-tag')
 assert(releaseScript.includes("'--provenance'"), 'publisher must request npm provenance explicitly')
+assert(releaseScript.includes("'--ignore-scripts'"), 'publisher must reuse the already validated build outputs')
+assert(
+  releaseScript.includes('publishReleasePackages'),
+  'publisher must submit missing packages before converged registry verification',
+)
 assert(!releaseScript.includes('--tag=beta'), 'publisher must not hard-code the beta channel')
 assert(registryScript.includes('./release-version.mjs'), 'registry verification must derive the selected channel')
 assert(!/NPM_TOKEN|NODE_AUTH_TOKEN|_authToken/.test(workflow), 'release workflow must not reference npm tokens')

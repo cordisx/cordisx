@@ -13,17 +13,43 @@ export function markRegistryPropagationError(error) {
 }
 
 export async function retryRegistryPropagation(label, operation, options = {}) {
-  const attempts = options.attempts ?? 12
-  const delayMs = options.delayMs ?? 5000
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000
+  const initialDelayMs = options.initialDelayMs ?? 5000
+  const maxDelayMs = options.maxDelayMs ?? 60 * 1000
+  const factor = options.factor ?? 2
   const wait = options.wait ?? (duration => new Promise(resolve => setTimeout(resolve, duration)))
   const log = options.log ?? console.log
+  const now = options.now ?? Date.now
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('registry timeout must be positive')
+  if (!Number.isFinite(initialDelayMs) || initialDelayMs <= 0) {
+    throw new Error('registry initial delay must be positive')
+  }
+  if (!Number.isFinite(maxDelayMs) || maxDelayMs < initialDelayMs) {
+    throw new Error('registry maximum delay must be at least the initial delay')
+  }
+  if (!Number.isFinite(factor) || factor <= 1) throw new Error('registry backoff factor must exceed one')
+
+  const startedAt = now()
+  for (let attempt = 1;; attempt += 1) {
     try {
       return await operation(attempt)
     } catch (error) {
-      if (!isNpmRegistryPropagationError(error) || attempt === attempts) throw error
-      log(`[registry] ${label} is still propagating (attempt ${attempt}/${attempts})`)
+      if (!isNpmRegistryPropagationError(error)) throw error
+      const elapsedMs = Math.max(0, now() - startedAt)
+      const remainingMs = timeoutMs - elapsedMs
+      if (remainingMs <= 0) {
+        throw new Error(`[registry] ${label} did not converge within ${Math.round(timeoutMs / 1000)}s`, {
+          cause: error,
+        })
+      }
+      const backoffMs = initialDelayMs * factor ** (attempt - 1)
+      const delayMs = Math.min(backoffMs, maxDelayMs, remainingMs)
+      log(
+        `[registry] ${label} is still propagating after ${Math.round(elapsedMs / 1000)}s `
+          + `(attempt ${attempt}); retrying in ${Math.round(delayMs / 1000)}s `
+          + `(deadline ${Math.round(timeoutMs / 1000)}s)`,
+      )
       await wait(delayMs)
     }
   }

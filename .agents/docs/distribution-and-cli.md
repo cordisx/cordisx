@@ -586,12 +586,22 @@ public entry missing. Before publication, the workflow installs the lockfile,
 runs the focused release-tag test, builds all release workspaces, validates
 release metadata, and checks package allowlists.
 
-The registry cannot atomically publish two packages. The workflow publishes and
-reads back `cordisx` first, then publishes and reads back the scaffolder that
-depends on it. A retry may skip an already published package only after its
-registry tarball integrity, Git head, provenance, repository metadata, and
-selected dist-tag match the tagged commit exactly. Any mismatch stops the
+The registry cannot atomically publish two packages. The workflow first checks
+every package version that is already visible, submits every missing package in
+dependency order without waiting for per-package visibility, and then converges
+remote readback for the complete release set. A retry skips an already published
+package only after its immutable registry tarball integrity, Git head,
+repository metadata, license, bin, and engine metadata match the tagged commit
+exactly. Provenance and selected dist-tags may still be propagating and are
+verified during the bounded converged readback. Any immutable mismatch stops the
 workflow.
+
+The release workflow caches the prepared dependency and workspace outputs under
+an exact commit and exact Node/npm toolchain key after release tests, build,
+metadata validation, and package allowlist checks pass. A retry of the same tag
+verifies and restores that artifact, then publishes with lifecycle scripts
+disabled so a registry-only recovery does not reinstall or rebuild. A different
+commit or toolchain cannot reuse the artifact.
 
 Completion requires remote readback, not only `npm pack`: both selected
 channel tags must resolve to the tagged version, prereleases must leave
@@ -600,6 +610,9 @@ tagged version. A clean temporary directory installs and runs both packages from
 that channel, verifies the CLI setup and dry-run paths, invokes both scaffolder
 command forms and all creator modes, installs each generated environment, runs
 its checks, and validates its generated entry graph.
+
+See [release recovery](release-recovery.md) for bounded registry propagation,
+idempotent reruns, artifact reuse, and conflict handling.
 
 ### Beta licensing boundary
 

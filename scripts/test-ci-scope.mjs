@@ -206,6 +206,24 @@ test('lockfile changes select resolved Node consumers and package checks, not fu
   assert.equal(result.package_checks, 'true')
 })
 
+test('a non-browser runtime dependency hotfix keeps the minimum dependency gate', () => {
+  const manifest = version => JSON.stringify({ dependencies: { debug: version } })
+  const result = classify({
+    initial: { 'package.json': manifest('1') },
+    changes: { 'package.json': manifest('2') },
+  })
+  assert.equal(result.full, 'false')
+  assert.equal(result.node_all, 'true')
+  assert.equal(result.package_checks, 'true')
+  assert.equal(result.browser, 'false')
+})
+
+test('release automation changes retain the full safety gate', () => {
+  const result = classify({ changes: { 'scripts/release.mjs': 'new\n' } })
+  assert.equal(result.full, 'true')
+  assert.equal(result.package_checks, 'false')
+})
+
 test('browser dependency updates select browser checks without unrelated service upgrades doing so', () => {
   const manifest = version => JSON.stringify({ dependencies: { react: version } })
   assert.equal(

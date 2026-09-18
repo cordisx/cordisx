@@ -28,11 +28,53 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
-      - run: npm ci --registry=https://registry.npmjs.org
-      - run: npm run test:release
-      - run: npm run build
-      - run: npm run check:release
-      - run: npm run check:package
+      - id: toolchain
+        name: Record exact release toolchain
+        run: |
+          echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+          echo "npm=$(npm --version)" >> "$GITHUB_OUTPUT"
+      - id: prepared
+        name: Restore exact prepared release artifact
+        uses: actions/cache/restore@v4
+        with:
+          path: .release-cache
+          key: release-prepared-${{ runner.os }}-${{ steps.toolchain.outputs.node }}-npm${{ steps.toolchain.outputs.npm }}-${{ github.sha }}
+      - name: Verify and unpack prepared release artifact
+        if: steps.prepared.outputs.cache-hit == 'true'
+        run: |
+          node scripts/release-prepared-artifact.mjs verify \
+            --archive .release-cache/prepared-host.tgz --tag "${GITHUB_REF_NAME}"
+          tar -xzf .release-cache/prepared-host.tgz
+      - name: Install release dependencies
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: npm ci --registry=https://registry.npmjs.org
+      - name: Run release script tests
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: npm run test:release
+      - name: Build release workspaces
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: npm run build
+      - name: Validate release metadata
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: npm run check:release
+      - name: Validate package allowlists
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: npm run check:package
+      - name: Archive prepared dependencies and outputs
+        if: steps.prepared.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .release-cache
+          find node_modules packages -type d \( -name node_modules -o -name dist \) -prune -print0 \
+            > "$RUNNER_TEMP/release-prepared-paths"
+          tar -czf .release-cache/prepared-host.tgz --null -T "$RUNNER_TEMP/release-prepared-paths"
+          node scripts/release-prepared-artifact.mjs write \
+            --archive .release-cache/prepared-host.tgz --tag "${GITHUB_REF_NAME}"
+      - name: Save exact prepared release artifact
+        if: steps.prepared.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .release-cache
+          key: ${{ steps.prepared.outputs.cache-primary-key }}
       - name: Publish repository release
         run: node scripts/release.mjs --tag "${GITHUB_REF_NAME}" --registry https://registry.npmjs.org
       - name: Verify clean registry installation
