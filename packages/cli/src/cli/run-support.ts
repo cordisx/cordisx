@@ -13,7 +13,6 @@ import {
   ensureCordisXHomeDirectory,
   ensureHomeConfig,
   type HomeConfigPathOptions,
-  loadHomeConfig,
   resolveHomeConfigPath,
 } from '../config/home-config.js'
 import type { buildRendererBundle } from '../launcher/bundle.js'
@@ -674,6 +673,7 @@ export async function runDevelopment(
       ))
       return
     }
+    const homeConfig = await ensureHomeConfig(homeConfigOptions)
     if (invocation.options.attach) {
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
     } else {
@@ -735,7 +735,6 @@ export async function runDevelopment(
       createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
       ...(managedServiceProjection === undefined ? [] : [managedServiceProjection.handler]),
     ]))
-    const homeConfig = await loadHomeConfig(homeConfigPath)
     const managementAppId = homeConfig.defaultApp
     const managementApp = ownValue(homeConfig.apps, managementAppId)
     if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)

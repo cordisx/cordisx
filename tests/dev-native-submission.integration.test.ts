@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { ManagedServiceSourceV1 } from '@cordisx/protocol/managed-service/v1'
@@ -110,6 +110,7 @@ describe('Vite development native submission assembly', () => {
       environment: { CORDISX_HOME: f.home },
     })
     expect(createNativeSubmission).toHaveBeenCalledWith(activation, f.executable)
+    await expect(access(path.join(f.home, 'config.json'))).resolves.toBeUndefined()
     expect(runHost).toHaveBeenCalledWith(expect.objectContaining({
       nativeSubmission: installation,
       managedServiceUI: expect.objectContaining({ handleBindingValue: expect.any(Function) }),
@@ -149,6 +150,7 @@ describe('Vite development native submission assembly', () => {
 
     expect(createActivation).not.toHaveBeenCalled()
     expect(createNativeSubmission).not.toHaveBeenCalled()
+    await expect(access(path.join(f.home, 'config.json'))).resolves.toBeUndefined()
     expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))
   })
 })
