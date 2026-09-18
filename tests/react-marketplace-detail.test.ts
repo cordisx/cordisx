@@ -32,17 +32,20 @@ describe('React Marketplace plugin detail', () => {
     expect(page).toContain('item.id === plugin.id && item.source === plugin.source')
     expect(page).toContain('const unmanagedInstalled = installed !== undefined && installedVersion === undefined')
     expect(page).toContain('const installDisabled = unmanagedInstalled || exactVersionInstalled')
+    expect(page).toContain('usePluginLifecycleActions')
     expect(page).toContain(': installedVersion === undefined')
     expect(page).toContain(': copy.update}')
-    expect(page).toContain('disabled={!installing && installDisabled}')
+    expect(page).toContain('disabled={!installing && (installDisabled || (')
+    expect(page).toContain('lifecycle.busyPluginId !== undefined && lifecycle.busyPluginId === installed?.id')
     expect(page).toContain('plugin.artifact === undefined')
     expect(page).not.toContain('<Button tag="a"')
     expect(list).toContain('readMarketplaceFavorites')
     expect(list).toContain('writeMarketplaceFavorites(next)')
     expect(list).toContain('useMarketplaceInstaller')
     expect(list).toContain('void installer.run(result.plugin, result.projection.name)')
-    expect(app).toContain(
-      '<MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} />',
+    expect(app.replace(/\s+/gu, ' ')).toContain(
+      '<MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} '
+        + 'pluginManagement={pluginManagement} pluginManagementSnapshot={pluginManagementSnapshot} />',
     )
     expect(installer).toContain('item.identity.source === planV4.identity.source')
     expect(installer).toContain('item.identity.source === planV2.identity.source')
