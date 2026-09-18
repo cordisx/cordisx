@@ -47,6 +47,30 @@ describe('production graph admission coordination', () => {
     await active
   })
 
+  it('queues a lifecycle request behind an active non-lifecycle mutation', async () => {
+    const gate = new CdpLifecycleRequestGate()
+    const values: string[] = []
+    const entered = deferred()
+    const release = deferred()
+    const management = gate.exclusive(async () => {
+      values.push('management')
+      entered.resolve()
+      await release.promise
+    })
+    await entered.promise
+    const lifecycle = gate.run(async () => {
+      values.push('lifecycle')
+    }, async () => {
+      values.push('response')
+    })
+    await expect(gate.run(async () => undefined, async () => undefined)).rejects.toThrow(/already active/)
+    await Promise.resolve()
+    expect(values).toEqual(['management'])
+    release.resolve()
+    await Promise.all([management, lifecycle])
+    expect(values).toEqual(['management', 'lifecycle', 'response'])
+  })
+
   it('queues watcher work while allowing the owning lifecycle task to re-enter', async () => {
     const gate = new CdpLifecycleRequestGate()
     const values: string[] = []

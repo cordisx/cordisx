@@ -114,9 +114,6 @@ export class CdpLifecycleRequestGate {
     let burst = this.#lifecycleBurst
     if (burst === undefined) {
       if (this.#closed) throw new Error('plugin lifecycle request gate is closed')
-      if (this.#pending > 0 && !reentrant) {
-        throw new Error('another plugin lifecycle request is already active')
-      }
       let resolve!: () => void
       burst = {
         pending: 0,
