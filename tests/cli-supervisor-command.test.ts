@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { runSupervisorCommand } from '../packages/cli/src/cli/supervisor-command.js'
@@ -12,6 +13,11 @@ import {
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
 import { requestSupervisorStop, startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
+import { resolveOwningPackageVersion } from '../packages/cli/src/launcher/package-version.js'
+
+const cliVersion = JSON.parse(
+  await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'),
+) as { readonly version: string }
 
 describe('supervisor management commands', () => {
   it('emits stable status JSON and marks a stale starting record failed instead of trusting its PID', async () => {
@@ -27,7 +33,7 @@ describe('supervisor management commands', () => {
       status: 'stopped',
       pid: null,
       uptime: 0,
-      version: '0.1.0-beta.8',
+      version: cliVersion.version,
       cdpEndpoint: null,
     })
     const paths = supervisorPaths(root, 'codex', 'default')
@@ -40,7 +46,7 @@ describe('supervisor management commands', () => {
       processStartedAt: 'reused pid',
       instanceToken: 'a'.repeat(32),
       createdAt: new Date().toISOString(),
-      version: '0.1.0-beta.8',
+      version: cliVersion.version,
       effectiveConfig: 'old',
     })
     await runSupervisorCommand(parseCordisXCli(['status', '--json']), {
@@ -67,7 +73,7 @@ describe('supervisor management commands', () => {
       processStartedAt: startedAt!,
       instanceToken: 'b'.repeat(32),
       createdAt: new Date().toISOString(),
-      version: '0.1.0-beta.8',
+      version: cliVersion.version,
       effectiveConfig: 'different',
     })
     await expect(runSupervisorCommand(parseCordisXCli(['start']), { env: { CORDISX_HOME: root } }))
@@ -198,7 +204,7 @@ describe('supervisor management commands', () => {
         processStartedAt: startedAt!,
         instanceToken: 'd'.repeat(32),
         createdAt: new Date().toISOString(),
-        version: '0.1.0-beta.8',
+        version: cliVersion.version,
         effectiveConfig: 'current',
         hostPid: host.pid!,
         hostProcessStartedAt: hostStartedAt!,
@@ -219,5 +225,14 @@ describe('supervisor management commands', () => {
         process.kill(-host.pid!, 'SIGTERM')
       } catch { /* already stopped */ }
     }
+  })
+
+  it('resolves the owning version from source and packaged dist paths', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-package-version-'))
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'cordisx', version: '9.8.7-beta.6' }))
+    const sourceUrl = pathToFileURL(path.join(root, 'src', 'cli', 'supervisor-command.ts'))
+    const distUrl = pathToFileURL(path.join(root, 'dist', 'src', 'cli', 'supervisor-command.js'))
+    await expect(resolveOwningPackageVersion(sourceUrl.href, 'cordisx')).resolves.toBe('9.8.7-beta.6')
+    await expect(resolveOwningPackageVersion(distUrl.href, 'cordisx')).resolves.toBe('9.8.7-beta.6')
   })
 })

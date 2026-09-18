@@ -18,8 +18,9 @@ import {
   writeSupervisorState,
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
+import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 
-const VERSION = '0.1.0-beta.8'
+const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
 const RETRY_DELAY = 50
 /** Product launch budget; deliberately independent from shutdown escalation. */
 export const RENDERER_READINESS_TIMEOUT_MS = 60_000

@@ -14,6 +14,7 @@ import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
+import { resolveOwningPackageVersion } from './package-version.js'
 
 export interface BuildRendererBundleOptions {
   /** Use only explicit CordisX Playground seats; never inspect Codex DOM. */
@@ -110,22 +111,6 @@ function importSpecifier(fromDirectory: string, absolutePath: string): string {
   return relative.startsWith('.') ? relative : `./${relative}`
 }
 
-async function readCordisXVersion(): Promise<string> {
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  while (true) {
-    const packagePath = path.join(directory, 'package.json')
-    try {
-      const manifest = JSON.parse(await readFile(packagePath, 'utf8')) as { name?: unknown; version?: unknown }
-      if (manifest.name === 'cordisx' && typeof manifest.version === 'string') return manifest.version
-    } catch {
-      // Keep walking until the owning CordisX package is found.
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) throw new Error('CordisX package version could not be resolved')
-    directory = parent
-  }
-}
-
 interface PluginReadmes {
   readonly default?: string
   readonly localized: Readonly<Record<string, string>>
@@ -190,7 +175,7 @@ export async function buildRendererCompositionSource(
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
   const [version, readmes, pluginBundles] = await Promise.all([
-    readCordisXVersion(),
+    resolveOwningPackageVersion(import.meta.url, 'cordisx'),
     Promise.all(config.plugins.map(async plugin => {
       if (plugin.readmes !== undefined) {
         const { default: localizedDefault, ...localized } = plugin.readmes
