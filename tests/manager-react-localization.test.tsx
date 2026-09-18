@@ -70,6 +70,24 @@ async function click(document: Document, selector: string): Promise<void> {
   })
 }
 
+async function installLifecycleDialogHost(dom: JSDOM) {
+  Object.defineProperty(dom.window, 'requestAnimationFrame', {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => dom.window.setTimeout(() => callback(Date.now()), 0),
+  })
+  dom.window.HTMLDialogElement.prototype.showModal = function() {
+    this.setAttribute('open', '')
+  }
+  dom.window.HTMLDialogElement.prototype.close = function() {
+    this.removeAttribute('open')
+  }
+  const host = await import('../packages/cli/src/renderer/dialogs/host.js')
+  return {
+    center: host.dialogCenterForDocument,
+    dispose: host.installDialogHost(dom.window.document),
+  }
+}
+
 describe('React Manager localization', () => {
   it('renders English Host chrome, plugin management, searches, and empty states from the copy catalog', async () => {
     const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body></body></html>', {
@@ -107,8 +125,7 @@ describe('React Manager localization', () => {
     Object.defineProperty(dom.window, 'matchMedia', {
       value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
     })
-    const confirm = vi.fn(() => false)
-    Object.defineProperty(dom.window, 'confirm', { configurable: true, value: confirm })
+    const dialogs = await installLifecycleDialogHost(dom)
     const { ManagerApp } = await import('../packages/cli/src/renderer/manager/ManagerApp.js')
     const state = snapshot()
     const requestPluginLifecycle = vi.fn(async () => ({
@@ -152,7 +169,17 @@ describe('React Manager localization', () => {
       expect(dialog.querySelector('[aria-label="Demo plugin · More plugin actions"]')).not.toBeNull()
 
       await click(dom.window.document, '[aria-label="Disable plugin"]')
-      expect(confirm).toHaveBeenCalledWith('This action affects: demo. Continue?')
+      const confirmation = dialogs.center(dom.window.document)!.visible()[0]!
+      expect(confirmation.chrome).toMatchObject({
+        title: 'Disable plugin?',
+        description: 'This action affects: demo. Continue?',
+      })
+      await act(async () => confirmation.handle.close('cancel'))
+      expect(requestPluginLifecycle).toHaveBeenCalledExactlyOnceWith({
+        kind: 'disable',
+        pluginId: 'demo',
+        impactToken: '',
+      })
 
       await click(dom.window.document, '[data-plugin-id="demo"]')
       expect(dialog.querySelector('.cxr-header [aria-label="Back"]')).not.toBeNull()
@@ -194,6 +221,7 @@ describe('React Manager localization', () => {
       expect(dialog.textContent).toContain('No routes or pages available')
       expect(dialog.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     } finally {
+      await act(async () => dialogs.dispose())
       await act(async () => root.unmount())
       Object.assign(globalThis, previous)
       if (previousActEnvironment === undefined) {
