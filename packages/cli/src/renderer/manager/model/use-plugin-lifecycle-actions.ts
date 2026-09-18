@@ -1,6 +1,8 @@
 import type { NotificationsV1 } from '@cordisx/protocol/notifications/v1'
+import type { DialogsV1 } from '@cordisx/protocol/dialogs/v1'
 import { useEffect, useRef, useState } from 'react'
 import type { CordisXPluginLifecycleOperationV1 } from '../../../plugin-lifecycle-contracts.js'
+import { dialogCenterForDocument } from '../../dialogs/host.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
 import { productLocale } from '../../ui-copy.js'
@@ -17,19 +19,35 @@ export function usePluginLifecycleActions(
 ): PluginLifecycleActions {
   const [busyPluginId, setBusyPluginId] = useState<string>()
   const notifications = useRef<NotificationsV1 | undefined>(undefined)
+  const dialogs = useRef<DialogsV1 | undefined>(undefined)
   useEffect(() => {
-    const binding = notificationCenterForDocument(document)?.bind({
+    const notificationBinding = notificationCenterForDocument(document)?.bind({
       key: 'host/plugin-management',
       pluginId: 'cordisx',
       active: () => true,
       presentation: () => ({ name: 'CordisX' }),
     })
-    notifications.current = binding?.api
+    const dialogBinding = dialogCenterForDocument(document)?.bind({
+      key: 'host/plugin-management',
+      name: () => 'CordisX',
+      active: () => true,
+      report: kind => {
+        notificationBinding?.api.show({
+          kind: `plugin.lifecycle.${kind}.failed`,
+          type: 'error',
+          message: productLocale(snapshot.localization.locale) === 'zh-CN' ? '插件操作失败' : 'Plugin operation failed',
+        })
+      },
+    })
+    notifications.current = notificationBinding?.api
+    dialogs.current = dialogBinding?.api
     return () => {
       notifications.current = undefined
-      binding?.dispose()
+      dialogs.current = undefined
+      dialogBinding?.dispose()
+      notificationBinding?.dispose()
     }
-  }, [])
+  }, [snapshot.localization.locale])
   const operationsAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
     && model.requestPluginLifecycle !== undefined
 
@@ -44,10 +62,22 @@ export function usePluginLifecycleActions(
       ) {
         const separator = productLocale(snapshot.localization.locale) === 'zh-CN' ? '、' : ', '
         const affected = result.affectedPluginIds.join(separator) || plugin.name
-        const prompt = productLocale(snapshot.localization.locale) === 'zh-CN'
-          ? `此操作会影响：${affected}。继续吗？`
-          : `This action affects: ${affected}. Continue?`
-        if (!window.confirm(prompt)) return
+        const zh = productLocale(snapshot.localization.locale) === 'zh-CN'
+        const confirmation = await dialogs.current?.confirm({
+          kind: `plugin.lifecycle.${operation.kind}.confirm`,
+          title: operation.kind === 'disable'
+            ? (zh ? '确认禁用插件' : 'Disable plugin?')
+            : (zh ? '确认卸载插件' : 'Uninstall plugin?'),
+          description: zh
+            ? `此操作会影响：${affected}。继续吗？`
+            : `This action affects: ${affected}. Continue?`,
+          confirmLabel: operation.kind === 'disable'
+            ? (zh ? '禁用插件' : 'Disable plugin')
+            : (zh ? '卸载' : 'Uninstall'),
+          tone: 'danger',
+          run: () => {},
+        })
+        if (confirmation?.status !== 'completed') return
         result = await model.requestPluginLifecycle({ ...operation, impactToken: result.impactToken })
       }
       if (result.error !== undefined) {

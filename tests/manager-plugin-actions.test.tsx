@@ -4,6 +4,20 @@ import type { ManagerPluginSnapshot } from '../packages/cli/src/renderer/manager
 import { installNotificationHost } from '../packages/cli/src/renderer/notifications/host.js'
 import { managerModel, managerRouter, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
 
+async function installLifecycleDialogHost(fixture: ReturnType<typeof reactManagerFixture>) {
+  fixture.dom.window.HTMLDialogElement.prototype.showModal = function() {
+    this.setAttribute('open', '')
+  }
+  fixture.dom.window.HTMLDialogElement.prototype.close = function() {
+    this.removeAttribute('open')
+  }
+  const host = await import('../packages/cli/src/renderer/dialogs/host.js')
+  return {
+    center: host.dialogCenterForDocument,
+    dispose: host.installDialogHost(fixture.document),
+  }
+}
+
 function plugin(): ManagerPluginSnapshot {
   return {
     id: 'demo',
@@ -29,6 +43,7 @@ function plugin(): ManagerPluginSnapshot {
 describe('React Manager plugin actions', () => {
   it('keeps navigation separate from lifecycle actions and submits the exact confirmed dependency impact', async () => {
     const fixture = reactManagerFixture()
+    const dialogs = await installLifecycleDialogHost(fixture)
     const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
     const request = vi.fn().mockResolvedValueOnce({
       outcome: 'planned',
@@ -36,8 +51,6 @@ describe('React Manager plugin actions', () => {
       affectedPluginIds: ['demo', 'consumer'],
     })
       .mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['demo', 'consumer'] })
-    const confirm = vi.fn(() => true)
-    Object.defineProperty(fixture.dom.window, 'confirm', { configurable: true, value: confirm })
     const state = managerSnapshot({
       plugins: [plugin()],
       pluginLifecycle: {
@@ -57,16 +70,70 @@ describe('React Manager plugin actions', () => {
         />,
       )
       await fixture.click('[aria-label="Disable plugin"]')
+      const center = dialogs.center(fixture.document)!
+      const confirmation = center.visible()[0]!
+      expect(confirmation.chrome).toMatchObject({
+        title: 'Disable plugin?',
+        description: 'This action affects: demo, consumer. Continue?',
+        footer: { primaryAction: { label: 'Disable plugin', tone: 'danger' } },
+      })
+      await act(async () => center.run(confirmation, confirmation.chrome.footer!.primaryAction!))
       expect(request.mock.calls).toEqual([[{ kind: 'disable', pluginId: 'demo', impactToken: '' }], [{
         kind: 'disable',
         pluginId: 'demo',
         impactToken: 'exact-impact',
       }]])
-      expect(confirm).toHaveBeenCalledWith('This action affects: demo, consumer. Continue?')
       expect(router.navigate).not.toHaveBeenCalled()
       await fixture.click('[data-plugin-id="demo"]')
       expect(router.navigate).toHaveBeenCalledWith({ kind: 'plugin', pluginId: 'demo', page: 'readme' })
     } finally {
+      await act(async () => dialogs.dispose())
+      await fixture.dispose()
+    }
+  })
+
+  it('cancels uninstall impact without submitting the confirmation token', async () => {
+    const fixture = reactManagerFixture()
+    const dialogs = await installLifecycleDialogHost(fixture)
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
+    const request = vi.fn().mockResolvedValue({
+      outcome: 'planned',
+      impactToken: 'uninstall-impact',
+      affectedPluginIds: ['demo'],
+    })
+    const state = managerSnapshot({
+      plugins: [plugin()],
+      pluginLifecycle: {
+        profileId: 'test',
+        revision: 1,
+        runtimeGeneration: 'runtime',
+        operationsAvailable: true,
+      },
+    })
+    try {
+      await fixture.render(
+        <PluginsPage
+          model={managerModel(state, { requestPluginLifecycle: request })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click('[aria-haspopup="menu"]')
+      const uninstall = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Uninstall'))
+      expect(uninstall).toBeDefined()
+      await act(async () => {
+        uninstall!.click()
+        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
+      })
+      const center = dialogs.center(fixture.document)!
+      const confirmation = center.visible()[0]!
+      expect(confirmation.chrome.title).toBe('Uninstall plugin?')
+      await act(async () => confirmation.handle.close('cancel'))
+      expect(request).toHaveBeenCalledExactlyOnceWith({ kind: 'uninstall', pluginId: 'demo', impactToken: '' })
+      expect(fixture.element('[aria-label="Disable plugin"]').classList.contains('t-is-disabled')).toBe(false)
+    } finally {
+      await act(async () => dialogs.dispose())
       await fixture.dispose()
     }
   })
