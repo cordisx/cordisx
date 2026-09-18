@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { createDocumentInstallationState, installDocumentBootstrap } from './cdp-installation-bootstrap.js'
 import * as support from './cdp-installation-support.js'
 import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
+import { installManagementCdpBinding } from './management-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 
 export async function install(
@@ -67,7 +68,6 @@ export async function install(
   const permissionController = permission === undefined ? undefined : new AbortController()
   const iconThemePreferenceController = iconThemePreference === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
-  const managementController = management === undefined ? undefined : new AbortController()
   const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
   const managedServiceUIController = managedServiceUI === undefined ? undefined : new AbortController()
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
@@ -98,8 +98,6 @@ export async function install(
       unregisterCurrentIconThemeDocument = undefined
     }
   let removeLifecycleBindingListener = (): void => {}
-  let removeManagementBindingListener = (): void => {}
-  let unsubscribeManagement = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<support.CdpPluginLifecycleRuntime['beginJoin']> | undefined
   let removePublisherGrantBindingListener = (): void => {}
@@ -150,7 +148,6 @@ export async function install(
       await session.send('Runtime.addBinding', { name: support.ICON_THEME_PREFERENCE_BINDING })
     }
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: support.PLUGIN_LIFECYCLE_BINDING })
-    if (management !== undefined) await session.send('Runtime.addBinding', { name: support.MANAGEMENT_BINDING })
     if (publisherGrant !== undefined) {
       await session.send('Runtime.addBinding', { name: support.PUBLISHER_GRANT_BINDING })
     }
@@ -199,46 +196,7 @@ export async function install(
         signal: marketplaceController.signal,
       })
     }
-    if (management !== undefined) {
-      removeManagementBindingListener = session.onEvent('Runtime.bindingCalled', params => {
-        if (params.name !== support.MANAGEMENT_BINDING || typeof params.payload !== 'string') return
-        const payload = params.payload
-        void (async () => {
-          let requestId = 'invalid'
-          try {
-            if (Buffer.byteLength(payload) > support.MAX_MANAGEMENT_REQUEST_BYTES) {
-              throw new Error('plugin management request exceeds maximum size')
-            }
-            const request = support.parsePluginManagementRpcRequest(
-              JSON.parse(payload) as unknown,
-              management,
-            )
-            requestId = request.requestId
-            if (managementController?.signal.aborted === true) throw new Error('plugin management bridge is closed')
-            const value = await lifecycleRequests.exclusive(
-              async () => await support.handlePluginManagementRpcRequest(management.service, request),
-            )
-            await support.sendPluginManagementBindingResponse(session, { requestId, ok: true, value })
-          } catch (error) {
-            await support.sendPluginManagementBindingResponse(session, {
-              requestId,
-              ok: false,
-              error: error instanceof Error ? error.message : 'plugin management request was rejected',
-            }).catch(() => undefined)
-          }
-        })()
-      })
-      unsubscribeManagement = management.service.subscribe(snapshot => {
-        if (managementController?.signal.aborted === true) return
-        void support.sendPluginManagementBindingResponse(session, {
-          version: 1,
-          kind: 'snapshot',
-          profileId: management.profileId,
-          generation: management.generation,
-          snapshot,
-        }).catch(() => undefined)
-      })
-    }
+    const managementBinding = await installManagementCdpBinding(session, management, lifecycleRequests)
     let activeProviderRequests = 0
     if (provider !== undefined) {
       removeProviderBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -926,10 +884,14 @@ export async function install(
       ...(unregisterIconThemePreferenceBroadcast === undefined ? {} : { unregisterIconThemePreferenceBroadcast }),
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
       lifecycleBindingInstalled: lifecycle !== undefined,
-      ...(managementController === undefined
+      ...(managementBinding.controller === undefined
         ? {}
-        : { managementController, removeManagementBindingListener, unsubscribeManagement }),
-      managementBindingInstalled: management !== undefined,
+        : {
+          managementController: managementBinding.controller,
+          removeManagementBindingListener: managementBinding.removeBindingListener,
+          unsubscribeManagement: managementBinding.unsubscribe,
+        }),
+      managementBindingInstalled: managementBinding.installed,
       unregisterLifecycleSession,
       ...(publisherGrantController === undefined
         ? {}

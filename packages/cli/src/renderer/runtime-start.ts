@@ -78,8 +78,7 @@ import { ModelProviderRegistry } from './model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
-import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
-import { BrowserPluginManagementBinding } from './management-binding.js'
+import { createRuntimeManagementBindings } from './runtime-management-bindings.js'
 import { PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
   CORDISX_GENERATION_VISIBILITY_COORDINATOR,
@@ -214,12 +213,7 @@ export async function start(
   const channelActionsBridge = metadata.channelActionsBridgeToken === undefined
     ? undefined
     : BrowserChannelActionsBridge.connect(metadata.channelActionsBridgeToken)
-  const lifecycleBridge = metadata.pluginLifecycleBridgeToken === undefined
-    ? undefined
-    : new BrowserPluginLifecycleBridge(metadata.pluginLifecycleBridgeToken, metadata.profileId, generation)
-  const pluginManagementBinding = metadata.pluginManagement === undefined
-    ? undefined
-    : new BrowserPluginManagementBinding(metadata.pluginManagement.token, metadata.pluginManagement.profileId)
+  const { lifecycleBridge, pluginManagementBinding } = createRuntimeManagementBindings(metadata, generation)
   const localDevelopment = new Map(plugins.flatMap(plugin =>
     plugin.development === undefined
       ? []
