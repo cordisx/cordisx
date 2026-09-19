@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CLI_PROXY_COMMIT = 'c28d6274d50b3d8d3dc8e70a9a5b196cf4817c37'
+const CLI_PROXY_COMMIT = '12d5daa36dbd5dd565b96d22859afb1d0f3f3e1d'
 const CLI_PROXY_DEPENDENCY = `github:cordisx/plugin-cli-proxy-api#${CLI_PROXY_COMMIT}`
 
 /** Verify the installed convenience alias and its sibling service artifact. */
@@ -45,5 +45,11 @@ export async function verifyInstalledCliProxy(input) {
     ))
   ) throw new Error('installed CLIProxy package-v14 permission artifact is invalid')
   await Promise.all(runtimeManifest.services.map(service => access(path.join(packageRoot, service.entry))))
+  const artwork = await readFile(path.join(packageRoot, 'assets', 'icon.png'))
+  if (
+    manifest.cordisxSource !== CLI_PROXY_DEPENDENCY
+    || createHash('sha256').update(artwork).digest('hex')
+      !== '15295b1c1634e631b5e1d11a4b17838778c3d4cba03cca95b8bf5d13c13ff0d4'
+  ) throw new Error('installed CLIProxy must carry the selected brand artwork from its pinned source')
   return config
 }

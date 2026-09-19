@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CHANNEL_COMMIT = 'd426ec0a7a907746bc62317269a0ec5b3379adf9'
+const CHANNEL_COMMIT = '1b6def3a53758e5d2fd93af922d2ed29b2706822'
 const CHANNEL_DEPENDENCY = `github:cordisx/plugin-channel#${CHANNEL_COMMIT}`
 
 export function enableInstalledChannel(config) {
@@ -22,5 +23,11 @@ export async function verifyInstalledChannel(input) {
     throw new Error('installed cordisx:channel alias did not resolve the bundled package export')
   }
   await access(path.join(packageRoot, 'dist', 'service.mjs'))
+  const artwork = await readFile(path.join(packageRoot, 'assets', 'channel.png'))
+  if (
+    manifest.cordisxSource !== CHANNEL_DEPENDENCY
+    || createHash('sha256').update(artwork).digest('hex')
+      !== '8a989a7a2c83d66d4b10381e77bf596222f8301980518a86b4fbbcad006c1e0d'
+  ) throw new Error('installed Channel must carry the selected brand artwork from its pinned source')
   return config
 }

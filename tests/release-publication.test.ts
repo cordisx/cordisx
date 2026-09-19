@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { publishReleasePackages } from '../scripts/release-publication.mjs'
 import { retryRegistryPropagation } from '../scripts/registry-release-propagation.mjs'
 
-const version = '0.1.0-beta.8'
+const version = '0.1.0-beta.9'
 const distTag = 'beta'
 const gitHead = '1234567890abcdef'
 const packages = [
