@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect } from 'vitest'
 import { settle } from './bundle.fixtures.js'
 import type { verifyRoutes } from './bundle.routes.js'
@@ -36,7 +37,9 @@ export async function verifyManagerShell(context: Awaited<ReturnType<typeof veri
   expect([...managerModal!.querySelectorAll<HTMLElement>('.cxr-nav [data-tab]')].map(item => item.dataset.tab))
     .toEqual(['plugins', 'model-services', 'marketplace', 'extension-points', 'routes', 'notifications', 'about'])
   const pluginRow = managerModal?.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')
-  expect(pluginRow?.querySelector('[data-icon-kind="derived"]')).not.toBeNull()
+  const artwork = await readFile(new URL('../../examples/plugins/slot-showcase/icon.png', import.meta.url))
+  expect(pluginRow?.querySelector('[data-icon-kind="artwork"] img')?.getAttribute('src'))
+    .toBe(`data:image/png;base64,${artwork.toString('base64')}`)
   expect(pluginRow?.textContent).toContain('点位展示')
   pluginRow?.click()
   await settle()

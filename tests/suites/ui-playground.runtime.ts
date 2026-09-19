@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom'
+import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { buildRendererBundle } from '../../packages/cli/src/launcher/bundle.js'
@@ -235,18 +236,24 @@ export function registerRuntimeTests() {
         expect(trigger.querySelector('svg')).toBeNull()
         trigger.click()
         expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')).not.toBeNull()
-        expect(
-          dom.window.document.querySelector<HTMLImageElement>('[data-plugin-id="cli-proxy-api"] .cxr-card-icon img')
-            ?.src,
-        )
-          .toMatch(/^data:image\/png;base64,/)
+        const brandArtwork = new Map([
+          ['slot-showcase', 'fe40a39bba90adac7848d16d792a7559deffc6012c05552a0d8db203b72cd310'],
+          ['channel', '8a989a7a2c83d66d4b10381e77bf596222f8301980518a86b4fbbcad006c1e0d'],
+          ['cli-proxy-api', '15295b1c1634e631b5e1d11a4b17838778c3d4cba03cca95b8bf5d13c13ff0d4'],
+        ])
+        for (const [pluginId, digest] of brandArtwork) {
+          const uri = dom.window.document.querySelector<HTMLImageElement>(
+            `[data-plugin-id="${pluginId}"] [data-icon-kind="artwork"] img`,
+          )?.src
+          expect(uri).toMatch(/^data:image\/png;base64,/)
+          const bytes = Buffer.from(uri!.slice('data:image/png;base64,'.length), 'base64')
+          expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest)
+        }
         const internalAccents = new Map([
-          ['slot-showcase', 'spectral'],
           ['hello-toolbar', 'solar'],
           ['form-schema-gallery', 'violet'],
           ['settings-tab-demo', 'polar'],
           ['console-showcase', 'ember'],
-          ['channel', 'jade'],
         ])
         const gradientPhases = new Set<string>()
         for (const [pluginId, accent] of internalAccents) {

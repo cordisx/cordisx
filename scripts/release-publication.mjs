@@ -1,4 +1,5 @@
-import { isNpmRegistryPropagationError, markRegistryPropagationError } from './registry-release-propagation.mjs'
+import { isNpmRegistryPropagationError } from './npm-pack-report.mjs'
+import { markRegistryPropagationError } from './registry-release-propagation.mjs'
 
 function repositoryUrl(value) {
   return typeof value === 'string' ? value : value?.url
