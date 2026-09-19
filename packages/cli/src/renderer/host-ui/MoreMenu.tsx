@@ -7,6 +7,7 @@ export interface MoreMenuItem {
   readonly id: string
   readonly label: string
   readonly icon: ManagerIconToken
+  readonly theme?: 'default' | 'success' | 'warning' | 'error'
   readonly disabled?: boolean
   readonly onSelect: () => void
 }
@@ -16,6 +17,7 @@ export function MoreMenu({ label, items }: { readonly label: string; readonly it
     value: item.id,
     content: item.label,
     prefixIcon: <HostIcon token={item.icon} />,
+    ...(item.theme === undefined ? {} : { theme: item.theme }),
     ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
   }))
   return (

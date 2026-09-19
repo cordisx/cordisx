@@ -5,7 +5,16 @@ import type { DialogBinding } from './model.js'
 import { notificationCenterForDocument } from '../notifications/host.js'
 
 /** Compatibility adapter for Host's existing structured editor dialogs. */
-export function HostEditorDialog({ visible, header, children, confirmBtn, cancelBtn, onClose, onConfirm }: {
+export function HostEditorDialog({
+  visible,
+  header,
+  children,
+  confirmBtn,
+  cancelBtn,
+  showOwner = true,
+  onClose,
+  onConfirm,
+}: {
   readonly visible: boolean
   readonly header: string
   readonly children: ReactNode
@@ -17,6 +26,7 @@ export function HostEditorDialog({ visible, header, children, confirmBtn, cancel
     readonly disabled?: boolean
   }
   readonly cancelBtn: string
+  readonly showOwner?: boolean
   readonly onClose: () => void
   readonly onConfirm: () => void | Promise<void>
 }) {
@@ -33,6 +43,7 @@ export function HostEditorDialog({ visible, header, children, confirmBtn, cancel
     const dialogs = center.bind({
       key: 'host/editors',
       name: () => 'CordisX',
+      showName: () => showOwner,
       active: () => true,
       report: () => {
         notifications?.api.show({
@@ -47,7 +58,7 @@ export function HostEditorDialog({ visible, header, children, confirmBtn, cancel
       dialogs.dispose()
       notifications?.dispose()
     }
-  }, [])
+  }, [showOwner])
   if (!binding) return null
   return (
     <Dialog
@@ -61,6 +72,9 @@ export function HostEditorDialog({ visible, header, children, confirmBtn, cancel
           id: 'confirm',
           label: typeof confirmBtn === 'string' ? confirmBtn : confirmBtn.content,
           disabled: typeof confirmBtn === 'string' ? false : confirmBtn.disabled ?? false,
+          ...(typeof confirmBtn !== 'string' && (confirmBtn.theme === 'danger' || confirmBtn.theme === 'error')
+            ? { tone: 'danger' as const }
+            : {}),
           onAction: onConfirm,
         },
       }}

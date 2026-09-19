@@ -51,7 +51,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-breadcrumbs button { min-width: 0; overflow: hidden; border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-breadcrumbs button:hover { color: var(--cx-text, #edf0f4); }
   .cxr-breadcrumbs [aria-current="page"] { min-width: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-weight: 650; text-overflow: ellipsis; }
-  .cxr-content { min-width: 0; min-height: 0; overflow: auto; padding: 16px 22px 22px; }
+  .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px 22px 22px; }
   .cxr-content:has(.cxr-plugin-config-panel) { overflow: hidden; padding-bottom: 0; }
   .cxr-content:has(.cxm-console-panel) { display: flex; overflow: hidden; }
   .cxr-content:has(> .cxmp-management) { overflow: hidden; }
@@ -133,12 +133,13 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-policy-select { width: min(180px, 35%); flex: none; }
   .cxr-dialog-form { display: grid; gap: 12px; }
   .cxr-dialog-form label { display: grid; gap: 5px; }
-  .cxr-source-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-  .cxr-source-row { gap: 8px; }
-  .cxr-source-state { flex: none; color: var(--cx-muted,#9ca5b5); font-size: 10px; }
-  .cxr-source-actions { display: flex; flex: none; align-items: center; gap: 2px; }
-  .cxr-hidden-marketplace { display: grid; gap: 9px; }
-  .cxr-hidden-marketplace-heading { display: flex; align-items: center; }
+  .cxr-source-row { position: relative; gap: 8px; }
+  .cxr-source-row .cxr-card-body { min-width: 0; }
+  .cxr-source-actions, .cxr-marketplace-actions { position: absolute; inset: 0 0 0 auto; z-index: 1; display: flex; align-items: center; gap: 2px; border-radius: 0 10px 10px 0; padding: 0 10px 0 24px; background: linear-gradient(90deg,transparent 0,var(--cx-surface-raised,#20242b) 24px); opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+  .cxr-source-row:hover .cxr-source-actions, .cxr-source-row:focus-within .cxr-source-actions { opacity: 1; pointer-events: auto; }
+  @media (hover: none), (pointer: coarse) {
+    .cxr-source-actions, .cxr-marketplace-actions { opacity: 1; pointer-events: auto; }
+  }
   .cxr-marketplace-tools { display: flex; min-width: 0; align-items: center; overflow: hidden; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; background: var(--cx-surface-raised,#20242b); }
   .cxr-plugins-toolbar { display: flex; width: 100%; min-width: 0; align-items: center; }
   .cxr-plugins-toolbar .cxr-search { min-width: 180px; flex: 1; }
@@ -153,7 +154,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-marketplace-card { position: relative; display: flex; min-width: 0; min-height: 96px; align-items: center; border: 1px solid var(--cx-border); border-radius: 11px; background: var(--cx-surface-raised); color: inherit; }
   .cxr-marketplace-card:hover { border-color: color-mix(in srgb,var(--cx-text) 32%,var(--cx-border)); }
   .cxr-marketplace-primary { display: flex; min-width: 0; min-height: 94px; flex: 1; align-items: center; gap: 11px; border: 0; padding: 13px; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-  .cxr-marketplace-actions { position: absolute; top: 50%; right: 8px; z-index: 1; display: flex; align-items: center; gap: 2px; border-radius: 8px; padding: 2px; background: color-mix(in srgb,var(--cx-surface-raised,#20242b) 92%,transparent); box-shadow: 0 2px 12px rgb(0 0 0 / 20%); opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity 120ms ease; }
   .cxr-marketplace-card:hover .cxr-marketplace-actions, .cxr-marketplace-card:focus-within .cxr-marketplace-actions { opacity: 1; pointer-events: auto; }
   .cxr-marketplace-meta { align-self: end; color: var(--cx-muted); font-size: 10px; }
   .cxr-marketplace-title-row { display: flex; min-width: 0; align-items: center; gap: 6px; }

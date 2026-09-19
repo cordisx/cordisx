@@ -80,7 +80,7 @@ export function DialogShell(
     >
       <header>
         <div className="heading">
-          <div className="source">{entry.owner.name()}</div>
+          {entry.owner.showName?.() === false ? null : <div className="source">{entry.owner.name()}</div>}
           <h2 id={titleId}>{entry.chrome.title}</h2>
           {entry.chrome.description
             ? <p id={descriptionId} className="description">{entry.chrome.description}</p>

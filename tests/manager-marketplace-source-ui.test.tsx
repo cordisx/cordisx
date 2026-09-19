@@ -76,13 +76,11 @@ describe('React Marketplace source controls', () => {
         url: OFFICIAL_MARKETPLACE_SOURCE,
         enabled: false,
       }, 7)
-      expect(fixture.element('[aria-label="Remove source: Managed Marketplace"]').classList.contains('t-is-disabled'))
-        .toBe(true)
-      await fixture.click('[aria-label="Restore hidden-demo"]')
-      expect(mutate).toHaveBeenLastCalledWith({
-        kind: 'catalog-unhide',
-        identity: { sourceUrl: OFFICIAL_MARKETPLACE_SOURCE, pluginId: 'hidden-demo' },
-      }, 7)
+      await fixture.click('[aria-haspopup="menu"]')
+      const remove = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Remove source'))
+      expect(remove?.classList.contains('t-dropdown__item--disabled')).toBe(true)
+      expect(fixture.document.querySelector('[aria-label="Restore hidden-demo"]')).toBeNull()
     } finally {
       await fixture.dispose()
       marketplace.dispose()
@@ -138,20 +136,40 @@ describe('React Marketplace source controls', () => {
     }
   })
 
-  it('refreshes only the selected source and reports failures through Host notifications', async () => {
+  it('reports source retry failures through Host notifications', async () => {
     const fixture = reactManagerFixture()
+    const shadows: ShadowRoot[] = []
+    const attach = fixture.dom.window.HTMLElement.prototype.attachShadow
+    const shadowSpy = vi.spyOn(fixture.dom.window.HTMLElement.prototype, 'attachShadow').mockImplementation(
+      function(this: HTMLElement, options) {
+        const shadow = attach.call(this, options)
+        shadows.push(shadow)
+        return shadow
+      },
+    )
     let disposeNotifications!: () => void
     await act(async () => {
       disposeNotifications = installNotificationHost(fixture.document, 'test')
     })
+    fixture.dom.window.HTMLDialogElement.prototype.showModal = function() {
+      this.setAttribute('open', '')
+    }
+    fixture.dom.window.HTMLDialogElement.prototype.close = function() {
+      this.removeAttribute('open')
+    }
+    const { dialogCenterForDocument, installDialogHost } = await import(
+      '../packages/cli/src/renderer/dialogs/host.js'
+    )
+    const disposeDialogs = installDialogHost(fixture.document)
     const { MarketplaceSourcesPage } = await import(
       '../packages/cli/src/renderer/manager/pages/MarketplaceSourcesPage.js'
     )
     const marketplace = new BrowserMarketplaceModel(undefined, async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(feed),
+      ok: false,
+      status: 503,
+      text: async () => 'Unavailable',
     }))
+    await marketplace.reload()
     const snapshot = managementSnapshot()
     const reloadSource = vi.spyOn(marketplace, 'reloadSource').mockRejectedValue(new Error('Source refresh failed'))
     const binding: ManagerPluginManagementBinding = {
@@ -169,13 +187,20 @@ describe('React Marketplace source controls', () => {
           managementSnapshot={snapshot}
         />,
       )
-      await fixture.click('[aria-label="Refresh source: Managed Marketplace"]')
+      await fixture.click('[aria-label^="View source error"]')
+      expect(dialogCenterForDocument(fixture.document)!.visible()[0]!.chrome.title).toBe('Source error')
+      await act(async () => {
+        shadows.at(-1)!.querySelector<HTMLButtonElement>('[data-action=confirm]')!.click()
+        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
+      })
       expect(reloadSource).toHaveBeenCalledExactlyOnceWith(OFFICIAL_MARKETPLACE_SOURCE)
       expect(fixture.document.querySelector('.cxr-page > [role="status"]')).toBeNull()
       expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Plugin management action failed')
       expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Source refresh failed')
     } finally {
+      await act(async () => disposeDialogs())
       await act(async () => disposeNotifications())
+      shadowSpy.mockRestore()
       await fixture.dispose()
       marketplace.dispose()
     }

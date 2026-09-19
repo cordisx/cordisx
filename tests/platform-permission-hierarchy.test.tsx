@@ -1,8 +1,27 @@
 import React from 'react'
 import { describe, expect, it } from 'vitest'
-import type { ManagerPermissionSnapshot } from '../packages/cli/src/renderer/manager.js'
+import type { ManagerPermissionSnapshot, ManagerPluginSnapshot } from '../packages/cli/src/renderer/manager.js'
 import { managerModel, managerRouter, managerSnapshot, reactManagerFixture } from './helpers/react-manager.js'
 const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
+const plugin: ManagerPluginSnapshot = {
+  id: identity.id,
+  source: identity.source,
+  name: 'Demo',
+  inject: [],
+  config: {},
+  configuration: {
+    namespace: identity.id,
+    schemaKind: 'none',
+    applies: 'live',
+    writable: false,
+    revision: 1,
+    lastGoodRevision: 1,
+    value: {},
+    fields: [],
+    secrets: [],
+  },
+  status: 'active',
+}
 function permission(
   capability: ManagerPermissionSnapshot['capability'],
   overrides: Partial<ManagerPermissionSnapshot> = {},
@@ -121,11 +140,53 @@ describe('React Manager permission detail', () => {
         />,
       )
       const trace = fixture.element('[data-permission-authorization-origin="certified-implicit"]')
+      expect(fixture.element('.t-select input')).toHaveProperty('value', 'Certified automatic authorization')
       expect(trace.textContent).toContain('demo@1.2.3')
       expect(trace.textContent).toContain(certification.integrity)
       expect(trace.textContent).toContain(certification.fingerprint)
       expect(trace.querySelector('a')?.href).toBe(certification.evidence.reference)
       expect(trace.querySelector('a')?.rel).toBe('noopener noreferrer')
+    } finally {
+      await fixture.dispose()
+    }
+  })
+  it('presents certified ask as automatic authorization without changing policy actions or fallback', async () => {
+    const fixture = reactManagerFixture()
+    const { PermissionDetailPage } = await import('../packages/cli/src/renderer/manager/pages/PermissionDetailPage.js')
+    const { PluginDetailPage } = await import('../packages/cli/src/renderer/manager/pages/PluginDetailPage.js')
+    const certified = permission('ui.extension-points.render', { authorizationOrigin: 'certified-implicit' })
+    const state = managerSnapshot({ plugins: [plugin], permissions: [certified] })
+    const model = managerModel(state)
+    try {
+      await fixture.render(
+        <PluginDetailPage
+          model={model}
+          snapshot={state}
+          router={managerRouter({ kind: 'plugin', pluginId: plugin.id, page: 'permissions' })}
+        />,
+      )
+      expect(fixture.document.body.textContent).toContain('Certified automatic authorization')
+
+      const detailRouter = managerRouter({
+        kind: 'permission',
+        pluginId: plugin.id,
+        capability: certified.capability,
+        fingerprint: certified.fingerprint,
+      })
+      await fixture.render(<PermissionDetailPage model={model} snapshot={state} router={detailRouter} />)
+      await fixture.choose('.t-select input', '始终允许')
+      expect(model.setPermissionPolicy).toHaveBeenCalledExactlyOnceWith(
+        plugin.id,
+        certified.capability,
+        'allow',
+        certified.scope,
+      )
+
+      const uncertifiedState = managerSnapshot({ plugins: [plugin], permissions: [permission(certified.capability)] })
+      await fixture.render(
+        <PermissionDetailPage model={model} snapshot={uncertifiedState} router={detailRouter} />,
+      )
+      expect(fixture.element('.t-select input')).toHaveProperty('value', '每次询问')
     } finally {
       await fixture.dispose()
     }

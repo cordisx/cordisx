@@ -23,6 +23,7 @@ export function PermissionDetailPage(
     && item.fingerprint === route.fingerprint
   )
   if (permission === undefined) return <div className="cxr-empty">权限记录已不存在</div>
+  const certifiedAutomatic = permission.authorizationOrigin === 'certified-implicit' && permission.policy === 'ask'
   return (
     <section className="cxr-page cxr-grid">
       <section className="cxr-section">
@@ -30,10 +31,18 @@ export function PermissionDetailPage(
         <p>{permission.reasonText}</p>
         <Select
           value={permission.policy}
-          options={permission.authorizationOrigin === 'local-development'
+          options={permission.authorizationOrigin === 'local-development' || certifiedAutomatic
             ? policyOptions.map(option =>
-              option.value === 'allow'
-                ? { ...option, label: managerCopy(snapshot.localization.locale, 'permission.development-authorized') }
+              option.value === (certifiedAutomatic ? 'ask' : 'allow')
+                ? {
+                  ...option,
+                  label: managerCopy(
+                    snapshot.localization.locale,
+                    certifiedAutomatic
+                      ? 'permission.certified-automatic-authorization'
+                      : 'permission.development-authorized',
+                  ),
+                }
                 : option
             )
             : policyOptions}

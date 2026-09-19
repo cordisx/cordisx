@@ -287,6 +287,8 @@ export function PluginDetailPage(
               <span className="cxr-status">
                 {item.authorizationOrigin === 'local-development'
                   ? managerCopy(snapshot.localization.locale, 'permission.development-authorized')
+                  : item.authorizationOrigin === 'certified-implicit' && item.policy === 'ask'
+                  ? managerCopy(snapshot.localization.locale, 'permission.certified-automatic-authorization')
                   : item.policy}
               </span>
             </button>

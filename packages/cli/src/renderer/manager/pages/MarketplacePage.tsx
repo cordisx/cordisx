@@ -196,54 +196,62 @@ export function MarketplacePage(
           const favorite = favorites.has(result.plugin.identity)
           const trustLabels = marketplaceTrustLabels(result.plugin, snapshot.localization.locale)
           const installedPlugin = installed.get(`${result.plugin.source}\0${result.plugin.id}`)
-          const installedVersion = installedPlugin?.package?.version
-          const unmanagedInstalled = installedPlugin !== undefined && installedVersion === undefined
+          const managedInstalled = installedPlugin !== undefined
+            && installedPlugin.package !== undefined
+            && installedPlugin.development === undefined
+          const installedVersion = managedInstalled ? installedPlugin.package!.version : undefined
+          const unmanagedInstalled = installedPlugin !== undefined && !managedInstalled
           const exactVersionInstalled = installedVersion === result.plugin.version
           const installing = installer.installingIdentity === result.plugin.identity
-          const installDisabled = unmanagedInstalled || exactVersionInstalled || result.plugin.artifact === undefined
-            || !installer.available
-          const installLabel = installing
+          const updateAvailable = installedVersion !== undefined && !exactVersionInstalled
+          const primaryLabel = installing
             ? copy.cancelInstall
-            : exactVersionInstalled || unmanagedInstalled
+            : installedVersion !== undefined
+            ? copy.uninstall
+            : unmanagedInstalled
             ? copy.installed
-            : installedVersion === undefined
-            ? copy.install
-            : copy.update
-          const installDescription = installing
+            : copy.install
+          const primaryDescription = installing
             ? copy.installing
-            : exactVersionInstalled || unmanagedInstalled
+            : installedVersion !== undefined
+            ? copy.uninstall
+            : unmanagedInstalled
             ? copy.installed
             : result.plugin.artifact === undefined
             ? copy.artifactUnavailable
             : installer.available
-            ? installLabel
+            ? copy.install
             : copy.installUnavailable
+          const primaryDisabled = !installing && (installedVersion !== undefined
+            ? !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin?.id
+            : unmanagedInstalled || result.plugin.artifact === undefined || !installer.available)
           const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
             ? []
-            : [{
-              id: installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
-              label: installedPlugin.status === 'configured-disabled' ? copy.enable : copy.disable,
-              icon: installedPlugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin',
-              disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
-              onSelect: () =>
-                void lifecycle.run(
-                  installedPlugin,
-                  installedPlugin.status === 'configured-disabled'
-                    ? { kind: 'enable', pluginId: installedPlugin.id }
-                    : { kind: 'disable', pluginId: installedPlugin.id, impactToken: '' },
-                ),
-            }, {
-              id: 'uninstall',
-              label: copy.uninstall,
-              icon: 'uninstall-plugin',
-              disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
-              onSelect: () =>
-                void lifecycle.run(installedPlugin, {
-                  kind: 'uninstall',
-                  pluginId: installedPlugin.id,
-                  impactToken: '',
-                }),
-            }]
+            : [
+              {
+                id: installedPlugin.status === 'configured-disabled' ? 'enable' : 'disable',
+                label: installedPlugin.status === 'configured-disabled' ? copy.enable : copy.disable,
+                icon: installedPlugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin',
+                disabled: !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin.id,
+                onSelect: () =>
+                  void lifecycle.run(
+                    installedPlugin,
+                    installedPlugin.status === 'configured-disabled'
+                      ? { kind: 'enable', pluginId: installedPlugin.id }
+                      : { kind: 'disable', pluginId: installedPlugin.id, impactToken: '' },
+                  ),
+              },
+              ...(updateAvailable
+                ? [{
+                  id: 'update',
+                  label: copy.update,
+                  icon: 'import-plugin' as const,
+                  disabled: installing || result.plugin.artifact === undefined || !installer.available
+                    || lifecycle.busyPluginId === installedPlugin.id,
+                  onSelect: () => void installer.run(result.plugin, result.projection.name),
+                }]
+                : []),
+            ]
           return (
             <div
               className="cxr-marketplace-card"
@@ -276,17 +284,21 @@ export function MarketplacePage(
               </button>
               <span className="cxr-marketplace-actions">
                 <IconButton
-                  icon={installing ? 'close' : 'import-plugin'}
-                  label={installLabel}
-                  disabled={!installing && (installDisabled || (
-                    lifecycle.busyPluginId !== undefined && lifecycle.busyPluginId === installedPlugin?.id
-                  ))}
-                  description={installDescription}
+                  icon={installing ? 'close' : installedVersion === undefined ? 'import-plugin' : 'uninstall-plugin'}
+                  label={primaryLabel}
+                  disabled={primaryDisabled}
+                  description={primaryDescription}
                   aria-busy={installing}
                   onClick={event => {
                     event.stopPropagation()
                     if (installing) installer.cancel()
-                    else void installer.run(result.plugin, result.projection.name)
+                    else if (installedVersion !== undefined && installedPlugin !== undefined) {
+                      void lifecycle.run(installedPlugin, {
+                        kind: 'uninstall',
+                        pluginId: installedPlugin.id,
+                        impactToken: '',
+                      })
+                    } else void installer.run(result.plugin, result.projection.name)
                   }}
                 />
                 <IconButton

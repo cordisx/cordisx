@@ -25,6 +25,20 @@ const CERTIFICATION_SCHEMA =
 const EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
 const DIGEST = `sha256:${'a'.repeat(64)}`
 
+async function installLifecycleDialogHost(fixture: ReturnType<typeof reactManagerFixture>) {
+  fixture.dom.window.HTMLDialogElement.prototype.showModal = function() {
+    this.setAttribute('open', '')
+  }
+  fixture.dom.window.HTMLDialogElement.prototype.close = function() {
+    this.removeAttribute('open')
+  }
+  const host = await import('../packages/cli/src/renderer/dialogs/host.js')
+  return {
+    center: host.dialogCenterForDocument,
+    dispose: host.installDialogHost(fixture.document),
+  }
+}
+
 function installedPlugin(source: string): ManagerPluginSnapshot {
   return {
     id: 'trusted',
@@ -337,6 +351,7 @@ describe('React Manager Marketplace', () => {
 
   it('exposes installed lifecycle actions without conflating them with install or discovery state', async () => {
     const fixture = reactManagerFixture()
+    const dialogs = await installLifecycleDialogHost(fixture)
     const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
     fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
     const marketplace = new BrowserMarketplaceModel(
@@ -345,7 +360,11 @@ describe('React Manager Marketplace', () => {
     )
     await marketplace.reload()
     const installed = installedPlugin(TRUSTED_SOURCE)
-    const request = vi.fn().mockResolvedValue({ outcome: 'applied', affectedPluginIds: ['trusted'] })
+    const request = vi.fn().mockResolvedValue({
+      outcome: 'planned',
+      impactToken: 'marketplace-uninstall-impact',
+      affectedPluginIds: ['trusted'],
+    })
     const state = managerSnapshot({
       plugins: [installed],
       pluginLifecycle: {
@@ -366,17 +385,78 @@ describe('React Manager Marketplace', () => {
       )
       const card = fixture.element(`[data-marketplace-plugin="trusted"]`)
       expect(card.textContent).toContain('Installed')
-      expect(card.querySelector('[aria-label="Installed"]')).not.toBeNull()
+      expect(card.querySelector('[aria-label="Uninstall"]')).not.toBeNull()
+      await fixture.click(`[data-marketplace-plugin="trusted"] [aria-label="Uninstall"]`)
+      const confirmation = dialogs.center(fixture.document)!.visible()[0]!
+      expect(confirmation.chrome.title).toBe('Uninstall plugin?')
+      await act(async () => confirmation.handle.close('cancel'))
+      expect(request).toHaveBeenCalledExactlyOnceWith({ kind: 'uninstall', pluginId: 'trusted', impactToken: '' })
+
       await fixture.click(`[data-marketplace-plugin="trusted"] [aria-haspopup="menu"]`)
-      const disable = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
-        .find(item => item.textContent?.includes('Disable'))
+      const menuItems = [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+      const disable = menuItems.find(item => item.textContent?.includes('Disable'))
       expect(disable).toBeDefined()
-      await act(async () => {
-        disable!.click()
-        await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
+      expect(menuItems.find(item => item.textContent?.includes('Uninstall'))).toBeUndefined()
+
+      const disabledState = managerSnapshot({
+        ...state,
+        plugins: [{ ...installed, status: 'configured-disabled' }],
       })
-      expect(request).toHaveBeenCalledWith({ kind: 'disable', pluginId: 'trusted', impactToken: '' })
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(disabledState, { requestPluginLifecycle: request })}
+          snapshot={disabledState}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click(`[data-marketplace-plugin="trusted"] [aria-haspopup="menu"]`)
+      expect([...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Enable'))).toBeDefined()
+
+      const outdatedState = managerSnapshot({
+        ...state,
+        plugins: [{ ...installed, package: { ...installed.package!, version: '1.0.0' } }],
+      })
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(outdatedState, { requestPluginLifecycle: request })}
+          snapshot={outdatedState}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click(`[data-marketplace-plugin="trusted"] [aria-haspopup="menu"]`)
+      expect([...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+        .find(item => item.textContent?.includes('Update'))).toBeDefined()
+
+      const developmentState = managerSnapshot({
+        ...state,
+        plugins: [{
+          ...installed,
+          development: {
+            origin: 'local-dev',
+            sourcePath: '/plugins/trusted',
+            state: 'ready',
+          },
+        }],
+      })
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(developmentState, { requestPluginLifecycle: request })}
+          snapshot={developmentState}
+          router={managerRouter()}
+        />,
+      )
+      expect(
+        fixture.element(`[data-marketplace-plugin="trusted"] [aria-label="Installed"]`)
+          .classList.contains('t-is-disabled'),
+      ).toBe(true)
+      expect(fixture.document.querySelector(`[data-marketplace-plugin="trusted"] [aria-label="Uninstall"]`))
+        .toBeNull()
     } finally {
+      await act(async () => dialogs.dispose())
       await fixture.dispose()
       marketplace.dispose()
     }

@@ -15,6 +15,7 @@ import type {
 export interface DialogOwner {
   readonly key: string
   readonly name: () => string
+  readonly showName?: () => boolean
   readonly active: () => boolean
   readonly report: (kind: string) => void
 }

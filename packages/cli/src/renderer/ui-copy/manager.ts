@@ -73,6 +73,10 @@ export const STATUS_COPY = {
 } satisfies ProductCopyCatalog<'status'>
 
 export const PERMISSION_COPY = {
+  'permission.certified-automatic-authorization': {
+    en: 'Certified automatic authorization',
+    'zh-CN': '认证自动授权',
+  },
   'permission.development-authorized': { en: 'Allowed for development', 'zh-CN': '开发模式已授权' },
   'permission.development-reason': {
     en: 'Declared permissions are automatically allowed for this local development plugin.',
