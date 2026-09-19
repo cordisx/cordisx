@@ -14,6 +14,8 @@ import {
 import type {} from '../../../packages/cli/src/contracts.js'
 import { ShowcasePage } from './view.js'
 
+export { icon } from './icon.js'
+
 export const name = 'structured-showcase'
 export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']
 export const Config = Schema.object({

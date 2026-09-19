@@ -3,6 +3,12 @@
 Slot Showcase demonstrates CordisX extension points, navigation, pages, and
 state interactions in Plugin Manager.
 
+The plugin owns its 256 × 256 brand artwork in `icon.png`. The module exports
+the same bytes through `icon.ts` using `CordisXPluginBrandIcon`, so development
+and installed bundles carry the artwork without a remote image dependency.
+Keep the PNG and its generated base64 payload byte-identical when updating it.
+This example is distributed as repository source, not a separate npm package.
+
 This is the end-to-end structured UI example. It submits data through
 `ctx.commands`, `ctx.routes`, `ctx.pages`, and the DSH-style
 `ctx.slots.register`; the Host owns shell DOM, interaction, ordering,

@@ -2,6 +2,11 @@
 
 Slot Showcase 在插件管理器中展示 CordisX 扩展点、导航、页面与状态交互。
 
+插件自有的 256 × 256 品牌图片保存在 `icon.png`，通过 `icon.ts` 以
+`CordisXPluginBrandIcon` 导出相同字节，开发与安装后的构建均不依赖远程图片。
+更新时保持 PNG 与生成的 base64 数据字节一致。
+本示例通过仓库源码分发，不是独立 npm 包。
+
 这是结构化 UI 的端到端示例。它通过 `ctx.commands`、`ctx.routes`、
 `ctx.pages` 与 DSH 风格的 `ctx.slots.register` 提交数据；Host 统一负责
 shell DOM、交互、排序、无障碍与清理。
