@@ -30,6 +30,7 @@ function catalogDetail(
 ): PluginManagementCatalogDetail {
   return {
     identity: { sourceUrl, pluginId: plugin.id },
+    schemaVersion: plugin.schemaVersion,
     canonicalSource: plugin.source,
     version: plugin.version,
     name: plugin.name,

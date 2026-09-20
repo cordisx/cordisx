@@ -195,6 +195,7 @@ export function MarketplacePluginPage({
     const controller = new AbortController()
     setMarketplaceReadme(undefined)
     void manager.previewMarketplaceArtifact({
+      schemaVersion: plugin.schemaVersion as 3 | 4 | 5 | 6 | 7 | 8,
       pluginId: plugin.id,
       version: plugin.version,
       canonicalSource: plugin.source,

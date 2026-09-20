@@ -294,7 +294,7 @@ describe('plugin management service', () => {
     },
   )
 
-  it('refreshes one configured source and creates a verified marketplace candidate', async () => {
+  it('refreshes a v8 source and creates a verified candidate for an unscoped package', async () => {
     const { homeDir, service } = await fixture()
     const source = await localPackageV4(homeDir)
     const archiveRoot = path.join(homeDir, 'archive')
@@ -306,7 +306,7 @@ describe('plugin management service', () => {
     await writeFile(cordisxPackagePath, JSON.stringify({ ...cordisxPackage, canonicalSource }))
     await writeFile(
       path.join(archiveRoot, 'package', 'package.json'),
-      JSON.stringify({ name: '@example/permission-v4', version: '1.0.0' }),
+      JSON.stringify({ name: 'permission-v4', version: '1.0.0' }),
     )
     const archive = path.join(homeDir, 'permission-v4.tgz')
     await createTar({ cwd: archiveRoot, file: archive, gzip: true }, ['package'])
@@ -323,8 +323,8 @@ describe('plugin management service', () => {
     const sourceUrl = `${http.url}/marketplace.json`
     feed = {
       $schema:
-        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json',
-      schemaVersion: 3,
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v8.schema.json',
+      schemaVersion: 8,
       fallbackLocale: 'en',
       localizations: {},
       generatedAt: '2026-09-18T00:00:00.000Z',
@@ -335,13 +335,14 @@ describe('plugin management service', () => {
         cryptographicAttestation: 'unsupported',
       },
       name: 'Local test feed',
+      description: 'Exercises the Marketplace v8 management path.',
       homepage: 'https://example.com/marketplace',
       official: [],
       certifications: [],
       plugins: [{
         $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json',
-        schemaVersion: 3,
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v8.schema.json',
+        schemaVersion: 8,
         id: 'permission-v4',
         fallbackLocale: 'en',
         name: 'Permission V4',
@@ -350,9 +351,7 @@ describe('plugin management service', () => {
         version: '1.0.0',
         source: canonicalSource,
         artifact: {
-          publisherIdentity: 'npm:@example',
-          packageNamespace: '@example',
-          packageName: '@example/permission-v4',
+          packageName: 'permission-v4',
           downloadUrl: artifactUrl,
           integrity,
         },
@@ -365,7 +364,12 @@ describe('plugin management service', () => {
     await service.execute({ kind: 'source-add', source: { url: sourceUrl, enabled: true } })
     expect(await service.refreshCatalog(sourceUrl)).toMatchObject({
       sources: [{ url: sourceUrl, status: 'loaded', pluginCount: 1 }],
-      plugins: [{ identity: { sourceUrl, pluginId: 'permission-v4' }, installable: true }],
+      plugins: [{
+        identity: { sourceUrl, pluginId: 'permission-v4' },
+        schemaVersion: 8,
+        installable: true,
+        artifact: { packageName: 'permission-v4' },
+      }],
     })
     expect(requests).toEqual(['/marketplace.json'])
     await expect(service.refreshCatalog(`${http.url}/unknown.json`)).rejects.toThrow('does not exist')

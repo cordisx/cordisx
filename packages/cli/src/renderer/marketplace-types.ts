@@ -25,8 +25,8 @@ export interface MarketplaceFeedLocalization {
 }
 
 export interface MarketplaceArtifact {
-  readonly publisherIdentity: string
-  readonly packageNamespace: string
+  readonly publisherIdentity?: string
+  readonly packageNamespace?: string
   readonly packageName: string
   readonly downloadUrl: string
   readonly integrity: string
@@ -39,7 +39,7 @@ export interface MarketplaceCommerceDescriptor {
 }
 
 export interface MarketplacePlugin {
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   readonly id: string
   /** Locale of the required base display metadata; v1 projects as legacy `en`. */
   readonly fallbackLocale: string
@@ -169,7 +169,7 @@ export interface MarketplaceResponse {
 export type MarketplaceFetcher = (url: string, init: RequestInit) => Promise<MarketplaceResponse>
 
 export interface ParsedFeed {
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   readonly fallbackLocale: string
   readonly name: string
   readonly description?: string

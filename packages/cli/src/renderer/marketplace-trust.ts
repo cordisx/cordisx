@@ -1,4 +1,5 @@
 import { sha256Hex } from '../permission-model-v2.js'
+import { marketplacePackageNamespace } from '../marketplace-package-name.js'
 
 const PUBLIC_TRUST_AUTHORITY = 'cordisx.marketplace.codeowners/v1'
 const INTERNAL_TRUST_AUTHORITY = 'byted.cordisx-marketplace.codeowners/v1'
@@ -84,14 +85,15 @@ export interface MarketplaceLocalizedText {
 }
 
 export interface MarketplaceArtifactIdentity {
-  readonly publisherIdentity: string
-  readonly packageNamespace: string
+  readonly publisherIdentity?: string
+  readonly packageNamespace?: string
   readonly packageName: string
   readonly downloadUrl: string
   readonly integrity: string
 }
 
 export interface MarketplaceTrustPlugin {
+  readonly schemaVersion?: number
   readonly identity: string
   readonly id: string
   readonly version: string
@@ -721,8 +723,8 @@ export function evaluateMarketplaceTrust(
     ? INTERNAL_TRUST_PROFILE
     : undefined
   if (profile === undefined) throw new Error('feed.trust.authority 不受支持')
-  if (profile.recordVersion === 2 && feed.schemaVersion !== 7) {
-    throw new Error('internal Marketplace trust authority 仅支持 feed schemaVersion 7')
+  if (profile.recordVersion === 2 && feed.schemaVersion !== 7 && feed.schemaVersion !== 8) {
+    throw new Error('internal Marketplace trust authority 仅支持 feed schemaVersion 7 或 8')
   }
   const authority = profile.authority
   const root = canonicalHttpsUrl(trust.root, 'feed.trust.root')
@@ -766,9 +768,13 @@ export function evaluateMarketplaceTrust(
       plugin?.artifact === undefined
       || plugin.id !== record.identity.pluginId
       || plugin.source !== record.identity.canonicalSource
-      || plugin.artifact.publisherIdentity !== record.identity.publisherIdentity
-      || plugin.artifact.packageNamespace !== record.identity.packageNamespace
       || plugin.artifact.packageName !== record.identity.packageName
+      || plugin.artifact.publisherIdentity !== record.identity.publisherIdentity
+      || (plugin.schemaVersion !== 8 && (
+        plugin.artifact.packageNamespace !== record.identity.packageNamespace
+      ))
+      || (plugin.schemaVersion === 8
+        && marketplacePackageNamespace(plugin.artifact.packageName) !== record.identity.packageNamespace)
     ) {
       throw new Error(`official identity 与当前插件发布链不匹配: ${record.identity.pluginId}`)
     }

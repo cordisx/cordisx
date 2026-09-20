@@ -310,12 +310,16 @@ export async function openPluginManagementService(
       const plugin = await catalog.pluginInfo(request)
       if (plugin === undefined) throw new Error('Marketplace plugin was not found.')
       if (plugin.artifact === undefined) throw new Error('Marketplace plugin has no installable artifact.')
+      if (plugin.schemaVersion === 1 || plugin.schemaVersion === 2) {
+        throw new Error('Marketplace plugin schema does not support installable artifacts.')
+      }
       return await inspectMarketplaceArtifactPackage({
         token: 'plugin-management-service',
         profileId: options.profileId,
         generation: runtimeGeneration,
         coordinator: lifecycle,
       }, {
+        schemaVersion: plugin.schemaVersion,
         pluginId: plugin.identity.pluginId,
         version: plugin.version,
         canonicalSource: plugin.canonicalSource,

@@ -44,6 +44,7 @@ export interface PluginManagementCatalogQuery {
 
 export interface PluginManagementCatalogSummary {
   readonly identity: PluginManagementCatalogIdentity
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   readonly canonicalSource: string
   readonly version: string
   readonly name: string
@@ -58,8 +59,8 @@ export interface PluginManagementCatalogDetail extends PluginManagementCatalogSu
   readonly homepage?: string
   readonly license: string
   readonly artifact?: {
-    readonly publisherIdentity: string
-    readonly packageNamespace: string
+    readonly publisherIdentity?: string
+    readonly packageNamespace?: string
     readonly packageName: string
     readonly downloadUrl: string
     readonly integrity: string

@@ -235,6 +235,64 @@ describe('marketplace trust evaluator', () => {
     })
   })
 
+  it('requires exact asserted publisher identity for v8 Official matching', () => {
+    const v8 = plugin({
+      schemaVersion: 8,
+      artifact: {
+        publisherIdentity: 'npm:@cordisx',
+        packageName: '@cordisx/example',
+        downloadUrl: plugin().artifact!.downloadUrl,
+        integrity: DIGEST,
+      },
+    })
+    expect(evaluateMarketplaceTrust(feed([official()], []), [v8], OPTIONS).byPluginIdentity.get(v8.identity)?.official)
+      .toBeDefined()
+
+    for (const publisherIdentity of [undefined, 'npm:another-author']) {
+      expect(() =>
+        evaluateMarketplaceTrust(feed([official()], []), [{
+          ...v8,
+          artifact: { ...v8.artifact!, publisherIdentity },
+        }], OPTIONS)
+      ).toThrow('发布链不匹配')
+    }
+  })
+
+  it('keeps an ordinary unscoped v8 artifact admitted without promoting trust', () => {
+    const ordinary = plugin({
+      schemaVersion: 8,
+      source: 'https://github.com/independent/pet',
+      id: 'plugin-composer-animal',
+      identity: 'https://github.com/independent/pet\u0000plugin-composer-animal',
+      artifact: {
+        packageName: 'plugin-composer-animal',
+        downloadUrl: 'https://github.com/independent/pet/releases/download/v0.1.2/plugin-composer-animal-0.1.2.tgz',
+        integrity: DIGEST,
+      },
+    })
+    const result = evaluateMarketplaceTrust(feed([], []), [ordinary], OPTIONS)
+    expect(result.byPluginIdentity.get(ordinary.identity)).toBeUndefined()
+  })
+
+  it('keeps v8 certification independent from package scope and publisher identity', () => {
+    const unscoped = plugin({
+      schemaVersion: 8,
+      artifact: {
+        packageName: 'independent-example',
+        downloadUrl: plugin().artifact!.downloadUrl,
+        integrity: DIGEST,
+      },
+    })
+    const trust = evaluateMarketplaceTrust(feed([], [certification()]), [unscoped], OPTIONS)
+      .byPluginIdentity.get(unscoped.identity)
+
+    expect(trust?.official).toBeUndefined()
+    expect(trust?.certification).toEqual(expect.objectContaining({ level: 'cordisx-certified' }))
+    expect(trust?.certifiedPermission).toEqual(expect.objectContaining({
+      kind: 'cordisx-certified-permission-eligibility',
+    }))
+  })
+
   it('projects a formally valid exact immutable permission eligibility input without Official or grant policy', async () => {
     const result = evaluateMarketplaceTrust(feed([official()], [certification()]), [plugin()], OPTIONS)
     const projection = result.byPluginIdentity.get(`${SOURCE}\u0000example`)?.certifiedPermission

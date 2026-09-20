@@ -55,6 +55,7 @@ export function useMarketplaceInstaller(
       setInstallingIdentity(plugin.identity)
       try {
         const inspection = await manager.inspectMarketplaceArtifact({
+          schemaVersion: plugin.schemaVersion as 3 | 4 | 5 | 6 | 7 | 8,
           pluginId: plugin.id,
           version: plugin.version,
           canonicalSource: plugin.source,

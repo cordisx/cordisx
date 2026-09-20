@@ -2,6 +2,7 @@ import type { CordisXPluginLifecycleResultV1 } from '../plugin-lifecycle-contrac
 import type { MarketplaceArtifact } from './marketplace-types.js'
 
 export interface MarketplaceArtifactInspectionRequest {
+  readonly schemaVersion: 3 | 4 | 5 | 6 | 7 | 8
   readonly pluginId: string
   readonly version: string
   readonly canonicalSource: string

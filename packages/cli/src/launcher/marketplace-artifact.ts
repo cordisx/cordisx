@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, open, rm } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { mkdtemp, open, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { type ReadEntry, t as inspectTar } from 'tar'
+import { isValidMarketplacePackageName } from '../marketplace-package-name.js'
 import type { CordisXPluginLifecycleResultV1 } from '../plugin-lifecycle-contracts.js'
 import type { MarketplaceArtifactInspectionRequest } from '../renderer/marketplace-artifact-binding.js'
 import type { PluginLifecycleBridgeHandler } from './plugin-lifecycle-rpc.js'
@@ -75,11 +77,24 @@ export function parseMarketplaceArtifactBindingRequest(value: unknown): Marketpl
   }
   exactKeys(input, ['kind', 'requestId', 'request'], 'Marketplace artifact inspect request')
   const request = object(input.request, 'Marketplace artifact identity')
-  exactKeys(request, ['pluginId', 'version', 'canonicalSource', 'artifact'], 'Marketplace artifact identity')
+  exactKeys(
+    request,
+    ['schemaVersion', 'pluginId', 'version', 'canonicalSource', 'artifact'],
+    'Marketplace artifact identity',
+  )
+  const schemaVersion = request.schemaVersion
+  if (
+    schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5 && schemaVersion !== 6
+    && schemaVersion !== 7 && schemaVersion !== 8
+  ) {
+    throw new Error('Marketplace schema version is unsupported')
+  }
   const artifact = object(request.artifact, 'Marketplace artifact')
   exactKeys(
     artifact,
-    ['publisherIdentity', 'packageNamespace', 'packageName', 'downloadUrl', 'integrity'],
+    schemaVersion === 8
+      ? ['publisherIdentity', 'packageName', 'downloadUrl', 'integrity']
+      : ['publisherIdentity', 'packageNamespace', 'packageName', 'downloadUrl', 'integrity'],
     'Marketplace artifact',
   )
   const pluginId = identifier(request.pluginId, 'Marketplace plugin id', /^[a-z0-9][a-z0-9._-]*$/)
@@ -89,22 +104,26 @@ export function parseMarketplaceArtifactBindingRequest(value: unknown): Marketpl
     /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
   )
   const canonicalSource = artifactUrl(request.canonicalSource, 'Marketplace canonical source').href.replace(/\/$/u, '')
-  const packageNamespace = identifier(
-    artifact.packageNamespace,
-    'Marketplace package namespace',
-    /^@[a-z0-9][a-z0-9._-]*$/,
-  )
-  const packageName = identifier(
-    artifact.packageName,
-    'Marketplace package name',
-    /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/,
-  )
-  const publisherIdentity = identifier(
-    artifact.publisherIdentity,
-    'Marketplace publisher identity',
-    /^npm:@[a-z0-9][a-z0-9._-]*$/,
-  )
-  if (publisherIdentity !== `npm:${packageNamespace}` || !packageName.startsWith(`${packageNamespace}/`)) {
+  const packageName = identifier(artifact.packageName, 'Marketplace package name', /^.{1,214}$/)
+  if (
+    schemaVersion === 8
+      ? !isValidMarketplacePackageName(packageName)
+      : !/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)
+  ) throw new Error('Marketplace package name is invalid')
+  const packageNamespace = artifact.packageNamespace === undefined
+    ? undefined
+    : identifier(artifact.packageNamespace, 'Marketplace package namespace', /^@[a-z0-9][a-z0-9._-]*$/)
+  const publisherIdentity = artifact.publisherIdentity === undefined
+    ? undefined
+    : identifier(
+      artifact.publisherIdentity,
+      'Marketplace publisher identity',
+      /^npm:(?:@[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/,
+    )
+  if (
+    schemaVersion <= 7
+    && (publisherIdentity !== `npm:${packageNamespace}` || !packageName.startsWith(`${packageNamespace}/`))
+  ) {
     throw new Error('Marketplace package identity is inconsistent')
   }
   const integrity = identifier(artifact.integrity, 'Marketplace artifact integrity', /^sha256:[a-f0-9]{64}$/)
@@ -112,12 +131,13 @@ export function parseMarketplaceArtifactBindingRequest(value: unknown): Marketpl
     kind: input.kind,
     requestId,
     request: {
+      schemaVersion,
       pluginId,
       version,
       canonicalSource,
       artifact: {
-        publisherIdentity,
-        packageNamespace,
+        ...(publisherIdentity === undefined ? {} : { publisherIdentity }),
+        ...(packageNamespace === undefined ? {} : { packageNamespace }),
         packageName,
         downloadUrl: artifactUrl(artifact.downloadUrl, 'Marketplace artifact URL').href,
         integrity,
@@ -214,6 +234,12 @@ async function npmPackageIdentity(archive: string): Promise<{ readonly name: str
   return { name: value.name, version: value.version }
 }
 
+async function archiveDigest(archive: string): Promise<`sha256:${string}`> {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(archive)) hash.update(chunk)
+  return `sha256:${hash.digest('hex')}`
+}
+
 async function archiveEntry(
   archive: string,
   paths: readonly string[],
@@ -245,6 +271,94 @@ async function archiveEntry(
   })
   if (duplicate) throw new Error(`Marketplace artifact contains multiple ${paths.at(-1) ?? 'requested'} files`)
   return found
+}
+
+async function cordisxPackageIdentity(
+  archive: string,
+): Promise<{ readonly id: string; readonly version: string; readonly canonicalSource: string }> {
+  const manifest = await archiveEntry(
+    archive,
+    ['package/cordisx-package.json', 'cordisx-package.json'],
+    MAX_PACKAGE_JSON_BYTES,
+  )
+  if (manifest === undefined) throw new Error('Marketplace artifact has no CordisX package manifest')
+  const value = object(JSON.parse(manifest.bytes.toString('utf8')), 'Marketplace CordisX package manifest')
+  return {
+    id: identifier(value.id, 'Marketplace CordisX plugin id', /^[a-z0-9][a-z0-9._-]*$/),
+    version: identifier(
+      value.version,
+      'Marketplace CordisX plugin version',
+      /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
+    ),
+    canonicalSource: artifactUrl(value.canonicalSource, 'Marketplace CordisX canonical source').href.replace(
+      /\/$/u,
+      '',
+    ),
+  }
+}
+
+export interface MarketplaceArtifactArchiveValidation {
+  readonly archive: string
+  readonly size: number
+  readonly schemaVersion: MarketplaceArtifactInspectionRequest['schemaVersion']
+  readonly downloadUrl: string
+  readonly integrity: `sha256:${string}`
+  readonly packageName: string
+  readonly pluginId: string
+  readonly version: string
+  readonly canonicalSource: string
+}
+
+async function validateMarketplaceArtifactIdentity(
+  archive: string,
+  request: MarketplaceArtifactInspectionRequest,
+  integrity: `sha256:${string}`,
+): Promise<
+  Pick<
+    MarketplaceArtifactArchiveValidation,
+    'integrity' | 'packageName' | 'pluginId' | 'version' | 'canonicalSource'
+  >
+> {
+  if (integrity !== request.artifact.integrity) {
+    throw new Error(`Marketplace artifact SHA-256 mismatch; received ${integrity}`)
+  }
+  const [npmIdentity, cordisxIdentity] = await Promise.all([
+    npmPackageIdentity(archive),
+    cordisxPackageIdentity(archive),
+  ])
+  if (npmIdentity.name !== request.artifact.packageName || npmIdentity.version !== request.version) {
+    throw new Error('Marketplace feed package identity does not match package.json')
+  }
+  if (
+    cordisxIdentity.id !== request.pluginId || cordisxIdentity.version !== request.version
+    || cordisxIdentity.canonicalSource !== request.canonicalSource
+  ) {
+    throw new Error('Marketplace feed identity does not match the packaged CordisX manifest')
+  }
+  return {
+    integrity,
+    packageName: npmIdentity.name,
+    pluginId: cordisxIdentity.id,
+    version: npmIdentity.version,
+    canonicalSource: cordisxIdentity.canonicalSource,
+  }
+}
+
+export async function validateMarketplaceArtifactArchive(
+  archive: string,
+  request: MarketplaceArtifactInspectionRequest,
+): Promise<MarketplaceArtifactArchiveValidation> {
+  const archiveStats = await stat(archive)
+  if (!archiveStats.isFile()) throw new Error('Marketplace artifact archive must be a file')
+  if (archiveStats.size > MAX_ARTIFACT_BYTES) throw new Error('Marketplace artifact exceeds 64 MiB')
+  const validated = await validateMarketplaceArtifactIdentity(archive, request, await archiveDigest(archive))
+  return {
+    archive: path.resolve(archive),
+    size: archiveStats.size,
+    schemaVersion: request.schemaVersion,
+    downloadUrl: request.artifact.downloadUrl,
+    ...validated,
+  }
 }
 
 async function packagedReadme(archive: string): Promise<string | undefined> {
@@ -286,13 +400,7 @@ async function stageMarketplaceArtifactPackage(
   const combined = AbortSignal.any([signal, timeout])
   try {
     const downloaded = await download(new URL(request.artifact.downloadUrl), archive, combined)
-    if (downloaded.digest !== request.artifact.integrity) {
-      throw new Error(`Marketplace artifact SHA-256 mismatch; received ${downloaded.digest}`)
-    }
-    const npmIdentity = await npmPackageIdentity(archive)
-    if (npmIdentity.name !== request.artifact.packageName || npmIdentity.version !== request.version) {
-      throw new Error('Marketplace feed package identity does not match package.json')
-    }
+    await validateMarketplaceArtifactIdentity(archive, request, downloaded.digest)
     combined.throwIfAborted()
     const staged = await handler.coordinator.stagePackageSource({
       kind: 'downloaded-tarball',
@@ -323,13 +431,7 @@ export async function previewMarketplaceArtifactPackage(
   const combined = AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)])
   try {
     const downloaded = await download(new URL(request.artifact.downloadUrl), archive, combined)
-    if (downloaded.digest !== request.artifact.integrity) {
-      throw new Error(`Marketplace artifact SHA-256 mismatch; received ${downloaded.digest}`)
-    }
-    const npmIdentity = await npmPackageIdentity(archive)
-    if (npmIdentity.name !== request.artifact.packageName || npmIdentity.version !== request.version) {
-      throw new Error('Marketplace feed package identity does not match package.json')
-    }
+    await validateMarketplaceArtifactIdentity(archive, request, downloaded.digest)
     combined.throwIfAborted()
     const readme = await packagedReadme(archive)
     return readme === undefined ? {} : { readme }

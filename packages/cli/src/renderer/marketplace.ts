@@ -1,4 +1,5 @@
 import { BrowserMarketplaceFeedCache, marketplaceCacheAge } from './marketplace-cache.js'
+import { isValidMarketplacePackageName } from '../marketplace-package-name.js'
 import {
   BrowserMarketplaceSourceStore,
   type MarketplaceSourceRecord,
@@ -85,6 +86,7 @@ const PLUGIN_SCHEMAS = Object.freeze({
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v5.schema.json',
   6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v6.schema.json',
   7: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v7.schema.json',
+  8: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v8.schema.json',
 })
 const FEED_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json',
@@ -94,6 +96,7 @@ const FEED_SCHEMAS = Object.freeze({
   5: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v5.schema.json',
   6: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v6.schema.json',
   7: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v7.schema.json',
+  8: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v8.schema.json',
 })
 
 function record(value: unknown): Record<string, unknown> {
@@ -186,7 +189,7 @@ function parsePluginLocalizations(
 function parseFeedLocalizations(
   value: unknown,
   fallbackLocale: string,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
   label: string,
 ): Readonly<Record<string, MarketplaceFeedLocalization>> {
   if (value === undefined) return Object.freeze({})
@@ -242,22 +245,45 @@ function optionalMarketplaceIcon(value: unknown, schemaVersion: number, label: s
   return text
 }
 
-function parseArtifact(value: unknown, label: string): MarketplaceArtifact | undefined {
+function parseArtifact(value: unknown, schemaVersion: number, label: string): MarketplaceArtifact | undefined {
   if (value === undefined) return undefined
   const artifact = record(value)
-  assertKeys(artifact, ['publisherIdentity', 'packageNamespace', 'packageName', 'downloadUrl', 'integrity'], label)
-  const publisherIdentity = requiredString(artifact.publisherIdentity, `${label}.publisherIdentity`, 128)
-  const packageNamespace = requiredString(artifact.packageNamespace, `${label}.packageNamespace`, 128)
+  const legacy = schemaVersion <= 7
+  assertKeys(
+    artifact,
+    legacy
+      ? ['publisherIdentity', 'packageNamespace', 'packageName', 'downloadUrl', 'integrity']
+      : ['publisherIdentity', 'packageName', 'downloadUrl', 'integrity'],
+    label,
+  )
+  const publisherIdentity = artifact.publisherIdentity === undefined
+    ? undefined
+    : requiredString(artifact.publisherIdentity, `${label}.publisherIdentity`, 128)
+  const packageNamespace = artifact.packageNamespace === undefined
+    ? undefined
+    : requiredString(artifact.packageNamespace, `${label}.packageNamespace`, 128)
   const packageName = requiredString(artifact.packageName, `${label}.packageName`, 214)
-  if (!/^npm:@[a-z0-9][a-z0-9._-]*$/.test(publisherIdentity)) throw new Error(`${label}.publisherIdentity 不受支持`)
-  if (!/^@[a-z0-9][a-z0-9._-]*$/.test(packageNamespace)) throw new Error(`${label}.packageNamespace 不受支持`)
-  if (!/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)) {
+  if (
+    publisherIdentity !== undefined && !/^npm:(?:@[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/.test(publisherIdentity)
+  ) {
+    throw new Error(`${label}.publisherIdentity 不受支持`)
+  }
+  if (legacy && (packageNamespace === undefined || !/^@[a-z0-9][a-z0-9._-]*$/.test(packageNamespace))) {
+    throw new Error(`${label}.packageNamespace 不受支持`)
+  }
+  if (
+    legacy
+      ? !/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)
+      : !isValidMarketplacePackageName(packageName)
+  ) {
     throw new Error(`${label}.packageName 不受支持`)
   }
-  if (publisherIdentity !== `npm:${packageNamespace}`) {
+  if (legacy && publisherIdentity !== `npm:${packageNamespace}`) {
     throw new Error(`${label}.publisherIdentity 与 packageNamespace 不匹配`)
   }
-  if (!packageName.startsWith(`${packageNamespace}/`)) throw new Error(`${label}.packageName 不属于 packageNamespace`)
+  if (legacy && !packageName.startsWith(`${packageNamespace}/`)) {
+    throw new Error(`${label}.packageName 不属于 packageNamespace`)
+  }
   const downloadUrl = requiredString(artifact.downloadUrl, `${label}.downloadUrl`, 2048)
   const parsedDownload = new URL(downloadUrl)
   if (
@@ -268,7 +294,13 @@ function parseArtifact(value: unknown, label: string): MarketplaceArtifact | und
   }
   const integrity = requiredString(artifact.integrity, `${label}.integrity`, 71)
   if (!/^sha256:[a-f0-9]{64}$/.test(integrity)) throw new Error(`${label}.integrity 必须是 sha256 digest`)
-  return { publisherIdentity, packageNamespace, packageName, downloadUrl, integrity }
+  return {
+    ...(publisherIdentity === undefined ? {} : { publisherIdentity }),
+    ...(packageNamespace === undefined ? {} : { packageNamespace }),
+    packageName,
+    downloadUrl,
+    integrity,
+  }
 }
 
 function parseCommerce(value: unknown, label: string): MarketplaceCommerceDescriptor | undefined {
@@ -331,7 +363,7 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const schemaVersion = plugin.schemaVersion
   if (
     schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
-    && schemaVersion !== 6 && schemaVersion !== 7
+    && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8
   ) {
     throw new Error(`plugins[${index}].schemaVersion 不受支持`)
   }
@@ -401,7 +433,9 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const homepage = optionalHttpsUrl(plugin.homepage, `plugins[${index}].homepage`)
   const icon = optionalMarketplaceIcon(plugin.icon, schemaVersion, `plugins[${index}].icon`)
   const manifest = optionalHttpsUrl(plugin.manifest, `plugins[${index}].manifest`)
-  const artifact = schemaVersion >= 3 ? parseArtifact(plugin.artifact, `plugins[${index}].artifact`) : undefined
+  const artifact = schemaVersion >= 3
+    ? parseArtifact(plugin.artifact, schemaVersion, `plugins[${index}].artifact`)
+    : undefined
   const commerce = schemaVersion >= 4 ? parseCommerce(plugin.commerce, `plugins[${index}].commerce`) : undefined
   return {
     schemaVersion,
@@ -429,7 +463,7 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
   const schemaVersion = feed.schemaVersion
   if (
     schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4 && schemaVersion !== 5
-    && schemaVersion !== 6 && schemaVersion !== 7
+    && schemaVersion !== 6 && schemaVersion !== 7 && schemaVersion !== 8
   ) {
     throw new Error('schemaVersion 不受支持')
   }

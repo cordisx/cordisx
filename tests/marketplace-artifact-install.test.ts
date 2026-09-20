@@ -9,6 +9,7 @@ import {
   inspectMarketplaceArtifactPackage,
   parseMarketplaceArtifactBindingRequest,
   previewMarketplaceArtifactPackage,
+  validateMarketplaceArtifactArchive,
 } from '../packages/cli/src/launcher/marketplace-artifact.js'
 import type { PluginLifecycleBridgeHandler } from '../packages/cli/src/launcher/plugin-lifecycle-rpc.js'
 
@@ -26,7 +27,15 @@ async function packageArchive(name = '@example/marketplace-demo', version = '1.2
   roots.push(root)
   await mkdir(path.join(root, 'package'))
   await writeFile(path.join(root, 'package', 'package.json'), JSON.stringify({ name, version, readme: './README.md' }))
-  await writeFile(path.join(root, 'package', 'cordisx-package.json'), JSON.stringify({ readme: './README.md' }))
+  await writeFile(
+    path.join(root, 'package', 'cordisx-package.json'),
+    JSON.stringify({
+      id: 'marketplace-demo',
+      version,
+      canonicalSource: SOURCE,
+      readme: './README.md',
+    }),
+  )
   await writeFile(path.join(root, 'package', 'README.md'), '# Marketplace demo\n')
   const archive = path.join(root, 'artifact.tgz')
   await createTar({ cwd: root, file: archive, gzip: true }, ['package'])
@@ -34,6 +43,7 @@ async function packageArchive(name = '@example/marketplace-demo', version = '1.2
 }
 
 function request(bytes: Buffer, overrides: Partial<{
+  readonly schemaVersion: 3 | 4 | 5 | 6 | 7 | 8
   readonly pluginId: string
   readonly version: string
   readonly canonicalSource: string
@@ -41,6 +51,7 @@ function request(bytes: Buffer, overrides: Partial<{
   readonly integrity: string
 }> = {}) {
   return {
+    schemaVersion: overrides.schemaVersion ?? 7,
     pluginId: overrides.pluginId ?? 'marketplace-demo',
     version: overrides.version ?? '1.2.3',
     canonicalSource: overrides.canonicalSource ?? SOURCE,
@@ -122,6 +133,51 @@ describe('Marketplace artifact installation boundary', () => {
     ).toThrow('canonical HTTPS')
   })
 
+  it('accepts v8 unscoped artifacts without publisher metadata and rejects fabricated namespaces', () => {
+    const bytes = Buffer.from('artifact')
+    const v8 = {
+      ...request(bytes, { schemaVersion: 8, packageName: 'plugin-composer-animal' }),
+      artifact: {
+        packageName: 'plugin-composer-animal',
+        downloadUrl: DOWNLOAD,
+        integrity: request(bytes).artifact.integrity,
+      },
+    }
+    expect(parseMarketplaceArtifactBindingRequest({
+      kind: 'inspect',
+      requestId: 'request-v8',
+      request: v8,
+    })).toMatchObject({ request: v8 })
+    expect(() =>
+      parseMarketplaceArtifactBindingRequest({
+        kind: 'inspect',
+        requestId: 'request-v8-namespace',
+        request: { ...v8, artifact: { ...v8.artifact, packageNamespace: '@cordisx' } },
+      })
+    ).toThrow('packageNamespace is unsupported')
+  })
+
+  it.each(['node_modules', 'favicon.ico', 'Uppercase', '../plugin', '@scope/../plugin'])(
+    'rejects invalid v8 package name %s',
+    packageName => {
+      const bytes = Buffer.from('artifact')
+      expect(() =>
+        parseMarketplaceArtifactBindingRequest({
+          kind: 'inspect',
+          requestId: 'request-invalid-v8',
+          request: {
+            ...request(bytes, { schemaVersion: 8, packageName }),
+            artifact: {
+              packageName,
+              downloadUrl: DOWNLOAD,
+              integrity: request(bytes).artifact.integrity,
+            },
+          },
+        })
+      ).toThrow('package name is invalid')
+    },
+  )
+
   it('verifies raw tarball SHA-256 before staging without reusing it as the package-tree digest', async () => {
     const bytes = await packageArchive()
     vi.stubGlobal(
@@ -154,7 +210,7 @@ describe('Marketplace artifact installation boundary', () => {
     expect(lifecycle.inspect).not.toHaveBeenCalled()
   })
 
-  it('rejects digest and package identity mismatches before lifecycle inspection', async () => {
+  it('rejects digest and exact package name/version mismatches before lifecycle inspection', async () => {
     const bytes = await packageArchive('@example/other-name')
     vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })))
     const digestMismatch = handler()
@@ -172,6 +228,16 @@ describe('Marketplace artifact installation boundary', () => {
       new AbortController().signal,
     )).rejects.toThrow('package identity does not match package.json')
     expect(identityMismatch.stage).not.toHaveBeenCalled()
+
+    const versionBytes = await packageArchive('@example/marketplace-demo', '1.2.4')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(versionBytes, { status: 200 })))
+    const versionMismatch = handler()
+    await expect(inspectMarketplaceArtifactPackage(
+      versionMismatch.value,
+      request(versionBytes),
+      new AbortController().signal,
+    )).rejects.toThrow('package identity does not match package.json')
+    expect(versionMismatch.stage).not.toHaveBeenCalled()
   })
 
   it('rejects packaged CordisX identity mismatches after staging and before candidate creation', async () => {
@@ -182,5 +248,34 @@ describe('Marketplace artifact installation boundary', () => {
       .rejects.toThrow('packaged CordisX manifest')
     expect(lifecycle.stage).toHaveBeenCalledOnce()
     expect(lifecycle.inspect).not.toHaveBeenCalled()
+  })
+
+  it('validates a local archive without staging or creating a candidate', async () => {
+    const bytes = await packageArchive('plugin-composer-animal', '0.1.2')
+    const root = roots.at(-1)!
+    const archive = path.join(root, 'artifact.tgz')
+    const validationRequest = {
+      schemaVersion: 8 as const,
+      pluginId: 'marketplace-demo',
+      version: '0.1.2',
+      canonicalSource: SOURCE,
+      artifact: {
+        packageName: 'plugin-composer-animal',
+        downloadUrl: 'https://github.com/cordisx/plugin-pet/releases/download/v0.1.2/plugin-composer-animal-0.1.2.tgz',
+        integrity: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      },
+    }
+
+    await expect(validateMarketplaceArtifactArchive(archive, validationRequest)).resolves.toMatchObject({
+      archive,
+      size: bytes.byteLength,
+      schemaVersion: 8,
+      downloadUrl: validationRequest.artifact.downloadUrl,
+      packageName: 'plugin-composer-animal',
+      pluginId: 'marketplace-demo',
+      version: '0.1.2',
+      canonicalSource: SOURCE,
+      integrity: validationRequest.artifact.integrity,
+    })
   })
 })
