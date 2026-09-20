@@ -1,0 +1,45 @@
+# CordisX
+
+CordisX is an opt-in local extension host for Codex Desktop. This is the entry
+point for agents helping a user install, start, use, or customize CordisX.
+
+## First-Time Adoption
+
+1. Read the npm beta installation section of [Getting started](.agents/docs/getting-started.md).
+   Check the user's existing installation and selected profile, then complete
+   only missing setup. Use the published beta channel, not a source checkout.
+2. For ongoing documentation discovery, follow [the documentation Skill installation guide](https://raw.githubusercontent.com/cordisx/docs/main/.agents/docs/install-docs-skill.md).
+   The Skill is a small navigation aid, not a copy of the product documentation.
+3. If the request includes plugins, continue at [Marketplace](https://raw.githubusercontent.com/cordisx/marketplace/main/llms.txt)
+   or the specific source guide provided by the user.
+4. For a requested launch, use the selected profile's normal shared-data launch
+   from Getting started. Verify readiness with `cordisx status --json` and report
+   installation, running Host, plugin activation, and service login separately.
+
+Reading this entry alone is not a request to install or launch anything. For a
+question about CordisX, use the task routes below without performing adoption.
+
+## Read Only What The Task Needs
+
+- Install, launch, select a profile, or manage the running instance: [Getting started](.agents/docs/getting-started.md).
+- Diagnose a startup failure: [Startup Q&A](.agents/docs/startup-qa.md).
+- Configure a source or install an existing plugin: [Marketplace entry](https://raw.githubusercontent.com/cordisx/marketplace/main/llms.txt).
+- Create or modify a plugin: [Plugin-development Skill](skills/cordisx-plugin-development/SKILL.md).
+  The CLI deploys this separate Skill on a non-dry-run Host launch.
+- Find a product topic: [Host documentation index](.agents/docs/README.md).
+- Find another owning repository or install the navigation Skill: [Docs entry](https://raw.githubusercontent.com/cordisx/docs/main/llms.txt).
+
+Follow links for the current task, not every link recursively. Resolve relative
+links against the containing document's URL. Do not repeat an already completed
+prerequisite when a child guide refers back here. If installed CLI help differs
+from a guide on `main`, use documentation at the installed release tag and
+report the mismatch instead of inventing commands.
+
+## Runtime And Safety Boundary
+
+Preserve existing CordisX configuration, profiles, accounts, and unrelated Apps.
+Normal use does not require cloning this repository, modifying the installed
+Codex application, or creating a new isolated login. Do not copy credentials or
+permission grants. Installation and source selection do not authorize arbitrary
+plugin effects; `--yes` confirms management operations, not permission grants.
+Use `AGENTS.md` only for work on this repository, not as an end-user setup guide.

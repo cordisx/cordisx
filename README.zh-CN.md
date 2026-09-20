@@ -24,6 +24,19 @@
 
 ## 启动 CordisX
 
+### 交给 AI
+
+把这句话发给你的 AI 助手：
+
+```text
+阅读 CordisX 接入指南，帮我安装并启动 CordisX，并配置文档 Skill：https://raw.githubusercontent.com/cordisx/cordisx/main/llms.txt
+```
+
+配置完成后，直接描述你的需求。文档 Skill 会按需查找对应指南；插件开发使用
+下文单独的开发 Skill。也可以[直接阅读接入入口](llms.txt)。
+
+### 使用终端
+
 ```bash
 npx cordisx@beta
 ```

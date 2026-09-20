@@ -1,5 +1,8 @@
 # CordisX documentation
 
+Agents helping end users start at [llms.txt](../../llms.txt), then read only the
+topic needed below. Repository maintenance still starts at `AGENTS.md`.
+
 This is the public, aggregatable source for Host product explanations, guides,
 and implementation references. Choose an entry by the task below. A reference
 may describe compatibility, experimental, or unavailable paths; its stated

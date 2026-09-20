@@ -24,6 +24,20 @@
 
 ## Start CordisX
 
+### With an AI assistant
+
+Send this to your assistant:
+
+```text
+Read the CordisX adoption guide and help me install and start CordisX, including its documentation Skill: https://raw.githubusercontent.com/cordisx/cordisx/main/llms.txt
+```
+
+After setup, describe what you need normally. The documentation Skill routes
+relevant questions to their owning guides; plugin development uses the separate
+development Skill below. [Read the entry yourself](llms.txt).
+
+### From the terminal
+
 ```bash
 npx cordisx@beta
 ```
