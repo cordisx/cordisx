@@ -6,6 +6,16 @@ has not converged yet. It does not authorize creating, moving, or deleting a Git
 tag, publishing from a feature branch, bypassing the `npm-release` environment,
 or publishing with a long-lived npm token.
 
+## Before expensive preparation
+
+Run `npm run check:release:entry && npm run check:release` on the intended
+revision before installing or building. These offline Node checks catch ESM
+linkage and local release metadata errors. They do not verify registry
+availability: confirm required Protocol and bundled plugin versions/source
+revisions have completed their owner release before preparing the Host release.
+Use the existing `cordisxSources`, manifests, and lockfile as the dependency
+record; retain the normal package and clean-registry gates for release evidence.
+
 ## Normal recovery
 
 1. Keep the original `v<semver>` tag and tagged commit unchanged. Confirm the

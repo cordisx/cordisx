@@ -1,5 +1,3 @@
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { publishReleasePackages } from '../scripts/release-publication.mjs'
 import { retryRegistryPropagation } from '../scripts/registry-release-propagation.mjs'
@@ -11,36 +9,6 @@ const packages = [
   { name: 'cordisx', workspace: 'cordisx' },
   { name: 'create-cordisx-plugin', workspace: 'create-cordisx-plugin' },
 ]
-
-describe('release scripts under native Node ESM', () => {
-  const cwd = fileURLToPath(new URL('..', import.meta.url))
-
-  it('links the publication module without the Vitest module transformer', () => {
-    const result = spawnSync(process.execPath, [
-      '--input-type=module',
-      '--eval',
-      `
-      import assert from 'node:assert/strict'
-      import { publishReleasePackages } from './scripts/release-publication.mjs'
-      assert.equal(typeof publishReleasePackages, 'function')
-    `,
-    ], { cwd, encoding: 'utf8' })
-    expect(result.error).toBeUndefined()
-    expect(result.status, result.stderr).toBe(0)
-  })
-
-  it.each(['release.mjs', 'check-registry-release.mjs'])('%s reaches argument validation in Node', script => {
-    // An invalid tag stops before any registry, package or publication operation.
-    const result = spawnSync(process.execPath, [`scripts/${script}`, '--tag', 'invalid'], {
-      cwd,
-      encoding: 'utf8',
-    })
-    expect(result.error).toBeUndefined()
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('release tag must be v<semver> without build metadata')
-    expect(result.stderr).not.toContain('does not provide an export')
-  })
-})
 
 function fixture(name: string, overrides = {}) {
   return {

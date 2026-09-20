@@ -21,6 +21,21 @@ closure only if outputs required by the selected tests are missing or stale.
 `npm run build --workspace=cordisx` builds the Host closure; `npm run build`
 builds all workspaces. Do not build merely because a different test group is next.
 
+Before preparing dependencies for release-script work, run
+`npm run check:release:entry` and `npm run check:release`. Both use Node alone,
+without installs or builds. The entry check reuses the native ESM regression:
+it links the real publication module and passes an invalid tag to both release
+CLIs, stopping at argument validation before registry or publication operations.
+`npm run test:release` includes this check plus the release behavior tests.
+PR scope and tag-release jobs run the entry check before costly preparation.
+
+For changed formatting, reuse `npm run lint:staged` for staged files or
+`npm run lint:staged -- --diff origin/main...HEAD` for committed changes with
+the existing tooling installed. Check generated source together with its
+generator using its owner's regeneration/drift command; a formatter alone
+does not prove generated content is current. Run the focused owning tests when
+an icon or label changes derived UI expectations.
+
 `vitest.config.mjs` partitions discovery into core, renderer, integration, and
 browser projects. Core catches otherwise unclassified tests so additions are
 not silently omitted. These are execution groups, not a claim that every

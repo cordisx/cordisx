@@ -38,6 +38,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash scripts/ci-scope.sh
       - run: node --test scripts/test-ci-scope.mjs
+      - name: Check release entry points before preparation
+        run: npm run check:release:entry
       - id: matrix
         env:
           BROWSER: ${{ steps.scope.outputs.browser }}

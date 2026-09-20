@@ -27,6 +27,8 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Check release entry points before preparation
+        run: npm run check:release:entry && npm run check:release
       - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
       - id: toolchain
         name: Record exact release toolchain
