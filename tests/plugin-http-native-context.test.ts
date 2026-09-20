@@ -1,4 +1,5 @@
 import { runInNewContext } from 'node:vm'
+import { nativeAccountResource } from './fixtures/native-account-resource.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readNativeHttpAccount } from '../packages/cli/src/launcher/plugin-http-native-account.js'
 import { issueOwnerDocumentPrincipalToken } from '../packages/cli/src/launcher/owner-document-rpc.js'
@@ -24,8 +25,9 @@ it('keeps normal HTTP reads usable after the first calling-context Native backgr
       send: async (method: string, params: Record<string, unknown>) => {
         expect(method).toBe('Runtime.evaluate')
         expect(params.contextId).toBe(contextId)
-        const source = String(params.expression).replace('await import(adapter.module)', 'await __loadNative()')
+        const source = String(params.expression).replace('url=>import(url)', 'url=>__loadNative()')
         const value = await runInNewContext(source, {
+          ...nativeAccountResource,
           AbortController,
           setTimeout,
           clearTimeout,
@@ -112,8 +114,9 @@ function productionClient(f: ReturnType<typeof fixture>, contextId: number, opti
   const session = {
     send: async (_: string, params: Record<string, unknown>) => {
       expect(params.contextId).toBe(contextId)
-      const expression = String(params.expression).replace('await import(adapter.module)', 'await __loadNative()')
+      const expression = String(params.expression).replace('url=>import(url)', 'url=>__loadNative()')
       const value = await runInNewContext(expression, {
+        ...nativeAccountResource,
         AbortController,
         setTimeout,
         clearTimeout,

@@ -15,46 +15,18 @@ import {
 } from './native-submission-cdp-channel.js'
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
-import {
-  NATIVE_OPERATION_REQUEST_TRANSFORM,
-  NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
-  NATIVE_OPERATION_REQUEST_TRANSFORM_9647,
-} from '../renderer/adapter/native-operation-request-transform.js'
-import {
-  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM,
-  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
-  NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9647,
-} from '../renderer/adapter/native-submit-orchestrator-transform.js'
+import { readNativeSubmissionResources } from './native-app-resources.js'
+import { discoverNativeSubmissionTransforms, type NativeScriptResource } from './native-submission-structure.js'
+import { discoverNativeAccountCapability } from './native-account-structure.js'
+import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 
 const execFileAsync = promisify(execFile)
-
-const NATIVE_SUBMISSION_TRANSFORMS = Object.freeze([
-  Object.freeze({
-    appVersion: '26.901.51231',
-    buildNumber: '8109',
-    transforms: Object.freeze([NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM, NATIVE_OPERATION_REQUEST_TRANSFORM]),
-  }),
-  Object.freeze({
-    appVersion: '26.908.70816',
-    buildNumber: '9275',
-    transforms: Object.freeze([
-      NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9275,
-      NATIVE_OPERATION_REQUEST_TRANSFORM_9275,
-    ]),
-  }),
-  Object.freeze({
-    appVersion: '26.911.61220',
-    buildNumber: '9647',
-    transforms: Object.freeze([
-      NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM_BUILD_9647,
-      NATIVE_OPERATION_REQUEST_TRANSFORM_9647,
-    ]),
-  }),
-])
 
 export interface NativeSubmissionInstallation {
   readonly authority: NativeSubmissionCdpAuthority
   readonly transforms: readonly NativeResourceTransform[]
+  readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
   readonly installation: NativeSubmissionInstallation
@@ -68,13 +40,24 @@ export function nativeAppServerIntermediaryPath(): string {
 export function nativeSubmissionTransformsForApp(
   appVersion: string,
   buildNumber: string,
-): readonly NativeResourceTransform[] | undefined {
-  return NATIVE_SUBMISSION_TRANSFORMS.find(pin => (
-    pin.appVersion === appVersion && pin.buildNumber === buildNumber
-  ))?.transforms
+  resources: readonly NativeScriptResource[],
+): readonly NativeResourceTransform[] {
+  try {
+    return legacyNativeSubmissionResources(resources) ?? discoverNativeSubmissionTransforms(resources)
+  } catch (error) {
+    throw new Error(
+      `Native submission incompatible with Codex Desktop ${appVersion} (${buildNumber}): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    )
+  }
 }
 
-async function nativeSubmissionTransforms(contents: string): Promise<readonly NativeResourceTransform[]> {
+async function nativeSubmissionTransforms(contents: string): Promise<{
+  transforms: readonly NativeResourceTransform[]
+  accountCapability?: NativeAccountCapabilityDescriptor
+}> {
   const info = path.join(contents, 'Info.plist')
   const [appVersion, buildNumber] = await Promise.all([
     execFileAsync('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', info]),
@@ -84,18 +67,21 @@ async function nativeSubmissionTransforms(contents: string): Promise<readonly Na
     appVersion: appVersion.stdout.trim(),
     buildNumber: buildNumber.stdout.trim(),
   }
-  const transforms = nativeSubmissionTransformsForApp(identity.appVersion, identity.buildNumber)
-  if (transforms === undefined) {
-    throw new Error(`Native submission has not audited Codex Desktop ${identity.appVersion} (${identity.buildNumber})`)
-  }
-  return transforms
+  const resources = readNativeSubmissionResources(contents)
+  const transforms = nativeSubmissionTransformsForApp(identity.appVersion, identity.buildNumber, resources)
+  const initial = resources.find(resource => resource.url.includes('/app-initial-'))!
+  let accountCapability: NativeAccountCapabilityDescriptor | undefined
+  try {
+    accountCapability = discoverNativeAccountCapability(initial)
+  } catch { /* Account admission reports its own unavailable capability. */ }
+  return { transforms, ...(accountCapability === undefined ? {} : { accountCapability }) }
 }
 
 export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
 ): Promise<NativeSubmissionComposition> {
-  if (process.platform !== 'darwin') throw new Error('Native managed routing requires the audited macOS app')
+  if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
   const macos = path.dirname(executable)
   if (path.basename(macos) !== 'MacOS' || path.basename(path.dirname(macos)) !== 'Contents') {
@@ -105,7 +91,7 @@ export async function createNativeSubmissionComposition(
   const cli = await realpath(path.join(contents, 'Resources', 'codex'))
   await access(cli, constants.X_OK)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
-  const transforms = await nativeSubmissionTransforms(contents)
+  const capabilities = await nativeSubmissionTransforms(contents)
   const control = await startNativeSubmissionControlServer()
   const credentials = createNativeProviderCredentialBroker({ resolve: id => activation.prepareNativeConnection(id) })
   let controller: NativeSubmissionController | undefined
@@ -141,7 +127,7 @@ export async function createNativeSubmissionComposition(
     return {
       installation: {
         authority: cdp,
-        transforms,
+        ...capabilities,
       },
       environment: {
         CODEX_CLI_PATH: nativeAppServerIntermediaryPath(),

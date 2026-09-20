@@ -16,8 +16,12 @@ Existing Agent transport pins are unaffected. Unknown builds, missing native
 clients, source errors and unsupported launchers return unavailable. Static
 source compatibility is distinct from a working native profile read.
 
-The native account input identifies the current account inside Host only. On
-8881, both HTTP authentication and CurrentUser use the audited
+The native account input identifies the current account inside Host only.
+Managed HTTP authentication now discovers the typed account capability from
+the actual native resource and checks it in the calling context, independent
+of Desktop version/build. See [native submission compatibility](native-model-providers.md#desktop-compatibility).
+The display-profile adapter described above remains separately pinned. On
+8881, CurrentUser uses the audited
 `TW.accessInputs.readAccountInfo()` reader used by that build's Native UI.
 Only typed `ready` data is accepted; missing, unavailable or failed typed inputs
 never fall back to the legacy POST channel or a cached display profile. Caller

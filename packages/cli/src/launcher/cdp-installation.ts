@@ -344,6 +344,7 @@ export async function install(
                       params.executionContextId,
                       () => ownerDocumentController?.signal.aborted !== true,
                       reason => ownerDocuments.http.reportNativeAccountUnavailable(parsed, reason),
+                      nativeSubmission?.accountCapability,
                     ),
                   history === undefined ? undefined : Object.assign(() => history.host.readWorkUsage(), {
                     current: (snapshot: { readonly scopeId: string; readonly epoch: string }) =>

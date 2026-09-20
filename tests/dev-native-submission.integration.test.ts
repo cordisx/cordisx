@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import type { NativeSubmissionComposition } from '../packages/cli/src/launcher/native-submission-composition.js'
 import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/managed-service-node-host.js'
+import { nativeSubmissionTransformsForApp } from '../packages/cli/src/launcher/native-submission-composition.js'
+import { resources } from './fixtures/native-submission-structure.js'
+import { createBuiltinSkillsFixture } from './helpers/cli-run-fixtures.js'
 
 const temporary = new Set<string>()
 
@@ -29,6 +32,37 @@ async function fixture(name: string) {
 }
 
 describe('Vite development native submission assembly', () => {
+  it.each(['codex', 'dev'])(
+    'reports incompatible resources without publishing native submission on %s',
+    async command => {
+      const f = await fixture('cordisx-incompatible-native-')
+      const sourceRoot = await createBuiltinSkillsFixture(f.root)
+      const activation = {
+        nativeProviderIds: [],
+        dispose: vi.fn(async () => {}),
+      } as unknown as ManagedServiceNodeActivation
+      const create = vi.fn(async () => {
+        throw new Error('Native capability submit-options: expected one structure, found 0')
+      })
+      const runHost = vi.fn(async () => {})
+      const output: string[] = []
+      await runCordisXCli([command, ...(command === 'dev' ? [f.entry] : []), '--executable', f.executable], {
+        cwd: f.project,
+        env: { CORDISX_HOME: f.home },
+        stdout: line => output.push(line),
+        internalRunInjectedHost: runHost,
+        internalCreateNativeSubmissionComposition: create,
+        internalCreateDevelopmentManagedServiceActivation: async () => activation,
+        internalNativeSubmissionPlatform: 'darwin',
+        internalBuiltinSkillsSourceRootDir: sourceRoot,
+        internalSharedHomeDir: path.join(f.root, 'shared-home'),
+      })
+      expect(create).toHaveBeenCalledOnce()
+      expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))
+      expect(output.join('\n')).toContain('submit-options')
+      if (command === 'dev') expect(activation.dispose).toHaveBeenCalledOnce()
+    },
+  )
   it('passes the native installation and control environment to the development Host', async () => {
     const f = await fixture('cordisx-dev-native-submission-')
     const binding = {
@@ -56,7 +90,10 @@ describe('Vite development native submission assembly', () => {
       prepareNativeConnection: vi.fn(),
       dispose: vi.fn(async () => undefined),
     } as unknown as ManagedServiceNodeActivation
-    const installation = { authority: {}, transforms: [] } as unknown as NativeSubmissionComposition['installation']
+    const installation = {
+      authority: {},
+      transforms: nativeSubmissionTransformsForApp('future', 'unknown', resources()),
+    } as unknown as NativeSubmissionComposition['installation']
     const nativeSubmission = {
       installation,
       environment: {
@@ -152,5 +189,39 @@ describe('Vite development native submission assembly', () => {
     expect(createNativeSubmission).not.toHaveBeenCalled()
     await expect(access(path.join(f.home, 'config.json'))).resolves.toBeUndefined()
     expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))
+  })
+
+  it('passes structurally selected resources through the production launch path and closes the composition', async () => {
+    const f = await fixture('cordisx-production-native-')
+    const sourceRoot = await createBuiltinSkillsFixture(f.root)
+    const installation = {
+      authority: {},
+      transforms: nativeSubmissionTransformsForApp('future', 'unknown', resources()),
+    } as unknown as NativeSubmissionComposition['installation']
+    const composition = {
+      installation,
+      environment: { CODEX_CLI_PATH: '/test/intermediary' },
+      close: vi.fn(async () => {}),
+    }
+    const create = vi.fn(async () => composition)
+    const runHost = vi.fn(async () => {})
+    await runCordisXCli(['codex', '--executable', f.executable], {
+      cwd: f.project,
+      env: { CORDISX_HOME: f.home },
+      stdout: () => {},
+      internalRunInjectedHost: runHost,
+      internalCreateNativeSubmissionComposition: create,
+      internalNativeSubmissionPlatform: 'darwin',
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
+      internalSharedHomeDir: path.join(f.root, 'shared-home'),
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(runHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nativeSubmission: installation,
+        environment: expect.objectContaining({ CODEX_CLI_PATH: '/test/intermediary' }),
+      }),
+    )
+    expect(composition.close).toHaveBeenCalledOnce()
   })
 })

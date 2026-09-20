@@ -1,5 +1,5 @@
 import type { CdpSession } from './cdp-session.js'
-import { CURRENT_USER_NATIVE_PINS } from '../current-user-native-pins.js'
+import { nativeAccountCapability, type NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readPinnedNativeAccount } from '../current-user-native-account.js'
 import {
   HTTP_NATIVE_ACCOUNT_UNAVAILABLE_REASONS,
@@ -14,18 +14,16 @@ export const HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS = 5_000
 const HTTP_NATIVE_ACCOUNT_EVALUATION_TIMEOUT_MS = 6_000
 const HTTP_NATIVE_ACCOUNT_CDP_TIMEOUT_MS = 6_500
 /** Launcher executes in the actual calling native context. Never accept account facts from plugin RPC input. */
-export const HTTP_NATIVE_ACCOUNT_EXPRESSION = `(async()=>{
+export function nativeAccountExpression(descriptor?: NativeAccountCapabilityDescriptor): string {
+  return `(async()=>{
   const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),${HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS});
   const fail=reason=>({status:'unavailable',reason});let phase='native-pin-read-exception';
   try {
     if(globalThis.codexWindowType!=='electron'||globalThis.location?.href!=='app://-/index.html')return fail('context-rejected');
-    const pin=await globalThis.electronBridge?.getSentryInitOptions?.();
-    const adapter=${
-  JSON.stringify(CURRENT_USER_NATIVE_PINS)
-}.find(x=>x.appVersion===pin?.appVersion&&x.buildNumber===pin?.buildNumber&&x.buildFlavor===pin?.buildFlavor);
-    if(!adapter)return fail('native-pin-unavailable');
-    phase='native-module-unavailable';const native=await import(adapter.module);
-    phase='native-read-exception';const value=await (${readPinnedNativeAccount.toString()})(adapter.buildNumber,native,abort.signal);
+    phase='native-capability-unavailable';const adapter=await (${nativeAccountCapability.toString()})(url=>import(url),${
+    JSON.stringify(descriptor) ?? 'undefined'
+  });
+    phase='native-read-exception';const value=await (${readPinnedNativeAccount.toString()})('typed',adapter.native,abort.signal);
     if(abort.signal.aborted)return fail('native-read-timeout');
     if(typeof value?.accountId!=='string'||!value.accountId||typeof value?.userId!=='string'||!value.userId)return fail('native-identity-invalid');
     return JSON.stringify([value.accountId,value.userId]);
@@ -35,6 +33,8 @@ export const HTTP_NATIVE_ACCOUNT_EXPRESSION = `(async()=>{
     return fail(${JSON.stringify(HTTP_NATIVE_ACCOUNT_UNAVAILABLE_REASONS)}.includes(reason)?reason:phase);
   }finally{clearTimeout(timer)}
 })()`
+}
+export const HTTP_NATIVE_ACCOUNT_EXPRESSION = nativeAccountExpression()
 
 /** Failure details stay private; calling-context failures never become Native identity observations. */
 export async function readNativeHttpAccount(
@@ -42,6 +42,7 @@ export async function readNativeHttpAccount(
   contextId: unknown,
   active: () => boolean,
   onUnavailable?: (reason: HttpNativeAccountUnavailableReason) => void,
+  descriptor?: NativeAccountCapabilityDescriptor,
 ): Promise<HttpNativeAccountValue> {
   const unavailable = (reason: HttpNativeAccountUnavailableReason): HttpNativeAccountValue => {
     try {
@@ -57,7 +58,7 @@ export async function readNativeHttpAccount(
   if (!Number.isInteger(contextId) || Number(contextId) < 1) return unavailable('context-missing')
   try {
     const evaluated = await session.send('Runtime.evaluate', {
-      expression: HTTP_NATIVE_ACCOUNT_EXPRESSION,
+      expression: nativeAccountExpression(descriptor),
       contextId,
       awaitPromise: true,
       returnByValue: true,

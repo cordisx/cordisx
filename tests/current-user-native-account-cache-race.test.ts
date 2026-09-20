@@ -1,4 +1,5 @@
 import { runInNewContext } from 'node:vm'
+import { nativeAccountResource } from './fixtures/native-account-resource.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readPinnedNativeAccount } from '../packages/cli/src/current-user-native-account.js'
 import { HTTP_NATIVE_ACCOUNT_EXPRESSION } from '../packages/cli/src/launcher/plugin-http-native-account.js'
@@ -138,10 +139,11 @@ it('maps the modeled near-expiry retirement through the current Host reader', as
 it('returns typed-retired through the complete HTTP expression after 60ms with its 2s timer still live', async () => {
   vi.useFakeTimers()
   const f = typedInput(), held = f.holdPost(1)
-  const source = HTTP_NATIVE_ACCOUNT_EXPRESSION.replace('await import(adapter.module)', 'await __loadNative()')
+  const source = HTTP_NATIVE_ACCOUNT_EXPRESSION.replace('url=>import(url)', 'url=>__loadNative()')
   expect(source).not.toBe(HTTP_NATIVE_ACCOUNT_EXPRESSION)
   const evaluate = () =>
     runInNewContext(source, {
+      ...nativeAccountResource,
       AbortController,
       Symbol,
       setTimeout,

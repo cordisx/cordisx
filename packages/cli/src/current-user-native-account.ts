@@ -1,6 +1,6 @@
 /** Host-private account input. This function is also serialized into the calling Native context. */
 export async function readPinnedNativeAccount(
-  buildNumber: string,
+  capability: string,
   native: {
     readonly TW?: { readonly accessInputs?: { readAccountInfo(): Promise<unknown> } }
     readonly gJt?: {
@@ -28,10 +28,10 @@ export async function readPinnedNativeAccount(
   })
   try {
     const operation = (async () => {
-      if (buildNumber === '8881' || buildNumber === '9275') {
+      if (capability !== 'legacy-post') {
         const inputs = native.TW?.accessInputs
         if (typeof inputs?.readAccountInfo !== 'function') return unavailable('typed-input-missing')
-        // Match this build's own account query. A failed typed input must never
+        // Match the native typed account query. A failed typed input must never
         // fall back to a second transport or a cached display identity.
         let result: { status?: unknown; reason?: unknown; data?: unknown } | null
         try {
@@ -72,7 +72,6 @@ export async function readPinnedNativeAccount(
         if (result?.status !== 'ready') return unavailable('typed-not-ready')
         return result.data
       }
-      if (buildNumber !== '8378') return unavailable('native-pin-unavailable')
       const client = native.gJt?.getInstance?.()
       if (!client?.post) return unavailable('legacy-input-missing')
       try {

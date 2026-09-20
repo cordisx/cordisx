@@ -1,14 +1,40 @@
 import { HttpNativeCallingContextUnavailableError } from '../packages/cli/src/launcher/plugin-http-native-account-diagnostics.js'
 import { runInNewContext } from 'node:vm'
+import { nativeAccountResource } from './fixtures/native-account-resource.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readPinnedNativeAccount } from '../packages/cli/src/current-user-native-account.js'
 import {
   HTTP_NATIVE_ACCOUNT_EXPRESSION,
   HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS,
+  nativeAccountExpression,
   readNativeHttpAccount,
 } from '../packages/cli/src/launcher/plugin-http-native-account.js'
 
 afterEach(() => vi.useRealTimers())
+it('passes the discovered resource and export through the production CDP account expression', async () => {
+  const descriptor = { module: 'app://-/assets/app-initial-unknown.js', exportName: 'Renamed' }
+  const readAccountInfo = vi.fn(async () => ({ status: 'ready', data: { accountId: 'account', userId: 'user' } }))
+  const source = nativeAccountExpression(descriptor).replace('url=>import(url)', 'url=>__loadNative(url)')
+  const send = vi.fn(async (_method, params) => {
+    expect(params.expression).toBe(nativeAccountExpression(descriptor))
+    return {
+      result: {
+        value: await runInNewContext(source, {
+          ...nativeAccountResource,
+          AbortController,
+          Symbol,
+          setTimeout,
+          clearTimeout,
+          location: { href: 'app://-/index.html' },
+          codexWindowType: 'electron',
+          __loadNative: async () => ({ Renamed: { accessInputs: { readAccountInfo } } }),
+        }),
+      },
+    }
+  })
+  expect(await readNativeHttpAccount({ send }, 1, () => true, undefined, descriptor)).toBe('["account","user"]')
+  expect(readAccountInfo).toHaveBeenCalledOnce()
+})
 const pair = { accountId: 'fixture-account', userId: 'fixture-user' }
 const pin = { appVersion: '26.908.40834', buildNumber: '8881', buildFlavor: 'prod' }
 function native(value: unknown) {
@@ -20,12 +46,13 @@ function expression(module: unknown, metadata: unknown = pin, url = 'app://-/ind
   // Replace only the ESM loader boundary; execute the complete production
   // context/pin/timeout/account projection, including its serialized reader.
   const source = HTTP_NATIVE_ACCOUNT_EXPRESSION.replace(
-    'await import(adapter.module)',
-    'await __loadNative(adapter.module)',
+    'url=>import(url)',
+    'url=>__loadNative(url)',
   )
   expect(source).not.toBe(HTTP_NATIVE_ACCOUNT_EXPRESSION)
   const load = vi.fn(async () => module)
   const result = runInNewContext(source, {
+    ...nativeAccountResource,
     AbortController,
     Symbol,
     setTimeout,
@@ -41,7 +68,7 @@ it('executes the 8881 production expression through typed ready input without le
   const module = native({ status: 'ready', data: { ...pair, token: 'fixture-private-extra' } })
   const f = expression(module)
   expect(await f.result).toBe(JSON.stringify([pair.accountId, pair.userId]))
-  expect(f.load).toHaveBeenCalledWith('app://-/assets/app-initial-9b95fa538c62.js')
+  expect(f.load).toHaveBeenCalledWith('app://-/assets/app-initial-unknown.js')
   expect(module.readAccountInfo).toHaveBeenCalledTimes(1)
   expect(module.post).not.toHaveBeenCalled()
 })
@@ -87,12 +114,7 @@ it('rejects missing typed exports, thrown RPC, unknown pins and non-primary cont
   const failed = native({ status: 'ready', data: pair })
   failed.readAccountInfo.mockRejectedValue(new Error('fixture-private-error'))
   expect(await expression(failed).result).toMatchObject({ status: 'unavailable' })
-  for (
-    const [metadata, url] of [[{ ...pin, buildFlavor: 'dev' }, 'app://-/index.html'], [
-      pin,
-      'app://-/other.html',
-    ]] as const
-  ) {
+  for (const [metadata, url] of [[pin, 'app://-/other.html']] as const) {
     const f = expression(old, metadata, url)
     expect(await f.result).toMatchObject({ status: 'unavailable' })
     expect(f.load).not.toHaveBeenCalled()
@@ -115,7 +137,7 @@ it('bounds typed RPC observation and discards late ready completion', async () =
 })
 it('retains the independently pinned 8378 legacy reader and caller abort', async () => {
   const module = native({ status: 'ready', data: pair }), signal = new AbortController().signal
-  expect(await readPinnedNativeAccount('8378', module, signal)).toEqual(pair)
+  expect(await readPinnedNativeAccount('legacy-post', module, signal)).toEqual(pair)
   expect(module.post).toHaveBeenCalledWith('vscode://codex/account-info', undefined, undefined, signal)
   expect(module.readAccountInfo).not.toHaveBeenCalled()
   const abort = new AbortController()
@@ -304,6 +326,6 @@ it.each([
   const module = native(value)
   const f = expression(module, { appVersion: '26.908.70816', buildNumber: '9275', buildFlavor: 'prod' })
   expect(await f.result).toEqual(expected)
-  expect(f.load).toHaveBeenCalledWith('app://-/assets/app-initial-4d7ea7f81c2d.js')
+  expect(f.load).toHaveBeenCalledWith('app://-/assets/app-initial-unknown.js')
   expect(module.post).not.toHaveBeenCalled()
 })

@@ -85,7 +85,8 @@ export async function readNativeCurrentUser(
     }
     if (!native.gJt?.getInstance || !native.eSt || !native.jKt?.safeGet || !native.NKt) return unavailable
     const client = native.gJt.getInstance()
-    const account = () => readPinnedNativeAccount(adapter.buildNumber, module, signal)
+    const account = () =>
+      readPinnedNativeAccount(adapter === CURRENT_USER_NATIVE_PIN ? 'legacy-post' : 'typed', module, signal)
     const before = identity(await account())
     if (!before) return { status: 'unavailable', reason: 'signed-out' }
     const [meValue, codexValue] = await Promise.all([

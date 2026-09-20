@@ -28,7 +28,7 @@ used to guess equivalence. Existing-thread provider changes require confirmation
 An active turn blocks switching and is not interrupted automatically. The Host
 does not create a replacement thread or automatically compact history.
 
-The version-pinned Codex adapter synchronizes the native composer selection and
+The capability-checked Codex adapter synchronizes the native composer selection and
 uses native session operations to change an idle thread's effective provider.
 The effective response, not the historical provider embedded in thread metadata,
 is the transition receipt. New drafts use the private configuration defaults.
@@ -41,6 +41,38 @@ composer seat cannot be found, or the replacement cannot represent the current
 selection. Disposal restores native visibility and removes owned React roots,
 portals, subscriptions, timers and action signals. Reasoning controls remain
 reachable alongside model selection.
+
+## Desktop Compatibility
+
+Native submission admission reads the installed App's initial and primary
+JavaScript resources without modifying or launching it. Desktop version/build
+strings are diagnostics, not an allowlist. The Host parses submission, model
+completion, draft/first-turn context, request normalization and final dispatch
+structures. Missing or ambiguous structures report the specific capability.
+Local minified identifiers and asset hashes are discovered from the resource.
+The older two-stage resource layout retains an exact-content adapter; it is
+selected only when both complete resource digests match, regardless of version.
+New resource layouts use structural discovery, not additional build entries.
+
+Each successful discovery binds interception to the observed resource SHA-256.
+A resource update between discovery and interception fails closed. The existing
+operation-token validation, awaited admission, native permission checks,
+credential isolation, execution acknowledgement and disposal fences remain.
+Production and Vite development share this composition.
+
+Managed-source account reads use the typed native account capability. The
+resource parser resolves its exported service from the native account query;
+the calling context verifies the resource and method before reading. A typed
+failure never falls back to legacy POST or a cached account. Display-profile
+adaptation and the separate Agent/Session transport remain separate capabilities;
+neither gates composer submission. Their existing version restrictions are not
+evidence that native submission is incompatible.
+
+After building the Host, run
+`node packages/cli/scripts/check-native-submission-resources.mjs --app /path/to/Codex.app`
+for read-only resource verification, or pass `--resources-dir` for an existing
+initial/primary resource directory. This verifies source compatibility and
+reports resource hashes; it does not prove a native submission or account read.
 
 ## Verification Boundaries
 

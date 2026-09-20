@@ -8,6 +8,7 @@ export const HTTP_NATIVE_ACCOUNT_UNAVAILABLE_REASONS = Object.freeze(
     'native-pin-unavailable',
     'native-pin-read-exception',
     'native-module-unavailable',
+    'native-capability-unavailable',
     'typed-input-missing',
     'typed-retired',
     'typed-connection',

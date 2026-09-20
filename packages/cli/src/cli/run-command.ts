@@ -838,13 +838,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await adapter.prepareLaunch(plan)
       if (
         shouldEnableNativeSubmission({
-          platform: process.platform,
+          platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
           adapterId: adapter.id,
           preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
         })
       ) {
         try {
-          nativeSubmission = await createNativeSubmissionComposition(managedServiceActivation, plan.executable)
+          nativeSubmission =
+            await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
+              managedServiceActivation,
+              plan.executable,
+            )
         } catch (error) {
           stdout(`[cordisx] native managed Desktop providers unavailable: ${String(error)}`)
         }
