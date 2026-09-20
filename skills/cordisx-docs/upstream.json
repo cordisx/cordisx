@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/cordisx/docs",
+  "commit": "8fc244ceac562f38392914a798edc918daa412ee",
+  "path": "skills/cordisx-docs",
+  "files": {
+    "SKILL.md": "sha256:fc6ce59c4fb97ef4fa13f66ab1f3cd423bf827dc57080cfc37db19ab4bc2ab10",
+    "agents/openai.yaml": "sha256:bf1757305e80c3b91bdee0795d1410c321b88bba31517f28a115a1f46f3bfce6",
+    "version.json": "sha256:6580bc014f8e4e5083a2f616d744bd20035fe3819f5fbadeb05c9ec3010aba52"
+  }
+}

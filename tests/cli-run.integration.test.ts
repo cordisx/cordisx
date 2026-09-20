@@ -1,22 +1,11 @@
-import {
-  access,
-  chmod,
-  mkdir,
-  mkdtemp as createTemporaryDirectory,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises'
+import { access, chmod, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { createServer } from 'node:net'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packages/cli/src/renderer/owner-documents.js'
@@ -24,51 +13,15 @@ import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
 
-import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import {
+  createBuiltinSkillFixture,
+  createBuiltinSkillsFixture,
+  createLocalDevelopmentFixture,
+  mkdtemp,
+} from './helpers/cli-run-fixtures.js'
 
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
 const execFileAsync = promisify(execFile)
-
-async function mkdtemp(prefix: string): Promise<string> {
-  const root = await createTemporaryDirectory(prefix)
-  onTestFinished(async () => {
-    const home = path.join(root, 'home')
-    const digests = await readdir(path.join(home, 'packages', 'sha256')).catch(() => [])
-    for (const digest of digests) await removeStagedPluginPackage(home, `sha256:${digest}`)
-    await rm(root, { recursive: true, force: true })
-  })
-  return root
-}
-
-async function createLocalDevelopmentFixture(root: string): Promise<{
-  readonly project: string
-  readonly entry: string
-  readonly configPath: string
-  readonly executable: string
-}> {
-  const project = path.join(root, 'project')
-  const entry = path.join(project, 'demo.ts')
-  const configPath = path.join(project, 'cordisx.config.json')
-  const executable = path.join(root, 'exits-before-injection')
-  await mkdir(project, { recursive: true })
-  await writeFile(path.join(project, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }))
-  await writeFile(entry, "export default { name: 'demo', apply() {} }\n")
-  await writeFile(configPath, JSON.stringify({ version: 1, plugins: [] }))
-  await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
-  await chmod(executable, 0o755)
-  return { project, entry, configPath, executable }
-}
-
-async function createBuiltinSkillFixture(root: string): Promise<string> {
-  const source = path.join(root, 'builtin-skill')
-  await mkdir(path.join(source, 'agents'), { recursive: true })
-  await writeFile(
-    path.join(source, 'SKILL.md'),
-    '---\nname: cordisx-plugin-development\ndescription: test Skill\n---\n',
-  )
-  await writeFile(path.join(source, 'agents', 'openai.yaml'), 'interface:\n  display_name: "CordisX"\n')
-  return source
-}
 
 describe('functional CordisX CLI', () => {
   it('rejects mismatched work guards before Vite, profile admission or history-secret writes', async () => {
@@ -297,6 +250,7 @@ describe('functional CordisX CLI', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-ready-reconciliation-'))
     const home = path.join(root, 'home')
     const sharedHome = path.join(root, 'shared-home')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     const launches: Array<{ readonly attach: boolean; readonly onReady?: () => void | Promise<void> }> = []
     const internalRunInjectedHost = vi.fn(async input => {
       launches.push({ attach: input.launcher.attach, onReady: input.onReady })
@@ -305,11 +259,13 @@ describe('functional CordisX CLI', () => {
     const runtime = {
       env: { CORDISX_HOME: home },
       internalRunInjectedHost,
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: sharedHome,
       stdout: () => undefined,
     }
 
     await runCordisXCli(['codex', '--attach'], runtime)
+    await expect(access(path.join(sharedHome, '.agents'))).rejects.toMatchObject({ code: 'ENOENT' })
     await runCordisXCli(['codex', '--executable', process.execPath], runtime)
 
     expect(launches).toHaveLength(2)
@@ -400,8 +356,10 @@ describe('functional CordisX CLI', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-handoff-failure-'))
     const home = path.join(root, 'home')
     const profile = path.join(root, 'profiles', 'fresh', 'chromium')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     const runtime = {
       env: { CORDISX_HOME: home },
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: path.join(root, 'shared-home'),
       internalAgentHistoryHost: () => {
         throw new Error('history assembly failed')
@@ -465,10 +423,35 @@ describe('functional CordisX CLI', () => {
     await expect(access(path.join(sharedHome, '.cordisx', 'studio'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('deploys all bundled Skills before a normal shared-data launch', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-bundled-skills-'))
+    const sharedHome = path.join(root, 'host-home')
+    const executable = path.join(root, 'exits-before-injection')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
+    await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
+    await chmod(executable, 0o755)
+    const output: string[] = []
+
+    await expect(runCordisXCli(['codex', '--executable', executable], {
+      env: { CORDISX_HOME: path.join(root, 'cordisx-home') },
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
+      internalSharedHomeDir: sharedHome,
+      stdout: line => {
+        output.push(line)
+      },
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+
+    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+      await expect(access(path.join(sharedHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
+    }
+    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(4)
+  })
+
   it('deploys the built-in Skill into host-isolated HOME without copying a shared personal Skill', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-isolated-skill-'))
     const cordisxHome = path.join(root, 'cordisx-home')
     const sharedHome = path.join(root, 'shared-home')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     const personalSkill = path.join(sharedHome, '.agents', 'skills', 'personal-only', 'SKILL.md')
     const executable = path.join(root, 'exits-before-injection')
     await mkdir(path.dirname(personalSkill), { recursive: true })
@@ -485,13 +468,15 @@ describe('functional CordisX CLI', () => {
       executable,
     ], {
       env: { CORDISX_HOME: cordisxHome },
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: sharedHome,
       stdout: () => undefined,
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
 
     const privateHome = path.join(cordisxHome, 'apps', 'codex', 'profiles', 'private', 'host-home')
-    await expect(access(path.join(privateHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')))
-      .resolves.toBeUndefined()
+    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+      await expect(access(path.join(privateHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
+    }
     await expect(access(path.join(privateHome, '.agents', 'skills', 'personal-only')))
       .rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(personalSkill, 'utf8')).resolves.toBe('personal-sentinel\n')
@@ -538,6 +523,7 @@ describe('functional CordisX CLI', () => {
     const { project, entry, executable } = await createLocalDevelopmentFixture(root)
     const firstHome = path.join(root, 'home-one')
     const secondHome = path.join(root, 'home-two')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     const cwdState = path.join(project, directGrantStatePath)
     await mkdir(path.dirname(cwdState), { recursive: true })
     await writeFile(cwdState, 'project-sentinel\n')
@@ -548,6 +534,7 @@ describe('functional CordisX CLI', () => {
       await expect(runCordisXCli(['dev', entry, '--executable', executable], {
         cwd: project,
         env: { CORDISX_HOME: home },
+        internalBuiltinSkillsSourceRootDir: sourceRoot,
         internalSharedHomeDir: path.join(root, 'host-home'),
         stdout: () => undefined,
       })).rejects.toThrow('Host exited before CordisX CDP became ready')
@@ -685,11 +672,13 @@ describe('functional CordisX CLI', () => {
     const { project, entry, executable } = await createLocalDevelopmentFixture(root)
     const isolatedHomedir = path.join(root, 'isolated-user-home')
     const home = path.join(isolatedHomedir, '.cordisx')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
 
     await expect(runCordisXCli(['dev', entry, '--executable', executable], {
       cwd: project,
       env: {},
       homedir: isolatedHomedir,
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: isolatedHomedir,
       stdout: () => undefined,
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
@@ -702,33 +691,36 @@ describe('functional CordisX CLI', () => {
     }
   })
 
-  it('deploys the bundled Skill before Vite development and preserves a locally edited copy', async () => {
+  it('deploys all bundled Skills before Vite development and preserves a locally edited copy', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-skill-'))
     const { project, entry, executable } = await createLocalDevelopmentFixture(root)
     const cordisxHome = path.join(root, 'cordisx-home')
     const hostHome = path.join(root, 'host-home')
-    const source = await createBuiltinSkillFixture(root)
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     const targetSkill = path.join(hostHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')
     const output: string[] = []
 
     await expect(runCordisXCli(['dev', entry, '--executable', executable], {
       cwd: project,
       env: { CORDISX_HOME: cordisxHome },
-      internalBuiltinSkillSourceDir: source,
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: hostHome,
       stdout: line => {
         output.push(line)
       },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     await expect(readFile(targetSkill, 'utf8')).resolves.toContain('description: test Skill')
-    expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
+    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+      await expect(access(path.join(hostHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
+    }
+    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(4)
 
     await writeFile(targetSkill, 'local user edit\n')
     output.length = 0
     await expect(runCordisXCli(['dev', entry, '--executable', executable], {
       cwd: project,
       env: { CORDISX_HOME: cordisxHome },
-      internalBuiltinSkillSourceDir: source,
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: hostHome,
       stdout: line => {
         output.push(line)
@@ -744,19 +736,19 @@ describe('functional CordisX CLI', () => {
     const directHome = path.join(root, 'direct-home')
     const configHome = path.join(root, 'config-home')
     const skillHome = path.join(root, 'skill-home')
-    const skillSource = await createBuiltinSkillFixture(root)
+    const skillSourceRoot = await createBuiltinSkillsFixture(root)
 
     await runCordisXCli(['dev', entry, '--dry-run'], {
       cwd: project,
       env: { CORDISX_HOME: directHome },
-      internalBuiltinSkillSourceDir: skillSource,
+      internalBuiltinSkillsSourceRootDir: skillSourceRoot,
       internalSharedHomeDir: skillHome,
       stdout: () => undefined,
     })
     await runCordisXCli(['dev', '--config', configPath, '--dry-run'], {
       cwd: project,
       env: { CORDISX_HOME: configHome },
-      internalBuiltinSkillSourceDir: skillSource,
+      internalBuiltinSkillsSourceRootDir: skillSourceRoot,
       internalSharedHomeDir: skillHome,
       stdout: () => undefined,
     })
@@ -946,6 +938,7 @@ describe('functional CordisX CLI', () => {
     const entry = path.join(project, 'send-confetti', 'src', 'send-confetti.ts')
     const observedEnvironment = path.join(root, 'observed-environment.json')
     const executable = path.join(root, 'capture-development-entry')
+    const sourceRoot = await createBuiltinSkillsFixture(root)
     await mkdir(path.dirname(entry), { recursive: true })
     await writeFile(
       path.join(project, 'send-confetti', 'package.json'),
@@ -979,6 +972,7 @@ describe('functional CordisX CLI', () => {
     await expect(runCordisXCli(['dev', entry, '--executable', executable], {
       cwd: project,
       env: { CORDISX_HOME: home },
+      internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: hostHome,
       stdout: line => {
         output.push(line)

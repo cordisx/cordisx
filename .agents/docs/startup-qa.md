@@ -40,12 +40,14 @@ The default launch opens an independent Codex window while retaining the
 existing account, conversations, projects, and model configuration. Explicit
 Host-data isolation is an advanced profile option.
 
-## Will CordisX overwrite my existing skills?
+## Will CordisX overwrite my existing Skills?
 
 No. The default launch uses `shared` data mode and continues to discover the
-user's personal skills and skills in the current repository. CordisX manages
-only its bundled plugin-development skill; it does not replace or remove the
-user's existing content.
+user's personal Skills and Skills in the current repository. A CordisX version
+that bundles managed Skills updates only CordisX-owned copies whose management
+marker and content still match; an unmanaged or user-modified directory is
+preserved and reported instead of being silently overwritten. Check the
+installed version before assuming a particular bundled entry is available.
 
 ## What is the difference between `shared` and `host-isolated`?
 
@@ -53,8 +55,10 @@ The default `shared` mode uses an independent CordisX window and Chromium
 profile while retaining the current user's Codex data and personal skills.
 
 `host-isolated` gives that CordisX profile a separate Host home, so personal
-skills from the user's real home are not discovered. Skills in the current
-repository and CordisX's bundled plugin-development skill remain available.
+Skills from the user's real home are not discovered. Skills in the current
+repository and the compatible CordisX Skills bundled by the installed version
+remain available.
+
 Use this mode only when account, conversation, or other Host data must also be
 isolated:
 
@@ -65,9 +69,17 @@ npx cordisx@beta codex work --data host-isolated
 ## Can I ask Codex to build a plugin immediately after launch?
 
 Yes. Describe the feature in natural language—for example, “Make the send
-button launch fullscreen confetti when it is clicked.” The bundled
-plugin-development skill handles project preparation, implementation,
-Playground launch, and verification.
+button launch fullscreen confetti when it is clicked.” Start with the bundled
+`cordisx` entry when it is available; it selects the plugin-development
+guidance without asking you to choose a lower-level Skill. It uses the checks
+appropriate to the requested behavior and does not launch a native App solely
+for documentation or static changes.
+
+## Where can I find answers about usage choices and known pitfalls?
+
+See the [user experience Q&A](user-experience-qa.md). It records contextual,
+evidence-backed answers and links to the governing documentation instead of
+turning one incident into a universal product rule.
 
 ## Where are the complete launcher options?
 

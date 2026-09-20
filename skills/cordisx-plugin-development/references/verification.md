@@ -13,8 +13,9 @@
 
 ## Development transport
 
+- Use this section when the request or claim needs live development transport. For prose, metadata, static schema, or packaging-only work, choose the narrower focused checks and do not start an App solely to satisfy this checklist.
 - Run `cordisx dev --dry-run` from the same directory and config-discovery path that users will use. For multiple plugins, prove that every enabled config entry resolves.
-- Run one launcher-owned Vite server and one Electron App for the project. Do not start a development server per plugin.
+- When an authorized live run is needed, use one launcher-owned Vite server and one Electron App for the project. Do not start a development server per plugin.
 - Verify both update triggers when applicable: save a local source file and invoke **Reload plugin** in Manager for one active local-development plugin.
 - Classify the observed result correctly. A refresh-compatible React component edit may retain component state; plugin entry, manifest, or activation changes replace that plugin through the Cordis generation transaction; Host modules outside a refresh boundary restart the CordisX renderer in the current document; config and Node-side launcher changes require restarting the command.
 - A source write proves only that an update was triggered. Inspect the runtime result and verify disposer cleanup, a single active registration/root, and last-good behavior after a failed candidate.
@@ -26,10 +27,10 @@ loader. Do not add a second WebSocket or CDP source-transfer path for production
 
 ## Real native App and Playground
 
-- Use `cordisx dev` for claims about the installed native App. The expected path is an isolated Electron launch whose `app://` renderer imports the launcher-owned loopback Vite entry; do not substitute Computer Use or a generic browser launch.
+- Use `cordisx dev` for claims about the installed native App when that launch is in scope and authorized. The expected path is an isolated Electron launch whose `app://` renderer imports the launcher-owned loopback Vite entry; generic browser evidence does not establish that native path.
 - CDP is the initial bootstrap and native policy-control seam. Before reload it grants loopback access to the exact target origin and enables CSP bypass. Subsequent modules and update notifications use Vite HTTP and Vite's own WebSocket. Source maps are separate resources fetched on demand; readiness follows the current installation's Vite bootstrap acknowledgement rather than a generic page-load event. Stopping restores the permission to `prompt`, disables the bypass, disconnects HMR, and removes Vite-injected styles even when plugin disposal fails.
 - Confirm the native renderer reaches ready and exercise the intended UI or contribution. On stop, verify the Vite/CDP ports, in-memory session state, and launcher-owned process/profile resources are released. The stable dependency cache under `CORDISX_HOME/cache/native-vite` should remain; reject symlinked or foreign-owned cache leaves, and verify that a second launch from the same CLI and workspace roots reuses the cache without an optimizer-triggered reload.
-- Apply the [debugging tool boundary](live-plugin-development.md#choose-debugging-tools-before-accessing-the-host) before native inspection or interaction. Use CordisX diagnostics and authorized CDP/debug mechanisms; never use Computer Use/CUA. A permitted harness does not establish user interaction or acceptance.
+- Apply the [debugging tool boundary](live-plugin-development.md#choose-debugging-tools-before-accessing-the-host) before native inspection or interaction. Use only mechanisms authorized for that target and action; do not use a different tool to bypass an explicit user, Host, or tool denial. A permitted harness does not establish user interaction or acceptance.
 - Test the actual native state transition relevant to the claim, including replacement of native layout when applicable. Changing fixture labels inside an `app://` page remains simulated evidence; it does not prove the real operation or full native flow.
 - Confirm the inspected window is foreground and running the intended module when verifying pointer or rendering behavior. Check behavior after the update, not just receipt of an HMR notification.
 - Use the maintained local Playground when it directly covers the feature under test.
@@ -41,8 +42,8 @@ loader. Do not add a second WebSocket or CDP source-transfer path for production
 
 ## Delivery evidence
 
-- Run the applicable owner gate and checks that support the claim; keep full gates at the repository-required merge/release boundary rather than every preview edit.
-- Run typecheck, build, package/install checks, audit, and diff check when required by the repository.
+- Run the checks required by the repository that owns the plugin and the evidence needed for the claim. CordisX Host maintainer gates apply only to CordisX-owned changes.
+- Run typecheck, build, package/install checks, audit, and diff check when required by that repository or delivery target.
 - Record real request evidence: no lazy chunk/CSS/image before the feature is opened; those resources appear after the trigger; a second open does not issue a second evaluation; and a replaced generation cannot become active later.
 - Exercise the relevant real runtime in the needed theme and layout states; these should confirm rules already encoded in components and tests, not serve as the first design review.
 - Honor the current preview agreement. Preserve a protected review instance; use already-authorized restart/HMR for an independent debug instance while retaining persistent data and non-target windows.

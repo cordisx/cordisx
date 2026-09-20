@@ -37,8 +37,9 @@ CordisX 当前需要 Node.js 22.19 或更高版本。更新 Node.js 后重新运
 ## CordisX 会覆盖我原来的 Skills 吗？
 
 不会。默认启动使用 `shared` 数据模式，继续读取用户原有的个人 Skills 和当前
-仓库中的 Skills。CordisX 只管理自己内置的插件开发 Skill，不会替换或删除用户
-已有的内容。
+仓库中的 Skills。包含托管 Skills 的 CordisX 版本只会更新带有有效管理标记且
+内容仍匹配的 CordisX 自有副本；未托管或被用户修改的目录会被保留并报告，不会
+被静默覆盖。判断某个内置入口是否可用时，应以实际安装版本为准。
 
 ## `shared` 和 `host-isolated` 有什么区别？
 
@@ -46,8 +47,8 @@ CordisX 当前需要 Node.js 22.19 或更高版本。更新 Node.js 后重新运
 用户的 Codex 数据与个人 Skills。
 
 `host-isolated` 会为这个 CordisX profile 使用独立的 Host home，因此不会读取
-真实用户 home 中的个人 Skills；当前仓库中的 Skills 和 CordisX 内置的插件开发
-Skill 仍然可用。只有需要隔离账号、会话或其他宿主数据时才使用它：
+真实用户 home 中的个人 Skills；当前仓库中的 Skills 和实际安装版本内置的兼容
+CordisX Skills 仍然可用。只有需要隔离账号、会话或其他宿主数据时才使用它：
 
 ```bash
 npx cordisx@beta codex work --data host-isolated
@@ -56,8 +57,14 @@ npx cordisx@beta codex work --data host-isolated
 ## 启动后可以直接让 Codex 开发插件吗？
 
 可以。直接用自然语言描述你想加入的功能即可，例如“我要发送按钮在点击时
-全屏放礼花”。CordisX 内置的插件开发 Skill 会负责后续的项目准备、实现、
-Playground 运行与验证。
+全屏放礼花”。如果安装版本包含 `cordisx` 入口，从这个入口开始即可；它会选择
+插件开发指导，不要求你手动挑选底层 Skill。它会按实际需求选择验证方式，不会
+仅因文档或静态改动而启动原生 App。
+
+## 在哪里查看常见使用疑惑和已知踩坑？
+
+参见[用户经验 Q&A](user-experience-qa.md)。其中记录有适用条件和依据的经验，
+并链接对应的规范文档，不会把单次事件直接写成通用产品规则。
 
 ## 在哪里查看完整启动选项？
 

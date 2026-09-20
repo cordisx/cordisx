@@ -1,0 +1,4 @@
+interface:
+  display_name: "CordisX Docs"
+  short_description: "Find standard CordisX documentation"
+  default_prompt: "Use $cordisx-docs to find the authoritative guide for my CordisX question."

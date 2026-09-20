@@ -1,0 +1,4 @@
+interface:
+  display_name: "CordisX User Experience Q&A"
+  short_description: "Answer CordisX usage questions with context and evidence"
+  default_prompt: "Use $cordisx-qa to answer this CordisX user-experience question with its applicability, evidence, and exact implementation or release status."

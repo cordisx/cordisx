@@ -23,6 +23,7 @@ implementation of those contracts, not a second public specification.
 | [getting-started](getting-started.md)               | Guide    | Installation, local setup, launch modes, examples, and smoke commands |
 | [startup-qa](startup-qa.md)                         | Guide    | Startup troubleshooting                                               |
 | [startup-qa.zh-CN](startup-qa.zh-CN.md)             | Guide    | Simplified Chinese startup troubleshooting                            |
+| [user-experience-qa](user-experience-qa.md)         | Guide    | Evidence-backed usage questions, pitfalls, and practical tradeoffs    |
 
 ## Develop and inspect plugins
 
@@ -120,10 +121,14 @@ instructions are not public product reference material.
 
 Package READMEs, including [the CLI](https://github.com/cordisx/cordisx/blob/main/packages/cli/README.md), stay beside
 their published artifacts. [Example READMEs](https://github.com/cordisx/cordisx/blob/main/examples/plugins/hello-toolbar/README.md)
-explain individual demos. The [plugin-development Skill](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/SKILL.md)
-is shipped with the CLI and keeps its task references together for installed
-use. These local entry points may summarize a feature and link to the detailed
-reference without duplicating its authority.
+explain individual demos. The bundled
+[CordisX entry Skill](https://github.com/cordisx/cordisx/blob/main/skills/cordisx/SKILL.md),
+[user-experience Q&A Skill](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-qa/SKILL.md),
+and [plugin-development Skill](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/SKILL.md)
+keep their task guidance together for installed use. The separately owned Docs
+Skill supplies standard documentation navigation. These artifacts may summarize
+a feature and link to its owning reference without duplicating normative product
+or protocol sources. Availability depends on the installed CordisX version.
 
 - [Composer controlled visuals](composer-visuals.md): experimental probe/runtime checkpoint and remaining production integration.
 - [Plugin Agent tools](plugin-agent-tools.md): restricted CLI invocation, Skill resources, and current integration limits.

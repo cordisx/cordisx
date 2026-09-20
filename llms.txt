@@ -8,13 +8,17 @@ point for agents helping a user install, start, use, or customize CordisX.
 1. Read the npm beta installation section of [Getting started](.agents/docs/getting-started.md).
    Check the user's existing installation and selected profile, then complete
    only missing setup. Use the published beta channel, not a source checkout.
-2. For ongoing documentation discovery, follow [the documentation Skill installation guide](https://raw.githubusercontent.com/cordisx/docs/main/.agents/docs/install-docs-skill.md).
-   The Skill is a small navigation aid, not a copy of the product documentation.
-3. If the request includes plugins, continue at [Marketplace](https://raw.githubusercontent.com/cordisx/marketplace/main/llms.txt)
+2. If the request includes plugins, continue at [Marketplace](https://raw.githubusercontent.com/cordisx/marketplace/main/llms.txt)
    or the specific source guide provided by the user.
-4. For a requested launch, use the selected profile's normal shared-data launch
+3. For a requested launch, use the selected profile's normal shared-data launch
    from Getting started. Verify readiness with `cordisx status --json` and report
    installation, running Host, plugin activation, and service login separately.
+
+Startup manages the Skills included in that CLI release. This source revision
+provides the [cordisx entry](skills/cordisx/SKILL.md), with Docs for standards,
+Q&A for user experience, and Plugin Dev for implementation. Published releases
+can lag this source; use the owner guides directly if an installed companion
+Skill is unavailable. Do not add manual Docs Skill installation to startup.
 
 Reading this entry alone is not a request to install or launch anything. For a
 question about CordisX, use the task routes below without performing adoption.
@@ -25,9 +29,9 @@ question about CordisX, use the task routes below without performing adoption.
 - Diagnose a startup failure: [Startup Q&A](.agents/docs/startup-qa.md).
 - Configure a source or install an existing plugin: [Marketplace entry](https://raw.githubusercontent.com/cordisx/marketplace/main/llms.txt).
 - Create or modify a plugin: [Plugin-development Skill](skills/cordisx-plugin-development/SKILL.md).
-  The CLI deploys this separate Skill on a non-dry-run Host launch.
+- Find or record practical user experience: [Q&A Skill](skills/cordisx-qa/SKILL.md).
 - Find a product topic: [Host documentation index](.agents/docs/README.md).
-- Find another owning repository or install the navigation Skill: [Docs entry](https://raw.githubusercontent.com/cordisx/docs/main/llms.txt).
+- Find standard documentation or another owning repository: [Docs entry](https://raw.githubusercontent.com/cordisx/docs/main/llms.txt).
 
 Follow links for the current task, not every link recursively. Resolve relative
 links against the containing document's URL. Do not repeat an already completed

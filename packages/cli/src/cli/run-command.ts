@@ -107,12 +107,7 @@ import { PlatformProviderPluginLifecycleRuntime } from '../launcher/platform-pro
 import { stagePluginPackageSourceV1 } from '../launcher/packages/index.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14, normalizePluginManifestV14 } from '../launcher/latest-runtime-manifest.js'
-import {
-  CordisXSkillConflictError,
-  type CordisXSkillDeploymentResult,
-  deployBundledCordisXSkill,
-  deployBundledCordisXSkillToHome,
-} from '../launcher/builtin-skill.js'
+import { deployBundledCordisXSkill, deployBundledCordisXSkills } from '../launcher/builtin-skill.js'
 import {
   createOwnerDocumentBridgeHandler,
   entityInstallationId,
@@ -130,6 +125,7 @@ import {
   cliProxyServiceConfigApis,
   codexHome,
   type CordisXCliRuntime,
+  deployBuiltinSkillsWithoutOverwritingUserChanges,
   deployBuiltinSkillWithoutOverwritingUserChanges,
   localDevelopmentHostConfig,
   pluginIdentities,
@@ -853,17 +849,32 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           stdout(`[cordisx] native managed Desktop providers unavailable: ${String(error)}`)
         }
       }
-      await deployBuiltinSkillWithoutOverwritingUserChanges(
-        deployBundledCordisXSkill(plan, {
-          ...(runtime.internalBuiltinSkillSourceDir === undefined
-            ? {}
-            : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
-          ...(runtime.internalSharedHomeDir === undefined
-            ? {}
-            : { sharedHomeOverride: runtime.internalSharedHomeDir }),
-        }),
-        stdout,
-      )
+      if (
+        runtime.internalBuiltinSkillSourceDir !== undefined
+        && runtime.internalBuiltinSkillsSourceRootDir === undefined
+      ) {
+        await deployBuiltinSkillWithoutOverwritingUserChanges(
+          deployBundledCordisXSkill(plan, {
+            sourceDir: runtime.internalBuiltinSkillSourceDir,
+            ...(runtime.internalSharedHomeDir === undefined
+              ? {}
+              : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+          }),
+          stdout,
+        )
+      } else {
+        await deployBuiltinSkillsWithoutOverwritingUserChanges(
+          deployBundledCordisXSkills(plan, {
+            ...(runtime.internalBuiltinSkillsSourceRootDir === undefined
+              ? {}
+              : { sourceRootDir: runtime.internalBuiltinSkillsSourceRootDir }),
+            ...(runtime.internalSharedHomeDir === undefined
+              ? {}
+              : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+          }),
+          stdout,
+        )
+      }
       productionPluginManagement = await openProductionPluginManagementComposition({
         configPath,
         homeDir: rootFromConfigPath(configPath),

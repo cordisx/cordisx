@@ -18,9 +18,18 @@ ownership belongs to CordisXMono; public plugin contracts belong to
 - Package, example, template, and fixture READMEs stay beside their artifacts.
   Their quick starts and bounded summaries are useful at those entry points;
   link to the full reference instead of copying its specification.
-- `skills/cordisx-plugin-development` is a maintained product artifact shipped
-  with the CLI. Keep its entry point and task references usable after packaging;
-  it is not another source of normative plugin contracts.
+- `skills/cordisx`, `skills/cordisx-qa`, and
+  `skills/cordisx-plugin-development` are maintained Host product artifacts.
+  Each directory is a self-contained packaged Skill with its own metadata and
+  provenance. Keep relative links to compatible sibling Skills valid after the
+  complete bundle is installed. The separately owned `skills/cordisx-docs`
+  snapshot provides documentation navigation; none of these Skill artifacts is
+  another source of normative product or plugin contracts.
+- Put reusable user experience in the owning `.agents/docs` guide as Q&A with
+  applicability and evidence. Do not publish raw conversations or private logs,
+  and do not record every interaction automatically. When experience becomes a
+  supported product rule, update or link the owning reference instead of keeping
+  a competing rule in a Skill.
 
 ## Authority and updates
 

@@ -121,6 +121,7 @@ export async function prepareCliCommand(
     runtime.internalRunInjectedHost,
     runtime.internalAgentHistoryHost,
     runtime.internalBuiltinSkillSourceDir,
+    runtime.internalBuiltinSkillsSourceRootDir,
     runtime.internalSharedHomeDir,
     runtime.internalBuildRendererBundle,
     runtime.internalObserveOwnerDocuments,

@@ -28,9 +28,13 @@ while IFS= read -r -d '' file; do
       ;;
   esac
   case "$file" in
-    skills/cordisx-plugin-development/*) skill_changed=true ;;
+    skills/cordisx/*|skills/cordisx-docs/*|skills/cordisx-qa/*|skills/cordisx-plugin-development/*)
+      skill_changed=true ;;
   esac
   case "$file" in
+    skills/cordisx/*.md|skills/cordisx/version.json|skills/cordisx/agents/openai.yaml|\
+    skills/cordisx-docs/*.md|skills/cordisx-docs/version.json|skills/cordisx-docs/upstream.json|skills/cordisx-docs/agents/openai.yaml|\
+    skills/cordisx-qa/*.md|skills/cordisx-qa/version.json|skills/cordisx-qa/agents/openai.yaml|\
     skills/cordisx-plugin-development/*.md|skills/cordisx-plugin-development/version.json|skills/cordisx-plugin-development/agents/openai.yaml)
       # Shipped Skill prose and metadata have a dedicated package/deployment gate.
       continue

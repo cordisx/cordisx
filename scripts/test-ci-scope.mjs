@@ -61,10 +61,14 @@ test('Host guides use the documentation gate', () => {
   assert.equal(result.docs_only, 'true')
 })
 
-test('PR 389 content selects documentation plus shipped Skill checks', () => {
+test('bundled Skill content selects documentation plus shipped Skill checks', () => {
   const result = classify({
     changes: {
       '.agents/docs/native-debugging-runbook.md': '# Guide\n',
+      'skills/cordisx/SKILL.md': '# Entry\n',
+      'skills/cordisx-docs/SKILL.md': '# Docs\n',
+      'skills/cordisx-docs/upstream.json': '{}\n',
+      'skills/cordisx-qa/SKILL.md': '# Q&A\n',
       'skills/cordisx-plugin-development/SKILL.md': '# Skill\n',
       'skills/cordisx-plugin-development/references/live-plugin-development.md': '# Guide\n',
       'skills/cordisx-plugin-development/agents/openai.yaml': 'interface: {}\n',
@@ -139,6 +143,15 @@ test('deleting a Skill asset still runs its package completeness checks', () => 
   assert.equal(result.skill_changed, 'true')
   assert.equal(result.full, 'false')
 })
+
+for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa']) {
+  test(`all bundled Skill trees select package completeness checks: ${skillName}`, () => {
+    const result = classify({ changes: { [`skills/${skillName}/SKILL.md`]: '# Skill\n' } })
+    assert.equal(result.skill_changed, 'true')
+    assert.equal(result.full, 'false')
+    assert.equal(result.docs_only, 'true')
+  })
+}
 
 test('whitespace and newline paths remain single records', () => {
   assert.equal(classify({ changes: { '.agents/docs/two words\nlauncher.md': '# Guide\n' } }).docs_only, 'true')

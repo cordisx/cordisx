@@ -132,7 +132,8 @@ import { type ManagedServiceNodeActivation, ManagedServiceNodeHost } from '../la
 import {
   CordisXSkillConflictError,
   type CordisXSkillDeploymentResult,
-  deployBundledCordisXSkill,
+  type CordisXSkillsDeploymentResult,
+  deployBundledCordisXSkillsToHome,
   deployBundledCordisXSkillToHome,
 } from '../launcher/builtin-skill.js'
 import {
@@ -204,6 +205,8 @@ export interface CordisXCliRuntime {
   }) => void | Promise<void>
   /** Repository-only source seam for built-in Skill deployment tests. */
   readonly internalBuiltinSkillSourceDir?: string
+  /** Repository-only source-root seam for bundled Skills deployment tests. */
+  readonly internalBuiltinSkillsSourceRootDir?: string
   /** Repository-only HOME seam that prevents launch tests from touching the user's real HOME. */
   readonly internalSharedHomeDir?: string
   /** Repository-only launch seam for proving CLI assembly without starting a native Host. */
@@ -230,6 +233,21 @@ export async function deployBuiltinSkillWithoutOverwritingUserChanges(
   } catch (error) {
     if (!(error instanceof CordisXSkillConflictError)) throw error
     stdout(`[cordisx] built-in Skill preserved: ${error.message}`)
+  }
+}
+
+export async function deployBuiltinSkillsWithoutOverwritingUserChanges(
+  deployment: Promise<CordisXSkillsDeploymentResult>,
+  stdout: (line: string) => void,
+): Promise<void> {
+  const result = await deployment
+  for (const installed of result.deployments) {
+    if (installed.status !== 'unchanged') {
+      stdout(`[cordisx] built-in Skill ${installed.status}: ${installed.targetDir}`)
+    }
+  }
+  for (const conflict of result.conflicts) {
+    stdout(`[cordisx] built-in Skill preserved: ${conflict.message}`)
   }
 }
 
@@ -676,13 +694,24 @@ export async function runDevelopment(
     const homeConfig = await ensureHomeConfig(homeConfigOptions)
     if (invocation.options.attach) {
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
-    } else {
+    } else if (
+      runtime.internalBuiltinSkillSourceDir !== undefined
+      && runtime.internalBuiltinSkillsSourceRootDir === undefined
+    ) {
       await deployBuiltinSkillWithoutOverwritingUserChanges(
         deployBundledCordisXSkillToHome(
           runtime.internalSharedHomeDir ?? environment.HOME ?? runtime.homedir ?? os.homedir(),
-          runtime.internalBuiltinSkillSourceDir === undefined
+          { sourceDir: runtime.internalBuiltinSkillSourceDir },
+        ),
+        stdout,
+      )
+    } else {
+      await deployBuiltinSkillsWithoutOverwritingUserChanges(
+        deployBundledCordisXSkillsToHome(
+          runtime.internalSharedHomeDir ?? environment.HOME ?? runtime.homedir ?? os.homedir(),
+          runtime.internalBuiltinSkillsSourceRootDir === undefined
             ? {}
-            : { sourceDir: runtime.internalBuiltinSkillSourceDir },
+            : { sourceRootDir: runtime.internalBuiltinSkillsSourceRootDir },
         ),
         stdout,
       )

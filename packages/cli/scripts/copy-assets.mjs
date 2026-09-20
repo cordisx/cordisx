@@ -7,8 +7,9 @@ const destination = fileURLToPath(new URL('../dist/assets', import.meta.url))
 const channelRuntimeSource = fileURLToPath(new URL('../../channel-runtime/dist', import.meta.url))
 const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime', import.meta.url))
 const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
-const cordisxSkillSource = fileURLToPath(new URL('../../../skills/cordisx-plugin-development', import.meta.url))
-const cordisxSkillDestination = fileURLToPath(new URL('../dist/skills/cordisx-plugin-development', import.meta.url))
+const cordisxSkillsSource = fileURLToPath(new URL('../../../skills', import.meta.url))
+const cordisxSkillsDestination = fileURLToPath(new URL('../dist/skills', import.meta.url))
+const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']
 const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
   'renderer/model-providers.css',
@@ -30,11 +31,17 @@ for (const relative of preservedRendererStyles) {
 // so an installed `cordisx` tarball never relies on a workspace symlink.
 await mkdir(channelRuntimeDestination, { recursive: true })
 await cp(channelRuntimeSource, channelRuntimeDestination, { recursive: true, force: true })
-// Mirror the complete maintained Skill into dist so the npm package and CLI
-// launcher use the same immutable source tree without publishing source paths.
-await rm(cordisxSkillDestination, { recursive: true, force: true })
-await mkdir(path.dirname(cordisxSkillDestination), { recursive: true })
-await cp(cordisxSkillSource, cordisxSkillDestination, { recursive: true, force: false, errorOnExist: true })
+// Mirror every release-owned Skill into dist so the npm package and CLI
+// launcher use the same immutable source trees without publishing source paths.
+await rm(cordisxSkillsDestination, { recursive: true, force: true })
+await mkdir(cordisxSkillsDestination, { recursive: true })
+for (const skillName of bundledSkillNames) {
+  await cp(
+    path.join(cordisxSkillsSource, skillName),
+    path.join(cordisxSkillsDestination, skillName),
+    { recursive: true, force: false, errorOnExist: true },
+  )
+}
 const channelService = await readFile(channelServiceDestination, 'utf8')
 await writeFile(
   channelServiceDestination,

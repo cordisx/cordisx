@@ -7,6 +7,11 @@ description: Assess the feasibility of a requested CordisX customization, then c
 
 Build plugins against the public CordisX contract. Keep the Host responsible for shared UI and runtime policy; keep business behavior and visual design in the owning plugin. Bundled revision and owning source are recorded in [version.json](version.json); the launching CLI deploys this complete tree by content digest.
 
+For current product facts and version compatibility, read
+[cordisx-docs](../cordisx-docs/SKILL.md). For evidence-backed user experience,
+known pitfalls, or recording a Q&A entry, read
+[cordisx-qa](../cordisx-qa/SKILL.md). Do not copy either source into this Skill.
+
 ## Read the relevant references
 
 - Assess any requested product behavior before scaffolding or editing: [feasibility-assessment.md](references/feasibility-assessment.md)
@@ -18,12 +23,13 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Run or deliver the result: [verification.md](references/verification.md)
 - Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)
 
-## Native plugin debugging tool boundary
+## Native plugin debugging boundary
 
-When debugging or verifying a CordisX plugin in a CordisX-launched Codex Host,
-never use Computer Use/CUA, including for screenshots or native UI inspection.
-Use CordisX development launch, Host injection, logs, permission diagnostics,
-and its authorized CDP/debug mechanisms. Read
+When a claim requires the CordisX-launched native Host, use the active
+environment's authorized CordisX development launch, Host injection, logs,
+permission diagnostics, and debugging mechanisms. Tool availability is not
+authorization: respect explicit user, Host, and tool restrictions, and never
+use another access path to bypass a denial. Read
 [the debugging workflow and permission boundary](references/live-plugin-development.md#choose-debugging-tools-before-accessing-the-host)
 before accessing the running Host.
 
@@ -43,12 +49,12 @@ before accessing the running Host.
 2. Proceed directly for a supported plugin request. If it needs a missing CordisX or Cordis capability, do not fake it with private Host state; explain the gap and smallest public contribution path. A plugin request alone does not authorize Host-core changes or an external PR.
 3. Select the creation mode from the user's project: one standalone plugin, a dedicated multi-plugin workspace, or `.cordisx/plugins/<id>` embedded in an existing business project. Preserve an existing package-manager workspace instead of rebuilding the project around CordisX.
 4. If `CORDISX_DEV_ENTRY` is set, use that exact legacy single-plugin entry and running launch. For config-driven development, use the explicit or discovered project config and all enabled entries. Do not start a second Vite or Electron process for each plugin.
-5. When creating a plugin, infer a concise product slug and use the maintained `create-cordisx-plugin` generator in the selected mode. Keep the scaffolding command as an implementation detail unless the user asks for it.
+5. When creating a plugin, infer a concise product slug and use the maintained `create-cordisx-plugin` generator in the selected mode. A third-party package may use a legal unscoped name or a scope controlled by its publisher; do not impose CordisX repository naming or release conventions. Keep the scaffolding command as an implementation detail unless the user asks for it.
 6. Define the manifest, localized product copy, contributions, config schema, permissions, React boundaries, and lifecycle behavior. Put activation effects under Cordis ownership and keep ESM top-level evaluation free of product side effects.
 7. Keep visual choices inside Host-supported components, tokens, semantic roles, and controlled visual seats. Locate a maintained example, but do not copy generated fixtures wholesale.
 8. Choose focused checks for the changed behavior. Show a useful preview early; add regression tests where they catch a real contract, React, or lifecycle failure, without requiring new tests for every reversible visual edit.
-9. Run the project through `cordisx dev`. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
-10. Exercise the real isolated native `app://` path for native claims; use Playground evidence only for the behavior it actually hosts.
+9. Run `cordisx dev` only when live development evidence is relevant and the launch is authorized. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
+10. Exercise the real isolated native `app://` path only for native claims; use Playground evidence only for the behavior it actually hosts. Do not launch an App solely for prose, metadata, or static checks.
 11. For production delivery, use the generated `cordisx/vite` helper config and retain its complete indexed Vite ESM graph. Do not duplicate the production Rollup policy or flatten dynamic imports, CSS, or static assets into a hand-built single file.
 12. Report implementation, verification, limitations, and planned work separately.
 
@@ -62,4 +68,4 @@ before accessing the running Host.
 
 ## Delivery
 
-Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. A production graph check validates formal `artifact.json`, its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. Honor the active preview agreement: keep a protected review session available, or update an independent debug instance directly when the user has authorized restart/HMR. Preserve persistent data and non-target instances.
+Provide exact evidence appropriate to the user's repository and claim: focused tests, diff checks, generated-project checks, and the relevant runtime when needed. CordisX maintainer gates are not admission requirements for third-party plugins. A production graph check validates formal `artifact.json`, its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. Honor the active preview agreement: keep a protected review session available, or update an independent debug instance directly when the user has authorized restart/HMR. Preserve persistent data and non-target instances.

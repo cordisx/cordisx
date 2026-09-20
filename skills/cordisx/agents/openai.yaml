@@ -1,0 +1,4 @@
+interface:
+  display_name: "CordisX"
+  short_description: "Route and complete CordisX requests from one entry"
+  default_prompt: "Use $cordisx to understand my CordisX goal, select the relevant bundled guidance, and complete the request without asking me to choose a lower-level Skill."

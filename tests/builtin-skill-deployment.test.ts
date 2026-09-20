@@ -4,12 +4,21 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ResolvedLaunchPlan } from '../packages/cli/src/adapters/contracts.js'
 import {
+  CORDISX_BUNDLED_SKILL_NAMES,
   CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
   CORDISX_SKILL_MARKER_FILE,
   CordisXSkillConflictError,
   deployBundledCordisXSkill,
+  deployBundledCordisXSkills,
   effectiveHomeForCordisXSkill,
 } from '../packages/cli/src/launcher/builtin-skill.js'
+
+const bundledSkillSources = {
+  cordisx: 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx',
+  'cordisx-docs': 'https://github.com/cordisx/docs/tree/main/skills/cordisx-docs',
+  'cordisx-qa': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-qa',
+  'cordisx-plugin-development': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+} as const
 
 async function createSkillSource(root: string, revision: string): Promise<string> {
   const source = path.join(root, 'source-skill')
@@ -22,6 +31,27 @@ async function createSkillSource(root: string, revision: string): Promise<string
   await writeFile(path.join(source, 'agents', 'openai.yaml'), 'interface:\n  display_name: "CordisX"\n')
   await writeFile(path.join(source, 'references', 'verification.md'), `${revision}\n`)
   return source
+}
+
+async function createSkillBundleSource(root: string, revision: string): Promise<string> {
+  const sourceRoot = path.join(root, 'source-skills')
+  for (const skillName of CORDISX_BUNDLED_SKILL_NAMES) {
+    const source = path.join(sourceRoot, skillName)
+    await mkdir(path.join(source, 'agents'), { recursive: true })
+    await writeFile(
+      path.join(source, 'SKILL.md'),
+      `---\nname: ${skillName}\ndescription: ${revision}\n---\n`,
+    )
+    await writeFile(path.join(source, 'agents', 'openai.yaml'), `interface:\n  display_name: "${skillName}"\n`)
+    await writeFile(
+      path.join(source, 'version.json'),
+      JSON.stringify({
+        version: revision,
+        source: bundledSkillSources[skillName],
+      }),
+    )
+  }
+  return sourceRoot
 }
 
 function sharedPlan(home: string): ResolvedLaunchPlan {
@@ -77,6 +107,70 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 }
 
 describe('built-in CordisX Skill deployment', () => {
+  it('installs all four bundled Skills with their own provenance and management markers', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-'))
+    const home = path.join(root, 'home')
+    const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
+
+    const result = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
+
+    expect(result.conflicts).toEqual([])
+    expect(result.deployments.map(item => path.basename(item.targetDir))).toEqual(CORDISX_BUNDLED_SKILL_NAMES)
+    expect(result.deployments.every(item => item.status === 'installed')).toBe(true)
+    for (const skillName of CORDISX_BUNDLED_SKILL_NAMES) {
+      const target = path.join(home, '.agents', 'skills', skillName)
+      const marker = JSON.parse(await readFile(path.join(target, CORDISX_SKILL_MARKER_FILE), 'utf8'))
+      expect(marker).toMatchObject({
+        managedBy: 'cordisx',
+        skillName,
+        provenance: { version: 'bundle-one', source: bundledSkillSources[skillName] },
+      })
+    }
+  })
+
+  it('reports one user conflict while installing and upgrading the other bundled Skills', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-conflict-'))
+    const home = path.join(root, 'home')
+    const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
+    const first = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
+    expect(first.deployments).toHaveLength(4)
+
+    const edited = path.join(home, '.agents', 'skills', 'cordisx-qa', 'SKILL.md')
+    await writeFile(edited, 'user-owned Q&A guidance\n')
+    await writeFile(
+      path.join(sourceRootDir, 'cordisx', 'SKILL.md'),
+      '---\nname: cordisx\ndescription: bundle-two\n---\n',
+    )
+
+    const second = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
+
+    expect(second.conflicts).toHaveLength(1)
+    expect(second.conflicts[0]?.targetDir).toContain('cordisx-qa')
+    expect(second.deployments).toHaveLength(3)
+    expect(second.deployments.find(item => path.basename(item.targetDir) === 'cordisx')?.status).toBe('upgraded')
+    await expect(readFile(edited, 'utf8')).resolves.toBe('user-owned Q&A guidance\n')
+    await expect(access(path.join(home, '.agents', 'skills', 'cordisx-docs', 'SKILL.md'))).resolves.toBeUndefined()
+    await expect(access(path.join(home, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')))
+      .resolves.toBeUndefined()
+  })
+
+  it('adopts the existing single-Skill installation while adding the other bundled Skills', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-legacy-'))
+    const home = path.join(root, 'home')
+    const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
+    const legacy = await deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: path.join(sourceRootDir, CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME),
+    })
+
+    const result = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
+
+    expect(legacy.status).toBe('installed')
+    expect(result.conflicts).toEqual([])
+    expect(result.deployments).toHaveLength(4)
+    expect(result.deployments.find(item => item.targetDir === legacy.targetDir)?.status).toBe('unchanged')
+    expect(result.deployments.filter(item => item.status === 'installed')).toHaveLength(3)
+  })
+
   it('installs the complete Skill into shared HOME without changing another user Skill or cwd', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-shared-'))
     const home = path.join(root, 'home')

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -29,8 +30,7 @@ try {
       })
       .sort()
 
-  const sourceSkillRoot = path.join(repositoryRoot, 'skills/cordisx-plugin-development')
-  const bundledSkillRoot = path.join(repositoryRoot, 'packages/cli/dist/skills/cordisx-plugin-development')
+  const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']
   const preservedRendererStyles = [
     'renderer/host-ui/public-markdown-editor.css',
     'renderer/model-providers.css',
@@ -40,14 +40,13 @@ try {
   mkdirSync(extractedRoot)
   if (typeof packItem.filename !== 'string') throw new Error('npm pack did not report a tarball filename')
   await extractTar({ cwd: extractedRoot, file: path.join(packRoot, packItem.filename) })
-  const tarballSkillRoot = path.join(extractedRoot, 'package/dist/skills/cordisx-plugin-development')
   const packagedSkillModule = await import(
     pathToFileURL(
       path.join(extractedRoot, 'package/dist/src/launcher/builtin-skill.js'),
     ).href
   )
   const deploymentHome = path.join(packRoot, 'deployment-home')
-  const deployment = await packagedSkillModule.deployBundledCordisXSkill({
+  const deployment = await packagedSkillModule.deployBundledCordisXSkills({
     version: 1,
     appId: 'codex',
     appName: 'Codex',
@@ -59,8 +58,13 @@ try {
     sharedDataRoots: [{ name: 'HOME', path: deploymentHome, managed: false }],
     isolatedDataRoots: [],
   })
-  if (deployment.status !== 'installed' || deployment.effectiveHome !== deploymentHome) {
-    throw new Error('tarball CordisX Skill deployment smoke returned an unexpected projection')
+  if (
+    deployment.effectiveHome !== deploymentHome
+    || deployment.conflicts.length !== 0
+    || deployment.deployments.length !== bundledSkillNames.length
+    || deployment.deployments.some(item => item.status !== 'installed')
+  ) {
+    throw new Error('tarball CordisX Skills deployment smoke returned an unexpected projection')
   }
   for (const relative of preservedRendererStyles) {
     const sourceStyle = readFileSync(path.join(repositoryRoot, 'packages/cli/src', relative))
@@ -73,58 +77,79 @@ try {
       throw new Error(`renderer stylesheet differs in the cordisx tarball: ${relative}`)
     }
   }
-  const deployedMarker = JSON.parse(
-    readFileSync(path.join(deployment.targetDir, packagedSkillModule.CORDISX_SKILL_MARKER_FILE), 'utf8'),
-  )
-  const sourceVersion = JSON.parse(readFileSync(path.join(sourceSkillRoot, 'version.json'), 'utf8'))
-  if (JSON.stringify(deployedMarker.provenance) !== JSON.stringify(sourceVersion)) {
-    throw new Error('packaged CLI did not deploy the bundled Skill provenance')
-  }
-  const sourceSkillFiles = listFiles(sourceSkillRoot)
-  const bundledSkillFiles = listFiles(bundledSkillRoot)
-  const tarballSkillFiles = listFiles(tarballSkillRoot)
-  if (
-    JSON.stringify(sourceSkillFiles) !== JSON.stringify(bundledSkillFiles)
-    || JSON.stringify(sourceSkillFiles) !== JSON.stringify(tarballSkillFiles)
-  ) {
-    throw new Error('cordisx package Skill is not a complete mirror of skills/cordisx-plugin-development')
-  }
-  for (
-    const required of [
-      'SKILL.md',
-      'version.json',
-      'references/css-and-lifecycle.md',
-      'agents/openai.yaml',
-      'references/feasibility-assessment.md',
-      'references/live-plugin-development.md',
-      'references/plugin-authoring.md',
-      'references/project-layouts-and-development.md',
-      'references/schema-configuration.md',
-      'references/ui-system.md',
-      'references/verification.md',
-    ]
-  ) {
-    if (!sourceSkillFiles.includes(required)) throw new Error(`CordisX Skill source is missing ${required}`)
-  }
-  for (const relative of sourceSkillFiles) {
-    const source = readFileSync(path.join(sourceSkillRoot, relative))
-    const bundled = readFileSync(path.join(bundledSkillRoot, relative))
-    const tarball = readFileSync(path.join(tarballSkillRoot, relative))
-    if (!source.equals(bundled)) throw new Error(`packaged CordisX Skill content differs: ${relative}`)
-    if (!source.equals(tarball)) throw new Error(`CordisX Skill tarball content differs: ${relative}`)
-    const tarballPath = path.posix.join('dist/skills/cordisx-plugin-development', relative)
-    if (!files.includes(tarballPath)) throw new Error(`cordisx package is missing ${tarballPath}`)
-  }
-  const deployedSkillFiles = listFiles(deployment.targetDir)
-    .filter(relative => relative !== packagedSkillModule.CORDISX_SKILL_MARKER_FILE)
-  if (JSON.stringify(sourceSkillFiles) !== JSON.stringify(deployedSkillFiles)) {
-    throw new Error('tarball CordisX Skill deployment did not publish the complete Skill')
-  }
-  for (const relative of sourceSkillFiles) {
-    const source = readFileSync(path.join(sourceSkillRoot, relative))
-    const deployed = readFileSync(path.join(deployment.targetDir, relative))
-    if (!source.equals(deployed)) {
-      throw new Error(`deployed CordisX Skill content differs: ${relative}`)
+  for (const skillName of bundledSkillNames) {
+    const sourceSkillRoot = path.join(repositoryRoot, 'skills', skillName)
+    const bundledSkillRoot = path.join(repositoryRoot, 'packages/cli/dist/skills', skillName)
+    const tarballSkillRoot = path.join(extractedRoot, 'package/dist/skills', skillName)
+    const deployedSkillRoot = path.join(deploymentHome, '.agents', 'skills', skillName)
+    const sourceSkillFiles = listFiles(sourceSkillRoot)
+    const bundledSkillFiles = listFiles(bundledSkillRoot)
+    const tarballSkillFiles = listFiles(tarballSkillRoot)
+    if (
+      JSON.stringify(sourceSkillFiles) !== JSON.stringify(bundledSkillFiles)
+      || JSON.stringify(sourceSkillFiles) !== JSON.stringify(tarballSkillFiles)
+    ) {
+      throw new Error(`cordisx package Skill is not a complete mirror of skills/${skillName}`)
+    }
+    for (const required of ['SKILL.md', 'version.json', 'agents/openai.yaml']) {
+      if (!sourceSkillFiles.includes(required)) throw new Error(`${skillName} source is missing ${required}`)
+    }
+    if (skillName === 'cordisx-plugin-development') {
+      for (
+        const required of [
+          'references/css-and-lifecycle.md',
+          'references/feasibility-assessment.md',
+          'references/live-plugin-development.md',
+          'references/plugin-authoring.md',
+          'references/project-layouts-and-development.md',
+          'references/schema-configuration.md',
+          'references/ui-system.md',
+          'references/verification.md',
+        ]
+      ) {
+        if (!sourceSkillFiles.includes(required)) throw new Error(`${skillName} source is missing ${required}`)
+      }
+    }
+    if (skillName === 'cordisx-docs') {
+      const upstream = JSON.parse(readFileSync(path.join(sourceSkillRoot, 'upstream.json'), 'utf8'))
+      if (typeof upstream.commit !== 'string' || !/^[a-f0-9]{40}$/u.test(upstream.commit)) {
+        throw new Error('cordisx-docs upstream.json must record an exact Git commit')
+      }
+      for (const relative of ['SKILL.md', 'agents/openai.yaml', 'version.json']) {
+        const expected = upstream.files?.[relative]
+        const actual = `sha256:${
+          createHash('sha256').update(readFileSync(path.join(sourceSkillRoot, relative))).digest('hex')
+        }`
+        if (expected !== actual) {
+          throw new Error(`cordisx-docs upstream.json digest differs for ${relative}`)
+        }
+      }
+    }
+    const deployedMarker = JSON.parse(
+      readFileSync(path.join(deployedSkillRoot, packagedSkillModule.CORDISX_SKILL_MARKER_FILE), 'utf8'),
+    )
+    const sourceVersion = JSON.parse(readFileSync(path.join(sourceSkillRoot, 'version.json'), 'utf8'))
+    if (JSON.stringify(deployedMarker.provenance) !== JSON.stringify(sourceVersion)) {
+      throw new Error(`packaged CLI did not deploy the ${skillName} provenance`)
+    }
+    for (const relative of sourceSkillFiles) {
+      const source = readFileSync(path.join(sourceSkillRoot, relative))
+      const bundled = readFileSync(path.join(bundledSkillRoot, relative))
+      const tarball = readFileSync(path.join(tarballSkillRoot, relative))
+      if (!source.equals(bundled)) throw new Error(`packaged ${skillName} content differs: ${relative}`)
+      if (!source.equals(tarball)) throw new Error(`${skillName} tarball content differs: ${relative}`)
+      const tarballPath = path.posix.join('dist/skills', skillName, relative)
+      if (!files.includes(tarballPath)) throw new Error(`cordisx package is missing ${tarballPath}`)
+    }
+    const deployedSkillFiles = listFiles(deployedSkillRoot)
+      .filter(relative => relative !== packagedSkillModule.CORDISX_SKILL_MARKER_FILE)
+    if (JSON.stringify(sourceSkillFiles) !== JSON.stringify(deployedSkillFiles)) {
+      throw new Error(`tarball CordisX Skill deployment did not publish the complete ${skillName} Skill`)
+    }
+    for (const relative of sourceSkillFiles) {
+      const source = readFileSync(path.join(sourceSkillRoot, relative))
+      const deployed = readFileSync(path.join(deployedSkillRoot, relative))
+      if (!source.equals(deployed)) throw new Error(`deployed ${skillName} content differs: ${relative}`)
     }
   }
 
@@ -194,6 +219,13 @@ try {
       'dist/src/renderer/host-ui/public-markdown-editor.css',
       'dist/src/renderer/model-providers.css',
       'dist/src/renderer/manager/pages/model-services.css',
+      'dist/skills/cordisx/SKILL.md',
+      'dist/skills/cordisx/agents/openai.yaml',
+      'dist/skills/cordisx-docs/SKILL.md',
+      'dist/skills/cordisx-docs/agents/openai.yaml',
+      'dist/skills/cordisx-docs/upstream.json',
+      'dist/skills/cordisx-qa/SKILL.md',
+      'dist/skills/cordisx-qa/agents/openai.yaml',
       'dist/skills/cordisx-plugin-development/SKILL.md',
       'dist/skills/cordisx-plugin-development/agents/openai.yaml',
       'dist/skills/cordisx-plugin-development/references/feasibility-assessment.md',

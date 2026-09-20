@@ -5,11 +5,13 @@ including when the current session is already attached to a development project.
 
 ## Choose debugging tools before accessing the Host
 
-This boundary applies to the CordisX-launched Codex test instance, including
-startup failures, UI inspection, screenshots, interactions, HMR and permission
-failures. Never select Computer Use/CUA for this work: do not attach it to the
-Codex app, enumerate its windows, capture its screen or automate its native UI.
-Do not replace it with generic desktop automation or a generic browser launch.
+This boundary applies when work accesses a CordisX-launched Codex test instance,
+including startup failures, UI inspection, screenshots, interactions, HMR and
+permission failures. First read the active user, Host, and tool restrictions.
+Use CordisX-owned diagnostics and debugging mechanisms for CordisX runtime
+claims. Computer Use/CUA, desktop automation, or a generic browser must not be
+used as a workaround for an explicit restriction, and generic browser evidence
+does not prove behavior in the native `app://` Host.
 
 1. Identify the authorized test instance from the CordisX launch/config and
    loaded plugin entry. Check the effective Host/CLI build, profile/data mode
@@ -41,14 +43,14 @@ the installed Codex app, or access unrelated profiles, windows or data. The
 is part of the authorized development launch; it cannot override an applicable
 user, Host or tool denial.
 
-If CUA was selected accidentally, acknowledge the tool-selection error and read
-the actual restriction before continuing. A tool-specific unsupported surface
-or capability limitation does not by itself establish that the user lacks
+If a selected tool is prohibited or unsupported for the target, acknowledge the
+tool-selection error and read the actual restriction before continuing. A
+tool-specific limitation does not by itself establish that the user lacks
 authority to debug their own test instance. Continue through CordisX only when
 the action is independently authorized and no applicable denial prohibits it;
 when a restriction's scope is unclear, stop that action and report the exact
-restriction while continuing permitted source/log checks. Do not turn a mistaken
-tool choice into a blanket refusal of CordisX debugging.
+restriction while continuing permitted source/log checks. Do not turn one
+unavailable tool into a blanket refusal of CordisX debugging.
 
 ## Locate the active project
 
@@ -113,9 +115,10 @@ immutable Vite graph per plugin and keeps source-level dynamic imports, CSS,
 and static assets independently loadable. Production replacement uses CordisX
 package generations, not the development HMR socket.
 
-For native behavior, verify the actual isolated `app://` App launched by
-CordisX. A Playground or browser harness is useful supporting evidence only
-when it exposes the same public capability.
+For a claim about native behavior, verify the actual isolated `app://` App
+launched by CordisX when that launch is authorized. A Playground or browser
+harness is useful supporting evidence only when it exposes the same public
+capability. Non-native claims do not require an App launch.
 
 For a native Host interaction, use only a cataloged extension point. If the
 contract is unavailable in the installed CordisX version, say so plainly

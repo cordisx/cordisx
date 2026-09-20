@@ -153,25 +153,39 @@ Resolution precedence is CLI option, named profile, app default, global
 default, then adapter default. Every resolved launch plan is inspectable through
 `cordisx doctor` without starting the host.
 
-## Bundled plugin-development Skill
+## Bundled Skills
 
-The `cordisx` package carries the complete maintained
-`cordisx-plugin-development` Skill under `dist/skills`. Every non-dry-run
-named launch deploys that copy before the Host starts. Shared profiles target
+<a id="bundled-plugin-development-skill"></a>
+
+This source revision packages one `cordisx` entry and three supporting Skills
+under `dist/skills`: `cordisx-docs` for standard documentation, `cordisx-qa` for
+user experience recorded as questions and answers, and
+`cordisx-plugin-development` for developing plugins. Users can describe their
+goal without choosing a supporting Skill. Each Skill remains independently
+discoverable; the launcher does not change an assistant's Skill picker.
+
+Every non-dry-run named launch deploys the bundled copies before the Host starts. Shared profiles target
 the `HOME` declared by the resolved launch plan; `host-isolated` profiles
 target their private Host `HOME`. Direct-entry and config-driven Vite
 development use the same deployment path. Attach mode skips deployment because
 the launcher cannot prove the existing Host process's effective `HOME`.
 
-`skills/cordisx-plugin-development/version.json` records the guidance revision
-and owning source. Packaging mirrors it with all references; installation
+Each Skill's `version.json` records its guidance revision and owning source.
+The Docs Skill is maintained in `cordisx/docs`; its complete snapshot under
+`skills/cordisx-docs` records the exact upstream commit and file digests in
+`upstream.json`. Update that snapshot from its owning source, not by editing a
+second independent copy. Startup and packaging do not fetch mutable remote
+Skill instructions. Published releases can predate this bundle; the published
+`0.1.0-beta.13` provisions only Plugin Dev.
+
+Packaging mirrors each Skill with all references; installation
 validates it and records the provenance in the management marker. Existing v1
 markers without provenance remain valid. Provenance is diagnostic: the complete
 content digest determines replacement, not a semver comparison. Launching an
 older CLI can therefore restore its older bundled guidance. An unmarked old
 copy cannot be distinguished from user edits and is not silently overwritten.
 
-The target marker records a digest over the relative path and bytes of every
+Each target marker records a digest over the relative path and bytes of every
 Skill file. Deployments take an adjacent directory-level lock before inspecting
 or changing the target, so concurrent CordisX starts serialize against the same
 Host `HOME`. If the actual target still matches its marker, an equal bundled
@@ -189,7 +203,9 @@ removes that marker only after atomically isolating it and proving both its
 original filesystem identity and exact bytes. A marker replaced or edited
 concurrently is restored or retained at a reported recovery path. Any other
 unmarked, invalid, or locally edited target remains untouched and emits a
-non-blocking diagnostic. Structural package or filesystem deployment errors
+non-blocking diagnostic. Other bundled Skills may still deploy; a conflict is
+reported for its exact directory, not as successful installation of all Skills.
+Structural package or filesystem deployment errors
 remain launch failures. Dry runs never create or update a Skill directory.
 
 Attach mode remains available for graph-free production composition and
@@ -560,9 +576,9 @@ requested only when the user asks to share or publish, and an already explicit
 publication request is not followed by a redundant confirmation.
 
 Before a direct-entry Host starts, CordisX deploys its bundled
-plugin-development Skill into the Host's effective `HOME` and projects two
+Skills into the Host's effective `HOME` and projects two
 launcher-owned environment facts into the process: `CORDISX_DEV_ENTRY` is the
-absolute watched entry and `CORDISX_DEV_MODE` is `explicit-entry`. The Skill
+absolute watched entry and `CORDISX_DEV_MODE` is `explicit-entry`. Plugin Dev
 directs the in-session Codex agent to edit that exact scaffolded project and to
 use only versioned public contracts. Saving the entry follows the normal
 debounced candidate build, generation transaction, last-good retention, and

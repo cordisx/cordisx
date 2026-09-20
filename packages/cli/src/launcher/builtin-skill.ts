@@ -5,7 +5,21 @@ import { fileURLToPath } from 'node:url'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 
 export const CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME = 'cordisx-plugin-development'
+export const CORDISX_BUNDLED_SKILL_NAMES = [
+  'cordisx',
+  'cordisx-docs',
+  'cordisx-qa',
+  CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
+] as const
+export type CordisXBundledSkillName = typeof CORDISX_BUNDLED_SKILL_NAMES[number]
 export const CORDISX_SKILL_MARKER_FILE = '.cordisx-managed.json'
+
+const CORDISX_BUNDLED_SKILL_SOURCES: Readonly<Record<CordisXBundledSkillName, string>> = {
+  cordisx: 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx',
+  'cordisx-docs': 'https://github.com/cordisx/docs/tree/main/skills/cordisx-docs',
+  'cordisx-qa': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-qa',
+  'cordisx-plugin-development': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+}
 
 const CORDISX_SKILL_MARKER_CONTRACT = 'cordisx.skill-installation/v1'
 const CORDISX_SKILL_DEPLOYMENT_LOCK_TIMEOUT_MS = 10_000
@@ -37,7 +51,7 @@ interface CordisXSkillMarkerV1 {
   readonly schemaVersion: 1
   readonly provenance?: SkillProvenance
   readonly managedBy: 'cordisx'
-  readonly skillName: typeof CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME
+  readonly skillName: CordisXBundledSkillName
   readonly contentDigest: `sha256:${string}`
 }
 
@@ -46,6 +60,12 @@ export interface CordisXSkillDeploymentResult {
   readonly effectiveHome: string
   readonly targetDir: string
   readonly contentDigest: `sha256:${string}`
+}
+
+export interface CordisXSkillsDeploymentResult {
+  readonly effectiveHome: string
+  readonly deployments: readonly CordisXSkillDeploymentResult[]
+  readonly conflicts: readonly CordisXSkillConflictError[]
 }
 
 export interface DeployBundledCordisXSkillOptions {
@@ -60,6 +80,18 @@ export interface DeployBundledCordisXSkillOptions {
 export type DeployBundledCordisXSkillToHomeOptions = Pick<
   DeployBundledCordisXSkillOptions,
   'sourceDir' | 'testHooks'
+>
+
+export interface DeployBundledCordisXSkillsOptions {
+  /** Repository-only override used by source-level bundle tests and integration. */
+  readonly sourceRootDir?: string
+  /** Repository-only test seam; product launches derive shared HOME from the resolved plan. */
+  readonly sharedHomeOverride?: string
+}
+
+export type DeployBundledCordisXSkillsToHomeOptions = Pick<
+  DeployBundledCordisXSkillsOptions,
+  'sourceRootDir'
 >
 
 /** @internal Repository-only hooks; not part of the packaged CLI contract. */
@@ -134,7 +166,7 @@ export function digestSkillFiles(files: readonly SkillFile[]): `sha256:${string}
   return `sha256:${digest.digest('hex')}`
 }
 
-async function sourceManifest(sourceDir: string): Promise<SkillManifest> {
+async function sourceManifest(sourceDir: string, skillName: CordisXBundledSkillName): Promise<SkillManifest> {
   const sourceMetadata = await lstat(sourceDir).catch(error => {
     throw new Error(`bundled CordisX Skill source is unavailable: ${sourceDir}`, { cause: error })
   })
@@ -157,21 +189,21 @@ async function sourceManifest(sourceDir: string): Promise<SkillManifest> {
       value === null || typeof value !== 'object'
       || !('version' in value) || typeof value.version !== 'string' || value.version.trim() === ''
       || !('source' in value)
-      || value.source !== 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development'
+      || value.source !== CORDISX_BUNDLED_SKILL_SOURCES[skillName]
     ) throw new Error('bundled CordisX Skill has invalid version.json provenance')
     provenance = { version: value.version, source: value.source }
   }
   return { files, contentDigest: digestSkillFiles(files), ...(provenance === undefined ? {} : { provenance }) }
 }
 
-function parseMarker(raw: string): CordisXSkillMarkerV1 | undefined {
+function parseMarker(raw: string, skillName: CordisXBundledSkillName): CordisXSkillMarkerV1 | undefined {
   try {
     const candidate = JSON.parse(raw) as Partial<CordisXSkillMarkerV1>
     if (
       candidate.contract !== CORDISX_SKILL_MARKER_CONTRACT
       || candidate.schemaVersion !== 1
       || candidate.managedBy !== 'cordisx'
-      || candidate.skillName !== CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME
+      || candidate.skillName !== skillName
       || typeof candidate.contentDigest !== 'string'
       || !/^sha256:[a-f0-9]{64}$/u.test(candidate.contentDigest)
     ) return undefined
@@ -186,7 +218,10 @@ type ExistingTarget =
   | { readonly status: 'unmanaged'; readonly contentDigest: `sha256:${string}` }
   | { readonly status: 'managed'; readonly contentDigest: `sha256:${string}` }
 
-async function inspectExistingTarget(targetDir: string): Promise<ExistingTarget> {
+async function inspectExistingTarget(
+  targetDir: string,
+  skillName: CordisXBundledSkillName,
+): Promise<ExistingTarget> {
   const metadata = await lstat(targetDir).catch(error => {
     if (isNodeError(error, 'ENOENT')) return undefined
     throw error
@@ -211,7 +246,7 @@ async function inspectExistingTarget(targetDir: string): Promise<ExistingTarget>
       )
     }
   }
-  const marker = parseMarker(markerSource)
+  const marker = parseMarker(markerSource, skillName)
   if (marker === undefined) throw new CordisXSkillConflictError(targetDir, 'has an invalid CordisX management marker')
 
   let files: readonly SkillFile[]
@@ -233,7 +268,11 @@ async function inspectExistingTarget(targetDir: string): Promise<ExistingTarget>
   return { status: 'managed', contentDigest: actualDigest }
 }
 
-async function copyManifestToStage(manifest: SkillManifest, stageDir: string): Promise<void> {
+async function copyManifestToStage(
+  manifest: SkillManifest,
+  stageDir: string,
+  skillName: CordisXBundledSkillName,
+): Promise<void> {
   for (const file of manifest.files) {
     const destination = path.join(stageDir, ...file.relativePath.split('/'))
     await mkdir(path.dirname(destination), { recursive: true })
@@ -243,7 +282,7 @@ async function copyManifestToStage(manifest: SkillManifest, stageDir: string): P
     contract: CORDISX_SKILL_MARKER_CONTRACT,
     schemaVersion: 1,
     managedBy: 'cordisx',
-    skillName: CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
+    skillName,
     contentDigest: manifest.contentDigest,
     ...(manifest.provenance === undefined ? {} : { provenance: manifest.provenance }),
   }
@@ -256,6 +295,7 @@ async function copyManifestToStage(manifest: SkillManifest, stageDir: string): P
 
 async function adoptExactUnmanagedTarget(
   targetDir: string,
+  skillName: CordisXBundledSkillName,
   expectedDigest: `sha256:${string}`,
   provenance: SkillProvenance | undefined,
   testHooks: CordisXSkillDeploymentTestHooks | undefined,
@@ -265,7 +305,7 @@ async function adoptExactUnmanagedTarget(
     contract: CORDISX_SKILL_MARKER_CONTRACT,
     schemaVersion: 1,
     managedBy: 'cordisx',
-    skillName: CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
+    skillName,
     contentDigest: expectedDigest,
     ...(provenance === undefined ? {} : { provenance }),
   }
@@ -282,7 +322,7 @@ async function adoptExactUnmanagedTarget(
   }
   try {
     await testHooks?.afterAdoptionMarkerWritten?.(markerPath)
-    await verifyStagedTarget(targetDir, expectedDigest)
+    await verifyStagedTarget(targetDir, skillName, expectedDigest)
   } catch (error) {
     await rollbackAdoptionMarker(targetDir, markerPath, markerSource, markerIdentity)
     throw new CordisXSkillConflictError(
@@ -345,8 +385,12 @@ async function rollbackAdoptionMarker(
   await rm(rollbackPath)
 }
 
-async function verifyStagedTarget(stageDir: string, expectedDigest: string): Promise<void> {
-  const staged = await inspectExistingTarget(stageDir)
+async function verifyStagedTarget(
+  stageDir: string,
+  skillName: CordisXBundledSkillName,
+  expectedDigest: string,
+): Promise<void> {
+  const staged = await inspectExistingTarget(stageDir, skillName)
   if (staged.status !== 'managed' || staged.contentDigest !== expectedDigest) {
     throw new Error(`staged CordisX Skill failed content verification: ${stageDir}`)
   }
@@ -358,11 +402,12 @@ async function wait(milliseconds: number): Promise<void> {
 
 async function withSkillDeploymentLock<T>(
   skillsDir: string,
+  skillName: CordisXBundledSkillName,
   testHooks: CordisXSkillDeploymentTestHooks | undefined,
   operation: () => Promise<T>,
 ): Promise<T> {
   await mkdir(skillsDir, { recursive: true })
-  const lockDir = path.join(skillsDir, `.${CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME}.deployment-lock`)
+  const lockDir = path.join(skillsDir, `.${skillName}.deployment-lock`)
   const deadline = Date.now()
     + (testHooks?.deploymentLockTimeoutMs ?? CORDISX_SKILL_DEPLOYMENT_LOCK_TIMEOUT_MS)
   while (true) {
@@ -373,7 +418,7 @@ async function withSkillDeploymentLock<T>(
       if (!isNodeError(error, 'EEXIST')) throw error
       if (Date.now() >= deadline) {
         throw new CordisXSkillConflictError(
-          path.join(skillsDir, CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME),
+          path.join(skillsDir, skillName),
           'is currently being installed or upgraded by another CordisX process',
         )
       }
@@ -392,6 +437,7 @@ async function withSkillDeploymentLock<T>(
 async function replaceManagedTarget(
   stageDir: string,
   targetDir: string,
+  skillName: CordisXBundledSkillName,
   expectedExistingDigest: `sha256:${string}`,
   expectedDigest: `sha256:${string}`,
   testHooks: CordisXSkillDeploymentTestHooks | undefined,
@@ -399,12 +445,12 @@ async function replaceManagedTarget(
   const parent = path.dirname(targetDir)
   const backupDir = path.join(
     parent,
-    `.${CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME}.backup-${randomBytes(12).toString('hex')}`,
+    `.${skillName}.backup-${randomBytes(12).toString('hex')}`,
   )
   await rename(targetDir, backupDir)
   try {
     await testHooks?.afterTargetMovedToBackup?.(backupDir)
-    const captured = await inspectExistingTarget(backupDir)
+    const captured = await inspectExistingTarget(backupDir, skillName)
     if (captured.status !== 'managed' || captured.contentDigest !== expectedExistingDigest) {
       throw new CordisXSkillConflictError(
         targetDir,
@@ -412,7 +458,7 @@ async function replaceManagedTarget(
       )
     }
     await rename(stageDir, targetDir)
-    await verifyStagedTarget(targetDir, expectedDigest)
+    await verifyStagedTarget(targetDir, skillName, expectedDigest)
   } catch (installError) {
     let rollbackError: unknown
     try {
@@ -442,10 +488,10 @@ async function replaceManagedTarget(
   await rm(backupDir, { recursive: true, force: true })
 }
 
-async function bundledSkillSourceDir(): Promise<string> {
+async function bundledSkillSourceDir(skillName: CordisXBundledSkillName): Promise<string> {
   const candidates = [
-    fileURLToPath(new URL(`../../skills/${CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME}`, import.meta.url)),
-    fileURLToPath(new URL(`../../../../skills/${CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME}`, import.meta.url)),
+    fileURLToPath(new URL(`../../skills/${skillName}`, import.meta.url)),
+    fileURLToPath(new URL(`../../../../skills/${skillName}`, import.meta.url)),
   ]
   for (const candidate of candidates) {
     if (await realDirectory(candidate)) return candidate
@@ -481,13 +527,25 @@ export async function deployBundledCordisXSkillToHome(
   rawEffectiveHome: string,
   options: DeployBundledCordisXSkillToHomeOptions = {},
 ): Promise<CordisXSkillDeploymentResult> {
+  return await deployBundledCordisXNamedSkillToHome(
+    rawEffectiveHome,
+    CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
+    options,
+  )
+}
+
+async function deployBundledCordisXNamedSkillToHome(
+  rawEffectiveHome: string,
+  skillName: CordisXBundledSkillName,
+  options: DeployBundledCordisXSkillToHomeOptions = {},
+): Promise<CordisXSkillDeploymentResult> {
   const effectiveHome = absoluteHome(rawEffectiveHome, 'Host launch')
-  const targetDir = path.join(effectiveHome, '.agents', 'skills', CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME)
-  const sourceDir = path.resolve(options.sourceDir ?? await bundledSkillSourceDir())
-  const manifest = await sourceManifest(sourceDir)
+  const targetDir = path.join(effectiveHome, '.agents', 'skills', skillName)
+  const sourceDir = path.resolve(options.sourceDir ?? await bundledSkillSourceDir(skillName))
+  const manifest = await sourceManifest(sourceDir, skillName)
   const skillsDir = path.dirname(targetDir)
-  return await withSkillDeploymentLock(skillsDir, options.testHooks, async () => {
-    const existing = await inspectExistingTarget(targetDir)
+  return await withSkillDeploymentLock(skillsDir, skillName, options.testHooks, async () => {
+    const existing = await inspectExistingTarget(targetDir, skillName)
     if (existing.status === 'managed' && existing.contentDigest === manifest.contentDigest) {
       return { status: 'unchanged', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
     }
@@ -496,11 +554,17 @@ export async function deployBundledCordisXSkillToHome(
         throw new CordisXSkillConflictError(targetDir, 'already exists with unmanaged or user-modified content')
       }
       try {
-        await adoptExactUnmanagedTarget(targetDir, manifest.contentDigest, manifest.provenance, options.testHooks)
+        await adoptExactUnmanagedTarget(
+          targetDir,
+          skillName,
+          manifest.contentDigest,
+          manifest.provenance,
+          options.testHooks,
+        )
         return { status: 'unchanged', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
       } catch (error) {
         if (!isNodeError(error, 'EEXIST')) throw error
-        const raced = await inspectExistingTarget(targetDir)
+        const raced = await inspectExistingTarget(targetDir, skillName)
         if (raced.status === 'managed' && raced.contentDigest === manifest.contentDigest) {
           return { status: 'unchanged', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
         }
@@ -508,20 +572,20 @@ export async function deployBundledCordisXSkillToHome(
       }
     }
 
-    const stageDir = await mkdtemp(path.join(skillsDir, `.${CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME}.stage-`))
+    const stageDir = await mkdtemp(path.join(skillsDir, `.${skillName}.stage-`))
     let stageExists = true
     try {
-      await copyManifestToStage(manifest, stageDir)
-      await verifyStagedTarget(stageDir, manifest.contentDigest)
+      await copyManifestToStage(manifest, stageDir, skillName)
+      await verifyStagedTarget(stageDir, skillName, manifest.contentDigest)
       if (existing.status === 'absent') {
         try {
           await rename(stageDir, targetDir)
           stageExists = false
-          await verifyStagedTarget(targetDir, manifest.contentDigest)
+          await verifyStagedTarget(targetDir, skillName, manifest.contentDigest)
           return { status: 'installed', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
         } catch (error) {
           if (!isNodeError(error, 'EEXIST') && !isNodeError(error, 'ENOTEMPTY')) throw error
-          const raced = await inspectExistingTarget(targetDir)
+          const raced = await inspectExistingTarget(targetDir, skillName)
           if (raced.status === 'managed' && raced.contentDigest === manifest.contentDigest) {
             return { status: 'unchanged', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
           }
@@ -532,6 +596,7 @@ export async function deployBundledCordisXSkillToHome(
       await replaceManagedTarget(
         stageDir,
         targetDir,
+        skillName,
         existing.contentDigest,
         manifest.contentDigest,
         options.testHooks,
@@ -544,12 +609,48 @@ export async function deployBundledCordisXSkillToHome(
   })
 }
 
+/** Deploy every release-bundled CordisX Skill and report user-owned conflicts without hiding partial results. */
+export async function deployBundledCordisXSkillsToHome(
+  rawEffectiveHome: string,
+  options: DeployBundledCordisXSkillsToHomeOptions = {},
+): Promise<CordisXSkillsDeploymentResult> {
+  const effectiveHome = absoluteHome(rawEffectiveHome, 'Host launch')
+  const deployments: CordisXSkillDeploymentResult[] = []
+  const conflicts: CordisXSkillConflictError[] = []
+  for (const skillName of CORDISX_BUNDLED_SKILL_NAMES) {
+    try {
+      deployments.push(
+        await deployBundledCordisXNamedSkillToHome(effectiveHome, skillName, {
+          ...(options.sourceRootDir === undefined
+            ? {}
+            : { sourceDir: path.join(path.resolve(options.sourceRootDir), skillName) }),
+        }),
+      )
+    } catch (error) {
+      if (!(error instanceof CordisXSkillConflictError)) throw error
+      conflicts.push(error)
+    }
+  }
+  return { effectiveHome, deployments, conflicts }
+}
+
 /** Resolve the named launch's Host HOME, then deploy only CordisX's own built-in Skill. */
 export async function deployBundledCordisXSkill(
   plan: ResolvedLaunchPlan,
   options: DeployBundledCordisXSkillOptions = {},
 ): Promise<CordisXSkillDeploymentResult> {
   return await deployBundledCordisXSkillToHome(
+    effectiveHomeForCordisXSkill(plan, options.sharedHomeOverride),
+    options,
+  )
+}
+
+/** Resolve the named launch's Host HOME, then deploy all release-bundled CordisX Skills. */
+export async function deployBundledCordisXSkills(
+  plan: ResolvedLaunchPlan,
+  options: DeployBundledCordisXSkillsOptions = {},
+): Promise<CordisXSkillsDeploymentResult> {
+  return await deployBundledCordisXSkillsToHome(
     effectiveHomeForCordisXSkill(plan, options.sharedHomeOverride),
     options,
   )
