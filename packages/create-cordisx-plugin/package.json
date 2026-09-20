@@ -1,6 +1,6 @@
 {
   "name": "create-cordisx-plugin",
-  "version": "0.1.0-beta.11",
+  "version": "0.1.0-beta.12",
   "description": "Create standalone, workspace, or embedded CordisX plugin projects",
   "type": "module",
   "files": [
