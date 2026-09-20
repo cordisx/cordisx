@@ -545,6 +545,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         package: {
           manifest: mutation.package.manifest,
           digest: mutation.package.digest,
+          ...(mutation.package.artifactIntegrity === undefined ? {} : {
+            artifactIntegrity: mutation.package.artifactIntegrity,
+          }),
           identitySource: mutation.package.identitySource,
           ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
         },

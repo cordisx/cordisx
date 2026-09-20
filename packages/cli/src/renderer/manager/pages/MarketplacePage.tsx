@@ -203,6 +203,7 @@ export function MarketplacePage(
           const unmanagedInstalled = installedPlugin !== undefined && !managedInstalled
           const exactVersionInstalled = installedVersion === result.plugin.version
           const installing = installer.installingIdentity === result.plugin.identity
+          const anotherInstallRunning = installer.installingIdentity !== undefined && !installing
           const updateAvailable = installedVersion !== undefined && !exactVersionInstalled
           const primaryLabel = installing
             ? copy.cancelInstall
@@ -224,7 +225,8 @@ export function MarketplacePage(
             : copy.installUnavailable
           const primaryDisabled = !installing && (installedVersion !== undefined
             ? !lifecycle.operationsAvailable || lifecycle.busyPluginId === installedPlugin?.id
-            : unmanagedInstalled || result.plugin.artifact === undefined || !installer.available)
+            : anotherInstallRunning || unmanagedInstalled || result.plugin.artifact === undefined
+              || !installer.available)
           const lifecycleItems: readonly MoreMenuItem[] = installedPlugin === undefined
             ? []
             : [
@@ -246,7 +248,8 @@ export function MarketplacePage(
                   id: 'update',
                   label: copy.update,
                   icon: 'import-plugin' as const,
-                  disabled: installing || result.plugin.artifact === undefined || !installer.available
+                  disabled: installer.installingIdentity !== undefined || result.plugin.artifact === undefined
+                    || !installer.available
                     || lifecycle.busyPluginId === installedPlugin.id,
                   onSelect: () => void installer.run(result.plugin, result.projection.name),
                 }]

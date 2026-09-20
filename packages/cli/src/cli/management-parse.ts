@@ -55,6 +55,7 @@ export interface CordisXSourceManagementInvocation extends CordisXManagementBase
   readonly url?: string
   readonly name?: string
   readonly description?: string
+  readonly trusted?: boolean
 }
 
 export type CordisXManagementInvocation =
@@ -62,7 +63,7 @@ export type CordisXManagementInvocation =
   | CordisXPluginManagementInvocation
   | CordisXSourceManagementInvocation
 
-type BooleanOption = 'json' | 'dryRun' | 'yes' | 'includeHidden' | 'help'
+type BooleanOption = 'json' | 'dryRun' | 'yes' | 'includeHidden' | 'trusted' | 'untrusted' | 'help'
 type ValueOption = 'profile' | 'source' | 'version' | 'url' | 'name' | 'description'
 type Option = BooleanOption | ValueOption
 
@@ -77,6 +78,8 @@ const BOOLEAN_OPTIONS = new Map<string, BooleanOption>([
   ['--dry-run', 'dryRun'],
   ['--yes', 'yes'],
   ['--include-hidden', 'includeHidden'],
+  ['--trusted', 'trusted'],
+  ['--untrusted', 'untrusted'],
   ['--help', 'help'],
   ['-h', 'help'],
 ])
@@ -231,7 +234,7 @@ function parsePlugin(parsed: ParsedManagementArguments): CordisXManagementInvoca
   if (!['search', 'info', 'install', 'update'].includes(pluginCommand)) {
     rejectOptions(parsed, `cordisx plugin ${pluginCommand}`, ['version'])
   }
-  rejectOptions(parsed, `cordisx plugin ${pluginCommand}`, ['url', 'name', 'description'])
+  rejectOptions(parsed, `cordisx plugin ${pluginCommand}`, ['url', 'name', 'description', 'trusted', 'untrusted'])
 
   if (pluginCommand === 'list') requireExactly(operands, 0, 'cordisx plugin list [options]')
   else {
@@ -275,11 +278,13 @@ function parseSource(parsed: ParsedManagementArguments): CordisXManagementInvoca
       'description',
       'source',
       'version',
+      'trusted',
+      'untrusted',
     ])
     requireExactly(operands, 0, 'cordisx source list [options]')
   } else if (sourceCommand === 'add') {
     rejectOptions(parsed, 'cordisx source add', ['includeHidden', 'url', 'source', 'version'])
-    requireExactly(operands, 1, 'cordisx source add <url> [--name <name>] [--description <text>] [options]')
+    requireExactly(operands, 1, 'cordisx source add <url> [--trusted|--untrusted] [options]')
   } else if (sourceCommand === 'edit') {
     rejectOptions(parsed, 'cordisx source edit', ['includeHidden', 'source', 'version'])
     requireExactly(
@@ -289,10 +294,11 @@ function parseSource(parsed: ParsedManagementArguments): CordisXManagementInvoca
     )
     if (
       parsed.values.url === undefined && parsed.values.name === undefined && parsed.values.description === undefined
+      && !parsed.booleans.has('trusted') && !parsed.booleans.has('untrusted')
     ) {
       throw new CordisXCliParseError(
         'missing-option-value',
-        'cordisx source edit requires --url, --name, or --description',
+        'cordisx source edit requires --url, --name, --description, --trusted, or --untrusted',
       )
     }
   } else if (sourceCommand === 'refresh') {
@@ -305,6 +311,8 @@ function parseSource(parsed: ParsedManagementArguments): CordisXManagementInvoca
       'description',
       'source',
       'version',
+      'trusted',
+      'untrusted',
     ])
     if (operands.length > 1) {
       throw new CordisXCliParseError('unexpected-positional', 'Usage: cordisx source refresh [source-url] [options]')
@@ -317,10 +325,15 @@ function parseSource(parsed: ParsedManagementArguments): CordisXManagementInvoca
       'description',
       'source',
       'version',
+      'trusted',
+      'untrusted',
     ])
     requireExactly(operands, 1, `cordisx source ${sourceCommand} <source-url> [options]`)
   }
 
+  if (parsed.booleans.has('trusted') && parsed.booleans.has('untrusted')) {
+    throw new CordisXCliParseError('invalid-option-value', '--trusted and --untrusted cannot be used together')
+  }
   return {
     action: 'management',
     namespace: 'source',
@@ -333,6 +346,11 @@ function parseSource(parsed: ParsedManagementArguments): CordisXManagementInvoca
     ...(parsed.values.url === undefined ? {} : { url: parsed.values.url }),
     ...(parsed.values.name === undefined ? {} : { name: parsed.values.name }),
     ...(parsed.values.description === undefined ? {} : { description: parsed.values.description }),
+    ...(parsed.booleans.has('trusted')
+      ? { trusted: true }
+      : parsed.booleans.has('untrusted')
+      ? { trusted: false }
+      : {}),
   }
 }
 

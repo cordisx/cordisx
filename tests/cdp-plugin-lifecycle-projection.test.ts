@@ -202,6 +202,7 @@ describe('CdpPluginLifecycleRuntime projection', () => {
     } as never)
     const fence = runtime.prepare('tx')
     transactionEpoch = fence.transactionEpoch
+    const artifactIntegrity = `sha256:${'c'.repeat(64)}` as const
     await runtime.stage({
       transactionId: 'tx',
       ...fence,
@@ -214,6 +215,7 @@ describe('CdpPluginLifecycleRuntime projection', () => {
       package: {
         manifest: { id: 'demo' },
         digest: `sha256:${'b'.repeat(64)}`,
+        artifactIntegrity,
         moduleSource: '',
         artifactSource: 'void 0',
         serviceModules: [],
@@ -221,6 +223,8 @@ describe('CdpPluginLifecycleRuntime projection', () => {
       } as never,
     })
     expect(stagedExpression).toContain('signed-demo-new')
+    expect(stagedExpression).toContain(`\"artifactIntegrity\":\"${artifactIntegrity}\"`)
+    expect(stagedExpression).toContain(`\"digest\":\"sha256:${'b'.repeat(64)}\"`)
     expect(
       leases.allowed({
         profileId: 'work',

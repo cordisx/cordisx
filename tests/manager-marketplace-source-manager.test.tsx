@@ -43,6 +43,7 @@ describe('Marketplace source manager', () => {
     const source = {
       url: 'https://old.example/marketplace.json',
       enabled: true,
+      trusted: true,
       name: 'Old source',
       description: 'Old description',
       official: false,
@@ -86,6 +87,7 @@ describe('Marketplace source manager', () => {
       expect(save).toHaveBeenLastCalledWith('https://old.example/marketplace.json', {
         url: 'https://new.example/marketplace.json',
         enabled: true,
+        trusted: true,
         local: { name: 'New source', description: 'New description' },
       })
       expect(fixture.document.querySelector('[role="alert"]')?.textContent).toBe('Source URL already exists')

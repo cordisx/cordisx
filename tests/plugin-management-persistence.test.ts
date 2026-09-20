@@ -31,7 +31,7 @@ describe('plugin management persistence', () => {
     expect(before.apps.codex?.profiles.default?.management).toBeUndefined()
     expect(await loadPluginManagementConfig(target)).toEqual({
       revision: 0,
-      sources: [{ url: OFFICIAL_MARKETPLACE_DISCOVERY_SOURCE, enabled: true }],
+      sources: [{ url: OFFICIAL_MARKETPLACE_DISCOVERY_SOURCE, enabled: true, trusted: true }],
       hiddenCatalogEntries: [],
     })
     expect((await loadHomeConfig(target.configPath)).apps.codex?.profiles.default?.management).toBeUndefined()
@@ -43,7 +43,7 @@ describe('plugin management persistence', () => {
     const second = 'http://127.0.0.1:5173/marketplace.json'
     await updatePluginManagementConfig(target, {
       kind: 'source-add',
-      source: { url: first, enabled: true, local: { name: 'Local' } },
+      source: { url: first, enabled: true, trusted: false, local: { name: 'Local' } },
     })
     await updatePluginManagementConfig(target, {
       kind: 'catalog-hide',
@@ -52,7 +52,7 @@ describe('plugin management persistence', () => {
     const result = await updatePluginManagementConfig(target, {
       kind: 'source-edit',
       url: first,
-      source: { url: second, enabled: false, local: { name: 'Replacement' } },
+      source: { url: second, enabled: false, trusted: false, local: { name: 'Replacement' } },
     })
     expect(result.sources.at(-1)).toMatchObject({
       url: second,
@@ -68,7 +68,7 @@ describe('plugin management persistence', () => {
     const legacyOnly = 'http://localhost:4173/legacy.json'
     await updatePluginManagementConfig(target, {
       kind: 'source-add',
-      source: { url: shared, enabled: false, local: { name: 'CLI value' } },
+      source: { url: shared, enabled: false, trusted: false, local: { name: 'CLI value' } },
     })
     const first = await migrateLegacyPluginManagementSources(target, {
       sources: [
@@ -79,14 +79,87 @@ describe('plugin management persistence', () => {
     expect(first.migrated).toBe(true)
     expect(first.management.sources.find(source => source.url === shared)).toMatchObject({
       enabled: false,
+      trusted: false,
       local: { name: 'CLI value', note: 'legacy note' },
     })
+    expect(first.management.sources.find(source => source.url === legacyOnly)?.trusted).toBe(false)
     await updatePluginManagementConfig(target, { kind: 'source-remove', url: legacyOnly })
     const second = await migrateLegacyPluginManagementSources(target, {
       sources: [{ url: legacyOnly, enabled: true }],
     })
     expect(second.migrated).toBe(false)
     expect(second.management.sources.some(source => source.url === legacyOnly)).toBe(false)
+  })
+
+  it('stores one trusted definition while keeping profile selection and removal isolated', async () => {
+    const target = await fixture()
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      apps: {
+        ...config.apps,
+        codex: {
+          ...config.apps.codex!,
+          profiles: {
+            ...config.apps.codex!.profiles,
+            work: { displayName: 'Work', dataMode: 'host-isolated' },
+          },
+        },
+      },
+    }), target.configPath)
+    const sourceUrl = 'https://team.example/marketplace.json'
+    await updatePluginManagementConfig(target, {
+      kind: 'source-add',
+      source: { url: sourceUrl, enabled: true, trusted: true, local: { name: 'Team' } },
+    })
+    const persisted = await loadHomeConfig(target.configPath)
+    expect(persisted.marketplaceSources.find(source => source.url === sourceUrl)).toEqual({
+      url: sourceUrl,
+      enabled: true,
+      trusted: true,
+      local: { name: 'Team' },
+    })
+    expect(persisted.apps.codex?.profiles.default?.management?.sources).toContainEqual({
+      url: sourceUrl,
+      enabled: true,
+    })
+    expect(persisted.apps.codex?.profiles.work?.management?.sources.some(source => source.url === sourceUrl)).toBe(
+      false,
+    )
+    expect((await loadPluginManagementConfig({ ...target, profileId: 'work' })).sources.some(
+      source => source.url === sourceUrl,
+    )).toBe(false)
+
+    await updateHomeConfigAtomic(config => {
+      const app = config.apps.codex!
+      const work = app.profiles.work!
+      return {
+        ...config,
+        apps: {
+          ...config.apps,
+          codex: {
+            ...app,
+            profiles: {
+              ...app.profiles,
+              work: {
+                ...work,
+                management: {
+                  ...work.management!,
+                  sources: [...work.management!.sources, { url: sourceUrl, enabled: false }],
+                  hiddenCatalogEntries: [{ sourceUrl, pluginId: 'team-plugin' }],
+                },
+              },
+            },
+          },
+        },
+      }
+    }, target.configPath)
+    await updatePluginManagementConfig(target, { kind: 'source-remove', url: sourceUrl })
+    const removed = await loadHomeConfig(target.configPath)
+    expect(removed.marketplaceSources.some(source => source.url === sourceUrl)).toBe(false)
+    for (const profile of Object.values(removed.apps.codex!.profiles)) {
+      expect(profile.management?.sources.some(source => source.url === sourceUrl)).toBe(false)
+      expect(profile.management?.hiddenCatalogEntries.some(entry => entry.sourceUrl === sourceUrl)).toBe(false)
+    }
   })
 
   it('preserves the legacy enabled state when the official source was only an implicit default', async () => {

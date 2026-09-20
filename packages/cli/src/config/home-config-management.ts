@@ -1,16 +1,9 @@
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 
-export interface HomeConfigMarketplaceSourceLocal {
-  readonly name?: string
-  readonly description?: string
-  readonly note?: string
-}
-
-/** Profile-owned discovery input. This is deliberately separate from Marketplace trust roots. */
-export interface HomeConfigMarketplaceSource {
+/** A profile selects a top-level Marketplace definition and may override its enabled state. */
+export interface HomeConfigMarketplaceSourceSelection {
   readonly url: string
   readonly enabled: boolean
-  readonly local?: HomeConfigMarketplaceSourceLocal
 }
 
 export interface HomeConfigHiddenMarketplaceEntry {
@@ -24,7 +17,7 @@ export interface HomeConfigProfileManagementMigrations {
 
 export interface HomeConfigProfileManagement {
   readonly revision: number
-  readonly sources: readonly HomeConfigMarketplaceSource[]
+  readonly sources: readonly HomeConfigMarketplaceSourceSelection[]
   readonly hiddenCatalogEntries: readonly HomeConfigHiddenMarketplaceEntry[]
   readonly migrations?: HomeConfigProfileManagementMigrations
 }
@@ -49,14 +42,6 @@ function nonEmptyString(value: unknown, label: string): string {
   return value.trim()
 }
 
-function optionalLocalText(value: unknown, label: string, maxLength: number): string | undefined {
-  if (value === undefined) return undefined
-  if (typeof value !== 'string' || value.trim() !== value || value.length === 0 || value.length > maxLength) {
-    throw new Error(`${label} must be trimmed text with at most ${maxLength} characters`)
-  }
-  return value
-}
-
 function canonicalMarketplaceDiscoveryUrl(value: unknown, label: string): string {
   const text = nonEmptyString(value, label)
   const url = new URL(text)
@@ -70,30 +55,13 @@ function canonicalMarketplaceDiscoveryUrl(value: unknown, label: string): string
   return text
 }
 
-function parseMarketplaceDiscoverySource(value: unknown, label: string): HomeConfigMarketplaceSource {
+function parseMarketplaceSourceSelection(value: unknown, label: string): HomeConfigMarketplaceSourceSelection {
   const source = record(value, label)
-  rejectUnknownKeys(source, ['url', 'enabled', 'local'], label)
+  rejectUnknownKeys(source, ['url', 'enabled'], label)
   if (typeof source.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
-  let local: HomeConfigMarketplaceSourceLocal | undefined
-  if (source.local !== undefined) {
-    const raw = record(source.local, `${label}.local`)
-    rejectUnknownKeys(raw, ['name', 'description', 'note'], `${label}.local`)
-    const name = optionalLocalText(raw.name, `${label}.local.name`, 80)
-    const description = optionalLocalText(raw.description, `${label}.local.description`, 280)
-    const note = optionalLocalText(raw.note, `${label}.local.note`, 500)
-    if (name === undefined && description === undefined && note === undefined) {
-      throw new Error(`${label}.local must not be empty`)
-    }
-    local = {
-      ...(name === undefined ? {} : { name }),
-      ...(description === undefined ? {} : { description }),
-      ...(note === undefined ? {} : { note }),
-    }
-  }
   return {
     url: canonicalMarketplaceDiscoveryUrl(source.url, `${label}.url`),
     enabled: source.enabled,
-    ...(local === undefined ? {} : { local }),
   }
 }
 
@@ -105,7 +73,7 @@ export function parseHomeConfigProfileManagement(value: unknown, label: string):
   }
   if (!Array.isArray(management.sources)) throw new Error(`${label}.sources must be an array`)
   const sources = management.sources.map((source, index) =>
-    parseMarketplaceDiscoverySource(source, `${label}.sources[${index}]`)
+    parseMarketplaceSourceSelection(source, `${label}.sources[${index}]`)
   )
   const sourceUrls = new Set<string>()
   for (const source of sources) {

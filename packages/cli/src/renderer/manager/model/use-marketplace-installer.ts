@@ -49,7 +49,7 @@ export function useMarketplaceInstaller(
     cancel: () => controller.current?.abort(),
     run: async (plugin, name) => {
       if (plugin.artifact === undefined || manager.inspectMarketplaceArtifact === undefined) return
-      controller.current?.abort()
+      if (controller.current !== undefined) return
       const request = new AbortController()
       controller.current = request
       setInstallingIdentity(plugin.identity)

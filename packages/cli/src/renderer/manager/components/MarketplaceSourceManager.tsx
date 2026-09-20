@@ -8,6 +8,7 @@ import { MoreMenu } from '../../host-ui/MoreMenu.js'
 export interface MarketplaceSourceView {
   readonly url: string
   readonly enabled: boolean
+  readonly trusted: boolean
   readonly name: string
   readonly description?: string
   readonly error?: string
@@ -20,6 +21,7 @@ export interface MarketplaceSourceView {
 export interface MarketplaceSourceInput {
   readonly url: string
   readonly enabled: boolean
+  readonly trusted: boolean
   readonly local?: { readonly name?: string; readonly description?: string }
 }
 
@@ -47,6 +49,8 @@ const COPY = {
     name: '本地名称（可选）',
     description: '本地描述（可选）',
     enabled: '启用',
+    trusted: '信任此商店的认证',
+    trustedDescription: '仅对该商店签发且来源、版本、归档摘要、有效期和能力范围完全匹配的认证生效。',
     disabled: '停用',
     copy: '复制来源地址',
     remove: '删除来源',
@@ -71,6 +75,9 @@ const COPY = {
     name: 'Local name (optional)',
     description: 'Local description (optional)',
     enabled: 'Enable',
+    trusted: 'Trust certifications from this Marketplace',
+    trustedDescription:
+      'Only exact source, version, archive digest, expiry, and capability scope matches are accepted.',
     disabled: 'Disable',
     copy: 'Copy source URL',
     remove: 'Remove source',
@@ -110,12 +117,14 @@ export function MarketplaceSourceManager({
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [trusted, setTrusted] = useState(true)
   const [error, setError] = useState<string>()
   const open = (source?: MarketplaceSourceView) => {
     setEditing(source ?? 'new')
     setUrl(source?.url ?? '')
     setName(source?.local?.name ?? '')
     setDescription(source?.local?.description ?? '')
+    setTrusted(source?.trusted ?? true)
     setError(undefined)
   }
   const close = () => {
@@ -131,6 +140,7 @@ export function MarketplaceSourceManager({
       await onSave(currentUrl, {
         url: url.trim(),
         enabled: editing === 'new' ? true : editing.enabled,
+        trusted,
         ...(localName === undefined && localDescription === undefined
           ? {}
           : {
@@ -272,6 +282,11 @@ export function MarketplaceSourceManager({
           <label>
             <span>{copy.description}</span>
             <Textarea value={description} autosize={{ minRows: 2, maxRows: 5 }} onChange={setDescription} />
+          </label>
+          <label>
+            <span>{copy.trusted}</span>
+            <Switch value={trusted} aria-label={copy.trusted} onChange={setTrusted} />
+            <small>{copy.trustedDescription}</small>
           </label>
           {error === undefined ? null : <div className="cxr-danger" role="alert">{error}</div>}
         </div>

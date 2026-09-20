@@ -28,6 +28,7 @@ const snapshot: PluginManagementSnapshot = {
   sources: [{
     url: 'https://plugins.example/catalog.json',
     enabled: true,
+    trusted: true,
     official: false,
     removable: true,
     local: { name: 'Example', description: 'Old description' },
@@ -143,6 +144,132 @@ describe('management CLI commands', () => {
     })
   })
 
+  it('resolves a Host-owned source name for queries and installs while preserving URL selectors', async () => {
+    const management = service()
+    await runWithService(['plugin', 'search', 'alpha', '--source', 'Example'], management)
+    expect(management.queryCatalog).toHaveBeenCalledWith({ query: 'alpha', sourceUrl: snapshot.sources[0]!.url })
+    await runWithService(['plugin', 'install', 'alpha', '--source', 'Example', '--yes'], management)
+    expect(management.plan).toHaveBeenLastCalledWith({
+      kind: 'plugin-plan-marketplace',
+      pluginId: 'alpha',
+      sourceUrl: snapshot.sources[0]!.url,
+    })
+
+    await runWithService(['plugin', 'install', 'beta', '--source', 'Example', '--yes'], management)
+    expect(management.plan).toHaveBeenLastCalledWith({
+      kind: 'plugin-plan-marketplace',
+      pluginId: 'beta',
+      sourceUrl: snapshot.sources[0]!.url,
+    })
+
+    await runWithService([
+      'plugin',
+      'install',
+      'alpha',
+      '--source',
+      snapshot.sources[0]!.url,
+      '--yes',
+    ], management)
+    expect(management.plan).toHaveBeenLastCalledWith({
+      kind: 'plugin-plan-marketplace',
+      pluginId: 'alpha',
+      sourceUrl: snapshot.sources[0]!.url,
+    })
+  })
+
+  it('supports the add-name then install-by-name workflow for multiple plugins', async () => {
+    const sourceUrl = 'https://plugins.example/team.json'
+    let current = { ...snapshot, sources: [] as PluginManagementSnapshot['sources'] }
+    const management = service({
+      query: vi.fn(async () => current),
+      plan: vi.fn(async request => ({ status: 'planned', request, snapshot: current, executionRequest: request })),
+      execute: vi.fn(async request => {
+        if (request.kind === 'source-add') {
+          current = {
+            ...current,
+            sources: [{
+              ...request.source,
+              trusted: request.source.trusted === true,
+              official: false,
+              removable: true,
+            }],
+          }
+        }
+        return { status: 'applied', request, snapshot: current, pendingActivation: false }
+      }),
+    })
+    await runWithService(['source', 'add', sourceUrl, '--name', 'team', '--yes'], management)
+    expect(management.plan).toHaveBeenLastCalledWith({
+      kind: 'source-add',
+      source: { url: sourceUrl, enabled: true, trusted: true, local: { name: 'team' } },
+    })
+    await runWithService(['plugin', 'install', 'alpha', '--source', 'team', '--yes'], management)
+    await runWithService(['plugin', 'install', 'beta', '--source', 'team', '--yes'], management)
+    expect(management.plan).toHaveBeenNthCalledWith(2, {
+      kind: 'plugin-plan-marketplace',
+      pluginId: 'alpha',
+      sourceUrl,
+    })
+    expect(management.plan).toHaveBeenNthCalledWith(3, {
+      kind: 'plugin-plan-marketplace',
+      pluginId: 'beta',
+      sourceUrl,
+    })
+  })
+
+  it.each([
+    'http://127.0.0.1:43124/catalog.json',
+    'https://plugins.example/catalog.json?channel=team',
+  ])('adds discovery-only source %s as untrusted by default', async sourceUrl => {
+    const management = service()
+    await runWithService(['source', 'add', sourceUrl, '--yes'], management)
+    expect(management.plan).toHaveBeenLastCalledWith({
+      kind: 'source-add',
+      source: { url: sourceUrl, enabled: true, trusted: false },
+    })
+  })
+
+  it('still rejects explicit trust for a discovery-only source URL', async () => {
+    const management = service()
+    await expect(runWithService([
+      'source',
+      'add',
+      'https://plugins.example/catalog.json?channel=team',
+      '--trusted',
+      '--yes',
+    ], management)).rejects.toThrow('must be HTTPS without a query when trusted')
+  })
+
+  it('rejects missing, disabled, and duplicate source names without guessing', async () => {
+    const disabled = service({
+      query: vi.fn(async () => ({
+        ...snapshot,
+        sources: [{ ...snapshot.sources[0]!, enabled: false, local: { name: 'team' } }],
+      })),
+    })
+    await expect(runWithService(['plugin', 'install', 'alpha', '--source', 'team', '--yes'], disabled))
+      .rejects.toMatchObject({ code: 'source-disabled' })
+
+    const duplicate = service({
+      query: vi.fn(async () => ({
+        ...snapshot,
+        sources: [
+          { ...snapshot.sources[0]!, local: { name: 'team' } },
+          {
+            ...snapshot.sources[0]!,
+            url: 'https://other.example/marketplace.json',
+            local: { name: 'team' },
+          },
+        ],
+      })),
+    })
+    await expect(runWithService(['plugin', 'info', 'beta', '--source', 'team'], duplicate))
+      .rejects.toMatchObject({ code: 'ambiguous-selection' })
+
+    await expect(runWithService(['plugin', 'search', 'alpha', '--source', 'missing'], service()))
+      .rejects.toMatchObject({ code: 'not-found' })
+  })
+
   it('preserves source fields while editing and omits cleared local metadata', async () => {
     const management = service()
     await runWithService([
@@ -161,6 +288,7 @@ describe('management CLI commands', () => {
       source: {
         url: 'https://plugins.example/catalog.json',
         enabled: true,
+        trusted: true,
       },
     })
   })

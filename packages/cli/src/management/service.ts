@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { type FSWatcher, watch } from 'node:fs'
 import path from 'node:path'
-import { loadHomeConfig } from '../config/home-config.js'
+import { createDefaultHomeConfig, loadHomeConfig } from '../config/home-config.js'
 import {
   CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1,
   type CordisXPluginActivationItemV1,
@@ -400,8 +400,11 @@ export async function openPluginManagementService(
 
   const plan = async (request: PluginManagementRequest): Promise<PluginManagementResult> => {
     if (configRequest(request)) {
-      const current = await loadPluginManagementConfig(options)
-      planPluginManagementConfig(current, request)
+      const current = await loadHomeConfig(options.configPath).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return createDefaultHomeConfig()
+        throw error
+      })
+      planPluginManagementConfig(current, options, request)
       return { status: 'planned', request, snapshot: await query(), executionRequest: request }
     }
     if (request.kind === 'plugin-execute-plan') {

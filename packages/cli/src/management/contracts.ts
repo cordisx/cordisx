@@ -22,10 +22,19 @@ export interface PluginManagementSourceLocal {
 export interface PluginManagementSourceInput {
   readonly url: string
   readonly enabled: boolean
+  /** Whether this Host-owned source may supply exact Marketplace certification evidence. */
+  readonly trusted?: boolean
   readonly local?: PluginManagementSourceLocal
 }
 
-export interface PluginManagementSource extends PluginManagementSourceInput {
+export interface PluginManagementLegacySourceInput {
+  readonly url: string
+  readonly enabled: boolean
+  readonly local?: PluginManagementSourceLocal
+}
+
+export interface PluginManagementSource extends Omit<PluginManagementSourceInput, 'trusted'> {
+  readonly trusted: boolean
   readonly official: boolean
   readonly removable: boolean
 }
@@ -133,7 +142,7 @@ export type PluginManagementPluginRequest =
 export type PluginManagementRequest = PluginManagementConfigRequest | PluginManagementPluginRequest
 
 export interface PluginManagementLegacySourceMigration {
-  readonly sources: readonly PluginManagementSourceInput[]
+  readonly sources: readonly PluginManagementLegacySourceInput[]
 }
 
 export type PluginManagementResult =

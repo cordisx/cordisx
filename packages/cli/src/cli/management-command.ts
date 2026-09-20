@@ -10,6 +10,7 @@ import {
   loadHomeConfig,
   resolveHomeConfigPath,
 } from '../config/home-config.js'
+import { supportsTrustedMarketplaceSource } from '../config/home-config-marketplace.js'
 import type {
   PluginManagementCatalogDetail,
   PluginManagementCatalogIdentity,
@@ -24,6 +25,7 @@ import type {
   PluginManagementSourceLocal,
 } from '../management/contracts.js'
 import type { PluginManagementService } from '../management/service.js'
+import { resolveMarketplaceSourceReference } from '../management/source-reference.js'
 import { confirmManagementMutation } from './management-confirmation.js'
 import { openCliPluginManagementClient } from './management-client.js'
 import { PLUGIN_MANAGEMENT_HELP, SOURCE_MANAGEMENT_HELP } from './management-help.js'
@@ -67,10 +69,13 @@ export class CordisXManagementCommandError extends Error {
   }
 }
 
-function catalogQuery(invocation: CordisXPluginManagementInvocation): PluginManagementCatalogQuery {
+function catalogQuery(
+  invocation: CordisXPluginManagementInvocation,
+  sourceUrl?: string,
+): PluginManagementCatalogQuery {
   return {
     ...(invocation.query === undefined ? {} : { query: invocation.query }),
-    ...(invocation.source === undefined ? {} : { sourceUrl: invocation.source }),
+    ...(sourceUrl === undefined ? {} : { sourceUrl }),
     ...(invocation.version === undefined ? {} : { version: invocation.version }),
     ...(invocation.includeHidden === true ? { includeHidden: true } : {}),
   }
@@ -79,10 +84,11 @@ function catalogQuery(invocation: CordisXPluginManagementInvocation): PluginMana
 function catalogIdentity(
   invocation: CordisXPluginManagementInvocation,
   detail: PluginManagementCatalogDetail,
+  sourceUrl?: string,
 ): PluginManagementCatalogIdentity {
   if (invocation.target === undefined) throw new Error('plugin id is required')
   return {
-    sourceUrl: invocation.source ?? detail.identity.sourceUrl,
+    sourceUrl: sourceUrl ?? detail.identity.sourceUrl,
     pluginId: invocation.target,
   }
 }
@@ -92,11 +98,12 @@ async function pluginRequest(
   service: PluginManagementService,
 ): Promise<PluginManagementRequest> {
   if (invocation.target === undefined) throw new Error('plugin id is required')
+  const sourceUrl = await resolvePluginSourceReference(service, invocation.source)
   if (invocation.command === 'install' || invocation.command === 'update') {
     return {
       kind: 'plugin-plan-marketplace',
       pluginId: invocation.target,
-      ...(invocation.source === undefined ? {} : { sourceUrl: invocation.source }),
+      ...(sourceUrl === undefined ? {} : { sourceUrl }),
       ...(invocation.version === undefined ? {} : { version: invocation.version }),
     }
   }
@@ -106,7 +113,6 @@ async function pluginRequest(
   if (invocation.command === 'hide' || invocation.command === 'unhide') {
     if (invocation.command === 'unhide') {
       const snapshot = await service.query()
-      const sourceUrl = invocation.source === undefined ? undefined : canonicalUrl(invocation.source)
       const matches = snapshot.hiddenCatalogEntries.filter(identity =>
         identity.pluginId === invocation.target
         && (sourceUrl === undefined || identity.sourceUrl === sourceUrl)
@@ -127,12 +133,12 @@ async function pluginRequest(
     }
     const detail = await service.pluginInfo({
       pluginId: invocation.target,
-      ...(invocation.source === undefined ? {} : { sourceUrl: invocation.source }),
+      ...(sourceUrl === undefined ? {} : { sourceUrl }),
     })
     if (detail === undefined) throw new Error(`marketplace plugin was not found: ${invocation.target}`)
     return {
       kind: invocation.command === 'hide' ? 'catalog-hide' : 'catalog-unhide',
-      identity: catalogIdentity(invocation, detail),
+      identity: catalogIdentity(invocation, detail, sourceUrl),
     }
   }
   throw new Error(`plugin command is not a mutation: ${invocation.command}`)
@@ -140,6 +146,18 @@ async function pluginRequest(
 
 function canonicalUrl(value: string): string {
   return new URL(value).href
+}
+
+async function resolvePluginSourceReference(
+  service: PluginManagementService,
+  reference: string | undefined,
+): Promise<string | undefined> {
+  if (reference === undefined) return undefined
+  try {
+    const url = new URL(reference)
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href
+  } catch { /* non-URL values are resolved as Host-owned source names */ }
+  return resolveMarketplaceSourceReference((await service.query()).sources, reference)
 }
 
 function sourceLocal(invocation: CordisXSourceManagementInvocation): PluginManagementSourceLocal | undefined {
@@ -172,6 +190,7 @@ function editedSource(
   return {
     url: invocation.url ?? current.url,
     enabled: current.enabled,
+    trusted: invocation.trusted ?? current.trusted,
     ...(Object.keys(definedLocal).length === 0 ? {} : { local: definedLocal }),
   }
 }
@@ -182,10 +201,18 @@ async function sourceRequest(
 ): Promise<PluginManagementRequest> {
   if (invocation.command === 'add') {
     if (invocation.url === undefined) throw new Error('source URL is required')
+    if (invocation.trusted === true && !supportsTrustedMarketplaceSource(invocation.url)) {
+      throw new Error('marketplace source URL must be HTTPS without a query when trusted')
+    }
     const local = sourceLocal(invocation)
     return {
       kind: 'source-add',
-      source: { url: invocation.url, enabled: true, ...(local === undefined ? {} : { local }) },
+      source: {
+        url: invocation.url,
+        enabled: true,
+        trusted: invocation.trusted ?? supportsTrustedMarketplaceSource(invocation.url),
+        ...(local === undefined ? {} : { local }),
+      },
     }
   }
   if (invocation.target === undefined) throw new Error('source URL is required')
@@ -288,7 +315,11 @@ function printSources(stdout: (line: string) => void, snapshot: PluginManagement
   stdout(`Profile ${snapshot.profileId}: ${snapshot.sources.length} discovery source(s)`)
   for (const source of snapshot.sources) {
     const name = source.local?.name === undefined ? '' : `  ${source.local.name}`
-    stdout(`${source.enabled ? 'enabled ' : 'disabled'}  ${source.url}${name}`)
+    stdout(
+      `${source.enabled ? 'enabled ' : 'disabled'}  ${
+        source.trusted ? 'trusted  ' : 'untrusted'
+      }  ${source.url}${name}`,
+    )
   }
 }
 
@@ -428,15 +459,17 @@ export async function runManagementCommand(
         return
       }
       if (invocation.command === 'search') {
-        const result = await service.queryCatalog(catalogQuery(invocation))
+        const sourceUrl = await resolvePluginSourceReference(service, invocation.source)
+        const result = await service.queryCatalog(catalogQuery(invocation, sourceUrl))
         invocation.options.json ? printJson(stdout, result) : printCatalog(stdout, result)
         return
       }
       if (invocation.command === 'info') {
         if (invocation.target === undefined) throw new Error('plugin id is required')
+        const sourceUrl = await resolvePluginSourceReference(service, invocation.source)
         const detail = await service.pluginInfo({
           pluginId: invocation.target,
-          ...(invocation.source === undefined ? {} : { sourceUrl: invocation.source }),
+          ...(sourceUrl === undefined ? {} : { sourceUrl }),
           ...(invocation.version === undefined ? {} : { version: invocation.version }),
         })
         if (detail === undefined) throw new Error(`marketplace plugin was not found: ${invocation.target}`)

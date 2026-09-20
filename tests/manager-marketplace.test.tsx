@@ -349,6 +349,51 @@ describe('React Manager Marketplace', () => {
     }
   })
 
+  it('disables other Marketplace install actions while one installation is active', async () => {
+    const fixture = reactManagerFixture()
+    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
+    const marketplace = new BrowserMarketplaceModel(
+      fixture.dom.window.localStorage,
+      async () => ({ ok: true, status: 200, text: async () => JSON.stringify(trustedFeed) }),
+    )
+    await marketplace.reload()
+    const state = managerSnapshot({
+      pluginLifecycle: {
+        profileId: 'test',
+        revision: 1,
+        runtimeGeneration: 'runtime',
+        operationsAvailable: true,
+      },
+    })
+    const inspect = vi.fn((_request, signal: AbortSignal) =>
+      new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true })
+      })
+    )
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={managerModel(state, { inspectMarketplaceArtifact: inspect, requestPluginLifecycle: vi.fn() })}
+          snapshot={state}
+          router={managerRouter()}
+        />,
+      )
+      await fixture.click('[data-marketplace-plugin="trusted"] [aria-label="Install"]')
+      expect(fixture.document.querySelector('[data-marketplace-plugin="trusted"] [aria-label="Cancel installation"]'))
+        .not.toBeNull()
+      const competingInstall = fixture.element(
+        '[data-marketplace-plugin="official-only"] [aria-label="Install"]',
+      )
+      expect(competingInstall.classList.contains('t-is-disabled')).toBe(true)
+      expect(inspect).toHaveBeenCalledTimes(1)
+    } finally {
+      await fixture.dispose()
+      marketplace.dispose()
+    }
+  })
+
   it('exposes installed lifecycle actions without conflating them with install or discovery state', async () => {
     const fixture = reactManagerFixture()
     const dialogs = await installLifecycleDialogHost(fixture)

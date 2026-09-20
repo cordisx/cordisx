@@ -80,10 +80,13 @@ used by the Manager UI; the result reports pending runtime activation honestly
 until a compatible Host runtime applies it. Hiding a catalog entry only changes
 discovery visibility. It does not disable or uninstall an installed plugin.
 
-Discovery sources are addressed by canonical URL. `source edit` replaces URL,
-name, and description atomically, and canonical source URLs remain unique.
-Local testing sources are allowed as discovery inputs but do not become plugin
-trust roots.
+Discovery sources are stored by canonical URL and may be selected by either
+that URL or an exact, unique Host-owned local name. `source edit` replaces URL,
+name, description, and trust state atomically, and canonical source URLs remain
+unique. User-added canonical HTTPS sources without a query are trusted by
+default; `--untrusted` opts out. HTTP loopback and query-bearing HTTPS sources
+remain available for discovery but do not become trust roots, and explicitly
+marking either form trusted is rejected.
 
 ## Home configuration
 

@@ -50,7 +50,7 @@ describe('management CLI parsing', () => {
       command,
       'com.example.calendar',
       '--source',
-      'https://plugins.example/catalog.json',
+      'team',
       '--version=2.0.0',
       '--dry-run',
       '--yes',
@@ -58,7 +58,7 @@ describe('management CLI parsing', () => {
       namespace: 'plugin',
       command,
       target: 'com.example.calendar',
-      source: 'https://plugins.example/catalog.json',
+      source: 'team',
       version: '2.0.0',
       options: { json: false, dryRun: true, yes: true },
     })
@@ -75,7 +75,7 @@ describe('management CLI parsing', () => {
     },
   )
 
-  it('accepts a source URL to disambiguate catalog hide and unhide', () => {
+  it('accepts a source URL or configured name to disambiguate catalog hide and unhide', () => {
     expect(parseCordisXCli([
       'plugin',
       'hide',
@@ -87,9 +87,13 @@ describe('management CLI parsing', () => {
       target: 'com.example.calendar',
       source: 'https://plugins.example/catalog.json',
     })
+    expect(parseCordisXCli(['plugin', 'unhide', 'com.example.calendar', '--source', 'team'])).toMatchObject({
+      command: 'unhide',
+      source: 'team',
+    })
   })
 
-  it('parses source CRUD and refresh operations', () => {
+  it('parses source CRUD, trust, and refresh operations', () => {
     expect(parseCordisXCli([
       'source',
       'add',
@@ -97,12 +101,14 @@ describe('management CLI parsing', () => {
       '--name',
       'Example',
       '--description=Team catalog',
+      '--trusted',
     ])).toMatchObject({
       namespace: 'source',
       command: 'add',
       url: 'https://plugins.example/catalog.json',
       name: 'Example',
       description: 'Team catalog',
+      trusted: true,
     })
     expect(parseCordisXCli([
       'source',
@@ -112,11 +118,13 @@ describe('management CLI parsing', () => {
       'http://127.0.0.1:43124/catalog.json',
       '--name',
       '',
+      '--untrusted',
     ])).toMatchObject({
       command: 'edit',
       target: 'https://plugins.example/catalog.json',
       url: 'http://127.0.0.1:43124/catalog.json',
       name: '',
+      trusted: false,
     })
     expect(parseCordisXCli(['source', 'refresh'])).toMatchObject({ command: 'refresh' })
     expect(parseCordisXCli(['source', 'refresh', 'https://plugins.example/catalog.json'])).toMatchObject({
@@ -155,17 +163,26 @@ describe('management CLI parsing', () => {
     })
   })
 
-  it('rejects missing operands and meaningless options', () => {
+  it('rejects missing operands, contradictory trust, and meaningless options', () => {
     expect(() => parseCordisXCli(['plugin', 'info'])).toThrow('Usage: cordisx plugin info')
     expect(() => parseCordisXCli(['plugin', 'list', '--yes'])).toThrow('--yes is not valid')
     expect(() => parseCordisXCli(['plugin', 'enable', 'example', '--version', '2'])).toThrow(
       '--version is not valid',
     )
     expect(() => parseCordisXCli(['source', 'edit', 'https://plugins.example/catalog.json'])).toThrow(
-      'requires --url, --name, or --description',
+      'requires --url, --name, --description, --trusted, or --untrusted',
     )
     expect(() => parseCordisXCli(['source', 'add', 'https://example.test', '--url', 'https://other.test']))
       .toThrow('--url is not valid')
+    expect(() =>
+      parseCordisXCli([
+        'source',
+        'add',
+        'https://example.test',
+        '--trusted',
+        '--untrusted',
+      ])
+    ).toThrow('--trusted and --untrusted cannot be used together')
     expect(() => parseCordisXCli(['source', 'refresh', '--yes'])).toThrow('--yes is not valid')
   })
 

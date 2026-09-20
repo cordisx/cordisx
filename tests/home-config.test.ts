@@ -35,7 +35,11 @@ describe('CordisX home configuration', () => {
     const config = await ensureHomeConfig(configPath)
     expect(config).toEqual(createDefaultHomeConfig())
     expect(config.plugins).toEqual([])
-    expect(config.marketplaceTrustSources).toEqual([{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }])
+    expect(config.marketplaceSources).toEqual([{
+      url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
+      enabled: true,
+      trusted: true,
+    }])
     expect(config.apps.codex?.profiles.default?.dataMode).toBe('shared')
     expect((await stat(path.dirname(configPath))).mode & 0o777).toBe(0o700)
     expect((await stat(configPath)).mode & 0o777).toBe(0o600)
@@ -165,43 +169,137 @@ describe('CordisX home configuration', () => {
     expect(() =>
       parseHomeConfig({
         ...createDefaultHomeConfig(),
-        marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, certified: true }],
+        marketplaceSources: [{
+          url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
+          enabled: true,
+          trusted: true,
+          certified: true,
+        }],
       })
     ).toThrow('certified is not supported')
     expect(() =>
       parseHomeConfig({
         ...createDefaultHomeConfig(),
-        marketplaceTrustSources: [{ url: 'http://marketplace.example/feed.json', enabled: true }],
+        marketplaceSources: [{ url: 'http://marketplace.example/feed.json', enabled: true, trusted: true }],
       })
-    ).toThrow('must be an HTTPS URL')
+    ).toThrow('must be HTTPS without a query when trusted')
     expect(() =>
       parseHomeConfig({
         ...createDefaultHomeConfig(),
-        marketplaceTrustSources: [
-          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
-          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false },
+        marketplaceSources: [
+          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, trusted: true },
+          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false, trusted: false },
         ],
       })
-    ).toThrow('duplicate Marketplace trust source')
+    ).toThrow('duplicate Marketplace source')
     expect(() =>
       parseHomeConfig({
         ...createDefaultHomeConfig(),
-        marketplaceTrustSources: Array.from({ length: 9 }, (_, index) => ({
+        marketplaceSources: Array.from({ length: 33 }, (_, index) => ({
           url: `https://marketplace.example/${index}.json`,
           enabled: true,
+          trusted: false,
         })),
       })
-    ).toThrow('at most 8 sources')
+    ).toThrow('at most 32 sources')
   })
 
-  it('migrates a legacy config to the Launcher-owned official trust root without consulting renderer state', () => {
-    const legacy = { ...createDefaultHomeConfig() } as Record<string, unknown>
-    delete legacy.marketplaceTrustSources
-    expect(parseHomeConfig(legacy).marketplaceTrustSources).toEqual([{
-      url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
+  it('migrates legacy discovery and trust lists into one Host-owned source definition', async () => {
+    const { configPath } = await fixturePath()
+    const team = 'https://marketplace.example/team.json'
+    const disabled = 'https://marketplace.example/disabled.json'
+    const current = createDefaultHomeConfig()
+    const { marketplaceSources: _marketplaceSources, ...legacy } = current
+    const document = {
+      ...legacy,
+      marketplaceTrustSources: [
+        { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
+        { url: disabled, enabled: false },
+      ],
+      apps: {
+        codex: {
+          defaultProfile: 'default',
+          profiles: {
+            default: {
+              displayName: 'Default',
+              dataMode: 'shared',
+              management: {
+                revision: 4,
+                sources: [
+                  { url: team, enabled: true, local: { name: 'Team' } },
+                  { url: disabled, enabled: true },
+                ],
+                hiddenCatalogEntries: [],
+              },
+            },
+          },
+        },
+      },
+    }
+    await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 })
+    await writeFile(configPath, `${JSON.stringify(document)}\n`, { mode: 0o600 })
+    const migrated = await ensureHomeConfig(configPath)
+    expect(migrated.marketplaceSources).toEqual([
+      { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, trusted: true },
+      { url: disabled, enabled: true, trusted: false },
+      { url: team, enabled: true, trusted: true, local: { name: 'Team' } },
+    ])
+    expect(migrated.apps.codex?.profiles.default?.management?.sources).toEqual([
+      { url: team, enabled: true },
+      { url: disabled, enabled: true },
+      { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
+    ])
+    const persisted = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+    expect(persisted).not.toHaveProperty('marketplaceTrustSources')
+    expect(persisted).toHaveProperty('marketplaceSources')
+
+    const explicitlyUntrusted = parseHomeConfig({ ...document, marketplaceTrustSources: [] })
+    expect(explicitlyUntrusted.marketplaceSources).toEqual([
+      { url: team, enabled: true, trusted: false, local: { name: 'Team' } },
+      { url: disabled, enabled: true, trusted: false },
+    ])
+  })
+
+  it('preserves legacy discovery-only sources without upgrading their trust', () => {
+    const current = createDefaultHomeConfig()
+    const { marketplaceSources: _marketplaceSources, ...legacy } = current
+    const loopback = 'http://127.0.0.1:43124/catalog.json'
+    const query = 'https://plugins.example/catalog.json?channel=team'
+    const parsed = parseHomeConfig({
+      ...legacy,
+      apps: {
+        codex: {
+          defaultProfile: 'default',
+          profiles: {
+            default: {
+              displayName: 'Default',
+              dataMode: 'shared',
+              management: {
+                revision: 0,
+                sources: [
+                  { url: loopback, enabled: true, local: { name: 'Local', note: 'Developer feed' } },
+                  { url: query, enabled: true, local: { description: 'Team channel' } },
+                ],
+                hiddenCatalogEntries: [],
+              },
+            },
+          },
+        },
+      },
+    })
+
+    expect(parsed.marketplaceSources).toContainEqual({
+      url: loopback,
       enabled: true,
-    }])
-    expect(parseHomeConfig({ ...legacy, marketplaceTrustSources: [] }).marketplaceTrustSources).toEqual([])
+      trusted: false,
+      local: { name: 'Local', note: 'Developer feed' },
+    })
+    expect(parsed.marketplaceSources).toContainEqual({
+      url: query,
+      enabled: true,
+      trusted: false,
+      local: { description: 'Team channel' },
+    })
   })
 
   it('keeps persistent policies separated by profile, identity, capability, and exact scope', async () => {

@@ -114,6 +114,72 @@ function handler(expectedSource = SOURCE): {
 }
 
 describe('Marketplace artifact installation boundary', () => {
+  it('reports the failed host and network cause without leaking redirect credentials', async () => {
+    const cause = Object.assign(new Error('private transport payload'), { code: 'ECONNRESET' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(
+          new Response(null, {
+            status: 302,
+            headers: { location: 'https://download.example/private/package.tgz?token=secret' },
+          }),
+        )
+        .mockRejectedValueOnce(new TypeError('fetch failed', { cause: new AggregateError([cause]) })),
+    )
+    const lifecycle = handler()
+    const inspection = inspectMarketplaceArtifactPackage(
+      lifecycle.value,
+      request(Buffer.from('artifact')),
+      new AbortController().signal,
+    )
+    await expect(inspection).rejects.toThrow(
+      'Plugin download from download.example failed (ECONNRESET). Check network access to this host and retry.',
+    )
+    expect(lifecycle.stage).not.toHaveBeenCalled()
+  })
+
+  it('reports a stalled download and preserves explicit cancellation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('expired', 'TimeoutError')))
+    const lifecycle = handler()
+    await expect(inspectMarketplaceArtifactPackage(
+      lifecycle.value,
+      request(Buffer.from('artifact')),
+      new AbortController().signal,
+    )).rejects.toThrow('Plugin download from registry.example timed out')
+    const controller = new AbortController()
+    controller.abort()
+    await expect(inspectMarketplaceArtifactPackage(
+      lifecycle.value,
+      request(Buffer.from('artifact')),
+      controller.signal,
+    )).rejects.toBe(controller.signal.reason)
+    expect(lifecycle.stage).not.toHaveBeenCalled()
+  })
+
+  it('reports network failure while reading an artifact body before staging', async () => {
+    const cause = Object.assign(new Error('private body payload'), { code: 'UND_ERR_SOCKET' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new TypeError('terminated', { cause }))
+            },
+          }),
+        ),
+      ),
+    )
+    const lifecycle = handler()
+    await expect(inspectMarketplaceArtifactPackage(
+      lifecycle.value,
+      request(Buffer.from('artifact')),
+      new AbortController().signal,
+    )).rejects.toThrow('Plugin download from registry.example failed (UND_ERR_SOCKET)')
+    expect(lifecycle.stage).not.toHaveBeenCalled()
+  })
+
   it('accepts only a consistent HTTPS feed artifact request', () => {
     const bytes = Buffer.from('artifact')
     expect(parseMarketplaceArtifactBindingRequest({

@@ -52,6 +52,7 @@ export function MarketplaceSourcesPage({
     return {
       url: source.url,
       enabled: source.enabled,
+      trusted: source.trusted,
       name: projection.name,
       ...(projection.description === undefined ? {} : { description: projection.description }),
       ...(state?.error === undefined ? {} : { error: state.error }),

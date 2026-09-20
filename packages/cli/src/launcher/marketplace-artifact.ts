@@ -17,6 +17,46 @@ const MAX_REDIRECTS = 4
 const DOWNLOAD_TIMEOUT_MS = 30_000
 const README_PATH = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/
 
+function downloadError(error: unknown, url: URL, signal: AbortSignal): Error {
+  if (signal.aborted && signal.reason?.name !== 'TimeoutError') return signal.reason
+  const codes = new Set([
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+    'UND_ERR_SOCKET',
+    'CERT_HAS_EXPIRED',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+  ])
+  const pending: unknown[] = [error]
+  let code: string | undefined
+  for (let index = 0; index < pending.length && index < 8; index++) {
+    const cause = pending[index]
+    if (cause === null || typeof cause !== 'object') continue
+    const candidate = Reflect.get(cause, 'code')
+    if (typeof candidate === 'string' && codes.has(candidate)) {
+      code = candidate
+      break
+    }
+    pending.push(Reflect.get(cause, 'cause'))
+    if (cause instanceof AggregateError) pending.push(...cause.errors.slice(0, 8))
+  }
+  const timedOut = signal.reason?.name === 'TimeoutError' || error instanceof Error && error.name === 'TimeoutError'
+  // Redirect URLs and raw transport messages may contain credentials. Expose only the host and known codes.
+  return new Error(
+    `Plugin download from ${url.hostname} ${timedOut ? 'timed out' : 'failed'}${code ? ` (${code})` : ''}. `
+      + 'Check network access to this host and retry.',
+    { cause: error },
+  )
+}
+
 export type MarketplaceArtifactBindingRequest =
   | {
     readonly kind: 'inspect' | 'preview'
@@ -161,6 +201,8 @@ async function download(
       'user-agent': 'CordisX-Marketplace/0.1',
     },
     signal,
+  }).catch(error => {
+    throw downloadError(error, url, signal)
   })
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     if (redirects >= MAX_REDIRECTS) throw new Error('Marketplace artifact redirected too many times')
@@ -185,7 +227,9 @@ async function download(
   const reader = response.body.getReader()
   try {
     while (true) {
-      const chunk = await reader.read()
+      const chunk = await reader.read().catch(error => {
+        throw downloadError(error, url, signal)
+      })
       if (chunk.done) break
       const bytes = Buffer.from(chunk.value)
       size += bytes.byteLength

@@ -47,7 +47,8 @@ cordisx plugin install com.example.calendar
 cordisx plugin disable com.example.calendar --yes
 
 cordisx source list
-cordisx source add https://plugins.example/catalog.json --name "Team catalog"
+cordisx source add https://plugins.example/catalog.json --name team --trusted --yes
+cordisx plugin install com.example.calendar --source team --yes
 cordisx source edit https://plugins.example/catalog.json --url http://127.0.0.1:43124/catalog.json
 cordisx source refresh http://127.0.0.1:43124/catalog.json
 ```
@@ -61,8 +62,12 @@ permission flow.
 These commands can persist profile management changes while the Host App is
 stopped. Their result reports when runtime activation is pending. Catalog
 `hide` and `unhide` affect discovery only; they do not enable, disable, install,
-or uninstall a plugin. Discovery sources are addressed by canonical URL. Local
-testing sources do not become trust roots.
+or uninstall a plugin. Plugin commands accept either a canonical source URL or
+the exact local name configured by `cordisx source add --name`; names resolve
+only within the selected profile and fail when missing, disabled, or ambiguous.
+New HTTPS sources added through the Host UI or CLI trust exact certifications
+by default; use `--untrusted` to opt out. HTTP development sources and legacy
+browser sources do not become trust roots automatically.
 
 ## Configure CLIProxyAPI providers
 

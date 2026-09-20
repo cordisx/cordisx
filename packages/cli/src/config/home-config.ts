@@ -9,11 +9,22 @@ import {
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 import { type HomeConfigProfileManagement, parseHomeConfigProfileManagement } from './home-config-management.js'
+import {
+  DEFAULT_MARKETPLACE_TRUST_SOURCE,
+  type HomeConfigMarketplaceSource,
+  migrateMarketplaceConfigDocument,
+  parseHomeConfigMarketplaceSources,
+} from './home-config-marketplace.js'
+
+export {
+  DEFAULT_MARKETPLACE_TRUST_SOURCE,
+  type HomeConfigMarketplaceSource,
+  type HomeConfigMarketplaceSourceLocal,
+} from './home-config-marketplace.js'
 
 export type {
   HomeConfigHiddenMarketplaceEntry,
-  HomeConfigMarketplaceSource,
-  HomeConfigMarketplaceSourceLocal,
+  HomeConfigMarketplaceSourceSelection,
   HomeConfigProfileManagement,
   HomeConfigProfileManagementMigrations,
 } from './home-config-management.js'
@@ -112,12 +123,6 @@ export interface HomeConfigPublisherGrantIssuer {
   readonly publicKeySpki: string
 }
 
-/** Launcher-owned Marketplace trust root. Renderer storage is never authoritative. */
-export interface HomeConfigMarketplaceTrustSource {
-  readonly url: string
-  readonly enabled: boolean
-}
-
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
@@ -125,7 +130,7 @@ export interface HomeConfig {
   readonly plugins: readonly HomeConfigPlugin[]
   readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly publisherGrantIssuers: readonly HomeConfigPublisherGrantIssuer[]
-  readonly marketplaceTrustSources: readonly HomeConfigMarketplaceTrustSource[]
+  readonly marketplaceSources: readonly HomeConfigMarketplaceSource[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -159,10 +164,6 @@ const SEMVER =
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
-const MAX_MARKETPLACE_TRUST_SOURCES = 8
-export const DEFAULT_MARKETPLACE_TRUST_SOURCE =
-  'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
-
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object`)
@@ -499,30 +500,9 @@ function parsePublisherGrantIssuer(value: unknown, index: number): HomeConfigPub
   return { id, keyId, environment: issuer.environment, publicKeySpki }
 }
 
-function parseMarketplaceTrustSource(value: unknown, index: number): HomeConfigMarketplaceTrustSource {
-  const label = `config.marketplaceTrustSources[${index}]`
-  const source = record(value, label)
-  rejectUnknownKeys(source, ['url', 'enabled'], label)
-  const text = nonEmptyString(source.url, `${label}.url`)
-  const url = new URL(text)
-  if (
-    url.protocol !== 'https:'
-    || url.username !== ''
-    || url.password !== ''
-    || url.search !== ''
-    || url.hash !== ''
-  ) {
-    throw new Error(`${label}.url must be an HTTPS URL without credentials, query, or fragment`)
-  }
-  if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '')
-  if (url.href !== text) throw new Error(`${label}.url must be canonical`)
-  if (typeof source.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
-  return { url: text, enabled: source.enabled }
-}
-
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
-  const config = record(value, 'config')
+  const config = migrateMarketplaceConfigDocument(record(value, 'config')).document
   rejectUnknownKeys(config, [
     'version',
     'defaultApp',
@@ -530,7 +510,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     'plugins',
     'permissions',
     'publisherGrantIssuers',
-    'marketplaceTrustSources',
+    'marketplaceSources',
     'apps',
   ], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
@@ -574,23 +554,8 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     if (seenIssuerKeys.has(key)) throw new Error(`duplicate PublisherGrant issuer key: ${key}`)
     seenIssuerKeys.add(key)
   }
-  if (config.marketplaceTrustSources !== undefined && !Array.isArray(config.marketplaceTrustSources)) {
-    throw new Error('config.marketplaceTrustSources must be an array')
-  }
-  const marketplaceTrustSources = (config.marketplaceTrustSources ?? [{
-    url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
-    enabled: true,
-  }]).map(parseMarketplaceTrustSource)
-  if (marketplaceTrustSources.length > MAX_MARKETPLACE_TRUST_SOURCES) {
-    throw new Error(`config.marketplaceTrustSources must contain at most ${MAX_MARKETPLACE_TRUST_SOURCES} sources`)
-  }
-  const seenMarketplaceTrustSources = new Set<string>()
-  for (const source of marketplaceTrustSources) {
-    if (seenMarketplaceTrustSources.has(source.url)) {
-      throw new Error(`duplicate Marketplace trust source: ${source.url}`)
-    }
-    seenMarketplaceTrustSources.add(source.url)
-  }
+  const marketplaceSources = parseHomeConfigMarketplaceSources(config.marketplaceSources)
+  const seenMarketplaceSources = new Set(marketplaceSources.map(source => source.url))
   const rawApps = record(config.apps, 'config.apps')
   const apps: Record<string, HomeConfigApp> = Object.create(null) as Record<string, HomeConfigApp>
   for (const [appId, rawApp] of Object.entries(rawApps)) {
@@ -598,6 +563,17 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
+  for (const [appId, app] of Object.entries(apps)) {
+    for (const [profileId, profile] of Object.entries(app.profiles)) {
+      for (const source of profile.management?.sources ?? []) {
+        if (!seenMarketplaceSources.has(source.url)) {
+          throw new Error(
+            `config.apps.${appId}.profiles.${profileId}.management.sources references missing Marketplace source: ${source.url}`,
+          )
+        }
+      }
+    }
+  }
   return {
     version: 1,
     defaultApp,
@@ -605,7 +581,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     plugins,
     permissions,
     publisherGrantIssuers,
-    marketplaceTrustSources,
+    marketplaceSources,
     apps,
   }
 }
@@ -619,7 +595,7 @@ export function createDefaultHomeConfig(): HomeConfig {
     plugins: [],
     permissions: [],
     publisherGrantIssuers: [],
-    marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }],
+    marketplaceSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, trusted: true }],
     apps: {
       codex: {
         defaultProfile: 'default',
@@ -632,6 +608,25 @@ export function createDefaultHomeConfig(): HomeConfig {
       },
     },
   }
+}
+
+/** Resolve the exact Marketplace definitions selected by one Host profile. */
+export function resolveHomeConfigMarketplaceSources(
+  config: HomeConfig,
+  profileId: string,
+  appId = 'codex',
+): readonly HomeConfigMarketplaceSource[] {
+  const app = config.apps[appId]
+  if (app === undefined) throw new Error(`Unknown CordisX app: ${appId}`)
+  const profile = app.profiles[profileId]
+  if (profile === undefined) throw new Error(`Unknown CordisX profile: ${profileId}`)
+  if (profile.management === undefined) return config.marketplaceSources
+  const definitions = new Map(config.marketplaceSources.map(source => [source.url, source]))
+  return profile.management.sources.map(selection => {
+    const source = definitions.get(selection.url)
+    if (source === undefined) throw new Error(`Marketplace source definition is missing: ${selection.url}`)
+    return { ...source, enabled: selection.enabled }
+  })
 }
 
 /** Resolve `${CORDISX_HOME || ~/.cordisx}/config.json` without consulting the cwd. */
@@ -943,7 +938,10 @@ export async function ensureHomeConfig(options?: string | HomeConfigWriteOptions
   const lock = await acquireLock(configPath, normalized)
   try {
     try {
-      const existing = await readValidated(configPath)
+      const document = await readConfigDocument(configPath, 'home config')
+      const migration = migrateMarketplaceConfigDocument(record(document, 'config'))
+      const existing = validateConfigDocument(migration.document, configPath, 'home config', parseHomeConfig)
+      if (migration.migrated) await publishAtomic(configPath, existing)
       await chmod(configPath, 0o600)
       return existing
     } catch (error) {

@@ -2,7 +2,11 @@ import { createHash, randomUUID } from 'node:crypto'
 import { constants, type Stats, unwatchFile, watchFile } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
-import { type HomeConfigMarketplaceTrustSource, loadHomeConfig } from '../config/home-config.js'
+import {
+  type HomeConfigMarketplaceSource,
+  loadHomeConfig,
+  resolveHomeConfigMarketplaceSources,
+} from '../config/home-config.js'
 import { canonicalPluginSource, marketplacePluginIdentity, parseMarketplaceFeed } from '../renderer/marketplace.js'
 import {
   type MarketplaceCertifiedPermissionProjectionV1,
@@ -78,7 +82,7 @@ interface PersistedAuthorityState {
 }
 
 interface FetchOutcome {
-  readonly source: HomeConfigMarketplaceTrustSource
+  readonly source: HomeConfigMarketplaceSource
   readonly result?: MarketplaceFetchResult
   readonly error?: unknown
 }
@@ -452,10 +456,11 @@ export class LauncherMarketplaceCertifiedAuthority {
   }
 
   private async refreshNow(): Promise<LauncherMarketplaceCertifiedSnapshot> {
-    let configured: readonly HomeConfigMarketplaceTrustSource[]
+    let configured: readonly HomeConfigMarketplaceSource[]
     try {
       const config = await loadHomeConfig(this.options.configPath)
-      configured = config.marketplaceTrustSources
+      configured = resolveHomeConfigMarketplaceSources(config, this.options.profileId)
+        .filter(source => source.trusted)
     } catch {
       await this.commitDisabledSources()
       return this.snapshot()
@@ -534,7 +539,7 @@ export class LauncherMarketplaceCertifiedAuthority {
     return { enabled: true, generatedAt, digest, feedText: result.text, requiresNewer: false }
   }
 
-  private async fetchBounded(sources: readonly HomeConfigMarketplaceTrustSource[]): Promise<readonly FetchOutcome[]> {
+  private async fetchBounded(sources: readonly HomeConfigMarketplaceSource[]): Promise<readonly FetchOutcome[]> {
     const outcomes: FetchOutcome[] = new Array(sources.length)
     let index = 0
     const worker = async (): Promise<void> => {

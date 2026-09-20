@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_MARKETPLACE_TRUST_SOURCE,
   ensureHomeConfig,
-  type HomeConfigMarketplaceTrustSource,
+  type HomeConfigMarketplaceSource,
   updateHomeConfigAtomic,
 } from '../packages/cli/src/config/home-config.js'
 import {
@@ -25,15 +25,16 @@ interface Fixture {
   readonly configPath: string
 }
 
-async function fixture(sources: readonly HomeConfigMarketplaceTrustSource[] = [{
+async function fixture(sources: readonly HomeConfigMarketplaceSource[] = [{
   url: DEFAULT_MARKETPLACE_TRUST_SOURCE,
   enabled: true,
+  trusted: true,
 }]): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-certified-authority-'))
   const homeDir = path.join(root, 'home')
   const configPath = path.join(homeDir, 'config.json')
   await ensureHomeConfig(configPath)
-  await updateHomeConfigAtomic(current => ({ ...current, marketplaceTrustSources: sources }), configPath)
+  await updateHomeConfigAtomic(current => ({ ...current, marketplaceSources: sources }), configPath)
   return { homeDir, configPath }
 }
 
@@ -98,6 +99,59 @@ describe('Launcher Marketplace Certified authority', () => {
     }
   })
 
+  it('uses the unified source trust setting while preserving profile disable and trust revocation', async () => {
+    const target = await fixture()
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      apps: {
+        ...config.apps,
+        codex: {
+          ...config.apps.codex!,
+          profiles: {
+            default: {
+              ...config.apps.codex!.profiles.default!,
+              management: {
+                revision: 1,
+                sources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }],
+                hiddenCatalogEntries: [],
+              },
+            },
+            work: {
+              displayName: 'Work',
+              dataMode: 'host-isolated',
+              management: {
+                revision: 1,
+                sources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false }],
+                hiddenCatalogEntries: [],
+              },
+            },
+          },
+        },
+      },
+    }), target.configPath)
+    const fetcher: LauncherMarketplaceFeedFetcher = async url => ({ url, status: 200, text: trustFeed() })
+    const defaultAuthority = await open(target, fetcher)
+    const workAuthority = await LauncherMarketplaceCertifiedAuthority.open({
+      ...target,
+      profileId: 'work',
+      fetcher,
+      watchConfig: false,
+    })
+    try {
+      expect(defaultAuthority.snapshot().projections).toHaveLength(1)
+      expect(workAuthority.snapshot().projections).toEqual([])
+      await updateHomeConfigAtomic(config => ({
+        ...config,
+        marketplaceSources: config.marketplaceSources.map(source => ({ ...source, trusted: false })),
+      }), target.configPath)
+      await defaultAuthority.refresh()
+      expect(defaultAuthority.snapshot().projections).toEqual([])
+    } finally {
+      await defaultAuthority.dispose()
+      await workAuthority.dispose()
+    }
+  })
+
   it('rejects renderer/plugin self-report fields and tombstones a successful malicious feed', async () => {
     const target = await fixture()
     let text = trustFeed()
@@ -137,7 +191,7 @@ describe('Launcher Marketplace Certified authority', () => {
       const revisions: number[] = []
       authority.subscribe(revision => revisions.push(revision))
       const before = authority.snapshot().revision
-      await updateHomeConfigAtomic(current => ({ ...current, marketplaceTrustSources: [] }), target.configPath)
+      await updateHomeConfigAtomic(current => ({ ...current, marketplaceSources: [] }), target.configPath)
       await authority.refresh()
       expect(authority.snapshot().projections).toEqual([])
       expect(authority.snapshot().revision).toBeGreaterThan(before)
@@ -147,7 +201,7 @@ describe('Launcher Marketplace Certified authority', () => {
 
       await updateHomeConfigAtomic(current => ({
         ...current,
-        marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true }],
+        marketplaceSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, trusted: true }],
       }), target.configPath)
       await authority.refresh()
       expect(fetches).toBe(disabledFetches + 1)
@@ -175,7 +229,7 @@ describe('Launcher Marketplace Certified authority', () => {
           resolve(revision)
         })
       })
-      await updateHomeConfigAtomic(current => ({ ...current, marketplaceTrustSources: [] }), target.configPath)
+      await updateHomeConfigAtomic(current => ({ ...current, marketplaceSources: [] }), target.configPath)
       expect(await invalidated).toBeGreaterThan(before)
       expect(authority.snapshot().projections).toEqual([])
     } finally {
@@ -261,8 +315,8 @@ describe('Launcher Marketplace Certified authority', () => {
 
   it('excludes an exact artifact asserted by more than one configured trust root', async () => {
     const target = await fixture([
-      { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
-      { url: ALTERNATE_ROOT, enabled: true },
+      { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, trusted: true },
+      { url: ALTERNATE_ROOT, enabled: true, trusted: true },
     ])
     const authority = await open(target, async url => ({ url, status: 200, text: trustFeed({ root: url }) }))
     try {
@@ -297,6 +351,7 @@ describe('Launcher Marketplace Certified authority', () => {
     const sources = Array.from({ length: 5 }, (_, index) => ({
       url: `https://marketplace.example/${index}.json`,
       enabled: true,
+      trusted: true,
     }))
     const target = await fixture(sources)
     let active = 0

@@ -35,14 +35,18 @@ dimension changes sandbox, lifecycle, or installation review.
 
 ## Trust root and revocation
 
-The renderer accepts discovery metadata from its configured HTTPS feeds for
-display. That renderer source list, its `localStorage`, Marketplace model,
-bridge, globals, and primordials are not authorization inputs: bundled plugins
-share the current renderer realm and can mutate them.
+The Host owns one top-level `config.json` `marketplaceSources` collection for
+Marketplace URL, display metadata, default enabled state, and the explicit
+`trusted` decision. Profiles retain only URL selection and enabled overrides.
+The Manager and CLI edit this shared definition; renderer `localStorage` is a
+one-time legacy import source and is deleted after durable migration. A
+browser-only or imported legacy source enters the Host configuration with
+`trusted: false` and cannot promote itself into an authorization input.
 
-Certified permission eligibility instead comes from the Launcher-private
-`LauncherMarketplaceCertifiedAuthority`. Its enabled roots live in the
-Host-owned `config.json` `marketplaceTrustSources` field and its last-good feed,
+Certified permission eligibility comes from the Launcher-private
+`LauncherMarketplaceCertifiedAuthority`. It reads the same profile-selected
+`marketplaceSources` definitions and fetches only entries with both effective
+`enabled: true` and explicit `trusted: true`. Its last-good feed,
 digest, monotonic `generatedAt` watermark, divergence tombstone, projection
 revision, and expiry state live under
 `CORDISX_HOME/state/marketplace-certified/<profile>.v1.json`. Both directories
@@ -68,7 +72,7 @@ the feed invalid. Plugin manifest fields named `official`, `certified`, or
 similar remain unknown manifest fields and cannot establish trust.
 
 Each refresh re-reads Host config and evaluates fresh feeds with at most eight
-roots, two concurrent fetches by default, a ten-second timeout, and the existing
+trusted roots, two concurrent fetches by default, a ten-second timeout, and the existing
 two-MiB response boundary. Redirecting to an unconfigured final URL is not
 accepted. A newer valid feed atomically replaces the last-good snapshot;
 revoked, removed, mismatched, and expired records are not projected. An older
@@ -107,8 +111,8 @@ all use that revision-only invalidation path. Missing projection, changed
 projection `fingerprint`/`revision`, or elapsed `expiresAt` removes eligibility.
 
 The renderer `MarketplaceModel.snapshot()/subscribe()` remains the UI discovery
-and badge/filter invalidation seam only. It must never be wired into
-PermissionBroker or PackageLifecycleAuthority decisions.
+and badge/filter invalidation seam only. Browser state and feed content must
+never be wired into PermissionBroker or PackageLifecycleAuthority decisions.
 
 ## Search contract
 
