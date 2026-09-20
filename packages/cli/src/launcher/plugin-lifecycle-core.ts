@@ -155,7 +155,7 @@ export class PluginLifecycleCoordinatorCore {
   protected readonly reservedPluginIds: ReadonlySet<string>
   protected readonly pendingPermissionReviews = new Map<string, PendingPermissionReview>()
   protected readonly receiptAuthority = createHostRegistryReceiptAuthority()
-  protected readonly authority: Promise<PackageLifecycleAuthority>
+  private authorityPromise: Promise<PackageLifecycleAuthority> | undefined
   protected preparedRecovery: {
     readonly completed: readonly string[]
     readonly rollbacks: readonly { access: RollbackAccess; plan: RollbackPlan }[]
@@ -166,6 +166,10 @@ export class PluginLifecycleCoordinatorCore {
     if (!path.isAbsolute(options.homeDir)) throw new Error('CordisX home directory must be absolute')
     this.store = new PluginActivationStore(options.homeDir, options.profileId, options.runtimeGeneration)
     this.reservedPluginIds = new Set(options.reservedPluginIds ?? [])
+  }
+
+  protected get authority(): Promise<PackageLifecycleAuthority> {
+    if (this.authorityPromise !== undefined) return this.authorityPromise
     const permissionAuthority = createHostPermissionReviewAuthority(async input => {
       const pending = this.pendingPermissionReviews.get(input.transactionId)
       if (pending === undefined || pending.candidateId !== input.transactionId) {
@@ -187,12 +191,13 @@ export class PluginLifecycleCoordinatorCore {
         oneShotGrantIds,
       }
     })
-    this.authority = PackageLifecycleAuthority.open({
-      homeDir: options.homeDir,
-      profileId: options.profileId,
-      runtimeGeneration: options.runtimeGeneration,
+    this.authorityPromise = PackageLifecycleAuthority.open({
+      homeDir: this.options.homeDir,
+      profileId: this.options.profileId,
+      runtimeGeneration: this.options.runtimeGeneration,
       permissionAuthority,
     })
+    return this.authorityPromise
   }
 
   setBundleClaimGuard(guard: (pluginId: string) => Promise<readonly string[]>): void {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openProductionPluginManagementComposition, runCordisXCli } from '../packages/cli/src/cli/run-command.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import type { PluginLifecycleRuntime } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { PackageLifecycleAuthority } from '../packages/cli/src/launcher/packages/authority.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
@@ -38,50 +39,56 @@ describe('production plugin management composition', () => {
   it('shares the active lifecycle coordinator across renderer and RPC access', async () => {
     const { homeDir, configPath } = await fixture()
     const runtimeGeneration = 'production-generation'
-    const coordinator = new PluginLifecycleCoordinator({
-      homeDir,
-      profileId: 'default',
-      runtimeGeneration,
-      permissionPolicies: [],
-      runtime: runtime(),
-    })
-    const loadActive = vi.spyOn(coordinator.store, 'loadActive')
-    const composition = await openProductionPluginManagementComposition({
-      configPath,
-      homeDir,
-      appId: 'codex',
-      profileId: 'default',
-      runtimeGeneration,
-      token: 'renderer-token',
-      coordinator,
-      processStartedAt: 'test-owner',
-    })
-    const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+    const openAuthority = vi.spyOn(PackageLifecycleAuthority, 'open')
     try {
-      expect(composition.handler).toMatchObject({
-        token: 'renderer-token',
+      const coordinator = new PluginLifecycleCoordinator({
+        homeDir,
         profileId: 'default',
-        generation: runtimeGeneration,
+        runtimeGeneration,
+        permissionPolicies: [],
+        runtime: runtime(),
       })
-      await expect(composition.handler.service.query()).resolves.toMatchObject({
-        profileId: 'default',
-        runtime: { kind: 'active', runtimeGeneration },
-      })
-      const endpoint = await readPluginManagementRpcEndpoint(paths)
-      expect(endpoint).toMatchObject({
+      const loadActive = vi.spyOn(coordinator.store, 'loadActive')
+      const composition = await openProductionPluginManagementComposition({
+        configPath,
+        homeDir,
         appId: 'codex',
         profileId: 'default',
-        generation: runtimeGeneration,
+        runtimeGeneration,
+        token: 'renderer-token',
+        coordinator,
+        processStartedAt: 'test-owner',
       })
-      await expect(requestPluginManagementRpc(paths, endpoint!, { kind: 'query' })).resolves.toMatchObject({
-        runtime: { kind: 'active', runtimeGeneration },
-      })
-      expect(loadActive).toHaveBeenCalledTimes(2)
+      const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      try {
+        expect(composition.handler).toMatchObject({
+          token: 'renderer-token',
+          profileId: 'default',
+          generation: runtimeGeneration,
+        })
+        await expect(composition.handler.service.query()).resolves.toMatchObject({
+          profileId: 'default',
+          runtime: { kind: 'active', runtimeGeneration },
+        })
+        const endpoint = await readPluginManagementRpcEndpoint(paths)
+        expect(endpoint).toMatchObject({
+          appId: 'codex',
+          profileId: 'default',
+          generation: runtimeGeneration,
+        })
+        await expect(requestPluginManagementRpc(paths, endpoint!, { kind: 'query' })).resolves.toMatchObject({
+          runtime: { kind: 'active', runtimeGeneration },
+        })
+        expect(loadActive).toHaveBeenCalledTimes(2)
+        expect(openAuthority).not.toHaveBeenCalled()
+      } finally {
+        await composition.close()
+      }
+      await expect(access(paths.state)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(paths.socket)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
-      await composition.close()
+      openAuthority.mockRestore()
     }
-    await expect(access(paths.state)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(access(paths.socket)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('does not publish management state during a production dry-run', async () => {
