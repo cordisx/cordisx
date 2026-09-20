@@ -93,6 +93,8 @@ assert(
   cli.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
   `cordisx must consume @cordisx/protocol@${expectedProtocolVersion}`,
 )
+assert(root.optionalDependencies?.fsevents === '~2.3.3', 'root must preserve Vite fsevents as optional')
+assert(cli.optionalDependencies?.fsevents === '~2.3.3', 'cordisx must preserve Vite fsevents as optional')
 assert(
   channelRuntime.dependencies?.['@cordisx/protocol'] === expectedProtocolVersion,
   `channel runtime must consume @cordisx/protocol@${expectedProtocolVersion}`,

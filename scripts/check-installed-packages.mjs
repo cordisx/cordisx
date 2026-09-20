@@ -68,6 +68,8 @@ const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-installed-ch
 try {
   const packDirectory = path.join(temporaryRoot, 'pack')
   const runnerDirectory = path.join(temporaryRoot, 'runner')
+  const globalHome = path.join(temporaryRoot, 'global-home')
+  const globalPrefix = path.join(temporaryRoot, 'global-prefix')
   const cordisxHome = path.join(temporaryRoot, 'cordisx-home')
   const installEnvironment = { ...process.env, npm_config_cache: path.join(temporaryRoot, 'npm-cache') }
   await mkdir(packDirectory, { recursive: true })
@@ -82,6 +84,58 @@ try {
     packWorkspace(repositoryRoot, 'cordisx', packDirectory),
     packWorkspace(repositoryRoot, 'create-cordisx-plugin', packDirectory),
   ])
+  const globalInstallEnvironment = { ...installEnvironment, HOME: globalHome }
+  await run('npm', [
+    'install',
+    '--global',
+    '--prefix',
+    globalPrefix,
+    '--no-audit',
+    '--no-fund',
+    '--loglevel=error',
+    cordisxTarball,
+  ], { cwd: runnerDirectory, env: globalInstallEnvironment })
+  const globalNodeModules = (await run('npm', [
+    'root',
+    '--global',
+    '--prefix',
+    globalPrefix,
+  ], { cwd: runnerDirectory, env: globalInstallEnvironment })).stdout.trim()
+  const globalCordisXRoot = path.join(globalNodeModules, 'cordisx')
+  const globalCordisXManifest = JSON.parse(await readFile(path.join(globalCordisXRoot, 'package.json'), 'utf8'))
+  if (globalCordisXManifest.optionalDependencies?.fsevents !== '~2.3.3') {
+    throw new Error('globally installed cordisx must retain the Vite fsevents optional edge')
+  }
+  const globalBinDirectory = process.platform === 'win32' ? globalPrefix : path.join(globalPrefix, 'bin')
+  const globalExecutable = path.join(globalBinDirectory, process.platform === 'win32' ? 'cordisx.cmd' : 'cordisx')
+  await access(globalExecutable)
+  const globalHelp = await run(globalExecutable, ['--help'], {
+    cwd: runnerDirectory,
+    env: { ...globalInstallEnvironment, CORDISX_HOME: path.join(temporaryRoot, 'global-cordisx-home') },
+  })
+  if (!globalHelp.stdout.includes('cordisx setup')) {
+    throw new Error('globally installed cordisx --help is incomplete')
+  }
+  const globalRequire = createRequire(path.join(globalCordisXRoot, 'package.json'))
+  const esbuild = globalRequire('esbuild')
+  const lightningcss = globalRequire('lightningcss')
+  const vite = await import(pathToFileURL(globalRequire.resolve('vite')).href)
+  const esbuildResult = await esbuild.transform('const installed: number = 1', { loader: 'ts' })
+  if (!esbuildResult.code.includes('const installed = 1')) {
+    throw new Error('globally installed esbuild did not transform TypeScript')
+  }
+  const lightningResult = lightningcss.transform({
+    filename: 'installed.css',
+    code: Buffer.from('.installed { color: red; }'),
+  })
+  if (!lightningResult.code.toString().includes('.installed')) {
+    throw new Error('globally installed lightningcss did not transform CSS')
+  }
+  if (typeof vite.createServer !== 'function') throw new Error('globally installed Vite entry did not import')
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    await access(globalRequire.resolve('@esbuild/darwin-arm64/bin/esbuild'))
+    await access(globalRequire.resolve('lightningcss-darwin-arm64'))
+  }
   if (protocolTarball !== undefined) await access(protocolTarball)
   await run('npm', [
     'install',
@@ -925,7 +979,7 @@ createElement(AgentAvatar, props)
   await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false, generatedOptions)
 
   console.log(
-    `[cordisx] installed tarballs verified: licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
+    `[cordisx] installed tarballs verified: isolated global CLI and native transforms, licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
       protocolTarball === undefined ? '' : ', exact local Protocol'
     }, durable outbox reload, local AgentLoop provider composition, Connector and Manager navigation v9 consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
   )

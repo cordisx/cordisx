@@ -131,6 +131,9 @@
     "ws": "^8.18.3",
     "yaml": "2.8.1"
   },
+  "optionalDependencies": {
+    "fsevents": "~2.3.3"
+  },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
     "@types/node": "^22.18.1",
