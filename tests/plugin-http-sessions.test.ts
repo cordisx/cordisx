@@ -1,5 +1,7 @@
 import { HttpNativeCallingContextUnavailableError } from '../packages/cli/src/launcher/plugin-http-native-account-diagnostics.js'
 import { createServer } from 'node:http'
+import { runInNewContext } from 'node:vm'
+import { nativeAccountResource } from './fixtures/native-account-resource.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PluginHttpAuthority } from '../packages/cli/src/launcher/plugin-http-authority.js'
 import { issueOwnerDocumentPrincipalToken } from '../packages/cli/src/launcher/owner-document-rpc.js'
@@ -363,10 +365,47 @@ describe('durable HTTP sessions', () => {
       HttpNativeCallingContextUnavailableError,
     )
   })
-  it('keeps native lookup exact-build guarded and independent of profile endpoint readiness', () => {
-    expect(HTTP_NATIVE_ACCOUNT_EXPRESSION).toContain('8378')
-    expect(HTTP_NATIVE_ACCOUNT_EXPRESSION).toContain('8881')
-    expect(HTTP_NATIVE_ACCOUNT_EXPRESSION).toContain('vscode://codex/account-info')
+  it('uses typed capability on unknown builds while keeping identity private and independent of profile readiness', async () => {
+    const readAccountInfo = vi.fn(async () => ({
+      status: 'ready',
+      data: { accountId: 'native-account', userId: 'native-user', token: 'private-token', displayName: 'Private Name' },
+    }))
+    const post = vi.fn(), fetch = vi.fn()
+    const getSentryInitOptions = vi.fn(() => ({ appVersion: 'unknown', buildNumber: 'unknown' }))
+    const legacy = { getInstance: () => ({ post }) }
+    const source = HTTP_NATIVE_ACCOUNT_EXPRESSION.replace('url=>import(url)', 'url=>__loadNative(url)')
+    expect(source).not.toBe(HTTP_NATIVE_ACCOUNT_EXPRESSION)
+    const load = vi.fn(async () => ({ Renamed: { accessInputs: { readAccountInfo } }, gJt: legacy }))
+    const context = {
+      ...nativeAccountResource,
+      AbortController,
+      Symbol,
+      setTimeout,
+      clearTimeout,
+      location: { href: 'app://-/index.html' },
+      codexWindowType: 'electron',
+      electronBridge: { getSentryInitOptions },
+      fetch,
+      __loadNative: load,
+    }
+    expect(await runInNewContext(source, context)).toBe('["native-account","native-user"]')
+    expect(load).toHaveBeenCalledExactlyOnceWith('app://-/assets/app-initial-unknown.js')
+    expect(readAccountInfo).toHaveBeenCalledOnce()
+    const missing = vi.fn(async () => ({ gJt: legacy }))
+    expect(await runInNewContext(source, { ...context, __loadNative: missing })).toEqual({
+      status: 'unavailable',
+      reason: 'native-capability-unavailable',
+    })
+    load.mockClear()
+    expect(await runInNewContext(source, { ...context, location: { href: 'app://-/other.html' } })).toEqual({
+      status: 'unavailable',
+      reason: 'context-rejected',
+    })
+    expect(load).not.toHaveBeenCalled()
+    expect(readAccountInfo).toHaveBeenCalledOnce()
+    expect(getSentryInitOptions).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
     expect(HTTP_NATIVE_ACCOUNT_EXPRESSION).not.toContain('/wham/profiles/me')
     expect(HTTP_NATIVE_ACCOUNT_EXPRESSION).not.toContain('displayName')
   })
