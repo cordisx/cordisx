@@ -641,7 +641,8 @@ it('a queued work deadline cannot delete the active sibling observation continui
   )
   const running = f.client.submitLocalWorkUsage({ ...f.localBinding, audience: 'local-work-income' })
   await vi.waitFor(() => expect(f.seen.filter(payload => payload.audience === 'local-work-income')).toHaveLength(2))
-  const queued = await f.authority.handle({
+  vi.useFakeTimers()
+  const queued = f.authority.handle({
     operation: 'plugin-http-submit-local-work',
     input: { ...f.localBinding, audience: 'local-work-income' },
     clientId: 'queued-work-client',
@@ -650,7 +651,9 @@ it('a queued work deadline cannot delete the active sibling observation continui
   }, async () => {
     throw new Error('Native must not be read')
   }, async () => snapshot)
-  expect(queued).toEqual({ status: 'unavailable', code: 'deadline-exceeded' })
+  await vi.advanceTimersByTimeAsync(31)
+  expect(await queued).toEqual({ status: 'unavailable', code: 'deadline-exceeded' })
+  vi.useRealTimers()
   f.hold()
   release()
   expect(await running).toMatchObject({ status: 'accepted' })

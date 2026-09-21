@@ -104,7 +104,9 @@ describe('formal Connector Protocol public type import', () => {
     }
     expect(protocolEdges(documents)).toHaveLength(11)
     expect(protocolPinViolations(documents)).toEqual([])
-    expect(`${rootManifestText}\n${cliManifestText}\n${lockfileText}`).not.toContain(staleProtocolVersion)
+    expect(`${rootManifestText}\n${cliManifestText}\n${lockfileText}`).not.toContain(
+      JSON.stringify(staleProtocolVersion),
+    )
     expect(lockfileText).not.toContain('github:cordisx/cordisx-protocol')
     expect(formalConnectorConsumerSurface).toBeNull()
   })
