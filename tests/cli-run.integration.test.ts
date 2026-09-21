@@ -22,6 +22,13 @@ import {
 
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
 const execFileAsync = promisify(execFile)
+const BUNDLED_SKILL_NAMES = [
+  'cordisx',
+  'cordisx-docs',
+  'cordisx-qa',
+  'cordisx-plugin-development',
+  'cordisx-feedback',
+] as const
 
 describe('functional CordisX CLI', () => {
   it('rejects mismatched work guards before Vite, profile admission or history-secret writes', async () => {
@@ -441,10 +448,12 @@ describe('functional CordisX CLI', () => {
       },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
 
-    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+    for (const skillName of BUNDLED_SKILL_NAMES) {
       await expect(access(path.join(sharedHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
     }
-    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(4)
+    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(
+      BUNDLED_SKILL_NAMES.length,
+    )
   })
 
   it('deploys the built-in Skill into host-isolated HOME without copying a shared personal Skill', async () => {
@@ -474,7 +483,7 @@ describe('functional CordisX CLI', () => {
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
 
     const privateHome = path.join(cordisxHome, 'apps', 'codex', 'profiles', 'private', 'host-home')
-    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+    for (const skillName of BUNDLED_SKILL_NAMES) {
       await expect(access(path.join(privateHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
     }
     await expect(access(path.join(privateHome, '.agents', 'skills', 'personal-only')))
@@ -710,10 +719,12 @@ describe('functional CordisX CLI', () => {
       },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     await expect(readFile(targetSkill, 'utf8')).resolves.toContain('description: test Skill')
-    for (const skillName of ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']) {
+    for (const skillName of BUNDLED_SKILL_NAMES) {
       await expect(access(path.join(hostHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()
     }
-    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(4)
+    expect(output.filter(line => line.includes('[cordisx] built-in Skill installed:'))).toHaveLength(
+      BUNDLED_SKILL_NAMES.length,
+    )
 
     await writeFile(targetSkill, 'local user edit\n')
     output.length = 0

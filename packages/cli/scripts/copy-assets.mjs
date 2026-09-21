@@ -9,7 +9,7 @@ const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime
 const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
 const cordisxSkillsSource = fileURLToPath(new URL('../../../skills', import.meta.url))
 const cordisxSkillsDestination = fileURLToPath(new URL('../dist/skills', import.meta.url))
-const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']
+const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development', 'cordisx-feedback']
 const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
   'renderer/model-providers.css',

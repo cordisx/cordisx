@@ -1,6 +1,7 @@
 import { resolveHostAdapter } from '../adapters/registry.js'
 import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
 import { type CordisXCliInvocation, parseCordisXCli } from './parse.js'
+import { runFeedbackCommand } from './feedback-command.js'
 import { runManagementCommand } from './management-command.js'
 import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
@@ -113,6 +114,10 @@ export async function prepareCliCommand(
     return
   }
   const parsedInvocation = parseCordisXCli(argv)
+  if (parsedInvocation.action === 'feedback') {
+    await runFeedbackCommand(parsedInvocation, runtime)
+    return
+  }
   if (parsedInvocation.action === 'management') {
     await runManagementCommand(parsedInvocation, runtime)
     return

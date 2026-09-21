@@ -1,0 +1,4 @@
+interface:
+  display_name: "CordisX Feedback"
+  short_description: "Collect private local CordisX diagnostics"
+  default_prompt: "Use $cordisx-feedback to collect and review a local, privacy-filtered CordisX feedback bundle."

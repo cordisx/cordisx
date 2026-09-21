@@ -18,6 +18,7 @@ const bundledSkillSources = {
   'cordisx-docs': 'https://github.com/cordisx/docs/tree/main/skills/cordisx-docs',
   'cordisx-qa': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-qa',
   'cordisx-plugin-development': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+  'cordisx-feedback': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-feedback',
 } as const
 
 async function createSkillSource(root: string, revision: string): Promise<string> {
@@ -107,7 +108,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 }
 
 describe('built-in CordisX Skill deployment', () => {
-  it('installs all four bundled Skills with their own provenance and management markers', async () => {
+  it('installs all bundled Skills with their own provenance and management markers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-'))
     const home = path.join(root, 'home')
     const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
@@ -133,7 +134,7 @@ describe('built-in CordisX Skill deployment', () => {
     const home = path.join(root, 'home')
     const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
     const first = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
-    expect(first.deployments).toHaveLength(4)
+    expect(first.deployments).toHaveLength(5)
 
     const edited = path.join(home, '.agents', 'skills', 'cordisx-qa', 'SKILL.md')
     await writeFile(edited, 'user-owned Q&A guidance\n')
@@ -146,7 +147,7 @@ describe('built-in CordisX Skill deployment', () => {
 
     expect(second.conflicts).toHaveLength(1)
     expect(second.conflicts[0]?.targetDir).toContain('cordisx-qa')
-    expect(second.deployments).toHaveLength(3)
+    expect(second.deployments).toHaveLength(4)
     expect(second.deployments.find(item => path.basename(item.targetDir) === 'cordisx')?.status).toBe('upgraded')
     await expect(readFile(edited, 'utf8')).resolves.toBe('user-owned Q&A guidance\n')
     await expect(access(path.join(home, '.agents', 'skills', 'cordisx-docs', 'SKILL.md'))).resolves.toBeUndefined()
@@ -166,9 +167,9 @@ describe('built-in CordisX Skill deployment', () => {
 
     expect(legacy.status).toBe('installed')
     expect(result.conflicts).toEqual([])
-    expect(result.deployments).toHaveLength(4)
+    expect(result.deployments).toHaveLength(5)
     expect(result.deployments.find(item => item.targetDir === legacy.targetDir)?.status).toBe('unchanged')
-    expect(result.deployments.filter(item => item.status === 'installed')).toHaveLength(3)
+    expect(result.deployments.filter(item => item.status === 'installed')).toHaveLength(4)
   })
 
   it('installs the complete Skill into shared HOME without changing another user Skill or cwd', async () => {
