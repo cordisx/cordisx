@@ -37,11 +37,22 @@ describe('local development checkpoint runner', () => {
       '/Applications/Codex.app/Contents/MacOS/Codex',
       '--cli-bin',
       '/tmp/cordisx',
+      '--cordisx-home',
+      '/tmp/acceptance/cordisx-home',
+      '--profile-dir',
+      '/tmp/acceptance/chromium-profile',
+      '--source-root',
+      '/tmp/acceptance/checkpoint-plugin',
+      '--session-boundary',
       '--timeout-ms',
       '45000',
     ])).toMatchObject({
       executable: '/Applications/Codex.app/Contents/MacOS/Codex',
       'cli-bin': '/tmp/cordisx',
+      'cordisx-home': '/tmp/acceptance/cordisx-home',
+      'profile-dir': '/tmp/acceptance/chromium-profile',
+      'source-root': '/tmp/acceptance/checkpoint-plugin',
+      'session-boundary': true,
       timeoutMs: 45_000,
     })
   })

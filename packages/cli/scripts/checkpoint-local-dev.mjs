@@ -25,7 +25,7 @@ import {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = path.resolve(scriptDir, '../../..')
 const usage =
-  `Usage: npm run checkpoint:local-dev:app -- --executable <absolute Codex executable> [options]\n\nOptions:\n  --artifacts <absolute directory>  New runner-owned checkpoint/evidence root\n  --repo-root <absolute directory>  Owning Host repository (default: current package root)\n  --cli <absolute dist cli.js>      Run this built JavaScript entry with Node\n  --cli-bin <absolute executable>   Run this packed/installed cordisx binary\n  --timeout-ms <5000..120000>       Per-generation timeout (default: 30000)\n`
+  `Usage: npm run checkpoint:local-dev:app -- --executable <absolute Codex executable> [options]\n\nOptions:\n  --artifacts <absolute directory>  New runner-owned checkpoint/evidence root\n  --repo-root <absolute directory>  Owning Host repository (default: current package root)\n  --cli <absolute dist cli.js>      Run this built JavaScript entry with Node\n  --cli-bin <absolute executable>   Run this packed/installed cordisx binary\n  --cordisx-home <absolute dir>     Dedicated CordisX state root\n  --profile-dir <absolute dir>      Dedicated Chromium profile\n  --source-root <absolute dir>      Stable runner-owned checkpoint plugin root\n  --session-boundary               Create and release one empty Agent Session\n  --timeout-ms <5000..120000>       Per-generation timeout (default: 30000)\n`
 
 let options
 try {
@@ -43,6 +43,7 @@ if (options.help) {
 const repoRoot = options['repo-root']
 const executable = options.executable
 const timeoutMs = options.timeoutMs
+const sessionBoundary = options['session-boundary'] === true
 if (options.artifacts !== undefined && await pathExists(options.artifacts)) {
   throw new Error(`--artifacts must name a new runner-owned directory: ${options.artifacts}`)
 }
@@ -50,9 +51,10 @@ const checkpointRoot = options.artifacts === undefined
   ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-checkpoint-'))
   : path.resolve(options.artifacts)
 const artifacts = path.join(checkpointRoot, 'artifacts')
-const sourceRoot = path.join(checkpointRoot, 'plugin')
+const sourceRoot = options['source-root'] ?? path.join(checkpointRoot, 'plugin')
 const entry = path.join(sourceRoot, 'index.ts')
-const cordisxHome = path.join(checkpointRoot, 'cordisx-home')
+const cordisxHome = options['cordisx-home'] ?? path.join(checkpointRoot, 'cordisx-home')
+const explicitProfileDir = options['profile-dir']
 const reportPath = path.join(artifacts, 'checkpoint-report.json')
 const logPath = path.join(artifacts, 'launcher.log')
 const initialScreenshotPath = path.join(artifacts, 'dev1-manager-runtime.png')
@@ -65,15 +67,23 @@ await Promise.all([
   ensurePrivateDirectory(artifacts),
   ensurePrivateDirectory(sourceRoot),
   ensurePrivateDirectory(cordisxHome),
+  ...(explicitProfileDir === undefined ? [] : [ensurePrivateDirectory(explicitProfileDir)]),
 ])
 await chmod(checkpointRoot, 0o700)
 
-const fixture = label =>
-  `export const name = ${
+const fixture = label => {
+  const sessionExports = sessionBoundary
+    ? "export const manifest = { $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json', schemaVersion: 5, id: 'index', services: [], capabilities: ['agents.create', 'agents.get', 'agents.message.submit'].map(name => ({ name, required: true, scope: {} })) }\nexport const inject = ['agents']"
+    : 'export const inject = []'
+  const sessionCheck = sessionBoundary && label === 'DEV-1'
+    ? "const sessionId = 'cx-session.local-candidate-' + crypto.randomUUID(); const acquired = await ctx.agents.create({ sessionId, mutationId: 'local-candidate-create-' + sessionId }); globalThis.__cordisxLocalDevCheckpointSession = { sessionId, create: acquired.status, disposed: false }; if (acquired.status !== 'accepted') throw new Error('candidate Session creation failed: ' + acquired.status); const disposed = await acquired.handle.dispose({ mutationId: 'local-candidate-dispose-' + sessionId }); globalThis.__cordisxLocalDevCheckpointSession = { sessionId, create: acquired.status, dispose: disposed.status, disposed: disposed.status === 'accepted' }; if (disposed.status !== 'accepted') throw new Error('candidate Session disposal failed: ' + disposed.status)"
+    : ''
+  return `export const name = ${
     JSON.stringify(`Checkpoint ${label}`)
-  }\nexport const inject = []\nexport function apply() { globalThis.__cordisxLocalDevCheckpoint = ${
+  }\n${sessionExports}\nexport async function apply(ctx) { globalThis.__cordisxLocalDevCheckpoint = ${
     JSON.stringify(label)
-  } }\n`
+  }; ${sessionCheck} }\n`
+}
 await writeFile(
   path.join(sourceRoot, 'package.json'),
   '{"name":"cordisx-local-dev-checkpoint","version":"1.0.0","type":"module"}\n',
@@ -121,6 +131,7 @@ const launcher = spawn(invocation.command, [
   String(port),
   '--executable',
   executable,
+  ...(explicitProfileDir === undefined ? [] : ['--profile-dir', explicitProfileDir]),
 ], {
   cwd: checkpointRoot,
   detached: process.platform !== 'win32',
@@ -143,6 +154,8 @@ const report = {
     sourceRoot,
     entry,
     cordisxHome,
+    profileDir: explicitProfileDir ?? null,
+    sessionBoundary,
     port,
   },
   processes: { runner: { pid: process.pid }, launcher: { pid: launcher.pid ?? null }, port },
@@ -317,6 +330,13 @@ const stateExpression = `(() => {
   JSON.stringify(entry)
 } && development?.getClientRects().length > 0 },
     dialogs: { permission: document.querySelectorAll('[data-permission-authorization]').length, lifecycle: document.querySelectorAll('.cxm-lifecycle-overlay').length },
+    candidateBoundary: {
+      pluginIds: runtime?.pluginIds ?? [],
+      capabilityProviders: snapshot?.capabilityProviders ?? [],
+      providerRequestInstalled: typeof globalThis.__cordisxProviderRequestV1 === 'function',
+      providerReceiverInstalled: typeof globalThis.__cordisxProviderReceiveV1 === 'function',
+      session: globalThis.__cordisxLocalDevCheckpointSession ?? null,
+    },
   }
 })()`
 
@@ -439,6 +459,17 @@ try {
   )
   const initialManager = await openManagerRuntime(main.client)
   assertStateSafety(initialManager, 'DEV-1')
+  if (
+    sessionBoundary && (
+      initialManager.candidateBoundary.session?.create !== 'accepted'
+      || initialManager.candidateBoundary.session?.dispose !== 'accepted'
+      || initialManager.candidateBoundary.session?.disposed !== true
+    )
+  ) {
+    throw new Error(
+      `candidate Session creation boundary failed: ${JSON.stringify(initialManager.candidateBoundary.session)}`,
+    )
+  }
   report.stages.dev1 = { state: initialManager, sha256: sha256(initialManager) }
   await capture(main.client, initialScreenshotPath)
 
@@ -524,7 +555,9 @@ try {
   await capture(main.client, finalScreenshotPath)
 
   const grants = await findNamed(cordisxHome, 'direct-device-bound.v1.json')
-  const profiles = await findNamed(cordisxHome, 'codex-app-profile')
+  const profiles = explicitProfileDir === undefined
+    ? await findNamed(cordisxHome, 'codex-app-profile')
+    : [explicitProfileDir]
   if (grants.length !== 1) throw new Error(`expected one publisher grant under CORDISX_HOME, found ${grants.length}`)
   if (profiles.length !== 1) {
     throw new Error(`expected one default profile under CORDISX_HOME, found ${profiles.length}`)
@@ -535,8 +568,14 @@ try {
   const stateRoot = path.dirname(path.dirname(grants[0]))
   const stateMode = await mode(stateRoot)
   const root = path.resolve(cordisxHome)
-  if (![grants[0], profiles[0], stateRoot].every(target => path.resolve(target).startsWith(`${root}${path.sep}`))) {
+  if (![grants[0], stateRoot].every(target => path.resolve(target).startsWith(`${root}${path.sep}`))) {
     throw new Error('runtime state escaped CORDISX_HOME')
+  }
+  if (explicitProfileDir === undefined && !path.resolve(profiles[0]).startsWith(`${root}${path.sep}`)) {
+    throw new Error('default Chromium profile escaped CORDISX_HOME')
+  }
+  if (explicitProfileDir !== undefined && path.resolve(profiles[0]) !== path.resolve(explicitProfileDir)) {
+    throw new Error('launcher did not use the explicit Chromium profile')
   }
   if (homeMode !== 0o700 || stateMode !== 0o700 || profileMode !== 0o700 || grantMode !== 0o600) {
     throw new Error(
@@ -564,6 +603,7 @@ try {
     repoStatusUnchanged: true,
     protectedRepoPathsUnchanged: true,
   }
+  report.stages.candidateBoundary = initialManager.candidateBoundary
   report.processes.inventory = processInventory(profiles[0])
   report.processes.launcher.pgid = report.processes.inventory.launcher?.pgid ?? null
   report.processes.profilePath = profiles[0]

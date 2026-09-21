@@ -57,6 +57,8 @@
     "packages/*"
   ],
   "scripts": {
+    "acceptance:local-candidate": "node scripts/run-local-candidate-acceptance.mjs",
+    "acceptance:local-candidate:clean": "node scripts/run-local-candidate-acceptance.mjs --cleanup-profile",
     "build": "npm run build --workspaces --if-present",
     "check": "npm run check:release:entry && npm run check:clean-dev && npm run typecheck && npm run build && npm run test:all && npm run check:release && npm run check:package && npm run check:installed",
     "check:fast": "npm run lint:staged && npm run typecheck && npm run test:affected",

@@ -120,8 +120,24 @@ export function parseCheckpointArgs(argv, defaults = {}) {
     const option = argv[index]
     if (!option.startsWith('--')) throw new Error(`unknown positional argument: ${option}`)
     if (option === '--help') return { help: true }
+    if (option === '--session-boundary') {
+      values['session-boundary'] = true
+      continue
+    }
     const name = option.slice(2)
-    if (!['executable', 'artifacts', 'repo-root', 'cli', 'cli-bin', 'timeout-ms'].includes(name)) {
+    if (
+      ![
+        'executable',
+        'artifacts',
+        'repo-root',
+        'cli',
+        'cli-bin',
+        'timeout-ms',
+        'cordisx-home',
+        'profile-dir',
+        'source-root',
+      ].includes(name)
+    ) {
       throw new Error(`unknown option: ${option}`)
     }
     const value = argv[index + 1]
@@ -133,7 +149,18 @@ export function parseCheckpointArgs(argv, defaults = {}) {
     throw new Error('--cli and --cli-bin are mutually exclusive')
   }
   if (values.executable === undefined) throw new Error('--executable is required')
-  for (const name of ['executable', 'artifacts', 'repo-root', 'cli', 'cli-bin']) {
+  for (
+    const name of [
+      'executable',
+      'artifacts',
+      'repo-root',
+      'cli',
+      'cli-bin',
+      'cordisx-home',
+      'profile-dir',
+      'source-root',
+    ]
+  ) {
     if (values[name] !== undefined && !path.isAbsolute(values[name])) throw new Error(`--${name} must be absolute`)
   }
   const timeoutMs = Number(values['timeout-ms'] ?? 30_000)

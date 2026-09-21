@@ -413,6 +413,13 @@ that has already reached WebSocket `CLOSED` remains a non-blocking diagnostic;
 the report counts both all projection failures and this known closed-target
 subset instead of hiding it.
 
+For an unpublished npm candidate, use `npm run acceptance:local-candidate`.
+That entry packs and installs both public package tarballs before reusing this
+real-App checkpoint with the installed `cordisx` bin. Temporary and persistent
+acceptance profiles, explicit cleanup, package-only machines, report redaction,
+and the separate real-message opt-in are documented in
+[local candidate acceptance](local-candidate-acceptance.md).
+
 `--online-devtools` additionally permits the official Chrome DevTools frontend
 to connect to the loopback endpoint. That frontend receives full debugging
 authority over the isolated renderer and must not be enabled for a normal

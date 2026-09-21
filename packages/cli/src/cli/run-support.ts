@@ -255,6 +255,10 @@ export async function deployBuiltinSkillsWithoutOverwritingUserChanges(
   }
 }
 
+export function shouldSkipBuiltinSkillDeployment(environment: NodeJS.ProcessEnv): boolean {
+  return environment.CORDISX_SKIP_BUILTIN_SKILL_DEPLOYMENT === '1'
+}
+
 export function waitForExit(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
     child.once('error', reject)
@@ -696,7 +700,9 @@ export async function runDevelopment(
       return
     }
     const homeConfig = await ensureHomeConfig(homeConfigOptions)
-    if (invocation.options.attach) {
+    if (shouldSkipBuiltinSkillDeployment(environment)) {
+      stdout('[cordisx] built-in Skill deployment skipped by the local acceptance runner')
+    } else if (invocation.options.attach) {
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
     } else if (
       runtime.internalBuiltinSkillSourceDir !== undefined

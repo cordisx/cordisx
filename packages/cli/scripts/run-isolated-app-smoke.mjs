@@ -29,6 +29,7 @@ const devConfig = optionalValue('--dev-config')
 const homeConfig = optionalValue('--home-config')
 const homeSeedInput = optionalValue('--home-seed')
 const smokeEntryInput = optionalValue('--smoke-entry')
+const cliBinInput = optionalValue('--cli-bin')
 const rendererTimeoutInput = optionalValue('--renderer-timeout-ms')
 const connectorHarness = process.argv.includes('--connector-harness')
 const desktopAgentSessionHarness = process.argv.includes('--desktop-agent-session-harness')
@@ -49,6 +50,12 @@ if (homeSeedInput !== undefined && !path.isAbsolute(homeSeedInput)) {
 if (homeSeedInput !== undefined && homeConfig === undefined) throw new Error('--home-seed requires --home-config')
 if (smokeEntryInput !== undefined && !path.isAbsolute(smokeEntryInput)) {
   throw new Error('--smoke-entry must be an absolute module path')
+}
+if (cliBinInput !== undefined && !path.isAbsolute(cliBinInput)) {
+  throw new Error('--cli-bin must be an absolute executable path')
+}
+if (cliBinInput !== undefined && connectorHarness) {
+  throw new Error('--cli-bin cannot replace the connector harness fixture CLI')
 }
 if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) {
   throw new Error('--connector-harness owns its fixed temporary Home composition')
@@ -317,10 +324,8 @@ const launcherEnvironment = connectorHarness
   : homeRoot === undefined
   ? process.env
   : { ...process.env, HOME: homeRoot }
-const launcher = spawn(process.execPath, [
-  '--import',
-  'tsx',
-  cliEntry,
+const launcher = spawn(cliBinInput ?? process.execPath, [
+  ...(cliBinInput === undefined ? ['--import', 'tsx', cliEntry] : []),
   ...invocation,
   '--debug-port',
   String(port),
