@@ -13,6 +13,14 @@ import {
   registryAttemptCache,
   retryRegistryPropagation,
 } from './registry-release-propagation.mjs'
+import {
+  assertReleaseRecoveryIdentity,
+  assertReleaseRecoveryPackage,
+  readPreparedArtifactIdentity,
+  readReleaseRecoveryState,
+  releaseRecoveryStages,
+  updateReleaseRecoveryState,
+} from './release-recovery-state.mjs'
 
 const execute = promisify(execFile)
 let npmCache
@@ -26,7 +34,44 @@ const packages = releasePackageNames()
 const release = releaseFromTag(argument('--tag'))
 const { version, distTag } = release
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
+const recoveryStatePath = argument('--recovery-state')
+  ?? path.join(process.cwd(), '.release-cache', 'npm-release-recovery.json')
+const preparedArtifactMetadataPath = argument('--prepared-artifact-metadata')
+  ?? path.join(process.cwd(), '.release-cache', 'prepared-host.tgz.json')
 if (registry !== 'https://registry.npmjs.org') throw new Error('registry must be https://registry.npmjs.org')
+
+const gitHead = (await execute('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' })).stdout.trim()
+const artifactSha512 = await readPreparedArtifactIdentity(preparedArtifactMetadataPath, {
+  tag: release.tag,
+  version,
+  gitHead,
+  packages,
+})
+let recoveryState = await readReleaseRecoveryState(recoveryStatePath)
+assertReleaseRecoveryIdentity(recoveryState, {
+  tag: release.tag,
+  version,
+  gitHead,
+  registry,
+  artifactSha512,
+  packageIntegrities: recoveryState.packageIntegrities,
+})
+const remainingStages = releaseRecoveryStages(recoveryState.nextAction)
+if (remainingStages.length === 0) {
+  console.log(JSON.stringify({
+    status: 'verified',
+    source: 'release-recovery',
+    tag: release.tag,
+    version,
+    recovery: {
+      runId: recoveryState.runId,
+      runAttempt: recoveryState.runAttempt,
+      nextAction: recoveryState.nextAction,
+      statePath: recoveryStatePath,
+    },
+  }))
+  process.exit(0)
+}
 
 async function run(file, args, options = {}) {
   try {
@@ -194,8 +239,14 @@ try {
   await mkdir(runner, { recursive: true })
   await writeFile(path.join(runner, 'package.json'), `${JSON.stringify({ private: true }, null, 2)}\n`, 'utf8')
   await retryRegistryPropagation('release package metadata', async attempt => {
+    recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {
+      nextAction: 'verification',
+      phaseAttempt: attempt,
+    })
     npmCache = registryAttemptCache(temporaryRoot, 'metadata', attempt)
     for (const packageName of packages) {
+      const metadata = await npmViewJson([`${packageName}@${version}`], runner)
+      assertReleaseRecoveryPackage(metadata, packageName, recoveryState)
       const tags = await npmViewJson([packageName, 'dist-tags'], runner)
       try {
         assertReleaseTag(packageName, tags)
@@ -205,28 +256,34 @@ try {
       }
     }
   })
-  await retryRegistryPropagation('release package installation', async attempt => {
-    npmCache = registryAttemptCache(temporaryRoot, 'install', attempt)
-    await rm(path.join(runner, 'node_modules'), { recursive: true, force: true })
-    await rm(path.join(runner, 'package-lock.json'), { force: true })
-    await run('npm', [
-      'install',
-      '--no-save',
-      '--no-audit',
-      '--no-fund',
-      '--loglevel=error',
-      ...packages.map(name => `${name}@${distTag}`),
-      `--registry=${registry}`,
-    ], { cwd: runner })
-    for (const packageName of packages) {
-      try {
-        await verifyInstalledPackage(runner, packageName)
-      } catch (error) {
-        if (error?.code === 'VERSION_MISMATCH') throw markRegistryPropagationError(error)
-        throw error
+  if (remainingStages.includes('clean-install')) {
+    await retryRegistryPropagation('release package installation', async attempt => {
+      recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {
+        nextAction: 'clean-install',
+        phaseAttempt: attempt,
+      })
+      npmCache = registryAttemptCache(temporaryRoot, 'install', attempt)
+      await rm(path.join(runner, 'node_modules'), { recursive: true, force: true })
+      await rm(path.join(runner, 'package-lock.json'), { force: true })
+      await run('npm', [
+        'install',
+        '--no-save',
+        '--no-audit',
+        '--no-fund',
+        '--loglevel=error',
+        ...packages.map(name => `${name}@${distTag}`),
+        `--registry=${registry}`,
+      ], { cwd: runner })
+      for (const packageName of packages) {
+        try {
+          await verifyInstalledPackage(runner, packageName)
+        } catch (error) {
+          if (error?.code === 'VERSION_MISMATCH') throw markRegistryPropagationError(error)
+          throw error
+        }
       }
-    }
-  })
+    })
+  }
 
   const bin = path.join(
     runner,
@@ -359,6 +416,11 @@ try {
     assertReleaseTag(packageName, tags)
   }
 
+  recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {
+    nextAction: 'complete',
+    phaseAttempt: 0,
+  })
+
   console.log(JSON.stringify({
     status: 'verified',
     source: 'registry',
@@ -369,6 +431,12 @@ try {
     license: 'AGPL-3.0-or-later',
     pluginException: true,
     packages,
+    recovery: {
+      runId: recoveryState.runId,
+      runAttempt: recoveryState.runAttempt,
+      nextAction: recoveryState.nextAction,
+      statePath: recoveryStatePath,
+    },
     creatorForms: [`npm create cordisx-plugin@${distTag}`, `npx create-cordisx-plugin@${distTag}`],
     creatorModes: ['single', 'workspace', 'embedded-workspace', 'embedded-isolated'],
   }))

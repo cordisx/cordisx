@@ -69,4 +69,22 @@ describe('registry release propagation retries', () => {
     })).rejects.toThrow('installed license mismatch')
     expect(operation).toHaveBeenCalledOnce()
   })
+
+  it('fails with the explicit attempt count and total deadline', async () => {
+    let elapsed = 0
+    const operation = vi.fn(async () => {
+      throw markRegistryPropagationError(new Error('npm view failed with E404'))
+    })
+
+    await expect(retryRegistryPropagation('package metadata', operation, {
+      initialDelayMs: 1000,
+      maxDelayMs: 2000,
+      timeoutMs: 3000,
+      wait: async delay => {
+        elapsed += delay
+      },
+      now: () => elapsed,
+    })).rejects.toThrow('package metadata timed out after 3 attempts within 3s')
+    expect(operation).toHaveBeenCalledTimes(3)
+  })
 })

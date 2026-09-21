@@ -40,6 +40,46 @@ record; retain the normal package and clean-registry gates for release evidence.
 6. Treat the workflow as complete only after clean registry installation and
    generated-project verification pass for both packages.
 
+The publisher writes `.release-cache/npm-release-recovery.json` after each
+upload and before every propagation attempt. The checkpoint records the
+GitHub run id and attempt, exact tag and commit, prepared-artifact SHA-512,
+per-package tarball integrity, uploaded package names, phase attempt, and next
+action. A resumed attempt must restore that file beside the same prepared
+artifact. It verifies the complete identity before using the checkpoint, then
+rechecks registry metadata instead of trusting the saved package list.
+
+Only these stages are resumable: `upload`, `visibility`, `verification`, and
+`clean-install`. A visibility or verification resume never rebuilds and never
+submits another publish request. An upload resume may repeat `npm publish` only
+to cover a crash between registry acceptance and checkpoint persistence; an
+`EPUBLISHCONFLICT` still requires matching integrity and immutable metadata on
+readback. A completed checkpoint makes the publisher a no-op.
+
+The workflow owner must persist and restore
+`.release-cache/npm-release-recovery.json` after publication starts. That is a
+CI integration boundary, not part of the registry scripts. The state file is
+deliberately narrower than a general release manifest and can consume a future
+Route A identity only if it supplies the same exact tag, commit, artifact
+SHA-512, and package integrity map.
+
+## Timing model
+
+Before this change, the recovery model was a whole-job rerun. Older releases
+also waited for one package to propagate before the next upload, so two packages
+with seven-minute propagation delays could spend about 14 minutes before clean
+installation, plus repeated install/build preparation when the artifact cache
+was unavailable.
+
+After this change, all missing packages are submitted first. Visibility and
+immutable verification share one exponential-backoff window: 5, 10, 20, 40,
+then at most 60 seconds per wait, with a hard 10-minute wall-clock deadline.
+In a deterministic two-package model where each package becomes visible after
+seven minutes, the configured backoff observes both at 7 minutes 15 seconds;
+the previous per-package serial flow would take about 14 minutes 30 seconds.
+Recovery starts at the saved stage and reuses the exact prepared artifact, so the retry
+adds no `npm ci` or build time; only the remaining registry and clean-install
+work is repeated.
+
 ## Stop conditions
 
 Do not rerun publication after an immutable mismatch. Preserve the log and

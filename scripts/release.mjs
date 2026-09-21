@@ -9,6 +9,13 @@ import { releasePackageDefinitions } from './release-packages.mjs'
 import { publishReleasePackages } from './release-publication.mjs'
 import { releaseFromTag } from './release-version.mjs'
 import { retryRegistryPropagation } from './registry-release-propagation.mjs'
+import {
+  loadReleaseRecoveryState,
+  readPreparedArtifactIdentity,
+  releaseRecoveryIdentity,
+  releaseRecoveryStages,
+  updateReleaseRecoveryState,
+} from './release-recovery-state.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -21,6 +28,10 @@ function argument(name) {
 const release = releaseFromTag(argument('--tag'))
 const { tag, version, distTag } = release
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
+const recoveryStatePath = argument('--recovery-state')
+  ?? path.join(repositoryRoot, '.release-cache', 'npm-release-recovery.json')
+const preparedArtifactMetadataPath = argument('--prepared-artifact-metadata')
+  ?? path.join(repositoryRoot, '.release-cache', 'prepared-host.tgz.json')
 if (registry !== 'https://registry.npmjs.org') throw new Error('release registry must be https://registry.npmjs.org')
 if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('publication is restricted to GitHub Actions')
 if (process.env.GITHUB_REPOSITORY?.toLowerCase() !== 'cordisx/cordisx') {
@@ -138,27 +149,62 @@ try {
 
   for (const pkg of releasePackageDefinitions) packs.set(pkg.name, await pack(pkg, temporaryRoot))
 
-  const published = await publishReleasePackages({
-    packages: releasePackageDefinitions,
-    manifests,
-    packs,
+  const artifactSha512 = await readPreparedArtifactIdentity(preparedArtifactMetadataPath, {
+    tag,
     version,
-    distTag,
     gitHead: expectedGitHead,
-    viewVersion,
-    viewTags: name => npmViewJson([name, 'dist-tags']),
-    assertRegistryPackage,
-    publish: pkg =>
-      runNpm([
-        'publish',
-        `--workspace=${pkg.workspace}`,
-        '--ignore-scripts',
-        `--tag=${distTag}`,
-        '--access=public',
-        '--provenance',
-      ]),
-    retry: (label, operation) => retryRegistryPropagation(label, operation),
+    packages: releasePackageDefinitions.map(pkg => pkg.name),
   })
+  const identity = releaseRecoveryIdentity({
+    tag,
+    version,
+    gitHead: expectedGitHead,
+    registry,
+    artifactSha512,
+    packageIntegrities: Object.fromEntries(
+      releasePackageDefinitions.map(pkg => [pkg.name, packs.get(pkg.name).integrity]),
+    ),
+  })
+  let recoveryState = await loadReleaseRecoveryState(recoveryStatePath, {
+    identity,
+    runId: process.env.GITHUB_RUN_ID,
+    runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+  })
+  recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {})
+
+  const remainingStages = releaseRecoveryStages(recoveryState.nextAction)
+  const published = remainingStages.includes('visibility') || remainingStages.includes('verification')
+    ? await publishReleasePackages({
+      packages: releasePackageDefinitions,
+      manifests,
+      packs,
+      version,
+      distTag,
+      gitHead: expectedGitHead,
+      viewVersion,
+      viewTags: name => npmViewJson([name, 'dist-tags']),
+      assertRegistryPackage,
+      publish: pkg =>
+        runNpm([
+          'publish',
+          `--workspace=${pkg.workspace}`,
+          '--ignore-scripts',
+          `--tag=${distTag}`,
+          '--access=public',
+          '--provenance',
+        ]),
+      retry: (label, operation) => retryRegistryPropagation(label, operation),
+      uploadedPackages: recoveryState.uploadedPackages,
+      startAction: recoveryState.nextAction,
+      progress: async ({ nextAction, attempt, uploadedPackages }) => {
+        recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {
+          nextAction,
+          phaseAttempt: attempt,
+          uploadedPackages,
+        })
+      },
+    })
+    : releasePackageDefinitions.map(pkg => ({ name: pkg.name, recovery: recoveryState.nextAction }))
 
   console.log(JSON.stringify({
     status: 'published',
@@ -166,6 +212,12 @@ try {
     version,
     distTag,
     gitHead: expectedGitHead,
+    recovery: {
+      runId: recoveryState.runId,
+      runAttempt: recoveryState.runAttempt,
+      nextAction: recoveryState.nextAction,
+      statePath: recoveryStatePath,
+    },
     packages: published,
   }))
 } finally {

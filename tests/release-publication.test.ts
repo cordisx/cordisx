@@ -71,6 +71,33 @@ describe('release publication convergence', () => {
     expect(submitted).toEqual(['cordisx', 'create-cordisx-plugin'])
   })
 
+  it('uses one shared propagation window instead of serial package waits', async () => {
+    let elapsed = 0
+    const submittedAt = new Map<string, number>()
+    const viewVersion = vi.fn(async (name: string) => {
+      const submitted = submittedAt.get(name)
+      return submitted !== undefined && elapsed - submitted >= 7 * 60 * 1000 ? fixture(name) : undefined
+    })
+    const input = options(viewVersion, vi.fn(async pkg => submittedAt.set(pkg.name, elapsed)))
+    input.retry = (label, operation) =>
+      retryRegistryPropagation(label, operation, {
+        initialDelayMs: 5000,
+        maxDelayMs: 60_000,
+        timeoutMs: 10 * 60 * 1000,
+        wait: async delay => {
+          elapsed += delay
+        },
+        now: () => elapsed,
+        log: vi.fn(),
+      })
+
+    await publishReleasePackages(input)
+
+    expect([...submittedAt.values()]).toEqual([0, 0])
+    expect(elapsed).toBe(435_000)
+    expect(elapsed).toBeLessThan(870_000)
+  })
+
   it('skips an already published package, submits the missing package, then verifies both', async () => {
     let creatorVisible = false
     const viewVersion = vi.fn(async (name: string) => {
@@ -123,5 +150,44 @@ describe('release publication convergence', () => {
 
     await expect(publishReleasePackages(input)).rejects.toThrow('registry gitHead mismatch')
     expect(input.publish).not.toHaveBeenCalled()
+  })
+
+  it('resumes visibility without publishing or rebuilding', async () => {
+    let attempt = 0
+    const viewVersion = vi.fn(async (name: string) => attempt === 0 ? undefined : fixture(name))
+    const input = options(viewVersion)
+    const build = vi.fn()
+    input.retry = async (_label, operation) => {
+      attempt += 1
+      return operation(attempt)
+    }
+
+    await expect(publishReleasePackages({
+      ...input,
+      startAction: 'visibility',
+      uploadedPackages: packages.map(pkg => pkg.name),
+    })).resolves.toHaveLength(2)
+    expect(input.publish).not.toHaveBeenCalled()
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('records the uploaded package and next action at each recovery point', async () => {
+    const visible = new Set<string>()
+    const progress = vi.fn(async () => undefined)
+    const viewVersion = vi.fn(async (name: string) => visible.has(name) ? fixture(name) : undefined)
+    const input = options(viewVersion, vi.fn(async pkg => visible.add(pkg.name)))
+
+    await publishReleasePackages({ ...input, progress })
+
+    expect(progress).toHaveBeenCalledWith({
+      nextAction: 'upload',
+      attempt: 0,
+      uploadedPackages: ['cordisx'],
+    })
+    expect(progress).toHaveBeenLastCalledWith({
+      nextAction: 'clean-install',
+      attempt: 0,
+      uploadedPackages: ['cordisx', 'create-cordisx-plugin'],
+    })
   })
 })

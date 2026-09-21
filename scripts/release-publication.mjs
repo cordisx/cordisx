@@ -35,6 +35,7 @@ export function assertReleaseTag(pkg, tags, { version, distTag }) {
   if (tags[distTag] !== version) {
     throw markRegistryPropagationError(
       new Error(`${pkg.name} ${distTag} dist-tag does not point to ${version}`),
+      'verification',
     )
   }
 }
@@ -49,7 +50,10 @@ export function isAlreadyPublishedError(error) {
 async function verifyOne(pkg, context) {
   const metadata = await context.viewVersion(pkg.name, context.version)
   if (metadata === undefined) {
-    throw markRegistryPropagationError(new Error(`${pkg.name}@${context.version} is not visible yet`))
+    throw markRegistryPropagationError(
+      new Error(`${pkg.name}@${context.version} is not visible yet`),
+      'visibility',
+    )
   }
   assertImmutablePublishedMetadata({
     pkg,
@@ -60,7 +64,10 @@ async function verifyOne(pkg, context) {
     gitHead: context.gitHead,
   })
   if (!hasProvenance(metadata)) {
-    throw markRegistryPropagationError(new Error(`${pkg.name}@${context.version} provenance is not visible yet`))
+    throw markRegistryPropagationError(
+      new Error(`${pkg.name}@${context.version} provenance is not visible yet`),
+      'verification',
+    )
   }
   await context.assertRegistryPackage(pkg)
   const tags = await context.viewTags(pkg.name)
@@ -72,10 +79,14 @@ async function verifyAll(packages, context) {
   const results = await Promise.allSettled(packages.map(pkg => verifyOne(pkg, context)))
   const fatal = results.find(result => result.status === 'rejected' && !isNpmRegistryPropagationError(result.reason))
   if (fatal?.status === 'rejected') throw fatal.reason
+  const pendingResults = results.filter(result => result.status === 'rejected')
   const pending = results.flatMap((result, index) => result.status === 'rejected' ? [packages[index].name] : [])
   if (pending.length > 0) {
     context.log(`[registry] pending package readback: ${pending.join(', ')}`)
-    throw markRegistryPropagationError(new Error(`pending packages: ${pending.join(', ')}`))
+    const phase = pendingResults.some(result => result.reason?.releasePhase === 'visibility')
+      ? 'visibility'
+      : 'verification'
+    throw markRegistryPropagationError(new Error(`pending packages: ${pending.join(', ')}`), phase)
   }
   return results.map(result => result.value)
 }
@@ -93,6 +104,9 @@ export async function publishReleasePackages(options) {
     assertRegistryPackage,
     publish,
     retry,
+    uploadedPackages = [],
+    startAction = 'upload',
+    progress = async () => undefined,
     log = console.log,
   } = options
   const context = {
@@ -106,12 +120,19 @@ export async function publishReleasePackages(options) {
     assertRegistryPackage,
     log,
   }
+  const submitted = new Set(uploadedPackages)
   const missing = []
+
+  const uploadEnabled = startAction === 'upload'
+  if (!['upload', 'visibility', 'verification'].includes(startAction)) {
+    throw new Error(`unsupported publication recovery action: ${startAction}`)
+  }
+  await progress({ nextAction: startAction, attempt: 0, uploadedPackages: [...submitted] })
 
   for (const pkg of packages) {
     const metadata = await viewVersion(pkg.name, version)
     if (metadata === undefined) {
-      missing.push(pkg)
+      if (uploadEnabled) missing.push(pkg)
       continue
     }
     assertImmutablePublishedMetadata({
@@ -122,6 +143,8 @@ export async function publishReleasePackages(options) {
       version,
       gitHead,
     })
+    submitted.add(pkg.name)
+    await progress({ nextAction: startAction, attempt: 0, uploadedPackages: [...submitted] })
     log(`[release] ${pkg.name}@${version} already matches immutable metadata; skipping publish`)
   }
 
@@ -133,7 +156,32 @@ export async function publishReleasePackages(options) {
       if (!isAlreadyPublishedError(error)) throw error
       log(`[release] ${pkg.name}@${version} was already submitted; waiting for registry readback`)
     }
+    submitted.add(pkg.name)
+    await progress({ nextAction: 'upload', attempt: 0, uploadedPackages: [...submitted] })
   }
 
-  return retry('published package metadata', () => verifyAll(packages, context))
+  await progress({
+    nextAction: startAction === 'verification' ? 'verification' : 'visibility',
+    attempt: 0,
+    uploadedPackages: [...submitted],
+  })
+  const published = await retry('published package metadata', async attempt => {
+    await progress({
+      nextAction: startAction === 'verification' ? 'verification' : 'visibility',
+      attempt,
+      uploadedPackages: [...submitted],
+    })
+    try {
+      return await verifyAll(packages, context)
+    } catch (error) {
+      await progress({
+        nextAction: error?.releasePhase ?? 'visibility',
+        attempt,
+        uploadedPackages: [...submitted],
+      })
+      throw error
+    }
+  })
+  await progress({ nextAction: 'clean-install', attempt: 0, uploadedPackages: [...submitted] })
+  return published
 }
