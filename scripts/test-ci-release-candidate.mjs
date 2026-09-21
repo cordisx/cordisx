@@ -123,6 +123,8 @@ test('workflow keeps exact-SHA candidates, minimal reruns, and an all-green aggr
   const release = readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8')
   assert.match(check, /max-parallel: 4/)
   assert.match(check, /name: release-candidate-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/)
+  assert.match(check, /path: release-candidate\n/)
+  assert.doesNotMatch(check, /path: \.release-candidate/)
   assert.match(check, /installed:\n[\s\S]*needs: \[scope, prepare, package\]/)
   assert.match(check, /needs: \[scope, changed-quality, prepare, typecheck, tests, package, installed\]/)
   assert.ok(check.includes('.result == "success" or .result == "skipped"'))

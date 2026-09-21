@@ -44,19 +44,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-candidate-${{ github.sha }}
-          path: .release-candidate
+          path: release-candidate
           github-token: ${{ github.token }}
           run-id: ${{ steps.candidate.outputs.run_id }}
       - name: Verify and restore the exact candidate package contents
         run: |
           node scripts/ci-release-candidate.mjs verify \
-            --directory .release-candidate --commit "$GITHUB_SHA" \
+            --directory release-candidate --commit "$GITHUB_SHA" \
             --repository "$GITHUB_REPOSITORY" --require-toolchain
           node scripts/ci-release-candidate.mjs extract \
-            --directory .release-candidate --commit "$GITHUB_SHA" \
+            --directory release-candidate --commit "$GITHUB_SHA" \
             --repository "$GITHUB_REPOSITORY" --require-toolchain
           node scripts/ci-release-candidate.mjs verify-workspace \
-            --directory .release-candidate --commit "$GITHUB_SHA" \
+            --directory release-candidate --commit "$GITHUB_SHA" \
             --repository "$GITHUB_REPOSITORY" --require-toolchain
       - name: Recheck release entry points and metadata
         run: npm run check:release:entry && npm run check:release

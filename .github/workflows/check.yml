@@ -197,13 +197,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
           node scripts/ci-release-candidate.mjs create
-          --directory .release-candidate
+          --directory release-candidate
           --commit "$HEAD_SHA"
           --repository "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: .release-candidate
+          path: release-candidate
           overwrite: true
           compression-level: 0
           retention-days: 30
@@ -224,17 +224,17 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: .release-candidate
+          path: release-candidate
       - name: Bind installation checks to the exact candidate
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           node scripts/ci-release-candidate.mjs verify \
-            --directory .release-candidate \
+            --directory release-candidate \
             --commit "$HEAD_SHA" \
             --repository "$GITHUB_REPOSITORY"
-          echo "CORDISX_TARBALL=$GITHUB_WORKSPACE/.release-candidate/$(jq -r '.packages[] | select(.name == "cordisx") | .filename' .release-candidate/provenance.json)" >> "$GITHUB_ENV"
-          echo "CORDISX_CREATOR_TARBALL=$GITHUB_WORKSPACE/.release-candidate/$(jq -r '.packages[] | select(.name == "create-cordisx-plugin") | .filename' .release-candidate/provenance.json)" >> "$GITHUB_ENV"
+          echo "CORDISX_TARBALL=$GITHUB_WORKSPACE/release-candidate/$(jq -r '.packages[] | select(.name == "cordisx") | .filename' release-candidate/provenance.json)" >> "$GITHUB_ENV"
+          echo "CORDISX_CREATOR_TARBALL=$GITHUB_WORKSPACE/release-candidate/$(jq -r '.packages[] | select(.name == "create-cordisx-plugin") | .filename' release-candidate/provenance.json)" >> "$GITHUB_ENV"
       - run: npm run check:clean-dev
       - run: npm run check:installed
 
