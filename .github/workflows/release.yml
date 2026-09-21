@@ -44,23 +44,55 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-candidate-${{ github.sha }}
-          path: release-candidate
+          path: .release-cache
           github-token: ${{ github.token }}
           run-id: ${{ steps.candidate.outputs.run_id }}
-      - name: Verify and restore the exact candidate package contents
+      - name: Restore the latest canonical recovery state
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          prefix="release-state-$GITHUB_SHA-"
+          artifacts=$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100")
+          state_name=$(jq -r --arg prefix "$prefix" \
+            '[.artifacts[] | select(.expired == false and (.name | startswith($prefix)))] | sort_by(.created_at) | last.name // empty' \
+            <<< "$artifacts")
+          if [[ -n "$state_name" ]]; then
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "$state_name" --dir "$RUNNER_TEMP/release-state"
+            node scripts/release-manifest.mjs resume \
+              --manifest .release-cache/release-manifest.json \
+              --state "$RUNNER_TEMP/release-state/release-state.json" \
+              --artifact-root .release-cache/release-packages
+            cp "$RUNNER_TEMP/release-state/release-state.json" .release-cache/release-state.json
+          fi
+      - id: candidate_ready
+        name: Verify and restore the canonical candidate package contents
+        run: |
+          node scripts/release-manifest.mjs resume \
+            --manifest .release-cache/release-manifest.json \
+            --state .release-cache/release-state.json \
+            --artifact-root .release-cache/release-packages
           node scripts/ci-release-candidate.mjs verify \
-            --directory release-candidate --commit "$GITHUB_SHA" \
-            --repository "$GITHUB_REPOSITORY" --require-toolchain
+            --directory .release-cache --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
           node scripts/ci-release-candidate.mjs extract \
-            --directory release-candidate --commit "$GITHUB_SHA" \
-            --repository "$GITHUB_REPOSITORY" --require-toolchain
+            --directory .release-cache --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
           node scripts/ci-release-candidate.mjs verify-workspace \
-            --directory release-candidate --commit "$GITHUB_SHA" \
-            --repository "$GITHUB_REPOSITORY" --require-toolchain
+            --directory .release-cache --commit "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Recheck release entry points and metadata
         run: npm run check:release:entry && npm run check:release
       - name: Publish repository release
         run: node scripts/release.mjs --tag "${GITHUB_REF_NAME}" --registry https://registry.npmjs.org
       - name: Verify clean registry installation
         run: node scripts/check-registry-release.mjs --tag "${GITHUB_REF_NAME}" --registry https://registry.npmjs.org
+      - name: Persist canonical release recovery state
+        if: always() && steps.candidate_ready.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-state-${{ github.sha }}-${{ github.run_attempt }}
+          path: .release-cache/release-state.json
+          include-hidden-files: true
+          retention-days: 90

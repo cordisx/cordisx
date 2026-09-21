@@ -5,7 +5,7 @@ import { releaseFromTag } from './release-version.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
-const expectedVersion = '0.1.0-beta.18'
+const expectedVersion = '0.1.0-beta.19'
 const expectedProtocolVersion = '0.1.0-beta.7'
 const expectedCliProxySource = 'github:cordisx/plugin-cli-proxy-api#12d5daa36dbd5dd565b96d22859afb1d0f3f3e1d'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
@@ -151,14 +151,21 @@ assert(
 assert(workflow.includes('gh run watch "$run_id"'), 'release workflow must await the exact Check result')
 assert(workflow.includes('release-candidate-${{ github.sha }}'), 'release candidate must be bound to the exact commit')
 assert(
-  workflow.includes('scripts/ci-release-candidate.mjs verify'),
-  'release workflow must verify candidate provenance',
+  workflow.includes('path: .release-cache'),
+  'release workflow must restore the candidate to the canonical release cache',
+)
+assert(
+  workflow.includes('scripts/release-manifest.mjs resume'),
+  'release workflow must verify the canonical release manifest and state',
 )
 assert(
   workflow.includes('scripts/ci-release-candidate.mjs verify-workspace'),
-  'release workflow must reproduce integrity',
+  'release workflow must reproduce canonical tarball integrity',
 )
-assert(workflow.includes('--require-toolchain'), 'release workflow must enforce the candidate toolchain')
+assert(
+  workflow.includes('release-state-${{ github.sha }}-${{ github.run_attempt }}'),
+  'release workflow must persist canonical recovery state for later attempts',
+)
 assert(!workflow.includes('npm ci'), 'release workflow must not repeat the exact-SHA dependency installation')
 assert(!workflow.includes('npm run build'), 'release workflow must not rebuild the exact-SHA candidate')
 assert(!workflow.includes('npm run test:release'), 'release workflow must reuse the exact-SHA Check evidence')
@@ -169,6 +176,10 @@ assert(workflow.includes('check-registry-release.mjs --tag'), 'release workflow 
 assert(
   workflow.indexOf('scripts/ci-release-candidate.mjs verify-workspace') < workflow.indexOf('scripts/release.mjs --tag'),
   'candidate integrity must be reproduced before publication can start',
+)
+assert(
+  workflow.indexOf('scripts/release-manifest.mjs resume') < workflow.indexOf('scripts/release.mjs --tag'),
+  'canonical recovery state must be restored before publication can start',
 )
 assert(workflow.includes('${GITHUB_REF_NAME}'), 'release workflow must derive the version from the pushed tag')
 assert(!workflow.includes(expectedVersion), 'release workflow must not hard-code the current version')

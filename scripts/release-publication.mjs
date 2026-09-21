@@ -28,17 +28,6 @@ export function assertImmutablePublishedMetadata({ pkg, manifest, packed, metada
   }
 }
 
-export function assertReleaseTag(pkg, tags, { version, distTag }) {
-  if (distTag !== 'latest' && tags.latest === version) {
-    throw new Error(`${pkg.name} prerelease must not move latest`)
-  }
-  if (tags[distTag] !== version) {
-    throw markRegistryPropagationError(
-      new Error(`${pkg.name} ${distTag} dist-tag does not point to ${version}`),
-    )
-  }
-}
-
 export function isAlreadyPublishedError(error) {
   const output = `${error?.npmOutput ?? ''}\n${error?.commandOutput ?? ''}\n${error?.message ?? ''}`
   return /EPUBLISHCONFLICT|cannot publish over (?:the )?previously published|previously published versions/i.test(
@@ -49,7 +38,10 @@ export function isAlreadyPublishedError(error) {
 async function verifyOne(pkg, context) {
   const metadata = await context.viewVersion(pkg.name, context.version)
   if (metadata === undefined) {
-    throw markRegistryPropagationError(new Error(`${pkg.name}@${context.version} is not visible yet`))
+    throw markRegistryPropagationError(
+      new Error(`${pkg.name}@${context.version} is not visible yet`),
+      'visibility',
+    )
   }
   assertImmutablePublishedMetadata({
     pkg,
@@ -60,22 +52,27 @@ async function verifyOne(pkg, context) {
     gitHead: context.gitHead,
   })
   if (!hasProvenance(metadata)) {
-    throw markRegistryPropagationError(new Error(`${pkg.name}@${context.version} provenance is not visible yet`))
+    throw markRegistryPropagationError(
+      new Error(`${pkg.name}@${context.version} provenance is not visible yet`),
+      'verification',
+    )
   }
   await context.assertRegistryPackage(pkg)
-  const tags = await context.viewTags(pkg.name)
-  assertReleaseTag(pkg, tags, context)
-  return { name: pkg.name, latest: tags.latest }
+  return { name: pkg.name }
 }
 
 async function verifyAll(packages, context) {
   const results = await Promise.allSettled(packages.map(pkg => verifyOne(pkg, context)))
   const fatal = results.find(result => result.status === 'rejected' && !isNpmRegistryPropagationError(result.reason))
   if (fatal?.status === 'rejected') throw fatal.reason
+  const pendingResults = results.filter(result => result.status === 'rejected')
   const pending = results.flatMap((result, index) => result.status === 'rejected' ? [packages[index].name] : [])
   if (pending.length > 0) {
     context.log(`[registry] pending package readback: ${pending.join(', ')}`)
-    throw markRegistryPropagationError(new Error(`pending packages: ${pending.join(', ')}`))
+    const phase = pendingResults.some(result => result.reason?.releasePhase === 'visibility')
+      ? 'visibility'
+      : 'verification'
+    throw markRegistryPropagationError(new Error(`pending packages: ${pending.join(', ')}`), phase)
   }
   return results.map(result => result.value)
 }
@@ -89,10 +86,12 @@ export async function publishReleasePackages(options) {
     distTag,
     gitHead,
     viewVersion,
-    viewTags,
     assertRegistryPackage,
     publish,
     retry,
+    startPhase = 'PUBLISHED',
+    completePhase = async () => undefined,
+    run = {},
     log = console.log,
   } = options
   const context = {
@@ -102,16 +101,23 @@ export async function publishReleasePackages(options) {
     distTag,
     gitHead,
     viewVersion,
-    viewTags,
     assertRegistryPackage,
     log,
   }
+  const submitted = new Set()
+  const matched = new Set()
+  const conflicts = new Set()
   const missing = []
+
+  const uploadEnabled = startPhase === 'PUBLISHED'
+  if (!['PUBLISHED', 'VISIBLE'].includes(startPhase)) {
+    throw new Error(`unsupported publication recovery phase: ${startPhase}`)
+  }
 
   for (const pkg of packages) {
     const metadata = await viewVersion(pkg.name, version)
     if (metadata === undefined) {
-      missing.push(pkg)
+      if (uploadEnabled) missing.push(pkg)
       continue
     }
     assertImmutablePublishedMetadata({
@@ -122,6 +128,8 @@ export async function publishReleasePackages(options) {
       version,
       gitHead,
     })
+    submitted.add(pkg.name)
+    matched.add(pkg.name)
     log(`[release] ${pkg.name}@${version} already matches immutable metadata; skipping publish`)
   }
 
@@ -131,9 +139,38 @@ export async function publishReleasePackages(options) {
       log(`[release] submitted ${pkg.name}@${version} with ${distTag}`)
     } catch (error) {
       if (!isAlreadyPublishedError(error)) throw error
+      conflicts.add(pkg.name)
       log(`[release] ${pkg.name}@${version} was already submitted; waiting for registry readback`)
     }
+    submitted.add(pkg.name)
   }
 
-  return retry('published package metadata', () => verifyAll(packages, context))
+  let visibilityAttempt = 0
+  const published = await retry('published package metadata', async attempt => {
+    visibilityAttempt = attempt
+    return verifyAll(packages, context)
+  })
+  if (uploadEnabled) {
+    await completePhase({
+      phase: 'PUBLISHED',
+      evidence: {
+        packages: packages.map(pkg => pkg.name),
+        submittedPackages: [...submitted].filter(name => !matched.has(name)),
+        matchedPackages: [...matched],
+        publishConflicts: [...conflicts],
+        ...run,
+      },
+    })
+  }
+  await completePhase({
+    phase: 'VISIBLE',
+    evidence: {
+      packages: packages.map(pkg => pkg.name),
+      registryReadbackAttempt: visibilityAttempt,
+      immutableMetadata: true,
+      provenance: true,
+      ...run,
+    },
+  })
+  return published
 }

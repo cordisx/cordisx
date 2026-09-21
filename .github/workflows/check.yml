@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -192,18 +193,13 @@ jobs:
       - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
       - run: npm run check:release
       - run: npm run check:package
-      - name: Pack the exact Host and Creator release candidate
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: >-
-          node scripts/ci-release-candidate.mjs create
-          --directory release-candidate
-          --commit "$HEAD_SHA"
-          --repository "$GITHUB_REPOSITORY"
+      - name: Pack the exact Host and Creator release packages
+        run: node scripts/ci-release-candidate.mjs pack --directory .release-cache/release-packages
       - uses: actions/upload-artifact@v4
         with:
-          name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: release-candidate
+          name: release-packages-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-cache/release-packages
+          include-hidden-files: true
           overwrite: true
           compression-level: 0
           retention-days: 30
@@ -223,18 +219,17 @@ jobs:
       - uses: ./.github/actions/restore-prepared-host
       - uses: actions/download-artifact@v4
         with:
-          name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: release-candidate
+          name: release-packages-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-cache/release-packages
       - name: Bind installation checks to the exact candidate
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          node scripts/ci-release-candidate.mjs verify \
-            --directory release-candidate \
-            --commit "$HEAD_SHA" \
-            --repository "$GITHUB_REPOSITORY"
-          echo "CORDISX_TARBALL=$GITHUB_WORKSPACE/release-candidate/$(jq -r '.packages[] | select(.name == "cordisx") | .filename' release-candidate/provenance.json)" >> "$GITHUB_ENV"
-          echo "CORDISX_CREATOR_TARBALL=$GITHUB_WORKSPACE/release-candidate/$(jq -r '.packages[] | select(.name == "create-cordisx-plugin") | .filename' release-candidate/provenance.json)" >> "$GITHUB_ENV"
+          version=$(node -p "require('./package.json').version")
+          cordisx="$GITHUB_WORKSPACE/.release-cache/release-packages/cordisx-$version.tgz"
+          creator="$GITHUB_WORKSPACE/.release-cache/release-packages/create-cordisx-plugin-$version.tgz"
+          test -f "$cordisx"
+          test -f "$creator"
+          echo "CORDISX_TARBALL=$cordisx" >> "$GITHUB_ENV"
+          echo "CORDISX_CREATOR_TARBALL=$creator" >> "$GITHUB_ENV"
       - run: npm run check:clean-dev
       - run: npm run check:installed
 
@@ -243,8 +238,19 @@ jobs:
     if: ${{ !cancelled() && always() }}
     needs: [scope, changed-quality, prepare, typecheck, tests, package, installed]
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        if: needs.package.result == 'success'
+        with:
+          name: release-packages-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-cache/release-packages
       - id: outcomes
         name: Check selected gate outcomes
         env:
@@ -254,6 +260,68 @@ jobs:
           echo "$RESULTS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'
           echo "### Host checks for $HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "$RESULTS" | jq -r 'to_entries[] | "- \(.key): \(.value.result)"' >> "$GITHUB_STEP_SUMMARY"
+      - id: review
+        name: Record review evidence for the exact commit
+        if: needs.package.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          status=BYPASSED
+          actor="$GITHUB_ACTOR"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$HEAD_SHA"
+          reason="direct main push admitted by repository policy"
+          if [[ "$EVENT" == pull_request ]]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$PR_NUMBER"
+            reason="pull request validation candidate; tag publication accepts push candidates only"
+          else
+            pulls=$(gh api "/repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls")
+            pr_number=$(jq -r '[.[] | select(.merged_at != null)] | first.number // empty' <<< "$pulls")
+            if [[ -n "$pr_number" ]]; then
+              review=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json reviewDecision,reviews,url)
+              url=$(jq -r '.url' <<< "$review")
+              if [[ $(jq -r '.reviewDecision' <<< "$review") == APPROVED ]]; then
+                status=APPROVED
+                actor=$(jq -r '[.reviews[] | select(.state == "APPROVED")] | last.author.login' <<< "$review")
+                reason=
+              else
+                reason="merged pull request admitted without a current APPROVED review decision"
+              fi
+            fi
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "actor=$actor" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+      - name: Create and verify the canonical release candidate
+        if: needs.package.result == 'success'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REVIEW_STATUS: ${{ steps.review.outputs.status }}
+          REVIEW_ACTOR: ${{ steps.review.outputs.actor }}
+          REVIEW_URL: ${{ steps.review.outputs.url }}
+          REVIEW_REASON: ${{ steps.review.outputs.reason }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          node scripts/ci-release-candidate.mjs create \
+            --directory .release-cache --commit "$HEAD_SHA" --repository "$GITHUB_REPOSITORY" --tag "$tag" \
+            --ci-name "Check / selected gates" \
+            --ci-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --review-status "$REVIEW_STATUS" --review-actor "$REVIEW_ACTOR" \
+            --review-url "$REVIEW_URL" --review-reason "$REVIEW_REASON"
+          node scripts/ci-release-candidate.mjs verify \
+            --directory .release-cache --commit "$HEAD_SHA" --repository "$GITHUB_REPOSITORY" --tag "$tag"
+      - uses: actions/upload-artifact@v4
+        if: needs.package.result == 'success'
+        with:
+          name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-cache
+          include-hidden-files: true
+          overwrite: true
+          compression-level: 0
+          retention-days: 30
       - name: Record aggregate evidence
         if: always()
         env:

@@ -6,9 +6,10 @@ export function registryAttemptCache(root, phase, attempt) {
   return path.join(root, 'npm-cache', phase, String(attempt))
 }
 
-export function markRegistryPropagationError(error) {
+export function markRegistryPropagationError(error, phase) {
   if (!(error instanceof Error)) throw new Error('registry propagation failures must be Error instances')
   error.commandOutput = `${typeof error.commandOutput === 'string' ? error.commandOutput : ''}\nETARGET`
+  if (phase !== undefined) error.releasePhase = phase
   return error
 }
 
@@ -39,9 +40,12 @@ export async function retryRegistryPropagation(label, operation, options = {}) {
       const elapsedMs = Math.max(0, now() - startedAt)
       const remainingMs = timeoutMs - elapsedMs
       if (remainingMs <= 0) {
-        throw new Error(`[registry] ${label} did not converge within ${Math.round(timeoutMs / 1000)}s`, {
-          cause: error,
-        })
+        throw new Error(
+          `[registry] ${label} timed out after ${attempt} attempts within ${Math.round(timeoutMs / 1000)}s`,
+          {
+            cause: error,
+          },
+        )
       }
       const backoffMs = initialDelayMs * factor ** (attempt - 1)
       const delayMs = Math.min(backoffMs, maxDelayMs, remainingMs)

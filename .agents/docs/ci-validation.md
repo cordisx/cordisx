@@ -60,11 +60,15 @@ matrix, and package validation run in parallel. All four test projects may run
 at the same time. The installed-package job starts only after package validation
 has produced the exact Host and Creator tarballs that it installs.
 
-The package job uploads `release-candidate-<commit>` for 30 days. Its
-`provenance.json` binds both tarballs to the repository, exact commit, Node/npm
-toolchain, filename, size, SHA-512 digest, and npm integrity. A new pull-request
-head creates a different artifact name and the verifier also rejects a commit
-mismatch, so successful evidence from an older head cannot satisfy the new run.
+The package job uploads `release-packages-<commit>` for downstream installation
+checks. After every selected gate succeeds, the `full` job binds those exact
+tarballs into the canonical `.release-cache/release-manifest.json`,
+`.release-cache/release-state.json`, and `.release-cache/release-packages/`
+layout and uploads `release-candidate-<commit>` for 30 days. The manifest records
+the repository, exact commit, release identity, CI and review evidence, package
+dependency inputs, filename, size, SHA-512 digest, and npm integrity. A new head
+creates a different artifact name and canonical verification rejects a commit,
+manifest, state, or tarball mismatch.
 
 The final `full` job remains the stable required check. It succeeds only when
 every selected prerequisite is successful or intentionally skipped. Use
@@ -73,12 +77,14 @@ shared preparation and exact candidate remain in the same workflow run, while
 only the failed job and its required dependants run again.
 
 Tag publication locates the `Check` push run for the exact tag commit, waits for
-its aggregate result, downloads that commit's candidate only after the run is
-green, verifies the recorded toolchain and archive integrity, restores the
-package contents, and confirms that each workspace reproduces the recorded npm
-integrity. It does not repeat dependency installation, the full tests, or the
-build. Missing, expired, failed, changed-head, or wrong-toolchain candidates
-fail before publication.
+its aggregate result, and downloads that commit's canonical candidate only
+after the run is green. It restores the latest valid `release-state.json` saved
+by an earlier attempt of the same release run, verifies the manifest, state, and
+tarball bytes, restores the package contents, and confirms that each workspace
+reproduces the recorded npm integrity. Every attempt persists the updated state
+with `always()` so Route B resumes at the next canonical phase. It does not
+repeat dependency installation, the full tests, or the build. Missing, expired,
+failed, changed-head, or invalid recovery candidates fail before publication.
 
 Before this change, the test matrix admitted only three concurrent projects and
 package validation plus clean installation shared one serial job. In main
