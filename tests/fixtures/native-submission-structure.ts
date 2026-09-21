@@ -26,15 +26,17 @@ async function normalize(manager,thread,operation) {
   let request={input:operation.request.input,model:null,effort:null,multiAgentMode:null,serviceTier:null,cyberAccessProgram:undefined};
   let params={model:null,effort:null,multiAgentMode:null,serviceTier:null};return {request,params};
 }
-async function dispatch({manager:manager,operation:operation,readPersistedValue:read,ownerWindowError:error}) {
-  let wire=normalizeWire(operation.request,manager.requestClient.getAppServerVersion());
-  return await manager.sendRequest('turn/start',wire);
+async function dispatch({manager:manager,operation:n,readPersistedValue:read,ownerWindowError:error}) {
+  let prepared={request:n.request};
+  {let n=manager.getConversation();let wire=normalizeWire(prepared.request,manager.requestClient.getAppServerVersion());
+  return await manager.sendRequest('turn/start',wire);}
 }
+async function steer(manager,request) { return await manager.sendRequest('turn/steer',request); }
 async function first(input) {
   let {projectAssignment:project,threadStartKind:kind,input:prompt,config:incoming,serviceTier:serviceTier,localTurnMetadata:metadata,attachments:attachments}=input;
   return {model:null,effort:null,multiAgentMode:null,input:prompt,toolOutput:null,collaborationMode:null,serviceTier:serviceTier};
 }
-globalThis.normalize=normalize;globalThis.dispatch=dispatch;globalThis.first=first;
+globalThis.normalize=normalize;globalThis.dispatch=dispatch;globalThis.first=first;globalThis.steer=steer;
 `
 export const resources = () => [
   { url: 'app://-/assets/app-primary-unrecognized.js', source: primary },

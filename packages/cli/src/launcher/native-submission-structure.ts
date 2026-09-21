@@ -29,6 +29,12 @@ const isFunction = (node: SyntaxNode | undefined | null): boolean =>
   /^(?:FunctionExpression|FunctionDeclaration|ArrowFunctionExpression)$/u.test(node?.type ?? '')
 const has = (node: SyntaxNode | undefined, keys: readonly string[]): boolean =>
   keys.every(key => properties(node).has(key))
+const uniqueBinding = (plan: ResourcePlan, root: SyntaxNode, base: string): string => {
+  const names = new Set(plan.nodes(root, node => node.type === 'Identifier').map(node => node.name))
+  let binding = base
+  for (let suffix = 2; names.has(binding); suffix++) binding = `${base}${suffix}`
+  return binding
+}
 
 class ResourcePlan {
   readonly ast: SyntaxNode
@@ -206,7 +212,7 @@ function normalizedRequest(plan: ResourcePlan, fn: SyntaxNode): void {
 }
 
 function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
-  const operation = plan.binding(fn.params[0], 'operation')
+  plan.binding(fn.params[0], 'operation')
   const call = plan.require(fn.body, n =>
     n.type === 'CallExpression'
     && member(n.callee, 'sendRequest') && literal(n.arguments[0]) === 'turn/start', 'turn-dispatch')
@@ -221,7 +227,11 @@ function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
     'wire-normalizer',
   )
   if (wire.end > call.start) throw new Error('Native capability turn-dispatch: invalid normalization order')
-  const token = valid(`${operation}.request.config?.[${JSON.stringify(TOKEN)}]`)
+  const request = wire.init.arguments[0]
+  const capturedRequest = uniqueBinding(plan, fn, '__cordisxOperationRequest')
+  plan.insert(wire.start, `${capturedRequest}=${plan.text(request)},`)
+  plan.replace(request, capturedRequest)
+  const token = valid(`${capturedRequest}.config?.[${JSON.stringify(TOKEN)}]`)
   // Preserve every normalized field and native permission check, carrying only the transaction token.
   plan.replace(
     argument,

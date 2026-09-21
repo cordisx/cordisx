@@ -26,6 +26,14 @@ function runtime(hook: unknown = async () => ({ allow: true, operationToken: tok
   return { sandbox, effects, transforms, source, submit }
 }
 
+function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unknown) => value)) {
+  return {
+    getConversation: () => ({}),
+    requestClient: { getAppServerVersion: () => 'future' },
+    sendRequest,
+  }
+}
+
 describe('structure-based native submission composition', () => {
   it('recognizes renamed local bindings, changed asset names and added whitespace', () => {
     const changed = resources().map(resource => ({
@@ -132,7 +140,7 @@ describe('structure-based native submission composition', () => {
     resolve(true)
     await expect(pending).resolves.toBe(true)
   })
-  it('carries the token through draft, first turn, normalization and final dispatch without touching permissions', async () => {
+  it('carries a new-thread token through first turn and final dispatch despite an inner operation-name shadow', async () => {
     const run = runtime()
     const context = await run.submit()
     expect(context.__cordisxOperationToken).toBe(token)
@@ -141,17 +149,55 @@ describe('structure-based native submission composition', () => {
     expect(draft.configOverrides).toEqual({ safe: 'retained', 'cordisx.operation_token': token })
     const first = await run.sandbox.first({ config: draft.configOverrides, input: 'message', serviceTier: null })
     expect(first.config).toEqual({ 'cordisx.operation_token': token })
-    const request = await run.sandbox.existing({ context, targetConversationId: 'thread', serviceTier: null })
-    expect(request.serviceTier).toBe('priority')
-    const normalized = await run.sandbox.normalize({}, 'thread', { request, context: {} })
+    const normalized = await run.sandbox.normalize({}, 'thread', { request: first, context: {} })
     expect(normalized.request.config).toEqual({ 'cordisx.operation_token': token })
     const sendRequest = vi.fn(async (_method, value) => value)
     const wire = await run.sandbox.dispatch({
-      manager: { requestClient: { getAppServerVersion: () => 'future' }, sendRequest },
+      manager: dispatchManager(sendRequest),
       operation: normalized,
     })
     expect(wire).toMatchObject({ permission: 'preserved', config: { 'cordisx.operation_token': token } })
     expect(sendRequest).toHaveBeenCalledWith('turn/start', wire)
+  })
+  it('carries an existing idle thread token through normal dispatch despite the same inner shadow', async () => {
+    const run = runtime()
+    const context = await run.submit()
+    const request = await run.sandbox.existing({ context, targetConversationId: 'thread', serviceTier: null })
+    expect(request.serviceTier).toBeNull()
+    const normalized = await run.sandbox.normalize({}, 'thread', { request, context: {} })
+    const wire = await run.sandbox.dispatch({ manager: dispatchManager(), operation: normalized })
+    expect(wire).toMatchObject({ permission: 'preserved', config: { 'cordisx.operation_token': token } })
+  })
+  it('leaves an official request without a token unchanged through final dispatch', async () => {
+    const run = runtime(null)
+    const context = await run.submit()
+    const request = await run.sandbox.existing({ context, targetConversationId: 'thread', serviceTier: null })
+    const normalized = await run.sandbox.normalize({}, 'thread', { request, context: {} })
+    const wire = await run.sandbox.dispatch({ manager: dispatchManager(), operation: normalized })
+    expect(wire).toEqual({ input: request.input, permission: 'preserved' })
+  })
+  it('chooses a collision-free request capture binding', async () => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace(
+      'let prepared={request:n.request};',
+      'let __cordisxOperationRequest=true,prepared={request:n.request};',
+    )
+    const run = runtime(undefined, source)
+    const context = await run.submit()
+    const request = await run.sandbox.existing({ context, targetConversationId: 'thread', serviceTier: null })
+    const normalized = await run.sandbox.normalize({}, 'thread', { request, context: {} })
+    await expect(run.sandbox.dispatch({ manager: dispatchManager(), operation: normalized })).resolves.toMatchObject({
+      config: { 'cordisx.operation_token': token },
+    })
+    const transformed = run.transforms[1]!.transform(source[1]!.source).source
+    expect(transformed).toContain('__cordisxOperationRequest2=prepared.request')
+  })
+  it('does not alter the active-turn steer boundary', async () => {
+    const run = runtime()
+    const request = { threadId: 'thread', input: 'steer' }
+    const sendRequest = vi.fn(async (_method, value) => value)
+    await expect(run.sandbox.steer(dispatchManager(sendRequest), request)).resolves.toEqual(request)
+    expect(sendRequest).toHaveBeenCalledWith('turn/steer', request)
   })
   it('keeps concurrent admission tokens on their own contexts and removes authority on disposal', async () => {
     const resolve: Array<(value: unknown) => void> = []
