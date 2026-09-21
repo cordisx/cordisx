@@ -9,13 +9,7 @@ import { releasePackageDefinitions } from './release-packages.mjs'
 import { publishReleasePackages } from './release-publication.mjs'
 import { releaseFromTag } from './release-version.mjs'
 import { retryRegistryPropagation } from './registry-release-propagation.mjs'
-import {
-  loadReleaseRecoveryState,
-  readPreparedArtifactIdentity,
-  releaseRecoveryIdentity,
-  releaseRecoveryStages,
-  updateReleaseRecoveryState,
-} from './release-recovery-state.mjs'
+import { advanceReleaseRecovery, loadReleaseRecovery, releaseRecoveryStages } from './release-recovery-state.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -28,10 +22,12 @@ function argument(name) {
 const release = releaseFromTag(argument('--tag'))
 const { tag, version, distTag } = release
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
-const recoveryStatePath = argument('--recovery-state')
-  ?? path.join(repositoryRoot, '.release-cache', 'npm-release-recovery.json')
-const preparedArtifactMetadataPath = argument('--prepared-artifact-metadata')
-  ?? path.join(repositoryRoot, '.release-cache', 'prepared-host.tgz.json')
+const releaseManifestPath = argument('--release-manifest')
+  ?? path.join(repositoryRoot, '.release-cache', 'release-manifest.json')
+const releaseStatePath = argument('--release-state')
+  ?? path.join(repositoryRoot, '.release-cache', 'release-state.json')
+const releaseArtifactRoot = argument('--release-artifact-root')
+  ?? path.join(repositoryRoot, '.release-cache', 'release-packages')
 if (registry !== 'https://registry.npmjs.org') throw new Error('release registry must be https://registry.npmjs.org')
 if (process.env.GITHUB_ACTIONS !== 'true') throw new Error('publication is restricted to GitHub Actions')
 if (process.env.GITHUB_REPOSITORY?.toLowerCase() !== 'cordisx/cordisx') {
@@ -134,7 +130,6 @@ await run('git', ['merge-base', '--is-ancestor', expectedGitHead, 'refs/remotes/
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-release-'))
 try {
   const manifests = new Map()
-  const packs = new Map()
   for (const pkg of releasePackageDefinitions) {
     const manifest = await readManifest(pkg)
     if (manifest.version !== version) throw new Error(`${pkg.name} manifest version does not match ${version}`)
@@ -142,38 +137,37 @@ try {
       throw new Error(`${pkg.name} license must be AGPL-3.0-or-later`)
     }
     manifests.set(pkg.name, manifest)
-    await assertRegistryPackage(pkg)
   }
   const manifestVersions = new Set([...manifests.values()].map(manifest => manifest.version))
   if (manifestVersions.size !== 1) throw new Error('repository release package versions must match')
 
-  for (const pkg of releasePackageDefinitions) packs.set(pkg.name, await pack(pkg, temporaryRoot))
-
-  const artifactSha512 = await readPreparedArtifactIdentity(preparedArtifactMetadataPath, {
+  const loaded = await loadReleaseRecovery({
+    manifestFile: releaseManifestPath,
+    stateFile: releaseStatePath,
+    artifactRoot: releaseArtifactRoot,
+    commitSha: expectedGitHead,
     tag,
     version,
-    gitHead: expectedGitHead,
+    registry,
+    distTag,
     packages: releasePackageDefinitions.map(pkg => pkg.name),
   })
-  const identity = releaseRecoveryIdentity({
-    tag,
-    version,
-    gitHead: expectedGitHead,
-    registry,
-    artifactSha512,
-    packageIntegrities: Object.fromEntries(
-      releasePackageDefinitions.map(pkg => [pkg.name, packs.get(pkg.name).integrity]),
-    ),
-  })
-  let recoveryState = await loadReleaseRecoveryState(recoveryStatePath, {
-    identity,
-    runId: process.env.GITHUB_RUN_ID,
-    runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
-  })
-  recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {})
+  const releaseManifest = loaded.manifest
+  let releaseState = loaded.state
+  const manifestPackages = new Map(releaseManifest.packages.map(pkg => [pkg.name, pkg]))
+  const packs = new Map()
+  for (const pkg of releasePackageDefinitions) {
+    const manifestPackage = manifestPackages.get(pkg.name)
+    const packed = await pack(pkg, temporaryRoot)
+    if (packed.integrity !== manifestPackage.tarball.integrity) {
+      throw new Error(`${pkg.name} workspace tarball does not match the release manifest`)
+    }
+    packs.set(pkg.name, packed)
+  }
+  for (const pkg of releasePackageDefinitions) await assertRegistryPackage(pkg)
 
-  const remainingStages = releaseRecoveryStages(recoveryState.nextAction)
-  const published = remainingStages.includes('visibility') || remainingStages.includes('verification')
+  const remainingStages = releaseRecoveryStages(loaded.recovery.nextPhase)
+  const published = remainingStages.includes('PUBLISHED') || remainingStages.includes('VISIBLE')
     ? await publishReleasePackages({
       packages: releasePackageDefinitions,
       manifests,
@@ -182,7 +176,6 @@ try {
       distTag,
       gitHead: expectedGitHead,
       viewVersion,
-      viewTags: name => npmViewJson([name, 'dist-tags']),
       assertRegistryPackage,
       publish: pkg =>
         runNpm([
@@ -194,17 +187,23 @@ try {
           '--provenance',
         ]),
       retry: (label, operation) => retryRegistryPropagation(label, operation),
-      uploadedPackages: recoveryState.uploadedPackages,
-      startAction: recoveryState.nextAction,
-      progress: async ({ nextAction, attempt, uploadedPackages }) => {
-        recoveryState = await updateReleaseRecoveryState(recoveryStatePath, recoveryState, {
-          nextAction,
-          phaseAttempt: attempt,
-          uploadedPackages,
-        })
+      startPhase: loaded.recovery.nextPhase,
+      run: {
+        workflowRunId: process.env.GITHUB_RUN_ID,
+        workflowRunAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+      },
+      completePhase: async ({ phase, evidence }) => {
+        releaseState = await advanceReleaseRecovery(
+          releaseStatePath,
+          releaseState,
+          releaseManifest,
+          phase,
+          evidence,
+          { commitSha: expectedGitHead },
+        )
       },
     })
-    : releasePackageDefinitions.map(pkg => ({ name: pkg.name, recovery: recoveryState.nextAction }))
+    : releasePackageDefinitions.map(pkg => ({ name: pkg.name, recovery: loaded.recovery.nextPhase }))
 
   console.log(JSON.stringify({
     status: 'published',
@@ -213,10 +212,10 @@ try {
     distTag,
     gitHead: expectedGitHead,
     recovery: {
-      runId: recoveryState.runId,
-      runAttempt: recoveryState.runAttempt,
-      nextAction: recoveryState.nextAction,
-      statePath: recoveryStatePath,
+      checkpoint: releaseState.recovery.checkpoint,
+      nextPhase: releaseState.recovery.nextPhase,
+      manifestPath: releaseManifestPath,
+      statePath: releaseStatePath,
     },
     packages: published,
   }))

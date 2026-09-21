@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 describe('release scripts under native Node ESM', () => {
   const cwd = fileURLToPath(new URL('..', import.meta.url))
 
-  it('links the publication module without the Vitest module transformer', () => {
+  it('links release modules without the Vitest module transformer', () => {
     const result = spawnSync(process.execPath, [
       '--input-type=module',
       '--eval',
@@ -14,8 +14,10 @@ describe('release scripts under native Node ESM', () => {
       import assert from 'node:assert/strict'
       import { publishReleasePackages } from './scripts/release-publication.mjs'
       import { releaseRecoveryStages } from './scripts/release-recovery-state.mjs'
+      import { RELEASE_PHASES } from './scripts/release-manifest.mjs'
       assert.equal(typeof publishReleasePackages, 'function')
-      assert.deepEqual(releaseRecoveryStages('clean-install'), ['clean-install'])
+      assert.deepEqual(RELEASE_PHASES, ['PUBLISHED', 'VISIBLE', 'VERIFIED', 'DISTRIBUTED'])
+      assert.deepEqual(releaseRecoveryStages('VERIFIED'), ['VERIFIED', 'DISTRIBUTED'])
     `,
     ], { cwd, encoding: 'utf8', timeout: 10_000 })
     assert.ifError(result.error)
@@ -36,4 +38,15 @@ describe('release scripts under native Node ESM', () => {
       assert.doesNotMatch(result.stderr, /does not provide an export/)
     })
   }
+
+  it('release-manifest.mjs reaches argument validation in Node', () => {
+    const result = spawnSync(process.execPath, ['scripts/release-manifest.mjs'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+    assert.ifError(result.error)
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, /usage: release-manifest\.mjs/)
+  })
 })

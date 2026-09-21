@@ -41,7 +41,6 @@ function options(viewVersion: ReturnType<typeof vi.fn>, publish = vi.fn(async ()
     distTag,
     gitHead,
     viewVersion,
-    viewTags: vi.fn(async () => ({ latest: '0.0.0', beta: version })),
     assertRegistryPackage: vi.fn(async () => undefined),
     publish,
     retry: (label: string, operation: (attempt: number) => Promise<unknown>) =>
@@ -110,8 +109,8 @@ describe('release publication convergence', () => {
     })
 
     await expect(publishReleasePackages(options(viewVersion, publish))).resolves.toEqual([
-      { name: 'cordisx', latest: '0.0.0' },
-      { name: 'create-cordisx-plugin', latest: '0.0.0' },
+      { name: 'cordisx' },
+      { name: 'create-cordisx-plugin' },
     ])
     expect(publish).toHaveBeenCalledOnce()
   })
@@ -130,6 +129,26 @@ describe('release publication convergence', () => {
 
     await expect(publishReleasePackages(options(viewVersion, publish))).resolves.toHaveLength(2)
     expect(publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not checkpoint a publish conflict before immutable readback succeeds', async () => {
+    let reads = 0
+    const viewVersion = vi.fn(async (name: string) => {
+      reads += 1
+      return reads <= packages.length ? undefined : fixture(name, { gitHead: 'different' })
+    })
+    const publish = vi.fn(async () => {
+      const error = new Error('You cannot publish over the previously published versions')
+      Object.assign(error, { commandOutput: 'npm error code EPUBLISHCONFLICT' })
+      throw error
+    })
+    const completePhase = vi.fn(async () => undefined)
+
+    await expect(publishReleasePackages({
+      ...options(viewVersion, publish),
+      completePhase,
+    })).rejects.toThrow('registry gitHead mismatch')
+    expect(completePhase).not.toHaveBeenCalled()
   })
 
   it('fails before publishing when an existing tarball digest differs', async () => {
@@ -164,30 +183,45 @@ describe('release publication convergence', () => {
 
     await expect(publishReleasePackages({
       ...input,
-      startAction: 'visibility',
-      uploadedPackages: packages.map(pkg => pkg.name),
+      startPhase: 'VISIBLE',
     })).resolves.toHaveLength(2)
     expect(input.publish).not.toHaveBeenCalled()
     expect(build).not.toHaveBeenCalled()
   })
 
-  it('records the uploaded package and next action at each recovery point', async () => {
+  it('records canonical phase evidence without defining a second recovery schema', async () => {
     const visible = new Set<string>()
-    const progress = vi.fn(async () => undefined)
+    const completePhase = vi.fn(async () => undefined)
     const viewVersion = vi.fn(async (name: string) => visible.has(name) ? fixture(name) : undefined)
     const input = options(viewVersion, vi.fn(async pkg => visible.add(pkg.name)))
 
-    await publishReleasePackages({ ...input, progress })
-
-    expect(progress).toHaveBeenCalledWith({
-      nextAction: 'upload',
-      attempt: 0,
-      uploadedPackages: ['cordisx'],
+    await publishReleasePackages({
+      ...input,
+      completePhase,
+      run: { workflowRunId: '1234', workflowRunAttempt: 2 },
     })
-    expect(progress).toHaveBeenLastCalledWith({
-      nextAction: 'clean-install',
-      attempt: 0,
-      uploadedPackages: ['cordisx', 'create-cordisx-plugin'],
+
+    expect(completePhase).toHaveBeenNthCalledWith(1, {
+      phase: 'PUBLISHED',
+      evidence: {
+        packages: ['cordisx', 'create-cordisx-plugin'],
+        submittedPackages: ['cordisx', 'create-cordisx-plugin'],
+        matchedPackages: [],
+        publishConflicts: [],
+        workflowRunId: '1234',
+        workflowRunAttempt: 2,
+      },
+    })
+    expect(completePhase).toHaveBeenNthCalledWith(2, {
+      phase: 'VISIBLE',
+      evidence: {
+        packages: ['cordisx', 'create-cordisx-plugin'],
+        registryReadbackAttempt: 1,
+        immutableMetadata: true,
+        provenance: true,
+        workflowRunId: '1234',
+        workflowRunAttempt: 2,
+      },
     })
   })
 })

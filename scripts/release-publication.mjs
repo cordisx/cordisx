@@ -28,18 +28,6 @@ export function assertImmutablePublishedMetadata({ pkg, manifest, packed, metada
   }
 }
 
-export function assertReleaseTag(pkg, tags, { version, distTag }) {
-  if (distTag !== 'latest' && tags.latest === version) {
-    throw new Error(`${pkg.name} prerelease must not move latest`)
-  }
-  if (tags[distTag] !== version) {
-    throw markRegistryPropagationError(
-      new Error(`${pkg.name} ${distTag} dist-tag does not point to ${version}`),
-      'verification',
-    )
-  }
-}
-
 export function isAlreadyPublishedError(error) {
   const output = `${error?.npmOutput ?? ''}\n${error?.commandOutput ?? ''}\n${error?.message ?? ''}`
   return /EPUBLISHCONFLICT|cannot publish over (?:the )?previously published|previously published versions/i.test(
@@ -70,9 +58,7 @@ async function verifyOne(pkg, context) {
     )
   }
   await context.assertRegistryPackage(pkg)
-  const tags = await context.viewTags(pkg.name)
-  assertReleaseTag(pkg, tags, context)
-  return { name: pkg.name, latest: tags.latest }
+  return { name: pkg.name }
 }
 
 async function verifyAll(packages, context) {
@@ -100,13 +86,12 @@ export async function publishReleasePackages(options) {
     distTag,
     gitHead,
     viewVersion,
-    viewTags,
     assertRegistryPackage,
     publish,
     retry,
-    uploadedPackages = [],
-    startAction = 'upload',
-    progress = async () => undefined,
+    startPhase = 'PUBLISHED',
+    completePhase = async () => undefined,
+    run = {},
     log = console.log,
   } = options
   const context = {
@@ -116,18 +101,18 @@ export async function publishReleasePackages(options) {
     distTag,
     gitHead,
     viewVersion,
-    viewTags,
     assertRegistryPackage,
     log,
   }
-  const submitted = new Set(uploadedPackages)
+  const submitted = new Set()
+  const matched = new Set()
+  const conflicts = new Set()
   const missing = []
 
-  const uploadEnabled = startAction === 'upload'
-  if (!['upload', 'visibility', 'verification'].includes(startAction)) {
-    throw new Error(`unsupported publication recovery action: ${startAction}`)
+  const uploadEnabled = startPhase === 'PUBLISHED'
+  if (!['PUBLISHED', 'VISIBLE'].includes(startPhase)) {
+    throw new Error(`unsupported publication recovery phase: ${startPhase}`)
   }
-  await progress({ nextAction: startAction, attempt: 0, uploadedPackages: [...submitted] })
 
   for (const pkg of packages) {
     const metadata = await viewVersion(pkg.name, version)
@@ -144,7 +129,7 @@ export async function publishReleasePackages(options) {
       gitHead,
     })
     submitted.add(pkg.name)
-    await progress({ nextAction: startAction, attempt: 0, uploadedPackages: [...submitted] })
+    matched.add(pkg.name)
     log(`[release] ${pkg.name}@${version} already matches immutable metadata; skipping publish`)
   }
 
@@ -154,34 +139,38 @@ export async function publishReleasePackages(options) {
       log(`[release] submitted ${pkg.name}@${version} with ${distTag}`)
     } catch (error) {
       if (!isAlreadyPublishedError(error)) throw error
+      conflicts.add(pkg.name)
       log(`[release] ${pkg.name}@${version} was already submitted; waiting for registry readback`)
     }
     submitted.add(pkg.name)
-    await progress({ nextAction: 'upload', attempt: 0, uploadedPackages: [...submitted] })
   }
 
-  await progress({
-    nextAction: startAction === 'verification' ? 'verification' : 'visibility',
-    attempt: 0,
-    uploadedPackages: [...submitted],
-  })
+  let visibilityAttempt = 0
   const published = await retry('published package metadata', async attempt => {
-    await progress({
-      nextAction: startAction === 'verification' ? 'verification' : 'visibility',
-      attempt,
-      uploadedPackages: [...submitted],
-    })
-    try {
-      return await verifyAll(packages, context)
-    } catch (error) {
-      await progress({
-        nextAction: error?.releasePhase ?? 'visibility',
-        attempt,
-        uploadedPackages: [...submitted],
-      })
-      throw error
-    }
+    visibilityAttempt = attempt
+    return verifyAll(packages, context)
   })
-  await progress({ nextAction: 'clean-install', attempt: 0, uploadedPackages: [...submitted] })
+  if (uploadEnabled) {
+    await completePhase({
+      phase: 'PUBLISHED',
+      evidence: {
+        packages: packages.map(pkg => pkg.name),
+        submittedPackages: [...submitted].filter(name => !matched.has(name)),
+        matchedPackages: [...matched],
+        publishConflicts: [...conflicts],
+        ...run,
+      },
+    })
+  }
+  await completePhase({
+    phase: 'VISIBLE',
+    evidence: {
+      packages: packages.map(pkg => pkg.name),
+      registryReadbackAttempt: visibilityAttempt,
+      immutableMetadata: true,
+      provenance: true,
+      ...run,
+    },
+  })
   return published
 }
