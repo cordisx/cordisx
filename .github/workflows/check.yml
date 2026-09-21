@@ -137,7 +137,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
@@ -176,7 +176,7 @@ jobs:
           path: test-result.json
           if-no-files-found: warn
 
-  package-checks:
+  package:
     if: github.event_name == 'push' || needs.scope.outputs.full == 'true' || needs.scope.outputs.package_checks == 'true' || needs.scope.outputs.skill_changed == 'true'
     needs: [scope, prepare]
     runs-on: ubuntu-latest
@@ -187,20 +187,61 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - uses: ./.github/actions/restore-prepared-host
+      - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
       - run: npm run check:release
       - run: npm run check:package
-      - name: Verify clean setup and installation for full delivery
-        if: github.event_name == 'push' || needs.scope.outputs.full == 'true'
+      - name: Pack the exact Host and Creator release candidate
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          node scripts/ci-release-candidate.mjs create
+          --directory .release-candidate
+          --commit "$HEAD_SHA"
+          --repository "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-candidate
+          overwrite: true
+          compression-level: 0
+          retention-days: 30
+
+  installed:
+    if: github.event_name == 'push' || needs.scope.outputs.full == 'true'
+    needs: [scope, prepare, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: ./.github/actions/restore-prepared-host
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .release-candidate
+      - name: Bind installation checks to the exact candidate
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          npm run check:clean-dev
-          npm run check:installed
+          node scripts/ci-release-candidate.mjs verify \
+            --directory .release-candidate \
+            --commit "$HEAD_SHA" \
+            --repository "$GITHUB_REPOSITORY"
+          echo "CORDISX_TARBALL=$GITHUB_WORKSPACE/.release-candidate/$(jq -r '.packages[] | select(.name == "cordisx") | .filename' .release-candidate/provenance.json)" >> "$GITHUB_ENV"
+          echo "CORDISX_CREATOR_TARBALL=$GITHUB_WORKSPACE/.release-candidate/$(jq -r '.packages[] | select(.name == "create-cordisx-plugin") | .filename' .release-candidate/provenance.json)" >> "$GITHUB_ENV"
+      - run: npm run check:clean-dev
+      - run: npm run check:installed
 
   full:
     # Stable aggregate status: a failed/cancelled prerequisite cannot appear green.
     if: ${{ !cancelled() && always() }}
-    needs: [scope, changed-quality, prepare, typecheck, tests, package-checks]
+    needs: [scope, changed-quality, prepare, typecheck, tests, package, installed]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

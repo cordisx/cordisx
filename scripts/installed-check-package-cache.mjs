@@ -6,6 +6,13 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const EXTERNAL_PACKAGES = ['@cordisx/protocol']
+const configuredTarballs = {
+  cordisx: process.env.CORDISX_TARBALL,
+  'create-cordisx-plugin': process.env.CORDISX_CREATOR_TARBALL,
+}
+if ((configuredTarballs.cordisx === undefined) !== (configuredTarballs['create-cordisx-plugin'] === undefined)) {
+  throw new Error('CORDISX_TARBALL and CORDISX_CREATOR_TARBALL must be provided together')
+}
 
 function packedFilename(stdout, packageName) {
   const report = JSON.parse(stdout)
@@ -15,6 +22,12 @@ function packedFilename(stdout, packageName) {
 }
 
 export async function packWorkspace(repositoryRoot, workspace, packDirectory) {
+  const configured = configuredTarballs[workspace]
+  if (configured !== undefined) {
+    const tarball = path.resolve(configured)
+    await access(tarball)
+    return tarball
+  }
   const { stdout } = await execute('npm', [
     'pack',
     `--workspace=${workspace}`,

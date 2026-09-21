@@ -144,23 +144,31 @@ assert(workflow.includes("tags:\n      - 'v*'"), 'release workflow must be trigg
 assert(!workflow.includes('workflow_dispatch'), 'release workflow must not create a second manual version interface')
 assert(workflow.includes('environment: npm-release'), 'release workflow must use the npm-release environment')
 assert(workflow.includes('npm@11.11.0'), 'release workflow must pin an OIDC-capable npm CLI')
-assert(workflow.includes('actions/cache/restore@v4'), 'release workflow must restore exact prepared artifacts')
-assert(workflow.includes('actions/cache/save@v4'), 'release workflow must save prepared artifacts before publication')
-assert(workflow.includes('${{ github.sha }}'), 'release artifact cache must be bound to the exact Git commit')
 assert(
-  workflow.includes('npm ci --registry=https://registry.npmjs.org'),
-  'release install must prepare registry and remaining Git dependencies',
+  workflow.includes('head_sha=$HEAD_SHA&event=push'),
+  'release workflow must select the Check push run for the exact Git commit',
 )
-assert(!workflow.includes('npm ci --ignore-scripts'), 'release install must not skip Git dependency preparation')
-for (const command of ['npm run test:release', 'npm run build', 'npm run check:release', 'npm run check:package']) {
-  assert(workflow.includes(command), `release workflow must run ${command}`)
-}
+assert(workflow.includes('gh run watch "$run_id"'), 'release workflow must await the exact Check result')
+assert(workflow.includes('release-candidate-${{ github.sha }}'), 'release candidate must be bound to the exact commit')
+assert(
+  workflow.includes('scripts/ci-release-candidate.mjs verify'),
+  'release workflow must verify candidate provenance',
+)
+assert(
+  workflow.includes('scripts/ci-release-candidate.mjs verify-workspace'),
+  'release workflow must reproduce integrity',
+)
+assert(workflow.includes('--require-toolchain'), 'release workflow must enforce the candidate toolchain')
+assert(!workflow.includes('npm ci'), 'release workflow must not repeat the exact-SHA dependency installation')
+assert(!workflow.includes('npm run build'), 'release workflow must not rebuild the exact-SHA candidate')
+assert(!workflow.includes('npm run test:release'), 'release workflow must reuse the exact-SHA Check evidence')
+assert(workflow.includes('npm run check:release'), 'release workflow must recheck release metadata')
 assert(!workflow.includes('npm run check\n'), 'release workflow must not expand into the full regression gate')
 assert(workflow.includes('scripts/release.mjs --tag'), 'release workflow must publish from the Git tag')
 assert(workflow.includes('check-registry-release.mjs --tag'), 'release workflow must verify a clean tagged install')
 assert(
-  workflow.indexOf('actions/cache/save@v4') < workflow.indexOf('scripts/release.mjs --tag'),
-  'prepared release artifacts must be saved before publication can fail',
+  workflow.indexOf('scripts/ci-release-candidate.mjs verify-workspace') < workflow.indexOf('scripts/release.mjs --tag'),
+  'candidate integrity must be reproduced before publication can start',
 )
 assert(workflow.includes('${GITHUB_REF_NAME}'), 'release workflow must derive the version from the pushed tag')
 assert(!workflow.includes(expectedVersion), 'release workflow must not hard-code the current version')

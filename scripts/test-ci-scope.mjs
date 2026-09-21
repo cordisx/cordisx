@@ -164,7 +164,7 @@ test('empty diff fails closed to the full gate', () => {
 test('CI shares preparation and preserves independent full delivery checks', () => {
   const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
   assert.equal([...workflow.matchAll(/run: npm ci\n/g)].length, 1)
-  assert.match(workflow, /max-parallel: 3/)
+  assert.match(workflow, /max-parallel: 4/)
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs.scope.outputs.matrix\) \}\}/)
   for (
     const command of ['check:clean-dev', 'typecheck', 'build', 'check:release', 'check:package', 'check:installed']
@@ -173,7 +173,8 @@ test('CI shares preparation and preserves independent full delivery checks', () 
   }
   assert.match(workflow, /args=\(run --project/)
   assert.match(workflow, /--changed "\$BASE_SHA"/)
-  assert.match(workflow, /needs: \[scope, changed-quality, prepare, typecheck, tests, package-checks\]/)
+  assert.match(workflow, /installed:\n[\s\S]*needs: \[scope, prepare, package\]/)
+  assert.match(workflow, /needs: \[scope, changed-quality, prepare, typecheck, tests, package, installed\]/)
   assert.ok(workflow.includes('.result == "success" or .result == "skipped"'))
 })
 

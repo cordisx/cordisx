@@ -93,7 +93,7 @@
     "test:integration": "vitest run --project integration",
     "test:browser": "vitest run --project browser",
     "test:all": "vitest run",
-    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-test-projects.mjs",
+    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-test-projects.mjs scripts/test-ci-release-candidate.mjs",
     "test:release": "npm run check:release:entry && vitest run tests/release-version.test.ts tests/npm-pack-report.test.ts tests/registry-release-propagation.test.ts tests/release-publication.test.ts",
     "validate:marketplace-artifact": "tsx packages/cli/scripts/validate-marketplace-artifact.ts"
   },

@@ -39,11 +39,10 @@ see [GitHub cancellation semantics](https://docs.github.com/en/actions/reference
 Short evidence/upload cleanup steps may still use `always()`.
 
 Inspect the run attempt, head SHA, and active step before rerunning anything.
-The full job exposes the same ordered commands as `npm run check` as separate
-steps: clean development, typecheck, build, tests, release metadata, package
-contents, and installed packages. GitHub records a duration for each step.
-Installation still runs lifecycle scripts, and package/installed checks remain
-serial because they share generated outputs and exercise real installations.
+The workflow prepares dependencies and build outputs once, then runs typecheck,
+the four test projects, and package validation in parallel. Installation remains
+downstream of package validation because it consumes those exact tarballs.
+GitHub records a duration for each job and matrix project.
 
 Compare the slow phase with recent successful runs of the same gate. Read its
 logs when duration or output suggests a stall; distinguish runner queue time,
@@ -52,3 +51,48 @@ an unchanged run does not produce new validation evidence. Report phase changes,
 failures, completion, or a diagnosed delay instead of repeating unchanged status.
 Do not restart healthy checks or rerun an unchanged full gate just to refresh a
 status message. Changing the head SHA requires fresh applicable evidence.
+
+## Host DAG and exact release candidates
+
+The `Check` workflow prepares dependencies and build outputs once. After that
+shared prerequisite, typechecking, the core/renderer/integration/browser test
+matrix, and package validation run in parallel. All four test projects may run
+at the same time. The installed-package job starts only after package validation
+has produced the exact Host and Creator tarballs that it installs.
+
+The package job uploads `release-candidate-<commit>` for 30 days. Its
+`provenance.json` binds both tarballs to the repository, exact commit, Node/npm
+toolchain, filename, size, SHA-512 digest, and npm integrity. A new pull-request
+head creates a different artifact name and the verifier also rejects a commit
+mismatch, so successful evidence from an older head cannot satisfy the new run.
+
+The final `full` job remains the stable required check. It succeeds only when
+every selected prerequisite is successful or intentionally skipped. Use
+GitHub's **Re-run failed jobs** action for transient failures: the successful
+shared preparation and exact candidate remain in the same workflow run, while
+only the failed job and its required dependants run again.
+
+Tag publication locates the `Check` push run for the exact tag commit, waits for
+its aggregate result, downloads that commit's candidate only after the run is
+green, verifies the recorded toolchain and archive integrity, restores the
+package contents, and confirms that each workspace reproduces the recorded npm
+integrity. It does not repeat dependency installation, the full tests, or the
+build. Missing, expired, failed, changed-head, or wrong-toolchain candidates
+fail before publication.
+
+Before this change, the test matrix admitted only three concurrent projects and
+package validation plus clean installation shared one serial job. In main
+`Check` run `35605863047`, the workflow took 8:57: integration remained the
+6:58 critical path, browser waited 3:29 for a matrix slot, and the 4:38 package
+job spent 4:13 in clean/installed verification. With four test slots, browser
+starts in the first wave; on that representative run the healthy critical path
+would still be integration, so the expected end-to-end CI duration remains
+about nine minutes. Package and installed checks become separate rerunnable
+units with their real artifact dependency instead of one opaque unit.
+
+The beta.18 release run `35577127123` spent 1:40 installing, testing, building,
+validating, archiving, and saving its first prepared cache before publication.
+The exact-SHA candidate removes that repeated first-attempt preparation while
+preserving the existing minimal retry behavior. Expected first-attempt release
+saving is therefore about 1:40 on the measured baseline; registry publication
+and clean-install verification remain unchanged.
