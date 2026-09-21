@@ -81,6 +81,19 @@ describe('native submission document authority', () => {
     }
   })
 
+  it('projects the launcher catalog through the private native command channel', async () => {
+    const h = await harness()
+    try {
+      await expect(h.channel.catalogRead()).resolves.toEqual([{
+        providerId: 'provider-b',
+        label: 'Provider B',
+        models: [{ id: 'model-b', label: 'Model B' }],
+      }])
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('keeps reads observational and commits same-provider model changes only through selection', async () => {
     const h = await harness()
     try {

@@ -35,6 +35,7 @@ export interface NativeProviderSubmitConfirmation {
 }
 
 export interface NativeProviderSelectionCommandChannel {
+  catalogRead?(): Promise<readonly import('./model-providers.js').NativeProviderProjection[]>
   selectionRead(
     input: Readonly<{ scope: NativeSubmissionScope; effective?: NativeProviderSelection }>,
   ): Promise<NativeProviderSelectionProjection>

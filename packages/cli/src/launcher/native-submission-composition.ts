@@ -20,6 +20,8 @@ import { discoverNativeSubmissionTransforms, type NativeScriptResource } from '.
 import { discoverNativeAccountCapability } from './native-account-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
+import { codexConfigModelProviders } from './codex-config-model-providers.js'
+import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -80,6 +82,7 @@ async function nativeSubmissionTransforms(contents: string): Promise<{
 export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
+  codexHome: string,
 ): Promise<NativeSubmissionComposition> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
@@ -109,8 +112,14 @@ export async function createNativeSubmissionComposition(
       }
     })()
   try {
+    let configured = await codexConfigModelProviders(codexHome)
+    const managedIds = new Set(activation.nativeProviderIds)
+    const configuredCatalog = async () => {
+      configured = await codexConfigModelProviders(codexHome)
+      return configured.providers
+    }
     const cdp = createNativeSubmissionCdpAuthority({
-      catalog: nativeModelProviderCatalog(activation),
+      catalog: combinedNativeModelProviderCatalog(nativeModelProviderCatalog(activation), configuredCatalog),
       isThreadIdle: id => control.isThreadIdle(id),
     })
     controller = createNativeSubmissionController({
@@ -121,6 +130,12 @@ export async function createNativeSubmissionComposition(
         credentials,
         resolveEndpoint: id => activation.prepareNativeConnection(id),
       }),
+      providerSource: providerId =>
+        managedIds.has(providerId)
+          ? 'managed'
+          : configured.providerIds.has(providerId)
+          ? 'config'
+          : undefined,
     })
     control.bindController(controller)
     cdp.bindController(controller)

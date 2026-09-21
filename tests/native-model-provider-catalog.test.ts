@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { nativeModelProviderCatalog } from '../packages/cli/src/launcher/native-model-provider-catalog.js'
+import {
+  combinedNativeModelProviderCatalog,
+  nativeModelProviderCatalog,
+} from '../packages/cli/src/launcher/native-model-provider-catalog.js'
 import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/managed-service-node-host.js'
 
 function connection(providerId: string, dispose: () => void) {
@@ -28,6 +31,31 @@ function connection(providerId: string, dispose: () => void) {
 }
 
 describe('native model provider catalog projection', () => {
+  it('keeps managed providers authoritative when configured ids overlap', async () => {
+    const managed = [{
+      providerId: 'aiden',
+      pluginId: 'aiden-plugin',
+      models: [{ id: 'managed-model', label: 'Managed model', aliases: [] }],
+      defaultModelId: 'managed-model',
+    }]
+    const configured = [{
+      providerId: 'aiden',
+      pluginId: 'cordisx.codex-config',
+      models: [{ id: 'configured-model', label: 'Configured model', aliases: [] }],
+      defaultModelId: 'configured-model',
+    }, {
+      providerId: 'deepseek',
+      pluginId: 'cordisx.codex-config',
+      models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', aliases: [] }],
+      defaultModelId: 'deepseek-chat',
+    }]
+
+    await expect(combinedNativeModelProviderCatalog(async () => managed, async () => configured)()).resolves.toEqual([
+      managed[0],
+      configured[1],
+    ])
+  })
+
   it('projects only safe provider and model metadata and drains every snapshot session', async () => {
     const dispose = vi.fn()
     const activation = {

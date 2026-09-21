@@ -753,7 +753,7 @@ export async function runDevelopment(
         })
         const createNativeSubmission = runtime.internalCreateNativeSubmissionComposition
           ?? createNativeSubmissionComposition
-        nativeSubmission = await createNativeSubmission(managedServiceActivation, executable)
+        nativeSubmission = await createNativeSubmission(managedServiceActivation, executable, codexHome(environment))
         managedServiceProjection = await createNativeViteManagedServiceProjection({
           activation: managedServiceActivation,
           profileId: 'development',
@@ -766,7 +766,7 @@ export async function runDevelopment(
         managedServiceProjection = undefined
         await managedServiceActivation?.dispose().catch(() => undefined)
         managedServiceActivation = undefined
-        stdout(`[cordisx] native managed Desktop providers unavailable: ${String(error)}`)
+        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
     }
     const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')

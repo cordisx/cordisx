@@ -4,7 +4,11 @@ import {
   type CordisXPluginActivationRecordV1,
 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
-import { equivalentModel, ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import {
+  equivalentModel,
+  ModelProviderRegistry,
+  nativeModelProviderRegistry,
+} from '../packages/cli/src/renderer/model-providers.js'
 
 const provider = { providerId: 'one', pluginId: 'plugin', models: [{ id: 'm', label: 'Model' }] }
 const entry = {
@@ -37,6 +41,25 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('model provider selector contract', () => {
+  it('loads the launcher catalog instead of the managed bridge when the native channel is installed', async () => {
+    const native = [{ ...provider, title: 'Configured provider' }]
+    const managed = { nativeProviders: vi.fn(async () => [{ ...provider, title: 'Managed provider' }]) }
+    const page = globalThis as typeof globalThis & {
+      __cordisxNativeProviderCommandChannel?: { catalogRead(): Promise<typeof native> }
+    }
+    const previous = page.__cordisxNativeProviderCommandChannel
+    page.__cordisxNativeProviderCommandChannel = { catalogRead: vi.fn(async () => native) }
+    try {
+      const registry = nativeModelProviderRegistry(managed)
+      await registry.refresh()
+      expect(registry.snapshot().providers[0]?.title).toBe('Configured provider')
+      expect(managed.nativeProviders).not.toHaveBeenCalled()
+    } finally {
+      if (previous === undefined) delete page.__cordisxNativeProviderCommandChannel
+      else page.__cordisxNativeProviderCommandChannel = previous
+    }
+  })
+
   it('matches actual IDs before explicit aliases, never labels or ambiguous aliases', () => {
     const current = { id: 'x', label: 'Identical label', aliases: ['portable'] }
     const exact = { id: 'x', label: 'Different' }

@@ -195,6 +195,7 @@ export interface NativeSubmissionControllerOptions {
   readonly credentials: NativeProviderCredentialBroker
   readonly runtime: NativeSubmissionRuntimeAuthority
   readonly existingThread: NativeExistingThreadSwitch
+  readonly providerSource?: (providerId: string) => 'managed' | 'config' | undefined
   readonly operationTtlMs?: number
   readonly confirmationTtlMs?: number
   readonly now?: () => number
@@ -399,15 +400,18 @@ export function createNativeSubmissionController(
     let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
     try {
       let configOverrides: Readonly<Record<string, unknown>>
-      if (prepared.pending.providerId === 'openai') {
-        // The built-in provider owns its auth and endpoint. Never synthesize a managed provider table.
-        credential = { serviceGeneration: 'native-openai', dispose() {} }
-        configOverrides = Object.freeze({ model_provider: 'openai', model: prepared.pending.model })
-      } else {
+      const source = prepared.pending.providerId === 'openai'
+        ? 'openai'
+        : options.providerSource?.(prepared.pending.providerId)
+      if (source === 'openai' || source === 'config') {
+        // Codex owns built-in and config-backed authentication. Never synthesize a managed provider table.
+        credential = { serviceGeneration: `native-${source}`, dispose() {} }
+        configOverrides = Object.freeze({ model_provider: prepared.pending.providerId, model: prepared.pending.model })
+      } else if (source === 'managed' || options.providerSource === undefined) {
         const managed = await options.credentials.prepare(prepared.pending.providerId)
         credential = managed
         configOverrides = requestConfig(prepared.pending, managed)
-      }
+      } else throw new Error('native provider is unknown')
       if (disposed || !revalidateSelection(prepared)) {
         await credential.dispose()
         return undefined
@@ -800,12 +804,21 @@ export function createNativeSubmissionController(
         disposed || input.providerId === 'openai' || !validText(input.providerId, 128)
         || !validText(input.model, 512) || !validText(input.threadId, 512)
       ) return { kind: 'reject', reason: 'unknown-provider' }
-      let credential: NativeProviderCredentialLease | undefined
+      const source = options.providerSource?.(input.providerId)
+      if (options.providerSource !== undefined && source === undefined) {
+        return { kind: 'reject', reason: 'unknown-provider' }
+      }
+      let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
       try {
-        credential = await options.credentials.prepare(input.providerId)
-        const configOverrides = Object.freeze({
-          [`model_providers.${input.providerId}`]: providerConfig(credential),
-        })
+        let configOverrides: Readonly<Record<string, unknown>>
+        if (source === 'config') {
+          credential = { serviceGeneration: 'native-config', dispose() {} }
+          configOverrides = Object.freeze({})
+        } else {
+          const managed = await options.credentials.prepare(input.providerId)
+          credential = managed
+          configOverrides = Object.freeze({ [`model_providers.${input.providerId}`]: providerConfig(managed) })
+        }
         if (disposed) throw new Error('native submission controller was disposed')
         const token = createId()
         if (!validText(token, 256) || token.length < 16 || threadResumes.has(token)) {

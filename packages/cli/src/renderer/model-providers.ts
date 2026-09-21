@@ -12,6 +12,7 @@ import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } 
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
+  readonly title?: string
   readonly models: readonly ModelProviderModelV1[]
   readonly defaultModelId?: string
 }
@@ -25,6 +26,18 @@ export interface ModelProviderSnapshot {
   }[]
   readonly loading: boolean
   readonly error?: string
+}
+
+export function nativeModelProviderRegistry(managed?: {
+  nativeProviders(): Promise<readonly NativeProviderProjection[]>
+}): ModelProviderRegistry {
+  const channel = (globalThis as typeof globalThis & {
+    __cordisxNativeProviderCommandChannel?:
+      import('./native-provider-selection-client.js').NativeProviderSelectionCommandChannel
+  }).__cordisxNativeProviderCommandChannel
+  return new ModelProviderRegistry(async () =>
+    channel?.catalogRead === undefined ? await managed?.nativeProviders() ?? [] : await channel.catalogRead()
+  )
 }
 
 function modelIdentities(model: ModelProviderModelV1): ReadonlySet<string> {
@@ -112,6 +125,7 @@ export class ModelProviderRegistry {
         Object.freeze({
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
+          ...(provider.title === undefined ? {} : { title: label(provider.title) }),
           ...(provider.defaultModelId === undefined ? {} : { defaultModelId: label(provider.defaultModelId, 512) }),
           models: Object.freeze(provider.models.map(model =>
             Object.freeze({
@@ -276,7 +290,7 @@ export class ModelProviderRegistry {
         )?.value
         return Object.freeze({
           providerId: provider.providerId,
-          title: presentation?.title ?? provider.providerId,
+          title: presentation?.title ?? provider.title ?? provider.providerId,
           icon: presentation?.icon ?? 'host:settings',
           models: Object.freeze(provider.models.map(model => {
             const metadata = presentation?.models?.find(item => item.id === model.id)

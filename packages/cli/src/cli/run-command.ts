@@ -848,9 +848,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
             await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
               managedServiceActivation,
               plan.executable,
+              codexHome({ ...environment, ...plan.environment }),
             )
         } catch (error) {
-          stdout(`[cordisx] native managed Desktop providers unavailable: ${String(error)}`)
+          stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
         }
       }
       if (

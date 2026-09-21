@@ -4,12 +4,27 @@ import type { NativeManagedGatewayConnectionSession } from './managed-service-na
 export interface NativeModelProviderCatalogEntry {
   readonly providerId: string
   readonly pluginId: string
+  readonly title?: string
   readonly models: readonly {
     readonly id: string
     readonly label: string
     readonly aliases: readonly string[]
   }[]
-  readonly defaultModelId: string
+  readonly defaultModelId?: string
+}
+
+export function combinedNativeModelProviderCatalog(
+  managed: () => Promise<readonly NativeModelProviderCatalogEntry[]>,
+  configured: () => Promise<readonly NativeModelProviderCatalogEntry[]>,
+) {
+  return async (): Promise<readonly NativeModelProviderCatalogEntry[]> => {
+    const [managedProviders, configuredProviders] = await Promise.all([managed(), configured()])
+    const managedIds = new Set(managedProviders.map(provider => provider.providerId))
+    return Object.freeze([
+      ...managedProviders,
+      ...configuredProviders.filter(provider => !managedIds.has(provider.providerId)),
+    ])
+  }
 }
 
 function projectProvider(

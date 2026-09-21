@@ -146,7 +146,11 @@ describe('Vite development native submission assembly', () => {
       homeDir: f.home,
       environment: { CORDISX_HOME: f.home },
     })
-    expect(createNativeSubmission).toHaveBeenCalledWith(activation, f.executable)
+    expect(createNativeSubmission).toHaveBeenCalledWith(
+      activation,
+      f.executable,
+      path.join(os.homedir(), '.codex'),
+    )
     await expect(access(path.join(f.home, 'config.json'))).resolves.toBeUndefined()
     expect(runHost).toHaveBeenCalledWith(expect.objectContaining({
       nativeSubmission: installation,

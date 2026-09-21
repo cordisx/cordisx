@@ -7,11 +7,17 @@ separate conversation surface. The public renderer contract is
 ## Ownership
 
 Managed Node plugins register their own service and publish an accepted native
-provider catalog. No particular gateway plugin is required. The launcher writes
-each ready provider's endpoint and authentication into the private managed
-configuration, then exposes only model IDs, aliases and plugin ownership to the
-renderer. Bearer credentials stay outside renderer descriptors. Unauthenticated
-managed endpoints are restricted to loopback.
+provider catalog. Providers already configured in the effective Codex
+`config.toml` are projected beside them from `model_providers`,
+`model_catalog_json`, `model_provider`, and `model`. Relative catalog paths are
+resolved from `CODEX_HOME`; a missing or invalid optional catalog retains the
+configured active model as the safe fallback. Managed providers take precedence
+when an ID is present in both sources. No particular gateway plugin is required.
+The launcher writes each ready managed provider's endpoint and authentication
+into the private managed configuration, then exposes only provider titles,
+model IDs, aliases and ownership to the renderer. Config provider bodies and all
+credentials stay outside renderer descriptors. Unauthenticated managed endpoints
+are restricted to loopback.
 
 The Host owns the Model services settings destination, provider rows, grouped
 model menu, and native selection adapter. Plugins decorate their own published
@@ -32,6 +38,10 @@ The capability-checked Codex adapter synchronizes the native composer selection 
 uses native session operations to change an idle thread's effective provider.
 The effective response, not the historical provider embedded in thread metadata,
 is the transition receipt. New drafts use the private configuration defaults.
+Config-backed providers pass only the selected `model_provider` and `model` to
+Codex, which continues to own their configured endpoint and authentication.
+Managed providers continue to use launch-scoped credential leases and provider
+tables.
 Only an accepted native operation changes the selected Provider shown to users.
 Failed transitions attempt to restore the prior effective session/configuration;
 failed recovery disables the replacement instead of claiming success.

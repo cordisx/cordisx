@@ -232,6 +232,12 @@ export function createNativeSubmissionCdpAuthority(options: {
           requestId = envelope.requestId
           if (active.has(requestId)) throw new Error('Duplicate native command')
           const input = record(envelope.input)
+          if (envelope.operation === 'catalogRead') {
+            active.add(requestId)
+            admitted = true
+            await respond(requestId, await options.catalog())
+            return
+          }
           const scope = scopeOf(input?.scope)
           if (scope.targetId !== target.id || scope.rendererGeneration !== generation) {
             throw new Error('Wrong native owner')
@@ -326,7 +332,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       },rendererGeneration:generation});
         globalThis.${RECEIVER}=(owner,message)=>{if(owner!==generation)return;const p=pending.get(message.requestId);if(!p)return;pending.delete(message.requestId);clearTimeout(p.timer);message.ok?p.resolve(message.value):p.reject(new Error('Native submission rejected'))};
         const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
-        globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
+        globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined

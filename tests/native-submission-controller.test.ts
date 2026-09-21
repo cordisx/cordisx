@@ -34,6 +34,7 @@ function harness(input: {
   now?: () => number
   runtimeValid?: () => boolean
   createdNavigation?: () => number
+  providerSource?: (providerId: string) => 'managed' | 'config' | undefined
 } = {}) {
   const scope = input.scope ?? draftScope
   let snapshot: NativeSubmissionSelectionSnapshot = {
@@ -118,6 +119,7 @@ function harness(input: {
       }),
     },
     existingThread: { switch: switchThread },
+    ...(input.providerSource === undefined ? {} : { providerSource: input.providerSource }),
     operationTtlMs: 100,
     now: input.now,
     createId: () => `opaque-operation-${String(++id).padStart(4, '0')}`,
@@ -431,6 +433,53 @@ describe('native submission controller', () => {
         model: publishedModelId,
       },
     })
+  })
+
+  it('routes a config-backed new draft through Codex config without managed credentials', async () => {
+    const fixture = harness({
+      pending: { ...pendingDraft, providerId: 'deepseek', model: 'deepseek-chat' },
+      providerSource: id => id === 'deepseek' ? 'config' : undefined,
+    })
+    const prepared = await fixture.controller.prepareSubmission(draftScope, draftAction)
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+
+    await expect(fixture.controller.consumeMarkedRequest({
+      method: 'thread/start',
+      requestId,
+      operationToken: prepared.operationToken,
+    })).resolves.toMatchObject({
+      kind: 'dispatch',
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+      serviceGeneration: 'native-config',
+      configOverrides: { model_provider: 'deepseek', model: 'deepseek-chat' },
+    })
+    expect(fixture.prepare).not.toHaveBeenCalled()
+  })
+
+  it('switches an idle existing thread to a config-backed provider without managed credentials', async () => {
+    const fixture = harness({
+      scope: threadScope,
+      pending: { ...pendingThread, providerId: 'deepseek', model: 'deepseek-chat' },
+      providerSource: id => id === 'deepseek' ? 'config' : undefined,
+    })
+    await expect(fixture.controller.commitSelection(threadScope)).resolves.toMatchObject({ kind: 'accepted' })
+    expect(fixture.switchThread).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+      configOverrides: { model_provider: 'deepseek', model: 'deepseek-chat' },
+      serviceGeneration: 'native-config',
+    }))
+    expect(fixture.prepare).not.toHaveBeenCalled()
+  })
+
+  it('rejects a provider not present in either managed or configured sources', async () => {
+    const fixture = harness({ pending: pendingDraft, providerSource: () => undefined })
+    await expect(fixture.controller.prepareSubmission(draftScope, draftAction)).resolves.toEqual({
+      kind: 'reject',
+      reason: 'provider-preparation-failed',
+    })
+    expect(fixture.prepare).not.toHaveBeenCalled()
   })
 
   it('commits an existing-thread provider selection immediately after authoritative idle revalidation', async () => {
@@ -796,5 +845,22 @@ describe('native submission controller', () => {
       model: 'model-b',
     })).resolves.toEqual({ kind: 'reject', reason: 'provider-preparation-failed' })
     expect(fixture.disposed).toEqual([])
+  })
+
+  it('resumes a config-backed thread through persisted Codex config without a provider table', async () => {
+    const fixture = harness({ providerSource: id => id === 'deepseek' ? 'config' : undefined })
+    const prepared = await fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+    })
+    expect(prepared).toMatchObject({ kind: 'resume', configOverrides: {} })
+    if (prepared.kind !== 'resume') throw new Error('resume not prepared')
+    await expect(fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: prepared.resumeToken,
+      succeeded: true,
+    })).resolves.toBe(true)
+    expect(fixture.prepare).not.toHaveBeenCalled()
   })
 })
