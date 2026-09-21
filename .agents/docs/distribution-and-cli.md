@@ -751,3 +751,47 @@ cleanup, and proof that the user's account data and ordinary host process were
 not modified.
 Claude Code or any other host requires its own adapter fixtures and live smoke
 before its command example is described as implemented.
+
+### macOS profile launch entries
+
+`cordisx codex work --create-shortcut` performs the ordinary managed start or
+reuse, then creates or updates
+`~/Desktop/CordisX · Codex · work · Shared.app`. The entry is bound to the
+canonical CordisX home, app, profile, and data mode. Opening it runs ordinary
+`start` and activates the verified owned Host; it does not create another
+entry.
+
+The creation flag is a one-shot output operation and does not become a Host
+argument. Explicit `--data`, `--executable`, and `--profile-dir` intent is
+persisted. Entry creation rejects attach, system profile, dry run, debug
+options, online DevTools, ephemeral npx installs, and Host arguments after
+`--` before starting.
+
+Private launch records and per-install runtime descriptors live under
+`~/Library/Application Support/CordisX/shortcuts` with owner-only permissions.
+Node, the CLI entry script, and launch paths are absolute; the app does not use
+a shell. Finder moves and renames are resolved with bookmarks. Missing,
+trashed, or unrelated same-name entries require explicit recovery rather than
+being overwritten.
+
+Automatic artwork combines the CordisX mark, the installed Host artwork, and
+an optional bounded avatar bitmap read from the owned Host. Identity,
+credentials, and remote avatar URLs do not cross the writer boundary. Finder
+custom icons take precedence and are preserved.
+
+For an entry-owned Codex launch on macOS, CordisX first verifies the installed
+Host bundle and its Electron main-inspector fuse. A random loopback inspector
+exists only while a fixed local Dock agent is installed into that exact owned
+Host process; CordisX closes the inspector before publishing renderer
+readiness. The agent reads owner-only PNGs and accepts only an authenticated
+refresh command on a private Unix socket. It derives the primary icon outline
+from macOS rendering of the generated app, keeps Host/avatar badges at their
+notification-badge scale, and updates light and dark variants on live system
+appearance changes. Ordinary managed starts without explicit entry metadata do
+not enable the main inspector.
+
+This first implementation guarantees the running icon for the Host process
+opened by the entry. Dock pin management and behavior after that Host exits are
+separate scope. The helper is built only on macOS for the build machine's
+architecture; multi-architecture native release artifacts require a separate
+packaging gate before publication.

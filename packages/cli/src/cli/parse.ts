@@ -62,6 +62,7 @@ export interface CordisXManagedInvocation {
   readonly hostArgs: readonly string[]
   readonly follow?: true
   readonly recoverStartup?: true
+  readonly createShortcut?: true
 }
 
 export interface CordisXSetupInvocation {
@@ -128,6 +129,7 @@ type BooleanOptionName =
   | 'follow'
   | 'recoverStartup'
   | 'help'
+  | 'createShortcut'
 type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath' | 'workScopeGuard'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
@@ -142,6 +144,7 @@ interface ParsedOptions {
   follow: boolean
   recoverStartup: boolean
   help: boolean
+  createShortcut: boolean
   dataMode?: CordisXDataMode
   profileDir?: string
   executable?: string
@@ -151,6 +154,7 @@ interface ParsedOptions {
 }
 
 const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
+  ['--create-shortcut', 'createShortcut'],
   ['--attach', 'attach'],
   ['--system', 'system'],
   ['--isolated', 'isolated'],
@@ -236,6 +240,7 @@ function parseCordisXOptions(args: readonly string[]): {
     follow: false,
     recoverStartup: false,
     help: false,
+    createShortcut: false,
   }
   const seen = new Set<ParsedOptionName>()
   const positionals: string[] = []
@@ -365,6 +370,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.json && '--json',
     options.follow && '--follow',
     options.recoverStartup && '--recover-startup',
+    options.createShortcut && '--create-shortcut',
     options.dataMode !== undefined && '--data',
     options.profileDir !== undefined && '--profile-dir',
     options.executable !== undefined && '--executable',
@@ -536,6 +542,16 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   // The bare command (including its optional app/profile) is intentionally the
   // idempotent background default. `run` is the foreground escape hatch.
   const action: CordisXCliAction = hasCommandPrefix ? first as CordisXCliAction : 'start'
+  if (
+    options.createShortcut
+    && (action !== 'start' || options.attach || options.system || options.dryRun || options.debugPort !== undefined
+      || options.onlineDevtools)
+  ) {
+    throw new CordisXCliParseError(
+      'unsupported-option',
+      '--create-shortcut supports ordinary start only, without attach/system/dry-run/debug options',
+    )
+  }
   if (action === 'setup' || action === 'config' || action === 'doctor') {
     if (positionals.length > 1) {
       throw new CordisXCliParseError(
@@ -655,5 +671,6 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
     hostArgs,
     ...(options.follow ? { follow: true as const } : {}),
     ...(options.recoverStartup ? { recoverStartup: true as const } : {}),
+    ...(options.createShortcut ? { createShortcut: true as const } : {}),
   }
 }

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createSupervisorRuntime } from '../packages/cli/src/cli/supervisor-runtime.js'
+import { createSupervisorRuntime, publishReadyAfterInspectorClose } from '../packages/cli/src/cli/supervisor-runtime.js'
 import {
   acquireSupervisorStartLock,
   processStartIdentity,
@@ -11,6 +11,28 @@ import {
 } from '../packages/cli/src/cli/supervisor-state.js'
 
 describe('background supervisor publication handshake', () => {
+  it('closes the one-shot main inspector before publishing ready', async () => {
+    const events: string[] = []
+    await publishReadyAfterInspectorClose(
+      async () => {
+        events.push('inspector-closed')
+      },
+      async () => {
+        events.push('ready-published')
+      },
+    )
+    expect(events).toEqual(['inspector-closed', 'ready-published'])
+    await expect(publishReadyAfterInspectorClose(
+      async () => {
+        throw new Error('inspector stayed open')
+      },
+      async () => {
+        events.push('must-not-publish')
+      },
+    )).rejects.toThrow('inspector stayed open')
+    expect(events).not.toContain('must-not-publish')
+  })
+
   it('waits for a matching published generation before consuming the bootstrap token', async () => {
     const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
     const paths = supervisorPaths(root, 'codex', 'work')
@@ -25,6 +47,7 @@ describe('background supervisor publication handshake', () => {
       CORDISX_SUPERVISOR_HOME: root,
       CORDISX_SUPERVISOR_APP: 'codex',
       CORDISX_SUPERVISOR_PROFILE: 'work',
+      CORDISX_SUPERVISOR_DATA_MODE: 'shared',
       CORDISX_SUPERVISOR_FINGERPRINT: fingerprint,
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
     })
@@ -43,6 +66,7 @@ describe('background supervisor publication handshake', () => {
       effectiveConfig: fingerprint,
     })
     const runtime = await pending
+    expect(runtime.dockInspector).toBe(false)
     await expect(readFile(paths.bootstrapToken, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(acquireSupervisorStartLock(paths)).rejects.toBeInstanceOf(SupervisorOperationBusyError)
     await runtime.markReady(43123)

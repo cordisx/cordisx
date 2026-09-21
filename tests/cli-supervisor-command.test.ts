@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
@@ -15,6 +15,7 @@ import {
 } from '../packages/cli/src/cli/supervisor-state.js'
 import { requestSupervisorStop, startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
 import { resolveOwningPackageVersion } from '../packages/cli/src/launcher/package-version.js'
+import { shortcutKey } from '../packages/cli/src/shortcuts/model.js'
 
 const cliVersion = JSON.parse(
   await readFile(new URL('../packages/cli/package.json', import.meta.url), 'utf8'),
@@ -113,6 +114,65 @@ describe('supervisor management commands', () => {
       expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
       expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
     ])
+  })
+
+  it('does not forward caller Dock metadata to an ordinary managed start', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    let childEnvironment: NodeJS.ProcessEnv | undefined
+    await runSupervisorCommand(parseCordisXCli(['start']), {
+      env: {
+        CORDISX_HOME: root,
+        CORDISX_DOCK_ENTRY: 'a'.repeat(32),
+        CORDISX_DOCK_RECORD: path.join(root, `${'a'.repeat(32)}.json`),
+      },
+      stdout: () => {},
+      internalSpawnSupervisor: input => {
+        childEnvironment = input.env
+        void (async () => {
+          for (;;) {
+            const state = await readSupervisorState(paths)
+            if (state !== undefined) {
+              await writeSupervisorState(paths, { ...state, phase: 'ready', cdpEndpoint: 'http://127.0.0.1:49997' })
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 5))
+          }
+        })()
+        return { pid: process.pid, unref: () => undefined }
+      },
+    })
+    expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_ENTRY')
+    expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_RECORD')
+  })
+
+  it('keeps a newly ready Host manageable when the entry Dock refresh fails afterward', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const entryId = shortcutKey(await realpath(root), 'codex', 'default', 'shared')
+    await expect(runSupervisorCommand(parseCordisXCli(['start']), {
+      env: { CORDISX_HOME: root },
+      stdout: () => {},
+      internalShortcutDockRecordPath: path.join(root, `${entryId}.json`),
+      internalSpawnSupervisor: () => {
+        void (async () => {
+          for (;;) {
+            const state = await readSupervisorState(paths)
+            if (state !== undefined) {
+              await writeSupervisorState(paths, { ...state, phase: 'ready', cdpEndpoint: 'http://127.0.0.1:49996' })
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 5))
+          }
+        })()
+        return { pid: process.pid, unref: () => undefined }
+      },
+    })).rejects.toThrow('Host is ready, but its Dock icon was not updated')
+    await expect(readSupervisorState(paths)).resolves.toMatchObject({
+      phase: 'ready',
+      pid: process.pid,
+      cdpEndpoint: 'http://127.0.0.1:49996',
+    })
   })
 
   it('lets stop cancel a published starting generation without a late ready overwrite', async () => {

@@ -431,9 +431,14 @@ export function launchCodex(
   profile?: IsolatedCodexProfile,
   allowOnlineDevTools = false,
   environment?: Readonly<Record<string, string>>,
+  mainInspector = false,
 ): ChildProcess {
-  const child = spawn(executable, codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools), {
-    stdio: profile === undefined ? 'inherit' : 'ignore',
+  const args = [
+    ...codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools),
+    ...(mainInspector ? ['--inspect=127.0.0.1:0'] : []),
+  ]
+  const child = spawn(executable, args, {
+    stdio: mainInspector ? ['ignore', 'ignore', 'pipe'] : profile === undefined ? 'inherit' : 'ignore',
     env: environment === undefined ? process.env : { ...process.env, ...environment },
     // A launcher owns exactly one process group, so cleanup can stop the Host
     // tree (including Chromium helpers) without touching an ordinary Host.

@@ -53,6 +53,7 @@ import {
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
@@ -171,9 +172,16 @@ Options:
   plugin --help            Show plugin management commands
   source --help            Show source management commands
   feedback --help          Show local, privacy-filtered feedback commands
+  --create-shortcut        Create/update a macOS launch entry after readiness
   -h, --help               Show this help`
 
 export interface CordisXCliRuntime {
+  /** Isolated native verification output; never read from user CLI/env. */
+  readonly internalShortcutOutput?: import('../shortcuts/model.js').ShortcutOutputOptions
+  /** Only the signed native shortcut entry supplies this internal path. */
+  readonly internalShortcutDockRecordPath?: string
+  /** GUI children start outside protected project folders; cwd still records launch intent. */
+  readonly internalShortcutSpawnCwd?: string
   readonly cwd?: string
   readonly env?: NodeJS.ProcessEnv
   /** Test/integration seam for the canonical default `~/.cordisx` root. */
@@ -267,6 +275,28 @@ export function waitForExit(child: ChildProcess): Promise<void> {
       else reject(new Error(`host exited with status ${String(code)}`))
     })
   })
+}
+
+/** Capture only the ephemeral loopback inspector address from our own Host stderr. */
+function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
+  const stream = child.stderr
+  if (!stream) return Promise.reject(new Error('Owned Host inspector stderr unavailable'))
+  const operation = new Promise<string>((resolve, reject) => {
+    let buffer = ''
+    const timer = setTimeout(() => reject(new Error('Owned Host inspector did not start')), 8_000)
+    stream.on('data', chunk => {
+      buffer = (buffer + String(chunk)).slice(-8_192)
+      const match = /Debugger listening on (ws:\/\/127\.0\.0\.1:\d+\/[a-f0-9-]+)/u.exec(buffer)
+      if (match?.[1]) {
+        clearTimeout(timer)
+        resolve(match[1])
+      }
+    })
+    stream.once('error', reject)
+    stream.once('end', () => reject(new Error('Owned Host main inspector exited')))
+  })
+  void operation.catch(() => undefined)
+  return operation
 }
 
 export function waitForAbort(signal: AbortSignal): Promise<void> {
@@ -469,7 +499,9 @@ export async function runInjectedHost(input: {
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
   readonly onReady?: () => void | Promise<void>
-  readonly onHostLaunched?: (pid: number) => void | Promise<void>
+  readonly onHostLaunched?: (pid: number, inspectorUrl?: Promise<string>) => void | Promise<void>
+  /** Internal, owned-entry bootstrap only. Never a user Host argument. */
+  readonly dockInspector?: boolean
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
@@ -535,6 +567,7 @@ export async function runInjectedHost(input: {
     if (input.profile !== undefined && profileLease === undefined) {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir)
     }
+    const mainInspector = input.dockInspector === true && await supportsOwnedMainInspector(input.executable)
     input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
     launched = launchCodex(
       input.executable,
@@ -543,9 +576,11 @@ export async function runInjectedHost(input: {
       input.profile,
       input.launcher.onlineDevtools,
       input.environment,
+      mainInspector,
     )
     if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
-    await input.onHostLaunched?.(launched.pid)
+    const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
+    await input.onHostLaunched?.(launched.pid, inspectorUrl)
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),

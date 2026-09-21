@@ -1,14 +1,16 @@
+import { fileURLToPath } from 'node:url'
+import { launchFingerprint } from './launch-fingerprint.js'
 import { randomBytes } from 'node:crypto'
-import { chmod, open, readFile, writeFile } from 'node:fs/promises'
+import { chmod, open, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
+import os from 'node:os'
 import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
 import { resolveProfileSelection } from './profiles.js'
 import type { CordisXCliInvocation } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
 import {
   acquireSupervisorStartLock,
-  effectiveConfigFingerprint,
   LegacySupervisorLockError,
   processIdentityStatus,
   processStartIdentity,
@@ -19,8 +21,11 @@ import {
   supervisorPaths,
   writeSupervisorState,
 } from './supervisor-state.js'
-import { requestSupervisorStop } from './supervisor-control.js'
+import { requestDockRefresh, requestShortcutPresentation, requestSupervisorStop } from './supervisor-control.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
+import { createShortcut, preflightShortcut } from '../shortcuts/create.js'
+import { shortcutKey } from '../shortcuts/model.js'
+import { registryFor } from '../shortcuts/store.js'
 
 const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
 const RETRY_DELAY = 50
@@ -70,7 +75,16 @@ async function selectionFor(
     configPath,
     appId,
     selection,
-    fingerprint: effectiveConfigFingerprint({ source, options: invocation.options, hostArgs: invocation.hostArgs }),
+    fingerprint: launchFingerprint({
+      source,
+      options: invocation.options,
+      hostArgs: invocation.hostArgs,
+      dataMode: selection.dataMode,
+      cwd: runtime.cwd ?? process.cwd(),
+      ...(environment.CODEX_HOME
+        ? { codexHome: path.resolve(runtime.cwd ?? process.cwd(), environment.CODEX_HOME) }
+        : {}),
+    }),
   }
 }
 
@@ -262,11 +276,72 @@ async function followLog(paths: ReturnType<typeof supervisorPaths>, runtime: Cor
   }
 }
 
+export interface ReadyLaunchResult {
+  readonly state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>
+  readonly target: Awaited<ReturnType<typeof selectionFor>>
+}
+
+async function finishReady(
+  invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>,
+  runtime: CordisXCliRuntime,
+  ready: ReadyLaunchResult,
+): Promise<ReadyLaunchResult> {
+  let shortcut: Awaited<ReturnType<typeof createShortcut>> | undefined
+  if (invocation.createShortcut) {
+    try {
+      const socket = supervisorPaths(
+        path.dirname(ready.target.configPath),
+        ready.target.appId,
+        ready.target.selection.profileId,
+      ).socket
+      let displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
+      const avatarDeadline = Date.now() + 10_000
+      while (displayProfile.status !== 'available' || !displayProfile.avatar) {
+        if (Date.now() >= avatarDeadline) break
+        await new Promise(resolve => setTimeout(resolve, 250))
+        displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
+      }
+      shortcut = await createShortcut({
+        ...(displayProfile.status === 'available' && displayProfile.avatar ? { avatar: displayProfile.avatar } : {}),
+        invocation,
+        appId: ready.target.appId,
+        profileId: ready.target.selection.profileId,
+        dataMode: ready.target.selection.dataMode,
+        home: path.dirname(ready.target.configPath),
+        cwd: runtime.cwd ?? process.cwd(),
+        env: ready.target.environment,
+        ...(runtime.internalShortcutOutput ? { output: runtime.internalShortcutOutput } : {}),
+      })
+    } catch (error) {
+      throw new Error('Host is ready; shortcut was not updated: ' + failureMessage(error))
+    }
+  }
+  if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) {
+    const home = await realpath(path.dirname(ready.target.configPath))
+    const id = shortcutKey(home, ready.target.appId, ready.target.selection.profileId, ready.target.selection.dataMode)
+    const recordPath = runtime.internalShortcutDockRecordPath
+      ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
+    const paths = supervisorPaths(
+      path.dirname(ready.target.configPath),
+      ready.target.appId,
+      ready.target.selection.profileId,
+    )
+    if (!await requestDockRefresh(paths.socket, ready.state.instanceToken, recordPath)) {
+      throw new Error(
+        'Host is ready, but its Dock icon was not updated; stop this owned profile and reopen the shortcut',
+      )
+    }
+  }
+  output(runtime, { ...display(ready.state), ...(shortcut ? { shortcut } : {}) }, invocation.options.json)
+  return ready
+}
+
 export async function runSupervisorCommand(
   invocation: CordisXCliInvocation,
   runtime: CordisXCliRuntime,
-): Promise<void> {
+): Promise<ReadyLaunchResult | undefined> {
   if (!isManaged(invocation)) throw new Error('not a supervisor command')
+  if (invocation.createShortcut) await preflightShortcut(invocation, runtime.cwd ?? process.cwd())
   const target = await selectionFor(invocation, runtime)
   const paths = supervisorPaths(path.dirname(target.configPath), target.appId, target.selection.profileId)
   const json = invocation.options.json
@@ -378,29 +453,43 @@ export async function runSupervisorCommand(
       await releaseOperation()
       const ready = state.phase === 'ready' ? state : await waitForState(paths, readinessTimeout(runtime))
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
-      output(runtime, display(ready), json)
-      return
+      return await finishReady(invocation, runtime, { state: ready, target })
     }
     const log = await open(paths.log, 'a', 0o600)
     await chmod(paths.log, 0o600)
     const instanceToken = randomBytes(32).toString('hex')
     await writeFile(paths.bootstrapToken, instanceToken, { mode: 0o600 })
-    const args = [process.argv[1]!, ...childArgs(invocation)]
+    const args = [fileURLToPath(new URL('../cli.js', import.meta.url)), ...childArgs(invocation)]
+    const {
+      CORDISX_DOCK_ENTRY: _untrustedDockEntry,
+      CORDISX_DOCK_RECORD: _untrustedDockRecord,
+      ...launchEnvironment
+    } = target.environment
     const childEnvironment = {
-      ...target.environment,
+      ...launchEnvironment,
       CORDISX_SUPERVISOR_HOME: path.dirname(target.configPath),
       CORDISX_SUPERVISOR_APP: target.appId,
       CORDISX_SUPERVISOR_PROFILE: target.selection.profileId,
+      CORDISX_SUPERVISOR_DATA_MODE: target.selection.dataMode,
       CORDISX_SUPERVISOR_FINGERPRINT: target.fingerprint,
       // The path is not authority. The random token stays in a mode-0600
       // bootstrap file rather than appearing in the child environment.
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+    }
+    if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) {
+      const home = await realpath(path.dirname(target.configPath))
+      const id = shortcutKey(home, target.appId, target.selection.profileId, target.selection.dataMode)
+      const recordPath = runtime.internalShortcutDockRecordPath
+        ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
+      if (path.basename(recordPath) !== `${id}.json`) throw new Error('Dock record does not match launch profile')
+      Object.assign(childEnvironment, { CORDISX_DOCK_ENTRY: id, CORDISX_DOCK_RECORD: recordPath })
     }
     const child = runtime.internalSpawnSupervisor === undefined
       ? spawn(process.execPath, args, {
         detached: true,
         stdio: ['ignore', log.fd, log.fd],
         env: childEnvironment,
+        cwd: runtime.internalShortcutSpawnCwd ?? runtime.cwd ?? process.cwd(),
       })
       : runtime.internalSpawnSupervisor({ args, env: childEnvironment, logFd: log.fd })
     log.close()
@@ -420,10 +509,11 @@ export async function runSupervisorCommand(
     })
     child.unref()
     await releaseOperation()
+    let ready: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>
     try {
-      const ready = await waitForState(paths, readinessTimeout(runtime))
-      if (ready === undefined) throw new Error('background supervisor exited before readiness')
-      output(runtime, display(ready), json)
+      const observedReady = await waitForState(paths, readinessTimeout(runtime))
+      if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
+      ready = observedReady
     } catch (error) {
       const observed = await readSupervisorState(paths)
       if (observed !== undefined && observed.instanceToken === instanceToken && observed.phase !== 'failed') {
@@ -445,6 +535,7 @@ export async function runSupervisorCommand(
       }
       throw error
     }
+    return await finishReady(invocation, runtime, { state: ready, target })
   } finally {
     await releaseOperation()
   }

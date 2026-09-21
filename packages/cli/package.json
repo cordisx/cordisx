@@ -52,7 +52,7 @@
     }
   },
   "scripts": {
-    "build": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "build": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json && node scripts/copy-assets.mjs && node scripts/build-shortcut-helper.mjs",
     "check": "npm run typecheck",
     "check:package": "node scripts/check-package-contents.mjs",
     "dev": "tsx src/cli.ts",
