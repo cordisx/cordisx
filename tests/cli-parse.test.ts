@@ -88,6 +88,13 @@ describe('parseCordisXCli', () => {
       app: 'codex',
       profile: 'work',
     })
+    expect(parseCordisXCli(['restart', 'codex', 'work', '--recover-startup'])).toMatchObject({
+      action: 'restart',
+      app: 'codex',
+      profile: 'work',
+      recoverStartup: true,
+    })
+    expect(() => parseCordisXCli(['status', '--recover-startup'])).toThrow('--recover-startup')
   })
 
   it('parses bounded local feedback commands separately from launch options', () => {

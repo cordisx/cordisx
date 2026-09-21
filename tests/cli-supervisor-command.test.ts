@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { runSupervisorCommand } from '../packages/cli/src/cli/supervisor-command.js'
 import {
+  acquireSupervisorStartLock,
   processStartIdentity,
   readSupervisorState,
   supervisorPaths,
@@ -113,6 +114,149 @@ describe('supervisor management commands', () => {
       expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
     ])
   })
+
+  it('lets stop cancel a published starting generation without a late ready overwrite', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' })
+    const startOutput: string[] = []
+    const stopOutput: string[] = []
+    try {
+      const start = runSupervisorCommand(parseCordisXCli(['start', '--json']), {
+        env: { CORDISX_HOME: root },
+        stdout: line => startOutput.push(line),
+        internalSpawnSupervisor: () => child,
+      })
+      let state
+      for (;;) {
+        state = await readSupervisorState(paths)
+        if (state !== undefined) break
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+      const stop = runSupervisorCommand(parseCordisXCli(['stop', '--json']), {
+        env: { CORDISX_HOME: root },
+        stdout: line => stopOutput.push(line),
+        internalSupervisorReadinessTimeoutMs: 2_000,
+      })
+      await expect(start).rejects.toThrow('background supervisor exited before renderer readiness')
+      await stop
+      expect(startOutput).toEqual([])
+      expect(JSON.parse(stopOutput[0]!)).toEqual({ app: 'codex', profile: 'default', status: 'stopped' })
+      await expect(readSupervisorState(paths)).resolves.toBeUndefined()
+      expect(() => process.kill(child.pid!, 0)).toThrow()
+    } finally {
+      try {
+        process.kill(-child.pid!, 'SIGKILL')
+      } catch { /* already stopped */ }
+    }
+  }, 15_000)
+
+  it('reports startup-operation contention instead of renderer readiness timeout', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const release = await acquireSupervisorStartLock(supervisorPaths(root, 'codex', 'default'))
+    try {
+      await expect(runSupervisorCommand(parseCordisXCli(['start']), {
+        env: { CORDISX_HOME: root },
+        internalSupervisorReadinessTimeoutMs: 75,
+      })).rejects.toThrow('timed out waiting for another CordisX startup operation')
+    } finally {
+      await release()
+    }
+  })
+
+  it('refuses to start over invalid supervisor state', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    await mkdir(paths.directory, { recursive: true })
+    await writeFile(paths.state, '{not-json')
+    let spawned = 0
+    await expect(runSupervisorCommand(parseCordisXCli(['start']), {
+      env: { CORDISX_HOME: root },
+      internalSpawnSupervisor: () => {
+        spawned++
+        return { pid: process.pid, unref: () => undefined }
+      },
+    })).rejects.toThrow('supervisor state is invalid')
+    expect(spawned).toBe(0)
+    await expect(runSupervisorCommand(parseCordisXCli(['status']), {
+      env: { CORDISX_HOME: root },
+    })).rejects.toThrow('supervisor state is invalid')
+  })
+
+  it('cleans transient files when stop finds no published state', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    await mkdir(paths.directory, { recursive: true })
+    await writeFile(paths.bootstrapToken, 'abandoned')
+    await writeFile(paths.socket, 'abandoned')
+    const output: string[] = []
+    await runSupervisorCommand(parseCordisXCli(['stop', '--json']), {
+      env: { CORDISX_HOME: root },
+      stdout: line => output.push(line),
+    })
+    expect(JSON.parse(output[0]!)).toEqual({ app: 'codex', profile: 'default', status: 'stopped' })
+    await expect(readFile(paths.bootstrapToken, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(paths.socket, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('lets restart cancel a pre-handoff start and creates one replacement generation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const children = [
+      spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' }),
+      spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' }),
+    ]
+    let spawned = 0
+    const output: string[] = []
+    const runtime = {
+      env: { CORDISX_HOME: root },
+      stdout: (line: string) => output.push(line),
+      internalSupervisorReadinessTimeoutMs: 2_000,
+      internalSpawnSupervisor: () => children[spawned++]!,
+    }
+    try {
+      const start = runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime)
+      const startResult = start.then(
+        () => ({ status: 'resolved' as const }),
+        error => ({ status: 'rejected' as const, error }),
+      )
+      let first
+      for (;;) {
+        first = await readSupervisorState(paths)
+        if (first !== undefined) break
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+      const restart = runSupervisorCommand(parseCordisXCli(['restart', '--json']), runtime)
+      let replacement
+      for (;;) {
+        replacement = await readSupervisorState(paths)
+        if (replacement !== undefined && replacement.instanceToken !== first.instanceToken) break
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+      await writeSupervisorState(paths, {
+        ...replacement,
+        phase: 'ready',
+        cdpEndpoint: 'http://127.0.0.1:49995',
+      })
+      await restart
+      const original = await startResult
+      expect(original.status).toBe('rejected')
+      if (original.status === 'rejected') {
+        expect(original.error).toMatchObject({
+          message: 'CordisX background supervisor exited before renderer readiness',
+        })
+      }
+      expect(spawned).toBe(2)
+      expect(() => process.kill(children[0]!.pid!, 0)).toThrow()
+      expect(JSON.parse(output.at(-1)!)).toMatchObject({ status: 'ready', pid: children[1]!.pid })
+    } finally {
+      for (const child of children) {
+        try {
+          process.kill(-child.pid!, 'SIGKILL')
+        } catch { /* already stopped */ }
+      }
+    }
+  }, 15_000)
 
   it('terminates a timed-out detached startup and leaves an inspectable failed state', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))

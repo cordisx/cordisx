@@ -18,6 +18,7 @@ import {
   verifyGeneratedProject,
   verifyGeneratedWorkspace,
 } from './installed-check-generated-projects.mjs'
+import { verifyInstalledSupervisorLock } from './check-installed-supervisor-lock.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -116,6 +117,7 @@ try {
   if (!globalHelp.stdout.includes('cordisx setup')) {
     throw new Error('globally installed cordisx --help is incomplete')
   }
+  await verifyInstalledSupervisorLock(globalCordisXRoot, temporaryRoot)
   const globalRequire = createRequire(path.join(globalCordisXRoot, 'package.json'))
   const esbuild = globalRequire('esbuild')
   const lightningcss = globalRequire('lightningcss')

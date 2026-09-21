@@ -50,6 +50,14 @@ version, and CDP endpoint fields. `logs` reads that instance's private log and
 authenticated supervisor and its launcher-owned process group; they never use
 an unscoped application-name kill.
 
+`start`, `stop`, and `restart` serialize through an app/profile-scoped kernel
+lock that is released automatically when the owning CLI exits. A detached
+supervisor does not begin Host initialization until its matching state record
+is published. Upgrades from the earlier existence-only `start.lock` require an
+explicit `--recover-startup` operation after all older CordisX commands for the
+selected app/profile have exited; an empty or old lock file is not treated as
+proof that recovery is safe.
+
 `app` is an adapter id, not a hard-coded union owned by the CLI. `codex` is the
 first implementation. `claude-code` and later hosts use the same grammar only
 after their adapters are installed and report launch support; an unknown or

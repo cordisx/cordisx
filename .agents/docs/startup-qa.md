@@ -34,6 +34,22 @@ locations automatically. Non-standard application locations can be selected
 with the advanced launcher options in the
 [complete beta guide](getting-started.md#npm-beta-installation).
 
+## What if an upgraded install reports a legacy start lock?
+
+First make sure every older CordisX `start`, `stop`, or `restart` command for
+the selected app and profile has exited. Then run the intended mutating command
+once with `--recover-startup`, for example:
+
+```bash
+npx cordisx@beta start codex default --recover-startup
+```
+
+The flag converts only the selected profile's legacy lock into the current
+kernel-backed startup fence. CordisX does not infer that an empty or old lock
+file is abandoned, because an older detached startup may not have published
+its state yet. Do not use the flag while an older CordisX command is still
+running.
+
 ## Will CordisX require another sign-in?
 
 The default launch opens an independent Codex window while retaining the

@@ -29,6 +29,19 @@ CordisX 当前需要 Node.js 22.19 或更高版本。更新 Node.js 后重新运
 请先安装 Codex Desktop。CordisX 会自动检查受支持的 macOS 应用位置。如果安装在
 非标准位置，可使用[完整公测指南](getting-started.md#npm-beta-installation)中的高级启动选项。
 
+## 升级后提示存在旧版启动锁怎么办？
+
+先确认所选 app 和 profile 的所有旧版 CordisX `start`、`stop` 或 `restart`
+命令都已退出，然后为本次变更命令添加一次 `--recover-startup`，例如：
+
+```bash
+npx cordisx@beta start codex default --recover-startup
+```
+
+该选项只会把所选 profile 的旧版锁转换为当前内核锁使用的启动隔离标记。CordisX
+不会因为锁文件为空或创建时间较早就认定它已被遗弃，因为旧版 detached 启动进程
+可能尚未写入状态。旧版 CordisX 命令仍在运行时不要使用该选项。
+
 ## 启动后需要重新登录吗？
 
 默认启动会打开独立的 Codex 窗口，同时沿用已有账号、会话、项目和模型配置。

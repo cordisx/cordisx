@@ -61,6 +61,7 @@ export interface CordisXManagedInvocation {
   readonly options: CordisXLauncherOptions
   readonly hostArgs: readonly string[]
   readonly follow?: true
+  readonly recoverStartup?: true
 }
 
 export interface CordisXSetupInvocation {
@@ -125,6 +126,7 @@ type BooleanOptionName =
   | 'writeConfig'
   | 'json'
   | 'follow'
+  | 'recoverStartup'
   | 'help'
 type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath' | 'workScopeGuard'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
@@ -138,6 +140,7 @@ interface ParsedOptions {
   writeConfig: boolean
   json: boolean
   follow: boolean
+  recoverStartup: boolean
   help: boolean
   dataMode?: CordisXDataMode
   profileDir?: string
@@ -156,6 +159,7 @@ const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
   ['--write-config', 'writeConfig'],
   ['--json', 'json'],
   ['--follow', 'follow'],
+  ['--recover-startup', 'recoverStartup'],
   ['--help', 'help'],
   ['-h', 'help'],
 ])
@@ -230,6 +234,7 @@ function parseCordisXOptions(args: readonly string[]): {
     writeConfig: false,
     json: false,
     follow: false,
+    recoverStartup: false,
     help: false,
   }
   const seen = new Set<ParsedOptionName>()
@@ -359,6 +364,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.writeConfig && '--write-config',
     options.json && '--json',
     options.follow && '--follow',
+    options.recoverStartup && '--recover-startup',
     options.dataMode !== undefined && '--data',
     options.profileDir !== undefined && '--profile-dir',
     options.executable !== undefined && '--executable',
@@ -601,6 +607,12 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
       '--isolated is only valid with cordisx dev; use --data host-isolated for a separate Host root',
     )
   }
+  if (options.recoverStartup && action !== 'start' && action !== 'stop' && action !== 'restart') {
+    throw new CordisXCliParseError(
+      'unsupported-option',
+      `--recover-startup is not valid with cordisx ${action}`,
+    )
+  }
   if (positionals.length > (hasCommandPrefix ? 3 : 2)) {
     throw new CordisXCliParseError(
       'unexpected-positional',
@@ -642,5 +654,6 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
     options: launcherOptions(options),
     hostArgs,
     ...(options.follow ? { follow: true as const } : {}),
+    ...(options.recoverStartup ? { recoverStartup: true as const } : {}),
   }
 }

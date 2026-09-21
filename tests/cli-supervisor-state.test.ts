@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -6,10 +7,12 @@ import {
   acquireSupervisorStartLock,
   effectiveConfigFingerprint,
   hasMatchingProcess,
+  LegacySupervisorLockError,
   processStartIdentity,
   readSupervisorState,
   removeSupervisorState,
   stateFileIsPrivate,
+  SupervisorOperationBusyError,
   supervisorPaths,
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
@@ -56,16 +59,65 @@ describe('transient supervisor state', () => {
     expect(await hasMatchingProcess((await readSupervisorState(paths))!)).toBe(false)
   })
 
-  it('serializes concurrent start ownership and permits safe stale cleanup', async () => {
+  it('serializes concurrent ownership through an OS lock and keeps the fixed lock paths', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-'))
     const paths = supervisorPaths(root, 'codex', 'work')
     const release = await acquireSupervisorStartLock(paths)
-    await expect(acquireSupervisorStartLock(paths)).rejects.toThrow('already in progress')
+    await expect(acquireSupervisorStartLock(paths)).rejects.toBeInstanceOf(SupervisorOperationBusyError)
     await release()
     const second = await acquireSupervisorStartLock(paths)
     await second()
+    expect((await lstat(paths.lock)).isDirectory()).toBe(true)
+    expect((await lstat(paths.mutex)).isFile()).toBe(true)
     await mkdir(paths.directory, { recursive: true })
     await removeSupervisorState(paths)
     expect(await readSupervisorState(paths)).toBeUndefined()
+  })
+
+  it('recovers the kernel lock after a lock-owner process is killed', async () => {
+    if (process.platform !== 'darwin' && process.platform !== 'linux') return
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-crash-'))
+    const moduleUrl = new URL('../packages/cli/src/cli/supervisor-state.ts', import.meta.url).href
+    const child = spawn(process.execPath, [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      `import { acquireSupervisorStartLock, supervisorPaths } from ${JSON.stringify(moduleUrl)};
+       await acquireSupervisorStartLock(supervisorPaths(process.argv[1], 'codex', 'work'));
+       process.stdout.write('locked'); setInterval(() => {}, 1_000)`,
+      root,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.stdout.once('data', () => resolve())
+        child.stderr.once('data', error => reject(new Error(String(error))))
+        child.once('exit', code => reject(new Error(`lock owner exited early: ${code}`)))
+      })
+      const paths = supervisorPaths(root, 'codex', 'work')
+      await expect(acquireSupervisorStartLock(paths)).rejects.toBeInstanceOf(SupervisorOperationBusyError)
+      process.kill(child.pid!, 'SIGKILL')
+      await new Promise(resolve => child.once('exit', resolve))
+      const release = await acquireSupervisorStartLock(paths)
+      await release()
+    } finally {
+      try {
+        process.kill(child.pid!, 'SIGKILL')
+      } catch { /* already stopped */ }
+    }
+  })
+
+  it('requires explicit recovery before replacing a legacy regular-file lock', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-legacy-'))
+    const paths = supervisorPaths(root, 'codex', 'work')
+    await mkdir(paths.directory, { recursive: true })
+    await writeFile(paths.lock, '')
+    await expect(acquireSupervisorStartLock(paths)).rejects.toBeInstanceOf(LegacySupervisorLockError)
+    expect((await lstat(paths.lock)).isFile()).toBe(true)
+    const release = await acquireSupervisorStartLock(paths, { recoverLegacy: true })
+    await release()
+    expect((await lstat(paths.lock)).isDirectory()).toBe(true)
+    await expect(rm(paths.lock, { force: true })).rejects.toMatchObject({ code: 'ERR_FS_EISDIR' })
+    expect((await lstat(paths.lock)).isDirectory()).toBe(true)
   })
 })

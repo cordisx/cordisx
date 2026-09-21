@@ -147,6 +147,7 @@ import type { OpenManagementCommandService } from './management-command.js'
 
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
+  cordisx start|status|logs|stop|restart [app] [profile] [options]
   cordisx setup
   cordisx config
   cordisx doctor
@@ -163,6 +164,7 @@ Options:
   --debug-port <port>      Override the loopback CDP port
   --online-devtools        Allow the official online DevTools frontend
   --dry-run                Resolve and print the plan without starting the host
+  --recover-startup        Replace a legacy start lock after older CordisX starts have exited
   --write-config           Enable plugin saves to an explicit dev --config file
   --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
