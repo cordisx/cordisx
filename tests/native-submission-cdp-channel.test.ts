@@ -7,18 +7,29 @@ import type {
   NativeSubmissionScope,
 } from '../packages/cli/src/launcher/native-submission-controller.js'
 
-async function harness() {
+async function harness(options: Readonly<{
+  defaultProviderId?: string
+  catalog?: () => readonly {
+    providerId: string
+    pluginId: string
+    label: string
+    models: readonly { id: string; label: string; aliases?: readonly string[] }[]
+  }[]
+}> = {}) {
   const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
   let live: NativeSubmissionScope
   let receive: (params: Record<string, any>) => void
   const idle = vi.fn(async () => true)
   const authority = createNativeSubmissionCdpAuthority({
-    catalog: async () => [{
-      providerId: 'provider-b',
-      label: 'Provider B',
-      models: [{ id: 'model-b', label: 'Model B' }],
-    }],
+    catalog: async () =>
+      options.catalog?.() ?? [{
+        providerId: 'provider-b',
+        pluginId: 'plugin-b',
+        label: 'Provider B',
+        models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
+      }],
     isThreadIdle: idle,
+    ...(options.defaultProviderId === undefined ? {} : { defaultProviderId: options.defaultProviderId }),
   })
   const session = {
     isClosed: () => false,
@@ -70,6 +81,213 @@ async function harness() {
 }
 
 describe('native submission document authority', () => {
+  it('projects a valid configured default only for new drafts', async () => {
+    const h = await harness({ defaultProviderId: 'provider-b' })
+    try {
+      await expect(h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.toMatchObject({
+        effective: { providerId: 'openai', model: 'gpt-current' },
+        draftPreference: { providerId: 'provider-b', generation: 1 },
+      })
+      const thread = { ...h.draft, threadId: 'thread-1', navigationGeneration: 4 }
+      h.setLive(thread)
+      await expect(h.channel.selectionRead({
+        scope: thread,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.not.toHaveProperty('draftPreference')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('remembers only explicit new-draft provider choices, including OpenAI', async () => {
+    const h = await harness({ defaultProviderId: 'provider-b' })
+    try {
+      const first = await h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })
+      await h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'provider-b',
+        model: 'model-b',
+        source: 'preference',
+        expectedRevision: first.revision,
+      })
+      await h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'openai',
+        model: 'gpt-current',
+      })
+      const second = { ...h.draft, navigationGeneration: 4 }
+      h.setLive(second)
+      await expect(h.channel.selectionRead({
+        scope: second,
+        effective: { providerId: 'provider-b', model: 'model-b' },
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'openai', generation: 2 } })
+
+      const thread = { ...second, threadId: 'thread-1', navigationGeneration: 5 }
+      h.setLive(thread)
+      await h.channel.selectionRead({ scope: thread, effective: { providerId: 'openai', model: 'gpt-current' } })
+      vi.mocked(h.controller.commitSelection).mockResolvedValueOnce({
+        kind: 'accepted',
+        projection: {
+          available: true,
+          revision: 3,
+          effective: { providerId: 'provider-b', model: 'model-b' },
+        },
+      })
+      await h.channel.selectionSelect({ scope: thread, providerId: 'provider-b', model: 'model-b' })
+      const third = { ...h.draft, navigationGeneration: 6 }
+      h.setLive(third)
+      await expect(h.channel.selectionRead({
+        scope: third,
+        effective: { providerId: 'provider-b', model: 'model-b' },
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'openai', generation: 3 } })
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('updates the next-draft Provider after each explicit draft choice', async () => {
+    const h = await harness({
+      catalog: () => [
+        {
+          providerId: 'provider-a',
+          pluginId: 'plugin-a',
+          label: 'Provider A',
+          models: [{ id: 'model-a', label: 'Model A', aliases: [] }],
+        },
+        {
+          providerId: 'provider-b',
+          pluginId: 'plugin-b',
+          label: 'Provider B',
+          models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
+        },
+      ],
+    })
+    try {
+      await h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'provider-a', model: 'model-a' },
+      })
+      await h.channel.selectionSelect({ scope: h.draft, providerId: 'provider-a', model: 'model-a' })
+      const second = { ...h.draft, navigationGeneration: 4 }
+      h.setLive(second)
+      await expect(h.channel.selectionRead({
+        scope: second,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'provider-a', generation: 1 } })
+      await h.channel.selectionSelect({ scope: second, providerId: 'provider-b', model: 'model-b' })
+      const third = { ...h.draft, navigationGeneration: 5 }
+      h.setLive(third)
+      await expect(h.channel.selectionRead({
+        scope: third,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'provider-b', generation: 2 } })
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('falls through unavailable memory and configuration without activating a provider', async () => {
+    const h = await harness({ defaultProviderId: 'missing-provider', catalog: () => [] })
+    try {
+      await expect(h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.not.toHaveProperty('draftPreference')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('falls through an unavailable remembered Provider to a valid configured default', async () => {
+    let providers = [{
+      providerId: 'provider-b',
+      pluginId: 'plugin-b',
+      label: 'Provider B',
+      models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
+    }]
+    const h = await harness({ defaultProviderId: 'openai', catalog: () => providers })
+    try {
+      await h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })
+      await h.channel.selectionSelect({ scope: h.draft, providerId: 'provider-b', model: 'model-b' })
+      providers = []
+      const next = { ...h.draft, navigationGeneration: 4 }
+      h.setLive(next)
+      await expect(h.channel.selectionRead({
+        scope: next,
+        effective: { providerId: 'provider-a', model: 'model-a' },
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'openai', generation: 2 } })
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('rejects a stale configured-default projection after a user selection wins', async () => {
+    const h = await harness({ defaultProviderId: 'provider-b' })
+    try {
+      const initial = await h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })
+      await h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'openai',
+        model: 'gpt-current',
+      })
+      await expect(h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'provider-b',
+        model: 'model-b',
+        source: 'preference',
+        expectedRevision: initial.revision,
+      })).rejects.toThrow()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('retires a draft preference when its Provider disappears before application', async () => {
+    let providers = [{
+      providerId: 'provider-b',
+      pluginId: 'plugin-b',
+      label: 'Provider B',
+      models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
+    }]
+    const h = await harness({ defaultProviderId: 'provider-b', catalog: () => providers })
+    try {
+      const initial = await h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })
+      providers = []
+      await expect(h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'provider-b',
+        model: 'model-b',
+        source: 'preference',
+        expectedRevision: initial.revision,
+      })).rejects.toThrow()
+      await expect(h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.toMatchObject({ revision: 2, effective: { providerId: 'openai', model: 'gpt-current' } })
+      await expect(h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'gpt-current' },
+      })).resolves.not.toHaveProperty('draftPreference')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('admits built-in OpenAI without requiring a plugin catalog entry', async () => {
     const h = await harness()
     try {
@@ -86,8 +304,9 @@ describe('native submission document authority', () => {
     try {
       await expect(h.channel.catalogRead()).resolves.toEqual([{
         providerId: 'provider-b',
+        pluginId: 'plugin-b',
         label: 'Provider B',
-        models: [{ id: 'model-b', label: 'Model B' }],
+        models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
       }])
     } finally {
       await h.installed.dispose()

@@ -59,6 +59,8 @@ interface State {
   nextGeneration: number
   effective: NativeProviderSelection
   pending?: PendingNativeProviderChange
+  draftPreference?: Readonly<{ providerId: string; generation: number }>
+  draftUserSelected?: true
 }
 const projection = (state: State) => ({
   available: true,
@@ -73,6 +75,7 @@ const projection = (state: State) => ({
         generation: state.pending.selectionGeneration,
       },
     }),
+  ...(state.draftPreference === undefined ? {} : { draftPreference: state.draftPreference }),
 })
 interface DocumentOwner {
   generation: string
@@ -90,11 +93,41 @@ export interface NativeSubmissionCdpAuthority {
 export function createNativeSubmissionCdpAuthority(options: {
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   isThreadIdle(threadId: string): Promise<boolean>
+  readonly defaultProviderId?: string
 }): NativeSubmissionCdpAuthority {
   const states = new Map<string, State>()
   const threadSelections = new Map<string, NativeProviderSelection>()
   const documents = new Map<string, DocumentOwner>()
+  if (options.defaultProviderId !== undefined && !text(options.defaultProviderId, 128)) {
+    throw new Error('Invalid default native model provider')
+  }
+  const defaultProviderId = options.defaultProviderId
+  let rememberedDraftProviderId: string | undefined
+  let nextDraftPreferenceGeneration = 1
   let controller: NativeSubmissionController | undefined
+  const draftPreference = async (): Promise<State['draftPreference']> => {
+    const candidates = [
+      ...new Set(
+        [rememberedDraftProviderId, defaultProviderId].filter((candidate): candidate is string =>
+          candidate !== undefined
+        ),
+      ),
+    ]
+    if (candidates.length === 0) return undefined
+    let catalog: readonly NativeModelProviderCatalogEntry[]
+    try {
+      catalog = await options.catalog()
+    } catch {
+      catalog = []
+    }
+    const providerId = candidates.find(candidate =>
+      candidate === 'openai'
+      || catalog.some(provider => provider.providerId === candidate && provider.models.length > 0)
+    )
+    return providerId === undefined
+      ? undefined
+      : Object.freeze({ providerId, generation: nextDraftPreferenceGeneration++ })
+  }
   const selection: NativeSubmissionSelectionAuthority = {
     adoptScope(source, target) {
       if (key(source) === key(target)) return states.has(key(source))
@@ -250,11 +283,13 @@ export function createNativeSubmissionCdpAuthority(options: {
           if (envelope.operation === 'selectionRead') {
             const supplied = selectionOf(input?.effective)
             if (!state) {
+              const preference = scope.threadId === undefined ? await draftPreference() : undefined
               state = {
                 scope,
                 revision: 1,
                 nextGeneration: 1,
                 effective: scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied,
+                ...(preference === undefined ? {} : { draftPreference: preference }),
               }
               states.set(key(scope), state)
             }
@@ -262,17 +297,37 @@ export function createNativeSubmissionCdpAuthority(options: {
           } else if (envelope.operation === 'selectionSelect') {
             if (!state) throw new Error('Native selection not initialized')
             const selected = selectionOf(input)
+            const source = input?.source ?? 'user'
+            if (source !== 'user' && source !== 'preference') throw new Error('Invalid native selection source')
+            if (
+              source === 'preference'
+              && (scope.threadId !== undefined || !Number.isSafeInteger(input?.expectedRevision)
+                || input?.expectedRevision !== state.revision || state.draftUserSelected === true
+                || state.draftPreference?.providerId !== selected.providerId)
+            ) throw new Error('Stale native draft preference')
             const catalog = await options.catalog()
             const liveAfter = await liveScope(scope)
             if (!liveAfter || key(liveAfter) !== key(scope) || owner.disposed) throw new Error('Stale native selection')
-            if (
-              selected.providerId !== state.effective.providerId
-              && selected.providerId !== 'openai'
-              && !catalog.some(provider =>
+            const catalogContainsSelection = selected.providerId === 'openai'
+              || catalog.some(provider =>
                 provider.providerId === selected.providerId
                 && provider.models.some(model => model.id === selected.model)
               )
-            ) throw new Error('Selection is outside provider catalog')
+            if (
+              !catalogContainsSelection
+              && (source === 'preference' || selected.providerId !== state.effective.providerId)
+            ) {
+              if (source === 'preference') {
+                delete state.draftPreference
+                state.revision++
+              }
+              throw new Error('Selection is outside provider catalog')
+            }
+            if (scope.threadId === undefined && source === 'user') {
+              rememberedDraftProviderId = selected.providerId
+              state.draftUserSelected = true
+            }
+            delete state.draftPreference
             state.revision++
             if (selected.providerId === state.effective.providerId) {
               delete state.pending

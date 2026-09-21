@@ -91,6 +91,40 @@ describe('CordisX home configuration', () => {
     expect(await readFile(configPath, 'utf8')).toBe(original)
   })
 
+  it('validates an optional profile-scoped default model provider', () => {
+    const base = createDefaultHomeConfig()
+    const configured = parseHomeConfig({
+      ...base,
+      apps: {
+        codex: {
+          ...base.apps.codex,
+          profiles: {
+            default: {
+              ...base.apps.codex!.profiles.default,
+              defaultModelProvider: 'managed.gateway',
+            },
+          },
+        },
+      },
+    })
+    expect(configured.apps.codex?.profiles.default?.defaultModelProvider).toBe('managed.gateway')
+    for (const defaultModelProvider of ['', 'x'.repeat(129), 'provider\nsecret']) {
+      expect(() =>
+        parseHomeConfig({
+          ...base,
+          apps: {
+            codex: {
+              ...base.apps.codex,
+              profiles: {
+                default: { ...base.apps.codex!.profiles.default, defaultModelProvider },
+              },
+            },
+          },
+        })
+      ).toThrow('defaultModelProvider')
+    }
+  })
+
   it('normalizes an exact profile icon-theme preference and drops only a corrupted preference', () => {
     const base = createDefaultHomeConfig()
     const exact = {

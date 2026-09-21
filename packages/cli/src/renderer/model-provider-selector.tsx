@@ -33,18 +33,26 @@ export interface ProviderSelectionSnapshot {
   readonly pendingModel?: string
   readonly confirmation?: NativeProviderSubmitConfirmation
   readonly submissionError?: NativeSubmissionRejection
+  readonly draftPreference?: Readonly<{
+    readonly providerId: string
+    readonly generation: number
+    readonly revision: number
+  }>
 }
 
 export interface ProviderSelectionTransport {
   getSnapshot(): ProviderSelectionSnapshot
   subscribe(listener: () => void): () => void
-  select(target: { readonly providerId: string; readonly model: string }): Promise<'accepted' | 'busy' | 'unavailable'>
+  select(
+    target: { readonly providerId: string; readonly model: string },
+    options?: Readonly<{ source: 'preference'; expectedRevision: number }>,
+  ): Promise<'accepted' | 'busy' | 'unavailable'>
   selectReasoningEffort(reasoningEffort: string): Promise<'accepted' | 'busy' | 'unavailable'>
   selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'>
   confirmSubmission?(confirmed: boolean): void
 }
 
-function selectionModelForProvider(
+export function selectionModelForProvider(
   current: ModelProviderModelV1 | undefined,
   provider: Pick<ModelProviderV1, 'models' | 'defaultModelId'>,
   locale: string,
@@ -79,6 +87,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   const modelTrigger = useRef<HTMLButtonElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const operation = useRef(0)
+  const attemptedDraftPreference = useRef<string | undefined>(undefined)
   const copy = modelProviderCopy(locale)
   const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
@@ -221,6 +230,36 @@ export function ModelProviderSelector({ registry, transport, locale }: {
       if (generation === operation.current) setSwitching(false)
     }
   }
+
+  useEffect(() => {
+    const preference = native.draftPreference
+    if (preference === undefined || native.threadId !== undefined || native.pendingProviderId !== undefined) return
+    const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
+    if (attemptedDraftPreference.current === key) return
+    const provider = preference.providerId === 'openai'
+      ? {
+        providerId: 'openai',
+        models: (native.nativeModels ?? []).filter(model => !model.disabled),
+      }
+      : catalog.providers.find(candidate => candidate.providerId === preference.providerId)
+    if (provider === undefined) return
+    const model = selectionModelForProvider(displayedModel, provider, locale)
+    if (model === undefined) return
+    attemptedDraftPreference.current = key
+    void transport.select(
+      { providerId: provider.providerId, model: model.id },
+      { source: 'preference', expectedRevision: preference.revision },
+    )
+  }, [
+    catalog.providers,
+    displayedModel,
+    locale,
+    native.draftPreference,
+    native.nativeModels,
+    native.pendingProviderId,
+    native.threadId,
+    transport,
+  ])
 
   const choose = (provider: Pick<ModelProviderV1, 'providerId'>, model: ModelProviderModelV1) => {
     if (native.busy) {

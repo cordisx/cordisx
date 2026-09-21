@@ -105,6 +105,8 @@ export interface HomeConfigProvider {
 export interface HomeConfigProfile {
   readonly displayName: string
   readonly dataMode: HomeDataMode
+  /** Launch-scoped default for new native conversation drafts. */
+  readonly defaultModelProvider?: string
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
 }
@@ -449,13 +451,20 @@ function parseIconThemePreference(value: unknown): HomeConfigIconThemePreference
 
 function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
-  rejectUnknownKeys(profile, ['displayName', 'dataMode', 'iconTheme', 'management'], label)
+  rejectUnknownKeys(profile, ['displayName', 'dataMode', 'defaultModelProvider', 'iconTheme', 'management'], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
     throw new Error(`${label}.dataMode must be shared or host-isolated`)
   }
   // `isolated` was the v1 spelling for an opt-in private Host root. Reading it
   // does not rewrite the file; later writes use the explicit current spelling.
+  const defaultModelProvider = profile.defaultModelProvider === undefined
+    ? undefined
+    : nonEmptyString(profile.defaultModelProvider, `${label}.defaultModelProvider`)
+  if (
+    defaultModelProvider !== undefined
+    && (defaultModelProvider.length > 128 || /[\0\r\n]/u.test(defaultModelProvider))
+  ) throw new Error(`${label}.defaultModelProvider is invalid`)
   const iconTheme = parseIconThemePreference(profile.iconTheme)
   const management = profile.management === undefined
     ? undefined
@@ -463,6 +472,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
   return {
     displayName,
     dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
+    ...(defaultModelProvider === undefined ? {} : { defaultModelProvider }),
     ...(iconTheme === undefined ? {} : { iconTheme }),
     ...(management === undefined ? {} : { management }),
   }

@@ -54,6 +54,7 @@ interface SelectionPatch {
   readonly serviceTier?: 'priority' | null
   readonly error?: string | null
   readonly submissionError?: NativeSubmissionRejection | null
+  readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
 const clone = <Value>(value: Value): Value => structuredClone(value)
@@ -178,12 +179,16 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       },
     )
     this.selectionClient.subscribe(() => {
-      const effective = this.selectionClient.snapshot().effective
+      const projection = this.selectionClient.snapshot()
+      const effective = projection.effective
+      const draftPreference = this.visibleThreadId === undefined && projection.draftPreference !== undefined
+        ? { ...projection.draftPreference, revision: projection.revision }
+        : null
       if (effective !== undefined && this.selectionClient.confirmation() === undefined) {
         if (this.selectionClient.submissionActive()) this.refreshGeneration++
         if (this.visibleThreadId !== undefined) this.effectiveByThread.set(this.visibleThreadId, effective)
-        this.publishPatch({ modelProvider: effective.providerId, model: effective.model })
-      } else this.publishPatch()
+        this.publishPatch({ modelProvider: effective.providerId, model: effective.model, draftPreference })
+      } else this.publishPatch({ draftPreference })
     })
     ;(globalThis as NativeHookGlobal).__cordisxNativeSubmitHook = this.selectionClient.submitHook
     ;(globalThis as NativeHookGlobal).__cordisxNativeSubmissionAuthority = this.submissionAuthority
@@ -268,14 +273,17 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   async select(target: {
     readonly providerId: string
     readonly model: string
-  }): Promise<'accepted' | 'busy' | 'unavailable'> {
+  }, options: Readonly<{ source: 'preference'; expectedRevision: number }> | undefined = undefined): Promise<
+    'accepted' | 'busy' | 'unavailable'
+  > {
     if (this.disposed || !this.state.available) return 'unavailable'
     const navigation = this.navigationGeneration
     const threadId = this.state.threadId
     if (target.providerId !== this.state.modelProvider) {
       if (this.state.busy) return 'busy'
-      const result = await this.selectionClient.select(target)
+      const result = await this.selectionClient.select(target, options)
       if (!this.isCurrent(navigation, threadId)) return 'unavailable'
+      if (result !== 'accepted' && options?.source === 'preference') await this.selectionClient.refresh()
       this.publishPatch({ error: null, submissionError: null })
       return result
     }
@@ -285,7 +293,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       const result = await this.selectionClient.select({
         providerId: target.providerId,
         model: this.state.model ?? target.model,
-      })
+      }, options)
       if (result !== 'accepted' || !this.isCurrent(navigation, threadId)) return 'unavailable'
       this.publishPatch({ error: null, submissionError: null })
       if (target.model === this.state.model) return 'accepted'
@@ -301,7 +309,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     try {
       await control.selectModel(target.model, effort)
       this.assertCurrent(navigation, threadId)
-      if (await this.selectionClient.select(target) !== 'accepted') throw new Error('Native selection commit failed')
+      if (await this.selectionClient.select(target, options) !== 'accepted') {
+        if (options?.source === 'preference') await this.selectionClient.refresh()
+        throw new Error('Native selection commit failed')
+      }
       this.assertCurrent(navigation, threadId)
       this.publishPatch({
         model: target.model,
@@ -518,6 +529,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         serviceTier: serviceTier === 'priority' || serviceTier === 'fast' ? 'priority' : null,
       })
       await this.selectionClient.refresh()
+      const projection = this.selectionClient.snapshot()
+      this.publishPatch({
+        draftPreference: threadId === undefined && projection.draftPreference !== undefined
+          ? { ...projection.draftPreference, revision: projection.revision }
+          : null,
+      })
     } catch {
       if (this.isRefreshCurrent(generation, threadId)) this.replaceState({ available: false, busy: false })
     }
@@ -817,6 +834,9 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       ? next.reasoningEfforts ?? undefined
       : this.state.reasoningEfforts
     const serviceTier = Object.hasOwn(next, 'serviceTier') ? next.serviceTier ?? null : this.state.serviceTier
+    const draftPreference = Object.hasOwn(next, 'draftPreference')
+      ? next.draftPreference ?? undefined
+      : this.state.draftPreference
     const error = Object.hasOwn(next, 'error') ? next.error ?? undefined : this.state.error
     this.replaceState({
       available: next.available ?? this.state.available,
@@ -827,6 +847,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
       ...(serviceTier === undefined ? {} : { serviceTier }),
+      ...(draftPreference === undefined ? {} : { draftPreference }),
       ...(error === undefined ? {} : { error }),
     })
   }

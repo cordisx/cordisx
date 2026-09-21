@@ -83,6 +83,7 @@ export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
   codexHome: string,
+  options: Readonly<{ defaultProviderId?: string }> = {},
 ): Promise<NativeSubmissionComposition> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
@@ -121,6 +122,7 @@ export async function createNativeSubmissionComposition(
     const cdp = createNativeSubmissionCdpAuthority({
       catalog: combinedNativeModelProviderCatalog(nativeModelProviderCatalog(activation), configuredCatalog),
       isThreadIdle: id => control.isThreadIdle(id),
+      ...(options.defaultProviderId === undefined ? {} : { defaultProviderId: options.defaultProviderId }),
     })
     controller = createNativeSubmissionController({
       selection: cdp.selection,

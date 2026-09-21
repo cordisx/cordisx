@@ -128,6 +128,31 @@ The initial schema is conceptually:
 }
 ```
 
+`apps.<app>.profiles.<profile>.defaultModelProvider` optionally selects the
+Provider used by a new native conversation draft for that App/profile launch.
+The value is a Provider ID such as `openai`, an enabled managed plugin Provider,
+or a Provider already present in Codex `model_providers`. Unknown, disabled, or
+currently unavailable Providers fall back to the native Codex default and are
+not activated automatically.
+
+Profile fragment:
+
+```json
+{
+  "apps": {
+    "codex": {
+      "profiles": {
+        "default": {
+          "displayName": "Default",
+          "dataMode": "shared",
+          "defaultModelProvider": "openai"
+        }
+      }
+    }
+  }
+}
+```
+
 The first generated configuration always uses `plugins: []`. CordisX itself is
 host infrastructure, not a bundled demo plugin, and setup must not silently
 activate `slot-showcase` or any other example. Version 1 may load explicitly

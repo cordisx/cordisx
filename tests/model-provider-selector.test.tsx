@@ -30,6 +30,9 @@ async function setup(model = 'shared', busy = false, options?: {
     readonly aliases?: readonly string[]
   }[]
   readonly secondDefaultModelId?: string
+  readonly draft?: boolean
+  readonly draftPreference?: ProviderSelectionSnapshot['draftPreference']
+  readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
 }) {
   dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://example.test' })
   Object.assign(
@@ -67,24 +70,30 @@ async function setup(model = 'shared', busy = false, options?: {
   await registry.refresh()
   let snapshot: ProviderSelectionSnapshot = {
     available: true,
-    threadId: 't1',
+    ...(options?.draft ? {} : { threadId: 't1' }),
     modelProvider: 'first',
     model,
+    ...(options?.nativeModels === undefined ? {} : { nativeModels: options.nativeModels }),
     reasoningEffort: 'high',
     reasoningEfforts: ['low', 'high'],
     busy,
+    ...(options?.draftPreference === undefined ? {} : { draftPreference: options.draftPreference }),
   }
   const listeners = new Set<() => void>()
   const notify = () => {
     for (const listener of listeners) listener()
   }
-  const select = vi.fn(async (target: { providerId: string; model: string }) => {
+  const select = vi.fn(async (
+    target: { providerId: string; model: string },
+    _selectionOptions?: Readonly<{ source: 'preference'; expectedRevision: number }>,
+  ) => {
     snapshot = {
       ...snapshot,
       modelProvider: target.providerId,
       model: target.model,
       pendingProviderId: undefined,
       pendingModel: undefined,
+      draftPreference: undefined,
     }
     notify()
     return 'accepted' as const
@@ -145,6 +154,36 @@ const providerTrigger = '.cxmp-provider-trigger'
 const modelTrigger = '.cxmp-model-trigger'
 
 describe('provider selection interaction', () => {
+  it('applies a launcher draft preference with the existing legal model pairing strategy', async () => {
+    const { select } = await setup('source-model', false, {
+      draft: true,
+      draftPreference: { providerId: 'second', generation: 7, revision: 3 },
+      firstLabel: 'GPT-5.6-Sol[Responses]',
+      secondDefaultModelId: 'fallback',
+      secondModels: [
+        { id: 'fallback', label: 'Default model' },
+        { id: 'provider-specific-sol', label: 'gpt-5.6-sol' },
+      ],
+    })
+    expect(select).toHaveBeenCalledWith(
+      { providerId: 'second', model: 'provider-specific-sol' },
+      { source: 'preference', expectedRevision: 3 },
+    )
+  })
+
+  it('waits for a legal built-in model before applying an OpenAI draft preference', async () => {
+    const { select, update } = await setup('provider-model', false, {
+      draft: true,
+      draftPreference: { providerId: 'openai', generation: 8, revision: 4 },
+    })
+    expect(select).not.toHaveBeenCalled()
+    await update({ nativeModels: [{ id: 'gpt-6-astra', label: 'GPT-6-Astra', disabled: false }] })
+    expect(select).toHaveBeenCalledWith(
+      { providerId: 'openai', model: 'gpt-6-astra' },
+      { source: 'preference', expectedRevision: 4 },
+    )
+  })
+
   it('shows the built-in Codex choice and theme-inheriting icon without a configured provider', async () => {
     const { update, select } = await setup()
     await update({

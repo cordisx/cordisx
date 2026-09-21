@@ -38,6 +38,18 @@ The capability-checked Codex adapter synchronizes the native composer selection 
 uses native session operations to change an idle thread's effective provider.
 The effective response, not the historical provider embedded in thread metadata,
 is the transition receipt. New drafts use the private configuration defaults.
+Within one App/profile launch, the Provider explicitly selected in a new draft
+becomes the default Provider for later new drafts. Before that first explicit
+draft selection, `apps.<app>.profiles.<profile>.defaultModelProvider` is used
+when it resolves to `openai`, a ready managed Provider, or an available
+config-backed Provider. The precedence is therefore last explicit new-draft
+Provider, configured profile default, then the native Codex default. This
+launch-scoped memory stores only the Provider ID, never credentials or a model;
+each draft reuses the normal exact-ID, unique-alias, provider-default, then
+first-model selection strategy to choose a legal model for that Provider.
+Existing-thread switches, restoration, catalog projection, and automatic
+initialization do not update the preference. Restarting the App clears the
+launch-scoped memory and reads the profile configuration again.
 Config-backed providers pass only the selected `model_provider` and `model` to
 Codex, which continues to own their configured endpoint and authentication.
 Managed providers continue to use launch-scoped credential leases and provider

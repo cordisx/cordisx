@@ -25,6 +25,10 @@ export interface NativeProviderSelectionProjection {
   readonly revision: number
   readonly effective?: NativeProviderSelection
   readonly pending?: PendingNativeProviderSelection
+  readonly draftPreference?: Readonly<{
+    readonly providerId: string
+    readonly generation: number
+  }>
 }
 
 export interface NativeProviderSubmitConfirmation {
@@ -44,6 +48,8 @@ export interface NativeProviderSelectionCommandChannel {
       scope: NativeSubmissionScope
       providerId: string
       model: string
+      source?: 'user' | 'preference'
+      expectedRevision?: number
     }>,
   ): Promise<
     Readonly<{
@@ -169,13 +175,16 @@ export class NativeProviderSelectionClient {
     }
   }
 
-  async select(target: NativeProviderSelection): Promise<'accepted' | 'unavailable'> {
+  async select(
+    target: NativeProviderSelection,
+    options: Readonly<{ source?: 'user' | 'preference'; expectedRevision?: number }> = {},
+  ): Promise<'accepted' | 'unavailable'> {
     if (this.disposed || !this.projection.available) return 'unavailable'
     this.confirmSubmission(false)
     const scope = this.authority().scope
     const generation = ++this.projectionGeneration
     try {
-      const result = await this.channel.selectionSelect({ scope, ...target })
+      const result = await this.channel.selectionSelect({ scope, ...target, ...options })
       if (!this.projectionCurrent(scope, generation, result.revision)) return 'unavailable'
       this.replace({
         available: true,

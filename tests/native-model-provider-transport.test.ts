@@ -427,6 +427,35 @@ describe('native model provider transport', () => {
     dom.window.close()
   })
 
+  it('projects a guarded launcher preference into a new draft selection', async () => {
+    const { channel, dom, transport } = await harness()
+    channel.selectionRead.mockResolvedValueOnce({
+      available: true,
+      revision: 10,
+      effective: { providerId: 'provider-a', model: 'model-a' },
+      draftPreference: { providerId: 'provider-b', generation: 4 },
+    })
+    composer(dom.window.document, null)
+    await settle()
+    expect(transport.getSnapshot()).toMatchObject({
+      modelProvider: 'provider-a',
+      model: 'model-a',
+      draftPreference: { providerId: 'provider-b', generation: 4, revision: 10 },
+    })
+    await transport.select(
+      { providerId: 'provider-b', model: 'model-b' },
+      { source: 'preference', expectedRevision: 10 },
+    )
+    expect(channel.selectionSelect).toHaveBeenLastCalledWith(expect.objectContaining({
+      providerId: 'provider-b',
+      model: 'model-b',
+      source: 'preference',
+      expectedRevision: 10,
+    }))
+    transport.dispose()
+    dom.window.close()
+  })
+
   it('uses the native callback without unsubscribe for a model change inside one provider', async () => {
     const { dom, requests, selectModel, transport } = await harness()
     expect(await transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
