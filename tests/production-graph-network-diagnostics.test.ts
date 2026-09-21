@@ -161,6 +161,52 @@ describe('production Host graph network diagnostics', () => {
     expect(session.send).toHaveBeenCalledOnce()
   })
 
+  it('keeps waiting through a pending bootstrap when an earlier document was canceled', async () => {
+    const session = {
+      send: vi.fn()
+        .mockResolvedValueOnce(evaluation({ ok: false, error: 'cordisx:production-boot-pending' }))
+        .mockResolvedValueOnce(evaluation({ ok: true })),
+      isClosed: () => false,
+    } as unknown as CdpSession
+    const failure: ProductionGraphNetworkFailure = {
+      sequence: 1,
+      stage: 'manifest-fetch',
+      errorText: 'net::ERR_ABORTED',
+      canceled: true,
+      observedAt: Date.now() - 1_000,
+    }
+
+    await expect(
+      waitForProductionBootstrap(session, 'install-2', Date.now() + 1_000, undefined, {
+        latest: () => failure,
+      }),
+    ).resolves.toBeUndefined()
+    expect(session.send).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps waiting through a destroyed execution context when an earlier document was canceled', async () => {
+    const session = {
+      send: vi.fn()
+        .mockRejectedValueOnce(new Error('Execution context was destroyed'))
+        .mockResolvedValueOnce(evaluation({ ok: true })),
+      isClosed: () => false,
+    } as unknown as CdpSession
+    const failure: ProductionGraphNetworkFailure = {
+      sequence: 1,
+      stage: 'manifest-fetch',
+      errorText: 'net::ERR_ABORTED',
+      canceled: true,
+      observedAt: Date.now() - 1_000,
+    }
+
+    await expect(
+      waitForProductionBootstrap(session, 'install-3', Date.now() + 1_000, undefined, {
+        latest: () => failure,
+      }),
+    ).resolves.toBeUndefined()
+    expect(session.send).toHaveBeenCalledTimes(2)
+  })
+
   it('wires the Network observer around the production reload and reports policy failure', async () => {
     const listeners = new Map<string, (params: Record<string, unknown>) => void>()
     const methods: string[] = []
