@@ -18,34 +18,8 @@ type NativeHookGlobal = typeof globalThis & {
   __cordisxNativeServiceTierOverride?: 'priority' | 'default'
 }
 
-export const CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS = Object.freeze(
-  [
-    Object.freeze({ appVersion: '26.818.61809', buildNumber: '7019', buildFlavor: 'prod', hostId: 'local' }),
-    Object.freeze({ appVersion: '26.820.60940', buildNumber: '7119', buildFlavor: 'prod', hostId: 'local' }),
-    Object.freeze({ appVersion: '26.901.41600', buildNumber: '7982', buildFlavor: 'prod', hostId: 'local' }),
-    Object.freeze({ appVersion: '26.901.51231', buildNumber: '8109', buildFlavor: 'prod', hostId: 'local' }),
-    Object.freeze({ appVersion: '26.908.70816', buildNumber: '9275', buildFlavor: 'prod', hostId: 'local' }),
-    Object.freeze({ appVersion: '26.911.61220', buildNumber: '9647', buildFlavor: 'prod', hostId: 'local' }),
-  ] as const,
-)
-
-type NativeModelProviderTransportPin = typeof CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS[number]
-
-export function nativeModelProviderTransportPinForApp(input: {
-  readonly appVersion?: unknown
-  readonly buildNumber?: unknown
-  readonly buildFlavor?: unknown
-}): NativeModelProviderTransportPin | undefined {
-  return CODEX_DESKTOP_NATIVE_MODEL_PROVIDER_TRANSPORT_PINS.find(candidate => (
-    input.appVersion === candidate.appVersion
-    && input.buildNumber === candidate.buildNumber
-    && input.buildFlavor === candidate.buildFlavor
-  ))
-}
-
 interface ElectronBridge {
   readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
-  readonly getSentryInitOptions?: () => Promise<unknown> | unknown
 }
 
 interface PendingNativeRequest {
@@ -114,7 +88,7 @@ function threadBusy(thread: Record<string, unknown>): boolean | undefined {
   return undefined
 }
 
-/** Host-private, version-pinned selection control for the current native composer. */
+/** Host-private selection control using the launcher's verified native capability. */
 export class CodexDesktopNativeModelProviderTransport implements ProviderSelectionTransport {
   private readonly listeners = new Set<() => void>()
   private readonly pending = new Map<string, PendingRequest>()
@@ -256,15 +230,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (
       page.codexWindowType !== 'electron' || page.location?.href !== 'app://-/index.html'
       || page.document === undefined || typeof bridge?.sendMessageFromView !== 'function'
-      || typeof bridge.getSentryInitOptions !== 'function'
     ) return undefined
     try {
-      const options = record(await bridge.getSentryInitOptions())
-      const pin = nativeModelProviderTransportPinForApp(options ?? {})
-      if (pin === undefined) return undefined
       const transport = new CodexDesktopNativeModelProviderTransport(
         bridge as Required<ElectronBridge>,
-        pin.hostId,
+        'local',
         page.document,
         nativeManagedModelRoutingAvailable,
         rendererOwner,

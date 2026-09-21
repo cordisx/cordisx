@@ -4,8 +4,7 @@ import { nativeSubmissionTransformsForApp } from '../packages/cli/src/launcher/n
 import { resources } from './fixtures/native-submission-structure.js'
 
 const token = 'operation-unique-token'
-function runtime(hook: unknown = async () => ({ allow: true, operationToken: token })) {
-  const source = resources()
+function runtime(hook: unknown = async () => ({ allow: true, operationToken: token }), source = resources()) {
   const transforms = nativeSubmissionTransformsForApp('unknown-version', 'unknown-build', source)
   const effects: string[] = []
   const sandbox: Record<string, any> = {
@@ -67,10 +66,47 @@ describe('structure-based native submission composition', () => {
       'changed after capability discovery',
     )
   })
-  it('rejects an inserted pre-admission effect or broken draft config propagation', () => {
-    const effects = resources()
-    effects[0]!.source = effects[0]!.source.replace('clear();', 'sendBeforeAdmission();clear();')
-    expect(() => nativeSubmissionTransformsForApp('future', 'x', effects)).toThrow('guard ordering changed')
+  it('resolves model completion in its owner rather than unrelated minified names', () => {
+    const source = resources()
+    source[0]!.source += '\nfunction unrelated(){let select;select=(a,b,c)=>d=>a(d)}'
+    const run = runtime(null, source)
+    expect(run.sandbox.menu.onSelectModel('model', 'high')).toBeInstanceOf(Promise)
+    expect(run.sandbox.updateModel).toHaveBeenCalledWith('model', 'high')
+  })
+  it('awaits admission before additional native guards and effects without requiring adjacency', async () => {
+    const source = resources()
+    source[0]!.source = source[0]!.source.replace('clear();', 'if(nativePaused())return;extraEffect();clear();')
+    let resolve!: (value: unknown) => void
+    const run = runtime(() =>
+      new Promise(done => {
+        resolve = done
+      }), source)
+    run.sandbox.nativePaused = vi.fn(() => false)
+    run.sandbox.extraEffect = vi.fn()
+    const denied = run.submit()
+    expect(run.sandbox.nativePaused).not.toHaveBeenCalled()
+    expect(run.sandbox.extraEffect).not.toHaveBeenCalled()
+    resolve({ allow: false })
+    await denied
+    expect(run.effects).toEqual([])
+    expect(run.sandbox.nativePaused).not.toHaveBeenCalled()
+    const accepted = run.submit()
+    resolve({ allow: true, operationToken: token })
+    expect(await accepted).toHaveProperty('__cordisxOperationToken', token)
+    expect(run.sandbox.extraEffect).toHaveBeenCalledTimes(1)
+    expect(run.effects).toEqual(['send'])
+    run.sandbox.nativePaused.mockReturnValue(true)
+    const paused = run.submit()
+    resolve({ allow: true, operationToken: token })
+    expect(await paused).toBeUndefined()
+    expect(run.sandbox.extraEffect).toHaveBeenCalledTimes(1)
+    expect(run.effects).toEqual(['send'])
+  })
+  it('rejects reversed effects or broken draft config propagation', () => {
+    const reversed = resources()
+    reversed[0]!.source = reversed[0]!.source.replace('  let {skipGoal', '  clear();let {skipGoal')
+      .replace('clear();let draft', 'let draft')
+    expect(() => nativeSubmissionTransformsForApp('future', 'x', reversed)).toThrow('guard ordering changed')
     const broken = resources()
     broken[1]!.source = broken[1]!.source.replace('config:overrides', 'config:undefined')
     expect(() => nativeSubmissionTransformsForApp('future', 'x', broken)).toThrow('draft-config-forward')

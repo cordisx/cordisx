@@ -4,7 +4,6 @@ import { TextDecoder, TextEncoder } from 'node:util'
 import { act } from 'react'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS } from '../packages/cli/src/renderer/codex-desktop-agent-session-transport.js'
 import { installModelProviderSelector } from '../packages/cli/src/renderer/install-model-provider-selector.js'
 import { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
 import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
@@ -196,7 +195,7 @@ describe('native model provider selector installation', () => {
         },
       })
       install('electronBridge', {
-        getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+        getSentryInitOptions: async () => ({ appVersion: 'future', buildNumber: 'unknown', buildFlavor: 'prod' }),
         sendMessageFromView: async (envelope: { request?: { id?: string; method?: string } }) => {
           if (envelope.request?.method !== 'config/read') return
           queueMicrotask(() => {
@@ -377,7 +376,7 @@ describe('native model provider selector installation', () => {
     Object.defineProperty(dom.window, 'electronBridge', {
       configurable: true,
       value: {
-        getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+        getSentryInitOptions: async () => ({ appVersion: 'future', buildNumber: 'unknown', buildFlavor: 'prod' }),
         sendMessageFromView: async (envelope: { request?: { id?: string; method?: string } }) => {
           if (envelope.request?.method !== 'config/read') return
           queueMicrotask(() => {
@@ -457,7 +456,7 @@ describe('native model provider selector installation', () => {
     install('codexWindowType', 'electron')
     const sendMessageFromView = vi.fn(async () => {})
     install('electronBridge', {
-      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+      getSentryInitOptions: async () => ({ appVersion: 'future', buildNumber: 'unknown', buildFlavor: 'prod' }),
       sendMessageFromView,
     })
     const registry = new ModelProviderRegistry(async () => [])

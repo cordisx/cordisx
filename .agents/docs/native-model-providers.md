@@ -53,6 +53,11 @@ Local minified identifiers and asset hashes are discovered from the resource.
 The older two-stage resource layout retains an exact-content adapter; it is
 selected only when both complete resource digests match, regardless of version.
 New resource layouts use structural discovery, not additional build entries.
+The selector consumes the launcher's verified capability and does not maintain
+a second Desktop version allowlist. Admission runs after submission options are
+bound, before subsequent native guards and effects; those guards remain intact.
+Model-update callbacks are resolved within their owning function, so unrelated
+minified bindings with the same spelling do not reject a compatible resource.
 
 Each successful discovery binds interception to the observed resource SHA-256.
 A resource update between discovery and interception fails closed. The existing

@@ -98,7 +98,7 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
       'persistedPromptRawOverride',
     ])
     && n.init?.type === 'Identifier' && n.init.name === options, 'submit-options')
-  // Guard immediately before the native clear-confirmation call, after options are bound.
+  // Bind admission to normalized options, not adjacency to a later native effect.
   const clear = bind('clearStopTurnConfirmation')
   const call = plan.require(fn.body, n =>
     n.type === 'ExpressionStatement'
@@ -106,16 +106,19 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
     && n.expression.arguments.length === 0, 'submit-first-effect')
   if (call.start < declaration.end || !fn.async) throw new Error('Native capability submit guard ordering changed')
   const block = plan.require(fn.body, n => n.type === 'BlockStatement' && n.body.includes(call), 'submit-effect-block')
-  const prior = block.body[block.body.indexOf(call) - 1]
-  if (prior?.type !== 'VariableDeclaration' || prior.declarations.at(-1) !== declaration) {
-    throw new Error('Native capability submit guard ordering changed: effect is not adjacent to options')
-  }
+  const optionsStatement = one<SyntaxNode>(
+    block.body.filter((statement: SyntaxNode) =>
+      statement.type === 'VariableDeclaration' && statement.declarations.includes(declaration)
+    ),
+    'submit-options-statement',
+  )
+  if (optionsStatement.end > call.start) throw new Error('Native capability submit guard ordering changed')
   const follow = bind('followUp')
   const raw = plan.binding(declaration.id, 'promptRawOverride')
   const persisted = plan.binding(declaration.id, 'persistedPromptRawOverride')
   plan.insert(
-    call.start,
-    `let ${decision}={allow:true};if(typeof globalThis.__cordisxNativeSubmitHook==='function'){
+    optionsStatement.end,
+    `;let ${decision}={allow:true};if(typeof globalThis.__cordisxNativeSubmitHook==='function'){
     ${decision}=await globalThis.__cordisxNativeSubmitHook({target:${bind('submitTarget')}.type,thread:${
       bind('conversationId')
     },response:${
@@ -249,14 +252,26 @@ function firstTurn(plan: ResourcePlan, fn: SyntaxNode): void {
 }
 
 function modelCompletion(plan: ResourcePlan): void {
-  const menus = plan.nodes(plan.ast, n =>
-    n.type === 'ObjectExpression'
-    && has(n, ['onSelectModel', 'onSelectReasoningEffort', 'onSelectModelOption']))
-  const candidates = menus.filter(n => properties(n).get('onSelectModel')?.type === 'Identifier')
-  const bindings = new Set(candidates.map(n => properties(n).get('onSelectModel')!.name))
-  const callbacks = plan.nodes(plan.ast, n =>
-    (n.type === 'AssignmentExpression' || n.type === 'VariableDeclarator')
-    && bindings.has((n.left ?? n.id)?.name) && isFunction(n.right ?? n.init))
+  const menus: Array<{ binding: string; owner: SyntaxNode | undefined }> = []
+  visitSyntax(plan.ast, (node, parents) => {
+    if (
+      node.type === 'ObjectExpression'
+      && has(node, ['onSelectModel', 'onSelectReasoningEffort', 'onSelectModelOption'])
+    ) {
+      const binding = properties(node).get('onSelectModel')
+      if (binding?.type === 'Identifier') menus.push({ binding: binding.name, owner: parents.findLast(isFunction) })
+    }
+  })
+  // Minified names are local bindings, not unique identifiers across the asset.
+  const callbacks = plan.nodes(
+    plan.ast,
+    (node, parents) =>
+      (node.type === 'AssignmentExpression' || node.type === 'VariableDeclarator')
+      && isFunction(node.right ?? node.init)
+      && menus.some(menu =>
+        menu.binding === (node.left ?? node.id)?.name && menu.owner === parents.findLast(isFunction)
+      ),
+  )
   const callback = one(callbacks, 'model-completion')
   const fn = callback.right ?? callback.init
   const body = fn.body
