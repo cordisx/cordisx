@@ -99,6 +99,14 @@ function settle(calls, message, isControl) {
   return true
 }
 
+function missingManagedProvider(message) {
+  if (message?.error?.code !== -32600 || typeof message.error.message !== 'string') return undefined
+  const match = /^failed to load configuration: Model provider `([^`\0\r\n]{1,128})` not found$/u.exec(
+    message.error.message,
+  )
+  return match?.[1]
+}
+
 // Only framed messages are buffered. Many small lines in one chunk do not count as one large request.
 function readLines(stream, receive, maxLineBytes = maxNativeLineBytes) {
   let buffer = ''
@@ -234,25 +242,38 @@ async function forward(line) {
 }
 
 // A restarted app-server no longer knows a launch-scoped managed provider that a persisted thread still names.
-async function recoverResume(id, params, failureLine) {
+async function recoverResume(id, params, providerId, failureLine) {
   try {
     const read = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
-    const providerId = read?.thread?.modelProvider
+    const persistedProviderId = read?.thread?.modelProvider
     const model = read?.thread?.model
     if (
-      typeof providerId !== 'string' || providerId === '' || providerId === 'openai'
+      persistedProviderId !== providerId || providerId === 'openai'
       || typeof model !== 'string' || model === ''
     ) throw new Error('Native thread is not managed')
     const prepared = await controlCall('resume', { threadId: params.threadId, providerId, model })
     const overrides = object(prepared?.configOverrides)
-    if (prepared?.kind !== 'resume' || overrides === undefined) throw new Error('Managed resume rejected')
+    if (prepared?.kind !== 'resume' || !validToken(prepared.resumeToken) || overrides === undefined) {
+      throw new Error('Managed resume rejected')
+    }
     let result
     try {
       result = await nativeCall('thread/resume', { ...params, config: { ...object(params.config), ...overrides } })
+      if (result?.thread?.id !== params.threadId) throw new Error('Managed resume returned another thread')
     } catch (error) {
-      await controlCall('resume-failed', { threadId: params.threadId }).catch(() => undefined)
+      await controlCall('resume-complete', {
+        threadId: params.threadId,
+        resumeToken: prepared.resumeToken,
+        succeeded: false,
+      }).catch(() => undefined)
       throw error
     }
+    const completed = await controlCall('resume-complete', {
+      threadId: params.threadId,
+      resumeToken: prepared.resumeToken,
+      succeeded: true,
+    })
+    if (completed !== true) throw new Error('Managed resume completion rejected')
     await write(process.stdout, { id, result })
   } catch {
     // The original native failure stays authoritative whenever the Host cannot vouch for the provider.
@@ -284,8 +305,9 @@ readLines(child.stdout, line => {
   const resumeParams = message.method === undefined ? resumeCalls.get(message?.id) : undefined
   if (resumeParams !== undefined) {
     resumeCalls.delete(message.id)
-    if (message.error !== undefined) {
-      void recoverResume(message.id, resumeParams, line).catch(stop)
+    const providerId = missingManagedProvider(message)
+    if (providerId !== undefined) {
+      void recoverResume(message.id, resumeParams, providerId, line).catch(stop)
       return
     }
   }

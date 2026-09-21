@@ -136,7 +136,7 @@ export type NativeMarkedRequestConsumption =
 
 /** Host-internal provider table for natively resuming a thread that a managed provider owns. */
 export type NativeThreadResumePreparation =
-  | Readonly<{ kind: 'resume'; configOverrides: Readonly<Record<string, unknown>> }>
+  | Readonly<{ kind: 'resume'; resumeToken: string; configOverrides: Readonly<Record<string, unknown>> }>
   | Readonly<{ kind: 'reject'; reason: 'unknown-provider' | 'provider-preparation-failed' }>
 
 export interface NativeSubmissionController {
@@ -181,6 +181,9 @@ export interface NativeSubmissionController {
   prepareThreadResume(
     input: Readonly<{ threadId: string; providerId: string; model: string }>,
   ): Promise<NativeThreadResumePreparation>
+  completeThreadResume(
+    input: Readonly<{ threadId: string; resumeToken: string; succeeded: boolean }>,
+  ): Promise<boolean>
   cancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<boolean>
   releaseScope(scope: NativeSubmissionScope): Promise<void>
   releaseThread(threadId: string): Promise<void>
@@ -233,6 +236,10 @@ interface ActiveBinding {
   readonly selection: NativeProviderSelection
   readonly serviceGeneration: string
   readonly credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
+}
+
+interface PreparedThreadResume extends ActiveBinding {
+  readonly token: string
 }
 
 const DEFAULT_OPERATION_TTL_MS = 120_000
@@ -342,6 +349,7 @@ export function createNativeSubmissionController(
   const confirmations = new Map<string, Confirmation>()
   const operations = new Map<string, PreparedOperation>()
   const bindings = new Map<string, ActiveBinding>()
+  const threadResumes = new Map<string, PreparedThreadResume>()
   let disposed = false
 
   const releaseOperation = async (operation: PreparedOperation): Promise<void> => {
@@ -799,20 +807,35 @@ export function createNativeSubmissionController(
           [`model_providers.${input.providerId}`]: providerConfig(credential),
         })
         if (disposed) throw new Error('native submission controller was disposed')
-        // The lease lives with the resumed thread, exactly like a binding created by a managed Send.
-        await replaceBinding({
+        const token = createId()
+        if (!validText(token, 256) || token.length < 16 || threadResumes.has(token)) {
+          throw new Error('native thread resume token is invalid')
+        }
+        threadResumes.set(token, {
+          token,
           threadId: input.threadId,
           selection: { providerId: input.providerId, model: input.model },
           serviceGeneration: credential.serviceGeneration,
           credential,
         })
-        return { kind: 'resume', configOverrides }
+        return { kind: 'resume', resumeToken: token, configOverrides }
       } catch {
-        if (credential !== undefined && bindings.get(input.threadId)?.credential !== credential) {
+        if (credential !== undefined && ![...threadResumes.values()].some(resume => resume.credential === credential)) {
           await credential.dispose()
         }
         return { kind: 'reject', reason: 'provider-preparation-failed' }
       }
+    },
+    async completeThreadResume(input) {
+      const resume = threadResumes.get(input.resumeToken)
+      if (resume === undefined || resume.threadId !== input.threadId) return false
+      threadResumes.delete(resume.token)
+      if (!input.succeeded || disposed) {
+        await resume.credential.dispose()
+        return !disposed
+      }
+      await replaceBinding(resume)
+      return true
     },
     async cancel(input) {
       const confirmation = confirmations.get(input.id)
@@ -864,8 +887,10 @@ export function createNativeSubmissionController(
       confirmations.clear()
       await Promise.allSettled([
         ...[...operations.values()].map(releaseOperation),
+        ...[...threadResumes.values()].map(async resume => await resume.credential.dispose()),
         ...[...bindings.values()].map(async binding => await binding.credential.dispose()),
       ])
+      threadResumes.clear()
       bindings.clear()
     },
   }

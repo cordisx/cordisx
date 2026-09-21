@@ -672,14 +672,16 @@ describe('native submission controller', () => {
     expect(fixture.disposed).toEqual(['provider-b-1'])
   })
 
-  it('hands a restarted app-server only the provider table and binds the lease to the resumed thread', async () => {
+  it('commits a restarted app-server resume lease only after native success', async () => {
     const fixture = harness()
-    await expect(fixture.controller.prepareThreadResume({
+    const prepared = await fixture.controller.prepareThreadResume({
       threadId: 'thread-1',
       providerId: 'provider-b',
       model: 'model-b',
-    })).resolves.toEqual({
+    })
+    expect(prepared).toEqual({
       kind: 'resume',
+      resumeToken: 'opaque-operation-0001',
       configOverrides: {
         'model_providers.provider-b': {
           name: 'CordisX managed provider',
@@ -696,8 +698,89 @@ describe('native submission controller', () => {
         },
       },
     })
+    if (prepared.kind !== 'resume') throw new Error('resume not prepared')
     expect(fixture.disposed).toEqual([])
+    await expect(fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: prepared.resumeToken,
+      succeeded: true,
+    })).resolves.toBe(true)
     await fixture.controller.releaseThread('thread-1')
+    expect(fixture.disposed).toEqual(['provider-b-1'])
+  })
+
+  it('keeps the existing binding when a candidate resume fails', async () => {
+    const fixture = harness()
+    const first = await fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'provider-b',
+      model: 'model-b',
+    })
+    if (first.kind !== 'resume') throw new Error('first resume not prepared')
+    await fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: first.resumeToken,
+      succeeded: true,
+    })
+    const candidate = await fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'provider-b',
+      model: 'model-c',
+    })
+    if (candidate.kind !== 'resume') throw new Error('candidate resume not prepared')
+
+    await expect(fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: candidate.resumeToken,
+      succeeded: false,
+    })).resolves.toBe(true)
+    expect(fixture.disposed).toEqual(['provider-b-2'])
+    await fixture.controller.releaseThread('thread-1')
+    expect(fixture.disposed).toEqual(['provider-b-2', 'provider-b-1'])
+  })
+
+  it('atomically replaces the prior binding after a candidate resume succeeds', async () => {
+    const fixture = harness()
+    const first = await fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'provider-b',
+      model: 'model-b',
+    })
+    if (first.kind !== 'resume') throw new Error('first resume not prepared')
+    await fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: first.resumeToken,
+      succeeded: true,
+    })
+    const replacement = await fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'provider-b',
+      model: 'model-c',
+    })
+    if (replacement.kind !== 'resume') throw new Error('replacement resume not prepared')
+
+    await expect(fixture.controller.completeThreadResume({
+      threadId: 'thread-1',
+      resumeToken: replacement.resumeToken,
+      succeeded: true,
+    })).resolves.toBe(true)
+    expect(fixture.disposed).toEqual(['provider-b-1'])
+    await fixture.controller.releaseThread('thread-1')
+    expect(fixture.disposed).toEqual(['provider-b-1', 'provider-b-2'])
+  })
+
+  it('releases an uncompleted candidate resume lease on controller disposal', async () => {
+    const fixture = harness()
+    await expect(fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'provider-b',
+      model: 'model-b',
+    })).resolves.toMatchObject({ kind: 'resume' })
+    expect(fixture.disposed).toEqual([])
+
+    await fixture.controller.dispose()
+    expect(fixture.disposed).toEqual(['provider-b-1'])
+    await fixture.controller.dispose()
     expect(fixture.disposed).toEqual(['provider-b-1'])
   })
 

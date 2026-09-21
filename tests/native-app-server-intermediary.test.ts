@@ -29,19 +29,20 @@ async function harness() {
       ? { kind: 'reject', reason: 'provider-preparation-failed' }
       : {
         kind: 'resume',
+        resumeToken: `resume-token-${input.threadId}`,
         configOverrides: {
           'model_providers.provider-b': { base_url: 'http://127.0.0.1/v1', requires_openai_auth: false },
         },
       }
   )
-  const releaseThread = vi.fn(async () => undefined)
+  const completeThreadResume = vi.fn(async () => true)
   server.bindController(
     {
       consumeMarkedRequest: consume,
       authorizeMarkedRequest: authorize,
       completeMarkedRequest: complete,
       prepareThreadResume,
-      releaseThread,
+      completeThreadResume,
     } as unknown as NativeSubmissionController,
   )
   const child = spawn(process.execPath, [
@@ -84,7 +85,7 @@ async function harness() {
     complete,
     authorize,
     prepareThreadResume,
-    releaseThread,
+    completeThreadResume,
     read,
     send(value: unknown) {
       child.stdin.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`)
@@ -273,7 +274,11 @@ describe('native app-server intermediary', () => {
         providerId: 'provider-b',
         model: 'model-b',
       })
-      expect(h.releaseThread).not.toHaveBeenCalled()
+      expect(h.completeThreadResume).toHaveBeenCalledWith({
+        threadId: 'managed-thread',
+        resumeToken: 'resume-token-managed-thread',
+        succeeded: true,
+      })
     } finally {
       await h.close()
     }
@@ -290,6 +295,65 @@ describe('native app-server intermediary', () => {
       h.send({ id: 2, method: 'thread/resume', params: { threadId: 'native-thread', model: 'native' } })
       expect(JSON.parse(await h.read())).toMatchObject({ id: 2, result: { thread: { id: 'native-thread' } } })
       expect(h.prepareThreadResume).toHaveBeenCalledTimes(1)
+      expect(h.completeThreadResume).not.toHaveBeenCalled()
+    } finally {
+      await h.close()
+    }
+  })
+
+  it.each(
+    [
+      ['permission', -32001, 'permission denied'],
+      ['parameters', -32602, 'invalid params'],
+      ['state', -32002, 'thread is active'],
+      ['compatibility', -32601, 'resume is unavailable'],
+    ] as const,
+  )('does not retry an unrelated %s resume error for a managed thread', async (kind, code, message) => {
+    const h = await harness()
+    try {
+      h.send({ id: `resume-${kind}`, method: 'thread/resume', params: { threadId: `managed-${kind}` } })
+      expect(JSON.parse(await h.read())).toEqual({
+        id: `resume-${kind}`,
+        error: { code, message },
+      })
+      expect(h.prepareThreadResume).not.toHaveBeenCalled()
+      expect(h.completeThreadResume).not.toHaveBeenCalled()
+    } finally {
+      await h.close()
+    }
+  })
+
+  it('aborts only the candidate lease when the managed resume retry fails', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'resume-fails', method: 'thread/resume', params: { threadId: 'managed-retry-fails' } })
+      expect(JSON.parse(await h.read())).toEqual({
+        id: 'resume-fails',
+        error: { code: -32600, message: 'failed to load configuration: Model provider `provider-b` not found' },
+      })
+      expect(h.completeThreadResume).toHaveBeenCalledWith({
+        threadId: 'managed-retry-fails',
+        resumeToken: 'resume-token-managed-retry-fails',
+        succeeded: false,
+      })
+    } finally {
+      await h.close()
+    }
+  })
+
+  it('does not commit the candidate lease when resume returns another thread', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'resume-wrong-thread', method: 'thread/resume', params: { threadId: 'managed-wrong-thread' } })
+      expect(JSON.parse(await h.read())).toEqual({
+        id: 'resume-wrong-thread',
+        error: { code: -32600, message: 'failed to load configuration: Model provider `provider-b` not found' },
+      })
+      expect(h.completeThreadResume).toHaveBeenCalledWith({
+        threadId: 'managed-wrong-thread',
+        resumeToken: 'resume-token-managed-wrong-thread',
+        succeeded: false,
+      })
     } finally {
       await h.close()
     }

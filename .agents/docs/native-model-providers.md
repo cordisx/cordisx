@@ -69,10 +69,13 @@ the submission channel, rejects an in-flight first turn, and reloads the page.
 Managed provider tables are launch-scoped request overrides, not persisted Codex
 configuration. A restarted app-server therefore rejects `thread/resume` for a
 thread that still names a managed provider, which also leaves the native model
-control, and with it the Host selector seat, unrendered. The intermediary reads
-the persisted provider of a failed Desktop resume and retries it once with the
-provider table the Host prepares for that thread; the lease stays bound to the
-thread. When the Host cannot vouch for the provider, the native failure stands.
+control, and with it the Host selector seat, unrendered. Only the explicit
+missing-provider configuration error is eligible for recovery. The intermediary
+verifies that provider against the persisted thread and retries once with a
+candidate provider table. The candidate lease replaces the thread binding only
+after native resume succeeds; other native errors and failed retries leave the
+existing binding unchanged. When the Host cannot vouch for the provider, the
+native failure stands.
 
 Each successful discovery binds interception to the observed resource SHA-256.
 A resource update between discovery and interception fails closed. The existing

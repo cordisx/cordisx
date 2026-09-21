@@ -12,6 +12,33 @@ reader.on('line', line => {
     process.stdout.write(`${line}\n`)
     return
   }
+  const unrelatedResumeErrors = {
+    'managed-permission': { code: -32001, message: 'permission denied' },
+    'managed-parameters': { code: -32602, message: 'invalid params' },
+    'managed-state': { code: -32002, message: 'thread is active' },
+    'managed-compatibility': { code: -32601, message: 'resume is unavailable' },
+  }
+  const unrelatedResumeError = unrelatedResumeErrors[message.params?.threadId]
+  if (message.method === 'thread/resume' && unrelatedResumeError !== undefined) {
+    process.stdout.write(`${JSON.stringify({ id: message.id, error: unrelatedResumeError })}\n`)
+    return
+  }
+  if (
+    message.method === 'thread/resume' && message.params.threadId === 'managed-retry-fails'
+    && message.params.config?.['model_providers.provider-b'] !== undefined
+  ) {
+    process.stdout.write(
+      `${JSON.stringify({ id: message.id, error: { code: -32602, message: 'invalid resume state' } })}\n`,
+    )
+    return
+  }
+  if (
+    message.method === 'thread/resume' && message.params.threadId === 'managed-wrong-thread'
+    && message.params.config?.['model_providers.provider-b'] !== undefined
+  ) {
+    process.stdout.write(`${JSON.stringify({ id: message.id, result: { thread: { id: 'another-thread' } } })}\n`)
+    return
+  }
   // A restarted app-server rejects a persisted managed thread until its provider table is supplied again.
   if (
     message.method === 'thread/resume' && String(message.params.threadId).startsWith('managed-')
