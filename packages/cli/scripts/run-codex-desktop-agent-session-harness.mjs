@@ -24,11 +24,17 @@ const parsed = parseArgs({
     report: { type: 'string' },
     marker: { type: 'string' },
     executable: { type: 'string' },
+    'cli-bin': { type: 'string' },
   },
 })
 const reportPath = parsed.values.report
 if (typeof reportPath !== 'string' || !path.isAbsolute(reportPath)) {
-  throw new Error('usage: --report <absolute-json> [--marker <marker>] [--executable <Codex executable>]')
+  throw new Error(
+    'usage: --report <absolute-json> [--marker <marker>] [--executable <Codex executable>] [--cli-bin <cordisx>]',
+  )
+}
+if (parsed.values['cli-bin'] !== undefined && !path.isAbsolute(parsed.values['cli-bin'])) {
+  throw new Error('--cli-bin must be absolute')
 }
 const marker = parsed.values.marker ?? `cordisx-live-${Date.now()}`
 if (!/^[A-Za-z0-9._-]{1,96}$/u.test(marker)) throw new Error('--marker must be 1 to 96 safe characters')
@@ -189,6 +195,7 @@ const args = [
   '--dev-config',
   configPath,
   '--desktop-agent-session-harness',
+  ...(parsed.values['cli-bin'] === undefined ? [] : ['--cli-bin', parsed.values['cli-bin']]),
   '--',
   '--report',
   reportPath,

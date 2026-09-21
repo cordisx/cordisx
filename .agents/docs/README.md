@@ -16,14 +16,15 @@ implementation of those contracts, not a second public specification.
 
 ## Use CordisX
 
-| Document                                            | Type     | Use it for                                                            |
-| --------------------------------------------------- | -------- | --------------------------------------------------------------------- |
-| [product-overview](product-overview.md)             | Overview | Product scope, background, ecosystem, and licensing                   |
-| [product-overview.zh-CN](product-overview.zh-CN.md) | Overview | Simplified Chinese product overview                                   |
-| [getting-started](getting-started.md)               | Guide    | Installation, local setup, launch modes, examples, and smoke commands |
-| [startup-qa](startup-qa.md)                         | Guide    | Startup troubleshooting                                               |
-| [startup-qa.zh-CN](startup-qa.zh-CN.md)             | Guide    | Simplified Chinese startup troubleshooting                            |
-| [user-experience-qa](user-experience-qa.md)         | Guide    | Evidence-backed usage questions, pitfalls, and practical tradeoffs    |
+| Document                                                    | Type     | Use it for                                                            |
+| ----------------------------------------------------------- | -------- | --------------------------------------------------------------------- |
+| [product-overview](product-overview.md)                     | Overview | Product scope, background, ecosystem, and licensing                   |
+| [product-overview.zh-CN](product-overview.zh-CN.md)         | Overview | Simplified Chinese product overview                                   |
+| [getting-started](getting-started.md)                       | Guide    | Installation, local setup, launch modes, examples, and smoke commands |
+| [local-candidate-acceptance](local-candidate-acceptance.md) | Guide    | Pack, install, and validate an unpublished local candidate safely     |
+| [startup-qa](startup-qa.md)                                 | Guide    | Startup troubleshooting                                               |
+| [startup-qa.zh-CN](startup-qa.zh-CN.md)                     | Guide    | Simplified Chinese startup troubleshooting                            |
+| [user-experience-qa](user-experience-qa.md)                 | Guide    | Evidence-backed usage questions, pitfalls, and practical tradeoffs    |
 
 ## Develop and inspect plugins
 

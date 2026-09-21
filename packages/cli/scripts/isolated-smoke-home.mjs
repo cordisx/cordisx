@@ -1,13 +1,17 @@
 import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { pathInside } from './local-acceptance-paths.mjs'
 
 const TEMP_HOME_PREFIX = 'cordisx-isolated-home-'
 
 function assertManagedHomeRoot(homeRoot) {
   const temporaryDirectory = path.resolve(os.tmpdir())
   const resolved = path.resolve(homeRoot)
-  if (path.dirname(resolved) !== temporaryDirectory || !path.basename(resolved).startsWith(TEMP_HOME_PREFIX)) {
+  if (
+    !pathInside(temporaryDirectory, resolved) || path.dirname(resolved) !== temporaryDirectory
+    || !path.basename(resolved).startsWith(TEMP_HOME_PREFIX)
+  ) {
     throw new Error('isolated smoke home cleanup refused an unmanaged path')
   }
   return resolved

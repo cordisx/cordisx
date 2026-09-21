@@ -32,6 +32,7 @@ describe('Codex Desktop Agent Session live harness', () => {
     expect(wrapper).toContain('secondProviderStarted: false')
     expect(wrapper).toContain('appAsarPatched: false')
     expect(wrapper).toContain("'--desktop-agent-session-harness'")
+    expect(wrapper).toContain("'--cli-bin'")
     expect(runner).toContain("'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'")
     expect(runner).toContain("'--desktop-agent-session-harness requires --dev-config")
     expect(runner).toContain('desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)')
