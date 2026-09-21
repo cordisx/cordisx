@@ -40,6 +40,61 @@ record; retain the normal package and clean-registry gates for release evidence.
 6. Treat the workflow as complete only after clean registry installation and
    generated-project verification pass for both packages.
 
+## Release manifest and state
+
+Create one immutable `cordisx/release-manifest/v1` record only after the exact
+commit is the intended release candidate, its tracked working tree is clean,
+every required CI gate has passed for that SHA, and review is approved or has a
+recorded authorized bypass. The manifest binds:
+
+- repository, full commit SHA, version, Git tag, registry, and npm dist-tag;
+- each package's dependency inputs and exact tarball filename, byte size,
+  SHA-512 hex digest, and npm `integrity` value;
+- required CI and review evidence, each independently tied to the same commit;
+- the ordered `PUBLISHED`, `VISIBLE`, `VERIFIED`, and `DISTRIBUTED` lifecycle.
+
+Keep mutable recovery progress in the separate
+`cordisx/release-state/v1` record. `PUBLISHED` means every upload was accepted
+or an immutable identical version already existed. `VISIBLE` means registry
+metadata and provenance are readable. `VERIFIED` means the clean-install and
+runtime package checks passed. `DISTRIBUTED` means the intended dist-tag and
+downstream distribution evidence are complete. A phase may complete only after
+its predecessor, and repeating an already-complete phase is an idempotent no-op.
+
+The state records the manifest SHA-512 digest, exact commit, last completed
+checkpoint, and next phase. Resume by verifying the manifest, every tarball,
+and the state before taking the next phase. A changed commit, changed tarball,
+changed manifest field, non-contiguous phase history, or mismatched gate SHA
+invalidates the recovery point; do not rebuild or publish under the old state.
+The CLI entry is:
+
+```text
+node scripts/release-manifest.mjs create --input <input.json> --manifest <manifest.json> --state <state.json>
+node scripts/release-manifest.mjs verify --manifest <manifest.json> --state <state.json> --artifact-root <dir>
+node scripts/release-manifest.mjs advance --manifest <manifest.json> --state <state.json> --artifact-root <dir> --phase <phase> --evidence <evidence.json>
+node scripts/release-manifest.mjs resume --manifest <manifest.json> --state <state.json> --artifact-root <dir>
+```
+
+The manifest/state scripts define identity and recovery semantics only. The
+release workflow and registry publisher remain responsible for creating the
+inputs and advancing phases at their existing safety boundaries.
+
+### Before and after this primitive
+
+Before this manifest, the reusable archive had one aggregate digest while
+per-package integrity and recovery progress were reconstructed from workflow
+logs and live registry queries. After adoption, one manifest binds every
+publishable tarball to the exact commit and one state file names the next of
+four phases. Reading a recovery point performs zero installs, zero builds, and
+zero registry calls; it reads two JSON files and hashes each package tarball.
+An identity failure therefore stops before any remote mutation.
+
+This primitive alone does not reduce the first release run's wall-clock time.
+The CI artifact and registry publication routes must integrate it before
+measuring the 20-30 minute narrow-hotfix and 30-45 minute Host-plus-Creator
+targets. Until then, report the existing workflow duration unchanged rather
+than attributing speculative savings to this script.
+
 ## Stop conditions
 
 Do not rerun publication after an immutable mismatch. Preserve the log and
@@ -64,6 +119,10 @@ silently trusts a partial or cross-commit artifact. If the cache itself is
 damaged, delete that exact cache entry in GitHub Actions and rerun the unchanged
 tag so the normal install, test, build, metadata, and package validation path
 can create it again.
+
+The prepared archive sidecar protects the reusable build cache. The release
+manifest additionally protects the publishable tarballs and the durable phase
+checkpoint. Neither record substitutes for the other.
 
 Pull-request CI remains risk-tiered. A package or lockfile dependency hotfix runs
 all Node test groups and package checks, plus the browser group only when the
