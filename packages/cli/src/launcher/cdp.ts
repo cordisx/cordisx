@@ -63,17 +63,48 @@ function nativeAppTarget(target: CdpTarget): boolean {
 
 function targetScore(target: CdpTarget): number {
   const label = `${target.title} ${target.url}`.toLowerCase()
-  if (label.includes('codex')) return 10
-  if (label.includes('chatgpt')) return 5
-  // The Desktop retitles its document after the open thread, so the native origin is the stable identity.
-  // A still-loading document reports an empty title or its URL; injecting into it aborts the bootstrap fetch.
-  return nativeAppTarget(target) && target.title !== '' && target.title !== target.url ? 5 : 0
+  return label.includes('codex') ? 10 : label.includes('chatgpt') ? 5 : 0
 }
 
-/** Select only renderer pages of the native App origin or visibly associated with Codex/ChatGPT. */
+/** Select only renderer pages visibly associated with Codex/ChatGPT for initial admission. */
 export function injectableTargets(targets: readonly CdpTarget[]): CdpTarget[] {
   const pages = targets.filter(injectable).sort((left, right) => targetScore(right) - targetScore(left))
   return pages.filter(target => targetScore(target) > 0)
+}
+
+function sameNativeAppOrigin(left: CdpTarget, right: CdpTarget): boolean {
+  if (!nativeAppTarget(left) || !nativeAppTarget(right)) return false
+  try {
+    const leftUrl = new URL(left.url)
+    const rightUrl = new URL(right.url)
+    return leftUrl.protocol === rightUrl.protocol
+      && leftUrl.hostname === rightUrl.hostname
+      && leftUrl.port === rightUrl.port
+  } catch {
+    return false
+  }
+}
+
+function matchesInstalledTarget(
+  target: CdpTarget,
+  installed: support.InstalledScript | undefined,
+): boolean {
+  return installed !== undefined
+    && injectable(target)
+    && installed.target.id === target.id
+    && installed.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
+    && !installed.session.isClosed()
+    && (!nativeAppTarget(installed.target) || sameNativeAppOrigin(installed.target, target))
+}
+
+function retainInstalledNativeTarget(
+  target: CdpTarget,
+  installed: support.InstalledScript | undefined,
+): boolean {
+  return installed !== undefined
+    && nativeAppTarget(installed.target)
+    && nativeAppTarget(target)
+    && matchesInstalledTarget(target, installed)
 }
 
 export interface WatchInjectionOptions {
@@ -270,7 +301,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             attemptedReloadTarget = 'production'
             throw fatalProductionGraphError
           }
-          const candidates = injectableTargets(await listTargets(options.port))
+          const listedTargets = await listTargets(options.port)
+          const candidates = injectableTargets(listedTargets)
+          const candidateIds = new Set(candidates.map(target => target.id))
+          for (const target of listedTargets) {
+            if (candidateIds.has(target.id) || !retainInstalledNativeTarget(target, installed.get(target.id))) continue
+            candidates.push(target)
+            candidateIds.add(target.id)
+          }
           const browserGraphTransport = options.hasLoopbackGraph === true
             || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
           const targets = options.viteDevelopment === true || browserGraphTransport
@@ -288,11 +326,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           }
           for (const target of targets) {
             const current = installed.get(target.id)
-            if (
-              current !== undefined
-              && current.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
-              && !current.session.isClosed()
-            ) continue
+            if (matchesInstalledTarget(target, current)) continue
             let stale: support.InstalledScript | undefined
             if (current !== undefined) {
               await support.uninstall(current, viteLoopbackPermissions)

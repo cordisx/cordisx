@@ -59,11 +59,12 @@ bound, before subsequent native guards and effects; those guards remain intact.
 Model-update callbacks are resolved within their owning function, so unrelated
 minified bindings with the same spelling do not reject a compatible resource.
 
-The Desktop retitles its document after the open thread, so the launcher
-identifies the native renderer by its `app://-/` origin once the document has
-announced a title of its own; an empty or URL title means it is still loading.
-Evicting an installed renderer on a cosmetic retitle disposes the submission
-channel, rejects an in-flight first turn, and reloads the page.
+The launcher admits a new renderer only while its title or URL still identifies
+Codex/ChatGPT. After that strict admission, the Desktop may retitle the document
+for the open thread; the launcher retains the installed native renderer only
+while its target id, debugger endpoint, live session, and `app://-/` origin
+remain stable. Evicting an installed renderer on a cosmetic retitle disposes
+the submission channel, rejects an in-flight first turn, and reloads the page.
 
 Managed provider tables are launch-scoped request overrides, not persisted Codex
 configuration. A restarted app-server therefore rejects `thread/resume` for a

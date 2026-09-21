@@ -78,14 +78,11 @@ describe('injectableTargets', () => {
     ).toEqual(['codex'])
   })
 
-  it('keeps the native App renderer when the Desktop retitles its document after the open thread', () => {
-    expect(
-      injectableTargets([
-        target('web', '回应问候'),
-        target('main', '回应问候', 'app://-/index.html'),
-        target('avatar', '回应问候', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
-      ]).map(item => item.id),
-    ).toEqual(['main'])
+  it('does not initially admit unbranded native App pages', () => {
+    expect(injectableTargets([
+      target('task', '回应问候', 'app://-/index.html'),
+      target('settings', 'Settings', 'app://-/index.html'),
+    ])).toEqual([])
   })
 
   it('waits for the native document to announce its own title before admitting it', () => {
@@ -99,6 +96,13 @@ describe('injectableTargets', () => {
     expect(injectableTargets([
       target('first', 'Desktop'),
       target('second', 'Settings'),
+    ])).toEqual([])
+  })
+
+  it('continues to exclude the native avatar overlay after it receives a title', () => {
+    expect(injectableTargets([
+      target('avatar', 'ChatGPT', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
+      target('retitled-avatar', '回应问候', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
     ])).toEqual([])
   })
 })

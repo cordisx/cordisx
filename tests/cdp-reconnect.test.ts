@@ -297,6 +297,7 @@ describe('watchAndInject session replacement', () => {
       })
     })
     let title = 'ChatGPT'
+    let url = 'app://-/index.html'
     let retitledPolls = 0
     const retitledTwice = deferred()
     const originalFetch = globalThis.fetch
@@ -307,7 +308,7 @@ describe('watchAndInject session replacement', () => {
         JSON.stringify([{
           id: 'native-target',
           title,
-          url: 'app://-/index.html',
+          url,
           type: 'page',
           webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
         }]),
@@ -333,10 +334,156 @@ describe('watchAndInject session replacement', () => {
       await ready.promise
       const installed = methods.length
       title = '回应问候'
+      url = 'app://-/local/thread'
       await retitledTwice.promise
       expect(connections).toHaveLength(1)
       expect(readyCount).toBe(1)
       expect(methods.slice(installed)).toEqual([])
+    } finally {
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('does not admit a new unbranded native window after the main renderer is installed', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    const connections: string[] = []
+    server.on('connection', (connection, request) => {
+      connections.push(request.url ?? '')
+      connection.on('message', data => {
+        const item = JSON.parse(String(data)) as { id: number; method: string }
+        connection.send(JSON.stringify({
+          id: item.id,
+          result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'bootstrap' }
+            : item.method === 'Runtime.evaluate'
+            ? { result: { value: { ok: true } } }
+            : {},
+        }))
+      })
+    })
+    let includeDetached = false
+    let detachedPolls = 0
+    const detachedObservedTwice = deferred()
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => {
+      if (includeDetached && ++detachedPolls === 2) detachedObservedTwice.resolve()
+      return new Response(
+        JSON.stringify([
+          {
+            id: 'native-main',
+            title: 'ChatGPT',
+            url: 'app://-/index.html',
+            type: 'page',
+            webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/main`,
+          },
+          ...(includeDetached
+            ? [{
+              id: 'native-detached',
+              title: 'Settings',
+              url: 'app://-/secondary.html',
+              type: 'page',
+              webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/detached`,
+            }]
+            : []),
+        ]),
+        { status: 200 },
+      )
+    }) as typeof fetch
+    const ready = deferred()
+    let readyCount = 0
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'current-live-bootstrap',
+      newDocumentSource: 'future-document-bootstrap',
+      signal: abort.signal,
+      onReady: () => {
+        readyCount++
+        ready.resolve()
+      },
+    })
+    try {
+      await ready.promise
+      includeDetached = true
+      await detachedObservedTwice.promise
+      expect(connections).toEqual(['/main'])
+      expect(readyCount).toBe(1)
+    } finally {
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('does not retain an installed native renderer after it leaves the admitted origin', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    const connections: import('ws').WebSocket[] = []
+    const methods: string[] = []
+    server.on('connection', connection => {
+      connections.push(connection)
+      connection.on('message', data => {
+        const item = JSON.parse(String(data)) as { id: number; method: string }
+        methods.push(item.method)
+        connection.send(JSON.stringify({
+          id: item.id,
+          result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'bootstrap' }
+            : item.method === 'Runtime.evaluate'
+            ? { result: { value: { ok: true } } }
+            : {},
+        }))
+      })
+    })
+    let title = 'ChatGPT'
+    let url = 'app://-/index.html'
+    const cleanupStarted = deferred()
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'native-target',
+          title,
+          url,
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}/main`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
+    server.on('connection', connection => {
+      connection.on('message', data => {
+        const item = JSON.parse(String(data)) as { method: string }
+        if (item.method === 'Page.removeScriptToEvaluateOnNewDocument') cleanupStarted.resolve()
+      })
+    })
+    const ready = deferred()
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'current-live-bootstrap',
+      newDocumentSource: 'future-document-bootstrap',
+      signal: abort.signal,
+      onReady: ready.resolve,
+    })
+    try {
+      await ready.promise
+      title = 'Settings'
+      url = 'app://settings/index.html'
+      await cleanupStarted.promise
+      expect(methods).toContain('Page.removeScriptToEvaluateOnNewDocument')
+      expect(connections).toHaveLength(1)
     } finally {
       abort.abort()
       await watching
