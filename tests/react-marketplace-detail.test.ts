@@ -26,7 +26,7 @@ describe('React Marketplace plugin detail', () => {
     expect(page).toContain('cxr-plugin-identity cxr-marketplace-identity')
     expect(page).toContain("favorite ? 'favorite-active' : 'favorite'")
     expect(page).toContain('writeMarketplaceFavorites(next)')
-    expect(page).toContain('useMarketplaceInstaller')
+    expect(page).toContain('useManagerMarketplaceInstaller')
     expect(page).toContain("icon={installing ? 'close' : 'import-plugin'}")
     expect(page).toContain('const installedVersion = installed?.package?.version')
     expect(page).toContain('item.id === plugin.id && item.source === plugin.source')
@@ -41,8 +41,10 @@ describe('React Marketplace plugin detail', () => {
     expect(page).not.toContain('<Button tag="a"')
     expect(list).toContain('readMarketplaceFavorites')
     expect(list).toContain('writeMarketplaceFavorites(next)')
-    expect(list).toContain('useMarketplaceInstaller')
+    expect(list).toContain('useManagerMarketplaceInstaller')
     expect(list).toContain('void installer.run(result.plugin, result.projection.name)')
+    expect(app).toContain('const installer = useMarketplaceInstaller')
+    expect(app).toContain('<MarketplaceInstallerProvider installer={installer}>')
     expect(app.replace(/\s+/gu, ' ')).toContain(
       '<MarketplacePluginPage manager={model} marketplace={marketplace} snapshot={snapshot} router={route} '
         + 'pluginManagement={pluginManagement} pluginManagementSnapshot={pluginManagementSnapshot} />',
