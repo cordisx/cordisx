@@ -1,5 +1,9 @@
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
-import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import {
+  type CordisXPluginManifestV12,
+  type CordisXPluginManifestV13,
+  isRuntimeExactRequestDeclaration,
+} from '../runtime-exact-request-permissions.js'
 import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -469,7 +473,9 @@ export function authorizationPlanV4(
       requestId,
     },
     declarations: staged.manifest.runtimeManifest.capabilities.filter(
-      isLegacyPermissionDeclarationV4,
+      declaration =>
+        isLegacyPermissionDeclarationV4(declaration)
+        && !isRuntimeExactRequestDeclaration(declaration),
     ) as readonly CordisXCapabilityDeclarationV4[],
     policiesV2,
     policiesV4,

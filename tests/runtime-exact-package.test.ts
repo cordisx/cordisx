@@ -4,16 +4,23 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  normalizeLatestRuntimeManifest,
+} from '../packages/cli/src/launcher/latest-runtime-manifest.js'
+import { authorizationPlanV4 } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import { stagePluginPackageSourceV1 } from '../packages/cli/src/launcher/packages/index.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
   PLUGIN_PACKAGE_SCHEMA_V11,
   PLUGIN_PACKAGE_SCHEMA_V12,
   PLUGIN_PACKAGE_SCHEMA_V13,
+  PLUGIN_PACKAGE_SCHEMA_V14,
 } from '../packages/cli/src/launcher/packages/manifest.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  isRuntimeExactRequestDeclaration,
   normalizePluginManifestV12,
   normalizePluginManifestV13,
 } from '../packages/cli/src/runtime-exact-request-permissions.js'
@@ -83,6 +90,71 @@ async function fixture(version: 11 | 12 | 13) {
   return { source, homeDir }
 }
 
+async function cliProxyApiFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-proxy-api-v14-'))
+  temporary.add(root)
+  const source = path.join(root, 'source')
+  const homeDir = path.join(root, 'home')
+  await mkdir(source, { recursive: true })
+  await writeFile(path.join(source, 'index.js'), 'export function apply() {}\n')
+  const runtime = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+    schemaVersion: 14,
+    id: 'cli-proxy-api',
+    name: 'CLIProxy Providers',
+    capabilities: [
+      { name: 'models.read', required: false, scope: {} },
+      { name: 'tasks.catalog.read', required: false, scope: {} },
+      { name: 'tasks.content.read', required: false, scope: { runtime: 'exact-request' } },
+      { name: 'tasks.create', required: false, scope: { runtime: 'exact-request' } },
+      { name: 'tasks.control', required: false, scope: { runtime: 'exact-request' } },
+      { name: 'turns.submit', required: false, scope: { runtime: 'exact-request' } },
+      { name: 'turns.control', required: false, scope: { runtime: 'exact-request' } },
+    ],
+    services: [],
+  }
+  const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
+  await writeFile(path.join(source, 'runtime-manifest.json'), runtimeText)
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: PLUGIN_PACKAGE_SCHEMA_V14,
+          schemaVersion: 14,
+          id: 'cli-proxy-api',
+          version: '0.1.1',
+          entry: './index.js',
+          canonicalSource: 'https://plugins.example/cli-proxy-api',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: {
+            runtimeAbi: 1,
+            protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14],
+          },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime-manifest.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
+  const staged = await stagePluginPackageSourceV1({
+    kind: 'local-directory',
+    location: pathToFileURL(source).href,
+  }, {
+    homeDir,
+    runtimeValidators: {
+      [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizeLatestRuntimeManifest(value, 'cli-proxy-api'),
+    },
+  })
+  return { homeDir, staged }
+}
+
 describe('runtime exact-request package admission', () => {
   it.each([
     { providers: ['provider-a'], cwdRoots: ['/workspace'] },
@@ -119,4 +191,38 @@ describe('runtime exact-request package admission', () => {
       await removeStagedPluginPackage(homeDir, staged.digest)
     })
   }
+
+  it.each(['install', 'update', 'enable'] as const)(
+    'keeps CLI Proxy API exact-request capabilities out of the %s authorization plan',
+    async operation => {
+      const { homeDir, staged } = await cliProxyApiFixture()
+      expect(
+        staged.manifest.runtimeManifest.capabilities.filter(isRuntimeExactRequestDeclaration).map(item => item.name),
+      )
+        .toEqual([
+          'tasks.content.read',
+          'tasks.create',
+          'tasks.control',
+          'turns.submit',
+          'turns.control',
+        ])
+
+      expect(
+        authorizationPlanV4(
+          staged,
+          operation,
+          'work',
+          'runtime-1',
+          'module-1',
+          'request-1',
+          [],
+          [],
+        ).declarations.map(declaration => declaration.capability),
+      ).toEqual([
+        'models.read',
+        'tasks.catalog.read',
+      ])
+      await removeStagedPluginPackage(homeDir, staged.digest)
+    },
+  )
 })
