@@ -11,7 +11,7 @@ import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import type { MoreMenuItem } from '../../host-ui/MoreMenu.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
-import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
+import { useManagerMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 import { productLocale } from '../../ui-copy.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
@@ -101,7 +101,7 @@ export function MarketplacePage(
   const [officialOnly, setOfficialOnly] = useState(false)
   const [certifiedOnly, setCertifiedOnly] = useState(false)
   const [favorites, setFavorites] = useState(readMarketplaceFavorites)
-  const installer = useMarketplaceInstaller(manager, snapshot, {
+  const installer = useManagerMarketplaceInstaller(manager, snapshot, {
     failed: copy.installFailed,
     succeeded: copy.installSucceeded,
   })

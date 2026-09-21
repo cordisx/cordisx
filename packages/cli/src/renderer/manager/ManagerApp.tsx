@@ -11,11 +11,14 @@ import { createBrandMarkElement } from '../host-ui/BrandMark.js'
 import { HostBrandIcon } from '../host-ui/HostBrandIcon.js'
 import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
+import { notificationCenterForDocument } from '../notifications/host.js'
+import type { NotificationCenter } from '../notifications/model.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
 import { useManagerSnapshot } from './model/store.js'
+import { MarketplaceInstallerProvider, useMarketplaceInstaller } from './model/use-marketplace-installer.js'
 import { type ManagerPluginManagementBinding, usePluginManagementSnapshot } from './model/plugin-management.js'
 import type { ManagerRoute } from './model/routes.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
@@ -28,6 +31,7 @@ import { MarketplacePluginPage } from './pages/MarketplacePluginPage.js'
 import { MarketplacePage } from './pages/MarketplacePage.js'
 import { MarketplaceSourcesPage } from './pages/MarketplaceSourcesPage.js'
 import { NavigationDetailPage } from './pages/NavigationDetailPage.js'
+import { NotificationRulesPage } from './pages/NotificationRulesPage.js'
 import { PermissionDetailPage } from './pages/PermissionDetailPage.js'
 import { PluginDetailPage } from './pages/PluginDetailPage.js'
 import { PluginBundleDetailPage } from './pages/PluginBundleDetailPage.js'
@@ -71,6 +75,9 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
       : 'Marketplace sources'
   }
   if (route.kind === 'about-acknowledgements') return productLocale(locale) === 'zh-CN' ? '致谢' : 'Acknowledgements'
+  if (route.kind === 'notification-rules') {
+    return productLocale(locale) === 'zh-CN' ? '通知规则' : 'Notification rules'
+  }
   if (route.kind === 'manager-content') {
     return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
   }
@@ -211,6 +218,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       />
     )
   }
+  if (route.kind === 'notification-rules') return <h2>{heading}</h2>
   const parent = route.kind === 'extension-point'
     ? {
       label: managerCopy(snapshot.localization.locale, 'manager.nav.extension-points'),
@@ -232,11 +240,21 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
 }
 
 function Content(
-  { model, marketplace, snapshot, route, pluginManagement, pluginManagementSnapshot, pluginManagementError }: {
+  {
+    model,
+    marketplace,
+    snapshot,
+    route,
+    notificationCenter,
+    pluginManagement,
+    pluginManagementSnapshot,
+    pluginManagementError,
+  }: {
     readonly model: ManagerModel
     readonly marketplace: MarketplaceModel
     readonly snapshot: ManagerSnapshot
     readonly route: ReturnType<typeof useManagerRouter>
+    readonly notificationCenter: NotificationCenter | undefined
     readonly pluginManagement: ManagerPluginManagementBinding | undefined
     readonly pluginManagementSnapshot: import('../../management/contracts.js').PluginManagementSnapshot | undefined
     readonly pluginManagementError: string | undefined
@@ -278,6 +296,15 @@ function Content(
     )
   }
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
+  if (current.kind === 'notification-rules') {
+    return notificationCenter === undefined
+      ? (
+        <div className="cxr-empty">
+          {productLocale(snapshot.localization.locale) === 'zh-CN' ? '通知不可用' : 'Notifications unavailable'}
+        </div>
+      )
+      : <NotificationRulesPage center={notificationCenter} locale={snapshot.localization.locale} />
+  }
   if (current.kind === 'manager-content') {
     if (snapshot.settingsNavigationItems?.find(item => item.id === current.id)?.permissionReview !== undefined) {
       return (
@@ -362,6 +389,7 @@ export function ManagerApp(
 ) {
   const snapshot = useManagerSnapshot(model)
   const management = usePluginManagementSnapshot(pluginManagement)
+  const notificationCenter = notificationCenterForDocument(triggerSeat.ownerDocument)
   const playgroundStorage = useMemo(
     () =>
       triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null
@@ -371,6 +399,12 @@ export function ManagerApp(
   )
   const router = useManagerRouter(playgroundStorage)
   const [open, setOpen] = useState(() => playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true')
+  const installer = useMarketplaceInstaller(model, snapshot, {
+    failed: productLocale(snapshot.localization.locale) === 'zh-CN' ? '插件安装失败' : 'Plugin installation failed',
+    succeeded: productLocale(snapshot.localization.locale) === 'zh-CN'
+      ? '插件安装完成'
+      : 'Plugin installation complete',
+  }, { document: triggerSeat.ownerDocument, feedbackActive: open })
   const previousOpen = useRef(open)
   const dialog = useRef<HTMLElement>(null)
   const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
@@ -394,6 +428,11 @@ export function ManagerApp(
         setOpen(true)
       },
     }), [navigationController, open, router.capture, router.restore])
+  useLayoutEffect(() =>
+    notificationCenter?.bindManager(() => {
+      router.navigate({ kind: 'notification-rules' })
+      setOpen(true)
+    }), [notificationCenter, router.navigate])
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
@@ -484,7 +523,9 @@ export function ManagerApp(
                 <header className="cxr-header">
                   <span className="cxr-header-seat">
                     {router.route.kind === 'primary'
-                      ? router.route.page === 'about' ? <BrandMark /> : <HostIcon token={primaryIcon(router.route)!} />
+                      ? router.route.page === 'about'
+                        ? <BrandMark />
+                        : <HostIcon token={primaryIcon(router.route)!} />
                       : managerContentBackRoute !== undefined
                       ? (
                         <Button
@@ -525,15 +566,18 @@ export function ManagerApp(
                   />
                 </header>
                 <div className="cxr-content">
-                  <Content
-                    model={model}
-                    marketplace={marketplace}
-                    snapshot={snapshot}
-                    route={router}
-                    pluginManagement={pluginManagement}
-                    pluginManagementSnapshot={management.snapshot}
-                    pluginManagementError={management.error}
-                  />
+                  <MarketplaceInstallerProvider installer={installer}>
+                    <Content
+                      model={model}
+                      marketplace={marketplace}
+                      snapshot={snapshot}
+                      route={router}
+                      notificationCenter={notificationCenter}
+                      pluginManagement={pluginManagement}
+                      pluginManagementSnapshot={management.snapshot}
+                      pluginManagementError={management.error}
+                    />
+                  </MarketplaceInstallerProvider>
                 </div>
               </main>
             </section>

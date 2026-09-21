@@ -28,6 +28,7 @@ export type ManagerRoute =
   | { readonly kind: 'marketplace-plugin'; readonly identity: string }
   | { readonly kind: 'marketplace-sources' }
   | { readonly kind: 'about-acknowledgements' }
+  | { readonly kind: 'notification-rules' }
   | { readonly kind: 'manager-content'; readonly id: string; readonly reference: CordisXRouteReference }
 
 export interface ManagerRouter {

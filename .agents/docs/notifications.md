@@ -56,8 +56,11 @@ More offers mute this kind, pause this plugin for one hour or until local
 midnight, mute the whole plugin, and manage rules. Applying a rule removes all
 matching visible/queued cards and suppresses later submissions. An undo receipt
 lasts ten seconds. Restoring a rule enables future notices without replaying
-old content. Host Manager navigation also exposes Notification rules so a fully
-muted plugin never prevents the user from restoring notifications.
+old content. Host Manager navigation also exposes Notification rules as a
+Manager-owned secondary page using the same content region, history Back,
+close behavior, and lifecycle as other Manager detail pages. A fully muted
+plugin therefore never prevents the user from restoring notifications, and
+rule management does not create a second document-level dialog.
 
 Rules are stored by profile in Host renderer local storage, keyed by stable
 plugin source/id plus optional kind, with expiry for pauses. Only rules persist;
@@ -85,9 +88,11 @@ payloads. Copying details happens only on an explicit user action.
 
 ## Implementation and verification
 
-`renderer/notifications/model.ts` owns queue, rules and owner-bound facades;
-`view.tsx` owns cards and rule management; `host.tsx` mounts the renderer lifetime;
-`styles.css` owns the complete notification style surface. Runtime mounts inject
+`renderer/notifications/model.ts` owns queue, rules, the Manager-open request,
+and owner-bound facades; `view.tsx` owns transient cards;
+`manager/pages/NotificationRulesPage.tsx` owns rule management inside Manager;
+`host.tsx` mounts the renderer lifetime; `styles.css` owns the transient
+notification style surface. Runtime mounts inject
 `notifications` per plugin and retire it with the plugin principal. Host starts
 one viewport and disposes it with the renderer context. Production packaging
 copies the CSS beside compiled modules.

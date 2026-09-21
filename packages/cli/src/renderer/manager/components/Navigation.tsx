@@ -1,4 +1,3 @@
-import { notificationCenterForDocument } from '../../notifications/host.js'
 import { useRef } from 'react'
 import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
@@ -80,7 +79,8 @@ export function Navigation({ snapshot, router }: NavigationProps) {
     && contributions.some(item =>
       item.owner === permissionRoute.pluginId && item.permissionReview?.fingerprint === permissionRoute.fingerprint
     )
-  const primary = router.route.kind === 'manager-content' || reviewingContribution
+  const primary = router.route.kind === 'manager-content' || router.route.kind === 'notification-rules'
+      || reviewingContribution
     ? undefined
     : primaryFor(router.route)
   const groups = CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG.groups.flatMap(group => {
@@ -144,7 +144,8 @@ export function Navigation({ snapshot, router }: NavigationProps) {
       <button
         type="button"
         data-tab="notifications"
-        onClick={event => notificationCenterForDocument(event.currentTarget.ownerDocument)?.manage()}
+        {...(router.route.kind === 'notification-rules' ? { 'aria-current': 'page' as const } : {})}
+        onClick={() => router.navigate({ kind: 'notification-rules' })}
       >
         <HostIcon token="configuration" />
         <span>{locale.startsWith('zh') ? '通知规则' : 'Notification rules'}</span>

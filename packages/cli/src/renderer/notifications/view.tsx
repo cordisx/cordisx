@@ -199,53 +199,6 @@ function NotificationCard(
   )
 }
 
-export function NotificationRules({ center, zh }: { center: NotificationCenter; zh: boolean }) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  const t = (cn: string, en: string) => zh ? cn : en
-  useEffect(() => {
-    const element = dialog.current
-    const previous = element?.ownerDocument.activeElement as HTMLElement | null
-    element?.showModal()
-    return () => {
-      element?.close()
-      if (previous?.isConnected) previous.focus()
-    }
-  }, [])
-  return (
-    <dialog
-      className="cxn-rules"
-      ref={dialog}
-      aria-label={t('通知规则', 'Notification rules')}
-      onCancel={() => center.manage(false)}
-    >
-      <header>
-        <strong>{t('通知规则', 'Notification rules')}</strong>
-        <button className="cxn-icon" aria-label={t('关闭', 'Close')} onClick={() => center.manage(false)}>
-          <HostIcon token="close" />
-        </button>
-      </header>
-      {center.persistenceError && (
-        <p role="alert">
-          {t('规则仅在当前窗口生效，暂时无法保存。', 'Rules apply in this window only; saving is unavailable.')}
-        </p>
-      )}
-      {center.getRules().length === 0 && <p>{t('没有屏蔽规则', 'No muted notifications')}</p>}
-      {center.getRules().map(rule => (
-        <div className="cxn-rule" key={rule.id}>
-          <div>
-            <strong>{rule.name}</strong>
-            <p>{rule.kind ?? t('所有通知', 'All notifications')}</p>
-            <small>
-              {rule.expiresAt ? new Date(rule.expiresAt).toLocaleString() : t('持续屏蔽', 'Muted until restored')}
-            </small>
-          </div>
-          <button onClick={() => center.removeRule(rule.id)}>{t('恢复通知', 'Restore notifications')}</button>
-        </div>
-      ))}
-    </dialog>
-  )
-}
-
 export function NotificationViewport({ center, document }: { center: NotificationCenter; document: Document }) {
   useSyncExternalStore(center.subscribe, center.snapshot, center.snapshot)
   const zh = document.documentElement.lang.toLowerCase().startsWith('zh') || document.documentElement.lang === ''
@@ -268,7 +221,6 @@ export function NotificationViewport({ center, document }: { center: Notificatio
           </div>
         )}
       </section>
-      {center.isManaging() && <NotificationRules center={center} zh={zh} />}
     </>
   )
 }

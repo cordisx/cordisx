@@ -44,7 +44,7 @@ export class NotificationCenter {
   private undoRule: string | undefined
   private undoUntil = 0
   private previousRules: NotificationRule[] = []
-  private management = false
+  private manageHandler: (() => void) | undefined
   persistenceError = false
   constructor(private readonly storage: NotificationStorage, private readonly now = Date.now) {
     try {
@@ -80,12 +80,14 @@ export class NotificationCenter {
   getRules() {
     return this.rules.filter(r => r.expiresAt === undefined || r.expiresAt > this.now())
   }
-  isManaging() {
-    return this.management
+  bindManager(handler: () => void): () => void {
+    this.manageHandler = handler
+    return () => {
+      if (this.manageHandler === handler) this.manageHandler = undefined
+    }
   }
-  manage(value = true) {
-    this.management = value
-    this.changed()
+  manage() {
+    this.manageHandler?.()
   }
   canUndo() {
     return this.undoRule !== undefined && this.undoUntil > this.now()
@@ -206,8 +208,7 @@ export class NotificationCenter {
     this.previousRules = [...this.getRules()]
     this.rules = this.getRules().filter(r => !(r.ownerKey === rule.ownerKey && r.kind === rule.kind))
     if (this.rules.length >= 500) {
-      this.management = true
-      this.changed()
+      this.manage()
       return
     }
     this.rules.push(rule)
@@ -240,6 +241,7 @@ export class NotificationCenter {
   dispose() {
     for (const e of this.entries) e.lifetime.abort()
     this.entries = []
+    this.manageHandler = undefined
     this.listeners.clear()
   }
 }

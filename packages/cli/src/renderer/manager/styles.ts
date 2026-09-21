@@ -124,6 +124,16 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-section { padding: 13px; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; background: var(--cx-surface-raised,#20242b); }
   .cxr-section h3, .cxr-section h4 { margin: 0; }
   .cxr-section p { margin: 5px 0 0; color: var(--cx-muted,#9ca5b5); }
+  .cxr-notification-rules { width: min(680px,100%); margin-inline: auto; }
+  .cxr-notification-rules > .cxr-notice { margin-bottom: 10px; }
+  .cxr-notification-rule-list { overflow: hidden; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; background: var(--cx-surface-raised,#20242b); }
+  .cxr-notification-rule { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 13px; overflow-wrap: anywhere; }
+  .cxr-notification-rule + .cxr-notification-rule { border-top: 1px solid var(--cx-border,#353a42); }
+  .cxr-notification-rule > div { min-width: 0; }
+  .cxr-notification-rule strong { font-weight: 650; }
+  .cxr-notification-rule p { margin: 3px 0; }
+  .cxr-notification-rule small { color: var(--cx-muted,#9ca5b5); }
+  .cxr-notification-rule > .t-button { flex: none; }
   .cxr-facts { display: grid; gap: 7px; margin: 10px 0 0; }
   .cxr-facts > div { display: grid; grid-template-columns: 76px minmax(0,1fr); gap: 9px; }
   .cxr-facts dt { color: var(--cx-muted,#9ca5b5); }

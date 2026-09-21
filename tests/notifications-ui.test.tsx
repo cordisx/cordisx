@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { NotificationCenter } from '../packages/cli/src/renderer/notifications/model.js'
 import { NotificationViewport } from '../packages/cli/src/renderer/notifications/view.js'
+import { NotificationRulesPage } from '../packages/cli/src/renderer/manager/pages/NotificationRulesPage.js'
 
 let root: Root | undefined
 let dom: JSDOM | undefined
@@ -38,6 +39,8 @@ describe('notification card interactions', () => {
       })
     )
     const center = new NotificationCenter({ read: () => [], write() {} })
+    const manage = vi.fn()
+    center.bindManager(manage)
     const binding = center.bind({
       key: 'source/plugin',
       pluginId: 'plugin',
@@ -97,10 +100,17 @@ describe('notification card interactions', () => {
     await click('More notification options')
     await click('Mute all notifications from this plugin')
     await click('Manage')
-    expect(document.querySelector('dialog')?.open).toBe(true)
+    expect(manage).toHaveBeenCalledOnce()
+    expect(document.querySelector('dialog')).toBeNull()
+    await act(async () => {
+      root!.render(<NotificationRulesPage center={center} locale="en" />)
+    })
+    expect(document.querySelector('[data-notification-rules-page]')).not.toBeNull()
     await click('Restore notifications')
     expect(center.getRules()).toHaveLength(0)
-    await click('Close')
+    await act(async () => {
+      root!.render(<NotificationViewport center={center} document={document} />)
+    })
     await act(async () => {
       show()
     })

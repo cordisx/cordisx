@@ -11,7 +11,7 @@ import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { MarkdownDocument } from '../components/MarkdownDocument.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
-import { useMarketplaceInstaller } from '../model/use-marketplace-installer.js'
+import { useManagerMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 import { usePluginLifecycleActions } from '../model/use-plugin-lifecycle-actions.js'
@@ -166,7 +166,7 @@ export function MarketplacePluginPage({
   const plugin = identity === undefined ? undefined : snapshot.plugins.find(item => item.identity === identity)
   const locale = productLocale(managerSnapshot.localization.locale)
   const copy = COPY[locale]
-  const installer = useMarketplaceInstaller(manager, managerSnapshot, {
+  const installer = useManagerMarketplaceInstaller(manager, managerSnapshot, {
     failed: copy.installFailed,
     succeeded: copy.installSucceeded,
   })

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import type { CordisXPluginLifecycleResultV1 } from '../../../plugin-lifecycle-contracts.js'
 import type { MarketplaceCatalogPlugin } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
@@ -18,28 +18,53 @@ export interface MarketplaceInstaller {
   cancel(): void
 }
 
-export function useMarketplaceInstaller(
+const MarketplaceInstallerContext = createContext<MarketplaceInstaller | undefined>(undefined)
+
+export function MarketplaceInstallerProvider(
+  { installer, children }: { readonly installer: MarketplaceInstaller; readonly children: ReactNode },
+) {
+  return createElement(MarketplaceInstallerContext.Provider, { value: installer }, children)
+}
+
+export function useManagerMarketplaceInstaller(
   manager: ManagerModel,
   snapshot: ManagerSnapshot,
   copy: MarketplaceInstallCopy,
 ): MarketplaceInstaller {
+  const installer = useContext(MarketplaceInstallerContext)
+  const local = useMarketplaceInstaller(manager, snapshot, copy, { feedbackActive: installer === undefined })
+  return installer ?? local
+}
+
+export function useMarketplaceInstaller(
+  manager: ManagerModel,
+  snapshot: ManagerSnapshot,
+  copy: MarketplaceInstallCopy,
+  options: { readonly document?: Document; readonly feedbackActive?: boolean } = {},
+): MarketplaceInstaller {
   const [installingIdentity, setInstallingIdentity] = useState<string | undefined>(undefined)
   const controller = useRef<AbortController | undefined>(undefined)
-  const notifications = useRef<NotificationsV1 | undefined>(undefined)
+  const notificationSession = useRef<{ readonly id: number; readonly api: NotificationsV1 } | undefined>(undefined)
+  const notificationSequence = useRef(0)
+  const ownerDocument = options.document ?? document
+  const feedbackActive = options.feedbackActive ?? true
+  // Installation survives Manager close; only its transient feedback belongs to an open session.
   useEffect(() => {
-    const binding = notificationCenterForDocument(document)?.bind({
+    if (!feedbackActive) return
+    const id = ++notificationSequence.current
+    const binding = notificationCenterForDocument(ownerDocument)?.bind({
       key: 'host/marketplace',
       pluginId: 'cordisx',
-      active: () => true,
+      active: () => notificationSession.current?.id === id,
       presentation: () => ({ name: 'CordisX Marketplace' }),
     })
-    notifications.current = binding?.api
+    if (binding !== undefined) notificationSession.current = { id, api: binding.api }
     return () => {
-      controller.current?.abort()
-      notifications.current = undefined
+      if (notificationSession.current?.id === id) notificationSession.current = undefined
       binding?.dispose()
     }
-  }, [])
+  }, [feedbackActive, ownerDocument])
+  useEffect(() => () => controller.current?.abort(), [])
   const available = snapshot.pluginLifecycle?.operationsAvailable === true
     && manager.inspectMarketplaceArtifact !== undefined
     && manager.requestPluginLifecycle !== undefined
@@ -51,6 +76,7 @@ export function useMarketplaceInstaller(
       if (plugin.artifact === undefined || manager.inspectMarketplaceArtifact === undefined) return
       if (controller.current !== undefined) return
       const request = new AbortController()
+      const feedbackSessionId = notificationSession.current?.id
       controller.current = request
       setInstallingIdentity(plugin.identity)
       try {
@@ -80,7 +106,7 @@ export function useMarketplaceInstaller(
             throw new Error('Permission review v4 is unavailable')
           }
           const decision = await requestPluginAuthorizationV4(
-            document,
+            ownerDocument,
             { id: plugin.id, name, source: planV4.identity.source },
             planV4,
             snapshot.permissions.filter(item =>
@@ -94,7 +120,7 @@ export function useMarketplaceInstaller(
             throw new Error('Permission review v2 is unavailable')
           }
           const decision = await requestPluginAuthorizationV2(
-            document,
+            ownerDocument,
             { id: plugin.id, name, source: planV2.identity.source },
             planV2,
             snapshot.permissions.filter(item =>
@@ -109,19 +135,25 @@ export function useMarketplaceInstaller(
         if (result === undefined || result.outcome !== 'applied') {
           throw new Error(result?.error?.message ?? `Installation ended with ${result?.outcome ?? 'no result'}`)
         }
-        notifications.current?.show({
-          kind: 'marketplace.install.succeeded',
-          type: 'success',
-          message: copy.succeeded,
-        })
+        const session = notificationSession.current
+        if (session !== undefined && session.id === feedbackSessionId) {
+          session.api.show({
+            kind: 'marketplace.install.succeeded',
+            type: 'success',
+            message: copy.succeeded,
+          })
+        }
       } catch (error) {
         if (request.signal.aborted) return
-        notifications.current?.show({
-          kind: 'marketplace.install.failed',
-          type: 'error',
-          message: copy.failed,
-          description: error instanceof Error ? error.message : String(error),
-        })
+        const session = notificationSession.current
+        if (session !== undefined && session.id === feedbackSessionId) {
+          session.api.show({
+            kind: 'marketplace.install.failed',
+            type: 'error',
+            message: copy.failed,
+            description: error instanceof Error ? error.message : String(error),
+          })
+        }
       } finally {
         if (controller.current === request) {
           controller.current = undefined

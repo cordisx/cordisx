@@ -167,39 +167,6 @@
 .cxn-undo span {
   margin-inline-end: auto;
 }
-.cxn-rules {
-  inline-size: min(540px, calc(100vw - 32px));
-  max-block-size: calc(100vh - 48px);
-  overflow: auto;
-  padding: 20px;
-  border: 1px solid var(--cx-border, GrayText);
-  border-radius: 14px;
-  background: var(--cx-surface-raised, Canvas);
-  color: var(--cx-text, CanvasText);
-}
-.cxn-rules::backdrop {
-  background: color-mix(in srgb, CanvasText 25%, transparent);
-}
-.cxn-rules header, .cxn-rule {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.cxn-rule {
-  padding-block: 14px;
-  border-block-end: 1px solid var(--cx-border, GrayText);
-  overflow-wrap: anywhere;
-}
-.cxn-rule p {
-  margin: 4px 0;
-}
-.cxn-rule small {
-  color: var(--cx-muted, GrayText);
-}
-.cxn-rule button {
-  flex: none;
-}
 @keyframes cxn-enter {
   from {
     opacity: 0;
