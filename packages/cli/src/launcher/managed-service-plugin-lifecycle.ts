@@ -18,6 +18,7 @@ import {
   parseManagedServiceUIBindingRequest,
 } from './managed-service-ui-rpc.js'
 import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import { safeDiagnosticMessage } from './diagnostic-redaction.js'
 
 interface ManagedServiceOwnerRoute {
   readonly key: string
@@ -51,12 +52,7 @@ function ownerKey(owner: ManagedServiceUIOwner): string {
 }
 
 function safeMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  return message
-    .replace(/[\r\n\u0000]/gu, ' ')
-    .replace(/((?:api[-_ ]?key|token|password|secret|credential)\s*[:=]\s*)[^\s,;]+/giu, '$1[redacted]')
-    .replace(/(^|\s)(\/(?:[^\s/]+\/)*[^\s]+)/gu, '$1[path redacted]')
-    .slice(0, 512)
+  return safeDiagnosticMessage(error)
 }
 
 /** Adds managed-backend fleets to the durable plugin generation transaction. */

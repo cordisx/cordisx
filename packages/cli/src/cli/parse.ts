@@ -16,6 +16,7 @@ export type CordisXCliAction =
   | 'config'
   | 'doctor'
   | 'dev'
+  | 'feedback'
   | 'management'
 export type CordisXDataMode = 'shared' | 'host-isolated'
 
@@ -83,6 +84,26 @@ export interface CordisXDevInvocation {
   readonly hostArgs: readonly string[]
 }
 
+export type FeedbackAction = 'collect' | 'inspect' | 'export' | 'help'
+
+export interface CordisXFeedbackInvocation {
+  readonly action: 'feedback'
+  readonly feedbackAction: FeedbackAction
+  readonly app?: string
+  readonly profile?: string
+  readonly since?: string
+  readonly from?: string
+  readonly until?: string
+  readonly launch?: string
+  readonly descriptionFile?: string
+  readonly output?: string
+  readonly maxBytes?: number
+  readonly format?: 'zip'
+  readonly recent?: true
+  readonly json: boolean
+  readonly input?: string
+}
+
 export type CordisXCliInvocation =
   | CordisXHelpInvocation
   | CordisXLaunchInvocation
@@ -92,6 +113,7 @@ export type CordisXCliInvocation =
   | CordisXConfigInvocation
   | CordisXDoctorInvocation
   | CordisXDevInvocation
+  | CordisXFeedbackInvocation
   | CordisXManagementInvocation
 
 type BooleanOptionName =
@@ -352,6 +374,141 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
   }
 }
 
+function feedbackNumber(option: string, value: string): number {
+  if (!/^[0-9]+$/u.test(value)) throw new CordisXCliParseError('invalid-option-value', `${option} requires an integer`)
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new CordisXCliParseError('invalid-option-value', `${option} requires a positive integer`)
+  }
+  return parsed
+}
+
+function feedbackId(label: string, value: string): string {
+  if (!PROFILE_ID.test(value)) {
+    throw new CordisXCliParseError('invalid-option-value', `${label} must match [a-z0-9][a-z0-9._-]{0,63}`)
+  }
+  return value
+}
+
+function parseFeedbackCli(argv: readonly string[]): CordisXFeedbackInvocation {
+  const args = argv.slice(1)
+  const action = args[0]
+  if (action === undefined || action === '--help' || action === '-h' || action === 'help') {
+    return { action: 'feedback', feedbackAction: 'help', json: false }
+  }
+  if (action !== 'collect' && action !== 'inspect' && action !== 'export') {
+    throw new CordisXCliParseError('invalid-option-value', 'cordisx feedback requires collect, inspect, or export')
+  }
+  let json = false
+  let recent = false
+  let since: string | undefined
+  let from: string | undefined
+  let until: string | undefined
+  let launch: string | undefined
+  let descriptionFile: string | undefined
+  let output: string | undefined
+  let maxBytes: number | undefined
+  let format: 'zip' | undefined
+  const positionals: string[] = []
+  const seen = new Set<string>()
+  const valueOptions = new Set([
+    '--since',
+    '--from',
+    '--until',
+    '--launch',
+    '--description-file',
+    '--output',
+    '--max-bytes',
+    '--format',
+  ])
+  for (let index = 1; index < args.length; index += 1) {
+    const token = args[index]
+    if (token === undefined) continue
+    if (!token.startsWith('-') || token === '-') {
+      positionals.push(token)
+      continue
+    }
+    if (token === '--json' || token === '--recent') {
+      if (seen.has(token)) throw new CordisXCliParseError('duplicate-option', `${token} may only be specified once`)
+      seen.add(token)
+      if (token === '--json') json = true
+      else recent = true
+      continue
+    }
+    const separator = token.indexOf('=')
+    const option = separator === -1 ? token : token.slice(0, separator)
+    if (!valueOptions.has(option)) {
+      throw new CordisXCliParseError('unknown-option', `unknown feedback option: ${option}`)
+    }
+    if (seen.has(option)) throw new CordisXCliParseError('duplicate-option', `${option} may only be specified once`)
+    seen.add(option)
+    const value = separator === -1 ? args[index + 1] : token.slice(separator + 1)
+    if (value === undefined || value === '' || (separator === -1 && value.startsWith('-'))) {
+      throw new CordisXCliParseError('missing-option-value', `${option} requires a value`)
+    }
+    if (separator === -1) index += 1
+    if (option === '--since') since = value
+    else if (option === '--from') from = value
+    else if (option === '--until') until = value
+    else if (option === '--launch') launch = value
+    else if (option === '--description-file') descriptionFile = value
+    else if (option === '--output') output = value
+    else if (option === '--max-bytes') maxBytes = feedbackNumber(option, value)
+    else if (value !== 'zip') throw new CordisXCliParseError('invalid-option-value', '--format must be zip')
+    else format = 'zip'
+  }
+  if (action === 'collect') {
+    if (positionals.length > 2) {
+      throw new CordisXCliParseError('unexpected-positional', 'feedback collect accepts [app] [profile]')
+    }
+    if (from !== undefined && since !== undefined) {
+      throw new CordisXCliParseError('conflicting-options', '--from and --since cannot be combined')
+    }
+    if (until !== undefined && from === undefined && since === undefined) {
+      throw new CordisXCliParseError('conflicting-options', '--until requires --from or --since')
+    }
+    if (format !== undefined) {
+      throw new CordisXCliParseError('unsupported-option', '--format is only valid with feedback export')
+    }
+    return {
+      action: 'feedback',
+      feedbackAction: action,
+      json,
+      ...(positionals[0] === undefined ? {} : { app: feedbackId('app', positionals[0]) }),
+      ...(positionals[1] === undefined ? {} : { profile: feedbackId('profile', positionals[1]) }),
+      ...(since === undefined ? {} : { since }),
+      ...(from === undefined ? {} : { from }),
+      ...(until === undefined ? {} : { until }),
+      ...(launch === undefined ? {} : { launch }),
+      ...(descriptionFile === undefined ? {} : { descriptionFile }),
+      ...(output === undefined ? {} : { output }),
+      ...(maxBytes === undefined ? {} : { maxBytes }),
+      ...(recent ? { recent: true as const } : {}),
+    }
+  }
+  if (positionals.length !== 1) {
+    throw new CordisXCliParseError('unexpected-positional', `feedback ${action} requires exactly one path`)
+  }
+  if (
+    recent || since !== undefined || from !== undefined || until !== undefined || launch !== undefined
+    || descriptionFile !== undefined || maxBytes !== undefined
+  ) {
+    throw new CordisXCliParseError('unsupported-option', `selection options are only valid with feedback collect`)
+  }
+  if (action === 'inspect' && (output !== undefined || format !== undefined)) {
+    throw new CordisXCliParseError('unsupported-option', '--output and --format are only valid with feedback export')
+  }
+  const input = positionals[0]!
+  return {
+    action: 'feedback',
+    feedbackAction: action,
+    json,
+    input,
+    ...(output === undefined ? {} : { output }),
+    ...(format === undefined ? {} : { format }),
+  }
+}
+
 /**
  * Parse arguments following the `cordisx` executable name.
  *
@@ -359,6 +516,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
+  if (argv[0] === 'feedback') return parseFeedbackCli(argv)
   if (argv[0] === 'plugin' || argv[0] === 'source') return parseManagementCli(argv)
   const boundary = argv.indexOf('--')
   const cordisArgs = boundary === -1 ? argv : argv.slice(0, boundary)

@@ -51,6 +51,7 @@ export async function createBuiltinSkillsFixture(root: string): Promise<string> 
     'cordisx-docs': 'https://github.com/cordisx/docs/tree/main/skills/cordisx-docs',
     'cordisx-qa': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-qa',
     'cordisx-plugin-development': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+    'cordisx-feedback': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-feedback',
   }
   for (const [skillName, sourceUrl] of Object.entries(sources)) {
     const source = path.join(sourceRoot, skillName)

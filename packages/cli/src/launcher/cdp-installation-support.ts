@@ -28,6 +28,7 @@ import {
   parseManagedServiceUIBindingRequest,
 } from './managed-service-ui-rpc.js'
 import { MARKETPLACE_ARTIFACT_BINDING } from './marketplace-artifact-cdp.js'
+import { safeDiagnosticMessage } from './diagnostic-redaction.js'
 
 export type { ProviderFleet } from '../providers/fleet.js'
 export type { CdpTarget } from './cdp-session.js'
@@ -167,12 +168,7 @@ const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
 const MAX_RENDERER_DIAGNOSTIC_BYTES = 8_192
 
 export function pluginLifecycleBridgeError(error: unknown): { readonly code: string; readonly error: string } {
-  const message = (error instanceof Error ? error.message : String(error))
-    .replace(/[\r\n\u0000-\u001f\u007f]/gu, ' ')
-    .replace(/((?:api[-_ ]?key|token|password|secret|credential)\s*[:=]\s*)[^\s,;]+/giu, '$1[redacted]')
-    .replace(/(^|\s)(\/(?:[^\s/]+\/)*[^\s]+)/gu, '$1[path redacted]')
-    .trim()
-    .slice(0, 512)
+  const message = safeDiagnosticMessage(error)
   const candidate = error !== null && typeof error === 'object' && 'code' in error
     ? (error as { readonly code?: unknown }).code
     : undefined

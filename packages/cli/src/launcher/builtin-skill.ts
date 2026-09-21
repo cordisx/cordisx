@@ -10,6 +10,7 @@ export const CORDISX_BUNDLED_SKILL_NAMES = [
   'cordisx-docs',
   'cordisx-qa',
   CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
+  'cordisx-feedback',
 ] as const
 export type CordisXBundledSkillName = typeof CORDISX_BUNDLED_SKILL_NAMES[number]
 export const CORDISX_SKILL_MARKER_FILE = '.cordisx-managed.json'
@@ -19,6 +20,7 @@ const CORDISX_BUNDLED_SKILL_SOURCES: Readonly<Record<CordisXBundledSkillName, st
   'cordisx-docs': 'https://github.com/cordisx/docs/tree/main/skills/cordisx-docs',
   'cordisx-qa': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-qa',
   'cordisx-plugin-development': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+  'cordisx-feedback': 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-feedback',
 }
 
 const CORDISX_SKILL_MARKER_CONTRACT = 'cordisx.skill-installation/v1'

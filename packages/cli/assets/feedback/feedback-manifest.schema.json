@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cordisx.example/schemas/feedback-manifest-v1.json",
+  "title": "CordisX Feedback Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "schemaVersion",
+    "bundleId",
+    "createdAt",
+    "producer",
+    "policy",
+    "target",
+    "selection",
+    "limits",
+    "artifacts",
+    "exclusions",
+    "missing",
+    "redactions",
+    "warnings"
+  ],
+  "properties": {
+    "contract": { "const": "cordisx.feedback-manifest/v1" },
+    "schemaVersion": { "const": 1 },
+    "bundleId": { "type": "string", "pattern": "^fb_[a-z0-9]{12,64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cordisxVersion", "nodeVersion", "platform", "arch"],
+      "properties": {
+        "cordisxVersion": { "type": "string", "maxLength": 64 },
+        "nodeVersion": { "type": "string", "maxLength": 64 },
+        "platform": { "type": "string", "enum": ["darwin", "linux", "win32", "other"] },
+        "osVersion": { "type": "string", "maxLength": 128 },
+        "arch": { "type": "string", "maxLength": 32 },
+        "hostVersion": { "type": ["string", "null"], "maxLength": 128 },
+        "hostBuild": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "localOnly", "contentCollection"],
+      "properties": {
+        "version": { "type": "string", "maxLength": 64 },
+        "localOnly": { "const": true },
+        "contentCollection": { "const": "excluded" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app", "profile", "dataMode"],
+      "properties": {
+        "app": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["codex", "other"] },
+            "ref": { "type": "string", "pattern": "^app_[a-f0-9]{16,64}$" }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "enum": ["default", "named"] },
+            "ref": { "type": "string", "pattern": "^profile_[a-f0-9]{16,64}$" }
+          }
+        },
+        "dataMode": { "enum": ["shared", "host-isolated"] }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launchId", "from", "until", "correlationConfidence", "disposition"],
+      "properties": {
+        "launchId": { "type": ["string", "null"], "pattern": "^launch_[a-f0-9]{16,64}$" },
+        "from": { "type": "string", "format": "date-time" },
+        "until": { "type": "string", "format": "date-time" },
+        "correlationConfidence": { "enum": ["exact", "partial", "none"] },
+        "disposition": {
+          "enum": [
+            "ready",
+            "ready_then_cleanup_degraded",
+            "injection_failed",
+            "launch_failed",
+            "terminated",
+            "unknown"
+          ]
+        },
+        "cdpPort": { "type": ["integer", "null"], "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lookbackSeconds", "maxBytes", "maxEvents", "collectionTimeoutMs"],
+      "properties": {
+        "lookbackSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "maxEvents": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "collectionTimeoutMs": { "type": "integer", "minimum": 1, "maximum": 30000 }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "exclusions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/exclusion" }
+    },
+    "missing": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/missing" }
+    },
+    "redactions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "byCategory"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "byCategory": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "propertyNames": { "pattern": "^[a-z][a-z0-9._-]{0,63}$" }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+          "message": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "bytes", "sha256", "verified"],
+      "properties": {
+        "format": { "const": "zip" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "verified": { "const": true }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "purpose",
+        "evidenceType",
+        "status",
+        "bytes",
+        "sha256",
+        "redactions"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
+          "maxLength": 240
+        },
+        "purpose": { "type": "string", "maxLength": 240 },
+        "evidenceType": { "enum": ["product_log", "structured_event", "environment_projection", "user_report"] },
+        "status": { "enum": ["present", "truncated"] },
+        "bytes": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "from": { "type": "string", "format": "date-time" },
+        "until": { "type": "string", "format": "date-time" },
+        "redactions": { "type": "integer", "minimum": 0 },
+        "omittedBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "reason"],
+      "properties": {
+        "category": {
+          "enum": [
+            "conversation_content",
+            "prompts",
+            "credentials",
+            "cookies",
+            "complete_config",
+            "complete_urls",
+            "absolute_paths",
+            "screenshots",
+            "project_files",
+            "browser_storage"
+          ]
+        },
+        "reason": { "type": "string", "maxLength": 240 }
+      }
+    },
+    "missing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "status", "reason"],
+      "properties": {
+        "field": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,127}$" },
+        "status": { "enum": ["missing", "unsupported", "permission_denied", "not_applicable", "truncated"] },
+        "reason": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

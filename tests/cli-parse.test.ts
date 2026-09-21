@@ -90,6 +90,47 @@ describe('parseCordisXCli', () => {
     })
   })
 
+  it('parses bounded local feedback commands separately from launch options', () => {
+    expect(
+      parseCordisXCli([
+        'feedback',
+        'collect',
+        'codex',
+        'work',
+        '--recent',
+        '--since',
+        '15m',
+        '--max-bytes',
+        '2048',
+        '--json',
+      ]),
+    )
+      .toEqual({
+        action: 'feedback',
+        feedbackAction: 'collect',
+        app: 'codex',
+        profile: 'work',
+        recent: true,
+        since: '15m',
+        maxBytes: 2048,
+        json: true,
+      })
+    expect(parseCordisXCli(['feedback', 'inspect', '/tmp/bundle', '--json']))
+      .toEqual({ action: 'feedback', feedbackAction: 'inspect', input: '/tmp/bundle', json: true })
+    expect(parseCordisXCli(['feedback', 'export', '/tmp/bundle', '--output', '/tmp/bundle.zip']))
+      .toEqual({
+        action: 'feedback',
+        feedbackAction: 'export',
+        input: '/tmp/bundle',
+        output: '/tmp/bundle.zip',
+        json: false,
+      })
+    expect(() => parseCordisXCli(['feedback', 'collect', '--from', '2026-09-21T00:00:00Z', '--since', '15m']))
+      .toThrow('--from and --since cannot be combined')
+    expect(() => parseCordisXCli(['feedback', 'inspect', '/tmp/bundle', '--recent']))
+      .toThrow('selection options are only valid with feedback collect')
+  })
+
   it('parses dev with one plugin path and preserved launcher options', () => {
     expect(parseCordisXCli([
       'dev',

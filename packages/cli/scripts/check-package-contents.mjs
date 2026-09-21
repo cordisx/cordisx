@@ -30,7 +30,13 @@ try {
       })
       .sort()
 
-  const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development']
+  const bundledSkillNames = [
+    'cordisx',
+    'cordisx-docs',
+    'cordisx-qa',
+    'cordisx-plugin-development',
+    'cordisx-feedback',
+  ]
   const preservedRendererStyles = [
     'renderer/host-ui/public-markdown-editor.css',
     'renderer/model-providers.css',
@@ -231,6 +237,10 @@ try {
       'dist/skills/cordisx-plugin-development/references/feasibility-assessment.md',
       'dist/skills/cordisx-plugin-development/references/live-plugin-development.md',
       'dist/skills/cordisx-plugin-development/references/project-layouts-and-development.md',
+      'dist/skills/cordisx-feedback/SKILL.md',
+      'dist/skills/cordisx-feedback/agents/openai.yaml',
+      'dist/skills/cordisx-feedback/version.json',
+      'dist/assets/feedback/feedback-manifest.schema.json',
       'dist/assets/brand/cordisx-mark-light.svg',
       'dist/assets/brand/cordisx-mark-dark.svg',
       'dist/assets/brand/cordisx-mark-animated-light.svg',
