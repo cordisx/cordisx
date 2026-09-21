@@ -11,6 +11,7 @@ interface RendererBootstrapOptions {
   readonly session: support.CdpSession
   readonly target: support.CdpTarget
   readonly installId: string
+  readonly documentSource: string
   readonly viteDevelopment: boolean
   readonly nativeSubmission?: NativeSubmissionInstallation
   readonly signal?: AbortSignal
@@ -40,45 +41,54 @@ export function createDocumentInstallationState(): DocumentInstallationState {
 async function waitForRendererBootstrap(
   options: RendererBootstrapOptions,
   deadline: number,
+  network?: { latest(): support.ProductionGraphNetworkFailure | undefined },
 ): Promise<void> {
   const { session, installId, viteDevelopment, signal } = options
   if (viteDevelopment) await support.waitForViteBootstrap(session, installId, deadline, signal)
-  else await support.waitForProductionBootstrap(session, installId, deadline, signal)
+  else await support.waitForProductionBootstrap(session, installId, deadline, signal, network)
 }
 
 async function bootstrapInstalledDocument(
   options: RendererBootstrapOptions,
+  observeProductionGraph: boolean,
 ): Promise<NativeResourceInterception | undefined> {
   const { session, target, nativeSubmission, signal } = options
   const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
   await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
+  const network = observeProductionGraph
+    ? await support.observeProductionGraphNetwork(session, options.documentSource)
+    : undefined
   let nativeInterception: NativeResourceInterception | undefined
-  if (nativeSubmission !== undefined) {
-    nativeInterception = await installNativeResourceInterception({
-      session,
-      target,
-      transforms: nativeSubmission.transforms,
-      reloadDocument: async () => {
-        await support.abortable(
-          session.send('Page.reload', { ignoreCache: true }, support.CDP_INJECTION_TIMEOUT_MS),
-          signal,
-        )
-      },
-      timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
-      ...(signal === undefined ? {} : { signal }),
-    })
-    if (nativeInterception.status !== 'active') {
-      throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
+  try {
+    if (nativeSubmission !== undefined) {
+      nativeInterception = await installNativeResourceInterception({
+        session,
+        target,
+        transforms: nativeSubmission.transforms,
+        reloadDocument: async () => {
+          await support.abortable(
+            session.send('Page.reload', { ignoreCache: true }, support.CDP_INJECTION_TIMEOUT_MS),
+            signal,
+          )
+        },
+        timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
+        ...(signal === undefined ? {} : { signal }),
+      })
+      if (nativeInterception.status !== 'active') {
+        throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
+      }
+      await waitForRendererBootstrap(options, deadline, network)
+    } else {
+      await support.reloadAndWaitForBootstrap(
+        session,
+        options.viteDevelopment ? { ignoreCache: true } : {},
+        async () => await waitForRendererBootstrap(options, deadline, network),
+      )
     }
-    await waitForRendererBootstrap(options, deadline)
-  } else {
-    await support.reloadAndWaitForBootstrap(
-      session,
-      options.viteDevelopment ? { ignoreCache: true } : {},
-      async () => await waitForRendererBootstrap(options, deadline),
-    )
+    return nativeInterception
+  } finally {
+    await network?.close()
   }
-  return nativeInterception
 }
 
 export async function installDocumentBootstrap(
@@ -131,8 +141,9 @@ export async function installDocumentBootstrap(
     session,
     target,
     installId: reloadInstallId!,
+    documentSource: productionDocumentSource ?? documentSource,
     viteDevelopment,
     ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
     ...(signal === undefined ? {} : { signal }),
-  })
+  }, loopbackModules && !viteDevelopment)
 }

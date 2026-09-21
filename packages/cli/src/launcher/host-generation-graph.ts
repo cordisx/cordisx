@@ -44,6 +44,13 @@ export interface HostGenerationGraphSource {
   readonly authoritySource: () => string
 }
 
+export function hostGenerationBootloaderSource(origin: string): string {
+  const manifestUrl = `${origin}/manifest.json`
+  return `(()=>{const m=${JSON.stringify(manifestUrl)},o=${
+    JSON.stringify(origin)
+  },e=(s,x)=>{let d=x instanceof Error?x.message:String(x);d=d.split(o).join('[host graph]').replace(/https?:\\/\\/[^\\s)]+/g,'[url]').slice(0,256);return Error('CordisX Host '+s+(d?': '+d:''))};const p=fetch(m).catch(x=>{throw e('manifest fetch failed',x)}).then(async r=>{if(!r.ok)throw Error('CordisX Host manifest HTTP '+r.status);try{return await r.json()}catch(x){throw e('manifest JSON invalid',x)}}).then(x=>{if(x?.version!==1||typeof x.entry!=='string'||!/^\\/[^/]/.test(x.entry)||typeof x.digest!=='string'||!/^sha256:[a-f0-9]{64}$/.test(x.digest))throw Error('CordisX Host manifest schema invalid');return import(o+x.entry).catch(y=>{throw e('entry import failed',y)})}).then(x=>x.runtime);globalThis.__cordisxCompositionBoot=p;void p.catch(x=>console.error('[cordisx] Host graph boot failed',x))})()`
+}
+
 export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
   if (attach && hasLoopbackGraph) {
     throw new Error('production browser graphs require a launcher-owned native Host; --attach is unsupported')
@@ -258,11 +265,7 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
     })
   })
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}/cordisx-host-generation/${secret}`
-  const bootloader = `(()=>{const m=${
-    JSON.stringify(`${origin}/manifest.json`)
-  };const p=fetch(m).then(r=>{if(!r.ok)throw Error('CordisX Host manifest unavailable');return r.json()}).then(x=>import(${
-    JSON.stringify(origin)
-  }+x.entry)).then(x=>x.runtime);globalThis.__cordisxCompositionBoot=p;void p.catch(e=>console.error('[cordisx] Host graph boot failed',e))})()`
+  const bootloader = hostGenerationBootloaderSource(origin)
   if (Buffer.byteLength(bootloader) >= MAX_BOOTLOADER_BYTES) {
     await close()
     throw new Error('Host graph bootloader exceeds 16 KiB')
