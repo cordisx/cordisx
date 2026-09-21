@@ -29,9 +29,47 @@ describe('production Host graph network diagnostics', () => {
     )
 
     await expect(scope.__cordisxCompositionBoot).rejects.toThrow(
-      'CordisX Host manifest fetch failed: Failed to fetch [host graph]/manifest.json',
+      'CordisX Host manifest fetch failed after 3 attempts: Failed to fetch [host graph]/manifest.json',
     )
     await expect(scope.__cordisxCompositionBoot).rejects.not.toThrow('private-secret')
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('recovers when the launch-private manifest transport becomes reachable', async () => {
+    const privateOrigin = 'http://127.0.0.1:43210/cordisx-host-generation/transient-secret'
+    const scope: Record<string, unknown> = {}
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          version: 1,
+          entry: '/host-test.js',
+          digest: `sha256:${'a'.repeat(64)}`,
+        }),
+      })
+    Function('globalThis', 'fetch', 'console', hostGenerationBootloaderSource(privateOrigin))(
+      scope,
+      fetch,
+      { error: vi.fn() },
+    )
+
+    await expect(scope.__cordisxCompositionBoot).rejects.toThrow('CordisX Host entry import failed')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry a manifest HTTP response', async () => {
+    const privateOrigin = 'http://127.0.0.1:43210/cordisx-host-generation/http-secret'
+    const scope: Record<string, unknown> = {}
+    const fetch = vi.fn(async () => ({ ok: false, status: 503 }))
+    Function('globalThis', 'fetch', 'console', hostGenerationBootloaderSource(privateOrigin))(
+      scope,
+      fetch,
+      { error: vi.fn() },
+    )
+
+    await expect(scope.__cordisxCompositionBoot).rejects.toThrow('CordisX Host manifest HTTP 503')
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('retains bounded CDP failure fields and drops the randomized request path', async () => {
