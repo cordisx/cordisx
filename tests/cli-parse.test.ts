@@ -70,6 +70,14 @@ describe('parseCordisXCli', () => {
     expect(parseCordisXCli([action])).toEqual({ action })
   })
 
+  it('reserves app for the native launcher while preserving an explicit host app named app', () => {
+    expect(parseCordisXCli(['app'])).toEqual({ action: 'app' })
+    expect(parseCordisXCli(['start', 'app'])).toMatchObject({ action: 'start', app: 'app' })
+    for (const args of [['app', 'extra'], ['app', '--json'], ['app', '--', 'host-arg']]) {
+      expect(() => parseCordisXCli(args)).toThrow(CordisXCliParseError)
+    }
+  })
+
   it('parses transient supervisor commands without confusing their app/profile target with a command', () => {
     expect(parseCordisXCli(['status', 'codex', 'work', '--json'])).toMatchObject({
       action: 'status',

@@ -4,17 +4,11 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { parseCordisXCli } from './parse.js'
 import { runSupervisorCommand } from './supervisor-command.js'
-import { hasMatchingProcessIdentity } from './supervisor-state.js'
+import { type ActivatedOwnedHost, activateOwnedHost } from './activate-owned-host.js'
 import { readPrivateJson } from '../shortcuts/store.js'
 import { type ShortcutRuntime, validRecord } from '../shortcuts/model.js'
-import { nativeOperation } from '../shortcuts/native.js'
 
-export async function openShortcut(recordPath: string): Promise<{
-  ok: true
-  hostPid: number
-  hostStartedAt: string
-  warning?: string
-}> {
+export async function openShortcut(recordPath: string): Promise<ActivatedOwnedHost> {
   const record = await readPrivateJson(recordPath)
   if (!validRecord(record)) throw new Error('Invalid shortcut record')
   const invocation = parseCordisXCli(record.argv)
@@ -50,31 +44,7 @@ export async function openShortcut(recordPath: string): Promise<{
     internalShortcutSpawnCwd: os.homedir(),
   })
   if (!ready) throw new Error('No ready Host instance returned')
-  const state = ready.state
-  if (
-    !state.hostPid || !state.hostProcessStartedAt
-    || !await hasMatchingProcessIdentity(state.hostPid, state.hostProcessStartedAt)
-  ) {
-    return {
-      ok: true,
-      hostPid: state.hostPid ?? 0,
-      hostStartedAt: state.hostProcessStartedAt ?? '',
-      warning: '应用已运行，未能确认对应窗口，未切到前台。',
-    }
-  }
-  const activated = await nativeOperation<{ activated: boolean }>({
-    operation: 'activate',
-    pid: state.hostPid,
-    startedAt: state.hostProcessStartedAt,
-  }).catch(() => ({ activated: false }))
-  return activated.activated
-    ? { ok: true, hostPid: state.hostPid, hostStartedAt: state.hostProcessStartedAt }
-    : {
-      ok: true,
-      hostPid: state.hostPid,
-      hostStartedAt: state.hostProcessStartedAt,
-      warning: '应用已运行，未能切到前台。',
-    }
+  return await activateOwnedHost(ready)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

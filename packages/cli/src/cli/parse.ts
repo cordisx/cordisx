@@ -12,6 +12,7 @@ export type CordisXCliAction =
   | 'logs'
   | 'stop'
   | 'restart'
+  | 'app'
   | 'setup'
   | 'config'
   | 'doctor'
@@ -69,6 +70,10 @@ export interface CordisXSetupInvocation {
   readonly action: 'setup'
 }
 
+export interface CordisXAppInvocation {
+  readonly action: 'app'
+}
+
 export interface CordisXConfigInvocation {
   readonly action: 'config'
 }
@@ -111,6 +116,7 @@ export type CordisXCliInvocation =
   | CordisXLaunchInvocation
   | CordisXRunInvocation
   | CordisXManagedInvocation
+  | CordisXAppInvocation
   | CordisXSetupInvocation
   | CordisXConfigInvocation
   | CordisXDoctorInvocation
@@ -190,6 +196,7 @@ const COMMANDS = new Set([
   'logs',
   'stop',
   'restart',
+  'app',
 ])
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
@@ -359,7 +366,7 @@ function assertLauncherOptionCompatibility(options: ParsedOptions): void {
   }
 }
 
-function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'doctor'): void {
+function assertNoOptions(options: ParsedOptions, action: 'app' | 'setup' | 'config' | 'doctor'): void {
   const supplied = [
     options.attach && '--attach',
     options.system && '--system',
@@ -552,7 +559,7 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
       '--create-shortcut supports ordinary start only, without attach/system/dry-run/debug options',
     )
   }
-  if (action === 'setup' || action === 'config' || action === 'doctor') {
+  if (action === 'app' || action === 'setup' || action === 'config' || action === 'doctor') {
     if (positionals.length > 1) {
       throw new CordisXCliParseError(
         'unexpected-positional',

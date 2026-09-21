@@ -147,6 +147,21 @@ func writeIcon(_ request: [String: Any]) throws -> [String: Any] {
     return ["written": true]
 }
 
+func writeLauncherIcon(_ request: [String: Any]) throws -> [String: Any] {
+    let output = try string(request, "output")
+    guard let brand = NSImage(contentsOfFile: try string(request, "brand")) else {
+        throw failure("CordisX brand mark unavailable")
+    }
+    let image = NSImage(size: NSSize(width: 512, height: 512))
+    image.lockFocus()
+    NSColor.black.setFill()
+    NSRect(x: 0, y: 0, width: 512, height: 512).fill()
+    brand.draw(in: NSRect(x: 31, y: 31, width: 450, height: 450))
+    image.unlockFocus()
+    try writeIcns(image, output: output)
+    return ["written": true]
+}
+
 func customIcon(_ path: String) -> Bool {
     var bytes = [UInt8](repeating: 0, count: 32)
     let count = path.withCString { p in "com.apple.FinderInfo".withCString { name in

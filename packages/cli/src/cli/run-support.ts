@@ -149,6 +149,7 @@ import type { OpenManagementCommandService } from './management-command.js'
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx start|status|logs|stop|restart [app] [profile] [options]
+  cordisx app
   cordisx setup
   cordisx config
   cordisx doctor
@@ -176,6 +177,10 @@ Options:
   -h, --help               Show this help`
 
 export interface CordisXCliRuntime {
+  /** Test-only app installation destination. */
+  readonly internalAppOutput?: { readonly directory: string; readonly path?: string }
+  /** Test-only exact-path replacement for `/usr/bin/open`. */
+  readonly internalOpenApp?: (path: string) => void | Promise<void>
   /** Isolated native verification output; never read from user CLI/env. */
   readonly internalShortcutOutput?: import('../shortcuts/model.js').ShortcutOutputOptions
   /** Only the signed native shortcut entry supplies this internal path. */

@@ -6,6 +6,7 @@ import { runManagementCommand } from './management-command.js'
 import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
+import { runAppCommand } from './app-command.js'
 
 export interface PreparedRunCommand {
   readonly invocation: Extract<CordisXCliInvocation, { readonly action: 'launch' }>
@@ -120,6 +121,10 @@ export async function prepareCliCommand(
   }
   if (parsedInvocation.action === 'management') {
     await runManagementCommand(parsedInvocation, runtime)
+    return
+  }
+  if (parsedInvocation.action === 'app') {
+    await runAppCommand(runtime)
     return
   }
   const internalForeground = [

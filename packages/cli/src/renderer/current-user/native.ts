@@ -15,6 +15,12 @@ interface NativeModuleTyped {
   readonly Uqt: { safeGet(path: string, options: { signal: AbortSignal }): Promise<unknown> }
   readonly Gqt: () => Record<string, string>
 }
+interface NativeModule9922 {
+  readonly L9: { readonly accessInputs: { readAccountInfo(): Promise<unknown> } }
+  readonly iin: { getInstance(): NativeClient }
+  readonly Drn: { safeGet(path: string, options: { signal: AbortSignal }): Promise<unknown> }
+  readonly krn: () => Record<string, string>
+}
 interface NativeClient {
   post(url: string, body?: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<{ body: unknown }>
   fetch(url: string, options: { headers?: Record<string, string>; signal: AbortSignal }): Promise<Response>
@@ -58,7 +64,8 @@ export function avatarRequest(value: unknown): { url: string; authenticated: boo
 /** Exact audited native display-profile client; no DOM, credential getter, login or Agent provider. */
 export async function readNativeCurrentUser(
   signal: AbortSignal,
-  load: (path: string) => Promise<NativeModule | NativeModuleTyped> = path => import(/* @vite-ignore */ path),
+  load: (path: string) => Promise<NativeModule | NativeModuleTyped | NativeModule9922> = path =>
+    import(/* @vite-ignore */ path),
 ): Promise<CurrentUserSource> {
   const page = globalThis as typeof globalThis & {
     electronBridge?: { getSentryInitOptions?: () => unknown }
@@ -75,18 +82,35 @@ export async function readNativeCurrentUser(
     if (!adapter) return unavailable
     const module = await load(adapter.module)
     // Audited builds 8881 and 9275 share the typed account/profile exports.
+    // Build 9922 retains the same capabilities under its own audited symbols.
     // Their own Codex profile client supplies name/picture directly; the
     // old /me export is absent. Never reuse old symbol names on a new bundle.
-    const native: NativeModule = adapter === CURRENT_USER_NATIVE_PIN ? module as NativeModule : {
-      gJt: (module as NativeModuleTyped).mJt,
-      eSt: async () => undefined,
-      jKt: (module as NativeModuleTyped).Uqt,
-      NKt: (module as NativeModuleTyped).Gqt,
-    }
+    const native: NativeModule = adapter === CURRENT_USER_NATIVE_PIN
+      ? module as NativeModule
+      : adapter.buildNumber === '9922'
+      ? {
+        gJt: (module as NativeModule9922).iin,
+        eSt: async () => undefined,
+        jKt: (module as NativeModule9922).Drn,
+        NKt: (module as NativeModule9922).krn,
+      }
+      : {
+        gJt: (module as NativeModuleTyped).mJt,
+        eSt: async () => undefined,
+        jKt: (module as NativeModuleTyped).Uqt,
+        NKt: (module as NativeModuleTyped).Gqt,
+      }
     if (!native.gJt?.getInstance || !native.eSt || !native.jKt?.safeGet || !native.NKt) return unavailable
     const client = native.gJt.getInstance()
+    const accountModule = adapter.buildNumber === '9922'
+      ? { TW: (module as NativeModule9922).L9 }
+      : module as NativeModule | NativeModuleTyped
     const account = () =>
-      readPinnedNativeAccount(adapter === CURRENT_USER_NATIVE_PIN ? 'legacy-post' : 'typed', module, signal)
+      readPinnedNativeAccount(
+        adapter === CURRENT_USER_NATIVE_PIN ? 'legacy-post' : 'typed',
+        accountModule,
+        signal,
+      )
     const before = identity(await account())
     if (!before) return { status: 'unavailable', reason: 'signed-out' }
     const [meValue, codexValue] = await Promise.all([

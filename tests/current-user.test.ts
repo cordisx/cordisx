@@ -207,6 +207,7 @@ describe('native profile adaptation and bitmap normalization', () => {
   it.each([
     ['26.908.40834', '8881', '9b95fa538c62'],
     ['26.908.70816', '9275', '4d7ea7f81c2d'],
+    ['26.915.31945', '9922', 'a498f911edeb'],
   ])(
     'selects audited %s exports without /me and rejects mismatched symbols or identity',
     async (appVersion, buildNumber, hash) => {
@@ -219,12 +220,21 @@ describe('native profile adaptation and bitmap normalization', () => {
         status: 'ready',
         data: { accountId: 'private-account', userId: 'private-user' },
       }))
-      const load = vi.fn(async () => ({
-        TW: { accessInputs: { readAccountInfo } },
-        mJt: { getInstance: () => f.client },
-        Uqt: { safeGet: profile },
-        Gqt: () => ({ nativeControl: '1' }),
-      }))
+      const load = vi.fn(async () =>
+        buildNumber === '9922'
+          ? ({
+            L9: { accessInputs: { readAccountInfo } },
+            iin: { getInstance: () => f.client },
+            Drn: { safeGet: profile },
+            krn: () => ({ nativeControl: '1' }),
+          })
+          : ({
+            TW: { accessInputs: { readAccountInfo } },
+            mJt: { getInstance: () => f.client },
+            Uqt: { safeGet: profile },
+            Gqt: () => ({ nativeControl: '1' }),
+          })
+      )
       expect(await readNativeCurrentUser(new AbortController().signal, load)).toEqual({
         status: 'available',
         identity: JSON.stringify(['private-account', 'private-user']),

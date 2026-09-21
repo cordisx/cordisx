@@ -9,10 +9,22 @@ export const shortcutHelper = fileURLToPath(
     import.meta.url,
   ),
 )
+export const appLauncherHelper = fileURLToPath(
+  new URL(
+    import.meta.url.includes('/dist/') ? '../../native/CordisXLauncher' : '../../dist/native/CordisXLauncher',
+    import.meta.url,
+  ),
+)
 export async function requireShortcutHelper(): Promise<void> {
   if (process.platform !== 'darwin') throw new Error('System shortcuts currently support macOS only')
   await access(shortcutHelper, constants.X_OK).catch(() => {
     throw new Error('This CordisX build has no macOS shortcut helper; build the native helper first')
+  })
+}
+export async function requireAppLauncherHelper(): Promise<void> {
+  await requireShortcutHelper()
+  await access(appLauncherHelper, constants.X_OK).catch(() => {
+    throw new Error('This CordisX build has no macOS app launcher helper; build the native helper first')
   })
 }
 export async function nativeOperation<T>(request: Record<string, unknown>): Promise<T> {

@@ -21,6 +21,7 @@ cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-argumen
 cordisx run [app] [profile] [options] [-- host-arguments...]
 cordisx start|status|logs|stop|restart [app] [profile] [options]
 cordisx setup
+cordisx app
 cordisx config
 cordisx doctor
 cordisx dev [plugin-path]
@@ -37,7 +38,26 @@ npx cordisx codex work
 npx cordisx codex work --data host-isolated
 npx cordisx claude-code personal
 npx cordisx setup
+npm install --global cordisx@beta
+cordisx app
 ```
+
+On macOS, `cordisx app` installs or reuses the single lightweight
+`~/Applications/CordisX.app` launcher and opens it. The launcher has its own
+Dock identity and no windows. Opening or reopening it launches or activates the
+currently configured default Host profile. Its Dock and application menus read
+the current default app's real profiles from the home configuration when the
+menu opens, so changing the default does not require reinstalling the bundle.
+Selecting a profile launches or activates that exact CordisX-owned instance.
+
+The launcher stores its runtime descriptor and any private Host projection
+cache under `~/Library/Application Support/CordisX/app-launcher`; it does not
+install visible per-profile applications. Quitting CordisX exits only this
+launcher and never stops a Host. It never changes Dock pins or addresses a
+process by application name. The command requires CordisX and Node to resolve
+from stable installed paths because the application must remain usable after
+the invoking shell exits. `app` is reserved as this command; use
+`cordisx start app` if a Host adapter is actually named `app`.
 
 The bare command is an idempotent background `start`; `cordisx run` retains
 the foreground launcher lifecycle for terminals and development diagnostics.

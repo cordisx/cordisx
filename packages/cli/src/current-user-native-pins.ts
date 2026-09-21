@@ -22,5 +22,12 @@ export const CURRENT_USER_NATIVE_PINS = Object.freeze(
       module: 'app://-/assets/app-initial-4d7ea7f81c2d.js',
       clientExport: 'mJt',
     }),
+    Object.freeze({
+      appVersion: '26.915.31945',
+      buildNumber: '9922',
+      buildFlavor: 'prod',
+      module: 'app://-/assets/app-initial-a498f911edeb.js',
+      clientExport: 'iin',
+    }),
   ] as const,
 )

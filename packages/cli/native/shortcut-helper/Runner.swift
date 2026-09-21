@@ -1,6 +1,6 @@
 import Foundation
 
-func boundedOutput(_ process: Process, _ pipe: Pipe) throws -> Data {
+func boundedOutput(_ process: Process, _ pipe: Pipe, timeoutSeconds: Double = 75) throws -> Data {
     let lock = NSLock(), terminated = DispatchSemaphore(value: 0), readDone = DispatchSemaphore(value: 0)
     var bytes = Data(), oversized = false
     process.terminationHandler = { _ in terminated.signal() }
@@ -18,7 +18,7 @@ func boundedOutput(_ process: Process, _ pipe: Pipe) throws -> Data {
         }
         readDone.signal()
     }
-    guard terminated.wait(timeout: .now() + 75) == .success else {
+    guard terminated.wait(timeout: .now() + .milliseconds(Int(timeoutSeconds * 1000))) == .success else {
         // This is only the short-lived CLI, never its detached supervisor/process group.
         if process.isRunning { process.terminate() }
         throw failure("尚未确认启动完成。后台实例可能仍在启动，请稍后重试。")

@@ -23,4 +23,10 @@ if (process.platform === 'darwin') {
     '-o',
     `${out}/CordisXEntry`,
   ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/swiftc', [
+    '-O',
+    fileURLToPath(new URL('native/app-launcher.swift', root)),
+    '-o',
+    `${out}/CordisXLauncher`,
+  ], { stdio: 'inherit' })
 }

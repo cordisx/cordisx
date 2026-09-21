@@ -18,6 +18,7 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
         return ["nodeExists": FileManager.default.isExecutableFile(atPath: try string(runtime, "node")), "scriptExists": FileManager.default.fileExists(atPath: try string(runtime, "entryScript"))]
     }
     if op == "icon" { return try writeIcon(request) }
+    if op == "app-icon" { return try writeLauncherIcon(request) }
     if op == "render-file-icon" {
         let path = try string(request, "path"), output = try string(request, "output")
         let appearance = request["appearance"] as? String ?? "dark"
@@ -51,6 +52,14 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
         let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) ?? [:]
         return ["path": path, "customIcon": customIcon(path), "bookmark": bookmark.base64EncodedString(),
                 "entryId": info["CordisXEntryId"] ?? "", "recordPath": info["CordisXEntryRecord"] ?? ""]
+    }
+    if op == "inspect-app" {
+        let path = try string(request, "path"), url = URL(fileURLWithPath: path)
+        guard path.hasSuffix(".app"), FileManager.default.fileExists(atPath: path + "/Contents/Info.plist") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) ?? [:]
+        return ["bundleIdentifier": info["CFBundleIdentifier"] ?? "", "runtimePath": info["CordisXAppRuntime"] ?? ""]
     }
     if op == "copy-custom-icon" {
         let source = try string(request, "source"), destination = try string(request, "destination")
@@ -95,6 +104,21 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
             "CFBundleIconFile": "base.icns", "LSUIElement": true, "CordisXEntryId": id,
             "CordisXEntryRecord": try string(request, "recordPath")]
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+        return ["assembled": true]
+    }
+    if op == "assemble-app" {
+        let path = try string(request, "path"), url = URL(fileURLWithPath: path)
+        let contents = url.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(atPath: try string(request, "helper"), toPath: contents.appendingPathComponent("MacOS/CordisXLauncher").path)
+        try FileManager.default.copyItem(atPath: try string(request, "icon"), toPath: contents.appendingPathComponent("Resources/CordisX.icns").path)
+        let plist: [String: Any] = ["CFBundleExecutable": "CordisXLauncher", "CFBundleIdentifier": "org.cordisx.launcher",
+            "CFBundleName": "CordisX", "CFBundleDisplayName": "CordisX", "CFBundlePackageType": "APPL",
+            "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0", "CFBundleIconFile": "CordisX.icns",
+            "NSHighResolutionCapable": true, "CordisXAppRuntime": try string(request, "runtimePath")]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: contents.appendingPathComponent("Info.plist"))
         return ["assembled": true]
     }
     if op == "activate" {
