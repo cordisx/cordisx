@@ -7,6 +7,8 @@ import { promisify } from 'node:util'
 import { isMissing, privateDirectory } from '../shortcuts/store.js'
 
 const run = promisify(execFile)
+const DEPENDENCY_LAYER_SCHEMA = 2
+const DEPENDENCY_LAYER_RECORD = 'layer.json'
 
 export interface AppRuntimeSource {
   readonly entryScript: string
@@ -119,6 +121,25 @@ async function mergeClonedDirectory(source: string, target: string): Promise<voi
   }
 }
 
+async function validDependencyLayer(target: string, digest: string): Promise<boolean> {
+  try {
+    const targetMetadata = await lstat(target)
+    const modulesMetadata = await lstat(path.join(target, 'node_modules'))
+    const recordPath = path.join(target, DEPENDENCY_LAYER_RECORD)
+    const recordMetadata = await lstat(recordPath)
+    if (
+      !targetMetadata.isDirectory() || targetMetadata.isSymbolicLink()
+      || !modulesMetadata.isDirectory() || modulesMetadata.isSymbolicLink()
+      || !recordMetadata.isFile() || recordMetadata.isSymbolicLink()
+    ) return false
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as Record<string, unknown>
+    return record.schemaVersion === DEPENDENCY_LAYER_SCHEMA && record.digest === digest
+  } catch (error) {
+    if (isMissing(error) || error instanceof SyntaxError) return false
+    throw error
+  }
+}
+
 async function validInstalledRuntime(
   directory: string,
   relativeEntry: string,
@@ -149,12 +170,16 @@ async function installDependencyLayer(support: string, roots: readonly string[])
     resolvedRoots.push(resolved)
     hash.update(await digestTree(resolved))
   }
-  const digest = hash.digest('hex')
+  const sourceDigest = hash.digest('hex')
+  const digest = createHash('sha256')
+    .update(`cordisx.app-runtime-dependencies.v${DEPENDENCY_LAYER_SCHEMA}\0`)
+    .update(sourceDigest)
+    .digest('hex')
   const layers = path.join(support, 'dependencies')
   await privateDirectory(layers)
   const target = path.join(layers, digest)
   const nodeModules = path.join(target, 'node_modules')
-  if (await existingDirectory(nodeModules)) return { digest, nodeModules }
+  if (await validDependencyLayer(target, digest)) return { digest, nodeModules }
   const stage = await mkdtemp(path.join(layers, '.dependencies-'))
   try {
     const stagedModules = path.join(stage, 'node_modules')
@@ -162,7 +187,23 @@ async function installDependencyLayer(support: string, roots: readonly string[])
       if (await existingDirectory(stagedModules)) await mergeClonedDirectory(root, stagedModules)
       else await cloneDirectory(root, stagedModules)
     }
-    await rename(stage, target)
+    await writeFile(
+      path.join(stage, DEPENDENCY_LAYER_RECORD),
+      JSON.stringify({ schemaVersion: DEPENDENCY_LAYER_SCHEMA, digest, sourceDigest }) + '\n',
+      { mode: 0o600 },
+    )
+    try {
+      await rename(stage, target)
+    } catch (error) {
+      if (await validDependencyLayer(target, digest)) {
+        await rm(stage, { recursive: true, force: true })
+        return { digest, nodeModules }
+      }
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error
+      await rm(target, { recursive: true, force: true })
+      await rename(stage, target)
+    }
     return { digest, nodeModules }
   } catch (error) {
     await rm(stage, { recursive: true, force: true })

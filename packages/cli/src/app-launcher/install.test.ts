@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { runAppCommand } from '../cli/app-command.js'
@@ -56,7 +68,7 @@ async function fixture() {
     },
     stdout: () => {},
   }
-  return { root, applications, target, opened, runtime, entryScript }
+  return { root, applications, target, opened, runtime, entryScript, overlayDependencySource }
 }
 
 describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () => {
@@ -137,6 +149,33 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
     expect(second.entryScript).not.toBe(first.entryScript)
     expect(await readFile(first.entryScript, 'utf8')).toContain('first-${dependency}')
     expect(await readFile(second.entryScript, 'utf8')).toContain('second-${dependency}')
+  })
+
+  it('ignores a legacy dependency layer that still contains workspace links', async () => {
+    const f = await fixture()
+    await runAppCommand(f.runtime)
+    const descriptor = path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json')
+    const first = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    const firstRuntime = path.resolve(path.dirname(first.entryScript), '../../..')
+    const firstModules = await realpath(path.join(firstRuntime, 'node_modules'))
+    const firstLayer = path.dirname(firstModules)
+    const record = JSON.parse(await readFile(path.join(firstLayer, 'layer.json'), 'utf8')) as {
+      sourceDigest: string
+    }
+    const legacyLayer = path.join(path.dirname(firstLayer), record.sourceDigest)
+    await rm(firstRuntime, { recursive: true })
+    await rename(firstLayer, legacyLayer)
+    await rm(path.join(legacyLayer, 'layer.json'))
+    const legacyOverlay = path.join(legacyLayer, 'node_modules', '@fixture', 'overlay')
+    await rm(legacyOverlay, { recursive: true })
+    await symlink(f.overlayDependencySource, legacyOverlay, 'dir')
+
+    await runAppCommand(f.runtime)
+    const second = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    const secondModules = await realpath(path.join(path.dirname(second.entryScript), '../../../node_modules'))
+    expect(secondModules).not.toBe(path.join(legacyLayer, 'node_modules'))
+    expect((await lstat(legacyOverlay)).isSymbolicLink()).toBe(true)
+    expect((await lstat(path.join(secondModules, '@fixture', 'overlay'))).isSymbolicLink()).toBe(false)
   })
 
   it('does not overwrite an unknown same-name application', async () => {
