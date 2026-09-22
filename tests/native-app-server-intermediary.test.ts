@@ -279,6 +279,17 @@ describe('native app-server intermediary', () => {
         resumeToken: 'resume-token-managed-thread',
         succeeded: true,
       })
+      h.send({ id: 'unmarked-turn', method: 'turn/start', params: { threadId: 'managed-thread' } })
+      expect(JSON.parse(await h.read())).toMatchObject({ id: 'unmarked-turn', error: { code: -32000 } })
+      h.send({
+        id: 'marked-turn',
+        method: 'turn/start',
+        params: {
+          threadId: 'managed-thread',
+          config: { 'cordisx.operation_token': 'allowed-operation-token' },
+        },
+      })
+      expect(JSON.parse(await h.read())).toMatchObject({ id: 'marked-turn', result: { method: 'turn/start' } })
     } finally {
       await h.close()
     }

@@ -145,7 +145,7 @@ import { shouldEnableNativeSubmission } from './native-submission-launch-policy.
 import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { processStartIdentity } from './supervisor-state.js'
-import { prepareProductionHostBootstrap } from './production-host-bootstrap.js'
+import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -212,36 +212,50 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const supervisorRuntime = await createSupervisorRuntime(environment)
   const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
-  const bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
-    prelaunch: runHost === runInjectedHost,
-    dockInspector: supervisorRuntime.dockInspector,
-    markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
-  })
-  const { plan, debugPort, profile } = bootstrap
-
-  const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
-    homeDir: rootFromConfigPath(configPath),
-    configPath,
-    profileId: selection.profileId,
-  }).catch(error => {
-    stdout(`[cordisx] Certified permission authority unavailable; explicit review remains required: ${String(error)}`)
-    return undefined
-  })
-  const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
-    ? undefined
-    : randomBytes(32).toString('hex')
+  let bootstrap: ProductionHostBootstrap | undefined
+  let plan: ProductionHostBootstrap['plan']
+  let debugPort: ProductionHostBootstrap['debugPort']
+  let profile: ProductionHostBootstrap['profile']
+  let certifiedPermissionAuthority: LauncherMarketplaceCertifiedAuthority | undefined
+  let certifiedPermissionChannelToken: string | undefined
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
-  const nativeSubmissionBootstrap = bootstrap.nativeSubmissionBootstrap
-  const nativeSubmissionUnavailable = bootstrap.nativeSubmissionUnavailable
+  let nativeSubmissionBootstrap: ProductionHostBootstrap['nativeSubmissionBootstrap']
+  let nativeSubmissionUnavailable = false
   let rendererComposition: RendererComposition | undefined
   let productionPluginManagement: ProductionPluginManagementComposition | undefined
-  let profileLease = bootstrap.profileLease
-  const prelaunchedHost = bootstrap.prelaunchedHost
+  let profileLease: ProductionHostBootstrap['profileLease']
+  let prelaunchedHost: ProductionHostBootstrap['prelaunchedHost']
   let profileLeaseHandedOff = false
   let prelaunchedHostHandedOff = false
   try {
+    bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
+      prelaunch: runHost === runInjectedHost,
+      dockInspector: supervisorRuntime.dockInspector,
+      markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
+    })
+    ;({
+      plan,
+      debugPort,
+      profile,
+      profileLease,
+      prelaunchedHost,
+      nativeSubmissionBootstrap,
+      nativeSubmissionUnavailable,
+    } = bootstrap)
+    certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
+      homeDir: rootFromConfigPath(configPath),
+      configPath,
+      profileId: selection.profileId,
+    }).catch(error => {
+      stdout(`[cordisx] Certified permission authority unavailable; explicit review remains required: ${String(error)}`)
+      return undefined
+    })
+    certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
+      ? undefined
+      : randomBytes(32).toString('hex')
+    const activeCertifiedPermissionAuthority = certifiedPermissionAuthority
     pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
     const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
     const configuredComposition = await loadConfig(configPath, {
@@ -322,7 +336,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       runtime: lifecycleTransactionRuntime,
       pluginGenerationArtifactServer: activePluginGenerationArtifactServer,
       reservedPluginIds: [...configuredIds],
-      ...(certifiedPermissionAuthority === undefined ? {} : {
+      ...(activeCertifiedPermissionAuthority === undefined ? {} : {
         certifiedPermissionForArtifact: async (
           artifact: Readonly<{
             source: string
@@ -334,7 +348,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           try {
             // The formal Marketplace projection validates sha256 integrity at its
             // Launcher boundary; its public type is intentionally wider (`string`).
-            return (await certifiedPermissionAuthority.lookup(artifact)).projection as
+            return (await activeCertifiedPermissionAuthority.lookup(artifact)).projection as
               | CordisXCertifiedPermissionProjectionV1
               | undefined
           } catch (error) {
@@ -815,6 +829,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       return
     }
     if (debugPort === undefined) throw new Error('loopback CDP port was not resolved')
+    const resolvedDebugPort = debugPort
     if (profile !== undefined && profileLease === undefined && runHost === runInjectedHost) {
       profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir)
     }
@@ -822,8 +837,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       if (prelaunchedHost === undefined) await adapter.prepareLaunch(plan)
       if (
         !nativeSubmissionUnavailable
-        &&
-        shouldEnableNativeSubmission({
+        && shouldEnableNativeSubmission({
           platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
           adapterId: adapter.id,
           preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
@@ -885,7 +899,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
       })
-      stdout(`[cordisx] loopback CDP port: ${debugPort}`)
+      stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
       const runHostInput: Parameters<typeof runHost>[0] = {
         ...(nativeSubmission === undefined ? {} : { nativeSubmission: nativeSubmission.installation }),
@@ -927,12 +941,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         publisherGrant,
         executable: plan.executable,
         ...(prelaunchedHost === undefined ? {} : { prelaunchedHost }),
-        debugPort,
+        debugPort: resolvedDebugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
         onReady: async () => {
           await markCliProxyStartupConfigApplied()
-          await supervisorRuntime.markReady(debugPort)
+          await supervisorRuntime.markReady(resolvedDebugPort)
         },
         onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
         dockInspector: supervisorRuntime.dockInspector,

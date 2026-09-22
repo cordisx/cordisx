@@ -803,7 +803,7 @@ export async function install(
       },
       documentInstallation,
     )
-    if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
+    if (loopbackModules || generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await support.evaluateRuntimeOperation(
         session,
         `(async () => { try {

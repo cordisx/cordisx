@@ -478,13 +478,11 @@ describe('native Vite development transport', () => {
     expect(connections).toBe(1)
   }, 30_000)
 
-  it('reloads only the native production renderer and awaits its exact graph bootstrap acknowledgement', async () => {
+  it('injects the first native production graph without replacing the already interactive document', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')
     const port = (server.address() as { port: number }).port
     const requests: { path: string; method: string; params: Record<string, unknown> }[] = []
-    let acknowledge: (() => void) | undefined
-    let bootChecks = 0
     server.on('connection', (socket, request) => {
       const socketPath = request.url ?? ''
       socket.on('message', data => {
@@ -503,15 +501,7 @@ describe('native Vite development transport', () => {
               : { result: { value } },
           }))
         }
-        const bootCheck = item.method === 'Runtime.evaluate'
-          && String(params.expression).includes('cordisx:production-boot-pending')
-        if (!bootCheck) {
-          reply()
-          return
-        }
-        bootChecks += 1
-        if (bootChecks === 1) reply({ ok: false, error: 'cordisx:production-boot-pending' })
-        else acknowledge = () => reply()
+        reply()
       })
     })
     const originalFetch = globalThis.fetch
@@ -536,6 +526,10 @@ describe('native Vite development transport', () => {
     const source = `globalThis.__cordisxCompositionBoot = Promise.resolve(
       globalThis.__cordisxRuntime = { kind: 'production-graph' }
     )`
+    const nativeAuthority = {
+      install: vi.fn(async () => ({ dispose: vi.fn(async () => undefined) })),
+    }
+    const nativeResource = 'native resource source'
     const ready = vi.fn()
     const controller = new AbortController()
     const watching = watchAndInject({
@@ -544,12 +538,24 @@ describe('native Vite development transport', () => {
       hasLoopbackGraph: true,
       launcherOwnedNativeTarget: true,
       pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      nativeSubmission: {
+        authority: nativeAuthority as never,
+        transforms: [{
+          url: 'app://-/assets/native-resource.js',
+          sha256: createHash('sha256').update(nativeResource).digest('hex'),
+          transform: () => ({
+            source: nativeResource,
+            anchorMatches: 1,
+            acknowledgementExpression: 'true',
+            fenceExpression: 'undefined',
+          }),
+        }],
+      },
       signal: controller.signal,
       onReady: ready,
     })
     try {
-      await vi.waitFor(() => expect(acknowledge).toBeTypeOf('function'))
-      expect(ready).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
       expect(requests.some(item => item.path === '/web')).toBe(false)
       const methods = requests.map(item => item.method)
       const grantIndex = requests.findIndex(item =>
@@ -559,34 +565,26 @@ describe('native Vite development transport', () => {
         item.method === 'Page.setBypassCSP' && item.params.enabled === true
       )
       const registrationIndex = methods.indexOf('Page.addScriptToEvaluateOnNewDocument')
-      const reloadIndex = methods.indexOf('Page.reload')
-      const acknowledgementIndex = requests.findIndex(item =>
-        item.method === 'Runtime.evaluate'
-        && String(item.params.expression).includes('cordisx:production-boot-pending')
+      const evaluationIndex = requests.findIndex(item =>
+        item.method === 'Runtime.evaluate' && String(item.params.expression).includes(source)
       )
       expect(grantIndex).toBeGreaterThanOrEqual(0)
       expect(grantIndex).toBeLessThan(bypassIndex)
       expect(bypassIndex).toBeLessThan(registrationIndex)
-      expect(registrationIndex).toBeLessThan(reloadIndex)
-      expect(reloadIndex).toBeLessThan(acknowledgementIndex)
-      expect(requests.find(item => item.method === 'Page.reload')?.params).toEqual({})
+      expect(registrationIndex).toBeLessThan(evaluationIndex)
+      expect(requests.some(item => item.method === 'Page.reload')).toBe(false)
+      expect(requests.some(item => item.method === 'Fetch.enable')).toBe(true)
+      expect(nativeAuthority.install).toHaveBeenCalledOnce()
 
       const installedSource = String(requests[registrationIndex]?.params.source)
       const installId = installedSource.match(/__cordisxProductionInstallId = "([^"]+)"/)?.[1]
       expect(installId).toBeDefined()
       expect(installedSource).toContain(`installId: "${installId}"`)
       expect(installedSource).toContain(source)
-      const acknowledgementSource = String(requests[acknowledgementIndex]?.params.expression)
-      expect(acknowledgementSource.match(new RegExp(`__cordisxProductionInstallId !== "${installId}"`, 'g')))
-        .toHaveLength(2)
-      expect(acknowledgementSource).toContain('__cordisxProductionBootstrapState')
-      expect(acknowledgementSource).toContain('CordisX production runtime is undefined after boot')
-      expect(requests.some(item => item.method === 'Runtime.evaluate' && item.params.expression === source)).toBe(
-        false,
-      )
-
-      acknowledge!()
-      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+      expect(requests.some(item =>
+        item.method === 'Runtime.evaluate'
+        && String(item.params.expression).startsWith('globalThis.__cordisxNativeSubmissionActivate?.(false);')
+      )).toBe(true)
     } finally {
       controller.abort()
       await watching
@@ -615,9 +613,8 @@ describe('native Vite development transport', () => {
       item.method === 'Browser.setPermission' && item.params.setting === 'prompt'
     )
     const cleanReloadIndex = requests.findLastIndex(item => item.method === 'Page.reload')
-    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
     expect(disposeIndex).toBeLessThan(cspRestoreIndex)
-    expect(removalIndex).toBeLessThan(cleanReloadIndex)
     expect(removalIndex).toBeLessThan(cspRestoreIndex)
     expect(cspRestoreIndex).toBeLessThan(permissionRestoreIndex)
     expect(permissionRestoreIndex).toBeLessThan(cleanReloadIndex)

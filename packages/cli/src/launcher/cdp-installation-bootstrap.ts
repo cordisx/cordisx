@@ -12,6 +12,7 @@ interface RendererBootstrapOptions {
   readonly target: support.CdpTarget
   readonly installId: string
   readonly documentSource: string
+  readonly evaluationSource: string
   readonly viteDevelopment: boolean
   readonly nativeSubmission?: NativeSubmissionInstallation
   readonly signal?: AbortSignal
@@ -55,6 +56,36 @@ async function bootstrapInstalledDocument(
   const { session, target, nativeSubmission, signal } = options
   const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
   await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
+  if (observeProductionGraph) {
+    let nativeInterception: NativeResourceInterception | undefined
+    if (nativeSubmission !== undefined) {
+      nativeInterception = await installNativeResourceInterception({
+        session,
+        target,
+        transforms: nativeSubmission.transforms,
+        timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
+        ...(signal === undefined ? {} : { signal }),
+        onStatusChange: status => {
+          if (status !== 'unavailable') return
+          void session.send('Runtime.evaluate', {
+            expression: 'globalThis.__cordisxNativeSubmissionActivate?.(false)',
+          }, support.CDP_INJECTION_TIMEOUT_MS).catch(() => undefined)
+        },
+      })
+    }
+    const evaluated = await support.abortable(
+      session.send('Runtime.evaluate', {
+        expression: nativeSubmission === undefined
+          ? options.evaluationSource
+          : `globalThis.__cordisxNativeSubmissionActivate?.(false);\n${options.evaluationSource}`,
+        allowUnsafeEvalBlockedByCSP: true,
+      }, support.CDP_INJECTION_TIMEOUT_MS),
+      signal,
+    )
+    const exception = support.runtimeEvaluationException(evaluated)
+    if (exception !== undefined) throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
+    return nativeInterception
+  }
   const network = observeProductionGraph
     ? await support.observeProductionGraphNetwork(session, options.documentSource)
     : undefined
@@ -126,8 +157,9 @@ export async function installDocumentBootstrap(
   const identifier = added.identifier
   if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
   state.identifier = identifier
-  state.loopbackReloadStarted = viteDevelopment || loopbackModules || nativeSubmission !== undefined
-  if (!state.loopbackReloadStarted) {
+  state.loopbackReloadStarted = viteDevelopment || (!loopbackModules && nativeSubmission !== undefined)
+  const needsDocumentBootstrap = viteDevelopment || loopbackModules || nativeSubmission !== undefined
+  if (!needsDocumentBootstrap) {
     const evaluated = await session.send(
       'Runtime.evaluate',
       { expression: evaluationSource, allowUnsafeEvalBlockedByCSP: true },
@@ -142,6 +174,7 @@ export async function installDocumentBootstrap(
     target,
     installId: reloadInstallId!,
     documentSource: productionDocumentSource ?? documentSource,
+    evaluationSource,
     viteDevelopment,
     ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
     ...(signal === undefined ? {} : { signal }),
