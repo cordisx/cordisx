@@ -126,7 +126,10 @@ function cacheIdentity(
   }))
 }
 
-function validCachedTransform(value: unknown, resources: readonly NativeScriptResource[]): value is CachedNativeTransform {
+function validCachedTransform(
+  value: unknown,
+  resources: readonly NativeScriptResource[],
+): value is CachedNativeTransform {
   if (!value || typeof value !== 'object') return false
   const transform = value as CachedNativeTransform
   const resource = resources.find(candidate => candidate.url === transform.url)
@@ -155,22 +158,24 @@ function validAccountCapability(
 function materializeCachedTransforms(
   cached: readonly CachedNativeTransform[],
 ): readonly NativeResourceTransform[] {
-  return cached.map(record => Object.freeze({
-    url: record.url,
-    sha256: record.sha256,
-    requiredForDocumentReady: record.requiredForDocumentReady,
-    transform: (observed: string) => {
-      if (digest(observed) !== record.sha256) {
-        throw new Error(`Native resource changed after capability discovery: ${record.url}`)
-      }
-      return {
-        source: record.source,
-        anchorMatches: 1,
-        acknowledgementExpression: record.acknowledgementExpression,
-        fenceExpression: record.fenceExpression,
-      }
-    },
-  }))
+  return cached.map(record =>
+    Object.freeze({
+      url: record.url,
+      sha256: record.sha256,
+      requiredForDocumentReady: record.requiredForDocumentReady,
+      transform: (observed: string) => {
+        if (digest(observed) !== record.sha256) {
+          throw new Error(`Native resource changed after capability discovery: ${record.url}`)
+        }
+        return {
+          source: record.source,
+          anchorMatches: 1,
+          acknowledgementExpression: record.acknowledgementExpression,
+          fenceExpression: record.fenceExpression,
+        }
+      },
+    })
+  )
 }
 
 async function readAnalysisCache(
