@@ -817,9 +817,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           debugPort,
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
-          onReady: async () => {
+          onReady: async signal => {
             await markCliProxyStartupConfigApplied()
-            await supervisorRuntime.markReady(debugPort, nativeSubmission?.installation.accountCapability)
+            await supervisorRuntime.markReady(debugPort, nativeSubmission?.installation.accountCapability, signal)
           },
           onHostLaunched: async (pid, inspectorUrl) =>
             await supervisorRuntime.markHostLaunched(pid, inspectorUrl, debugPort),
@@ -957,9 +957,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         debugPort: resolvedDebugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
-        onReady: async () => {
+        onReady: async signal => {
           await markCliProxyStartupConfigApplied()
-          await supervisorRuntime.markReady(resolvedDebugPort, nativeSubmission?.installation.accountCapability)
+          await supervisorRuntime.markReady(resolvedDebugPort, nativeSubmission?.installation.accountCapability, signal)
         },
         onHostLaunched: async (pid, inspectorUrl) =>
           await supervisorRuntime.markHostLaunched(pid, inspectorUrl, resolvedDebugPort),

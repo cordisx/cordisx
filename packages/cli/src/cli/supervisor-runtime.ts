@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import { cdpInstallationAborted } from '../launcher/cdp-session.js'
 import { readHostShortcutPresentation } from '../launcher/shortcut-presentation.js'
 import {
   dockScope,
@@ -87,7 +88,11 @@ export async function createSupervisorRuntime(
   environment: NodeJS.ProcessEnv,
   options: { readonly publicationTimeoutMs?: number } = {},
 ): Promise<{
-  readonly markReady: (debugPort: number, account?: NativeAccountCapabilityDescriptor) => Promise<void>
+  readonly markReady: (
+    debugPort: number,
+    account?: NativeAccountCapabilityDescriptor,
+    signal?: AbortSignal,
+  ) => Promise<void>
   readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>, debugPort?: number) => Promise<boolean>
   readonly close: () => Promise<void>
   readonly mainInspector: boolean
@@ -254,7 +259,7 @@ export async function createSupervisorRuntime(
       }
       return mainAgents !== undefined
     },
-    async markReady(debugPort, account): Promise<void> {
+    async markReady(debugPort, account, signal): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
       const current = await readSupervisorState(supervisorPaths(home, app, profile))
       if (
@@ -281,14 +286,22 @@ export async function createSupervisorRuntime(
         })
         dockAgentInstalled = dock !== undefined
       }
+      let startupSurface: 'authenticated-ready' | 'auth-required' | undefined
       await publishReadyAfterInspectorClose(
-        mainAgents ? async () => await mainAgents!.revealAndClose(account) : undefined,
-        async () =>
+        mainAgents
+          ? async () => {
+            startupSurface = await mainAgents!.revealAndClose(account, signal)
+          }
+          : undefined,
+        async () => {
+          if (signal?.aborted) throw cdpInstallationAborted()
           await writeSupervisorState(supervisorPaths(home, app, profile), {
             ...current,
             phase: 'ready',
+            ...(startupSurface === undefined ? {} : { startupSurface }),
             cdpEndpoint: `http://127.0.0.1:${debugPort}`,
-          }),
+          })
+        },
       )
       mainAgents = undefined
       await releaseStartupOperation?.()

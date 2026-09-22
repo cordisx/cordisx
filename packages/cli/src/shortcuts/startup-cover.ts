@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
+import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
-import { readNativeStartupReadiness } from '../renderer/adapter/startup-readiness.js'
+import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
 
 const require = createRequire(import.meta.url)
 const navigationAgent = fileURLToPath(new URL('../../native/startup-navigation.cjs', import.meta.url))
@@ -21,8 +21,8 @@ interface Held extends Owner {
   loadingShownAt?: number
 }
 export interface StartupCoverController {
-  reveal(account: NativeAccountCapabilityDescriptor | undefined): Promise<void>
-  close(): void
+  reveal(account: NativeAccountCapabilityDescriptor | undefined, signal?: AbortSignal): Promise<StartupSurface>
+  close(): Promise<void>
 }
 async function evaluate<Value>(session: CdpSession, expression: string, timeout = 5000): Promise<Value> {
   const result = await session.send(
@@ -103,7 +103,24 @@ export async function connectStartupCover(
     throw new Error('Owned startup target endpoint changed')
   }
   const page = await CdpSession.connect(socket.href)
-  let identifier: string
+  let identifier: string | undefined
+  const lifetime = new AbortController()
+  let cleanup: Promise<void> | undefined
+  const dispose = (): Promise<void> =>
+    cleanup ??= (async () => {
+      lifetime.abort()
+      if (identifier) {await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, 1000).catch(() =>
+          undefined
+        )}
+      await evaluate(
+        page,
+        `(() => { const api = globalThis.__cordisxStartupDocument; const receipt = api?.snapshot().receipt; if (receipt?.generation === ${
+          JSON.stringify(owner.generation)
+        }) api.retire(receipt); })()`,
+        1000,
+      ).catch(() => undefined)
+      page.close()
+    })()
   try {
     await page.send('Page.enable')
     const css = await readFile(new URL('../../native/startup-cover.css', import.meta.url), 'utf8')
@@ -126,76 +143,97 @@ export async function connectStartupCover(
     })
     console.error('[cordisx-startup]', JSON.stringify({ event: 'app-navigation', at: Date.now(), hostPid: owner.pid }))
   } catch (error) {
-    page.close()
+    await dispose()
     throw error
   }
   return {
-    async reveal(account) {
-      if (!account) throw new Error('Native account descriptor unavailable at startup')
-      console.error(
-        '[cordisx-startup]',
-        JSON.stringify({ event: 'composition-installed', at: Date.now(), hostPid: owner.pid }),
-      )
-      for (;;) {
-        const readyDeadline = Date.now() + 30000
-        while (Date.now() < readyDeadline) {
-          let result: Awaited<ReturnType<typeof readNativeStartupReadiness>> | undefined
-          try {
-            result = await evaluate(page, `(${readNativeStartupReadiness.toString()})(${JSON.stringify(account)})`)
-          } catch { /* A controlled reload may retire this execution context. */ }
-          if (result?.ready && result.receipt && result.observations) {
-            const released = await evaluate<boolean>(
-              page,
-              `globalThis.__cordisxStartupDocument?.release(${JSON.stringify(result.receipt)},${
-                JSON.stringify(result.observations)
-              }) === true`,
-            )
-            if (released) {
-              // The startup registration must not cover an ordinary later reload.
-              await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
-              console.error(
-                '[cordisx-startup]',
-                JSON.stringify({ event: 'usable-released', at: Date.now(), hostPid: owner.pid }),
-              )
-              page.close()
-              return
-            }
-          }
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-        await evaluate(
-          page,
-          'globalThis.__cordisxStartupDocument?.fail(globalThis.__cordisxStartupDocument.snapshot().receipt)',
+    async reveal(account, externalSignal) {
+      const signal = externalSignal ? AbortSignal.any([lifetime.signal, externalSignal]) : lifetime.signal
+      const check = (): void => {
+        if (signal.aborted) throw cdpInstallationAborted()
+      }
+      const read = <T>(expression: string): Promise<T> => {
+        check()
+        return abortable(evaluate<T>(page, expression), signal)
+      }
+      const delay = async (): Promise<void> => {
+        await abortable(new Promise(resolve => setTimeout(resolve, 100)), signal)
+        check()
+      }
+      try {
+        check()
+        if (!account) throw new Error('Native account descriptor unavailable at startup')
+        console.error(
+          '[cordisx-startup]',
+          JSON.stringify({ event: 'composition-installed', at: Date.now(), hostPid: owner.pid }),
         )
-        let action: string | undefined
-        let heartbeatAt = 0
-        while (!action) {
-          const snapshot = await evaluate<
-            { requestedAction?: string; phase?: string; mounted?: boolean; modal?: boolean }
-          >(
-            page,
-            'globalThis.__cordisxStartupDocument?.snapshot()',
+        for (;;) {
+          const readyDeadline = Date.now() + 30000
+          while (Date.now() < readyDeadline) {
+            let result: Awaited<ReturnType<typeof readNativeStartupReadiness>> | undefined
+            try {
+              result = await read(`(${readNativeStartupReadiness.toString()})(${JSON.stringify(account)})`)
+            } catch {
+              check() /* A controlled reload may retire this execution context. */
+            }
+            if (result?.ready && result.receipt && result.observations) {
+              check()
+              const released = await read<boolean>(
+                `globalThis.__cordisxStartupDocument?.release(${JSON.stringify(result.receipt)},${
+                  JSON.stringify(result.observations)
+                }) === true`,
+              )
+              if (released) {
+                // The startup registration must not cover an ordinary later reload.
+                await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+                identifier = undefined
+                console.error(
+                  '[cordisx-startup]',
+                  JSON.stringify({
+                    event: 'usable-released',
+                    at: Date.now(),
+                    hostPid: owner.pid,
+                    surface: result.surface,
+                  }),
+                )
+                return result.surface ?? 'authenticated-ready'
+              }
+            }
+            await delay()
+          }
+          await read(
+            'globalThis.__cordisxStartupDocument?.fail(globalThis.__cordisxStartupDocument.snapshot().receipt)',
           )
-          if (snapshot?.phase !== 'failed' || !snapshot.mounted || !snapshot.modal) {
-            throw new Error('Owning startup recovery surface is unavailable')
+          let action: string | undefined
+          let heartbeatAt = 0
+          while (!action) {
+            const snapshot = await read<
+              { requestedAction?: string; phase?: string; mounted?: boolean; modal?: boolean }
+            >(
+              'globalThis.__cordisxStartupDocument?.snapshot()',
+            )
+            if (snapshot?.phase !== 'failed' || !snapshot.mounted || !snapshot.modal) {
+              throw new Error('Owning startup recovery surface is unavailable')
+            }
+            if (Date.now() - heartbeatAt >= 1000) {
+              await abortable(Promise.resolve(onRecovery?.(true)), signal)
+              heartbeatAt = Date.now()
+            }
+            action = snapshot?.requestedAction
+            if (!action) await delay()
           }
-          if (Date.now() - heartbeatAt >= 1000) {
-            await onRecovery?.(true)
-            heartbeatAt = Date.now()
-          }
-          action = snapshot?.requestedAction
-          if (!action) await new Promise(resolve => setTimeout(resolve, 100))
+          if (action !== 'retry') throw new Error('Startup cancelled in the owning window')
+          await abortable(Promise.resolve(onRecovery?.(false)), signal)
+          // Keep the same target and its persistent bootstrap/cover registrations.
+          await abortable(page.send('Page.reload'), signal).catch(error => {
+            check()
+            if (!String(error).includes('timed out: Page.reload')) throw error
+          })
         }
-        if (action !== 'retry') throw new Error('Startup cancelled in the owning window')
-        await onRecovery?.(false)
-        // Keep the same target and its persistent bootstrap/cover registrations.
-        await page.send('Page.reload').catch(error => {
-          if (!String(error).includes('timed out: Page.reload')) throw error
-        })
+      } finally {
+        await dispose()
       }
     },
-    close() {
-      page.close()
-    },
+    close: dispose,
   }
 }

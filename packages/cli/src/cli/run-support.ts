@@ -446,6 +446,19 @@ export async function waitForHostExitAfterReadiness(input: {
   ])
 }
 
+/** A rejected startup UI callback is terminal, including the user's Close action. */
+export async function completeHostReadiness(
+  controller: AbortController,
+  ready?: (signal?: AbortSignal) => void | Promise<void>,
+): Promise<void> {
+  try {
+    await ready?.(controller.signal)
+  } catch (error) {
+    controller.abort()
+    throw error
+  }
+}
+
 export async function runInjectedHost(input: {
   readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
   readonly source: string | (() => string)
@@ -492,7 +505,7 @@ export async function runInjectedHost(input: {
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
-  readonly onReady?: () => void | Promise<void>
+  readonly onReady?: (signal?: AbortSignal) => void | Promise<void>
   readonly onHostLaunched?: import('../launcher/process.js').HostLaunchIdentityObserver
   /** Internal, owned-entry bootstrap only. Never a user Host argument. */
   readonly mainInspector?: boolean
@@ -544,7 +557,7 @@ export async function runInjectedHost(input: {
     onReady: async () => {
       if (reportedReady) return
       reportedReady = true
-      await input.onReady?.()
+      await completeHostReadiness(controller, input.onReady)
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
     },

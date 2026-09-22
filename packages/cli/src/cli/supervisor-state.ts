@@ -22,6 +22,7 @@ export interface SupervisorState {
   readonly hostPid?: number
   readonly hostProcessStartedAt?: string
   readonly cdpEndpoint?: string
+  readonly startupSurface?: 'authenticated-ready' | 'auth-required'
   /** Live heartbeat only while the owning window presents Retry/Close. */
   readonly startupRecovery?: { readonly waitingForUser: boolean; readonly attempt: number; readonly updatedAt: number }
   /** Sanitized launch diagnosis; detailed output remains in host.log. */
@@ -91,6 +92,8 @@ function validState(value: unknown): value is SupervisorState {
     && (item.hostPid === undefined || (Number.isSafeInteger(item.hostPid) && (item.hostPid as number) > 0))
     && (item.hostProcessStartedAt === undefined || typeof item.hostProcessStartedAt === 'string')
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')
+    && (item.startupSurface === undefined || item.startupSurface === 'authenticated-ready'
+      || item.startupSurface === 'auth-required')
     && (item.startupRecovery === undefined || validStartupRecovery(item.startupRecovery))
     && (item.failure === undefined || typeof item.failure === 'string')
     && (item.failedAt === undefined || typeof item.failedAt === 'string')

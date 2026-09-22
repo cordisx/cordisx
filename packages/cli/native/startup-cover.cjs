@@ -72,6 +72,10 @@ function installCover(options) {
     phase = 'retired'
     observer.disconnect()
     for (const name of events) globalThis.removeEventListener(name, block, true)
+    globalThis.removeEventListener('pagehide', retire)
+    dialog.removeEventListener('cancel', cancel)
+    if (dialog.open) dialog.close()
+    dialog.remove()
   }
   globalThis.addEventListener('pagehide', retire, { once: true })
   const cancel = event => event.preventDefault()
@@ -89,8 +93,9 @@ function installCover(options) {
         disposed || phase !== 'covered' || !matches(value)
         || !matches(observations?.receipt)
         || document.readyState === 'loading'
-        || observations?.hostUsable !== true || observations?.cordisxReady !== true
-        || observations?.authenticated !== true
+        || observations?.hostUsable !== true
+        || !(observations?.authenticated === true && observations?.cordisxReady === true
+          || observations?.authenticated === false && observations?.loginUsable === true)
       ) return false
       disposed = true
       phase = 'released'
@@ -109,6 +114,11 @@ function installCover(options) {
       actions.hidden = false
       retry.focus()
       mount()
+      return true
+    },
+    retire(value) {
+      if (disposed || !matches(value)) return false
+      retire()
       return true
     },
   })

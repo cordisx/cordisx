@@ -45,6 +45,45 @@ function readyDocument() {
   }
 }
 describe('startup release requires the same usable authenticated document', () => {
+  const showLogin = () => {
+    document.body.innerHTML = '<main><div><h1>登录 ChatGPT</h1></div><button>继续登录</button></main>'
+    for (const element of document.querySelectorAll('h1, button')) {
+      element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
+    }
+  }
+  it('releases an interactive native login only on explicit signed-out status, without requiring model or boot', async () => {
+    readyDocument()
+    showLogin()
+    vi.stubGlobal('__cordisxBoot', undefined)
+    vi.stubGlobal('__cordisxRuntime', undefined)
+    vi.stubGlobal('__startupAccountRead', async () => ({ status: 'ready', data: null }))
+    expect(await read()).toMatchObject({
+      ready: true,
+      surface: 'auth-required',
+      observations: { authenticated: false, loginUsable: true },
+    })
+    document.querySelector('button')!.disabled = true
+    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+  })
+  it.each(['unavailable', 'error'])(
+    'never treats %s account state as signed out even with a visible login form',
+    async status => {
+      readyDocument()
+      showLogin()
+      vi.stubGlobal('__startupAccountRead', async () => ({ status, data: null }))
+      expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
+    },
+  )
+  it('does not release a stale login page for an authenticated account or accept a stale signed-out result', async () => {
+    const { navigate } = readyDocument()
+    showLogin()
+    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+    vi.stubGlobal('__startupAccountRead', async () => {
+      navigate()
+      return { status: 'ready', data: null }
+    })
+    expect(await read()).toMatchObject({ ready: false, reason: 'document-changed' })
+  })
   it('does not accept an existing shell without real CordisX boot', async () => {
     readyDocument()
     vi.stubGlobal('__cordisxBoot', undefined)

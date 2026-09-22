@@ -281,6 +281,7 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
     uptime: Math.max(0, Date.now() - Date.parse(state.createdAt)),
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
+    ...(state.startupSurface === undefined ? {} : { startupSurface: state.startupSurface }),
     ...(state.failure === undefined ? {} : { failure: state.failure }),
   }
 }

@@ -24,6 +24,40 @@ async function documentFixture(url = 'app://-/index.html') {
 }
 const ready = receipt => ({ receipt, hostUsable: true, cordisxReady: true, authenticated: true })
 
+test('explicit login usability releases input without claiming authentication', async () => {
+  const dom = await documentFixture()
+  try {
+    const api = dom.window.__cordisxStartupDocument
+    const receipt = api.snapshot().receipt
+    assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false }), false)
+    assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false, loginUsable: true }), true)
+    assert.equal(api.snapshot().phase, 'released')
+    assert.equal(dom.window.document.querySelector('dialog'), null)
+  } finally {
+    dom.window.close()
+  }
+})
+
+test('cancellation retires the observer, modal and input listeners without ready observations', async () => {
+  const dom = await documentFixture()
+  const w = dom.window
+  try {
+    const api = w.__cordisxStartupDocument
+    assert.equal(api.retire({ ...api.snapshot().receipt, nonce: 'stale' }), false)
+    assert.equal(api.retire(api.snapshot().receipt), true)
+    w.document.body.innerHTML = '<button>Native control</button>'
+    await Promise.resolve()
+    let clicks = 0
+    w.document.querySelector('button').addEventListener('click', () => clicks++)
+    w.document.querySelector('button').click()
+    assert.equal(clicks, 1)
+    assert.equal(api.snapshot().phase, 'retired')
+    assert.equal(w.document.querySelector('dialog'), null)
+  } finally {
+    w.close()
+  }
+})
+
 test('body replacement stays covered; unready or stale receipts cannot release; cleanup restores input', async () => {
   const dom = await documentFixture()
   const { window: w } = dom

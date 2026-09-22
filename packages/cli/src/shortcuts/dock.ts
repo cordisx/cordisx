@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import type { StartupSurface } from '../renderer/adapter/startup-readiness.js'
 import { connectStartupCover, installStartupNavigation, type StartupCoverController } from './startup-cover.js'
 import { CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import { hasMatchingProcessIdentity } from '../cli/supervisor-state.js'
@@ -221,7 +222,7 @@ async function inspectorClosed(port: number): Promise<boolean> {
 }
 
 export interface HostMainAgentController {
-  revealAndClose(account?: NativeAccountCapabilityDescriptor): Promise<void>
+  revealAndClose(account?: NativeAccountCapabilityDescriptor, signal?: AbortSignal): Promise<StartupSurface>
   close(): Promise<void>
 }
 
@@ -336,17 +337,18 @@ export async function installHostMainAgents(input: {
   } catch (error) {
     // The caller owns process-tree cleanup. Do not disconnect/resume a paused
     // main before that cleanup: its first document may not have a cover yet.
-    startup?.close()
+    await startup?.close()
     throw error
   }
   return {
-    async revealAndClose(account): Promise<void> {
+    async revealAndClose(account, signal): Promise<StartupSurface> {
       if (!startup) throw new Error('Owned startup surface unavailable')
-      await startup.reveal(account)
+      const surface = await startup.reveal(account, signal)
       await closeInspector()
+      return surface
     },
     async close() {
-      startup?.close()
+      await startup?.close()
       await closeInspector()
     },
   }
