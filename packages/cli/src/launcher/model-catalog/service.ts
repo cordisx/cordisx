@@ -275,7 +275,7 @@ export class ModelCatalogService {
     if (!connection || connection.scopeRevision !== binding.scopeRevision || !connection.current()) {
       throw new CatalogError('unsupported')
     }
-    const adapter = this.options.registry.resolve(connection.endpoint, strategy.adapter)
+    const adapter = this.options.registry.resolve(connection, strategy.adapter)
     const models = await adapter.discover(connection, signal)
     if (!connection.current()) throw new CatalogError('cancelled')
     return models

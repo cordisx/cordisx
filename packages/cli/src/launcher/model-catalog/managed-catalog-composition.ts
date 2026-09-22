@@ -217,12 +217,19 @@ export class ManagedCatalogComposition {
     const denied = ['authentication', 'permission', 'account'].includes(this.#service.snapshot(view.id)?.error ?? '')
     const route = this.options.responsesAvailable && !this.#persistError
       && !denied
-    const capabilities = this.#service.sourceSnapshot(view.id)?.models ?? []
     const projected = projectManagementOverlay(
       this.members(view).map(model => {
-        const responses = capabilities.find(source => source.id === model.id)?.protocolCapabilities?.responses
-          ?? view.settings.protocol === 'responses'
-        return { ...model, protocolCapabilities: { responses }, selectable: route && responses }
+        const userDeclared = model.provenance?.includes('manual')
+          || model.notListed === true && model.provenance?.includes('manual-supplement')
+          || model.provenance?.includes('script')
+          || model.provenance?.includes('script-supplement')
+        const responses = model.protocolCapabilities?.responses
+          ?? (userDeclared && view.settings.protocol === 'responses' ? true : undefined)
+        return {
+          ...model,
+          ...(responses === undefined ? {} : { protocolCapabilities: { responses } }),
+          selectable: route && responses === true,
+        }
       }),
       this.#overlay.read(view.id, view.scopeRevision),
     )
@@ -233,6 +240,8 @@ export class ManagedCatalogComposition {
         notListed: row.notListed ?? false,
         ...(row.blocked ? { reason: 'blocked' as const } : denied
           ? { reason: 'permission' as const }
+          : row.protocolCapabilities === undefined
+          ? { reason: 'unconfirmed' as const }
           : !row.selectable
           ? { reason: 'pending-apply' as const }
           : {}),
@@ -254,8 +263,11 @@ export class ManagedCatalogComposition {
       const rows = this.rows(view), strategy = view.settings.strategy
       const replacing = script?.mode === 'replace'
       const status = replacing ? script : snapshot
-      const route = this.options.responsesAvailable && (view.settings.protocol === 'responses'
-        || this.#service.sourceSnapshot(view.id)?.models.some(model => model.protocolCapabilities?.responses))
+      const supportsResponses = rows.some(row =>
+        'protocolCapabilities' in row && row.protocolCapabilities?.responses === true
+      )
+      const route = this.options.responsesAvailable && !this.#persistError
+        && !['authentication', 'permission', 'account'].includes(snapshot?.error ?? '')
       return {
         bindingRef: view.id,
         providerId: providerId(view.id),
@@ -281,7 +293,7 @@ export class ManagedCatalogComposition {
               ['native', 'auto', 'manual', 'manual-supplement', 'script', 'script-supplement'].includes(value),
           ),
         })),
-        protocolCapabilities: { responses: Boolean(route) },
+        protocolCapabilities: { responses: route && supportsResponses },
         supplement: view.settings.supplement,
         capabilities: [
           'setOverlay',
@@ -304,7 +316,7 @@ export class ManagedCatalogComposition {
         ],
         diagnostics: {
           scopeConfirmed: true,
-          targetState: route ? 'applied' : 'unavailable',
+          targetState: route && supportsResponses ? 'applied' : 'unavailable',
           ...(this.#persistError ? { code: 'persist-failed' as const } : status?.error
             ? { code: status.error === 'ambiguous' ? 'unsupported' as const : status.error }
             : {}),

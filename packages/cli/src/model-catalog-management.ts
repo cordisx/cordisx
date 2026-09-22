@@ -25,6 +25,8 @@ export type CatalogManagementCode =
 export interface CatalogEditableModel {
   readonly id: string
   readonly label?: string
+  /** User declaration for this exact connection scope and model ID, not adapter evidence. */
+  readonly protocolCapabilities?: CatalogProtocolCapabilities
 }
 
 export interface CatalogConnectionSettings {

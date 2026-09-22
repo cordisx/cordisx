@@ -32,6 +32,7 @@ describe('explicit same-scope supplements', () => {
       }]),
       connection: () => ({
         endpoint: 'https://fixture.invalid',
+        providerName: 'Fixture',
         scopeRevision: 'account-1',
         current: () => true,
         request: async () => Response.json({}),
@@ -76,12 +77,33 @@ describe('explicit same-scope supplements', () => {
     expect(models()[0]?.provenance).toEqual(['auto'])
   })
 
+  it('overrides exact capabilities without letting label-only edits elevate or erase source evidence', async () => {
+    ids = ['same']
+    setup()
+    await service.refresh(binding.bindingRef)
+    expect(models()[0]?.protocolCapabilities).toBeUndefined()
+    supplement([{ id: 'same', label: 'Renamed', protocolCapabilities: { responses: true } }])
+    expect(models()[0]).toMatchObject({
+      label: 'Renamed',
+      protocolCapabilities: { responses: true },
+      provenance: ['auto', 'manual-supplement'],
+    })
+    ids = ['same']
+    await service.refresh(binding.bindingRef)
+    expect(models()[0]?.protocolCapabilities).toEqual({ responses: true })
+    supplement([{ id: 'same', label: 'Label only' }])
+    expect(models()[0]).toMatchObject({ label: 'Label only', provenance: ['auto', 'manual-supplement'] })
+    expect(models()[0]?.protocolCapabilities).toBeUndefined()
+    supplement([{ id: 'same', protocolCapabilities: { responses: false } }])
+    expect(models()[0]?.protocolCapabilities).toEqual({ responses: false })
+  })
+
   it('retains independent LKG on invalid supplement and temporary auto failure', async () => {
     ids = ['listed']
     setup()
     supplement([{ id: 'hidden' }])
     await service.refresh(binding.bindingRef)
-    supplement([{ id: 'bad', capabilities: { tools: true } }])
+    supplement([{ id: 'bad', protocolCapabilities: {} }])
     failed = true
     await service.refresh(binding.bindingRef)
     expect(models().map(model => model.id)).toEqual(['hidden', 'listed'])

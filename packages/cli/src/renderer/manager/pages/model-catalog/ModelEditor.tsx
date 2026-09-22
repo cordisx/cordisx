@@ -16,6 +16,8 @@ export function validModels(models: readonly CatalogEditableModel[]): boolean {
       && !/[\u0000-\u001f\u007f]/u.test(model.id)
       && (model.label === undefined || model.label.trim().length > 0 && model.label.length <= 256
           && !/[\u0000-\u001f\u007f]/u.test(model.label))
+      && (model.protocolCapabilities === undefined
+        || typeof model.protocolCapabilities.responses === 'boolean')
     )
 }
 
@@ -29,7 +31,12 @@ export function ModelEditor({ view, locale, mode, save, close }: {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const live = mode === 'supplement' ? view.supplement : view.rows.filter(row => row.present)
   const [draft, setDraft] = useState(() =>
-    live.map((model, key) => ({ key, id: model.id, label: model.label === model.id ? '' : model.label ?? '' }))
+    live.map((model, key) => ({
+      key,
+      id: model.id,
+      label: model.label === model.id ? '' : model.label ?? '',
+      ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+    }))
   )
   const [nextKey, setNextKey] = useState(draft.length)
   const [revision, setRevision] = useState(view.revision)
@@ -39,7 +46,11 @@ export function ModelEditor({ view, locale, mode, save, close }: {
   const [failed, setFailed] = useState(false)
   const changed = revision !== view.revision
   const scopeChanged = scope !== view.scopeRevision
-  const models = draft.map(item => ({ id: item.id, ...(item.label === '' ? {} : { label: item.label }) }))
+  const models = draft.map(item => ({
+    id: item.id,
+    ...(item.label === '' ? {} : { label: item.label }),
+    ...(item.protocolCapabilities ? { protocolCapabilities: item.protocolCapabilities } : {}),
+  }))
   const valid = validModels(models)
   const update = (key: number, field: 'id' | 'label', value: string) => {
     setDraft(draft.map(item => item.key === key ? { ...item, [field]: value } : item))

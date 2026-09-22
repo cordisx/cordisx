@@ -18,7 +18,11 @@ export type CatalogStrategy =
 export interface CatalogSupplement {
   readonly scopeRevision: string
   readonly authorityRevision: string
-  readonly models: readonly { readonly id: string; readonly label?: string }[]
+  readonly models: readonly {
+    readonly id: string
+    readonly label?: string
+    readonly protocolCapabilities?: { readonly responses: boolean }
+  }[]
 }
 
 export interface CatalogBinding {
@@ -29,13 +33,20 @@ export interface CatalogBinding {
 }
 
 export interface DiscoveryRequest {
+  /** Exact provider API base. The owner, not the adapter, grants this destination. */
   readonly origin: string
   readonly method: 'GET'
   readonly path: '/models'
 }
 
-export interface DiscoveryConnection {
+export const MAX_DISCOVERY_RESPONSE_BYTES = 8 * 1024 * 1024
+
+export interface DiscoveryTarget {
   readonly endpoint: string
+  readonly providerName: string
+}
+
+export interface DiscoveryConnection extends DiscoveryTarget {
   readonly scopeRevision: string
   /** Host-injected operation capability. No raw credential is exposed to an adapter. */
   readonly request: (operation: DiscoveryRequest, signal: AbortSignal) => Promise<Response>
@@ -46,7 +57,7 @@ export interface DiscoveryAdapter {
   readonly id: string
   readonly version: string
   readonly pagination: 'none' | 'cursor'
-  matches(endpoint: string): boolean
+  matches(target: DiscoveryTarget): boolean
   discover(connection: DiscoveryConnection, signal: AbortSignal): Promise<readonly CatalogModel[]>
 }
 

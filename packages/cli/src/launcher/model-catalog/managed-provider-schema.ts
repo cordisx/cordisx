@@ -1,6 +1,13 @@
-import { boundedString, CatalogError, type CatalogStrategy, object, parseCatalogStrategy } from './contracts.js'
+import {
+  boundedString,
+  CatalogError,
+  type CatalogStrategy,
+  type CatalogSupplement,
+  object,
+  parseCatalogStrategy,
+} from './contracts.js'
 import { parseSupplement } from './supplement.js'
-import { isDeepSeekOfficialEndpoint } from './deepseek.js'
+import { builtinDiscoveryRegistry } from './builtin-registry.js'
 
 export interface ManagedProviderSettings {
   readonly title: string
@@ -8,7 +15,7 @@ export interface ManagedProviderSettings {
   readonly protocol: 'responses' | 'chat-completions'
   readonly discoveryEnabled: boolean
   readonly strategy: CatalogStrategy
-  readonly supplement: readonly { readonly id: string; readonly label?: string }[]
+  readonly supplement: CatalogSupplement['models']
 }
 
 export function managedProviderSettings(value: unknown): ManagedProviderSettings {
@@ -36,10 +43,12 @@ export function managedProviderSettings(value: unknown): ManagedProviderSettings
   if (strategy.kind !== 'auto' && !(strategy.kind === 'manual' && 'ids' in strategy)) {
     throw new CatalogError('unsupported')
   }
-  if (
-    strategy.kind === 'auto'
-    && (!isDeepSeekOfficialEndpoint(input.endpoint) || !['detect', 'deepseek-official'].includes(strategy.adapter))
-  ) throw new CatalogError('unsupported')
+  if (strategy.kind === 'auto') {
+    builtinDiscoveryRegistry().resolve(
+      { endpoint: input.endpoint, providerName: input.title },
+      strategy.adapter,
+    )
+  }
   const supplement = parseSupplement({
     scopeRevision: 'validation',
     authorityRevision: 'validation',

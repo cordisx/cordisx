@@ -21,11 +21,23 @@ export function parseSupplement(value: unknown): CatalogSupplement {
     const model = object(value)
     if (
       !model || !boundedString(model.id) || (model.label !== undefined && !boundedString(model.label, 256))
-      || Object.keys(model).some(key => key !== 'id' && key !== 'label')
+      || Object.keys(model).some(key => !['id', 'label', 'protocolCapabilities'].includes(key))
+    ) throw new CatalogError('source-invalid')
+    const capabilities = model.protocolCapabilities === undefined ? undefined : object(model.protocolCapabilities)
+    if (
+      capabilities
+        && (Object.keys(capabilities).length !== 1 || typeof capabilities.responses !== 'boolean')
+      || model.protocolCapabilities !== undefined && !capabilities
     ) throw new CatalogError('source-invalid')
     if (seen.has(model.id)) return []
     seen.add(model.id)
-    return [Object.freeze({ id: model.id, ...(typeof model.label === 'string' ? { label: model.label } : {}) })]
+    return [Object.freeze({
+      id: model.id,
+      ...(typeof model.label === 'string' ? { label: model.label } : {}),
+      ...(capabilities
+        ? { protocolCapabilities: Object.freeze({ responses: capabilities.responses as boolean }) }
+        : {}),
+    })]
   })
   return Object.freeze({
     scopeRevision: input.scopeRevision,
@@ -56,7 +68,11 @@ export function composeMembers(
           aliases: existing?.aliases ?? Object.freeze([]),
           provenance: Object.freeze(existing ? [provenance, 'manual-supplement'] : ['manual-supplement']),
           notListed: existing === undefined,
-          ...(existing?.protocolCapabilities ? { protocolCapabilities: existing.protocolCapabilities } : {}),
+          ...(model.protocolCapabilities
+            ? { protocolCapabilities: model.protocolCapabilities }
+            : existing?.protocolCapabilities
+            ? { protocolCapabilities: existing.protocolCapabilities }
+            : {}),
         }) as CatalogModel,
       )
     }
