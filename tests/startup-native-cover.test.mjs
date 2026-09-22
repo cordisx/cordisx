@@ -45,7 +45,11 @@ test('explicit login usability releases input without claiming authentication', 
   }
 })
 
-test.each(['release', 'retire', 'fail'])('restores only the native static splash mark on %s', async outcome => {
+test.each(
+  ['release', 'retire', 'fail'].flatMap(outcome =>
+    ['relative size-full', 'absolute inset-0'].map(layout => [outcome, layout])
+  ),
+)('restores only the native splash marks on %s (%s)', async (outcome, layout) => {
   const dom = await documentFixture('about:blank')
   const w = dom.window
   try {
@@ -59,10 +63,15 @@ test.each(['release', 'retire', 'fail'])('restores only the native static splash
         nativeMarkSelector: NATIVE_STARTUP_MARK_SELECTOR,
       }),
     )
-    const mark = w.document.querySelector(NATIVE_STARTUP_MARK_SELECTOR)
+    let mark = w.document.querySelector(NATIVE_STARTUP_MARK_SELECTOR)
     const ordinary = w.document.querySelector('#ordinary')
     assert.equal(w.getComputedStyle(mark).visibility, 'hidden')
     assert.equal(w.getComputedStyle(ordinary).visibility, 'visible')
+    w.document.querySelector('.startup-loader').outerHTML =
+      `<div role="presentation" class="${layout} bg-transparent"><div class="flex flex-col items-center gap-2"><div aria-hidden="true" class="_Root_yklzu_11 size-14">React fallback</div></div></div>`
+    await Promise.resolve()
+    mark = w.document.querySelector(NATIVE_STARTUP_MARK_SELECTOR)
+    assert.equal(w.getComputedStyle(mark).visibility, 'hidden')
     const api = w.__cordisxStartupDocument, receipt = api.snapshot().receipt
     assert.equal(outcome === 'release' ? api.release(receipt, ready(receipt)) : api[outcome](receipt), true)
     await Promise.resolve()
