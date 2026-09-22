@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
+import { startupBrand } from './startup-brand.js'
 
 const require = createRequire(import.meta.url)
 const navigationAgent = fileURLToPath(new URL('../../native/startup-navigation.cjs', import.meta.url))
@@ -39,7 +40,13 @@ export async function installStartupNavigation(
   frameId: string,
   owner: Owner,
 ): Promise<void> {
-  const html = await readFile(new URL('../../native/startup-loading.html', import.meta.url), 'utf8')
+  const brand = await startupBrand()
+  const css = await readFile(new URL('../../native/startup-cover.css', import.meta.url), 'utf8')
+  const html = (await readFile(new URL('../../native/startup-loading.html', import.meta.url), 'utf8'))
+    .replace('__STARTUP_CSS__', css)
+    .replace('__STARTUP_MARK__', brand.markup)
+    .replace('__STARTUP_ANIMATION__', `(${brand.animate})(document.querySelector('.mark'))`)
+    .replaceAll('__STARTUP_NONCE__', owner.generation)
   const options = {
     ...owner,
     deadlineMs: 30000,
@@ -124,9 +131,15 @@ export async function connectStartupCover(
   try {
     await page.send('Page.enable')
     const css = await readFile(new URL('../../native/startup-cover.css', import.meta.url), 'utf8')
-    const builder = require(coverBuilder) as { buildCoverSource(options: unknown): string }
+    const brand = await startupBrand()
+    const builder = require(coverBuilder) as { buildCoverSource(options: unknown, animate?: string): string }
     const added = await page.send('Page.addScriptToEvaluateOnNewDocument', {
-      source: builder.buildCoverSource({ generation: owner.generation, url: 'app://-/index.html', css }),
+      source: builder.buildCoverSource({
+        generation: owner.generation,
+        url: 'app://-/index.html',
+        css,
+        mark: brand.markup,
+      }, brand.animate),
     })
     if (typeof added.identifier !== 'string') throw new Error('Missing startup document registration')
     identifier = added.identifier

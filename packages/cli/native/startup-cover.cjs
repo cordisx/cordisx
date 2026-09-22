@@ -1,6 +1,6 @@
 // Host-owned startup cover. This code executes in the original
 // main renderer, before its scripts, and never creates a native window/view.
-function installCover(options) {
+function installCover(options, animateMark) {
   if (globalThis.top !== globalThis || location.href !== options.url) return
   if (globalThis.__cordisxStartupDocument) return
   const receipt = Object.freeze({
@@ -26,10 +26,17 @@ function installCover(options) {
   const main = document.createElement('main')
   main.setAttribute('role', 'status')
   main.setAttribute('aria-live', 'polite')
-  const heading = document.createElement('h1')
-  heading.textContent = 'CordisX'
+  const mark = document.createElement('div')
+  mark.className = 'mark'
+  mark.setAttribute('aria-hidden', 'true')
+  if (options.mark) {
+    const parsed = new DOMParser().parseFromString(`<body>${options.mark}</body>`, 'text/html')
+    for (const svg of parsed.body.children) mark.append(document.importNode(svg, true))
+  }
+  const status = document.createElement('div')
+  status.className = 'status'
   const message = document.createElement('p')
-  message.textContent = '正在准备 ChatGPT 与 CordisX'
+  message.textContent = '正在准备…'
   const actions = document.createElement('div')
   actions.hidden = true
   const retry = document.createElement('button')
@@ -45,7 +52,8 @@ function installCover(options) {
     requestedAction = 'close'
   }
   actions.append(retry, close)
-  main.append(heading, message, actions)
+  status.append(message, actions)
+  main.append(mark, status)
   shadow.append(style, main)
   // Root-level mounting survives the app replacing its body/root subtree.
   function mount() {
@@ -124,6 +132,8 @@ function installCover(options) {
   })
   Object.defineProperty(globalThis, '__cordisxStartupDocument', { value: api, configurable: false })
   mount()
+  animateMark?.(mark)
 }
 
-exports.buildCoverSource = options => `(${installCover.toString()})(${JSON.stringify(options)});`
+exports.buildCoverSource = (options, animate) =>
+  `(${installCover.toString()})(${JSON.stringify(options)},${animate ?? 'undefined'});`
