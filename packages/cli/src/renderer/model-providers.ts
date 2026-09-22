@@ -16,12 +16,14 @@ export interface NativeProviderProjection {
   readonly pluginId: string
   readonly title?: string
   readonly selectorBrand?: ProviderBrandProjection
-  readonly models: readonly (ModelProviderModelV1 & { readonly selectorBrand?: ModelBrandChoice })[]
+  readonly models: readonly HostModelProviderModel[]
   readonly defaultModelId?: string
 }
 
 export interface HostModelProviderModel extends ModelProviderModelV1 {
   readonly selectorBrand?: ModelBrandChoice
+  readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement')[]
+  readonly notListed?: boolean
 }
 
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
@@ -47,9 +49,15 @@ export function nativeModelProviderRegistry(managed?: {
     __cordisxNativeProviderCommandChannel?:
       import('./native-provider-selection-client.js').NativeProviderSelectionCommandChannel
   }).__cordisxNativeProviderCommandChannel
-  return new ModelProviderRegistry(async () =>
-    channel?.catalogRead === undefined ? await managed?.nativeProviders() ?? [] : await channel.catalogRead()
+  const registry = new ModelProviderRegistry(async () =>
+    channel?.catalogSnapshotRead !== undefined
+      ? (await channel.catalogSnapshotRead()).providers
+      : channel?.catalogRead === undefined
+      ? await managed?.nativeProviders() ?? []
+      : await channel.catalogRead()
   )
+  if (channel?.catalogSubscribe) registry.connectSource(channel.catalogSubscribe)
+  return registry
 }
 
 function modelIdentities(model: ModelProviderModelV1): ReadonlySet<string> {
@@ -86,6 +94,26 @@ function label(value: string, maximum = 256): string {
 }
 
 export class ModelProviderRegistry {
+  private disconnectSource?: () => void
+  private sourceReconcile?: ReturnType<typeof setInterval>
+
+  hasLiveSource(): boolean {
+    return this.disconnectSource !== undefined
+  }
+
+  connectSource(subscribe: (listener: () => void) => () => void): void {
+    if (this.disposed) return
+    this.disconnectSource?.()
+    if (this.sourceReconcile) clearInterval(this.sourceReconcile)
+    const refresh = () => {
+      void this.refresh()
+    }
+    this.disconnectSource = subscribe(refresh)
+    // Full snapshots also repair missed invalidations and read/subscribe races.
+    this.sourceReconcile = setInterval(refresh, 30_000)
+    this.sourceReconcile.unref?.()
+    refresh()
+  }
   private projections: readonly NativeProviderProjection[] = []
   private readonly presentations = new Map<
     string,
@@ -152,6 +180,12 @@ export class ModelProviderRegistry {
                 : { aliases: Object.freeze(model.aliases.map(alias => label(alias))) }),
               ...(model.group === undefined ? {} : { group: label(model.group) }),
               ...(isModelBrandChoice(model.selectorBrand) ? { selectorBrand: model.selectorBrand } : {}),
+              ...(model.provenance === undefined ? {} : {
+                provenance: Object.freeze(
+                  model.provenance.filter(value => ['auto', 'native', 'manual', 'manual-supplement'].includes(value)),
+                ),
+              }),
+              ...(model.notListed === true ? { notListed: true } : {}),
             })
           )),
         })
@@ -287,6 +321,8 @@ export class ModelProviderRegistry {
   }
 
   dispose(): void {
+    this.disconnectSource?.()
+    if (this.sourceReconcile) clearInterval(this.sourceReconcile)
     this.disposed = true
     this.revision++
     this.disconnectVisibility?.()

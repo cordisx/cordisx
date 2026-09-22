@@ -234,6 +234,8 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   }
 
   useEffect(() => {
+    // A newly discovered member must not turn a catalog update into a native selection.
+    if (registry.hasLiveSource()) return
     const preference = native.draftPreference
     if (preference === undefined || native.threadId !== undefined || native.pendingProviderId !== undefined) return
     const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
@@ -260,6 +262,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
     native.nativeModels,
     native.pendingProviderId,
     native.threadId,
+    registry,
     transport,
   ])
 

@@ -17,6 +17,8 @@ export interface NativeModelProviderCatalogEntry {
     readonly label: string
     readonly aliases: readonly string[]
     readonly selectorBrand?: ModelBrandChoice
+    readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement')[]
+    readonly notListed?: boolean
   }[]
   readonly defaultModelId?: string
 }

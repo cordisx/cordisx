@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, open, rename, stat, unlink } from 'node:fs/promise
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { parseProfileModelOptions } from './home-config-model-catalogs.js'
+import { parseProfileModelOptions, PROFILE_MODEL_OPTION_KEYS } from './home-config-model-catalogs.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
   normalizePersistedPermissionPolicyRecord,
@@ -109,6 +109,7 @@ export interface HomeConfigProfile {
   /** Launch-scoped default for new native conversation drafts. */
   readonly defaultModelProvider?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
+  readonly dynamicModelCatalog?: boolean
   readonly selectorIcons?: import('../model-selector-branding.js').ModelSelectorIconOverrides
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
@@ -457,9 +458,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
   rejectUnknownKeys(profile, [
     'displayName',
     'dataMode',
-    'defaultModelProvider',
-    'configModelCatalogs',
-    'selectorIcons',
+    ...PROFILE_MODEL_OPTION_KEYS,
     'iconTheme',
     'management',
   ], label)

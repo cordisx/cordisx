@@ -128,6 +128,48 @@ connection field is accepted by this setting.
 
 ## Selection
 
+### Experimental Dynamic Catalogs
+
+The opt-in profile field `dynamicModelCatalog: true` watches the configured
+local catalog files and base Codex configuration asynchronously. Selection and
+submission consume an atomic in-memory projection instead of rereading those
+files. Parent-directory watching handles atomic editor saves; bounded periodic
+reconciliation repairs missed file events. Renderer invalidations are scoped
+to the admitted document generation and reload a complete safe snapshot.
+The default remains the existing pull/read-on-validation behavior.
+
+An invalid model catalog retains the prior list only while its base configuration
+source identity is unchanged. A valid empty catalog clears membership; removing
+a configured provider removes it. A broken or changed connection configuration
+cannot attest account/endpoint continuity and does not reuse the old list.
+This base-file identity is not an effective layered native connection resolver.
+The option preserves branding and never changes native endpoints, credentials,
+defaults, or an active request. Live updates do not apply draft model fallbacks.
+Full model-source management and script execution are not provided by this flag.
+
+Host-private discovery foundations additionally provide an explicit owner-binding
+capability, an adapter registry, and a strict `deepseek-official` adapter. It uses
+only the official HTTPS root, one `GET /models`, bounded JSON parsing, and a
+credential callback supplied by the effective connection owner. It never obtains
+keys from renderer data or infers credential ownership from a provider name.
+There is currently no production resolver for arbitrary native layered credentials;
+these bindings remain unsupported for auto discovery. Adapter fixtures are not
+evidence that native automatic discovery is usable or that a real account works.
+
+The internal catalog contract separates a base strategy from optional same-scope
+manual supplements: auto/native `only` uses the base list, `augment` also includes
+explicit exact IDs, and manual replacement bypasses discovery. Supplement-only
+entries are user-declared, not server-verified. Complete empty replaces only the
+base list; deleting a supplement does not remove an ID still listed by the base.
+Scope changes isolate both layers. This contract and its provenance are available
+for the subsequent owner integration; no supplement editor or script runner is
+shipped in the current UI.
+
+The current persistence helper is a single-owner primitive, not a cross-process
+transaction service or a production account-attested disk cache. Real native
+flow verification, durable owner integration, and user acceptance remain separate
+delivery gates. No provider API request is made by enabling the local-file flag.
+
 Provider changes prefer an exact model ID, then a unique explicit alias. An
 ambiguous or absent match opens the provider's model submenu; labels are never
 used to guess equivalence. Existing-thread provider changes require confirmation.

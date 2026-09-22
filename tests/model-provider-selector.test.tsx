@@ -34,6 +34,7 @@ async function setup(model = 'shared', busy = false, options?: {
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference']
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
+  readonly liveCatalog?: boolean
 }) {
   dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://example.test' })
   Object.assign(
@@ -70,6 +71,7 @@ async function setup(model = 'shared', busy = false, options?: {
       ...(options?.secondDefaultModelId === undefined ? {} : { defaultModelId: options.secondDefaultModelId }),
     },
   ])
+  if (options?.liveCatalog) registry.connectSource(() => () => {})
   await registry.refresh()
   let snapshot: ProviderSelectionSnapshot = {
     available: true,
@@ -157,6 +159,15 @@ const providerTrigger = '.cxmp-provider-trigger'
 const modelTrigger = '.cxmp-model-trigger'
 
 describe('provider selection interaction', () => {
+  it('does not apply draft fallback when a live catalog refresh changes members', async () => {
+    const result = await setup('shared', false, {
+      draft: true,
+      liveCatalog: true,
+      draftPreference: { providerId: 'second', generation: 7, revision: 3 },
+    })
+    expect(result.select).not.toHaveBeenCalled()
+    result.registry.dispose()
+  })
   it('applies a launcher draft preference with the existing legal model pairing strategy', async () => {
     const { select } = await setup('source-model', false, {
       draft: true,

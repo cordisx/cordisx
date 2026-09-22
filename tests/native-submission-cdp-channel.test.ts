@@ -9,6 +9,7 @@ import type {
 
 async function harness(options: Readonly<{
   defaultProviderId?: string
+  catalogSubscribe?: (listener: () => void) => () => void
   catalog?: () => readonly {
     providerId: string
     pluginId: string
@@ -21,6 +22,7 @@ async function harness(options: Readonly<{
   let receive: (params: Record<string, any>) => void
   const idle = vi.fn(async () => true)
   const authority = createNativeSubmissionCdpAuthority({
+    ...(options.catalogSubscribe === undefined ? {} : { catalogSubscribe: options.catalogSubscribe }),
     catalog: async () =>
       options.catalog?.() ?? [{
         providerId: 'provider-b',
@@ -81,6 +83,30 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('pushes fenced catalog invalidations and supports full snapshot resynchronization', async () => {
+    let changed!: () => void
+    const unsubscribe = vi.fn()
+    const h = await harness({
+      catalogSubscribe: listener => {
+        changed = listener
+        return unsubscribe
+      },
+    })
+    const observed = vi.fn()
+    h.channel.catalogSubscribe(observed)
+    const before = await h.channel.catalogSnapshotRead()
+    expect(before.sequence).toBe(0)
+    expect(before.epoch).toBe(h.draft.rendererGeneration)
+    changed()
+    changed()
+    expect(observed).toHaveBeenCalledTimes(2)
+    expect((await h.channel.catalogSnapshotRead()).sequence).toBe(2)
+    expect(h.controller.commitSelection).not.toHaveBeenCalled()
+    await h.installed.dispose()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    changed()
+    expect(observed).toHaveBeenCalledTimes(2)
+  })
   it('projects a valid configured default only for new drafts', async () => {
     const h = await harness({ defaultProviderId: 'provider-b' })
     try {

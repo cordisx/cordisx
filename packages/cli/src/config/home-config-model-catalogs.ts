@@ -9,6 +9,13 @@ import {
 const PROVIDER_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u
 const MODEL_ID = /^[^\0\r\n]{1,512}$/u
 
+export const PROFILE_MODEL_OPTION_KEYS = [
+  'defaultModelProvider',
+  'configModelCatalogs',
+  'dynamicModelCatalog',
+  'selectorIcons',
+] as const
+
 /** Host-only model membership; never an endpoint, authentication or native-profile override. */
 export function parseDefaultModelProvider(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined
@@ -94,10 +101,14 @@ export function parseModelSelectorIcons(value: unknown): ModelSelectorIconOverri
 }
 
 export function parseProfileModelOptions(profile: Record<string, unknown>, label: string) {
+  if (profile.dynamicModelCatalog !== undefined && typeof profile.dynamicModelCatalog !== 'boolean') {
+    throw new Error(`${label}.dynamicModelCatalog must be a boolean`)
+  }
   const defaultModelProvider = parseDefaultModelProvider(profile.defaultModelProvider, label)
   const configModelCatalogs = parseConfigModelCatalogs(profile.configModelCatalogs)
   const selectorIcons = parseModelSelectorIcons(profile.selectorIcons)
   return {
+    ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
     ...(defaultModelProvider === undefined ? {} : { defaultModelProvider }),
     ...(configModelCatalogs === undefined ? {} : { configModelCatalogs }),
     ...(selectorIcons === undefined ? {} : { selectorIcons }),

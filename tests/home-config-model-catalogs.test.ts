@@ -18,6 +18,14 @@ function configured(configModelCatalogs: unknown) {
 }
 
 describe('profile config model catalogs', () => {
+  it('keeps dynamic catalogs opt-in and rejects non-boolean flags', () => {
+    expect(createDefaultHomeConfig().apps.codex?.profiles.default?.dynamicModelCatalog).toBeUndefined()
+    const config = configured({})
+    Object.assign(config.apps.codex.profiles.first, { dynamicModelCatalog: true })
+    expect(parseHomeConfig(config).apps.codex?.profiles.first?.dynamicModelCatalog).toBe(true)
+    Object.assign(config.apps.codex.profiles.first, { dynamicModelCatalog: 'true' })
+    expect(() => parseHomeConfig(config)).toThrow('dynamicModelCatalog')
+  })
   it('preserves legacy defaults and isolates explicit mappings per profile', () => {
     expect(createDefaultHomeConfig().apps.codex?.profiles.default?.configModelCatalogs).toBeUndefined()
     const config = parseHomeConfig(configured({ gateway: 'first.json', other: '/local/other.json' }))

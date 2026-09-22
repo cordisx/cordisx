@@ -51,6 +51,7 @@ describe('Vite development native submission assembly', () => {
                   displayName: 'Default',
                   dataMode: 'shared',
                   configModelCatalogs: { fixture: 'scoped.json' },
+                  dynamicModelCatalog: true,
                 },
                 other: { displayName: 'Other', dataMode: 'shared', configModelCatalogs: { fixture: 'other.json' } },
               },
@@ -85,7 +86,7 @@ describe('Vite development native submission assembly', () => {
           expect.anything(),
           f.executable,
           expect.any(String),
-          { configModelCatalogs: { fixture: 'scoped.json' } },
+          { configModelCatalogs: { fixture: 'scoped.json' }, dynamicModelCatalog: true },
         )
       } else expect(create.mock.calls[0]).toHaveLength(3)
       expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))

@@ -41,6 +41,22 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('model provider selector contract', () => {
+  it('refreshes subscribed source snapshots and detaches on disposal', async () => {
+    let listener: (() => void) | undefined
+    let rows = [provider]
+    const disconnect = vi.fn()
+    const registry = new ModelProviderRegistry(async () => rows)
+    registry.connectSource(callback => {
+      listener = callback
+      return disconnect
+    })
+    await registry.refresh()
+    rows = [{ ...provider, models: [{ id: 'new', label: 'New' }] }]
+    listener!()
+    await vi.waitFor(() => expect(registry.snapshot().providers[0]?.models[0]?.id).toBe('new'))
+    registry.dispose()
+    expect(disconnect).toHaveBeenCalledTimes(1)
+  })
   it('loads the launcher catalog instead of the managed bridge when the native channel is installed', async () => {
     const native = [{ ...provider, title: 'Configured provider' }]
     const managed = { nativeProviders: vi.fn(async () => [{ ...provider, title: 'Managed provider' }]) }

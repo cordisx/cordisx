@@ -22,6 +22,7 @@ import type { NativeAccountCapabilityDescriptor } from '../native-account-capabi
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 import { codexConfigModelProviders } from './codex-config-model-providers.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 
 const execFileAsync = promisify(execFile)
@@ -87,6 +88,7 @@ export async function createNativeSubmissionComposition(
   options: Readonly<{
     defaultProviderId?: string
     configModelCatalogs?: Readonly<Record<string, string>>
+    dynamicModelCatalog?: boolean
     selectorIcons?: ModelSelectorIconOverrides
   }> = {},
 ): Promise<NativeSubmissionComposition> {
@@ -104,9 +106,11 @@ export async function createNativeSubmissionComposition(
   const control = await startNativeSubmissionControlServer()
   const credentials = createNativeProviderCredentialBroker({ resolve: id => activation.prepareNativeConnection(id) })
   let controller: NativeSubmissionController | undefined
+  let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let closePromise: Promise<void> | undefined
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
+      dynamic?.dispose()
       try {
         await controller?.dispose()
       } finally {
@@ -118,11 +122,20 @@ export async function createNativeSubmissionComposition(
       }
     })()
   try {
-    let configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
+    if (options.dynamicModelCatalog) {
+      dynamic = dynamicConfiguredCatalog({
+        codexHome,
+        ...(options.configModelCatalogs === undefined ? {} : { catalogs: options.configModelCatalogs }),
+        ...(options.selectorIcons === undefined ? {} : { selectorIcons: options.selectorIcons }),
+      })
+    }
+    let configured = dynamic?.snapshot()
+      ?? await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
     const managedIds = new Set(activation.nativeProviderIds)
     let lastDiagnostic: string | undefined
     const configuredCatalog = async () => {
-      configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
+      configured = dynamic?.snapshot()
+        ?? await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
       const diagnostic = JSON.stringify(configured.diagnostics)
       if (diagnostic !== lastDiagnostic && configured.diagnostics.length > 0) {
         console.warn(
@@ -133,6 +146,7 @@ export async function createNativeSubmissionComposition(
       return configured.providers
     }
     const cdp = createNativeSubmissionCdpAuthority({
+      ...(dynamic === undefined ? {} : { catalogSubscribe: dynamic.subscribe }),
       catalog: combinedNativeModelProviderCatalog(
         nativeModelProviderCatalog(activation, options.selectorIcons),
         configuredCatalog,
@@ -151,7 +165,7 @@ export async function createNativeSubmissionComposition(
       providerSource: providerId =>
         managedIds.has(providerId)
           ? 'managed'
-          : configured.providerIds.has(providerId)
+          : (dynamic?.snapshot() ?? configured).providerIds.has(providerId)
           ? 'config'
           : undefined,
       validateSelection: async selection => {

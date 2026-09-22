@@ -92,6 +92,7 @@ export interface NativeSubmissionCdpAuthority {
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
 export function createNativeSubmissionCdpAuthority(options: {
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
+  catalogSubscribe?(listener: () => void): () => void
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
 }): NativeSubmissionCdpAuthority {
@@ -245,6 +246,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       const owner: DocumentOwner = { generation, session, disposed: false }
       documents.set(target.id, owner)
       const active = new Set<string>()
+      let catalogSequence = 0
       const respond = async (requestId: string, value: unknown, ok = true): Promise<void> => {
         if (owner.disposed) return
         await session.send('Runtime.evaluate', {
@@ -265,10 +267,17 @@ export function createNativeSubmissionCdpAuthority(options: {
           requestId = envelope.requestId
           if (active.has(requestId)) throw new Error('Duplicate native command')
           const input = record(envelope.input)
-          if (envelope.operation === 'catalogRead') {
+          if (envelope.operation === 'catalogRead' || envelope.operation === 'catalogSnapshotRead') {
             active.add(requestId)
             admitted = true
-            await respond(requestId, await options.catalog())
+            const sequence = catalogSequence
+            const providers = await options.catalog()
+            await respond(
+              requestId,
+              envelope.operation === 'catalogRead'
+                ? providers
+                : { epoch: generation, sequence, providers },
+            )
             return
           }
           const scope = scopeOf(input?.scope)
@@ -381,20 +390,29 @@ export function createNativeSubmissionCdpAuthority(options: {
         if (params.name === BINDING && typeof params.payload === 'string') void dispatch(params.payload)
       })
       const source = `(() => {
-        const generation=${JSON.stringify(generation)},pending=new Map();let disposed=false;
+        const generation=${
+        JSON.stringify(generation)
+      },pending=new Map(),catalogListeners=new Set();let disposed=false,catalogSequence=-1;
+        globalThis.__cordisxCatalogChanged=(owner,sequence)=>{if(owner!==generation||disposed||sequence<=catalogSequence)return;catalogSequence=sequence;for(const listener of catalogListeners){try{listener()}catch{}}};
         let activate;globalThis.__cordisxNativeSubmissionReady=new Promise(resolve=>{activate=resolve});globalThis.__cordisxNativeSubmissionActivate=activate;
         globalThis.__cordisxNativeProviderOwner=Object.freeze({targetId:${
         JSON.stringify(target.id)
       },rendererGeneration:generation});
         globalThis.${RECEIVER}=(owner,message)=>{if(owner!==generation)return;const p=pending.get(message.requestId);if(!p)return;pending.delete(message.requestId);clearTimeout(p.timer);message.ok?p.resolve(message.value):p.reject(new Error('Native submission rejected'))};
         const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
-        globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
-        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
+        globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({${
+        options.catalogSubscribe === undefined
+          ? ''
+          : 'catalogSubscribe:listener=>{catalogListeners.add(listener);return()=>catalogListeners.delete(listener)},'
+      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
+        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined
+      let unsubscribeCatalog: (() => void) | undefined
       const dispose = async (): Promise<void> => {
         if (owner.disposed) return
         owner.disposed = true
+        unsubscribeCatalog?.()
         documents.delete(target.id)
         remove()
         for (const [id, state] of states) {
@@ -416,6 +434,14 @@ export function createNativeSubmissionCdpAuthority(options: {
         if (typeof added.identifier !== 'string') throw new Error('Native channel script registration failed')
         identifier = added.identifier
         await session.send('Runtime.evaluate', { expression: source })
+        unsubscribeCatalog = options.catalogSubscribe?.(() => {
+          catalogSequence++
+          if (!owner.disposed) {
+            void session.send('Runtime.evaluate', {
+              expression: `globalThis.__cordisxCatalogChanged?.(${JSON.stringify(generation)},${catalogSequence})`,
+            }).catch(() => undefined)
+          }
+        })
         return { dispose }
       } catch (error) {
         await dispose()

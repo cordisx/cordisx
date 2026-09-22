@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { parse } from 'smol-toml'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
@@ -53,6 +54,9 @@ function catalogModels(value: unknown, strict = false): NativeModelProviderCatal
 export interface CodexConfigModelProviderProjection {
   readonly providers: readonly NativeModelProviderCatalogEntry[]
   readonly providerIds: ReadonlySet<string>
+  /** Private source identity, not an effective native endpoint/account attestation. */
+  readonly sourceRevision?: string
+  readonly sourceAvailable?: boolean
   readonly diagnostics: readonly {
     readonly providerId: string
     readonly code: 'catalog-unavailable' | 'catalog-empty' | 'provider-missing'
@@ -68,11 +72,15 @@ export async function codexConfigModelProviders(
   const mappings = parseConfigModelCatalogs(configModelCatalogs) ?? {}
   const diagnostics: Array<CodexConfigModelProviderProjection['diagnostics'][number]> = []
   let config: Record<string, unknown>
+  let sourceRevision: string
   try {
-    config = record(parse(await boundedText(path.join(codexHome, 'config.toml'), MAX_CONFIG_BYTES))) ?? {}
+    const raw = await boundedText(path.join(codexHome, 'config.toml'), MAX_CONFIG_BYTES)
+    config = record(parse(raw)) ?? {}
+    sourceRevision = createHash('sha256').update(raw).digest('hex')
   } catch {
     return Object.freeze({
       providers: Object.freeze([]),
+      sourceAvailable: false,
       providerIds: new Set<string>(),
       diagnostics: Object.freeze(
         Object.keys(mappings).map(providerId => ({ providerId, code: 'provider-missing' as const })),
@@ -154,6 +162,8 @@ export async function codexConfigModelProviders(
   )
   return Object.freeze({
     providers,
+    sourceAvailable: true,
+    sourceRevision,
     providerIds: new Set(providers.map(provider => provider.providerId)),
     diagnostics: Object.freeze(diagnostics),
   })
