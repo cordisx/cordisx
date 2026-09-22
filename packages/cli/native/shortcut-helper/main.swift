@@ -59,7 +59,8 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
             throw CocoaError(.fileNoSuchFile)
         }
         let info = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist")) ?? [:]
-        return ["bundleIdentifier": info["CFBundleIdentifier"] ?? "", "runtimePath": info["CordisXAppRuntime"] ?? ""]
+        return ["bundleIdentifier": info["CFBundleIdentifier"] ?? "", "runtimePath": info["CordisXAppRuntime"] ?? "",
+                "helperDigest": info["CordisXAppHelperDigest"] ?? ""]
     }
     if op == "copy-custom-icon" {
         let source = try string(request, "source"), destination = try string(request, "destination")
@@ -116,7 +117,8 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
         let plist: [String: Any] = ["CFBundleExecutable": "CordisXLauncher", "CFBundleIdentifier": "org.cordisx.launcher",
             "CFBundleName": "CordisX", "CFBundleDisplayName": "CordisX", "CFBundlePackageType": "APPL",
             "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0", "CFBundleIconFile": "CordisX.icns",
-            "NSHighResolutionCapable": true, "CordisXAppRuntime": try string(request, "runtimePath")]
+            "NSHighResolutionCapable": true, "CordisXAppRuntime": try string(request, "runtimePath"),
+            "CordisXAppHelperDigest": try string(request, "helperDigest")]
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
             .write(to: contents.appendingPathComponent("Info.plist"))
         return ["assembled": true]

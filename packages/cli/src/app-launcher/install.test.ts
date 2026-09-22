@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { runAppCommand } from '../cli/app-command.js'
-import { nativeOperation } from '../shortcuts/native.js'
+import { appLauncherHelper, nativeOperation } from '../shortcuts/native.js'
 
 let roots: string[] = []
 afterEach(async () => {
@@ -51,7 +53,27 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
     const second = await runAppCommand(f.runtime)
     expect(second).toEqual({ status: 'reused', path: f.target })
     expect((await stat(second.path)).ino).toBe(firstInode)
-    expect(f.opened).toEqual([f.target, f.target])
+    const installedHelper = path.join(f.target, 'Contents', 'MacOS', 'CordisXLauncher')
+    await writeFile(installedHelper, '#!/bin/sh\nexit 1\n')
+    await chmod(installedHelper, 0o755)
+    execFileSync('/usr/libexec/PlistBuddy', [
+      '-c',
+      `Set :CordisXAppHelperDigest ${'0'.repeat(64)}`,
+      path.join(f.target, 'Contents', 'Info.plist'),
+    ])
+    execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', f.target])
+
+    const updated = await runAppCommand(f.runtime)
+    expect(updated).toEqual({ status: 'reused', path: f.target })
+    expect((await stat(updated.path)).ino).toBe(firstInode)
+    expect(await nativeOperation({ operation: 'inspect-app', path: updated.path })).toMatchObject({
+      helperDigest: createHash('sha256').update(await readFile(appLauncherHelper)).digest('hex'),
+    })
+    expect(() => execFileSync('/usr/bin/codesign', ['--verify', '--strict', updated.path])).not.toThrow()
+    const helperModifiedAt = (await stat(installedHelper)).mtimeMs
+    await runAppCommand(f.runtime)
+    expect((await stat(installedHelper)).mtimeMs).toBe(helperModifiedAt)
+    expect(f.opened).toEqual([f.target, f.target, f.target, f.target])
   })
 
   it('does not overwrite an unknown same-name application', async () => {

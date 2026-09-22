@@ -50,6 +50,9 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
     private let runtimePath: String
     private var launchInFlight = false
     private var lastError: String?
+    private var profileProjection: (app: String, selected: String, items: [[String: Any]])?
+    private var profileRefreshInFlight = false
+    private var profileRefreshFinished = false
 
     override init() {
         runtimePath = Bundle.main.object(forInfoDictionaryKey: "CordisXAppRuntime") as? String ?? ""
@@ -62,11 +65,13 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
             return
         }
         rebuildMainMenu()
+        refreshProfiles()
         launchDefault(nil)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         rebuildMainMenu()
+        refreshProfiles()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -75,7 +80,8 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
-        profileMenu(includeQuit: false)
+        refreshProfiles()
+        return profileMenu(includeQuit: false)
     }
 
     @objc private func launchDefault(_ sender: Any?) {
@@ -107,17 +113,58 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         rebuildMainMenu()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
-            do { _ = try self?.invoke(arguments, timeout: 75) }
+            var response: [String: Any]?
+            do { response = try self?.invoke(arguments, timeout: 75) }
             catch {
                 failure = error.localizedDescription
                 self?.appendLog(error.localizedDescription)
             }
             DispatchQueue.main.async {
+                if let response, let warning = self?.activateOwnedHost(response) {
+                    self?.appendLog(warning)
+                }
                 self?.launchInFlight = false
                 self?.lastError = failure
                 self?.rebuildMainMenu()
+                self?.refreshProfiles()
                 if let failure { self?.presentError(failure) }
             }
+        }
+    }
+
+    private func activateOwnedHost(_ response: [String: Any]) -> String? {
+        guard let pidNumber = response["hostPid"] as? NSNumber,
+              let startedAt = response["hostStartedAt"] as? String else {
+            return "应用已运行，未能确认对应窗口，未切到前台。"
+        }
+        let pid = pidNumber.int32Value
+        let check = Process(), output = Pipe()
+        check.executableURL = URL(fileURLWithPath: "/bin/ps")
+        check.arguments = ["-p", String(pid), "-o", "lstart="]
+        check.standardOutput = output
+        check.standardError = FileHandle.nullDevice
+        do {
+            try check.run()
+            let actual = String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+            check.waitUntilExit()
+            guard check.terminationStatus == 0, actual == startedAt,
+                  let host = NSRunningApplication(processIdentifier: pid) else {
+                return "应用已运行，未能确认对应窗口，未切到前台。"
+            }
+            let activated: Bool
+            if #available(macOS 14.0, *) {
+                let launcher = NSRunningApplication.current
+                NSApplication.shared.yieldActivation(to: host)
+                activated = host.activate(from: launcher, options: [.activateAllWindows])
+            } else {
+                activated = host.activate(options: [.activateAllWindows])
+            }
+            return activated ? nil : "应用已运行，未能切到前台。"
+        } catch {
+            return "应用已运行，未能确认对应窗口，未切到前台。"
         }
     }
 
@@ -128,6 +175,20 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         return (app, selected, items)
     }
 
+    private func refreshProfiles() {
+        guard !profileRefreshInFlight else { return }
+        profileRefreshInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let projection = self?.profiles()
+            DispatchQueue.main.async {
+                self?.profileRefreshInFlight = false
+                self?.profileRefreshFinished = true
+                if let projection { self?.profileProjection = projection }
+                self?.rebuildMainMenu()
+            }
+        }
+    }
+
     private func profileMenu(includeQuit: Bool) -> NSMenu {
         let menu = NSMenu(title: "CordisX")
         let launch = NSMenuItem(title: "启动默认配置", action: #selector(launchDefault(_:)), keyEquivalent: "")
@@ -135,7 +196,7 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         launch.isEnabled = !launchInFlight
         menu.addItem(launch)
         menu.addItem(.separator())
-        if let projection = profiles() {
+        if let projection = profileProjection {
             for profile in projection.items {
                 guard let id = profile["id"] as? String, let displayName = profile["displayName"] as? String else {
                     continue
@@ -148,7 +209,11 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(item)
             }
         } else {
-            let unavailable = NSMenuItem(title: "配置暂不可用", action: nil, keyEquivalent: "")
+            let unavailable = NSMenuItem(
+                title: profileRefreshFinished ? "配置暂不可用" : "正在载入配置…",
+                action: nil,
+                keyEquivalent: ""
+            )
             unavailable.isEnabled = false
             menu.addItem(unavailable)
         }

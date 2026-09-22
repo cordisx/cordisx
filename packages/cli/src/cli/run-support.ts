@@ -183,6 +183,8 @@ export interface CordisXCliRuntime {
   readonly internalOpenApp?: (path: string) => void | Promise<void>
   /** Isolated native verification output; never read from user CLI/env. */
   readonly internalShortcutOutput?: import('../shortcuts/model.js').ShortcutOutputOptions
+  /** The persistent app launcher may reuse one verified entry for the same live Host generation. */
+  readonly internalReuseShortcut?: boolean
   /** Only the signed native shortcut entry supplies this internal path. */
   readonly internalShortcutDockRecordPath?: string
   /** GUI children start outside protected project folders; cwd still records launch intent. */

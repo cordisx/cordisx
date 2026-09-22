@@ -77,6 +77,7 @@ export async function runAppLauncherOperation(
       directory: runtime.cacheDirectory,
       registry: runtime.cacheRegistry,
     },
+    internalReuseShortcut: true,
     internalShortcutSpawnCwd: runtime.cwd,
   }
   let ready: ReadyLaunchResult | undefined

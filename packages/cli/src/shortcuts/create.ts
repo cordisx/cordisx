@@ -12,6 +12,7 @@ import {
   legacyShortcutKey,
   shortcutArgv,
   shortcutKey,
+  type ShortcutLaunchIdentity,
   type ShortcutOutputOptions,
   type ShortcutRecord,
   validRecord,
@@ -43,6 +44,7 @@ export async function createShortcut(input: {
   env: NodeJS.ProcessEnv
   output?: ShortcutOutputOptions
   avatar?: string
+  launchIdentity?: ShortcutLaunchIdentity
 }): Promise<{ path: string; iconSource: ShortcutRecord['iconSource']; updated: boolean }> {
   const home = await realpath(input.home)
   const registry = input.output?.registry ?? registryFor(os.homedir())
@@ -266,6 +268,7 @@ export async function createShortcut(input: {
       helperDigest: custom ? previous!.helperDigest ?? helperDigest : helperDigest,
       iconDigest: custom ? previous!.iconDigest : digest,
       iconSource: custom ? 'user' : input.avatar ? 'cordisx-avatar' : 'cordisx-default',
+      ...(input.launchIdentity ? { launchIdentity: input.launchIdentity } : {}),
     }
     await writePrivateJson(recordPath, record)
     recordWritten = true
@@ -281,4 +284,56 @@ export async function createShortcut(input: {
     await release()
     await releaseLegacy()
   }
+}
+
+export async function reuseShortcut(input: {
+  invocation: CordisXManagedInvocation
+  appId: string
+  profileId: string
+  dataMode: 'shared' | 'host-isolated'
+  home: string
+  cwd: string
+  env: NodeJS.ProcessEnv
+  output?: ShortcutOutputOptions
+  launchIdentity: ShortcutLaunchIdentity
+}): Promise<{ path: string; iconSource: ShortcutRecord['iconSource']; updated: true } | undefined> {
+  const home = await realpath(input.home)
+  const registry = input.output?.registry ?? registryFor(os.homedir())
+  const id = shortcutKey(home, input.appId, input.profileId, input.dataMode)
+  const recordPath = path.join(registry, `${id}.json`)
+  let record: ShortcutRecord
+  try {
+    const value = await readPrivateJson(recordPath)
+    if (!validRecord(value) || value.entryId !== id) {
+      throw new Error('Invalid shortcut record; restore it before updating')
+    }
+    record = value
+  } catch (error) {
+    if (isMissing(error)) return undefined
+    throw error
+  }
+  const codexHome = input.env.CODEX_HOME ? path.resolve(input.cwd, input.env.CODEX_HOME) : undefined
+  const helperDigest = createHash('sha256').update(await readFile(shortcutHelper)).digest('hex')
+  if (
+    record.cordisxHome !== home || record.appId !== input.appId || record.profileId !== input.profileId
+    || record.dataMode !== input.dataMode || record.cwd !== input.cwd || record.codexHome !== codexHome
+    || JSON.stringify(record.argv) !== JSON.stringify(shortcutArgv(
+        input.invocation,
+        input.appId,
+        input.profileId,
+        input.cwd,
+        input.dataMode,
+      ))
+    || record.helperDigest !== helperDigest || record.iconSource !== 'cordisx-avatar'
+    || JSON.stringify(record.launchIdentity) !== JSON.stringify(input.launchIdentity)
+  ) return undefined
+  const resolved = await nativeOperation<{ path: string }>({ operation: 'resolve', bookmark: record.bookmark })
+    .catch(() => undefined)
+  const bundlePath = resolved?.path ?? record.bundlePath
+  await access(bundlePath).catch(() => undefined)
+  const inspection = await inspectBundle(bundlePath).catch(() => undefined)
+  if (!inspection || inspection.customIcon || inspection.entryId !== id || inspection.recordPath !== recordPath) {
+    return undefined
+  }
+  return { path: bundlePath, iconSource: record.iconSource, updated: true }
 }

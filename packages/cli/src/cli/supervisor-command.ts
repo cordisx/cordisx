@@ -23,7 +23,7 @@ import {
 } from './supervisor-state.js'
 import { requestDockRefresh, requestShortcutPresentation, requestSupervisorStop } from './supervisor-control.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
-import { createShortcut, preflightShortcut } from '../shortcuts/create.js'
+import { createShortcut, preflightShortcut, reuseShortcut } from '../shortcuts/create.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { registryFor } from '../shortcuts/store.js'
 
@@ -289,20 +289,15 @@ async function finishReady(
   let shortcut: Awaited<ReturnType<typeof createShortcut>> | undefined
   if (invocation.createShortcut) {
     try {
-      const socket = supervisorPaths(
-        path.dirname(ready.target.configPath),
-        ready.target.appId,
-        ready.target.selection.profileId,
-      ).socket
-      let displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
-      const avatarDeadline = Date.now() + 10_000
-      while (displayProfile.status !== 'available' || !displayProfile.avatar) {
-        if (Date.now() >= avatarDeadline) break
-        await new Promise(resolve => setTimeout(resolve, 250))
-        displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
-      }
-      shortcut = await createShortcut({
-        ...(displayProfile.status === 'available' && displayProfile.avatar ? { avatar: displayProfile.avatar } : {}),
+      const launchIdentity = ready.state.hostPid && ready.state.hostProcessStartedAt
+        ? {
+          supervisorPid: ready.state.pid,
+          supervisorStartedAt: ready.state.processStartedAt,
+          hostPid: ready.state.hostPid,
+          hostStartedAt: ready.state.hostProcessStartedAt,
+        }
+        : undefined
+      const shortcutInput = {
         invocation,
         appId: ready.target.appId,
         profileId: ready.target.selection.profileId,
@@ -311,7 +306,29 @@ async function finishReady(
         cwd: runtime.cwd ?? process.cwd(),
         env: ready.target.environment,
         ...(runtime.internalShortcutOutput ? { output: runtime.internalShortcutOutput } : {}),
-      })
+        ...(launchIdentity ? { launchIdentity } : {}),
+      }
+      shortcut = runtime.internalReuseShortcut && launchIdentity
+        ? await reuseShortcut({ ...shortcutInput, launchIdentity })
+        : undefined
+      if (!shortcut) {
+        const socket = supervisorPaths(
+          path.dirname(ready.target.configPath),
+          ready.target.appId,
+          ready.target.selection.profileId,
+        ).socket
+        let displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
+        const avatarDeadline = Date.now() + 10_000
+        while (displayProfile.status !== 'available' || !displayProfile.avatar) {
+          if (Date.now() >= avatarDeadline) break
+          await new Promise(resolve => setTimeout(resolve, 250))
+          displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
+        }
+        shortcut = await createShortcut({
+          ...(displayProfile.status === 'available' && displayProfile.avatar ? { avatar: displayProfile.avatar } : {}),
+          ...shortcutInput,
+        })
+      }
     } catch (error) {
       throw new Error('Host is ready; shortcut was not updated: ' + failureMessage(error))
     }

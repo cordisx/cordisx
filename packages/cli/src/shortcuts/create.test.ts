@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from 
 import path from 'node:path'
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { createShortcut } from './create.js'
+import { createShortcut, reuseShortcut } from './create.js'
 import * as store from './store.js'
 import { legacyShortcutKey, shortcutKey } from './model.js'
 import { dockScope, prepareDockImage, prepareOptionalDockImage } from './dock.js'
@@ -83,6 +83,28 @@ async function makeLegacyEntry(f: Awaited<ReturnType<typeof fixture>>, custom = 
   return { oldRecord, oldBundle }
 }
 describe.skipIf(process.platform !== 'darwin')('native shortcut transaction (no Host launch)', () => {
+  it('reuses an avatar entry only for the same live supervisor and Host identity', async () => {
+    const f = await fixture()
+    const created = await createShortcut(f.input)
+    const launchIdentity = {
+      supervisorPid: 101,
+      supervisorStartedAt: 'supervisor-start',
+      hostPid: 202,
+      hostStartedAt: 'host-start',
+    }
+    const record = JSON.parse(await readFile(f.record, 'utf8'))
+    await store.writePrivateJson(f.record, { ...record, iconSource: 'cordisx-avatar', launchIdentity })
+    await expect(reuseShortcut({ ...f.input, launchIdentity })).resolves.toEqual({
+      path: await realpath(created.path),
+      iconSource: 'cordisx-avatar',
+      updated: true,
+    })
+    await expect(reuseShortcut({
+      ...f.input,
+      launchIdentity: { ...launchIdentity, hostPid: 203 },
+    })).resolves.toBeUndefined()
+  })
+
   it('creates separate CordisX entries for both data modes of one profile', async () => {
     const f = await fixture()
     const isolated = await createShortcut(f.input)

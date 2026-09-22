@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { lstat, mkdir, mkdtemp, realpath, rename, rm } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +52,7 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
   const runtimePath = path.join(support, 'runtime.json')
   const applications = runtime.internalAppOutput?.directory ?? path.join(userHome, 'Applications')
   const target = runtime.internalAppOutput?.path ?? path.join(applications, 'CordisX.app')
+  const helperDigest = createHash('sha256').update(await readFile(appLauncherHelper)).digest('hex')
   await privateDirectory(support)
   await privateDirectory(cacheDirectory)
   await privateDirectory(cacheRegistry)
@@ -70,7 +72,11 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
       if (!isMissing(error)) throw error
     }
     if (existing) {
-      const inspection = await nativeOperation<{ bundleIdentifier: string; runtimePath: string }>({
+      const inspection = await nativeOperation<{
+        bundleIdentifier: string
+        runtimePath: string
+        helperDigest: string
+      }>({
         operation: 'inspect-app',
         path: target,
       }).catch(() => {
@@ -80,6 +86,36 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
         throw new Error('An unrelated application already exists at ' + target)
       }
       await run('/usr/bin/codesign', ['--verify', '--strict', target])
+      const installedHelper = path.join(target, 'Contents', 'MacOS', 'CordisXLauncher')
+      if (inspection.helperDigest !== helperDigest) {
+        stage = await mkdtemp(path.join(applications, '.cordisx-app-update-'))
+        const backup = path.join(stage, 'CordisXLauncher.previous')
+        const info = path.join(target, 'Contents', 'Info.plist')
+        const infoBackup = path.join(stage, 'Info.plist.previous')
+        const replacement = path.join(stage, 'CordisXLauncher.next')
+        await copyFile(installedHelper, backup)
+        await copyFile(info, infoBackup)
+        await copyFile(appLauncherHelper, replacement)
+        await chmod(replacement, 0o755)
+        await rename(replacement, installedHelper)
+        try {
+          await run('/usr/libexec/PlistBuddy', [
+            '-c',
+            inspection.helperDigest
+              ? `Set :CordisXAppHelperDigest ${helperDigest}`
+              : `Add :CordisXAppHelperDigest string ${helperDigest}`,
+            info,
+          ])
+          await run('/usr/bin/codesign', ['--force', '--sign', '-', target])
+          await run('/usr/bin/codesign', ['--verify', '--strict', target])
+        } catch (error) {
+          await copyFile(backup, installedHelper)
+          await copyFile(infoBackup, info)
+          await chmod(installedHelper, 0o755)
+          await run('/usr/bin/codesign', ['--force', '--sign', '-', target])
+          throw error
+        }
+      }
       status = 'reused'
     } else {
       stage = await mkdtemp(path.join(applications, '.cordisx-app-'))
@@ -90,6 +126,7 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
         operation: 'assemble-app',
         path: stagedBundle,
         helper: appLauncherHelper,
+        helperDigest,
         icon,
         runtimePath,
       })
