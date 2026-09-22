@@ -12,6 +12,7 @@ import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packa
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
+import { configuredHostLaunchBinding } from './helpers/host-launch-bindings.js'
 
 import {
   createBuiltinSkillFixture,
@@ -129,14 +130,8 @@ describe('functional CordisX CLI', () => {
     let result: unknown
     await runCordisXCli(['codex', 'work', '--dry-run', '--executable', process.execPath], {
       ...runtime,
-      internalObserveOwnerDocuments: async ({ source, handler }) => {
-        const token = source.match(
-          /ownerDocumentBindings\s*:\s*\[\{[^}]*?token\s*:\s*[`'"]([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)[`'"]/,
-        )?.[1]
-        if (token === undefined) throw new Error('configured plugin binding is missing')
-        const moduleGeneration =
-          (JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as { moduleGeneration: string })
-            .moduleGeneration
+      internalObserveOwnerDocuments: async ({ bootstrapSource, source, handler }) => {
+        const { token, moduleGeneration } = await configuredHostLaunchBinding(bootstrapSource, source, entry)
         globalThis.__cordisxOwnerDocumentRequestV1 = (payload: string) => {
           void (async () => {
             const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
