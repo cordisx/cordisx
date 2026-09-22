@@ -57,6 +57,13 @@ async function selectionFor(
   runtime: CordisXCliRuntime,
 ) {
   const environment = runtime.env ?? process.env
+  const requestedCwd = runtime.cwd ?? process.cwd()
+  // Spawn resolves cwd symlinks before the child resolves relative inputs.
+  // Use that same directory for identity, child launch and saved presentation.
+  const cwd = await realpath(requestedCwd).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return path.resolve(requestedCwd)
+  })
   const options: HomeConfigPathOptions = {
     env: environment,
     ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
@@ -74,6 +81,7 @@ async function selectionFor(
   const source = await readFile(configPath, 'utf8')
   return {
     environment,
+    cwd,
     configPath,
     appId,
     selection,
@@ -82,9 +90,9 @@ async function selectionFor(
       options: invocation.options,
       hostArgs: invocation.hostArgs,
       dataMode: selection.dataMode,
-      cwd: runtime.cwd ?? process.cwd(),
+      cwd,
       ...(environment.CODEX_HOME
-        ? { codexHome: path.resolve(runtime.cwd ?? process.cwd(), environment.CODEX_HOME) }
+        ? { codexHome: path.resolve(cwd, environment.CODEX_HOME) }
         : {}),
     }),
   }
@@ -373,7 +381,7 @@ async function finishReady(
         profileId: ready.target.selection.profileId,
         dataMode: ready.target.selection.dataMode,
         home,
-        cwd: runtime.cwd ?? process.cwd(),
+        cwd: ready.target.cwd,
         ...(ready.target.environment.CODEX_HOME ? { codexHome: ready.target.environment.CODEX_HOME } : {}),
         ...(presentation ? { output: presentation } : {}),
         launchIdentity,
@@ -561,7 +569,7 @@ export async function runSupervisorCommand(
         detached: true,
         stdio: ['ignore', log.fd, log.fd],
         env: childEnvironment,
-        cwd: runtime.internalShortcutSpawnCwd ?? runtime.cwd ?? process.cwd(),
+        cwd: runtime.internalShortcutSpawnCwd ?? target.cwd,
       })
       : runtime.internalSpawnSupervisor({ args, env: childEnvironment, logFd: log.fd })
     log.close()
