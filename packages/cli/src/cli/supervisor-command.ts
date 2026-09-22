@@ -181,10 +181,14 @@ async function terminateOwnedGroups(
 async function waitForState(
   paths: ReturnType<typeof supervisorPaths>,
   timeoutMs: number,
+  instanceToken: string,
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const state = await readSupervisorState(paths)
+    const state = await readMutableSupervisorState(paths)
+    if (state === undefined) throw new Error('CordisX background supervisor state was stopped or removed')
+    if (state.instanceToken !== instanceToken) throw new Error('CordisX background supervisor generation was replaced')
+    if (state.phase === 'stopping') throw new Error('CordisX background supervisor is stopping')
     if (state?.phase === 'ready') return state
     if (state?.phase === 'failed') {
       throw new Error(state.failure ?? 'CordisX background supervisor failed before readiness')
@@ -451,7 +455,9 @@ export async function runSupervisorCommand(
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
       }
       await releaseOperation()
-      const ready = state.phase === 'ready' ? state : await waitForState(paths, readinessTimeout(runtime))
+      const ready = state.phase === 'ready'
+        ? state
+        : await waitForState(paths, readinessTimeout(runtime), state.instanceToken)
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
       return await finishReady(invocation, runtime, { state: ready, target })
     }
@@ -511,7 +517,7 @@ export async function runSupervisorCommand(
     await releaseOperation()
     let ready: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>
     try {
-      const observedReady = await waitForState(paths, readinessTimeout(runtime))
+      const observedReady = await waitForState(paths, readinessTimeout(runtime), instanceToken)
       if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
       ready = observedReady
     } catch (error) {

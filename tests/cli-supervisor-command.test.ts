@@ -198,7 +198,9 @@ describe('supervisor management commands', () => {
         stdout: line => stopOutput.push(line),
         internalSupervisorReadinessTimeoutMs: 2_000,
       })
-      await expect(start).rejects.toThrow('background supervisor exited before renderer readiness')
+      await expect(start).rejects.toThrow(
+        /background supervisor (exited before renderer readiness|state was stopped or removed)/u,
+      )
       await stop
       expect(startOutput).toEqual([])
       expect(JSON.parse(stopOutput[0]!)).toEqual({ app: 'codex', profile: 'default', status: 'stopped' })
@@ -302,9 +304,9 @@ describe('supervisor management commands', () => {
       const original = await startResult
       expect(original.status).toBe('rejected')
       if (original.status === 'rejected') {
-        expect(original.error).toMatchObject({
-          message: 'CordisX background supervisor exited before renderer readiness',
-        })
+        expect(original.error.message).toMatch(
+          /background supervisor (exited before renderer readiness|state was stopped or removed|generation was replaced)/u,
+        )
       }
       expect(spawned).toBe(2)
       expect(() => process.kill(children[0]!.pid!, 0)).toThrow()
