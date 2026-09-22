@@ -36,6 +36,7 @@ export async function installModelProviderSelector(
   let root: Root | undefined
   let element: HTMLDivElement | undefined
   let trigger: HTMLElement | undefined
+  let group: HTMLElement | undefined
   let restoreTrigger: (() => void) | undefined
   let scheduled = false
   let disposed = false
@@ -51,6 +52,7 @@ export async function installModelProviderSelector(
     restoreTrigger?.()
     restoreTrigger = undefined
     trigger = undefined
+    group = undefined
   }
   const reconcile = () => {
     scheduled = false
@@ -66,9 +68,10 @@ export async function installModelProviderSelector(
       unmount()
       return
     }
-    if (trigger !== seat.trigger) {
+    if (trigger !== seat.trigger || group !== seat.group) {
       unmount()
       trigger = seat.trigger
+      group = seat.group
       const restoreGroup = hideNativeModelProviderTrigger(seat.group)
       const restoreButton = seat.group === trigger ? () => {} : hideNativeModelProviderTrigger(trigger)
       restoreTrigger = () => {
@@ -77,9 +80,15 @@ export async function installModelProviderSelector(
       }
       element = document.createElement('div')
       element.dataset.cordisxModelProviderSelector = 'true'
-      seat.parent.insertBefore(element, seat.group)
       detachTheme = theme.attach(element)
       root = createRoot(element)
+    }
+    // Native React can insert context usage before its model group after installation.
+    // Keep our sibling at that semantic seat without moving native-owned controls.
+    if (element!.parentElement !== seat.parent || element!.nextSibling !== seat.group) {
+      const focused = element!.contains(document.activeElement) ? document.activeElement as HTMLElement : undefined
+      seat.parent.insertBefore(element!, seat.group)
+      focused?.focus({ preventScroll: true })
     }
     root!.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} />)
   }
