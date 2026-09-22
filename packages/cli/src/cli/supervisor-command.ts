@@ -598,6 +598,7 @@ export async function runSupervisorCommandWithStartupGate(
   const gate = await openGate()
   const stderr = runtime.stderr ?? process.stderr
   stderr.write(`[cordisx] startup gate visible: ${Math.round(performance.now() - startedAt)} ms\n`)
+  let hostLaunchedAt: number | undefined
   let current = invocation
   try {
     for (;;) {
@@ -609,6 +610,8 @@ export async function runSupervisorCommandWithStartupGate(
               throw new Error('CordisX Host identity is unavailable before renderer readiness')
             }
             await gate.hostLaunched(state.state.hostPid, state.state.hostProcessStartedAt)
+            hostLaunchedAt ??= performance.now()
+            stderr.write(`[cordisx] Host created hidden: ${Math.round(hostLaunchedAt - startedAt)} ms\n`)
             await gate.stage('正在准备模型与界面')
           } else await gate.stage('正在完成启动')
           await onState?.(state, phase)
@@ -617,7 +620,11 @@ export async function runSupervisorCommandWithStartupGate(
           throw new Error('CordisX startup completed without a verified Host identity')
         }
         await gate.ready(ready.state.hostPid, ready.state.hostProcessStartedAt)
-        stderr.write(`[cordisx] full application ready: ${Math.round(performance.now() - startedAt)} ms\n`)
+        const readyAt = performance.now()
+        if (hostLaunchedAt !== undefined) {
+          stderr.write(`[cordisx] renderer ready after Host creation: ${Math.round(readyAt - hostLaunchedAt)} ms\n`)
+        }
+        stderr.write(`[cordisx] full application ready: ${Math.round(readyAt - startedAt)} ms\n`)
         return ready
       } catch (error) {
         const action = await gate.failed(failureMessage(error))

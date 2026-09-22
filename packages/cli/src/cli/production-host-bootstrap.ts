@@ -92,7 +92,11 @@ export async function prepareProductionHostBootstrap(
         preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
       })
     ) {
-      nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable)
+      const cacheDirectory = (runtime.env ?? process.env).CORDISX_INTERNAL_NATIVE_SUBMISSION_CACHE_DIRECTORY
+      nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(
+        plan.executable,
+        cacheDirectory === undefined ? {} : { cacheDirectory },
+      )
     }
     if (!input.prelaunch) {
       return {
