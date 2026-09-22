@@ -40,6 +40,9 @@ function fixture(
   }
   const receipt = { nonce: 'final-document' }
   const page = {
+    onEvent() {
+      return () => {}
+    },
     async send(method: string, params: { expression?: string }) {
       events.push(method)
       if (method === 'Page.addScriptToEvaluateOnNewDocument') {

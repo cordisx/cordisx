@@ -5,6 +5,7 @@ import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationExcepti
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
 import { startupBrand } from './startup-brand.js'
+import { observeStartupTiming } from './startup-timing.js'
 
 const require = createRequire(import.meta.url)
 const navigationAgent = fileURLToPath(new URL('../../native/startup-navigation.cjs', import.meta.url))
@@ -110,12 +111,18 @@ export async function connectStartupCover(
     throw new Error('Owned startup target endpoint changed')
   }
   const page = await CdpSession.connect(socket.href)
+  const timing = observeStartupTiming(
+    page,
+    owner.pid,
+    value => console.error('[cordisx-startup]', JSON.stringify(value)),
+  )
   let identifier: string | undefined
   const lifetime = new AbortController()
   let cleanup: Promise<void> | undefined
   const dispose = (): Promise<void> =>
     cleanup ??= (async () => {
       lifetime.abort()
+      timing.close()
       if (identifier) {await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, 1000).catch(() =>
           undefined
         )}
@@ -130,6 +137,7 @@ export async function connectStartupCover(
     })()
   try {
     await page.send('Page.enable')
+    await page.send('Runtime.enable')
     const css = await readFile(new URL('../../native/startup-cover.css', import.meta.url), 'utf8')
     const brand = await startupBrand()
     const builder = require(coverBuilder) as { buildCoverSource(options: unknown, animate?: string): string }
@@ -185,7 +193,9 @@ export async function connectStartupCover(
           while (Date.now() < readyDeadline) {
             let result: Awaited<ReturnType<typeof readNativeStartupReadiness>> | undefined
             try {
-              result = await read(`(${readNativeStartupReadiness.toString()})(${JSON.stringify(account)})`)
+              result = await read(
+                `(${readNativeStartupReadiness.toString()})(${JSON.stringify(account)},undefined,${timing.source})`,
+              )
             } catch {
               check() /* A controlled reload may retire this execution context. */
             }

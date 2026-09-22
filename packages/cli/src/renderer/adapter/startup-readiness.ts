@@ -6,6 +6,7 @@ export type StartupSurface = 'authenticated-ready' | 'auth-required'
 export async function readNativeStartupReadiness(
   descriptor: NativeAccountCapabilityDescriptor,
   load: (url: string) => Promise<Record<string, unknown>> = url => import(/* @vite-ignore */ url),
+  trace?: (phase: string, details?: { durationMs?: number; status?: string }) => void,
 ): Promise<{
   ready: boolean
   reason?: string
@@ -26,6 +27,7 @@ export async function readNativeStartupReadiness(
     __cordisxCompositionBoot?: Promise<unknown>
     __cordisxBoot?: Promise<unknown>
     __cordisxRuntime?: unknown
+    __cordisxStartupObservedBoot?: Promise<unknown>
   }
   const initial = root.__cordisxStartupDocument?.snapshot()
   if (!initial || initial.phase !== 'covered' || location.href !== 'app://-/index.html') {
@@ -34,6 +36,20 @@ export async function readNativeStartupReadiness(
   const current = (): boolean =>
     root.__cordisxStartupDocument?.snapshot().receipt.nonce === initial.receipt.nonce
     && performance.timeOrigin === initial.receipt.timeOrigin
+  trace?.('probe-start')
+  const observedBoot = root.__cordisxCompositionBoot ?? root.__cordisxBoot
+  if (trace && observedBoot && root.__cordisxStartupObservedBoot !== observedBoot) {
+    root.__cordisxStartupObservedBoot = observedBoot
+    trace('boot-observed')
+    void Promise.resolve(observedBoot).then(
+      () => {
+        if (current()) trace('boot-resolved')
+      },
+      () => {
+        if (current()) trace('boot-rejected')
+      },
+    )
+  }
   // Keep version-sensitive DOM knowledge in the Host adapter. A login form or
   // root element alone never establishes an interactive native application.
   const visible = (element: HTMLElement): boolean => {
@@ -50,7 +66,12 @@ export async function readNativeStartupReadiness(
       )
     const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
     const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
-    return (editor && model !== null && visible(model)) || (manager !== null && visible(manager))
+    const modelReady = model !== null && visible(model)
+    const managerReady = manager !== null && visible(manager)
+    if (editor) trace?.('editor-observed')
+    if (modelReady) trace?.('model-observed')
+    if (managerReady) trace?.('manager-observed')
+    return (editor && modelReady) || managerReady
   }
   // Account reads cross the typed native bridge. Avoid polling that bridge
   // while this document cannot yet satisfy the final usable-control proof.
@@ -62,27 +83,43 @@ export async function readNativeStartupReadiness(
       !element.closest('dialog') && visible(element)
     )
     const panel = heading?.parentElement?.parentElement
-    return !!panel
+    const ready = !!panel
       && [...panel.querySelectorAll<HTMLElement>('button, input')].some(element =>
         !element.closest('dialog') && visible(element) && !element.hasAttribute('disabled')
         && element.getAttribute('aria-disabled') !== 'true'
       )
+    if (ready) trace?.('login-observed')
+    return ready
   }
   if (!nativeControlsReady() && !loginControlsReady()) return { ready: false, reason: 'native-controls-pending' }
   let authenticated = false
   let invocation: (Promise<unknown> & { [key: symbol]: unknown }) | undefined
+  let accountStarted: number | undefined
   try {
+    trace?.('account-module-start')
     const native = await load(descriptor.module) as Record<string, {
       accessInputs?: { readAccountInfo(): Promise<unknown> }
     }>
     const inputs = native[descriptor.exportName]?.accessInputs
     if (typeof inputs?.readAccountInfo !== 'function') return { ready: false, reason: 'account-service-pending' }
+    trace?.('account-module-ready')
+    accountStarted = performance.now()
+    trace?.('account-read-start')
     invocation = inputs.readAccountInfo() as typeof invocation
     const account = await invocation as { status?: string; data?: unknown }
     if (!current()) return { ready: false, reason: 'document-changed' }
+    const status = account?.status === 'ready' && account.data !== undefined
+      ? account.data === null ? 'signed-out' : 'authenticated'
+      : account?.status === 'unavailable' || account?.status === 'error'
+      ? account.status
+      : 'unknown'
+    trace?.('account-read-complete', { durationMs: performance.now() - accountStarted, status })
     if (account?.status !== 'ready' || account.data === undefined) return { ready: false, reason: 'account-not-ready' }
     authenticated = account.data !== null
   } catch {
+    if (current() && accountStarted !== undefined) {
+      trace?.('account-read-complete', { durationMs: performance.now() - accountStarted, status: 'error' })
+    }
     return { ready: false, reason: 'account-unavailable' }
   } finally {
     const dispose = (Symbol as SymbolConstructor & { dispose?: symbol }).dispose

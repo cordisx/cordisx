@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readNativeStartupReadiness } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
 
 const descriptor = { module: 'app://-/assets/app-initial-fixture.js', exportName: 'accountService' }
-const read = () =>
+const read = (trace?: Parameters<typeof readNativeStartupReadiness>[2]) =>
   readNativeStartupReadiness(
     descriptor,
     async () => ({
@@ -14,6 +14,7 @@ const read = () =>
         },
       },
     }),
+    trace,
   )
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -45,6 +46,29 @@ function readyDocument() {
   }
 }
 describe('startup release requires the same usable authenticated document', () => {
+  it('observes boot, model, editor and a pending account read without emitting account data', async () => {
+    const { accountRead } = readyDocument()
+    let complete!: (value: { status: string; data: object }) => void
+    accountRead.mockImplementationOnce(() =>
+      new Promise(resolve => {
+        complete = resolve
+      })
+    )
+    const trace = vi.fn()
+    const pending = read(trace)
+    await vi.waitFor(() => expect(trace).toHaveBeenCalledWith('account-read-start'))
+    expect(trace).toHaveBeenCalledWith('boot-resolved')
+    expect(trace).toHaveBeenCalledWith('editor-observed')
+    expect(trace).toHaveBeenCalledWith('model-observed')
+    expect(trace).not.toHaveBeenCalledWith('account-read-complete', expect.anything())
+    complete({ status: 'ready', data: { email: 'private-fixture', token: 'never-log-fixture' } })
+    await expect(pending).resolves.toMatchObject({ ready: true })
+    expect(trace).toHaveBeenCalledWith('account-read-complete', {
+      status: 'authenticated',
+      durationMs: expect.any(Number),
+    })
+    expect(JSON.stringify(trace.mock.calls)).not.toMatch(/private-fixture|never-log-fixture/)
+  })
   const showLogin = () => {
     document.body.innerHTML = '<main><div><h1>登录 ChatGPT</h1></div><button>继续登录</button></main>'
     for (const element of document.querySelectorAll('h1, button')) {
