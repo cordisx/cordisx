@@ -7,9 +7,12 @@ import {
 import {
   acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
+  confirmHiddenCodexOwnership,
   findFreeLoopbackPort,
   type IsolatedCodexProfile,
   launchCodex,
+  launchCodexHidden,
+  retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
@@ -23,7 +26,7 @@ export interface ProductionHostBootstrap {
   readonly profile?: IsolatedCodexProfile
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly nativeSubmissionBootstrap?: NativeSubmissionBootstrap
-  readonly prelaunchedHost?: Readonly<{ child: ChildProcess; inspectorUrl?: Promise<string> }>
+  readonly prelaunchedHost?: Readonly<{ child: ChildProcess; hostPid: number; inspectorUrl?: Promise<string> }>
 }
 
 /** Resolve and reserve shared CLI/App launch inputs before compatibility analysis. */
@@ -115,31 +118,51 @@ export async function prepareProductionHostBootstrap(
     const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
     if (input.mainInspector && !mainInspector) throw new Error('Same-window startup requires an owned main inspector')
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
-    child = launchCodex(
+    const hostEnvironment = { ...plan.environment, ...nativeSubmissionBootstrap?.environment }
+    const hiddenLaunch = mainInspector
+      ? await launchCodexHidden(
+        plan.executable,
+        debugPort,
+        invocation.hostArgs,
+        profile,
+        invocation.options.onlineDevtools,
+        hostEnvironment,
+        await findFreeLoopbackPort(),
+      )
+      : undefined
+    child = hiddenLaunch?.child ?? launchCodex(
       plan.executable,
       debugPort,
-      mainInspector ? ['--inspect-brk=127.0.0.1:0', ...invocation.hostArgs] : invocation.hostArgs,
+      invocation.hostArgs,
       profile,
       invocation.options.onlineDevtools,
-      { ...plan.environment, ...nativeSubmissionBootstrap?.environment },
-      mainInspector,
+      hostEnvironment,
+      false,
     )
     if (child.pid === undefined) throw new Error('launched Host exposed no PID')
-    const inspectorUrl = mainInspector ? captureMainInspectorUrl(child) : undefined
-    stdout('[cordisx-startup] ' + JSON.stringify({ event: 'host-spawned', at: Date.now(), hostPid: child.pid }))
-    await input.markHostLaunched(child.pid, inspectorUrl, debugPort)
+    const hostPid = hiddenLaunch?.hostPid ?? child.pid
+    const inspectorUrl = hiddenLaunch?.inspectorUrl
+      ?? (mainInspector ? captureMainInspectorUrl(child) : undefined)
+    stdout('[cordisx-startup] ' + JSON.stringify({ event: 'host-spawned', at: Date.now(), hostPid }))
+    const ownershipVerified = await input.markHostLaunched(hostPid, inspectorUrl, debugPort)
+    if (hiddenLaunch) {
+      if (ownershipVerified !== true) throw new Error('Hidden Host inspector identity was not confirmed')
+      confirmHiddenCodexOwnership(hiddenLaunch)
+    }
     return {
       plan,
       debugPort,
       ...(profile === undefined ? {} : { profile }),
       ...(profileLease === undefined ? {} : { profileLease }),
       ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
-      prelaunchedHost: { child, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
+      prelaunchedHost: { child, hostPid, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
     }
   } catch (error) {
     if (child !== undefined) await terminateIsolatedCodex(child, profile).catch(() => undefined)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
-    await profileLease?.release().catch(() => undefined)
+    if (!retainProfileLeaseAfterHiddenHostFailure(error)) {
+      await profileLease?.release().catch(() => undefined)
+    }
     throw error
   }
 }

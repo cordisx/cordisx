@@ -42,6 +42,7 @@ interface ProcessIdentity {
 }
 
 const launchedProcessOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
+const pendingHiddenOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
 
 function processTable(): readonly ProcessIdentity[] {
   if (process.platform === 'win32') return []
@@ -585,6 +586,10 @@ export async function launchCodexHidden(
     }
     throw new HiddenHostIdentityUnconfirmedError()
   }
+  // The process list proves the executable plus both fresh loopback ports.
+  // Keep this provisional identity only for exact cleanup if inspector
+  // confirmation fails; it is not an adopted Host until confirmation below.
+  pendingHiddenOwnership.set(child, new ProcessOwnershipTracker(hostPid))
   return {
     child,
     hostPid,
@@ -594,7 +599,14 @@ export async function launchCodexHidden(
 
 /** Bind cleanup only after the main inspector has reported this exact PID. */
 export function confirmHiddenCodexOwnership(launch: HiddenCodexLaunch): void {
-  launchedProcessOwnership.set(launch.child, new ProcessOwnershipTracker(launch.hostPid))
+  const pending = pendingHiddenOwnership.get(launch.child)
+  const ownership = pending ?? new ProcessOwnershipTracker(launch.hostPid)
+  if (ownership.pid !== launch.hostPid || !ownership.rootAlive()) {
+    ownership.stop()
+    throw new Error('Hidden Host launch identity changed before confirmation')
+  }
+  launchedProcessOwnership.set(launch.child, ownership)
+  pendingHiddenOwnership.delete(launch.child)
 }
 
 function exited(child: ChildProcess): boolean {
@@ -622,10 +634,11 @@ async function waitForExit(child: ChildProcess, milliseconds: number, whileWaiti
 
 /** Stop only the exact process returned by launchCodex. */
 export async function terminateIsolatedCodex(child: ChildProcess, profile?: IsolatedCodexProfile): Promise<void> {
-  const ownership = launchedProcessOwnership.get(child)
+  const ownership = launchedProcessOwnership.get(child) ?? pendingHiddenOwnership.get(child)
   if (child.pid === undefined) {
     ownership?.stop()
     launchedProcessOwnership.delete(child)
+    pendingHiddenOwnership.delete(child)
     return
   }
   if (ownership?.rootAlive() === true || !exited(child)) {
@@ -640,6 +653,7 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
   }
   const ownedProcesses = ownership?.stop() ?? []
   launchedProcessOwnership.delete(child)
+  pendingHiddenOwnership.delete(child)
   if (profile?.cleanupOwned === true || (ownership !== undefined && ownership.pid !== child.pid)) {
     await terminateOwnedProcesses(ownedProcesses, child.pid)
   }

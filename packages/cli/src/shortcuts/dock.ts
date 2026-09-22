@@ -235,6 +235,7 @@ export async function installHostMainAgents(input: {
   inspectorUrl: string
   hostPid: number
   hostStartedAt: string
+  hostCwd?: string
   debugPort: number
   readyStatePath: string
   readyInstanceToken: string
@@ -285,6 +286,19 @@ export async function installHostMainAgents(input: {
     const pausedEvent = await paused
     const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
     if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
+    if (input.hostCwd !== undefined) {
+      const cwdResponse = await session.send('Debugger.evaluateOnCallFrame', {
+        callFrameId: frame.callFrameId,
+        expression: `process.chdir(${JSON.stringify(input.hostCwd)});process.cwd()`,
+        returnByValue: true,
+      })
+      if (
+        runtimeEvaluationException(cwdResponse)
+        || (cwdResponse.result as { value?: unknown })?.value !== input.hostCwd
+      ) {
+        throw new Error('Owned Host working directory could not be restored')
+      }
+    }
     await installStartupNavigation(session, frame.callFrameId, {
       pid: input.hostPid,
       generation: input.readyInstanceToken,

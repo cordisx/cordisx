@@ -266,6 +266,7 @@ export async function createSupervisorRuntime(
         mainAgents = await installHostMainAgents({
           inspectorUrl: await inspectorUrl,
           hostPid: pid,
+          hostCwd: process.cwd(),
           debugPort,
           hostStartedAt: hostProcessStartedAt,
           readyStatePath: supervisorPaths(home, app, profile).state,
@@ -295,6 +296,7 @@ export async function createSupervisorRuntime(
         mainAgents = await installHostMainAgents({
           inspectorUrl: await inspectorUrl,
           hostPid: current.hostPid,
+          hostCwd: process.cwd(),
           debugPort,
           hostStartedAt: current.hostProcessStartedAt,
           readyStatePath: supervisorPaths(home, app, profile).state,

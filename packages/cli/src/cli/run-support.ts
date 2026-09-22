@@ -465,6 +465,7 @@ export async function runInjectedHost(input: {
   readonly executable?: string
   readonly prelaunchedHost?: Readonly<{
     child: ChildProcess
+    hostPid?: number
     inspectorUrl?: Promise<string>
   }>
   readonly debugPort: number
@@ -487,8 +488,9 @@ export async function runInjectedHost(input: {
   let removeHostObserver = launched === undefined
     ? undefined
     : observeHostExit(launched, input.stdout, () => rendererIsReady)
+  const hostPid = (): number | undefined => input.prelaunchedHost?.hostPid ?? launched?.pid
   const lifecycle = (event: Parameters<typeof logHostLifecycle>[1]): void =>
-    logHostLifecycle(input.stdout, event, { hostPid: launched?.pid, ready: rendererIsReady })
+    logHostLifecycle(input.stdout, event, { hostPid: hostPid(), ready: rendererIsReady })
   const stop = (signal: 'SIGINT' | 'SIGTERM'): void => {
     lifecycle({ event: 'launcher-signal', signal })
     controller.abort()
