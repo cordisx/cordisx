@@ -8,6 +8,7 @@ import type {
 } from '../packages/cli/src/launcher/native-submission-controller.js'
 
 async function harness(options: Readonly<{
+  management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
   catalogSubscribe?: (listener: () => void) => () => void
   catalog?: () => readonly {
@@ -22,6 +23,7 @@ async function harness(options: Readonly<{
   let receive: (params: Record<string, any>) => void
   const idle = vi.fn(async () => true)
   const authority = createNativeSubmissionCdpAuthority({
+    ...(options.management ? { management: options.management } : {}),
     ...(options.catalogSubscribe === undefined ? {} : { catalogSubscribe: options.catalogSubscribe }),
     catalog: async () =>
       options.catalog?.() ?? [{
@@ -74,6 +76,7 @@ async function harness(options: Readonly<{
     draft,
     idle,
     installed,
+    world,
     channel: world.__cordisxNativeProviderCommandChannel,
     controller,
     setLive(value: NativeSubmissionScope) {
@@ -83,6 +86,57 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('fences management commands and invalidations to the installed document lifetime', async () => {
+    let changed!: () => void
+    let finish!: () => void
+    let admitted!: () => boolean
+    const unsubscribe = vi.fn()
+    const snapshot = { epoch: 'fixture', sequence: 1, views: [] }
+    const command = vi.fn(async (_input, authorized) => {
+      admitted = authorized
+      await new Promise<void>(resolve => {
+        finish = resolve
+      })
+      return { status: 'applied' as const }
+    })
+    const h = await harness({
+      management: {
+        snapshot: () => snapshot,
+        command,
+        subscribe: listener => {
+          changed = listener
+          return unsubscribe
+        },
+      },
+    })
+    const listener = vi.fn()
+    h.channel.catalogManagementSubscribe(listener)
+    expect(await h.channel.catalogManagementRead()).toEqual(snapshot)
+    h.world.__cordisxCatalogManagementChanged('stale', snapshot)
+    expect(listener).not.toHaveBeenCalled()
+    changed()
+    expect(listener).toHaveBeenCalledOnce()
+    const pending = h.channel.catalogManagementCommand({ operation: 'refresh' })
+    const rejected = expect(pending).rejects.toThrow('disposed')
+    await vi.waitFor(() => expect(command).toHaveBeenCalledOnce())
+    expect(admitted()).toBe(true)
+    await h.installed.dispose()
+    expect(admitted()).toBe(false)
+    finish()
+    await rejected
+    changed()
+    expect(listener).toHaveBeenCalledOnce()
+    expect(unsubscribe).toHaveBeenCalledOnce()
+    await expect(h.channel.catalogManagementRead()).rejects.toThrow('unavailable')
+  })
+
+  it('omits the management capability when no Host owner is available', async () => {
+    const h = await harness()
+    expect(h.channel.catalogManagementRead).toBeUndefined()
+    expect(h.channel.catalogManagementCommand).toBeUndefined()
+    expect(h.channel.catalogManagementSubscribe).toBeUndefined()
+    await h.installed.dispose()
+  })
   it('pushes fenced catalog invalidations and supports full snapshot resynchronization', async () => {
     let changed!: () => void
     const unsubscribe = vi.fn()

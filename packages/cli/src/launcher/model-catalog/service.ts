@@ -23,6 +23,7 @@ interface Entry {
   retryAt: number
   source: readonly CatalogModel[]
   supplement?: CatalogSupplement
+  paused: boolean
 }
 
 export interface CatalogServiceOptions {
@@ -30,6 +31,8 @@ export interface CatalogServiceOptions {
   readonly connection: (binding: CatalogBinding) => DiscoveryConnection | undefined
   readonly read: (binding: CatalogBinding, signal: AbortSignal) => Promise<readonly CatalogModel[]>
   readonly now?: () => number
+  /** Commit validated acquisition before publication when the owner supplies durable storage. */
+  readonly persistSource?: (snapshot: CatalogSnapshot, current: () => boolean) => Promise<void>
 }
 
 /** One owner per target. Readers never await source I/O; only completed candidates are published. */
@@ -59,10 +62,13 @@ export class ModelCatalogService {
     }
   }
 
-  configure(binding: CatalogBinding): void {
+  configure(binding: CatalogBinding, options: { paused?: boolean; cached?: CatalogSnapshot } = {}): void {
     if (this.disposed) return
     const previous = this.entries.get(binding.bindingRef)
-    if (previous && JSON.stringify(previous.binding) === JSON.stringify(binding)) return
+    if (previous && JSON.stringify(previous.binding) === JSON.stringify(binding)) {
+      this.setPaused(binding.bindingRef, options.paused ?? false)
+      return
+    }
     if (previous) this.stop(previous)
     const entry: Entry = {
       binding: structuredClone(binding),
@@ -80,9 +86,32 @@ export class ModelCatalogService {
       failures: 0,
       retryAt: 0,
       source: Object.freeze([]),
+      paused: options.paused ?? false,
       ...(previous?.binding.scopeRevision === binding.scopeRevision && previous.supplement
         ? { supplement: previous.supplement }
         : {}),
+    }
+    const cached = options.cached
+    if (
+      cached?.complete && cached.bindingRef === binding.bindingRef && cached.scopeRevision === binding.scopeRevision
+      && cached.authorityRevision === binding.authorityRevision
+    ) {
+      const byId = new Map(cached.models.map(model => [model.id, model]))
+      entry.source = Object.freeze(
+        catalogModels(cached.models.map(model => model.id)).map(model => ({
+          ...model,
+          ...(byId.get(model.id)?.protocolCapabilities
+            ? { protocolCapabilities: { responses: byId.get(model.id)!.protocolCapabilities!.responses === true } }
+            : {}),
+        })),
+      )
+      entry.snapshot = Object.freeze({
+        ...entry.snapshot,
+        complete: true,
+        freshness: 'stale',
+        ...(cached.error === undefined ? {} : { error: cached.error }),
+        ...(cached.lastSuccessAt === undefined ? {} : { lastSuccessAt: cached.lastSuccessAt }),
+      })
     }
     entry.snapshot = Object.freeze({
       ...entry.snapshot,
@@ -91,7 +120,25 @@ export class ModelCatalogService {
     this.entries.set(binding.bindingRef, entry)
     this.emit()
     // Scheduling is intentionally outside startup, selection and submission awaits.
-    this.schedule(entry, 0)
+    if (!entry.paused) this.schedule(entry, 0)
+  }
+
+  setPaused(bindingRef: string, paused: boolean): void {
+    const entry = this.entries.get(bindingRef)
+    if (!entry || this.disposed || entry.paused === paused) return
+    entry.paused = paused
+    if (paused) {
+      this.stop(entry)
+      delete entry.job
+      delete entry.abort
+      delete entry.timer
+      this.publish(entry, { loading: false })
+    } else this.schedule(entry, 0)
+  }
+
+  sourceSnapshot(bindingRef: string): CatalogSnapshot | undefined {
+    const entry = this.entries.get(bindingRef)
+    return entry ? Object.freeze({ ...entry.snapshot, models: entry.source }) : undefined
   }
 
   setSupplement(bindingRef: string, scopeRevision: string, authorityRevision: string, candidate: unknown): void {
@@ -102,6 +149,7 @@ export class ModelCatalogService {
       if (supplement.scopeRevision !== scopeRevision || supplement.authorityRevision !== authorityRevision) {
         throw new CatalogError('source-invalid')
       }
+      if (JSON.stringify(entry.supplement) === JSON.stringify(supplement) && !entry.snapshot.supplementError) return
       entry.supplement = supplement
       const { supplementError: _error, ...snapshot } = entry.snapshot
       entry.snapshot = snapshot
@@ -126,7 +174,7 @@ export class ModelCatalogService {
 
   refresh(bindingRef: string): Promise<void> {
     const entry = this.entries.get(bindingRef)
-    if (this.disposed || !entry) return Promise.resolve()
+    if (this.disposed || !entry || entry.paused) return Promise.resolve()
     if (entry.job) return entry.job
     if (this.now() < entry.retryAt) return Promise.resolve()
     if (entry.timer) clearTimeout(entry.timer)
@@ -157,20 +205,33 @@ export class ModelCatalogService {
             ...model,
             label: byId.get(model.id)?.label ?? model.id,
             aliases: Object.freeze([...(byId.get(model.id)?.aliases ?? [])]),
+            ...(byId.get(model.id)?.protocolCapabilities
+              ? {
+                protocolCapabilities: Object.freeze({
+                  responses: byId.get(model.id)!.protocolCapabilities!.responses === true,
+                }),
+              }
+              : {}),
           })
         ))
         entry.failures = 0
-        entry.source = validated
         entry.retryAt = 0
         const { error: _error, ...snapshot } = entry.snapshot
-        entry.snapshot = Object.freeze({
+        const candidate = Object.freeze({
           ...snapshot,
           revision: ++this.sequence,
-          models: composeMembers(validated, entry.binding.strategy, entry.supplement),
+          models: validated,
           complete: true,
-          freshness: 'fresh',
+          freshness: 'fresh' as const,
           loading: false,
           lastSuccessAt: this.now(),
+        })
+        await this.options.persistSource?.(candidate, current)
+        if (!current() || abort.signal.aborted) return
+        entry.source = validated
+        entry.snapshot = Object.freeze({
+          ...candidate,
+          models: composeMembers(validated, entry.binding.strategy, entry.supplement),
         })
         this.emit()
         if (entry.binding.strategy.kind === 'auto') this.schedule(entry, entry.binding.strategy.ttlMs)
@@ -221,6 +282,7 @@ export class ModelCatalogService {
   }
 
   private schedule(entry: Entry, delay: number): void {
+    if (entry.paused || this.disposed) return
     if (entry.timer) clearTimeout(entry.timer)
     entry.timer = setTimeout(() => {
       delete entry.timer

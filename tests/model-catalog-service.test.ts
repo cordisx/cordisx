@@ -62,6 +62,43 @@ describe('model catalog owner', () => {
     expect(service.snapshot(binding.bindingRef)?.models).toEqual([])
   })
 
+  it('waits for durable complete-empty commit and discards publication after pause', async () => {
+    let release!: () => void
+    let current!: () => boolean
+    const persistSource = vi.fn(async (_snapshot, valid) => {
+      current = valid
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+    })
+    const service = new ModelCatalogService({
+      registry: new DiscoveryAdapterRegistry([]),
+      connection: () => undefined,
+      read: async () => [],
+      persistSource,
+    })
+    services.push(service)
+    service.configure(binding, {
+      cached: {
+        ...binding,
+        revision: 1,
+        complete: true,
+        freshness: 'stale',
+        loading: false,
+        models: catalogModels(['old']),
+      },
+    })
+    const job = service.refresh(binding.bindingRef)
+    await vi.waitFor(() => expect(persistSource).toHaveBeenCalledOnce())
+    expect(service.snapshot(binding.bindingRef)?.models.map(model => model.id)).toEqual(['old'])
+    expect(persistSource.mock.calls[0]?.[0]).toMatchObject({ complete: true, models: [] })
+    service.setPaused(binding.bindingRef, true)
+    expect(current()).toBe(false)
+    release()
+    await job
+    expect(service.snapshot(binding.bindingRef)?.models.map(model => model.id)).toEqual(['old'])
+  })
+
   it('rejects late results after a manual replacement, without union or credential access', async () => {
     let resolve!: (models: ReturnType<typeof catalogModels>) => void
     const { service, connection } = create(() =>

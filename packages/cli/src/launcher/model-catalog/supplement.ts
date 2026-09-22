@@ -56,6 +56,7 @@ export function composeMembers(
           aliases: existing?.aliases ?? Object.freeze([]),
           provenance: Object.freeze(existing ? [provenance, 'manual-supplement'] : ['manual-supplement']),
           notListed: existing === undefined,
+          ...(existing?.protocolCapabilities ? { protocolCapabilities: existing.protocolCapabilities } : {}),
         }) as CatalogModel,
       )
     }
