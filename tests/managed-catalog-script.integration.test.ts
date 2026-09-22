@@ -1,0 +1,86 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import os from 'node:os'
+import { expect, it, vi } from 'vitest'
+import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
+import { output, scriptFixture } from './script-source-helpers.js'
+
+it('persists write-only script config, runs explicitly, publishes exact results, and restarts without execution', async () => {
+  const fixture = await scriptFixture(output([{ id: 'scripted' }]))
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'managed-script-'))
+  const values = new Map<string, string>()
+  const options = {
+    homeDir,
+    profileId: 'fixture',
+    responsesAvailable: true,
+    capture: async () => 'fixture-key',
+    keychain: {
+      async read(service: string, account: string) {
+        const value = values.get(`${service}/${account}`)
+        if (!value) throw Error()
+        return value
+      },
+      async status(service: string, account: string): Promise<'set' | 'unset'> {
+        return values.has(`${service}/${account}`) ? 'set' : 'unset'
+      },
+      async upsert(service: string, account: string, value: string) {
+        values.set(`${service}/${account}`, value)
+      },
+      async remove(service: string, account: string) {
+        values.delete(`${service}/${account}`)
+      },
+    },
+  }
+  let owner = await ManagedCatalogComposition.open(options)
+  const scope = () => {
+    const view = owner.snapshot().views[0]!
+    return { bindingRef: view.bindingRef, scopeRevision: view.scopeRevision, expectedRevision: view.revision }
+  }
+  try {
+    await owner.command({
+      operation: 'createConnection',
+      settings: {
+        title: 'Script fixture',
+        endpoint: 'https://fixture.invalid',
+        protocol: 'responses',
+        discoveryEnabled: false,
+        strategy: { kind: 'manual', ids: ['manual'] },
+      },
+    }, () => true)
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows).toHaveLength(1))
+    expect(
+      (await owner.command(
+        { ...scope(), operation: 'configureScript', mode: 'replace', config: fixture.config },
+        () => true,
+      )).status,
+    ).toBe('applied')
+    expect(owner.snapshot().views[0]?.rows).toEqual([])
+    expect(JSON.stringify(owner.snapshot())).not.toMatch(/fixture\.cjs|environment|executable|fixture-key/)
+    expect((await owner.command({ ...scope(), operation: 'runScript' }, () => true)).status).toBe('applied')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows[0]?.id).toBe('scripted'))
+    expect(owner.catalog()[0]?.models[0]?.provenance).toEqual(['script'])
+    await writeFile(fixture.file, output([]))
+    await owner.command({ ...scope(), operation: 'runScript' }, () => true)
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.outcome).toBe('empty'))
+    await owner.close()
+    const raw = await readFile(path.join(homeDir, 'state/host-provider-owners/fixture.lock.state'), 'utf8')
+    expect(raw).not.toContain(fixture.file)
+    owner = await ManagedCatalogComposition.open(options)
+    expect(owner.snapshot().views[0]).toMatchObject({ sourceKind: 'script', outcome: 'none', rows: [] })
+    await owner.command({ ...scope(), operation: 'refresh' }, () => true)
+    expect(owner.snapshot().views[0]?.outcome).toBe('none')
+    expect(
+      (await owner.command({ ...scope(), operation: 'editManual', models: [{ id: 'manual' }] }, () => true)).status,
+    )
+      .toBe('applied')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.sourceKind).toBe('manual'))
+    expect(owner.snapshot().views[0]?.capabilities).not.toContain('runScript')
+    await owner.close()
+    owner = await ManagedCatalogComposition.open(options)
+    expect(owner.snapshot().views[0]?.sourceKind).toBe('manual')
+  } finally {
+    await owner.close()
+    await fixture.close()
+    await rm(homeDir, { recursive: true, force: true })
+  }
+})

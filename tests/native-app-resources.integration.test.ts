@@ -63,12 +63,45 @@ it.skipIf(process.platform !== 'darwin')(
       ].join('\n'),
     )
     const prepareNativeConnection = vi.fn()
+    const values = new Map<string, string>()
+    const keychain = {
+      async read(service: string, account: string) {
+        const value = values.get(`${service}/${account}`)
+        if (!value) throw Error()
+        return value
+      },
+      async status(service: string, account: string): Promise<'set' | 'unset'> {
+        return values.has(`${service}/${account}`) ? 'set' : 'unset'
+      },
+      async upsert(service: string, account: string, value: string) {
+        values.set(`${service}/${account}`, value)
+      },
+      async remove(service: string, account: string) {
+        values.delete(`${service}/${account}`)
+      },
+    }
     await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'deepseek-chat' }] }))
     const composition = await createNativeSubmissionComposition(
       { nativeProviderIds: [], prepareNativeConnection },
       f.executable,
       codexHome,
-      { configModelCatalogs: { deepseek: 'scoped.json' } },
+      {
+        configModelCatalogs: { deepseek: 'scoped.json' },
+        managedCatalog: {
+          homeDir: codexHome,
+          profileId: 'fixture',
+          keychain,
+          capture: async () => 'fixture-managed-secret',
+          fetcher: async () =>
+            Response.json({
+              object: 'list',
+              data: [
+                { object: 'model', id: 'deepseek-flash', owned_by: 'deepseek' },
+                { object: 'model', id: 'unknown', owned_by: 'deepseek' },
+              ],
+            }),
+        },
+      },
     )
     try {
       expect(composition.installation.transforms).toHaveLength(2)
@@ -128,6 +161,55 @@ it.skipIf(process.platform !== 'darwin')(
         await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'replacement' }] }))
         expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'reject' })
         expect(prepareNativeConnection).not.toHaveBeenCalled()
+        const settings = {
+          title: 'Managed fixture',
+          endpoint: 'https://fixture.invalid/v1',
+          protocol: 'responses',
+          discoveryEnabled: false,
+          strategy: { kind: 'manual', ids: ['managed-model'] },
+        }
+        const events = vi.fn()
+        const unsubscribe = channel.catalogManagementSubscribe(events)
+        expect((await channel.catalogManagementCommand({ operation: 'createConnection', settings })).status).toBe(
+          'applied',
+        )
+        await vi.waitFor(async () => expect((await channel.catalogManagementRead()).views[0].selectableCount).toBe(1))
+        const view = (await channel.catalogManagementRead()).views[0]
+        expect(JSON.stringify(view)).not.toContain('fixture-managed-secret')
+        await channel.selectionSelect({ scope, providerId: view.providerId, model: 'managed-model' })
+        expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'allow-original' })
+        const current = (await channel.catalogManagementRead()).views[0]
+        expect(
+          (await channel.catalogManagementCommand({
+            operation: 'setOverlay',
+            bindingRef: current.bindingRef,
+            scopeRevision: current.scopeRevision,
+            expectedRevision: current.revision,
+            modelId: 'managed-model',
+            blocked: true,
+          })).status,
+        ).toBe('applied')
+        expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'reject' })
+        expect(events).toHaveBeenCalled()
+        expect(
+          (await channel.catalogManagementCommand({
+            operation: 'createConnection',
+            settings: {
+              title: 'Official protocol fixture',
+              endpoint: 'https://api.deepseek.com',
+              protocol: 'chat-completions',
+              discoveryEnabled: true,
+              strategy: { kind: 'auto', adapter: 'detect', mode: 'only', ttlMs: 60000 },
+            },
+          })).status,
+        ).toBe('applied')
+        await vi.waitFor(async () => expect((await channel.catalogManagementRead()).views[1].selectableCount).toBe(1))
+        const official = (await channel.catalogManagementRead()).views[1]
+        await channel.selectionSelect({ scope, providerId: official.providerId, model: 'deepseek-flash' })
+        expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'allow-original' })
+        await expect(channel.selectionSelect({ scope, providerId: official.providerId, model: 'unknown' })).rejects
+          .toThrow()
+        unsubscribe()
       } finally {
         await installed.dispose()
       }

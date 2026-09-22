@@ -24,6 +24,7 @@ import { codexConfigModelProviders } from './codex-config-model-providers.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
+import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -90,6 +91,7 @@ export async function createNativeSubmissionComposition(
     configModelCatalogs?: Readonly<Record<string, string>>
     dynamicModelCatalog?: boolean
     selectorIcons?: ModelSelectorIconOverrides
+    managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
   }> = {},
 ): Promise<NativeSubmissionComposition> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
@@ -104,7 +106,12 @@ export async function createNativeSubmissionComposition(
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   const capabilities = await nativeSubmissionTransforms(contents)
   const control = await startNativeSubmissionControlServer()
-  const credentials = createNativeProviderCredentialBroker({ resolve: id => activation.prepareNativeConnection(id) })
+  let managed: ManagedCatalogComposition | undefined
+  const resolveConnection = (id: string) =>
+    managed?.owns(id)
+      ? managed.nativeConnection(id)
+      : activation.prepareNativeConnection(id)
+  const credentials = createNativeProviderCredentialBroker({ resolve: resolveConnection })
   let controller: NativeSubmissionController | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let closePromise: Promise<void> | undefined
@@ -117,11 +124,20 @@ export async function createNativeSubmissionComposition(
         try {
           await credentials.close()
         } finally {
-          await control.close()
+          try {
+            await managed?.close()
+          } finally {
+            await control.close()
+          }
         }
       }
     })()
   try {
+    if (options.managedCatalog) {
+      try {
+        managed = await ManagedCatalogComposition.open({ ...options.managedCatalog, responsesAvailable: true })
+      } catch { /* An unavailable managed owner must not disable unrelated native providers. */ }
+    }
     if (options.dynamicModelCatalog) {
       dynamic = dynamicConfiguredCatalog({
         codexHome,
@@ -146,9 +162,18 @@ export async function createNativeSubmissionComposition(
       return configured.providers
     }
     const cdp = createNativeSubmissionCdpAuthority({
-      ...(dynamic === undefined ? {} : { catalogSubscribe: dynamic.subscribe }),
+      ...(!dynamic && !managed ? {} : {
+        catalogSubscribe: (listener: () => void) => {
+          const subscriptions = [dynamic?.subscribe(listener), managed?.subscribe(listener)]
+          return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
+        },
+      }),
+      ...(managed ? { management: managed } : {}),
       catalog: combinedNativeModelProviderCatalog(
-        nativeModelProviderCatalog(activation, options.selectorIcons),
+        combinedNativeModelProviderCatalog(
+          async () => managed?.catalog() ?? [],
+          nativeModelProviderCatalog(activation, options.selectorIcons),
+        ),
         configuredCatalog,
       ),
       isThreadIdle: id => control.isThreadIdle(id),
@@ -160,15 +185,18 @@ export async function createNativeSubmissionComposition(
       existingThread: control.existingThread,
       credentials: nativeSubmissionCredentialBroker({
         credentials,
-        resolveEndpoint: id => activation.prepareNativeConnection(id),
+        resolveEndpoint: resolveConnection,
       }),
       providerSource: providerId =>
-        managedIds.has(providerId)
+        managed?.owns(providerId) || managedIds.has(providerId)
           ? 'managed'
           : (dynamic?.snapshot() ?? configured).providerIds.has(providerId)
           ? 'config'
           : undefined,
       validateSelection: async selection => {
+        if (selection.providerId.startsWith('cordisx-')) {
+          return await managed?.validateSelection(selection.providerId, selection.model) ?? false
+        }
         if (selection.providerId === 'openai' || managedIds.has(selection.providerId)) return true
         return (await configuredCatalog()).some(provider =>
           provider.providerId === selection.providerId

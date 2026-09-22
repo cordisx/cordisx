@@ -195,10 +195,47 @@ Errors from Keychain and transport are value-free. The existing trusted-code
 model still applies: this is capability isolation, not a sandbox against arbitrary
 code running with the user's OS identity.
 
-These are internal owner/schema/API foundations. Production launcher scheduling,
-catalog cache integration, trusted configuration capture UI and submission routing
-remain separate integration work; their presence is not established by owner
-fixtures. Native-only connections continue to use native/manual catalogs until
+The production profile launcher now composes this owner with model discovery,
+the management channel, scoped overlays, manual supplements and developer scripts.
+An OS-native secure text prompt captures provider keys; the management channel
+only carries replacement intent. Script configuration is write-only and trusted
+when explicitly saved; see [developer script sources](script-model-source.md).
+Restoring settings never executes a script, and generic refresh never runs one.
+
+Profile catalog state contains source LKG, overlay preferences and script
+configuration, encrypted with AES-256-GCM using a separate Keychain-held key.
+The owning profile lock serializes writes, rejects observed external replacement,
+and fences encrypted state to its profile namespace. Complete empty replaces the
+source cache. Scope/strategy changes do not reuse an unrelated cache. Script
+results remain session-only. Pausing discovery cancels acquisition without
+deleting source members. Explicit authentication/account denials prevent new
+submissions even when retained rows remain visible.
+
+Responses connections use the existing Host-private native credential broker.
+Management snapshots never include its secret, command or lease. Overlay blocks
+are enforced at submission admission; pinning changes only ordering. A listed
+model is not proof of protocol support. The discovery adapter reports per-model
+`protocolCapabilities.responses`; the Host uses this generic capability before
+falling back to an explicitly configured Responses connection. Chat-only and
+explicitly unconfirmed models remain visible but unselectable.
+
+The [official DeepSeek Responses guide](https://api-docs.deepseek.com/guides/responses_api)
+and [Codex integration](https://api-docs.deepseek.com/quick_start/agent_integrations/codex)
+confirm native Responses support. The built-in adapter confirms only the exact
+`deepseek-flash` and `deepseek-v4-pro` IDs on the official endpoint; it does not
+infer support for unknown or legacy IDs. The base URL stays
+`https://api.deepseek.com/`, not `/responses`: upstream Codex appends the operation
+path. No Responses/Chat conversion layer is required or implemented.
+Upstream Codex owns HTTP, semantic SSE events and full stateless conversation
+history, including paired function/custom-tool results. Offline protocol fixtures
+and intermediary pass-through checks are not real App or upstream HTTP acceptance.
+
+The admitted native document channel exposes read, cursor subscription and
+CAS commands, with full snapshot resynchronization. No plugin API is registered.
+As elsewhere in the trusted renderer architecture, this is not an OS or arbitrary
+same-document-code sandbox. Tests use injected Keychain/transport and fixture App
+resources; no real App or live provider usability is established by those tests.
+Native-only connections continue to use native/manual catalogs until
 their actual native owner can provide an audited discovery capability. That
 optional compatibility dependency does not block CordisX-owned credentials.
 
@@ -211,9 +248,9 @@ Scope changes isolate both layers. This contract and its provenance are availabl
 for the subsequent owner integration; no supplement editor or script runner is
 shipped in the current UI.
 
-The current persistence helper is a single-owner primitive, not a cross-process
-transaction service or a production account-attested disk cache. Real native
-flow verification, durable owner integration, and user acceptance remain separate
+The encrypted state is a single-owner store, not a cross-process transaction
+service or an upstream account-attested disk cache. Real native
+flow verification and user acceptance remain separate
 delivery gates. No provider API request is made by enabling the local-file flag.
 
 Provider changes prefer an exact model ID, then a unique explicit alias. An

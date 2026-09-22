@@ -5,6 +5,7 @@ export interface CatalogModel {
   readonly aliases: readonly string[]
   readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement')[]
   readonly notListed?: boolean
+  readonly protocolCapabilities?: { readonly responses: boolean }
 }
 
 export type CatalogStrategy =

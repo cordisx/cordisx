@@ -86,7 +86,11 @@ describe('Vite development native submission assembly', () => {
           expect.anything(),
           f.executable,
           expect.any(String),
-          { configModelCatalogs: { fixture: 'scoped.json' }, dynamicModelCatalog: true },
+          {
+            configModelCatalogs: { fixture: 'scoped.json' },
+            dynamicModelCatalog: true,
+            managedCatalog: { homeDir: f.home, profileId: 'default' },
+          },
         )
       } else expect(create.mock.calls[0]).toHaveLength(3)
       expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))
