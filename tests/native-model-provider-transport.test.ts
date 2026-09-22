@@ -5,6 +5,12 @@ import {
   locateNativeModelSelectionControl,
 } from '../packages/cli/src/renderer/adapter/native-model-provider-seat.js'
 import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
+import {
+  collaborationMode,
+  firstTurnRuntime,
+  firstTurnToken,
+  nativeModelChangeState,
+} from './fixtures/native-model-change-baseline.js'
 import type {
   NativeProviderSelectionCommandChannel,
   NativeProviderSelectionProjection,
@@ -197,6 +203,55 @@ async function harness(handler?: (request: Record<string, unknown>, view: Window
 }
 
 describe('native model provider transport', () => {
+  it('keeps first-turn baseline synchronization silent and a later user switch observable', async () => {
+    const { dom, transport, channel, selectModel, trigger } = await harness()
+    const run = firstTurnRuntime(async () => ({ conversationResponse: { model: 'deepseek-v4-flash' } }))
+    const request = await run.first({
+      input: 'hello',
+      collaborationMode: collaborationMode('gpt-5.6-sol'),
+      config: { 'cordisx.operation_token': firstTurnToken },
+    })
+    const state = nativeModelChangeState('gpt-5.6-sol')
+    state.beginTurn(request.collaborationMode.settings.model)
+    selectModel.mockImplementation(async (model, effort) => {
+      state.applySettings(model)
+      const props = (trigger as any).__reactFiber$test.return.memoizedProps
+      props.model = model
+      props.reasoningEffort = effort
+    })
+    let projection: NativeProviderSelectionProjection = {
+      available: true,
+      revision: 10,
+      effective: { providerId: 'deepseek', model: 'deepseek-v4-flash' },
+    }
+    channel.selectionRead.mockImplementation(async () => projection)
+    channel.selectionSelect.mockImplementation(async target => {
+      projection = {
+        available: true,
+        revision: projection.revision + 1,
+        effective: { providerId: target.providerId, model: target.model },
+      }
+      return { ...projection, status: 'accepted', effective: projection.effective! }
+    })
+    for (let i = 0; i < 2; i++) {
+      message(dom.window, {
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: { method: 'turn/completed', params: { threadId: 'thread-1' } },
+      })
+      await settle()
+    }
+    expect(selectModel).toHaveBeenCalledTimes(1)
+    expect(state.beginTurn()).toEqual([])
+    expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('accepted')
+    expect(state.beginTurn()).toEqual([{
+      type: 'modelChanged',
+      fromModel: 'deepseek-v4-flash',
+      toModel: 'model-b',
+    }])
+    transport.dispose()
+    dom.window.close()
+  })
   it('connects through launcher capability without Desktop identity metadata', async () => {
     const h = await harness()
     expect(h.transport.getSnapshot().available).toBe(true)

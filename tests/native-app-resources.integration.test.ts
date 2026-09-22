@@ -111,6 +111,7 @@ it.skipIf(process.platform !== 'darwin')(
           providerId: 'deepseek',
           pluginId: 'cordisx.codex-config',
           title: 'DeepSeek',
+          selectorBrand: { brand: 'deepseek', source: 'inferred' },
           models: [{ id: 'deepseek-chat', label: 'deepseek-chat', aliases: [] }],
         }])
         expect(JSON.stringify(catalog)).not.toMatch(/base_url|env_key|api\.deepseek/u)

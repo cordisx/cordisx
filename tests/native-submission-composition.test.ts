@@ -11,6 +11,7 @@ function runtime(hook: unknown = async () => ({ allow: true, operationToken: tok
     __cordisxNativeSubmitHook: hook,
     __cordisxNativeSubmissionActivate: vi.fn(),
     updateModel: vi.fn(async () => true),
+    createNativeThread: vi.fn(async () => ({ conversationResponse: { model: 'deepseek-v4-flash' } })),
     normalizeWire: (request: Record<string, unknown>) => ({ input: request.input, permission: 'preserved' }),
   }
   transforms.forEach((transform, i) => runInNewContext(transform.transform(source[i]!.source).source, sandbox))
@@ -35,6 +36,18 @@ function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unkn
 }
 
 describe('structure-based native submission composition', () => {
+  it('uses the accepted first-thread model for the native collaboration baseline', async () => {
+    const run = runtime()
+    const mode = { mode: 'default', settings: { model: 'gpt-5.6-sol', reasoning_effort: 'medium' } }
+    const request = await run.sandbox.first({
+      input: 'message',
+      config: { 'cordisx.operation_token': token },
+      collaborationMode: mode,
+    })
+    expect(request.collaborationMode.settings.model).toBe('deepseek-v4-flash')
+    expect(mode.settings.model).toBe('gpt-5.6-sol')
+    expect(run.sandbox.updateModel).not.toHaveBeenCalled()
+  })
   it('recognizes renamed local bindings, changed asset names and added whitespace', () => {
     const changed = resources().map(resource => ({
       url: resource.url.replace('unrecognized', 'new-content-hash'),
