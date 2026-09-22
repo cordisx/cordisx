@@ -6,6 +6,7 @@ export interface ScriptComposableModel {
   readonly aliases: readonly string[]
   readonly provenance?: readonly string[]
   readonly notListed?: boolean
+  readonly protocolCapabilities?: { readonly responses: boolean }
 }
 
 /** Membership only. The target still applies native/plugin admission and user overlays. */
@@ -43,6 +44,7 @@ export function composeScriptMembers(input: {
         aliases: base?.aliases ?? Object.freeze([]),
         provenance: Object.freeze([...new Set([...(base?.provenance ?? []), 'script-supplement'])]),
         notListed: base === undefined || base.notListed === true,
+        ...(base?.protocolCapabilities ? { protocolCapabilities: base.protocolCapabilities } : {}),
       }),
     )
   }

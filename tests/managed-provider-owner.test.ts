@@ -65,7 +65,7 @@ describe('Host-owned managed Provider credentials', () => {
     expect(JSON.stringify(view)).not.toMatch(/fixture-secret|credentialRef/)
     const connection = owner.connection(view.id)!
     expect(connection).not.toHaveProperty('bearer')
-    const models = await builtinDiscoveryRegistry().resolve(connection.endpoint).discover(connection, signal())
+    const models = await builtinDiscoveryRegistry().resolve(connection).discover(connection, signal())
     expect(models.map(model => model.id)).toEqual(['listed'])
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.deepseek.com/models',
@@ -126,6 +126,37 @@ describe('Host-owned managed Provider credentials', () => {
       'credential-unavailable',
     )
     expect(owner.snapshot()).toEqual([])
+  })
+
+  it('derives the models request capability from each saved official connection', async () => {
+    const { owner, fetcher } = await setup()
+    fetcher.mockResolvedValueOnce(Response.json({
+      data: [{
+        id: 'openai/o4-mini',
+        name: 'OpenAI: o4-mini',
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['tools'],
+      }],
+      total_count: 1,
+      links: { next: null },
+    }))
+    const view = await owner.save({
+      settings: {
+        ...settings,
+        title: 'OpenRouter',
+        endpoint: 'https://openrouter.ai/api/v1',
+      },
+    }, async () => 'openrouter-fixture-secret')
+    const connection = owner.connection(view.id)!
+    const models = await builtinDiscoveryRegistry().resolve(connection).discover(connection, signal())
+    expect(models.map(model => model.id)).toEqual(['openai/o4-mini'])
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/models',
+      expect.objectContaining({
+        headers: { Accept: 'application/json', Authorization: 'Bearer openrouter-fixture-secret' },
+      }),
+    )
+    await expect(connection.request(operation, signal())).rejects.toThrow('permission')
   })
 
   it('retries physical deletion after restart without resurrecting the removed connection', async () => {

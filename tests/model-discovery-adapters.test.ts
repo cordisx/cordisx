@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseCatalogStrategy } from '../packages/cli/src/launcher/model-catalog/contracts.js'
+import {
+  MAX_DISCOVERY_RESPONSE_BYTES,
+  parseCatalogStrategy,
+} from '../packages/cli/src/launcher/model-catalog/contracts.js'
 import {
   deepSeekDiscoveryAdapter,
   isDeepSeekOfficialEndpoint,
 } from '../packages/cli/src/launcher/model-catalog/deepseek.js'
+import {
+  isOpenCodeGoEndpoint,
+  openCodeGoDiscoveryAdapter,
+} from '../packages/cli/src/launcher/model-catalog/opencode-go.js'
+import {
+  isOpenRouterEndpoint,
+  openRouterDiscoveryAdapter,
+} from '../packages/cli/src/launcher/model-catalog/openrouter.js'
 import { DiscoveryAdapterRegistry } from '../packages/cli/src/launcher/model-catalog/registry.js'
 import {
   createDiscoveryRequestCapability,
@@ -15,11 +26,22 @@ const response = (ids: string[]) =>
     object: 'list',
     data: ids.map(id => ({ id, object: 'model', owned_by: 'deepseek' })),
   })
-const connection = (fetcher: DiscoveryFetch = async () => response([]), bearer = vi.fn(async () => 'fixture-key')) => ({
-  endpoint: 'https://api.deepseek.com',
+const connection = ({
+  endpoint = 'https://api.deepseek.com',
+  providerName = 'DeepSeek',
+  fetcher = async () => response([]),
+  bearer = vi.fn(async () => 'fixture-key'),
+}: {
+  endpoint?: string
+  providerName?: string
+  fetcher?: DiscoveryFetch
+  bearer?: (signal: AbortSignal) => Promise<string>
+} = {}) => ({
+  endpoint,
+  providerName,
   scopeRevision: 'account-1',
   request: vi.fn(createDiscoveryRequestCapability({
-    operation: { origin: 'https://api.deepseek.com', method: 'GET', path: '/models' },
+    operation: { origin: endpoint.replace(/\/$/u, ''), method: 'GET', path: '/models' },
     current: () => true,
     bearer,
     fetcher,
@@ -36,7 +58,7 @@ describe('discovery contracts', () => {
     expect(parseCatalogStrategy({ kind: 'script', commandRef: 'trusted' }).kind).toBe('script')
   })
 
-  it('uses exact endpoint spelling, never provider names or generic proxy paths', () => {
+  it('uses exact official endpoints and never redirects credentials from provider names', () => {
     for (const url of ['https://api.deepseek.com', 'https://api.deepseek.com/', 'https://api.deepseek.com:443']) {
       expect(isDeepSeekOfficialEndpoint(url)).toBe(true)
     }
@@ -56,20 +78,35 @@ describe('discovery contracts', () => {
         'https://api.deepseek.com\\',
       ]
     ) expect(isDeepSeekOfficialEndpoint(url), url).toBe(false)
+    expect(isOpenCodeGoEndpoint('https://opencode.ai/zen/go/v1')).toBe(true)
+    expect(isOpenCodeGoEndpoint('https://opencode.ai/zen/v1')).toBe(false)
+    expect(isOpenRouterEndpoint('https://openrouter.ai/api/v1/')).toBe(true)
+    expect(isOpenRouterEndpoint('https://openrouter.ai/v1')).toBe(false)
     const adapter = deepSeekDiscoveryAdapter()
     expect(() => new DiscoveryAdapterRegistry([adapter, adapter])).toThrow('Duplicate')
-    expect(() => new DiscoveryAdapterRegistry([adapter]).resolve('https://proxy.test', adapter.id)).toThrow(
+    expect(() =>
+      new DiscoveryAdapterRegistry([adapter]).resolve(
+        { endpoint: 'https://proxy.test', providerName: 'DeepSeek' },
+        adapter.id,
+      )
+    ).toThrow(
       'unsupported',
     )
-    expect(() => new DiscoveryAdapterRegistry([adapter, { ...adapter, id: 'other' }]).resolve(connection().endpoint))
+    expect(() => new DiscoveryAdapterRegistry([adapter, { ...adapter, id: 'other' }]).resolve(connection()))
       .toThrow('ambiguous')
+    expect(() =>
+      new DiscoveryAdapterRegistry([openRouterDiscoveryAdapter()]).resolve({
+        endpoint: 'https://proxy.test/api/v1',
+        providerName: 'OpenRouter',
+      })
+    ).toThrow('unsupported')
   })
 
   it('requests only the fixed list operation and preserves exact legacy IDs', async () => {
     const fetcher = vi.fn(async () => response(['deepseek-v4-flash', 'deepseek-flash', 'deepseek-flash']))
-    const models = await deepSeekDiscoveryAdapter().discover(connection(fetcher), new AbortController().signal)
+    const models = await deepSeekDiscoveryAdapter().discover(connection({ fetcher }), new AbortController().signal)
     expect(models.map(model => model.id)).toEqual(['deepseek-flash', 'deepseek-v4-flash'])
-    expect(models.map(model => model.protocolCapabilities)).toEqual([{ responses: true }, { responses: false }])
+    expect(models.map(model => model.protocolCapabilities)).toEqual([{ responses: true }, undefined])
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.deepseek.com/models',
       expect.objectContaining({
@@ -82,7 +119,7 @@ describe('discovery contracts', () => {
   })
 
   it('does not resolve credentials on an ineligible connection', async () => {
-    const owner = { ...connection(), endpoint: 'https://proxy.test' }
+    const owner = connection({ endpoint: 'https://proxy.test' })
     await expect(deepSeekDiscoveryAdapter().discover(owner, new AbortController().signal)).rejects.toThrow(
       'unsupported',
     )
@@ -92,7 +129,7 @@ describe('discovery contracts', () => {
   it('cancels a credential callback that ignores its signal without issuing a request', async () => {
     const abort = new AbortController()
     const fetcher = vi.fn(async () => response([]))
-    const owner = connection(fetcher, vi.fn(() => new Promise<string>(() => {})))
+    const owner = connection({ fetcher, bearer: vi.fn(() => new Promise<string>(() => {})) })
     const request = deepSeekDiscoveryAdapter().discover(owner, abort.signal)
     abort.abort()
     await expect(request).rejects.toThrow('cancelled')
@@ -100,14 +137,15 @@ describe('discovery contracts', () => {
   })
 
   it('rejects oversized bodies and invalid UTF-8 without retaining their content', async () => {
-    for (const body of [' '.repeat(1024 * 1024 + 1), new Uint8Array([0xff])]) {
+    for (const body of [' '.repeat(MAX_DISCOVERY_RESPONSE_BYTES + 1), new Uint8Array([0xff])]) {
       await expect(
         deepSeekDiscoveryAdapter().discover(
-          connection(async () =>
-            new Response(body, {
-              headers: { 'content-type': 'application/json' },
-            })
-          ),
+          connection({
+            fetcher: async () =>
+              new Response(body, {
+                headers: { 'content-type': 'application/json' },
+              }),
+          }),
           new AbortController().signal,
         ),
       ).rejects.toThrow('protocol')
@@ -120,7 +158,9 @@ describe('discovery contracts', () => {
   ]])(
     'classifies %s without exposing response bodies',
     async (status, code) => {
-      const owner = connection(async () => new Response('private fixture diagnostic', { status: Number(status) }))
+      const owner = connection({
+        fetcher: async () => new Response('private fixture diagnostic', { status: Number(status) }),
+      })
       await expect(deepSeekDiscoveryAdapter().discover(owner, new AbortController().signal)).rejects.toThrow(
         String(code),
       )
@@ -134,9 +174,99 @@ describe('discovery contracts', () => {
       .resolves.toEqual([])
     for (const body of [{ object: 'list', data: [{}] }, { object: 'list', data: [], nextCursor: 'next' }]) {
       await expect(
-        deepSeekDiscoveryAdapter().discover(connection(async () => Response.json(body)), new AbortController().signal),
+        deepSeekDiscoveryAdapter().discover(
+          connection({ fetcher: async () => Response.json(body) }),
+          new AbortController().signal,
+        ),
       )
         .rejects.toThrow('protocol')
     }
+  })
+
+  it('discovers the OpenCode Go snapshot without turning observed IDs into capability claims or limits', async () => {
+    const ids = [
+      'deepseek-flash',
+      'deepseek-v4-pro',
+      'gpt-5.6-luna',
+      ...Array.from({ length: 31 }, (_, index) => `fixture-${index}`),
+    ]
+    const fetcher = vi.fn(async () => response(ids))
+    const models = await openCodeGoDiscoveryAdapter().discover(
+      connection({
+        endpoint: 'https://opencode.ai/zen/go/v1',
+        providerName: 'OpenCode Go',
+        fetcher,
+      }),
+      new AbortController().signal,
+    )
+    expect(models).toHaveLength(34)
+    expect(models.map(model => model.id)).toContain('gpt-5.6-luna')
+    expect(models.every(model => model.protocolCapabilities === undefined)).toBe(true)
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://opencode.ai/zen/go/v1/models',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fixture-key' }) }),
+    )
+  })
+
+  it('filters OpenRouter to text tool candidates while leaving Responses capability unknown', async () => {
+    const data = [
+      {
+        id: 'openai/o4-mini',
+        name: 'OpenAI: o4-mini',
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['tools', 'reasoning'],
+      },
+      {
+        id: 'openai/gpt-image-1',
+        name: 'OpenAI: Image',
+        architecture: { input_modalities: ['text'], output_modalities: ['image'] },
+        supported_parameters: ['tools'],
+      },
+      ...Array.from({ length: 442 }, (_, index) => ({
+        id: `fixture/model-${index}`,
+        name: `Fixture ${index}`,
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['temperature'],
+      })),
+    ]
+    const fetcher = vi.fn(async () => Response.json({ data, total_count: 444, links: { next: null } }))
+    const models = await openRouterDiscoveryAdapter().discover(
+      connection({
+        endpoint: 'https://openrouter.ai/api/v1',
+        providerName: 'OpenRouter',
+        fetcher,
+      }),
+      new AbortController().signal,
+    )
+    expect(models).toEqual([{
+      id: 'openai/o4-mini',
+      label: 'OpenAI: o4-mini',
+      aliases: [],
+    }])
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/models',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fixture-key' }) }),
+    )
+  })
+
+  it('rejects incomplete OpenRouter pages and malformed candidate metadata atomically', async () => {
+    const owner = (body: unknown) =>
+      connection({
+        endpoint: 'https://openrouter.ai/api/v1',
+        providerName: 'OpenRouter',
+        fetcher: async () => Response.json(body),
+      })
+    await expect(
+      openRouterDiscoveryAdapter().discover(
+        owner({ data: [], total_count: 1, links: { next: '/models?offset=1' } }),
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('protocol')
+    await expect(
+      openRouterDiscoveryAdapter().discover(
+        owner({ data: [{ id: 'openai/o4-mini', architecture: {}, supported_parameters: ['tools'] }] }),
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('protocol')
   })
 })

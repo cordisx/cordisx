@@ -28,6 +28,7 @@ describe('private owner discovery to safe renderer projection', () => {
         },
         connection: {
           endpoint: 'https://api.deepseek.com',
+          providerName: 'DeepSeek',
           scopeRevision: 'account-1',
           current: () => true,
           request: createDiscoveryRequestCapability({

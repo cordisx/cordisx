@@ -171,6 +171,7 @@ describe('model catalog owner', () => {
       }]),
       connection: () => ({
         endpoint: 'https://fixture.invalid',
+        providerName: 'Fixture',
         scopeRevision: 'account-1',
         current: () => true,
         request: async () => Response.json({}),

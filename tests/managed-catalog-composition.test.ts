@@ -191,6 +191,124 @@ describe('managed catalog production owner', () => {
     expect(reopened.catalog()[0]?.models.map(row => row.id)).toEqual(['deepseek-flash', 'deepseek-v4-pro'])
   })
 
+  it('keeps automatic capability unknown until an exact scoped user declaration overrides it', async () => {
+    const { owner, options } = await setup()
+    await owner.command({
+      operation: 'createConnection',
+      settings: {
+        ...settings,
+        endpoint: 'https://api.deepseek.com',
+        protocol: 'responses',
+        discoveryEnabled: true,
+        strategy: { kind: 'auto', mode: 'augment', adapter: 'detect', ttlMs: 60000 },
+      },
+    }, () => true)
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows[0]?.id).toBe('discovered'))
+    expect(owner.snapshot().views[0]?.rows[0]).toMatchObject({
+      selectable: false,
+      reason: 'unconfirmed',
+      provenance: ['auto'],
+    })
+
+    expect(
+      (await owner.command({
+        ...scope(owner),
+        operation: 'editSupplement',
+        models: [
+          { id: 'discovered', label: 'Renamed', protocolCapabilities: { responses: true } },
+          { id: 'manual-only' },
+        ],
+      }, () => true)).status,
+    ).toBe('applied')
+    let view = owner.snapshot().views[0]!
+    expect(view.rows.find(row => row.id === 'discovered')).toMatchObject({
+      label: 'Renamed',
+      selectable: true,
+      protocolCapabilities: { responses: true },
+      provenance: ['auto', 'manual-supplement'],
+    })
+    expect(view.rows.find(row => row.id === 'manual-only')).toMatchObject({
+      notListed: true,
+      selectable: true,
+      provenance: ['manual-supplement'],
+      protocolCapabilities: { responses: true },
+    })
+
+    options.fetcher.mockResolvedValueOnce(
+      Response.json({ object: 'list', data: [{ id: 'discovered', object: 'model', owned_by: 'fixture' }] }),
+    )
+    await owner.command({ ...scope(owner), operation: 'refresh' }, () => true)
+    await vi.waitFor(() => expect(options.fetcher).toHaveBeenCalledTimes(2))
+    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toEqual({
+      responses: true,
+    })
+
+    const rejected = await owner.command({
+      ...scope(owner),
+      operation: 'editSupplement',
+      models: [{ id: 'discovered', protocolCapabilities: {} }],
+    } as never, () => true)
+    expect(rejected).toMatchObject({ status: 'rejected', code: 'source-invalid' })
+    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toEqual({
+      responses: true,
+    })
+
+    await owner.command({
+      ...scope(owner),
+      operation: 'editSupplement',
+      models: [{ id: 'discovered', protocolCapabilities: { responses: false } }],
+    }, () => true)
+    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'discovered')).toMatchObject({
+      selectable: false,
+      protocolCapabilities: { responses: false },
+    })
+
+    await owner.command({
+      ...scope(owner),
+      operation: 'editSupplement',
+      models: [{ id: 'discovered', label: 'Label only' }],
+    }, () => true)
+    view = owner.snapshot().views[0]!
+    expect(view.rows.find(row => row.id === 'discovered')).toMatchObject({
+      label: 'Label only',
+      selectable: false,
+      reason: 'unconfirmed',
+    })
+    expect(view.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toBeUndefined()
+
+    await owner.command({
+      operation: 'createConnection',
+      settings: {
+        ...settings,
+        title: 'OpenCode Go',
+        endpoint: 'https://opencode.ai/zen/go/v1',
+        protocol: 'responses',
+        discoveryEnabled: true,
+        strategy: { kind: 'auto', mode: 'augment', adapter: 'detect', ttlMs: 60000 },
+      },
+    }, () => true)
+    await vi.waitFor(() =>
+      expect(
+        owner.snapshot().views.find(view => view.title === 'OpenCode Go')?.rows.some(row => row.id === 'discovered'),
+      )
+        .toBe(true)
+    )
+    const second = owner.snapshot().views.find(view => view.title === 'OpenCode Go')!
+    expect(
+      (await owner.command({
+        operation: 'editSupplement',
+        bindingRef: second.bindingRef,
+        scopeRevision: second.scopeRevision,
+        expectedRevision: second.revision,
+        models: [{ id: 'discovered', protocolCapabilities: { responses: true } }],
+      }, () => true)).status,
+    ).toBe('applied')
+    const firstAfter = owner.snapshot().views.find(view => view.title === 'Fixture')!
+    const secondAfter = owner.snapshot().views.find(view => view.title === 'OpenCode Go')!
+    expect(firstAfter.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toBeUndefined()
+    expect(secondAfter.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toEqual({ responses: true })
+  })
+
   it('closes promptly when credential capture ignores cancellation', async () => {
     const { owner, options } = await setup()
     await owner.close()

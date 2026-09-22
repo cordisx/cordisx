@@ -1,4 +1,10 @@
-import { boundedString, CatalogError, type DiscoveryConnection, type DiscoveryRequest } from './contracts.js'
+import {
+  boundedString,
+  CatalogError,
+  type DiscoveryConnection,
+  type DiscoveryRequest,
+  MAX_DISCOVERY_RESPONSE_BYTES,
+} from './contracts.js'
 import { withAbort } from './abort.js'
 
 export type DiscoveryFetch = (url: string, init: RequestInit) => Promise<Response>
@@ -57,7 +63,7 @@ export function createDiscoveryRequestCapability(input: {
           if (!input.current() || signal.aborted) throw new CatalogError('cancelled')
           if (value.done) break
           length += value.value.byteLength
-          if (length > 1024 * 1024) throw new CatalogError('protocol')
+          if (length > MAX_DISCOVERY_RESPONSE_BYTES) throw new CatalogError('protocol')
           chunks.push(value.value)
         }
         return new Response(Buffer.concat(chunks), {

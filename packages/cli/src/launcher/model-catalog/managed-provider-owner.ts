@@ -241,8 +241,12 @@ export class ManagedProviderOwner {
     ) return undefined
     const record = entry.value
     const current = () => !this.#closed && this.#records.get(id) === entry
+    const endpoint = new URL(record.settings.endpoint)
+    endpoint.pathname = endpoint.pathname.replace(/\/$/u, '')
+    const baseUrl = endpoint.href.replace(/\/$/u, '')
     return Object.freeze({
       endpoint: record.settings.endpoint,
+      providerName: record.settings.title,
       scopeRevision: record.scopeRevision,
       current,
       request: async (operation: DiscoveryRequest, externalSignal: AbortSignal) => {
@@ -255,7 +259,7 @@ export class ManagedProviderOwner {
         try {
           await this.#assertCurrent()
           const request = createDiscoveryRequestCapability({
-            operation: { origin: 'https://api.deepseek.com', method: 'GET', path: '/models' },
+            operation: { origin: baseUrl, method: 'GET', path: '/models' },
             current: () => current() && !signal.aborted,
             bearer: async () => {
               await this.#assertCurrent()

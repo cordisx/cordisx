@@ -148,10 +148,13 @@ defaults, or an active request. Live updates do not apply draft model fallbacks.
 Full model-source management and script execution are not provided by this flag.
 
 Host-private discovery foundations additionally provide an explicit owner-binding
-capability, an adapter registry, and a strict `deepseek-official` adapter. It uses
-only the official HTTPS root, one `GET /models`, bounded JSON parsing, and a
-credential callback supplied by the effective connection owner. It never obtains
-keys from renderer data or infers credential ownership from a provider name.
+capability and an adapter registry. The built-in registry has separate strict
+adapters for DeepSeek, OpenCode Go and OpenRouter. Selection receives the saved
+Provider endpoint and title, but a title alone never redirects a credential to a
+different endpoint. Each adapter uses only its official HTTPS API base, one
+`GET /models`, bounded JSON parsing, and a credential callback supplied by the
+effective connection owner. It never obtains keys from renderer data or infers
+credential ownership from a provider name.
 There is currently no production resolver for arbitrary native layered credentials;
 these bindings remain unsupported for auto discovery. Adapter fixtures are not
 evidence that native automatic discovery is usable or that a real account works.
@@ -186,11 +189,13 @@ system. A 60-second Host-private capture callback is the only secret input to
 the internal management API; read/save results contain safe metadata and status,
 not keys or keychain locations. No shared renderer secret field is provided.
 
-Built-in adapters receive only a fixed request capability. For DeepSeek it admits
-exactly `GET https://api.deepseek.com/models`, with no caller headers, body or
-redirects. The Host resolves credentials for a short operation, bounds the body
-to 1 MiB and cancels old operations on update, deletion or disposal. Its production
-registry contains only built-in Host adapters and accepts no plugin registration.
+Built-in adapters receive only a fixed request capability. It admits exactly the
+saved official API base plus `/models`, with no caller headers, body or redirects:
+`https://api.deepseek.com/models`, `https://opencode.ai/zen/go/v1/models`, or
+`https://openrouter.ai/api/v1/models`. The Host resolves that connection's own
+credential for a short operation, bounds the body to 8 MiB and cancels old
+operations on update, deletion or disposal. Its production registry contains
+only built-in Host adapters and accepts no plugin registration.
 Errors from Keychain and transport are value-free. The existing trusted-code
 model still applies: this is capability isolation, not a sandbox against arbitrary
 code running with the user's OS identity.
@@ -215,9 +220,18 @@ Responses connections use the existing Host-private native credential broker.
 Management snapshots never include its secret, command or lease. Overlay blocks
 are enforced at submission admission; pinning changes only ordering. A listed
 model is not proof of protocol support. The discovery adapter reports per-model
-`protocolCapabilities.responses`; the Host uses this generic capability before
-falling back to an explicitly configured Responses connection. Chat-only and
-explicitly unconfirmed models remain visible but unselectable.
+`protocolCapabilities.responses` only when it has positive evidence. Missing
+capability metadata remains unknown rather than becoming `false` or inheriting
+the connection protocol. Unknown and explicitly unsupported automatic members
+remain visible but unselectable.
+
+OpenCode Go accepts the bounded OpenAI-compatible list returned by its dedicated
+Go endpoint without treating one observed model count as a limit. OpenRouter
+requires namespaced IDs plus text input, text output and tool-parameter metadata,
+so its broad public catalog is reduced to conservative Codex candidates. Neither
+adapter infers Responses, streaming, tool execution or other runtime capability
+from membership or a display name. Fixture coverage, including previously
+observed IDs, is not a permanent allowlist or a live upstream acceptance claim.
 
 The [official DeepSeek Responses guide](https://api-docs.deepseek.com/guides/responses_api)
 and [Codex integration](https://api-docs.deepseek.com/quick_start/agent_integrations/codex)
@@ -244,9 +258,16 @@ manual supplements: auto/native `only` uses the base list, `augment` also includ
 explicit exact IDs, and manual replacement bypasses discovery. Supplement-only
 entries are user-declared, not server-verified. Complete empty replaces only the
 base list; deleting a supplement does not remove an ID still listed by the base.
-Scope changes isolate both layers. This contract and its provenance are available
-for the subsequent owner integration; no supplement editor or script runner is
-shipped in the current UI.
+Scope changes isolate both layers. A supplement may also declare
+`protocolCapabilities.responses: true` or `false` for one exact model ID in that
+connection scope. This is a user compatibility declaration, not adapter evidence.
+It overrides the automatic value across refreshes; omitting the field in a full
+supplement replacement deletes the declaration and restores automatic or unknown
+state. Changing only a label preserves the existing declaration through the
+Manager editor. An unlisted manual supplement on a Responses connection remains
+an explicit usable membership declaration, while a label-only supplement for an
+automatically listed unknown model does not elevate it. The Manager ships manual
+and supplement editors plus the separately trusted developer script controls.
 
 The encrypted state is a single-owner store, not a cross-process transaction
 service or an upstream account-attested disk cache. Real native

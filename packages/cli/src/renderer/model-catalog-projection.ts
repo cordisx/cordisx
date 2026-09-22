@@ -73,7 +73,13 @@ const optionalTime = (key: 'lastAttemptAt' | 'lastSuccessAt' | 'retryAt', value:
 
 function editable(value: unknown): CatalogEditableModel {
   const item = record(value)
-  return Object.freeze({ id: text(item.id), ...(item.label === undefined ? {} : { label: text(item.label, 256) }) })
+  return Object.freeze({
+    id: text(item.id),
+    ...(item.label === undefined ? {} : { label: text(item.label, 256) }),
+    ...(item.protocolCapabilities === undefined
+      ? {}
+      : { protocolCapabilities: protocolCapabilities(item.protocolCapabilities) }),
+  })
 }
 
 function row(value: unknown): CatalogManagementRow {

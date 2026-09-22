@@ -1,5 +1,5 @@
 import React, { act } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
 import { catalogFixture, catalogView } from './helpers/catalog-management-fixture.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
@@ -155,6 +155,38 @@ describe('binding catalog Manager', () => {
       await fixture.render(<ModelEditor {...props} view={catalogView({ revision: '3', scopeRevision: 'new-scope' })} />)
       expect((fixture.element('.cxmc-editor-actions button:last-child') as HTMLButtonElement).disabled).toBe(true)
       expect(saved).toBe(0)
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('preserves an exact capability declaration when the existing editor changes only the label', async () => {
+    const fixture = reactManagerFixture()
+    const { ModelEditor } = await import('../packages/cli/src/renderer/manager/pages/model-catalog/ModelEditor.js')
+    const save = vi.fn(async () => ({ status: 'applied' as const }))
+    try {
+      await fixture.render(
+        <ModelEditor
+          view={catalogView({
+            supplement: [{
+              id: 'declared-model',
+              label: 'Old label',
+              protocolCapabilities: { responses: true },
+            }],
+          })}
+          locale="en"
+          mode="supplement"
+          save={save}
+          close={() => {}}
+        />,
+      )
+      await fixture.type('[aria-label="Display name (optional) 1"]', 'Renamed')
+      await fixture.click('.cxmc-editor-actions button:last-child')
+      expect(save).toHaveBeenCalledWith([{
+        id: 'declared-model',
+        label: 'Renamed',
+        protocolCapabilities: { responses: true },
+      }], '1')
     } finally {
       await fixture.dispose()
     }

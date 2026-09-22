@@ -1,4 +1,4 @@
-import { CatalogError, type DiscoveryAdapter } from './contracts.js'
+import { CatalogError, type DiscoveryAdapter, type DiscoveryTarget } from './contracts.js'
 
 export class DiscoveryAdapterRegistry {
   private readonly adapters: readonly DiscoveryAdapter[]
@@ -10,9 +10,9 @@ export class DiscoveryAdapterRegistry {
     this.adapters = Object.freeze([...adapters])
   }
 
-  resolve(endpoint: string, requested = 'detect'): DiscoveryAdapter {
+  resolve(target: DiscoveryTarget, requested = 'detect'): DiscoveryAdapter {
     const matches = this.adapters.filter(adapter =>
-      (requested === 'detect' || adapter.id === requested) && adapter.matches(endpoint)
+      (requested === 'detect' || adapter.id === requested) && adapter.matches(target)
     )
     if (matches.length === 0) throw new CatalogError('unsupported')
     if (matches.length !== 1) throw new CatalogError('ambiguous')
