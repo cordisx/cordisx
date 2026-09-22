@@ -78,6 +78,31 @@ it('persists write-only script config, runs explicitly, publishes exact results,
     await owner.close()
     owner = await ManagedCatalogComposition.open(options)
     expect(owner.snapshot().views[0]?.sourceKind).toBe('manual')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.freshness).toBe('fresh'))
+    await owner.command({
+      ...scope(),
+      operation: 'updateConnection',
+      settings: {
+        title: 'Paused supplement fixture',
+        endpoint: 'https://api.deepseek.com',
+        protocol: 'responses',
+        discoveryEnabled: false,
+        strategy: { kind: 'auto', adapter: 'detect', mode: 'augment', ttlMs: 60000 },
+      },
+    }, () => true)
+    expect(
+      (await owner.command(
+        { ...scope(), operation: 'configureScript', mode: 'supplement', config: fixture.config },
+        () => true,
+      )).status,
+    )
+      .toBe('applied')
+    const scriptState = owner.snapshot().views[0]?.scriptState
+    for (const mode of ['only', 'augment'] as const) {
+      expect((await owner.command({ ...scope(), operation: 'setMode', mode }, () => true)).status).toBe('applied')
+      expect(owner.snapshot().views[0]?.scriptState).toEqual(scriptState)
+      expect(owner.snapshot().views[0]?.capabilities).toContain('runScript')
+    }
   } finally {
     await owner.close()
     await fixture.close()

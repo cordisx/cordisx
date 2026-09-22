@@ -36,6 +36,8 @@ type StoredState = {
   caches: Record<string, CatalogSnapshot>
 }
 const providerId = (id: string) => `cordisx-${id}`
+const scriptStrategy = (view: ManagedProviderView) =>
+  view.settings.strategy.kind === 'auto' ? 'auto' : JSON.stringify(view.settings.strategy)
 const authority = (view: ManagedProviderView) =>
   createHash('sha256')
     .update(JSON.stringify([view.scopeRevision, view.settings.strategy])).digest('hex')
@@ -153,7 +155,7 @@ export class ManagedCatalogComposition {
     for (const view of views) {
       const script = this.#state.scripts[view.id]
       const matching = script?.scopeRevision === view.scopeRevision
-        && script.strategy === JSON.stringify(view.settings.strategy)
+        && script.strategy === scriptStrategy(view)
       if (matching) {
         this.#scripts.save({ bindingRef: view.id, scopeRevision: view.scopeRevision, mode: script.mode }, script.config)
       } else {
@@ -183,7 +185,7 @@ export class ManagedCatalogComposition {
       const source = acquired?.bindingRef === view.id ? acquired : this.#service.sourceSnapshot(view.id)
       if (source?.complete) caches[view.id] = source
       const script = candidate.scripts[view.id]
-      if (script?.scopeRevision === view.scopeRevision && script.strategy === JSON.stringify(view.settings.strategy)) {
+      if (script?.scopeRevision === view.scopeRevision && script.strategy === scriptStrategy(view)) {
         scripts[view.id] = script
       }
     }
@@ -523,7 +525,7 @@ export class ManagedCatalogComposition {
           ...this.#state.scripts,
           [view.id]: {
             scopeRevision: view.scopeRevision,
-            strategy: JSON.stringify(view.settings.strategy),
+            strategy: scriptStrategy(view),
             mode: command.mode,
             config,
           },
