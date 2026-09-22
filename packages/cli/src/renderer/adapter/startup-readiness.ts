@@ -33,7 +33,7 @@ export async function readNativeStartupReadiness(
     __cordisxStartupObservedBoot?: Promise<unknown>
   }
   const initial = root.__cordisxStartupDocument?.snapshot()
-  if (!initial || initial.phase !== 'covered' || location.href !== 'app://-/index.html') {
+  if (!initial || !['covered', 'presented'].includes(initial.phase) || location.href !== 'app://-/index.html') {
     return { ready: false, reason: 'document-pending' }
   }
   const current = (): boolean =>

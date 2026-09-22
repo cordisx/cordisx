@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
-import { NATIVE_STARTUP_MARK_SELECTOR } from '../renderer/adapter/startup-presentation.js'
+import { NATIVE_STARTUP_MARK_SELECTOR, NATIVE_STARTUP_SURFACE } from '../renderer/adapter/startup-presentation.js'
 import { startupBrand } from './startup-brand.js'
 import { observeStartupTiming } from './startup-timing.js'
 import { releaseReadyStartup } from './startup-release.js'
@@ -150,6 +150,7 @@ export async function connectStartupCover(
         css,
         mark: brand.markup,
         nativeMarkSelector: NATIVE_STARTUP_MARK_SELECTOR,
+        nativeSurface: NATIVE_STARTUP_SURFACE,
       }, brand.animate),
     })
     if (typeof added.identifier !== 'string') throw new Error('Missing startup document registration')
@@ -229,11 +230,20 @@ export async function connectStartupCover(
           let heartbeatAt = 0
           while (!action) {
             const snapshot = await read<
-              { requestedAction?: string; phase?: string; mounted?: boolean; modal?: boolean }
+              {
+                requestedAction?: string
+                phase?: string
+                mounted?: boolean
+                modal?: boolean
+                presentationReleasedAt?: number
+              }
             >(
               'globalThis.__cordisxStartupDocument?.snapshot()',
             )
-            if (snapshot?.phase !== 'failed' || !snapshot.mounted || !snapshot.modal) {
+            if (
+              snapshot?.phase !== 'failed' || !snapshot.mounted
+              || (!snapshot.modal && !Number.isFinite(snapshot.presentationReleasedAt))
+            ) {
               throw new Error('Owning startup recovery surface is unavailable')
             }
             if (Date.now() - heartbeatAt >= 1000) {

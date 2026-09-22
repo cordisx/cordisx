@@ -18,6 +18,7 @@ function fixture(
     pending?: boolean
     action?: string
     surface?: 'auth-required' | 'workspace-ready'
+    nonmodalRecovery?: boolean
   } = {},
 ) {
   const events: string[] = []
@@ -43,9 +44,11 @@ function fixture(
     onEvent() {
       return () => {}
     },
-    async send(method: string, params: { expression?: string }) {
+    async send(method: string, params: { expression?: string; source?: string }) {
       events.push(method)
       if (method === 'Page.addScriptToEvaluateOnNewDocument') {
+        expect(params.source).toContain('data-app-shell-focus-area')
+        expect(params.source).toContain('data-vscode-context')
         registered = true
         return options.registration === false ? {} : { identifier: 'cover' }
       }
@@ -59,7 +62,17 @@ function fixture(
           return { result: { value: true } }
         }
         if (params.expression === 'globalThis.__cordisxStartupDocument?.snapshot()') {
-          return { result: { value: { phase: 'failed', modal: true, mounted: true, requestedAction: options.action } } }
+          return {
+            result: {
+              value: {
+                phase: 'failed',
+                modal: !options.nonmodalRecovery,
+                mounted: true,
+                requestedAction: options.action,
+                ...(options.nonmodalRecovery ? { presentationReleasedAt: 1234 } : {}),
+              },
+            },
+          }
         }
         if (options.pending) return await new Promise<never>(() => {})
         expect(params.expression).toContain('releaseReadyStartup')
@@ -164,6 +177,17 @@ it.each(['stop', 'close'] as const)('retires recovery and reaches owned Host cle
   expect(f.events).toContain('retire-document')
   expect(f.events.at(-1)).toBe('close-page')
   expect(terminate).toHaveBeenCalledOnce()
+})
+
+it('accepts actionable nonmodal recovery after the native surface has been presented', async () => {
+  const f = fixture({ ready: false, nonmodalRecovery: true, action: 'close' })
+  const cover = await f.connect()
+  vi.useFakeTimers()
+  const result = expect(cover.reveal(undefined)).rejects.toThrow('Startup cancelled in the owning window')
+  await vi.advanceTimersByTimeAsync(30100)
+  await result
+  expect(f.events).toContain('recovery-visible')
+  expect(f.events.at(-1)).toBe('close-page')
 })
 
 it('aborts an unresolved account/boot evaluation and cleans the script without waiting for its result', async () => {
