@@ -40,6 +40,27 @@ export async function readNativeStartupReadiness(
     return { ready: false, reason: 'cordisx-boot-failed' }
   }
   if (!current() || root.__cordisxProductionInstallId !== installId) return { ready: false, reason: 'document-changed' }
+  // Keep version-sensitive DOM knowledge in the Host adapter. A login form or
+  // root element alone never establishes an interactive native application.
+  const nativeControlsReady = (): boolean => {
+    const visible = (element: HTMLElement): boolean => {
+      const box = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return element.isConnected && box.width > 0 && box.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden'
+        && element.closest('[aria-hidden="true"]') === null
+    }
+    const editor = [...document.querySelectorAll<HTMLElement>('[contenteditable="true"][role="textbox"], textarea')]
+      .some(element =>
+        visible(element) && !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
+      )
+    const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
+    const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
+    return (editor && model !== null && visible(model)) || (manager !== null && visible(manager))
+  }
+  // Account reads cross the typed native bridge. Avoid polling that bridge
+  // while this document cannot yet satisfy the final usable-control proof.
+  if (!nativeControlsReady()) return { ready: false, reason: 'native-controls-pending' }
   let invocation: (Promise<unknown> & { [key: symbol]: unknown }) | undefined
   try {
     const native = await load(descriptor.module) as Record<string, {
@@ -59,24 +80,9 @@ export async function readNativeStartupReadiness(
       ;(invocation[dispose] as () => void).call(invocation)
     }
   }
-  // Keep version-sensitive DOM knowledge in the Host adapter. A login form or
-  // root element alone never establishes an interactive native application.
-  const visible = (element: HTMLElement): boolean => {
-    const box = element.getBoundingClientRect()
-    const style = getComputedStyle(element)
-    return element.isConnected && box.width > 0 && box.height > 0
-      && style.display !== 'none' && style.visibility !== 'hidden'
-      && element.closest('[aria-hidden="true"]') === null
-  }
-  const editor = [...document.querySelectorAll<HTMLElement>('[contenteditable="true"][role="textbox"], textarea')]
-    .some(element =>
-      visible(element) && !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
-    )
-  const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
-  const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
-  if (!(editor && model && visible(model)) && !(manager && visible(manager))) {
-    return { ready: false, reason: 'native-controls-pending' }
-  }
+  // Recheck after the asynchronous account read so release still proves the
+  // same document is both authenticated and usable at the final instant.
+  if (!nativeControlsReady()) return { ready: false, reason: 'native-controls-pending' }
   if (!current()) return { ready: false, reason: 'document-changed' }
   return {
     ready: true,
