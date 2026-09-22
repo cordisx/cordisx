@@ -21,7 +21,17 @@ function installCover(options, animateMark) {
   // The modal backdrop lives outside the content's shadow root. Scope its
   // transparency to this document receipt and retire the rule with the cover.
   const backdropStyle = document.createElement('style')
-  backdropStyle.textContent = `#${dialog.id}::backdrop { background: transparent; }`
+  backdropStyle.textContent = `#${dialog.id}::backdrop { background: transparent; }
+    [data-cordisx-startup-mark="${receipt.nonce}"] { visibility: hidden; }`
+  const nativeMarks = new Map()
+  function restoreNativeMarks() {
+    for (const [element, previous] of nativeMarks) {
+      if (element.getAttribute('data-cordisx-startup-mark') !== receipt.nonce) continue
+      if (previous === null) element.removeAttribute('data-cordisx-startup-mark')
+      else element.setAttribute('data-cordisx-startup-mark', previous)
+    }
+    nativeMarks.clear()
+  }
   const content = document.createElement('div')
   content.style.cssText = 'width:100%;height:100%;'
   dialog.append(content)
@@ -64,6 +74,15 @@ function installCover(options, animateMark) {
   function mount() {
     if (disposed || !globalThis.document?.documentElement) return
     if (backdropStyle.parentNode !== document.documentElement) document.documentElement.append(backdropStyle)
+    // The adapter identifies only the static native splash. Leave its window
+    // background and all ordinary application content untouched.
+    if (phase === 'covered' && options.nativeMarkSelector) {
+      const nativeMark = document.querySelector(options.nativeMarkSelector)
+      if (nativeMark && !nativeMarks.has(nativeMark)) {
+        nativeMarks.set(nativeMark, nativeMark.getAttribute('data-cordisx-startup-mark'))
+        nativeMark.setAttribute('data-cordisx-startup-mark', receipt.nonce)
+      }
+    }
     if (dialog.parentNode !== document.documentElement) document.documentElement.append(dialog)
     if (!dialog.open) dialog.showModal()
   }
@@ -90,6 +109,7 @@ function installCover(options, animateMark) {
     dialog.removeEventListener('cancel', cancel)
     if (dialog.open) dialog.close()
     dialog.remove()
+    restoreNativeMarks()
     backdropStyle.remove()
   }
   globalThis.addEventListener('pagehide', retire, { once: true })
@@ -120,12 +140,15 @@ function installCover(options, animateMark) {
       dialog.removeEventListener('cancel', cancel)
       dialog.close()
       dialog.remove()
+      restoreNativeMarks()
       backdropStyle.remove()
       return true
     },
     fail(value) {
       if (disposed || !matches(value)) return false
       phase = 'failed'
+      mark.hidden = true
+      restoreNativeMarks()
       message.textContent = '启动未完成，请重试或关闭此窗口'
       actions.hidden = false
       retry.focus()

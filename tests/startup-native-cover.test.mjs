@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import { buildCoverSource } from '../packages/cli/native/startup-cover.cjs'
+import { NATIVE_STARTUP_MARK_SELECTOR } from '../packages/cli/src/renderer/adapter/startup-presentation.js'
 
 const css = await readFile(new URL('../packages/cli/native/startup-cover.css', import.meta.url), 'utf8')
 const source = buildCoverSource({ generation: 'offline-run', url: 'app://-/index.html', css })
@@ -33,7 +34,7 @@ test('explicit login usability releases input without claiming authentication', 
     const dialog = w.document.querySelector('dialog')
     const backdrop = [...w.document.querySelectorAll('style')].find(style => style.textContent.includes('::backdrop'))
     assert.equal(dialog.style.background, 'transparent')
-    assert.equal(backdrop.textContent, `#${dialog.id}::backdrop { background: transparent; }`)
+    assert.ok(backdrop.textContent.includes(`#${dialog.id}::backdrop { background: transparent; }`))
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false }), false)
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false, loginUsable: true }), true)
     assert.equal(api.snapshot().phase, 'released')
@@ -41,6 +42,35 @@ test('explicit login usability releases input without claiming authentication', 
     assert.equal(backdrop.isConnected, false)
   } finally {
     dom.window.close()
+  }
+})
+
+test.each(['release', 'retire', 'fail'])('restores only the native static splash mark on %s', async outcome => {
+  const dom = await documentFixture('about:blank')
+  const w = dom.window
+  try {
+    w.document.body.innerHTML =
+      '<div id="root"><div class="startup-loader" aria-hidden="true"><div class="startup-loader__logo">Native splash</div></div><div class="startup-loader__logo" id="ordinary">Application logo</div></div>'
+    w.eval(
+      buildCoverSource({
+        generation: 'splash-scope',
+        url: 'about:blank',
+        css,
+        nativeMarkSelector: NATIVE_STARTUP_MARK_SELECTOR,
+      }),
+    )
+    const mark = w.document.querySelector(NATIVE_STARTUP_MARK_SELECTOR)
+    const ordinary = w.document.querySelector('#ordinary')
+    assert.equal(w.getComputedStyle(mark).visibility, 'hidden')
+    assert.equal(w.getComputedStyle(ordinary).visibility, 'visible')
+    const api = w.__cordisxStartupDocument, receipt = api.snapshot().receipt
+    assert.equal(outcome === 'release' ? api.release(receipt, ready(receipt)) : api[outcome](receipt), true)
+    await Promise.resolve()
+    assert.equal(w.getComputedStyle(mark).visibility, 'visible')
+    assert.equal(mark.hasAttribute('data-cordisx-startup-mark'), false)
+    assert.equal(w.getComputedStyle(ordinary).visibility, 'visible')
+  } finally {
+    w.close()
   }
 })
 

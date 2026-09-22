@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
+import { NATIVE_STARTUP_MARK_SELECTOR } from '../renderer/adapter/startup-presentation.js'
 import { startupBrand } from './startup-brand.js'
 import { observeStartupTiming } from './startup-timing.js'
 
@@ -147,6 +148,7 @@ export async function connectStartupCover(
         url: 'app://-/index.html',
         css,
         mark: brand.markup,
+        nativeMarkSelector: NATIVE_STARTUP_MARK_SELECTOR,
       }, brand.animate),
     })
     if (typeof added.identifier !== 'string') throw new Error('Missing startup document registration')
