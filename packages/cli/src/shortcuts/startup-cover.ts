@@ -185,7 +185,6 @@ export async function connectStartupCover(
       }
       try {
         check()
-        if (!account) throw new Error('Native account descriptor unavailable at startup')
         console.error(
           '[cordisx-startup]',
           JSON.stringify({ event: 'composition-installed', at: Date.now(), hostPid: owner.pid }),
@@ -221,7 +220,7 @@ export async function connectStartupCover(
                     surface: result.surface,
                   }),
                 )
-                return result.surface ?? 'authenticated-ready'
+                return result.surface ?? 'workspace-ready'
               }
             }
             await delay()

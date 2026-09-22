@@ -45,37 +45,119 @@ function readyDocument() {
     showNativeControls,
   }
 }
-describe('startup release requires the same usable authenticated document', () => {
-  it('observes boot, model, editor and a pending account read without emitting account data', async () => {
-    const { accountRead } = readyDocument()
-    let complete!: (value: { status: string; data: object }) => void
-    accountRead.mockImplementationOnce(() =>
-      new Promise(resolve => {
-        complete = resolve
-      })
-    )
-    const trace = vi.fn()
-    const pending = read(trace)
-    await vi.waitFor(() => expect(trace).toHaveBeenCalledWith('account-read-start'))
-    expect(trace).toHaveBeenCalledWith('boot-resolved')
-    expect(trace).toHaveBeenCalledWith('editor-observed')
-    expect(trace).toHaveBeenCalledWith('model-observed')
-    expect(trace).not.toHaveBeenCalledWith('account-read-complete', expect.anything())
-    complete({ status: 'ready', data: { email: 'private-fixture', token: 'never-log-fixture' } })
-    await expect(pending).resolves.toMatchObject({ ready: true })
-    expect(trace).toHaveBeenCalledWith('account-read-complete', {
-      status: 'authenticated',
-      durationMs: expect.any(Number),
-    })
-    expect(JSON.stringify(trace.mock.calls)).not.toMatch(/private-fixture|never-log-fixture/)
-  })
-  const showLogin = () => {
-    document.body.innerHTML = '<main><div><h1>登录 ChatGPT</h1></div><button>继续登录</button></main>'
-    for (const element of document.querySelectorAll('h1, button')) {
-      element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
-    }
+function showLogin() {
+  document.body.innerHTML = '<main><div><h1>登录 ChatGPT</h1></div><button>继续登录</button></main>'
+  for (const element of document.querySelectorAll('h1, button')) {
+    element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
   }
-  it('releases an interactive native login only on explicit signed-out status, without requiring model or boot', async () => {
+}
+
+describe('startup surface readiness is independent of workspace account enrichment', () => {
+  it.each(['pending', 'error', 'unavailable'])(
+    'does not block a usable workspace on %s account enrichment',
+    async status => {
+      const { accountRead } = readyDocument()
+      accountRead.mockImplementation(() =>
+        status === 'pending'
+          ? new Promise(() => {})
+          : Promise.resolve({ status, data: undefined } as never)
+      )
+      const trace = vi.fn()
+      let result: Awaited<ReturnType<typeof read>> | undefined
+      void read(trace).then(value => {
+        result = value
+      })
+      for (let turn = 0; turn < 12; turn++) await Promise.resolve()
+      expect(result).toMatchObject({
+        ready: true,
+        surface: 'workspace-ready',
+        observations: { hostUsable: true, cordisxReady: true, workspaceUsable: true },
+      })
+      expect(result?.observations).not.toHaveProperty('authenticated')
+      expect(accountRead).not.toHaveBeenCalled()
+      expect(trace).toHaveBeenCalledWith('boot-resolved')
+      expect(trace).toHaveBeenCalledWith('editor-observed')
+      expect(trace).toHaveBeenCalledWith('model-observed')
+      expect(trace).not.toHaveBeenCalledWith('account-read-start')
+    },
+  )
+
+  it('keeps a workspace covered until its real boot completes and rechecks controls', async () => {
+    readyDocument()
+    let finish!: () => void
+    vi.stubGlobal(
+      '__cordisxBoot',
+      new Promise<void>(resolve => {
+        finish = resolve
+      }),
+    )
+    let resolved = false
+    const pending = read().then(value => {
+      resolved = true
+      return value
+    })
+    for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+    expect(resolved).toBe(false)
+    document.querySelector('button')!.remove()
+    finish()
+    expect(await pending).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+  })
+
+  it.each(['missing', 'rejected', 'bootstrap-pending'])('rejects %s CordisX boot', async kind => {
+    readyDocument()
+    if (kind === 'missing') vi.stubGlobal('__cordisxBoot', undefined)
+    if (kind === 'rejected') vi.stubGlobal('__cordisxBoot', Promise.reject(new Error('boot failed')))
+    if (kind === 'bootstrap-pending') {
+      vi.stubGlobal('__cordisxProductionInstallId', 'current')
+      vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'old', status: 'evaluated' })
+    }
+    expect(await read()).toMatchObject({ ready: false })
+  })
+
+  it.each(['receipt', 'install', 'boot', 'bootstrap', 'runtime', 'url'])(
+    'rejects changed %s after asynchronous boot proof',
+    async kind => {
+      const { navigate } = readyDocument()
+      let finish!: () => void
+      vi.stubGlobal(
+        '__cordisxBoot',
+        new Promise<void>(resolve => {
+          finish = resolve
+        }),
+      )
+      vi.stubGlobal('__cordisxProductionInstallId', 'current')
+      vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'evaluated' })
+      const pending = read()
+      if (kind === 'receipt') navigate()
+      if (kind === 'install') vi.stubGlobal('__cordisxProductionInstallId', 'new')
+      if (kind === 'boot') vi.stubGlobal('__cordisxBoot', Promise.resolve())
+      if (kind === 'bootstrap') {
+        vi.stubGlobal('__cordisxProductionBootstrapState', {
+          installId: 'current',
+          status: 'loading',
+        })
+      }
+      if (kind === 'runtime') vi.stubGlobal('__cordisxRuntime', undefined)
+      if (kind === 'url') vi.stubGlobal('location', { href: 'app://-/other.html' })
+      finish()
+      expect(await pending).toMatchObject({ ready: false })
+    },
+  )
+
+  it.each(['model', 'editor', 'inert'])('keeps real %s usability in the release proof', async kind => {
+    const { accountRead } = readyDocument()
+    if (kind === 'model') document.querySelector('button')!.disabled = true
+    if (kind === 'editor') document.querySelector('textarea')!.disabled = true
+    if (kind === 'inert') document.body.setAttribute('inert', '')
+    try {
+      expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+      expect(accountRead).not.toHaveBeenCalled()
+    } finally {
+      document.body.removeAttribute('inert')
+    }
+  })
+
+  it('releases native login only on explicit signed-out status without requiring model or boot', async () => {
     readyDocument()
     showLogin()
     vi.stubGlobal('__cordisxBoot', undefined)
@@ -89,84 +171,39 @@ describe('startup release requires the same usable authenticated document', () =
     document.querySelector('button')!.disabled = true
     expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
   })
-  it.each(['unavailable', 'error'])(
-    'never treats %s account state as signed out even with a visible login form',
-    async status => {
-      readyDocument()
-      showLogin()
-      vi.stubGlobal('__startupAccountRead', async () => ({ status, data: null }))
-      expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
-    },
-  )
-  it('does not release a stale login page for an authenticated account or accept a stale signed-out result', async () => {
+
+  it.each(['unavailable', 'error'])('never classifies %s account state as signed-out', async status => {
+    readyDocument()
+    showLogin()
+    vi.stubGlobal('__startupAccountRead', async () => ({ status, data: null }))
+    expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
+  })
+
+  it('does not release a stale login for an authenticated account or accept a stale signed-out result', async () => {
     const { navigate } = readyDocument()
     showLogin()
-    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+    const trace = vi.fn()
+    vi.stubGlobal('__startupAccountRead', async () => ({ status: 'ready', data: { email: 'private-fixture' } }))
+    expect(await read(trace)).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+    expect(JSON.stringify(trace.mock.calls)).not.toContain('private-fixture')
     vi.stubGlobal('__startupAccountRead', async () => {
       navigate()
       return { status: 'ready', data: null }
     })
     expect(await read()).toMatchObject({ ready: false, reason: 'document-changed' })
   })
-  it('does not accept an existing shell without real CordisX boot', async () => {
-    readyDocument()
-    vi.stubGlobal('__cordisxBoot', undefined)
-    expect(await read()).toMatchObject({ ready: false, reason: 'cordisx-pending' })
-  })
-  it('does not call the typed account service while native controls are pending', async () => {
-    const { accountRead, showNativeControls } = readyDocument()
-    document.querySelector('button')!.remove()
-    for (let attempt = 0; attempt < 3; attempt++) {
-      expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
-    }
-    expect(accountRead).toHaveBeenCalledTimes(0)
-    document.body.innerHTML = '<button>Login</button>'
-    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
-    expect(accountRead).toHaveBeenCalledTimes(0)
-    showNativeControls()
-    expect(await read()).toMatchObject({ ready: true, observations: { authenticated: true } })
-    expect(accountRead).toHaveBeenCalledTimes(1)
-  })
-  it('retries unavailable and not-ready account results without weakening authentication', async () => {
+
+  it('retries failed login account reads and releases only its disposable invocation', async () => {
     const { accountRead } = readyDocument()
-    accountRead
-      .mockRejectedValueOnce(new Error('temporary native failure'))
-      .mockResolvedValueOnce({ status: 'unavailable', data: undefined })
-      .mockResolvedValueOnce({ status: 'ready', data: {} })
+    showLogin()
+    accountRead.mockRejectedValueOnce(new Error('temporary native failure'))
+      .mockResolvedValueOnce({ status: 'unavailable', data: undefined } as never)
     expect(await read()).toMatchObject({ ready: false, reason: 'account-unavailable' })
     expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
-    expect(await read()).toMatchObject({ ready: true, observations: { authenticated: true } })
-    expect(accountRead).toHaveBeenCalledTimes(3)
-  })
-  it('rechecks usable controls after the asynchronous account read', async () => {
-    const { accountRead, showNativeControls } = readyDocument()
-    accountRead.mockImplementationOnce(async () => {
-      document.querySelector('button')!.remove()
-      return { status: 'ready', data: {} }
-    })
-    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
-    expect(accountRead).toHaveBeenCalledTimes(1)
-
-    showNativeControls()
-    expect(await read()).toMatchObject({ ready: true, observations: { authenticated: true } })
-    expect(accountRead).toHaveBeenCalledTimes(2)
-  })
-  it('rejects an account result from an old document epoch and performs a fresh read', async () => {
-    const { accountRead, navigate } = readyDocument()
-    let resolveAccount!: (value: { status: string; data: object }) => void
-    accountRead.mockImplementationOnce(() =>
-      new Promise(resolve => {
-        resolveAccount = resolve
-      })
-    )
-    const oldDocumentRead = read()
-    await vi.waitFor(() => expect(accountRead).toHaveBeenCalledTimes(1))
-    navigate()
-    resolveAccount({ status: 'ready', data: {} })
-    expect(await oldDocumentRead).toMatchObject({ ready: false, reason: 'document-changed' })
-    expect(accountRead).toHaveBeenCalledTimes(1)
-
-    expect(await read()).toMatchObject({ ready: true, observations: { authenticated: true } })
-    expect(accountRead).toHaveBeenCalledTimes(2)
+    const dispose = vi.fn()
+    const invocation = Object.assign(Promise.resolve({ status: 'ready', data: null }), { [Symbol.dispose]: dispose })
+    accountRead.mockReturnValueOnce(invocation as never)
+    expect(await read()).toMatchObject({ ready: true, surface: 'auth-required' })
+    expect(dispose).toHaveBeenCalledOnce()
   })
 })

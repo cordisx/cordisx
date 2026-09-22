@@ -17,7 +17,7 @@ function fixture(
     ready?: boolean
     pending?: boolean
     action?: string
-    surface?: 'auth-required'
+    surface?: 'auth-required' | 'workspace-ready'
   } = {},
 ) {
   const events: string[] = []
@@ -112,6 +112,14 @@ it('registers the production cover before navigation and removes it only after f
   expect(f.events).not.toContain('Page.removeScriptToEvaluateOnNewDocument')
   await controller.reveal({ module: 'app://-/assets/fixture.js', exportName: 'account' })
   expect(f.events.indexOf('release-final')).toBeLessThan(f.events.indexOf('Page.removeScriptToEvaluateOnNewDocument'))
+  expect(f.events.at(-1)).toBe('close-page')
+})
+
+it('returns workspace-ready without requiring an account descriptor or claiming authentication', async () => {
+  const f = fixture({ surface: 'workspace-ready' })
+  const cover = await f.connect()
+  await expect(cover.reveal(undefined)).resolves.toBe('workspace-ready')
+  expect(f.events).toContain('release-final')
   expect(f.events.at(-1)).toBe('close-page')
 })
 

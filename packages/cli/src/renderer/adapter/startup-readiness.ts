@@ -1,10 +1,12 @@
 import type { NativeAccountCapabilityDescriptor } from '../../native-account-capability.js'
 
-export type StartupSurface = 'authenticated-ready' | 'auth-required'
+// authenticated-ready remains readable for older supervisor state; new workspace
+// presentation proves interactivity, while current-user consumers prove identity.
+export type StartupSurface = 'workspace-ready' | 'authenticated-ready' | 'auth-required'
 
 /** Serialized only into the launcher-owned primary document. No identity leaves it. */
 export async function readNativeStartupReadiness(
-  descriptor: NativeAccountCapabilityDescriptor,
+  descriptor: NativeAccountCapabilityDescriptor | undefined,
   load: (url: string) => Promise<Record<string, unknown>> = url => import(/* @vite-ignore */ url),
   trace?: (phase: string, details?: { durationMs?: number; status?: string }) => void,
 ): Promise<{
@@ -16,7 +18,8 @@ export async function readNativeStartupReadiness(
     receipt: Record<string, unknown>
     hostUsable: true
     cordisxReady?: true
-    authenticated: boolean
+    authenticated?: boolean
+    workspaceUsable?: true
     loginUsable?: true
   }
 }> {
@@ -36,6 +39,7 @@ export async function readNativeStartupReadiness(
   const current = (): boolean =>
     root.__cordisxStartupDocument?.snapshot().receipt.nonce === initial.receipt.nonce
     && performance.timeOrigin === initial.receipt.timeOrigin
+    && location.href === 'app://-/index.html'
   trace?.('probe-start')
   const observedBoot = root.__cordisxCompositionBoot ?? root.__cordisxBoot
   if (trace && observedBoot && root.__cordisxStartupObservedBoot !== observedBoot) {
@@ -57,7 +61,7 @@ export async function readNativeStartupReadiness(
     const style = getComputedStyle(element)
     return element.isConnected && box.width > 0 && box.height > 0
       && style.display !== 'none' && style.visibility !== 'hidden'
-      && element.closest('[aria-hidden="true"]') === null
+      && element.closest('[aria-hidden="true"], [inert]') === null
   }
   const nativeControlsReady = (): boolean => {
     const editor = [...document.querySelectorAll<HTMLElement>('[contenteditable="true"][role="textbox"], textarea')]
@@ -67,6 +71,7 @@ export async function readNativeStartupReadiness(
     const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
     const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
     const modelReady = model !== null && visible(model)
+      && !model.hasAttribute('disabled') && model.getAttribute('aria-disabled') !== 'true'
     const managerReady = manager !== null && visible(manager)
     if (editor) trace?.('editor-observed')
     if (modelReady) trace?.('model-observed')
@@ -91,7 +96,48 @@ export async function readNativeStartupReadiness(
     if (ready) trace?.('login-observed')
     return ready
   }
-  if (!nativeControlsReady() && !loginControlsReady()) return { ready: false, reason: 'native-controls-pending' }
+  // A usable workspace does not depend on account/avatar enrichment. Its
+  // native model control and current CordisX boot establish the interaction
+  // boundary; current-user consumers keep their own typed authentication proof.
+  if (nativeControlsReady()) {
+    const boot = root.__cordisxCompositionBoot ?? root.__cordisxBoot
+    if (!boot || root.__cordisxRuntime === undefined) return { ready: false, reason: 'cordisx-pending' }
+    const installId = root.__cordisxProductionInstallId
+    const runtime = root.__cordisxRuntime
+    if (
+      installId && (root.__cordisxProductionBootstrapState?.installId !== installId
+        || root.__cordisxProductionBootstrapState.status !== 'evaluated')
+    ) {
+      return { ready: false, reason: 'production-bootstrap-pending' }
+    }
+    try {
+      await boot
+    } catch {
+      return { ready: false, reason: 'cordisx-boot-failed' }
+    }
+    if (
+      !current() || root.__cordisxProductionInstallId !== installId || root.__cordisxRuntime !== runtime
+      || (root.__cordisxCompositionBoot ?? root.__cordisxBoot) !== boot
+    ) return { ready: false, reason: 'document-changed' }
+    if (
+      installId && (root.__cordisxProductionBootstrapState?.installId !== installId
+        || root.__cordisxProductionBootstrapState.status !== 'evaluated')
+    ) {
+      return { ready: false, reason: 'production-bootstrap-pending' }
+    }
+    // Boot may settle after navigation, installation or native controls change.
+    // Account identity is not part of this workspace interaction proof.
+    if (!nativeControlsReady()) return { ready: false, reason: 'native-controls-pending' }
+    if (!current()) return { ready: false, reason: 'document-changed' }
+    return {
+      ready: true,
+      surface: 'workspace-ready',
+      receipt: initial.receipt,
+      observations: { receipt: initial.receipt, hostUsable: true, cordisxReady: true, workspaceUsable: true },
+    }
+  }
+  if (!loginControlsReady()) return { ready: false, reason: 'native-controls-pending' }
+  if (!descriptor) return { ready: false, reason: 'account-service-pending' }
   let authenticated = false
   let invocation: (Promise<unknown> & { [key: symbol]: unknown }) | undefined
   let accountStarted: number | undefined
@@ -137,29 +183,5 @@ export async function readNativeStartupReadiness(
       observations: { receipt: initial.receipt, hostUsable: true, authenticated: false, loginUsable: true },
     }
   }
-  const boot = root.__cordisxCompositionBoot ?? root.__cordisxBoot
-  if (!boot || root.__cordisxRuntime === undefined) return { ready: false, reason: 'cordisx-pending' }
-  const installId = root.__cordisxProductionInstallId
-  if (
-    installId && (root.__cordisxProductionBootstrapState?.installId !== installId
-      || root.__cordisxProductionBootstrapState.status !== 'evaluated')
-  ) {
-    return { ready: false, reason: 'production-bootstrap-pending' }
-  }
-  try {
-    await boot
-  } catch {
-    return { ready: false, reason: 'cordisx-boot-failed' }
-  }
-  if (!current() || root.__cordisxProductionInstallId !== installId) return { ready: false, reason: 'document-changed' }
-  // Recheck after the asynchronous account read so release still proves the
-  // same document is both authenticated and usable at the final instant.
-  if (!nativeControlsReady()) return { ready: false, reason: 'native-controls-pending' }
-  if (!current()) return { ready: false, reason: 'document-changed' }
-  return {
-    ready: true,
-    surface: 'authenticated-ready',
-    receipt: initial.receipt,
-    observations: { receipt: initial.receipt, hostUsable: true, cordisxReady: true, authenticated: true },
-  }
+  return { ready: false, reason: 'native-controls-pending' }
 }

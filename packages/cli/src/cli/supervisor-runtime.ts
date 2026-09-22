@@ -300,7 +300,7 @@ export async function createSupervisorRuntime(
         })
         dockAgentInstalled = dock !== undefined
       }
-      let startupSurface: 'authenticated-ready' | 'auth-required' | undefined
+      let startupSurface: 'workspace-ready' | 'authenticated-ready' | 'auth-required' | undefined
       await publishReadyAfterInspectorClose(
         mainAgents
           ? async () => {

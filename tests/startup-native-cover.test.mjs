@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import { buildCoverSource } from '../packages/cli/native/startup-cover.cjs'
+import { readNativeStartupReadiness } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
 import { NATIVE_STARTUP_MARK_SELECTOR } from '../packages/cli/src/renderer/adapter/startup-presentation.js'
 
 const css = await readFile(new URL('../packages/cli/native/startup-cover.css', import.meta.url), 'utf8')
@@ -24,6 +25,42 @@ async function documentFixture(url = 'app://-/index.html') {
   return dom
 }
 const ready = receipt => ({ receipt, hostUsable: true, cordisxReady: true, authenticated: true })
+
+test('production workspace proof removes the modal and restores input without reading an account', async () => {
+  const dom = await documentFixture()
+  const w = dom.window
+  try {
+    w.document.body.innerHTML = '<textarea></textarea><button data-cordisx-model-ready="true">Model</button>'
+    for (const element of w.document.querySelectorAll('textarea,button')) {
+      element.getBoundingClientRect = () => ({ width: 10, height: 10 })
+    }
+    w.__cordisxRuntime = {}
+    w.__cordisxCompositionBoot = Promise.resolve()
+    w.__cordisxProductionInstallId = 'production-install'
+    w.__cordisxProductionBootstrapState = { installId: 'production-install', status: 'evaluated' }
+    const api = w.__cordisxStartupDocument
+    let clicks = 0
+    w.document.querySelector('button').addEventListener('click', () => clicks++)
+    w.document.querySelector('button').click()
+    assert.equal(clicks, 0)
+    const proof = await w.eval(`(${readNativeStartupReadiness.toString()})(undefined)`)
+    assert.equal(proof.ready, true)
+    assert.equal(proof.surface, 'workspace-ready')
+    assert.equal(Object.hasOwn(proof.observations, 'authenticated'), false)
+    assert.equal(api.release({ ...proof.receipt, nonce: 'wrong-document' }, proof.observations), false)
+    assert.equal(api.release(proof.receipt, { ...proof.observations, cordisxReady: false }), false)
+    assert.equal(api.release(proof.receipt, { ...proof.observations, receipt: { nonce: 'wrong-document' } }), false)
+    assert.equal(api.release(proof.receipt, proof.observations), true)
+    assert.equal(api.snapshot().phase, 'released')
+    assert.equal(api.snapshot().mounted, false)
+    assert.equal(api.snapshot().modal, false)
+    w.document.querySelector('button').click()
+    assert.equal(clicks, 1)
+    assert.equal(w.document.querySelector('dialog'), null)
+  } finally {
+    w.close()
+  }
+})
 
 test('explicit login usability releases input without claiming authentication', async () => {
   const dom = await documentFixture()

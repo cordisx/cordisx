@@ -129,7 +129,9 @@ function installCover(options, animateMark) {
         || !matches(observations?.receipt)
         || document.readyState === 'loading'
         || observations?.hostUsable !== true
-        || !(observations?.authenticated === true && observations?.cordisxReady === true
+        || !(observations?.workspaceUsable === true && observations?.cordisxReady === true
+            && observations?.authenticated === undefined
+          || observations?.authenticated === true && observations?.cordisxReady === true
           || observations?.authenticated === false && observations?.loginUsable === true)
       ) return false
       disposed = true
