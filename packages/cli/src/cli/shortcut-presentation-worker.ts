@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { appendFile, rm } from 'node:fs/promises'
+import { appendFile, mkdir, rm } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,6 +46,7 @@ async function currentGeneration(job: ShortcutPresentationJob): Promise<boolean>
 
 export async function updateShortcutPresentation(job: ShortcutPresentationJob): Promise<void> {
   if (!await currentGeneration(job)) return
+  if (job.output?.directory) await mkdir(job.output.directory, { recursive: true, mode: 0o700 })
   const shortcutInput = {
     invocation: job.invocation,
     appId: job.appId,

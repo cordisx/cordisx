@@ -5,7 +5,7 @@ import { loadHomeConfig } from '../config/home-config.js'
 import { type AppLauncherMenu, type AppLauncherRuntime, validAppLauncherRuntime } from '../app-launcher/model.js'
 import { readPrivateJson } from '../shortcuts/store.js'
 import { type CordisXManagedInvocation, parseCordisXCli } from './parse.js'
-import { type ReadyLaunchResult, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
+import { type ReadyLaunchResult, runSupervisorCommandWithStartupGate, type StartupPhase } from './supervisor-command.js'
 import { type ActivatedOwnedHost, activateOwnedHost } from './activate-owned-host.js'
 
 type AppOperation = 'menu' | 'launch-default' | 'launch-profile'
@@ -42,7 +42,7 @@ export interface AppEntryDependencies {
   readonly activate?: (ready: ReadyLaunchResult) => Promise<ActivatedOwnedHost>
   readonly onState?: (
     ready: ReadyLaunchResult,
-    phase: 'host-launched' | 'ready',
+    phase: StartupPhase,
   ) => void | Promise<void>
 }
 
@@ -84,19 +84,9 @@ export async function runAppLauncherOperation(
     internalReuseShortcut: true,
     internalShortcutSpawnCwd: runtime.cwd,
   }
-  let ready: ReadyLaunchResult | undefined
-  try {
-    ready = await run({ ...invocation, createShortcut: true }, runRuntime, dependencies.onState)
-  } catch {
-    // Launch/activation is the app's primary contract. A stale private icon
-    // cache must not prevent it, and a Host that already became ready is reused.
-    ready = await run(invocation, {
-      cwd: runRuntime.cwd,
-      env: runRuntime.env,
-      stdout: runRuntime.stdout,
-      internalShortcutSpawnCwd: runRuntime.internalShortcutSpawnCwd,
-    }, dependencies.onState)
-  }
+  // Presentation is optional and handled after readiness. A failed launch must
+  // never silently create another Host with a different request.
+  const ready = await run({ ...invocation, createShortcut: true }, runRuntime, dependencies.onState)
   if (!ready) throw new Error('No ready Host instance returned')
   return await (dependencies.activate ?? activateOwnedHost)(ready)
 }
@@ -109,7 +99,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       onState: (ready, phase) => {
         const state = ready.state
         if (!state.hostPid || !state.hostProcessStartedAt) return
-        const key = `${phase}:${state.hostPid}:${state.hostProcessStartedAt}`
+        const key = `${phase}:${state.hostPid}:${state.hostProcessStartedAt}:${state.startupRecovery?.updatedAt ?? 0}`
         if (published.has(key)) return
         published.add(key)
         process.stdout.write(

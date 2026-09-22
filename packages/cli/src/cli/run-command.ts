@@ -229,12 +229,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let prelaunchedHostHandedOff = false
   try {
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
-      // The native startup gate is already visible. Finish compatibility work
-      // before creating the real Host, then launch that Host hidden until ready.
-      prelaunch: false,
+      // The same primary window shows startup while compatibility work proceeds.
+      prelaunch: runHost === runInjectedHost && supervisorRuntime.mainInspector
+        && environment.CORDISX_SUPERVISOR_HOME !== undefined,
       prepareNativeSubmission: runHost === runInjectedHost,
       mainInspector: supervisorRuntime.mainInspector,
-      markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
+      markHostLaunched: async (pid, inspectorUrl, port) =>
+        await supervisorRuntime.markHostLaunched(pid, inspectorUrl, port),
     })
     ;({
       plan,
@@ -818,9 +819,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           launcher: invocation.options,
           onReady: async () => {
             await markCliProxyStartupConfigApplied()
-            await supervisorRuntime.markReady(debugPort)
+            await supervisorRuntime.markReady(debugPort, nativeSubmission?.installation.accountCapability)
           },
-          onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
+          onHostLaunched: async (pid, inspectorUrl) =>
+            await supervisorRuntime.markHostLaunched(pid, inspectorUrl, debugPort),
           mainInspector: supervisorRuntime.mainInspector,
           stdout,
         })
@@ -957,13 +959,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         launcher: invocation.options,
         onReady: async () => {
           await markCliProxyStartupConfigApplied()
-          await supervisorRuntime.markReady(resolvedDebugPort)
+          await supervisorRuntime.markReady(resolvedDebugPort, nativeSubmission?.installation.accountCapability)
         },
-        onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
+        onHostLaunched: async (pid, inspectorUrl) =>
+          await supervisorRuntime.markHostLaunched(pid, inspectorUrl, resolvedDebugPort),
         mainInspector: supervisorRuntime.mainInspector,
-        ...(runHost === runInjectedHost && environment.CORDISX_SUPERVISOR_HOME !== undefined
-          ? { hiddenUntilReady: true }
-          : {}),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)

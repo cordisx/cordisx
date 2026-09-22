@@ -1,0 +1,51 @@
+:host {
+  --startup-surface: #f4f5f7;
+  --startup-text: #202124;
+  --startup-muted: #65676b;
+  background: var(--startup-surface);
+  color: var(--startup-text);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+main {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
+  user-select: none;
+}
+h1 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 650;
+}
+p {
+  margin: 0;
+  color: var(--startup-muted);
+}
+button {
+  margin: 0 6px;
+  padding: 8px 18px;
+  border: 1px solid var(--startup-muted);
+  border-radius: 8px;
+  background: var(--startup-surface);
+  color: var(--startup-text);
+  font: inherit;
+  cursor: pointer;
+}
+button:focus-visible {
+  outline: 2px solid var(--startup-text);
+  outline-offset: 3px;
+}
+@media (prefers-color-scheme: dark) {
+  :host {
+    --startup-surface: #17181a;
+    --startup-text: #f2f3f5;
+    --startup-muted: #a7aab0;
+  }
+}

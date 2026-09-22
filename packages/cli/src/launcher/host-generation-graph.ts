@@ -406,6 +406,7 @@ export async function buildHostGenerationGraph(
     path.resolve(buildOptions.cacheRoot ?? defaultCacheRoot(config)),
     composition.hostGraphStableIdentity,
   )
+  console.error('[cordisx-startup]', JSON.stringify({ event: 'host-graph', at: Date.now(), cacheStatus }))
   const files = new Map(artifact.files)
   files.set('/launch.js', {
     body: new TextEncoder().encode(composition.hostGraphLaunchSource),

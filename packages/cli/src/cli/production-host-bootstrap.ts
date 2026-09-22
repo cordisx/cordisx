@@ -34,10 +34,15 @@ export async function prepareProductionHostBootstrap(
     prelaunch: boolean
     prepareNativeSubmission: boolean
     mainInspector: boolean
-    markHostLaunched(pid: number, inspectorUrl?: Promise<string>): boolean | void | Promise<boolean | void>
+    markHostLaunched(
+      pid: number,
+      inspectorUrl?: Promise<string>,
+      debugPort?: number,
+    ): boolean | void | Promise<boolean | void>
   }>,
 ): Promise<ProductionHostBootstrap> {
   const { invocation, selection, adapter, stdout, environment, configPath } = prepared
+  if (input.prelaunch) stdout('[cordisx-startup] ' + JSON.stringify({ event: 'prepare-started', at: Date.now() }))
   const resolved = invocation.options.attach
     ? undefined
     : await adapter.resolveLaunchPlan({
@@ -108,11 +113,12 @@ export async function prepareProductionHostBootstrap(
       }
     }
     const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
+    if (input.mainInspector && !mainInspector) throw new Error('Same-window startup requires an owned main inspector')
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
     child = launchCodex(
       plan.executable,
       debugPort,
-      invocation.hostArgs,
+      mainInspector ? ['--inspect-brk=127.0.0.1:0', ...invocation.hostArgs] : invocation.hostArgs,
       profile,
       invocation.options.onlineDevtools,
       { ...plan.environment, ...nativeSubmissionBootstrap?.environment },
@@ -120,7 +126,8 @@ export async function prepareProductionHostBootstrap(
     )
     if (child.pid === undefined) throw new Error('launched Host exposed no PID')
     const inspectorUrl = mainInspector ? captureMainInspectorUrl(child) : undefined
-    await input.markHostLaunched(child.pid, inspectorUrl)
+    stdout('[cordisx-startup] ' + JSON.stringify({ event: 'host-spawned', at: Date.now(), hostPid: child.pid }))
+    await input.markHostLaunched(child.pid, inspectorUrl, debugPort)
     return {
       plan,
       debugPort,

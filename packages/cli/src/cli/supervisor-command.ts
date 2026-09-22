@@ -25,8 +25,8 @@ import { requestSupervisorStop } from './supervisor-control.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { preflightShortcut } from '../shortcuts/create.js'
 import { shortcutKey } from '../shortcuts/model.js'
+import type { ShortcutOutputOptions } from '../shortcuts/model.js'
 import { registryFor } from '../shortcuts/store.js'
-import { openNativeStartupGate } from './startup-gate.js'
 import { scheduleShortcutPresentation } from './shortcut-presentation-worker.js'
 
 const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
@@ -180,18 +180,24 @@ async function terminateOwnedGroups(
   if (!await waitForOwnedShutdown(state)) throw new Error('timed out stopping the CordisX-owned process groups')
 }
 
-async function waitForState(
+export type StartupPhase = 'host-launched' | 'ready' | 'waiting-for-user' | 'retrying'
+
+export async function waitForState(
   paths: ReturnType<typeof supervisorPaths>,
   timeoutMs: number,
-  onHostLaunched?: (state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>) => void | Promise<void>,
+  onHostLaunched?: (
+    state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
+    phase: StartupPhase,
+  ) => void | Promise<void>,
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
-  const deadline = Date.now() + timeoutMs
+  let deadline = Date.now() + timeoutMs
   let hostPublished = false
-  while (Date.now() < deadline) {
+  let lastRecovery = 0
+  while (true) {
     const state = await readSupervisorState(paths)
     if (!hostPublished && state?.hostPid !== undefined && state.hostProcessStartedAt !== undefined) {
       hostPublished = true
-      await onHostLaunched?.(state)
+      await onHostLaunched?.(state, 'host-launched')
     }
     if (state?.phase === 'ready') return state
     if (state?.phase === 'failed') {
@@ -203,10 +209,24 @@ async function waitForState(
       if (identity === 'dead') {
         throw new Error('CordisX background supervisor exited before renderer readiness')
       }
+      const recovery = state.startupRecovery
+      if (recovery && Date.now() - recovery.updatedAt < 5000 && recovery.updatedAt > 0) {
+        if (
+          !state.hostPid || !state.hostProcessStartedAt
+          || await processIdentityStatus(state.hostPid, state.hostProcessStartedAt) !== 'alive'
+        ) {
+          throw new Error('Owning startup recovery window process exited')
+        }
+        if (recovery.waitingForUser || recovery.updatedAt !== lastRecovery) deadline = Date.now() + timeoutMs
+        if (recovery.updatedAt !== lastRecovery) {
+          await onHostLaunched?.(state, recovery.waitingForUser ? 'waiting-for-user' : 'retrying')
+          lastRecovery = recovery.updatedAt
+        }
+      }
     }
+    if (Date.now() >= deadline) throw new Error('timed out waiting for CordisX renderer readiness')
     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
   }
-  throw new Error('timed out waiting for CordisX renderer readiness')
 }
 
 async function acquireSupervisorOperation(
@@ -289,12 +309,30 @@ export interface ReadyLaunchResult {
   readonly target: Awaited<ReturnType<typeof selectionFor>>
 }
 
+function presentationOutput(
+  invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>,
+  runtime: CordisXCliRuntime,
+  home: string,
+): ShortcutOutputOptions | undefined {
+  if (runtime.internalShortcutOutput) return runtime.internalShortcutOutput
+  if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) return undefined
+  // Ordinary CLI launches need a live Dock identity too. Keep the supporting
+  // icon bundle private instead of creating an unsolicited Finder shortcut.
+  return {
+    directory: path.join(home, 'presentation', 'profiles'),
+    registry: path.join(home, 'presentation', 'records'),
+  }
+}
+
 async function finishReady(
   invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>,
   runtime: CordisXCliRuntime,
   ready: ReadyLaunchResult,
 ): Promise<ReadyLaunchResult> {
-  if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) {
+  if (
+    invocation.createShortcut || runtime.internalShortcutDockRecordPath
+    || (process.platform === 'darwin' && ready.target.appId === 'codex')
+  ) {
     const paths = supervisorPaths(
       path.dirname(ready.target.configPath),
       ready.target.appId,
@@ -311,9 +349,15 @@ async function finishReady(
     try {
       if (!launchIdentity) throw new Error('ready Host identity is unavailable')
       const home = await realpath(path.dirname(ready.target.configPath))
-      const id = shortcutKey(home, ready.target.appId, ready.target.selection.profileId, ready.target.selection.dataMode)
+      const presentation = presentationOutput(invocation, runtime, home)
+      const id = shortcutKey(
+        home,
+        ready.target.appId,
+        ready.target.selection.profileId,
+        ready.target.selection.dataMode,
+      )
       const recordPath = runtime.internalShortcutDockRecordPath
-        ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
+        ?? path.join(presentation?.registry ?? registryFor(os.homedir()), `${id}.json`)
       await (runtime.internalScheduleShortcutPresentation ?? scheduleShortcutPresentation)({
         schemaVersion: 1,
         invocation,
@@ -323,17 +367,19 @@ async function finishReady(
         home,
         cwd: runtime.cwd ?? process.cwd(),
         ...(ready.target.environment.CODEX_HOME ? { codexHome: ready.target.environment.CODEX_HOME } : {}),
-        ...(runtime.internalShortcutOutput ? { output: runtime.internalShortcutOutput } : {}),
+        ...(presentation ? { output: presentation } : {}),
         launchIdentity,
         paths,
         instanceToken: ready.state.instanceToken,
         recordPath,
-        updateShortcut: invocation.createShortcut === true,
+        updateShortcut: invocation.createShortcut === true || !runtime.internalShortcutDockRecordPath,
         reuseExistingAvatar: invocation.createShortcut === true && runtime.internalReuseShortcut === true,
       })
     } catch (error) {
       const stderr = runtime.stderr ?? process.stderr
-      stderr.write(`[cordisx] Host is ready; shortcut presentation will retry on the next launch: ${failureMessage(error)}\n`)
+      stderr.write(
+        `[cordisx] Host is ready; shortcut presentation will retry on the next launch: ${failureMessage(error)}\n`,
+      )
     }
   }
   output(runtime, display(ready.state), invocation.options.json)
@@ -343,7 +389,7 @@ async function finishReady(
 export async function runSupervisorCommand(
   invocation: CordisXCliInvocation,
   runtime: CordisXCliRuntime,
-  onState?: (ready: ReadyLaunchResult, phase: 'host-launched' | 'ready') => void | Promise<void>,
+  onState?: (ready: ReadyLaunchResult, phase: StartupPhase) => void | Promise<void>,
 ): Promise<ReadyLaunchResult | undefined> {
   if (!isManaged(invocation)) throw new Error('not a supervisor command')
   if (invocation.createShortcut) await preflightShortcut(invocation, runtime.cwd ?? process.cwd())
@@ -461,7 +507,7 @@ export async function runSupervisorCommand(
         : await waitForState(
           paths,
           readinessTimeout(runtime),
-          current => onState?.({ state: current, target }, 'host-launched'),
+          (current, phase) => onState?.({ state: current, target }, phase),
         )
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
       const result = { state: ready, target }
@@ -489,11 +535,15 @@ export async function runSupervisorCommand(
       // bootstrap file rather than appearing in the child environment.
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
     }
-    if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) {
+    if (
+      invocation.createShortcut || runtime.internalShortcutDockRecordPath
+      || (process.platform === 'darwin' && target.appId === 'codex')
+    ) {
       const home = await realpath(path.dirname(target.configPath))
+      const presentation = presentationOutput(invocation, runtime, home)
       const id = shortcutKey(home, target.appId, target.selection.profileId, target.selection.dataMode)
       const recordPath = runtime.internalShortcutDockRecordPath
-        ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
+        ?? path.join(presentation?.registry ?? registryFor(os.homedir()), `${id}.json`)
       if (path.basename(recordPath) !== `${id}.json`) throw new Error('Dock record does not match launch profile')
       Object.assign(childEnvironment, { CORDISX_DOCK_ENTRY: id, CORDISX_DOCK_RECORD: recordPath })
     }
@@ -527,7 +577,7 @@ export async function runSupervisorCommand(
       const observedReady = await waitForState(
         paths,
         readinessTimeout(runtime),
-        current => onState?.({ state: current, target }, 'host-launched'),
+        (current, phase) => onState?.({ state: current, target }, phase),
       )
       if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
       ready = observedReady
@@ -564,15 +614,14 @@ export async function runSupervisorCommand(
 export async function runSupervisorCommandWithStartupGate(
   invocation: CordisXCliInvocation,
   runtime: CordisXCliRuntime,
-  onState?: (ready: ReadyLaunchResult, phase: 'host-launched' | 'ready') => void | Promise<void>,
+  onState?: (ready: ReadyLaunchResult, phase: StartupPhase) => void | Promise<void>,
 ): Promise<ReadyLaunchResult | undefined> {
   if (!isManaged(invocation) || (invocation.action !== 'start' && invocation.action !== 'restart')) {
     return await runSupervisorCommand(invocation, runtime, onState)
   }
-  const openGate = runtime.internalOpenStartupGate === false
-    ? undefined
-    : runtime.internalOpenStartupGate
-      ?? (runtime.internalSpawnSupervisor === undefined ? openNativeStartupGate : undefined)
+  // The real Host owns startup presentation. Retain the injected gate seam for
+  // existing callers/tests, but never launch the superseded second window.
+  const openGate = runtime.internalOpenStartupGate || undefined
   if (openGate === undefined) return await runSupervisorCommand(invocation, runtime, onState)
   const startedAt = performance.now()
   const gate = await openGate()

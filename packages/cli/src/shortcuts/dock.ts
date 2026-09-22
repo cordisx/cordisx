@@ -5,6 +5,8 @@ import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import { connectStartupCover, installStartupNavigation, type StartupCoverController } from './startup-cover.js'
 import { CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import { hasMatchingProcessIdentity } from '../cli/supervisor-state.js'
 import { inspectBundle, nativeOperation } from './native.js'
@@ -13,7 +15,6 @@ import { validRecord } from './model.js'
 
 export const dockAgent = fileURLToPath(new URL('../../native/dock-agent.cjs', import.meta.url))
 export const visibilityAgent = fileURLToPath(new URL('../../native/visibility-agent.cjs', import.meta.url))
-const NATIVE_CONTENT_READY_TIMEOUT_MS = 45_000
 const run = promisify(execFile)
 const FUSE_SENTINEL = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
 
@@ -220,17 +221,19 @@ async function inspectorClosed(port: number): Promise<boolean> {
 }
 
 export interface HostMainAgentController {
-  revealAndClose(): Promise<void>
+  revealAndClose(account?: NativeAccountCapabilityDescriptor): Promise<void>
   close(): Promise<void>
 }
 
-/** Gate BrowserWindow.show and optionally install Dock ownership over one inspector. */
+/** Install same-window startup and optional Dock ownership over one inspector. */
 export async function installHostMainAgents(input: {
   inspectorUrl: string
   hostPid: number
   hostStartedAt: string
+  debugPort: number
   readyStatePath: string
   readyInstanceToken: string
+  onStartupRecovery?: (waiting: boolean) => Promise<void>
   dock?: { readonly scope: DockScope; readonly token: string }
 }): Promise<HostMainAgentController> {
   const matched = /^ws:\/\/127\.0\.0\.1:(\d+)\/[a-f0-9-]+$/u.exec(input.inspectorUrl)
@@ -239,6 +242,7 @@ export async function installHostMainAgents(input: {
   }
   const port = Number(matched[1])
   let session: CdpSession | undefined
+  let startup: StartupCoverController | undefined
   let closed = false
   const closeInspector = async (): Promise<void> => {
     if (closed) return
@@ -276,21 +280,10 @@ export async function installHostMainAgents(input: {
     const pausedEvent = await paused
     const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
     if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
-    const earlyVisibility = await session.send('Debugger.evaluateOnCallFrame', {
-      callFrameId: frame.callFrameId,
-      expression: `require(${JSON.stringify(visibilityAgent)}).install(${
-        JSON.stringify({ pid: input.hostPid })
-      }, require('electron'))`,
-      returnByValue: true,
-    }, 5_000)
-    const earlyError = runtimeEvaluationException(earlyVisibility)
-    if (
-      earlyError
-      || (earlyVisibility.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
-      || (earlyVisibility.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
-    ) {
-      throw new Error('Owned Host early visibility gate failed' + (earlyError ? ': ' + earlyError : ''))
-    }
+    await installStartupNavigation(session, frame.callFrameId, {
+      pid: input.hostPid,
+      generation: input.readyInstanceToken,
+    })
     await session.send('Debugger.resume')
     // Electron exposes the inspector before its application entry module is
     // loaded. Wait for the main module rather than racing Node bootstrap.
@@ -305,23 +298,12 @@ export async function installHostMainAgents(input: {
       if (!moduleReady) await new Promise(resolve => setTimeout(resolve, 100))
     }
     if (!moduleReady) throw new Error('Owned Host main module did not initialize')
-    const visibilityResponse = await session.send('Runtime.evaluate', {
-      expression: `process.mainModule.require(${JSON.stringify(visibilityAgent)}).install(${
-        JSON.stringify({ pid: input.hostPid })
-      })`,
-      awaitPromise: true,
-      returnByValue: true,
-    }, 5_000)
-    const visibilityError = runtimeEvaluationException(visibilityResponse)
-    if (
-      visibilityError
-      || (visibilityResponse.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
-      || (visibilityResponse.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
-    ) {
-      throw new Error(
-        'Owned Host visibility agent initialization failed' + (visibilityError ? ': ' + visibilityError : ''),
-      )
-    }
+    startup = await connectStartupCover(
+      session,
+      { pid: input.hostPid, generation: input.readyInstanceToken },
+      input.debugPort,
+      input.onStartupRecovery,
+    )
     if (input.dock) {
       // All code and arguments are selected by the owning launcher. No socket
       // request can provide JavaScript, a module path, or an image path.
@@ -352,32 +334,20 @@ export async function installHostMainAgents(input: {
       }
     }
   } catch (error) {
-    await session?.send('Debugger.resume').catch(() => undefined)
-    await closeInspector().catch(() => undefined)
+    // The caller owns process-tree cleanup. Do not disconnect/resume a paused
+    // main before that cleanup: its first document may not have a cover yet.
+    startup?.close()
     throw error
   }
   return {
-    async revealAndClose(): Promise<void> {
-      if (!session) throw new Error('Owned Host main inspector session is unavailable')
-      const response = await session.send('Runtime.evaluate', {
-        expression: `process.mainModule.require(${JSON.stringify(visibilityAgent)}).releaseWhenReady(${
-          JSON.stringify({
-            pid: input.hostPid,
-            statePath: input.readyStatePath,
-            instanceToken: input.readyInstanceToken,
-          })
-        })`,
-        awaitPromise: true,
-        returnByValue: true,
-      }, NATIVE_CONTENT_READY_TIMEOUT_MS)
-      const remoteError = runtimeEvaluationException(response)
-      if (
-        remoteError
-        || (response.result as { value?: { armed?: unknown; pid?: unknown } })?.value?.armed !== true
-        || (response.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
-      ) throw new Error('Owned Host native content readiness failed' + (remoteError ? ': ' + remoteError : ''))
+    async revealAndClose(account): Promise<void> {
+      if (!startup) throw new Error('Owned startup surface unavailable')
+      await startup.reveal(account)
       await closeInspector()
     },
-    close: closeInspector,
+    async close() {
+      startup?.close()
+      await closeInspector()
+    },
   }
 }

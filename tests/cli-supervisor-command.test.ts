@@ -122,9 +122,13 @@ describe('supervisor management commands', () => {
     const paths = supervisorPaths(root, 'codex', 'default')
     const startedAt = await processStartIdentity(process.pid)
     const phases: string[] = []
+    const presentationJobs: unknown[] = []
     await runSupervisorCommand(parseCordisXCli(['start', '--json']), {
       env: { CORDISX_HOME: root },
       stdout: () => undefined,
+      internalScheduleShortcutPresentation: job => {
+        presentationJobs.push(job)
+      },
       internalSpawnSupervisor: () => {
         void (async () => {
           for (;;) {
@@ -154,9 +158,19 @@ describe('supervisor management commands', () => {
       phases.push(phase)
     })
     expect(phases).toEqual(['host-launched', 'ready'])
+    if (process.platform === 'darwin') {
+      expect(presentationJobs).toEqual([expect.objectContaining({
+        updateShortcut: true,
+        output: {
+          directory: path.join(await realpath(root), 'presentation', 'profiles'),
+          registry: path.join(await realpath(root), 'presentation', 'records'),
+        },
+        launchIdentity: expect.objectContaining({ hostPid: process.pid }),
+      })])
+    }
   })
 
-  it('does not forward caller Dock metadata to an ordinary managed start', async () => {
+  it('derives private Dock ownership for an ordinary managed start and rejects caller metadata', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
     const paths = supervisorPaths(root, 'codex', 'default')
     let childEnvironment: NodeJS.ProcessEnv | undefined
@@ -182,8 +196,16 @@ describe('supervisor management commands', () => {
         return { pid: process.pid, unref: () => undefined }
       },
     })
-    expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_ENTRY')
-    expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_RECORD')
+    if (process.platform === 'darwin') {
+      const entryId = shortcutKey(await realpath(root), 'codex', 'default', 'shared')
+      expect(childEnvironment?.CORDISX_DOCK_ENTRY).toBe(entryId)
+      expect(childEnvironment?.CORDISX_DOCK_RECORD).toBe(
+        path.join(await realpath(root), 'presentation', 'records', `${entryId}.json`),
+      )
+    } else {
+      expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_ENTRY')
+      expect(childEnvironment).not.toHaveProperty('CORDISX_DOCK_RECORD')
+    }
   })
 
   it('returns a newly ready Host when background Dock presentation cannot be scheduled', async () => {

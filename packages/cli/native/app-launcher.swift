@@ -24,6 +24,7 @@ func launcherOutput(
 ) throws -> Data {
     let lock = NSLock(), terminated = DispatchSemaphore(value: 0), readDone = DispatchSemaphore(value: 0)
     var bytes = Data(), pending = Data(), oversized = false
+    var recoveryHeartbeatUntil: TimeInterval = 0
     process.terminationHandler = { _ in terminated.signal() }
     try process.run()
     DispatchQueue.global().async {
@@ -31,15 +32,23 @@ func launcherOutput(
             let chunk = pipe.fileHandleForReading.availableData
             if chunk.isEmpty { break }
             lock.lock()
-            if bytes.count + chunk.count > 96 * 1024 { oversized = true }
+            if pending.count + chunk.count > 96 * 1024 { oversized = true }
             else {
-                bytes.append(chunk)
                 pending.append(chunk)
                 while let newline = pending.firstRange(of: Data([0x0a])) {
                     let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
                     pending.removeSubrange(pending.startIndex...newline.lowerBound)
                     if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                        if object["event"] as? String == "waiting-for-user" {
+                            recoveryHeartbeatUntil = ProcessInfo.processInfo.systemUptime + 5
+                        } else if object["event"] as? String == "retrying" {
+                            recoveryHeartbeatUntil = 0
+                        }
                         onObject?(object)
+                        if object["event"] == nil {
+                            if bytes.count + line.count + 1 > 96 * 1024 { oversized = true }
+                            else { bytes.append(line); bytes.append(0x0a) }
+                        }
                     }
                 }
             }
@@ -49,9 +58,17 @@ func launcherOutput(
         }
         readDone.signal()
     }
-    guard terminated.wait(timeout: .now() + .milliseconds(Int(timeout * 1000))) == .success else {
-        if process.isRunning { process.terminate() }
-        throw launcherFailure("CordisX operation timed out")
+    var deadline = ProcessInfo.processInfo.systemUptime + timeout
+    while terminated.wait(timeout: .now() + .milliseconds(100)) != .success {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        let recoveryVisible = recoveryHeartbeatUntil > now
+        lock.unlock()
+        if recoveryVisible { deadline = now + timeout }
+        if now >= deadline {
+            if process.isRunning { process.terminate() }
+            throw launcherFailure("CordisX operation timed out")
+        }
     }
     guard readDone.wait(timeout: .now() + 2) == .success else {
         throw launcherFailure("CordisX operation output did not finish")

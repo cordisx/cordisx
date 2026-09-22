@@ -1,0 +1,96 @@
+import { test } from 'vitest'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { JSDOM } from 'jsdom'
+import { buildCoverSource } from '../packages/cli/native/startup-cover.cjs'
+
+const css = await readFile(new URL('../packages/cli/native/startup-cover.css', import.meta.url), 'utf8')
+const source = buildCoverSource({ generation: 'offline-run', url: 'app://-/index.html', css })
+async function documentFixture(url = 'app://-/index.html') {
+  const dom = new JSDOM('<!doctype html><html><body><main id="app"><input id="composer"></main></body></html>', {
+    url,
+    runScripts: 'outside-only',
+  })
+  // JSDOM has no modal/top-layer layout. This shim tests the lifecycle only.
+  dom.window.HTMLDialogElement.prototype.showModal = function() {
+    this.open = true
+  }
+  dom.window.HTMLDialogElement.prototype.close = function() {
+    this.open = false
+  }
+  await new Promise(resolve => dom.window.addEventListener('load', resolve))
+  dom.window.eval(source)
+  return dom
+}
+const ready = receipt => ({ receipt, hostUsable: true, cordisxReady: true, authenticated: true })
+
+test('body replacement stays covered; unready or stale receipts cannot release; cleanup restores input', async () => {
+  const dom = await documentFixture()
+  const { window: w } = dom
+  try {
+    const api = w.__cordisxStartupDocument
+    const receipt = api.snapshot().receipt
+    let input = 0
+    w.document.addEventListener('keydown', () => input++)
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    assert.equal(input, 0)
+    w.document.body.innerHTML = '<main>replaced application</main>'
+    await Promise.resolve()
+    assert.equal(api.snapshot().mounted, true)
+    assert.equal(api.release(receipt, { ...ready(receipt), authenticated: false }), false)
+    assert.equal(api.release({ ...receipt, nonce: 'previous-document' }, ready(receipt)), false)
+    assert.equal(api.release(receipt, ready(receipt)), true)
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    assert.equal(input, 1)
+    assert.equal(w.document.querySelector('dialog'), null)
+  } finally {
+    w.close()
+  }
+})
+
+test('reload creates a new nonce and installs cover again; prior document cannot release it', async () => {
+  const first = await documentFixture()
+  const second = await documentFixture()
+  try {
+    const old = first.window.__cordisxStartupDocument.snapshot().receipt
+    const next = second.window.__cordisxStartupDocument
+    assert.notEqual(next.snapshot().receipt.nonce, old.nonce)
+    assert.equal(next.snapshot().modal, true)
+    assert.equal(next.release(next.snapshot().receipt, ready(old)), false)
+    assert.equal(next.release(old, ready(old)), false)
+    assert.equal(next.fail(next.snapshot().receipt), true)
+    assert.equal(next.release(next.snapshot().receipt, ready(next.snapshot().receipt)), false)
+  } finally {
+    first.window.close()
+    second.window.close()
+  }
+})
+
+test('unrelated and auxiliary routes do not receive startup UI', async () => {
+  for (const url of ['https://example.com', 'app://-/index.html?initialRoute=avatar-overlay']) {
+    const dom = await documentFixture(url)
+    assert.equal(dom.window.__cordisxStartupDocument, undefined)
+    dom.window.close()
+  }
+})
+
+test('installation before documentElement mounts when parser supplies the root', async () => {
+  const dom = await documentFixture('about:blank')
+  const w = dom.window
+  try {
+    w.document.documentElement.remove()
+    w.eval(buildCoverSource({ generation: 'before-parser', url: 'about:blank', css }))
+    const api = w.__cordisxStartupDocument
+    assert.equal(api.snapshot().mounted, false)
+    const html = w.document.createElement('html')
+    html.append(w.document.createElement('body'))
+    w.document.append(html)
+    await Promise.resolve()
+    assert.equal(api.snapshot().mounted, true)
+    w.dispatchEvent(new w.Event('pagehide'))
+    assert.equal(api.snapshot().phase, 'retired')
+    assert.equal(api.release(api.snapshot().receipt, ready(api.snapshot().receipt)), false)
+  } finally {
+    w.close()
+  }
+})
