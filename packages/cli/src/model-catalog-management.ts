@@ -1,4 +1,10 @@
-/** Host-private, credential-free management DTOs. Not a plugin capability. */
+import type {
+  ScriptErrorCode,
+  ScriptSourceConfig,
+  ScriptSourceSnapshot,
+} from './launcher/model-catalog/script-types.js'
+
+/** Host-private management DTOs. Script configuration is write-only, never a snapshot. */
 export type CatalogSourceKind = 'native' | 'auto' | 'manual' | 'script'
 export type CatalogManagementCode =
   | 'unsupported'
@@ -14,10 +20,7 @@ export type CatalogManagementCode =
   | 'rate-limit'
   | 'temporary'
   | 'protocol'
-  | 'cancelled'
-  | 'script-grant-required'
-  | 'script-exit-failed'
-  | 'script-budget-exceeded'
+  | ScriptErrorCode
 
 export interface CatalogEditableModel {
   readonly id: string
@@ -34,15 +37,21 @@ export interface CatalogConnectionSettings {
     | { readonly kind: 'manual'; readonly ids: readonly string[] }
 }
 
+/** Host adapter evidence only; missing is unknown and does not grant submission. */
+export interface CatalogProtocolCapabilities {
+  readonly responses: boolean
+}
+
 export interface CatalogManagementRow {
   readonly id: string
   readonly label: string
-  readonly provenance: readonly ('native' | 'auto' | 'manual' | 'manual-supplement' | 'script')[]
+  readonly provenance: readonly ('native' | 'auto' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
   readonly notListed: boolean
   readonly present: boolean
   readonly selectable: boolean
   readonly blocked: boolean
   readonly pinned: boolean
+  readonly protocolCapabilities?: CatalogProtocolCapabilities
   readonly reason?: 'blocked' | 'removed' | 'unconfirmed' | 'permission' | 'pending-apply'
 }
 
@@ -67,6 +76,7 @@ export type CatalogManagementOperation =
   | 'setSource'
   | 'setMode'
   | 'requestCredentialReplacement'
+  | 'configureScript'
   | 'runScript'
   | 'cancelScript'
   | 'updateConnection'
@@ -92,6 +102,11 @@ export interface CatalogManagementView {
   readonly capabilities: readonly CatalogManagementOperation[]
   readonly diagnostics: CatalogSafeDiagnostics
   readonly connection?: CatalogConnectionSettings
+  readonly protocolCapabilities?: CatalogProtocolCapabilities
+  readonly scriptState?: Pick<
+    ScriptSourceSnapshot,
+    'authorityRevision' | 'runGeneration' | 'persistence' | 'evidence'
+  >
 }
 
 export interface CatalogManagementCursor {
@@ -136,6 +151,11 @@ export type CatalogManagementCommand =
       | { readonly operation: 'setSource'; readonly source: 'native' | 'auto' }
       | { readonly operation: 'setMode'; readonly mode: 'only' | 'augment' }
       | { readonly operation: 'updateConnection'; readonly settings: CatalogConnectionSettings }
+      | {
+        readonly operation: 'configureScript'
+        readonly config: ScriptSourceConfig
+        readonly mode: 'replace' | 'supplement'
+      }
     )
 
 export interface CatalogManagementResult {
@@ -145,7 +165,7 @@ export interface CatalogManagementResult {
   readonly retryAt?: number
 }
 
-/** Bound by the admitted Host document channel; no secret refs, filesystem paths or executable payloads. */
+/** Admitted Host document channel; script payloads are write-only and never exposed to plugins. */
 export interface CatalogManagementChannel {
   catalogManagementRead(): Promise<CatalogManagementSnapshot>
   catalogManagementSubscribe(listener: (cursor: CatalogManagementCursor) => void): () => void
