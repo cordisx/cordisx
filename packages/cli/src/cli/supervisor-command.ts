@@ -21,12 +21,13 @@ import {
   supervisorPaths,
   writeSupervisorState,
 } from './supervisor-state.js'
-import { requestDockRefresh, requestShortcutPresentation, requestSupervisorStop } from './supervisor-control.js'
+import { requestSupervisorStop } from './supervisor-control.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
-import { createShortcut, preflightShortcut, reuseShortcut } from '../shortcuts/create.js'
+import { preflightShortcut } from '../shortcuts/create.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { registryFor } from '../shortcuts/store.js'
 import { openNativeStartupGate } from './startup-gate.js'
+import { scheduleShortcutPresentation } from './shortcut-presentation-worker.js'
 
 const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
 const RETRY_DELAY = 50
@@ -293,70 +294,49 @@ async function finishReady(
   runtime: CordisXCliRuntime,
   ready: ReadyLaunchResult,
 ): Promise<ReadyLaunchResult> {
-  let shortcut: Awaited<ReturnType<typeof createShortcut>> | undefined
-  if (invocation.createShortcut) {
-    try {
-      const launchIdentity = ready.state.hostPid && ready.state.hostProcessStartedAt
-        ? {
-          supervisorPid: ready.state.pid,
-          supervisorStartedAt: ready.state.processStartedAt,
-          hostPid: ready.state.hostPid,
-          hostStartedAt: ready.state.hostProcessStartedAt,
-        }
-        : undefined
-      const shortcutInput = {
-        invocation,
-        appId: ready.target.appId,
-        profileId: ready.target.selection.profileId,
-        dataMode: ready.target.selection.dataMode,
-        home: path.dirname(ready.target.configPath),
-        cwd: runtime.cwd ?? process.cwd(),
-        env: ready.target.environment,
-        ...(runtime.internalShortcutOutput ? { output: runtime.internalShortcutOutput } : {}),
-        ...(launchIdentity ? { launchIdentity } : {}),
-      }
-      shortcut = runtime.internalReuseShortcut && launchIdentity
-        ? await reuseShortcut({ ...shortcutInput, launchIdentity })
-        : undefined
-      if (!shortcut) {
-        const socket = supervisorPaths(
-          path.dirname(ready.target.configPath),
-          ready.target.appId,
-          ready.target.selection.profileId,
-        ).socket
-        let displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
-        const avatarDeadline = Date.now() + 10_000
-        while (displayProfile.status !== 'available' || !displayProfile.avatar) {
-          if (Date.now() >= avatarDeadline) break
-          await new Promise(resolve => setTimeout(resolve, 250))
-          displayProfile = await requestShortcutPresentation(socket, ready.state.instanceToken)
-        }
-        shortcut = await createShortcut({
-          ...(displayProfile.status === 'available' && displayProfile.avatar ? { avatar: displayProfile.avatar } : {}),
-          ...shortcutInput,
-        })
-      }
-    } catch (error) {
-      throw new Error('Host is ready; shortcut was not updated: ' + failureMessage(error))
-    }
-  }
   if (invocation.createShortcut || runtime.internalShortcutDockRecordPath) {
-    const home = await realpath(path.dirname(ready.target.configPath))
-    const id = shortcutKey(home, ready.target.appId, ready.target.selection.profileId, ready.target.selection.dataMode)
-    const recordPath = runtime.internalShortcutDockRecordPath
-      ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
     const paths = supervisorPaths(
       path.dirname(ready.target.configPath),
       ready.target.appId,
       ready.target.selection.profileId,
     )
-    if (!await requestDockRefresh(paths.socket, ready.state.instanceToken, recordPath)) {
-      throw new Error(
-        'Host is ready, but its Dock icon was not updated; stop this owned profile and reopen the shortcut',
-      )
+    const launchIdentity = ready.state.hostPid && ready.state.hostProcessStartedAt
+      ? {
+        supervisorPid: ready.state.pid,
+        supervisorStartedAt: ready.state.processStartedAt,
+        hostPid: ready.state.hostPid,
+        hostStartedAt: ready.state.hostProcessStartedAt,
+      }
+      : undefined
+    try {
+      if (!launchIdentity) throw new Error('ready Host identity is unavailable')
+      const home = await realpath(path.dirname(ready.target.configPath))
+      const id = shortcutKey(home, ready.target.appId, ready.target.selection.profileId, ready.target.selection.dataMode)
+      const recordPath = runtime.internalShortcutDockRecordPath
+        ?? path.join(runtime.internalShortcutOutput?.registry ?? registryFor(os.homedir()), `${id}.json`)
+      await (runtime.internalScheduleShortcutPresentation ?? scheduleShortcutPresentation)({
+        schemaVersion: 1,
+        invocation,
+        appId: ready.target.appId,
+        profileId: ready.target.selection.profileId,
+        dataMode: ready.target.selection.dataMode,
+        home,
+        cwd: runtime.cwd ?? process.cwd(),
+        ...(ready.target.environment.CODEX_HOME ? { codexHome: ready.target.environment.CODEX_HOME } : {}),
+        ...(runtime.internalShortcutOutput ? { output: runtime.internalShortcutOutput } : {}),
+        launchIdentity,
+        paths,
+        instanceToken: ready.state.instanceToken,
+        recordPath,
+        updateShortcut: invocation.createShortcut === true,
+        reuseExistingAvatar: invocation.createShortcut === true && runtime.internalReuseShortcut === true,
+      })
+    } catch (error) {
+      const stderr = runtime.stderr ?? process.stderr
+      stderr.write(`[cordisx] Host is ready; shortcut presentation will retry on the next launch: ${failureMessage(error)}\n`)
     }
   }
-  output(runtime, { ...display(ready.state), ...(shortcut ? { shortcut } : {}) }, invocation.options.json)
+  output(runtime, display(ready.state), invocation.options.json)
   return ready
 }
 
@@ -599,6 +579,20 @@ export async function runSupervisorCommandWithStartupGate(
   const stderr = runtime.stderr ?? process.stderr
   stderr.write(`[cordisx] startup gate visible: ${Math.round(performance.now() - startedAt)} ms\n`)
   let hostLaunchedAt: number | undefined
+  let revealed = false
+  const revealReady = async (ready: ReadyLaunchResult): Promise<void> => {
+    if (revealed) return
+    if (!ready.state.hostPid || !ready.state.hostProcessStartedAt) {
+      throw new Error('CordisX startup completed without a verified Host identity')
+    }
+    await gate.ready(ready.state.hostPid, ready.state.hostProcessStartedAt)
+    revealed = true
+    const readyAt = performance.now()
+    if (hostLaunchedAt !== undefined) {
+      stderr.write(`[cordisx] renderer ready after Host creation: ${Math.round(readyAt - hostLaunchedAt)} ms\n`)
+    }
+    stderr.write(`[cordisx] full application ready: ${Math.round(readyAt - startedAt)} ms\n`)
+  }
   let current = invocation
   try {
     for (;;) {
@@ -613,27 +607,19 @@ export async function runSupervisorCommandWithStartupGate(
             hostLaunchedAt ??= performance.now()
             stderr.write(`[cordisx] Host created hidden: ${Math.round(hostLaunchedAt - startedAt)} ms\n`)
             await gate.stage('正在准备模型与界面')
-          } else await gate.stage('正在完成启动')
+          } else {
+            await gate.stage('正在完成启动')
+            // Renderer readiness is the foreground contract. Shortcut/avatar
+            // presentation is detached by finishReady and cannot hold the gate.
+            await revealReady(state)
+          }
           await onState?.(state, phase)
         })
-        if (ready === undefined || !ready.state.hostPid || !ready.state.hostProcessStartedAt) {
-          throw new Error('CordisX startup completed without a verified Host identity')
-        }
-        await gate.ready(ready.state.hostPid, ready.state.hostProcessStartedAt)
-        const readyAt = performance.now()
-        if (hostLaunchedAt !== undefined) {
-          stderr.write(`[cordisx] renderer ready after Host creation: ${Math.round(readyAt - hostLaunchedAt)} ms\n`)
-        }
-        stderr.write(`[cordisx] full application ready: ${Math.round(readyAt - startedAt)} ms\n`)
+        if (ready === undefined) throw new Error('CordisX startup completed without a ready Host')
+        await revealReady(ready)
         return ready
       } catch (error) {
         const message = failureMessage(error)
-        if (current.createShortcut && message.startsWith('Host is ready')) {
-          stderr.write(`[cordisx] ${message}\n`)
-          const { createShortcut: _omit, ...retryWithoutShortcut } = current
-          current = retryWithoutShortcut
-          continue
-        }
         const action = await gate.failed(message)
         if (action === 'dismiss') throw error
         current = { ...current, recoverStartup: true }

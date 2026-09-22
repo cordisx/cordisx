@@ -147,7 +147,6 @@ import {
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import type { OpenManagementCommandService } from './management-command.js'
-
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx start|status|logs|stop|restart [app] [profile] [options]
@@ -214,6 +213,7 @@ export interface CordisXCliRuntime {
   readonly internalSupervisorReadinessTimeoutMs?: number
   /** Repository-only startup-gate seam; false keeps command tests headless. */
   readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
+  readonly internalScheduleShortcutPresentation?: (job: import('./shortcut-presentation-worker.js').ShortcutPresentationJob) => void | Promise<void>
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is

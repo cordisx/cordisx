@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { spawn } from 'node:child_process'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -13,6 +13,7 @@ import {
   writeSupervisorState,
 } from '../packages/cli/src/cli/supervisor-state.js'
 import type { StartupGate } from '../packages/cli/src/cli/startup-gate.js'
+import { shortcutKey } from '../packages/cli/src/shortcuts/model.js'
 
 function fakeGate(events: string[], actions: Array<'retry' | 'dismiss'> = []): StartupGate {
   return {
@@ -40,6 +41,7 @@ describe('supervisor startup gate', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-startup-gate-'))
     const paths = supervisorPaths(root, 'codex', 'default')
     const startedAt = await processStartIdentity(process.pid)
+    const entryId = shortcutKey(await realpath(root), 'codex', 'default', 'shared')
     const events: string[] = []
     const stderr = new PassThrough()
     let diagnostics = ''
@@ -49,6 +51,10 @@ describe('supervisor startup gate', () => {
       env: { CORDISX_HOME: root },
       stdout: () => undefined,
       stderr,
+      internalShortcutDockRecordPath: path.join(root, `${entryId}.json`),
+      internalScheduleShortcutPresentation: () => {
+        events.push('presentation-scheduled')
+      },
       internalOpenStartupGate: async () => {
         events.push('visible')
         return fakeGate(events)
@@ -89,6 +95,7 @@ describe('supervisor startup gate', () => {
       'stage:正在准备模型与界面',
       'stage:正在完成启动',
       'ready',
+      'presentation-scheduled',
       'closed',
     ])
     expect(diagnostics).toMatch(/startup gate visible: \d+ ms/)
