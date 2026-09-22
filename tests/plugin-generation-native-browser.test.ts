@@ -111,9 +111,11 @@ async function waitForChromeTarget(
 ): Promise<string> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (process.exitCode !== null) throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
+    if (process.exitCode !== null || process.signalCode !== null) {
+      throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
+    }
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) })
       if (response.ok) {
         const targets = await response.json() as Array<
           { readonly type?: string; readonly url?: string; readonly webSocketDebuggerUrl?: string }
@@ -292,9 +294,9 @@ describe('plugin generation native browser graph', () => {
         }),
       ),
     ])
-    const server = await startVitePlayground({ configPath: path.join(root, 'config.json') })
     const port = await unusedPort()
     const profile = path.join(root, 'chrome')
+    let server: Awaited<ReturnType<typeof startVitePlayground>> | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
     let browserStderr = ''
@@ -308,6 +310,8 @@ describe('plugin generation native browser graph', () => {
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
       await cdp.send('Network.enable')
+      // Establish CDP before Vite's cold dependency scan competes for the CI runner.
+      server = await startVitePlayground({ configPath: path.join(root, 'config.json') })
       await cdp.send('Page.navigate', { url: server.url })
       try {
         await expect.poll(async () => await cdp!.evaluate('globalThis.__lazyCssReady === true'), { timeout: 15_000 })
@@ -334,7 +338,7 @@ describe('plugin generation native browser graph', () => {
     } finally {
       await cdp?.close().catch(() => undefined)
       if (browser !== undefined) await stopChrome(browser)
-      await server.close()
+      await server?.close()
     }
   }, 30_000)
   nativeIt('boots the real generated composition only after a fresh strict-CSP document has DOM roots', async () => {
