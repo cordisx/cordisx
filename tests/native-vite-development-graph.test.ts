@@ -493,13 +493,17 @@ describe('native Vite development transport', () => {
         }
         const params = item.params ?? {}
         requests.push({ path: socketPath, method: item.method, params })
-        const reply = (value: Record<string, unknown> = { ok: true }): void => {
+        const reply = (value: unknown = { ok: true }): void => {
           socket.send(JSON.stringify({
             id: item.id,
             result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
               ? { identifier: 'production-bootstrap' }
               : { result: { value } },
           }))
+        }
+        if (params.expression === 'navigator.userActivation?.hasBeenActive !== false') {
+          reply(true)
+          return
         }
         reply()
       })

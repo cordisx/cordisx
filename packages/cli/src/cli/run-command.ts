@@ -849,6 +849,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     }
     if (debugPort === undefined) throw new Error('loopback CDP port was not resolved')
     const resolvedDebugPort = debugPort
+    await nativeSubmissionCompletion
     if (profile !== undefined && profileLease === undefined && runHost === runInjectedHost) {
       profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir)
     }
