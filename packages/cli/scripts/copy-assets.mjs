@@ -14,6 +14,7 @@ const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
   'renderer/model-providers.css',
   'renderer/manager/pages/model-services.css',
+  'renderer/manager/pages/model-catalog/model-catalog.css',
 ]
 
 await mkdir(destination, { recursive: true })

@@ -41,6 +41,7 @@ try {
     'renderer/host-ui/public-markdown-editor.css',
     'renderer/model-providers.css',
     'renderer/manager/pages/model-services.css',
+    'renderer/manager/pages/model-catalog/model-catalog.css',
   ]
   const extractedRoot = path.join(packRoot, 'extracted')
   mkdirSync(extractedRoot)
@@ -225,6 +226,7 @@ try {
       'dist/src/renderer/host-ui/public-markdown-editor.css',
       'dist/src/renderer/model-providers.css',
       'dist/src/renderer/manager/pages/model-services.css',
+      'dist/src/renderer/manager/pages/model-catalog/model-catalog.css',
       'dist/skills/cordisx/SKILL.md',
       'dist/skills/cordisx/agents/openai.yaml',
       'dist/skills/cordisx-docs/SKILL.md',
