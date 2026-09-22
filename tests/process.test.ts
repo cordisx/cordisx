@@ -11,6 +11,7 @@ import {
   codexLaunchArgs,
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
+  hiddenHostPidFromProcessList,
   launchCodex,
   ONLINE_DEVTOOLS_ORIGIN,
   prepareIsolatedCodexProfile,
@@ -60,6 +61,17 @@ describe('isolated Codex process support', () => {
     const port = await findFreeLoopbackPort()
     expect(port).toBeGreaterThanOrEqual(1024)
     expect(port).toBeLessThanOrEqual(65535)
+  })
+
+  it('matches hidden Host debug and inspector ports at exact argv boundaries', () => {
+    const executable = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
+    const processList = [
+      `100 ${executable} --remote-debugging-port=60001 --inspect-brk=127.0.0.1:70001`,
+      `101 ${executable} --remote-debugging-port=6000 --inspect-brk=127.0.0.1:70001`,
+      `102 ${executable} --remote-debugging-port=6000 --inspect-brk=127.0.0.1:7000`,
+    ].join('\n')
+    expect(hiddenHostPidFromProcessList(processList, executable, 6000, 7000)).toBe(102)
+    expect(hiddenHostPidFromProcessList(processList, executable, 600, 700)).toBeUndefined()
   })
 
   it('does not derive a Windows executable from cwd when LOCALAPPDATA is missing or relative', () => {

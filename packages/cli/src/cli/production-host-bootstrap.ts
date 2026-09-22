@@ -34,7 +34,7 @@ export async function prepareProductionHostBootstrap(
     prelaunch: boolean
     prepareNativeSubmission: boolean
     mainInspector: boolean
-    markHostLaunched(pid: number, inspectorUrl?: Promise<string>): void | Promise<void>
+    markHostLaunched(pid: number, inspectorUrl?: Promise<string>): boolean | void | Promise<boolean | void>
   }>,
 ): Promise<ProductionHostBootstrap> {
   const { invocation, selection, adapter, stdout, environment, configPath } = prepared

@@ -3,11 +3,11 @@ import path from 'node:path'
 import { readHostShortcutPresentation } from '../launcher/shortcut-presentation.js'
 import {
   dockScope,
+  type HostMainAgentController,
   installHostMainAgents,
   prepareDockImage,
   prepareOptionalDockImage,
   refreshDockAgent,
-  type HostMainAgentController,
 } from '../shortcuts/dock.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
@@ -87,7 +87,7 @@ export async function createSupervisorRuntime(
   options: { readonly publicationTimeoutMs?: number } = {},
 ): Promise<{
   readonly markReady: (debugPort: number) => Promise<void>
-  readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>) => Promise<void>
+  readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>) => Promise<boolean>
   readonly close: () => Promise<void>
   readonly mainInspector: boolean
 }> {
@@ -198,9 +198,9 @@ export async function createSupervisorRuntime(
   }
   return {
     mainInspector: selectedHome !== undefined,
-    async markHostLaunched(pid, hostInspectorUrl): Promise<void> {
+    async markHostLaunched(pid, hostInspectorUrl): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
-      if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
+      if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return false
       const current = await readSupervisorState(supervisorPaths(home, app, profile))
       if (
         current === undefined
@@ -229,6 +229,7 @@ export async function createSupervisorRuntime(
         })
         dockAgentInstalled = dock !== undefined
       }
+      return mainAgents !== undefined
     },
     async markReady(debugPort): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return

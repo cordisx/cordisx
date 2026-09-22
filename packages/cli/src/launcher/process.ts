@@ -464,6 +464,11 @@ export interface HiddenCodexLaunch {
   readonly inspectorUrl?: Promise<string>
 }
 
+export type HostLaunchIdentityObserver = (
+  pid: number,
+  inspectorUrl?: Promise<string>,
+) => boolean | void | Promise<boolean | void>
+
 async function mainInspectorUrl(port: number): Promise<string> {
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
@@ -491,18 +496,36 @@ function applicationBundleForExecutable(executable: string): string {
   return bundle
 }
 
-function hiddenHostPid(executable: string, debugPort: number): number | undefined {
-  const portArgument = `--remote-debugging-port=${debugPort}`
-  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+export function hiddenHostPidFromProcessList(
+  processList: string,
+  executable: string,
+  debugPort: number,
+  mainInspectorPort?: number,
+): number | undefined {
+  const requiredArguments = [
+    `--remote-debugging-port=${debugPort}`,
+    ...(mainInspectorPort === undefined ? [] : [`--inspect-brk=127.0.0.1:${mainInspectorPort}`]),
+  ]
+  return processList
     .split('\n')
     .flatMap(line => {
       const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
       if (match === null || !match[1] || !match[2]) return []
       const command = match[2]
-      return command.startsWith(`${executable} `) && command.includes(` ${portArgument}`)
+      const argv = command.split(/\s+/u)
+      return command.startsWith(`${executable} `) && requiredArguments.every(argument => argv.includes(argument))
         ? [Number.parseInt(match[1], 10)]
         : []
     })[0]
+}
+
+function hiddenHostPid(executable: string, debugPort: number, mainInspectorPort?: number): number | undefined {
+  return hiddenHostPidFromProcessList(
+    execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }),
+    executable,
+    debugPort,
+    mainInspectorPort,
+  )
 }
 
 /** Launch a macOS Host hidden through Launch Services and retain an owned waiter for its exact process. */
@@ -537,7 +560,7 @@ export async function launchCodexHidden(
   let hostPid: number | undefined
   while (Date.now() < deadline && hostPid === undefined) {
     if (child.exitCode !== null || child.signalCode !== null) break
-    hostPid = hiddenHostPid(executable, debugPort)
+    hostPid = hiddenHostPid(executable, debugPort, mainInspectorPort)
     if (hostPid === undefined) await new Promise(resolve => setTimeout(resolve, 20))
   }
   if (hostPid === undefined) {
@@ -546,12 +569,16 @@ export async function launchCodexHidden(
     }
     throw new Error('Hidden Host launch did not publish an exact process identity')
   }
-  launchedProcessOwnership.set(child, new ProcessOwnershipTracker(hostPid))
   return {
     child,
     hostPid,
     ...(mainInspectorPort === undefined ? {} : { inspectorUrl: mainInspectorUrl(mainInspectorPort) }),
   }
+}
+
+/** Bind cleanup only after the main inspector has reported this exact PID. */
+export function confirmHiddenCodexOwnership(launch: HiddenCodexLaunch): void {
+  launchedProcessOwnership.set(launch.child, new ProcessOwnershipTracker(launch.hostPid))
 }
 
 function exited(child: ChildProcess): boolean {
