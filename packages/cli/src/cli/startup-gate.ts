@@ -12,7 +12,7 @@ type StartupGateAction = 'retry' | 'dismiss'
 export interface StartupGate {
   stage(message: string): Promise<void>
   hostLaunched(pid: number, startedAt: string): Promise<void>
-  ready(): Promise<void>
+  ready(pid: number, startedAt: string): Promise<void>
   failed(message: string): Promise<StartupGateAction>
   close(): Promise<void>
 }
@@ -111,9 +111,9 @@ class NativeStartupGate implements StartupGate {
     await hidden
   }
 
-  async ready(): Promise<void> {
+  async ready(pid: number, startedAt: string): Promise<void> {
     const ready = this.wait('ready')
-    this.send({ event: 'ready' })
+    this.send({ event: 'ready', pid, startedAt })
     await ready
   }
 

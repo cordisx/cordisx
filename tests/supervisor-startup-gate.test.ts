@@ -22,7 +22,7 @@ function fakeGate(events: string[], actions: Array<'retry' | 'dismiss'> = []): S
     hostLaunched: async () => {
       events.push('host-hidden')
     },
-    ready: async () => {
+    ready: async (_pid, _startedAt) => {
       events.push('ready')
     },
     failed: async message => {
@@ -157,5 +157,67 @@ describe('supervisor startup gate', () => {
         } catch { /* already stopped */ }
       }
     }
+  })
+
+  it('reuses an already-ready Host without asking the gate to hide it again', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-startup-gate-ready-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const startedAt = await processStartIdentity(process.pid)
+    const firstEvents: string[] = []
+    let spawned = 0
+
+    await runSupervisorCommandWithStartupGate(parseCordisXCli(['start']), {
+      env: { CORDISX_HOME: root },
+      stdout: () => undefined,
+      stderr: new PassThrough(),
+      internalOpenStartupGate: async () => {
+        firstEvents.push('visible')
+        return fakeGate(firstEvents)
+      },
+      internalSpawnSupervisor: () => {
+        spawned += 1
+        void (async () => {
+          for (;;) {
+            const state = await readSupervisorState(paths)
+            if (state !== undefined) {
+              await writeSupervisorState(paths, {
+                ...state,
+                phase: 'ready',
+                hostPid: process.pid,
+                hostProcessStartedAt: startedAt!,
+                cdpEndpoint: 'http://127.0.0.1:49993',
+              })
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 5))
+          }
+        })()
+        return { pid: process.pid, unref: () => undefined }
+      },
+    })
+
+    const repeatedEvents: string[] = []
+    await runSupervisorCommandWithStartupGate(parseCordisXCli(['start']), {
+      env: { CORDISX_HOME: root },
+      stdout: () => undefined,
+      stderr: new PassThrough(),
+      internalOpenStartupGate: async () => {
+        repeatedEvents.push('visible')
+        return fakeGate(repeatedEvents)
+      },
+      internalSpawnSupervisor: () => {
+        throw new Error('already-ready activation must not spawn another supervisor')
+      },
+    })
+
+    expect(spawned).toBe(1)
+    expect(firstEvents).toContain('host-hidden')
+    expect(repeatedEvents).toEqual([
+      'visible',
+      'stage:正在检查运行配置',
+      'stage:正在完成启动',
+      'ready',
+      'closed',
+    ])
   })
 })

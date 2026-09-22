@@ -476,12 +476,6 @@ export async function runSupervisorCommand(
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
       }
       await releaseOperation()
-      if (
-        state.phase === 'ready'
-        && state.hostPid !== undefined && state.hostProcessStartedAt !== undefined
-      ) {
-        await onState?.({ state, target }, 'host-launched')
-      }
       const ready = state.phase === 'ready'
         ? state
         : await waitForState(
@@ -622,7 +616,7 @@ export async function runSupervisorCommandWithStartupGate(
         if (ready === undefined || !ready.state.hostPid || !ready.state.hostProcessStartedAt) {
           throw new Error('CordisX startup completed without a verified Host identity')
         }
-        await gate.ready()
+        await gate.ready(ready.state.hostPid, ready.state.hostProcessStartedAt)
         stderr.write(`[cordisx] full application ready: ${Math.round(performance.now() - startedAt)} ms\n`)
         return ready
       } catch (error) {

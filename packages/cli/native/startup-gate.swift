@@ -163,7 +163,12 @@ private final class StartupGateDelegate: NSObject, NSApplicationDelegate {
             }
             hideHost(pid: number.int32Value, startedAt: startedAt)
         case "ready":
-            revealHost()
+            guard let number = value["pid"] as? NSNumber,
+                  let startedAt = value["startedAt"] as? String else {
+                publish("gate-error", error: "Ready Host identity is incomplete")
+                return
+            }
+            revealHost(pid: number.int32Value, startedAt: startedAt)
         case "failed":
             showFailure(value["message"] as? String ?? "CordisX 启动失败")
         case "close":
@@ -214,9 +219,11 @@ private final class StartupGateDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func revealHost() {
-        guard let identity = hostIdentity, processStart(identity.pid) == identity.startedAt,
-              let host = NSRunningApplication(processIdentifier: identity.pid) else {
+    private func revealHost(pid: pid_t, startedAt: String) {
+        let identity = hostIdentity ?? (pid, startedAt)
+        guard identity.pid == pid, identity.startedAt == startedAt,
+              processStart(pid) == startedAt,
+              let host = NSRunningApplication(processIdentifier: pid) else {
             publish("gate-error", error: "Ready Host identity is unavailable")
             return
         }
