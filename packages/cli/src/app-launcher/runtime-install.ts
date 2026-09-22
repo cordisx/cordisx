@@ -91,7 +91,8 @@ async function digestTree(root: string): Promise<string> {
 }
 
 async function cloneDirectory(source: string, target: string, merge = false): Promise<void> {
-  await run('/bin/cp', ['-cRL', merge ? path.join(source, '.') : source, target])
+  if (merge) await run('/usr/bin/ditto', [source, target])
+  else await run('/bin/cp', ['-cRL', source, target])
 }
 
 async function validInstalledRuntime(

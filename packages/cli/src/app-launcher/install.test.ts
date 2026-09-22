@@ -23,14 +23,22 @@ async function fixture() {
   const entryScript = path.join(packageRoot, 'dist/src/cli/app-entry.js')
   const dependencyRoot = path.join(root, 'runtime-dependencies')
   const dependency = path.join(dependencyRoot, 'fixture-dependency')
+  const dependencyOverlayRoot = path.join(root, 'runtime-dependencies-overlay')
+  const overlayDependency = path.join(dependencyOverlayRoot, 'fixture-overlay')
   await mkdir(path.dirname(entryScript), { recursive: true })
   await mkdir(dependency, { recursive: true })
+  await mkdir(overlayDependency, { recursive: true })
   await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ type: 'module', version: '1.2.3-test' }))
   await writeFile(path.join(dependency, 'package.json'), JSON.stringify({ type: 'module', exports: './index.js' }))
   await writeFile(path.join(dependency, 'index.js'), 'export default "dependency"\n')
   await writeFile(
+    path.join(overlayDependency, 'package.json'),
+    JSON.stringify({ type: 'module', exports: './index.js' }),
+  )
+  await writeFile(path.join(overlayDependency, 'index.js'), 'export default "overlay"\n')
+  await writeFile(
     entryScript,
-    'import dependency from "fixture-dependency"\nexport const runtimeMarker = `first-${dependency}`\n',
+    'import dependency from "fixture-dependency"\nimport overlay from "fixture-overlay"\nexport const runtimeMarker = `first-${dependency}-${overlay}`\n',
   )
   const runtime = {
     homedir: root,
@@ -38,7 +46,7 @@ async function fixture() {
     internalAppOutput: {
       directory: applications,
       path: target,
-      runtimeSource: { entryScript, packageRoot, dependencyRoots: [dependencyRoot] },
+      runtimeSource: { entryScript, packageRoot, dependencyRoots: [dependencyRoot, dependencyOverlayRoot] },
     },
     internalOpenApp: (app: string) => {
       opened.push(app)
@@ -110,7 +118,7 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
 
     await writeFile(
       f.entryScript,
-      'import dependency from "fixture-dependency"\nexport const runtimeMarker = `second-${dependency}`\n',
+      'import dependency from "fixture-dependency"\nimport overlay from "fixture-overlay"\nexport const runtimeMarker = `second-${dependency}-${overlay}`\n',
     )
     await runAppCommand(f.runtime)
     const second = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
