@@ -117,7 +117,20 @@ describe('model script Manager configuration', () => {
       },
     }
     try {
-      await fixture.render(<ScriptEditor {...props} view={catalogView()} />)
+      await fixture.render(
+        <ScriptEditor
+          {...props}
+          view={catalogView({
+            scriptState: {
+              authorityRevision: 'authority',
+              runGeneration: 1,
+              persistence: 'session-only',
+              evidence: 'script-declared',
+            },
+          })}
+        />,
+      )
+      expect((fixture.element('[aria-label="Model result"]') as HTMLInputElement).value).toBe('Supplement model list')
       await fixture.choose('[aria-label="Execution mode"]', 'Shell command')
       await fixture.type('input[aria-label="Shell command"]', 'node ./models.cjs')
       await fixture.type('[aria-label="Working directory"]', '/fixture')

@@ -33,7 +33,9 @@ export function ScriptEditor({ view, locale, save, close }: {
   const [inherit, setInherit] = useState(false)
   const [environment, setEnvironment] = useState<EnvironmentField[]>([])
   const [nextKey, setNextKey] = useState(0)
-  const [mode, setMode] = useState<'replace' | 'supplement'>(view.mode === 'supplement' ? 'supplement' : 'replace')
+  const [mode, setMode] = useState<'replace' | 'supplement'>(
+    view.mode === 'supplement' || view.sourceKind !== 'script' && view.scriptState ? 'supplement' : 'replace',
+  )
   const [timeout, setTimeoutValue] = useState(10)
   const [revision, setRevision] = useState(view.revision)
   const [scope] = useState(view.scopeRevision)
@@ -88,7 +90,7 @@ export function ScriptEditor({ view, locale, save, close }: {
     <section className="cxmc-editor" aria-label={t('catalog.configureScript')}>
       <h3>{t('catalog.configureScript')}</h3>
       <p>{t('catalog.scriptNotice')}</p>
-      {view.sourceKind === 'script' ? <p>{t('catalog.scriptReplaceNotice')}</p> : null}
+      {view.sourceKind === 'script' || view.scriptState ? <p>{t('catalog.scriptReplaceNotice')}</p> : null}
       <div className="cxmc-connection-fields">
         <label>
           <span>{t('catalog.commandKind')}</span>

@@ -49,7 +49,7 @@ export const MODEL_CATALOG_COPY = {
   'catalog.lastSuccess': { en: 'Last refreshed', 'zh-CN': '最后刷新' },
   'catalog.lastAttempt': { en: 'Last attempt', 'zh-CN': '最后尝试' },
   'catalog.retryAt': { en: 'Retry after', 'zh-CN': '下次重试' },
-  'catalog.never': { en: 'Never', 'zh-CN': '尚无' },
+  'catalog.never': { en: 'Unknown', 'zh-CN': '未知' },
   'catalog.refresh': { en: 'Refresh models', 'zh-CN': '刷新模型' },
   'catalog.pause': { en: 'Pause automatic refresh', 'zh-CN': '暂停自动刷新' },
   'catalog.resume': { en: 'Resume automatic refresh', 'zh-CN': '恢复自动刷新' },

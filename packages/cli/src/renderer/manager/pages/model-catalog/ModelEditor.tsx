@@ -28,7 +28,9 @@ export function ModelEditor({ view, locale, mode, save, close }: {
 }) {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const live = mode === 'supplement' ? view.supplement : view.rows.filter(row => row.present)
-  const [draft, setDraft] = useState(() => live.map((model, key) => ({ key, id: model.id, label: model.label ?? '' })))
+  const [draft, setDraft] = useState(() =>
+    live.map((model, key) => ({ key, id: model.id, label: model.label === model.id ? '' : model.label ?? '' }))
+  )
   const [nextKey, setNextKey] = useState(draft.length)
   const [revision, setRevision] = useState(view.revision)
   const [scope] = useState(view.scopeRevision)
