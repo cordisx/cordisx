@@ -221,6 +221,8 @@ export class ManagedCatalogComposition {
       this.members(view).map(model => {
         const userDeclared = model.provenance?.includes('manual')
           || model.notListed === true && model.provenance?.includes('manual-supplement')
+          || model.provenance?.includes('script')
+          || model.provenance?.includes('script-supplement')
         const responses = model.protocolCapabilities?.responses
           ?? (userDeclared && view.settings.protocol === 'responses' ? true : undefined)
         return {
