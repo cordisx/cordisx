@@ -189,12 +189,19 @@ export async function waitForState(
     state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
     phase: StartupPhase,
   ) => void | Promise<void>,
+  expectedInstanceToken?: string,
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
   let deadline = Date.now() + timeoutMs
   let hostPublished = false
   let lastRecovery = 0
   while (true) {
     const state = await readSupervisorState(paths)
+    if (expectedInstanceToken !== undefined) {
+      if (state === undefined) throw new Error('CordisX background supervisor exited before renderer readiness')
+      if (state.instanceToken !== expectedInstanceToken) {
+        throw new Error('CordisX background supervisor generation changed before renderer readiness')
+      }
+    }
     if (!hostPublished && state?.hostPid !== undefined && state.hostProcessStartedAt !== undefined) {
       hostPublished = true
       await onHostLaunched?.(state, 'host-launched')
@@ -509,6 +516,7 @@ export async function runSupervisorCommand(
           paths,
           readinessTimeout(runtime),
           (current, phase) => onState?.({ state: current, target }, phase),
+          state.instanceToken,
         )
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
       const result = { state: ready, target }
@@ -579,6 +587,7 @@ export async function runSupervisorCommand(
         paths,
         readinessTimeout(runtime),
         (current, phase) => onState?.({ state: current, target }, phase),
+        instanceToken,
       )
       if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
       ready = observedReady
