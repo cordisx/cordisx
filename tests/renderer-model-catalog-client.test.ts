@@ -13,6 +13,19 @@ afterEach(() => {
 })
 
 describe('catalog management Host consumer', () => {
+  it('accepts an exact maximum-length ID used as its fallback label', () => {
+    const id = 'm'.repeat(512)
+    const row = { ...catalogView().rows[0]!, id, label: id }
+    const parsed = parseManagementSnapshot({ epoch: 'a', sequence: 0, views: [catalogView({ rows: [row] })] })
+    expect(parsed.views[0]?.rows[0]?.id).toBe(id)
+    expect(() =>
+      parseManagementSnapshot({
+        epoch: 'a',
+        sequence: 0,
+        views: [catalogView({ rows: [{ ...row, label: 'l'.repeat(257) }] })],
+      })
+    ).toThrow()
+  })
   it('projects only bounded safe fields and never carries raw diagnostics or credentials', () => {
     const source = {
       epoch: 'a',

@@ -183,7 +183,7 @@ export class ModelProviderRegistry {
           models: Object.freeze(provider.models.map(model =>
             Object.freeze({
               id: label(model.id, 512),
-              label: label(model.label),
+              label: label(model.label, model.label === model.id ? 512 : 256),
               ...(model.aliases === undefined
                 ? {}
                 : { aliases: Object.freeze(model.aliases.map(alias => label(alias))) }),

@@ -65,6 +65,11 @@ export function CatalogBinding({ view, client, provider, locale, query, filter, 
     setError(undefined)
   }
   const items: MoreMenuItem[] = []
+  const openEditor = (next: NonNullable<typeof editor>) => {
+    setConfirmation(undefined)
+    setEditor(next)
+    setError(undefined)
+  }
   const action = (
     id: CatalogManagementOperation,
     label: Parameters<typeof managerCopy>[1],
@@ -75,9 +80,9 @@ export function CatalogBinding({ view, client, provider, locale, query, filter, 
       items.push({ id, label: t(label), icon, disabled: !allowed(id), onSelect: select })
     }
   }
-  action('editManual', 'catalog.editManual', 'edit', () => setEditor('manual'))
-  action('editSupplement', 'catalog.editSupplement', 'edit', () => setEditor('supplement'))
-  action('configureScript', 'catalog.configureScript', 'configuration', () => setEditor('script'))
+  action('editManual', 'catalog.editManual', 'edit', () => openEditor('manual'))
+  action('editSupplement', 'catalog.editSupplement', 'edit', () => openEditor('supplement'))
+  action('configureScript', 'catalog.configureScript', 'configuration', () => openEditor('script'))
   action(
     'convertToManual',
     'catalog.convert',
@@ -108,7 +113,7 @@ export function CatalogBinding({ view, client, provider, locale, query, filter, 
     'enable-plugin',
     () => confirm({ operation: 'restoreBlocked' }, 'catalog.restoreBlockedConfirm'),
   )
-  action('updateConnection', 'catalog.editConnection', 'configuration', () => setEditor('connection'))
+  action('updateConnection', 'catalog.editConnection', 'configuration', () => openEditor('connection'))
   action(
     'requestCredentialReplacement',
     'catalog.replaceCredential',
@@ -306,6 +311,7 @@ export function CatalogBinding({ view, client, provider, locale, query, filter, 
         : editor
         ? (
           <ModelEditor
+            key={editor}
             view={view}
             locale={locale}
             mode={editor}

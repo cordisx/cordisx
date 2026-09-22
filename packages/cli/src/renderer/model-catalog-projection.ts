@@ -78,9 +78,10 @@ function editable(value: unknown): CatalogEditableModel {
 
 function row(value: unknown): CatalogManagementRow {
   const item = record(value)
+  const id = text(item.id)
   return Object.freeze({
-    id: text(item.id),
-    label: text(item.label, 256),
+    id,
+    label: item.label === id ? id : text(item.label, 256),
     provenance: list(
       item.provenance,
       value => choice(value, ['native', 'auto', 'manual', 'manual-supplement', 'script', 'script-supplement'] as const),

@@ -5,6 +5,45 @@ import { catalogFixture, catalogView } from './helpers/catalog-management-fixtur
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 describe('binding catalog Manager', () => {
+  it('does not reuse a manual draft as supplemental declarations when switching editors', async () => {
+    const fixture = reactManagerFixture()
+    const host = catalogFixture([
+      catalogView({ capabilities: ['editManual', 'editSupplement'], supplement: [{ id: 'supplement-only' }] }),
+    ])
+    const { CatalogBinding } = await import(
+      '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
+    )
+    const select = async (text: string) => {
+      await fixture.click('[aria-label="More catalog actions: Provider A"]')
+      await act(async () =>
+        [...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')].find(item =>
+          item.textContent === text
+        )!.click()
+      )
+    }
+    try {
+      await host.client.refresh()
+      await fixture.render(
+        <CatalogBinding
+          view={host.client.snapshot().views[0]!}
+          client={host.client}
+          locale="en"
+          query=""
+          filter="all"
+          connected
+        />,
+      )
+      await select('Edit manual models')
+      await fixture.type('[aria-label="Exact model ID 1"]', 'manual-draft')
+      await select('Edit supplemental models')
+      expect((fixture.element('[aria-label="Exact model ID 1"]') as HTMLInputElement).value).toBe('supplement-only')
+      expect(host.commands).toEqual([])
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
   it('shows Host status, exact scoped controls and safe diagnostics without duplicate provider rows', async () => {
     const host = catalogFixture()
     const fixture = reactManagerFixture()
