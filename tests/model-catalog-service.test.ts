@@ -136,7 +136,7 @@ describe('model catalog owner', () => {
         endpoint: 'https://fixture.invalid',
         scopeRevision: 'account-1',
         current: () => true,
-        bearer: async () => undefined,
+        request: async () => Response.json({}),
       }),
       read: async () => [],
     })

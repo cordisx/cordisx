@@ -156,6 +156,52 @@ There is currently no production resolver for arbitrary native layered credentia
 these bindings remain unsupported for auto discovery. Adapter fixtures are not
 evidence that native automatic discovery is usable or that a real account works.
 
+### CordisX-Owned And Native-Only Connections
+
+CordisX-owned Provider discovery and native-only credential reuse are different
+paths. The Host-private `ManagedProviderOwner` owns explicitly provisioned
+endpoint, protocol, discovery consent, strategy and supplement settings. It
+stores its index and connection records through the existing OS Keychain backend
+in a dedicated `cordisx/host-provider/v1` namespace. There is no plaintext file
+fallback and no automatic import of Codex configuration, environment or secrets.
+The generic channel secret resolver rejects this namespace. Plugin service
+configuration is deliberately not used: no plugin receives this key, a resolver,
+or a request capability. These APIs are not plugin extension contracts.
+
+The owner issues random connection, scope and credential revisions, never a hash
+of a key or a reference name presented as an upstream account identity. Replacing
+a key, endpoint or protocol rotates the credential-binding scope. Supplement
+migration across that boundary requires a separate explicit action; an update
+with old nonempty supplements is rejected. Other setting changes preserve scope
+but retire old request leases. Removing a connection retires the durable index
+entry before deleting its secret. A Keychain cleanup journal retries retired
+items on reopen; cleanup failures are reported without reactivating them.
+
+One owner holds a private, profile-scoped directory lock. It never steals a
+possibly live lock; abnormal termination requires explicit stale-lock recovery.
+Keychain index changes or lock loss retire the owner. Records remain in Keychain,
+not ordinary home configuration, catalog JSON, feedback exports or backups of
+CordisX files. OS Keychain backup policy remains controlled by the operating
+system. A 60-second Host-private capture callback is the only secret input to
+the internal management API; read/save results contain safe metadata and status,
+not keys or keychain locations. No shared renderer secret field is provided.
+
+Built-in adapters receive only a fixed request capability. For DeepSeek it admits
+exactly `GET https://api.deepseek.com/models`, with no caller headers, body or
+redirects. The Host resolves credentials for a short operation, bounds the body
+to 1 MiB and cancels old operations on update, deletion or disposal. Its production
+registry contains only built-in Host adapters and accepts no plugin registration.
+Errors from Keychain and transport are value-free. The existing trusted-code
+model still applies: this is capability isolation, not a sandbox against arbitrary
+code running with the user's OS identity.
+
+These are internal owner/schema/API foundations. Production launcher scheduling,
+catalog cache integration, trusted configuration capture UI and submission routing
+remain separate integration work; their presence is not established by owner
+fixtures. Native-only connections continue to use native/manual catalogs until
+their actual native owner can provide an audited discovery capability. That
+optional compatibility dependency does not block CordisX-owned credentials.
+
 The internal catalog contract separates a base strategy from optional same-scope
 manual supplements: auto/native `only` uses the base list, `augment` also includes
 explicit exact IDs, and manual replacement bypasses discovery. Supplement-only

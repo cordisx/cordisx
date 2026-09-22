@@ -40,6 +40,8 @@ export async function resolveLauncherSecret(
   }
   const keychain = KEYCHAIN_SECRET.exec(reference)
   if (keychain === null) throw new LauncherSecretResolutionError('SECRET_REF_INVALID')
+  // Host-owned Provider credentials are not channel/plugin-resolvable references.
+  if (keychain[1]!.startsWith('cordisx/host-provider/')) throw new LauncherSecretResolutionError('SECRET_REF_INVALID')
   if ((options.platform ?? process.platform) !== 'darwin') throw new LauncherSecretResolutionError('SECRET_UNAVAILABLE')
   const segments = keychain[1]!.split('/')
   if (segments.length < 2) throw new LauncherSecretResolutionError('SECRET_REF_INVALID')

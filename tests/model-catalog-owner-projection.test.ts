@@ -3,13 +3,14 @@ import { createOwnerCatalogProjection } from '../packages/cli/src/launcher/model
 import { deepSeekDiscoveryAdapter } from '../packages/cli/src/launcher/model-catalog/deepseek.js'
 import { DiscoveryAdapterRegistry } from '../packages/cli/src/launcher/model-catalog/registry.js'
 import { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import { createDiscoveryRequestCapability } from '../packages/cli/src/launcher/model-catalog/request-capability.js'
 
 describe('private owner discovery to safe renderer projection', () => {
   it('publishes exact-ID provenance without leaking owner endpoint or credential capability', async () => {
     const fetcher = vi.fn(async () =>
       Response.json({ object: 'list', data: [{ id: 'listed', object: 'model', owned_by: 'deepseek' }] })
     )
-    const projection = createOwnerCatalogProjection(new DiscoveryAdapterRegistry([deepSeekDiscoveryAdapter(fetcher)]))
+    const projection = createOwnerCatalogProjection(new DiscoveryAdapterRegistry([deepSeekDiscoveryAdapter()]))
     const renderer = new ModelProviderRegistry(async () => projection.catalog())
     renderer.connectSource(projection.subscribe)
     try {
@@ -29,7 +30,12 @@ describe('private owner discovery to safe renderer projection', () => {
           endpoint: 'https://api.deepseek.com',
           scopeRevision: 'account-1',
           current: () => true,
-          bearer: async () => 'private-fixture-key',
+          request: createDiscoveryRequestCapability({
+            operation: { origin: 'https://api.deepseek.com', method: 'GET', path: '/models' },
+            current: () => true,
+            bearer: async () => 'private-fixture-key',
+            fetcher,
+          }),
         },
         read: async () => [],
       })

@@ -8,8 +8,6 @@ import {
 } from './contracts.js'
 import { withAbort } from './abort.js'
 
-export type DiscoveryFetch = (url: string, init: RequestInit) => Promise<Response>
-
 export function isDeepSeekOfficialEndpoint(endpoint: string): boolean {
   // Check spelling before URL normalization can discard dot segments or empty delimiters.
   if (!/^https:\/\/api\.deepseek\.com(?::443)?\/?$/u.test(endpoint)) return false
@@ -65,7 +63,7 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<un
   }
 }
 
-export function deepSeekDiscoveryAdapter(fetcher: DiscoveryFetch = fetch): DiscoveryAdapter {
+export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
   return Object.freeze({
     id: 'deepseek-official',
     version: '1',
@@ -80,17 +78,8 @@ export function deepSeekDiscoveryAdapter(fetcher: DiscoveryFetch = fetch): Disco
       try {
         signal.throwIfAborted()
         if (!connection.current()) throw new CatalogError('cancelled')
-        const bearer = await withAbort(connection.bearer(signal), signal)
-        signal.throwIfAborted()
-        if (!connection.current()) throw new CatalogError('cancelled')
-        if (!boundedString(bearer, 16_384)) throw new CatalogError('credential-unavailable')
         const response = await withAbort(
-          fetcher('https://api.deepseek.com/models', {
-            method: 'GET',
-            redirect: 'error',
-            headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` },
-            signal,
-          }),
+          connection.request({ origin: 'https://api.deepseek.com', method: 'GET', path: '/models' }, signal),
           signal,
         )
         if (response.status !== 200) {

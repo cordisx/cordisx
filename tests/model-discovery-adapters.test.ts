@@ -5,16 +5,25 @@ import {
   isDeepSeekOfficialEndpoint,
 } from '../packages/cli/src/launcher/model-catalog/deepseek.js'
 import { DiscoveryAdapterRegistry } from '../packages/cli/src/launcher/model-catalog/registry.js'
+import {
+  createDiscoveryRequestCapability,
+  type DiscoveryFetch,
+} from '../packages/cli/src/launcher/model-catalog/request-capability.js'
 
 const response = (ids: string[]) =>
   Response.json({
     object: 'list',
     data: ids.map(id => ({ id, object: 'model', owned_by: 'deepseek' })),
   })
-const connection = () => ({
+const connection = (fetcher: DiscoveryFetch = async () => response([]), bearer = vi.fn(async () => 'fixture-key')) => ({
   endpoint: 'https://api.deepseek.com',
   scopeRevision: 'account-1',
-  bearer: vi.fn(async () => 'fixture-key'),
+  request: vi.fn(createDiscoveryRequestCapability({
+    operation: { origin: 'https://api.deepseek.com', method: 'GET', path: '/models' },
+    current: () => true,
+    bearer,
+    fetcher,
+  })),
   current: () => true,
 })
 
@@ -58,7 +67,7 @@ describe('discovery contracts', () => {
 
   it('requests only the fixed list operation and preserves exact legacy IDs', async () => {
     const fetcher = vi.fn(async () => response(['deepseek-v4-flash', 'deepseek-flash', 'deepseek-flash']))
-    const models = await deepSeekDiscoveryAdapter(fetcher).discover(connection(), new AbortController().signal)
+    const models = await deepSeekDiscoveryAdapter().discover(connection(fetcher), new AbortController().signal)
     expect(models.map(model => model.id)).toEqual(['deepseek-flash', 'deepseek-v4-flash'])
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.deepseek.com/models',
@@ -76,14 +85,14 @@ describe('discovery contracts', () => {
     await expect(deepSeekDiscoveryAdapter().discover(owner, new AbortController().signal)).rejects.toThrow(
       'unsupported',
     )
-    expect(owner.bearer).not.toHaveBeenCalled()
+    expect(owner.request).not.toHaveBeenCalled()
   })
 
   it('cancels a credential callback that ignores its signal without issuing a request', async () => {
     const abort = new AbortController()
     const fetcher = vi.fn(async () => response([]))
-    const owner = { ...connection(), bearer: () => new Promise<string>(() => {}) }
-    const request = deepSeekDiscoveryAdapter(fetcher).discover(owner, abort.signal)
+    const owner = connection(fetcher, vi.fn(() => new Promise<string>(() => {})))
+    const request = deepSeekDiscoveryAdapter().discover(owner, abort.signal)
     abort.abort()
     await expect(request).rejects.toThrow('cancelled')
     expect(fetcher).not.toHaveBeenCalled()
@@ -92,11 +101,14 @@ describe('discovery contracts', () => {
   it('rejects oversized bodies and invalid UTF-8 without retaining their content', async () => {
     for (const body of [' '.repeat(1024 * 1024 + 1), new Uint8Array([0xff])]) {
       await expect(
-        deepSeekDiscoveryAdapter(async () =>
-          new Response(body, {
-            headers: { 'content-type': 'application/json' },
-          })
-        ).discover(connection(), new AbortController().signal),
+        deepSeekDiscoveryAdapter().discover(
+          connection(async () =>
+            new Response(body, {
+              headers: { 'content-type': 'application/json' },
+            })
+          ),
+          new AbortController().signal,
+        ),
       ).rejects.toThrow('protocol')
     }
   })
@@ -107,21 +119,21 @@ describe('discovery contracts', () => {
   ]])(
     'classifies %s without exposing response bodies',
     async (status, code) => {
-      const adapter = deepSeekDiscoveryAdapter(async () =>
-        new Response('private fixture diagnostic', { status: Number(status) })
+      const owner = connection(async () => new Response('private fixture diagnostic', { status: Number(status) }))
+      await expect(deepSeekDiscoveryAdapter().discover(owner, new AbortController().signal)).rejects.toThrow(
+        String(code),
       )
-      await expect(adapter.discover(connection(), new AbortController().signal)).rejects.toThrow(String(code))
     },
   )
 
   it('distinguishes complete empty from malformed and paginated results', async () => {
     await expect(
-      deepSeekDiscoveryAdapter(async () => response([])).discover(connection(), new AbortController().signal),
+      deepSeekDiscoveryAdapter().discover(connection(), new AbortController().signal),
     )
       .resolves.toEqual([])
     for (const body of [{ object: 'list', data: [{}] }, { object: 'list', data: [], nextCursor: 'next' }]) {
       await expect(
-        deepSeekDiscoveryAdapter(async () => Response.json(body)).discover(connection(), new AbortController().signal),
+        deepSeekDiscoveryAdapter().discover(connection(async () => Response.json(body)), new AbortController().signal),
       )
         .rejects.toThrow('protocol')
     }

@@ -34,7 +34,7 @@ describe('explicit same-scope supplements', () => {
         endpoint: 'https://fixture.invalid',
         scopeRevision: 'account-1',
         current: () => true,
-        bearer: async () => undefined,
+        request: async () => Response.json({}),
       }),
       read: async () => catalogModels(ids),
     })

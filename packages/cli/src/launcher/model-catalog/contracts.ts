@@ -27,11 +27,17 @@ export interface CatalogBinding {
   readonly strategy: CatalogStrategy
 }
 
+export interface DiscoveryRequest {
+  readonly origin: string
+  readonly method: 'GET'
+  readonly path: '/models'
+}
+
 export interface DiscoveryConnection {
   readonly endpoint: string
   readonly scopeRevision: string
-  /** Resolves only the effective owner's credential, after eligibility and opt-in. */
-  readonly bearer: (signal: AbortSignal) => Promise<string | undefined>
+  /** Host-injected operation capability. No raw credential is exposed to an adapter. */
+  readonly request: (operation: DiscoveryRequest, signal: AbortSignal) => Promise<Response>
   readonly current: () => boolean
 }
 
