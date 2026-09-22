@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nativeAccountCapability } from '../packages/cli/src/native-account-capability.js'
 import { nativeAccountResource } from './fixtures/native-account-resource.js'
-import { discoverNativeAccountCapability } from '../packages/cli/src/launcher/native-account-structure.js'
+import {
+  discoverNativeAccountCapability,
+  discoverNativeAccountCapabilityFromSyntax,
+} from '../packages/cli/src/launcher/native-account-structure.js'
+import { parseNativeSource } from '../packages/cli/src/launcher/native-source-structure.js'
 
 afterEach(() => vi.unstubAllGlobals())
 function environment(names = ['app://-/assets/app-initial-future.js']) {
@@ -17,6 +21,10 @@ describe('native account structural capability', () => {
         'let services;async function read(){let input=services?.accessInputs;return input.readAccountInfo()}export {services as Renamed};',
     }
     expect(discoverNativeAccountCapability(resource)).toEqual({ module: resource.url, exportName: 'Renamed' })
+    expect(discoverNativeAccountCapabilityFromSyntax(resource, parseNativeSource(resource.source))).toEqual({
+      module: resource.url,
+      exportName: 'Renamed',
+    })
     expect(() =>
       discoverNativeAccountCapability({ ...resource, source: resource.source.replace('readAccountInfo', 'readOther') })
     ).toThrow('native-account-service')

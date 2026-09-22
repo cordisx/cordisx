@@ -1,6 +1,9 @@
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { nativeSubmissionTransformsForApp } from '../packages/cli/src/launcher/native-submission-composition.js'
+import { analyzeNativeSubmissionTransforms } from '../packages/cli/src/launcher/native-submission-structure.js'
+import { discoverNativeAccountCapabilityFromSyntax } from '../packages/cli/src/launcher/native-account-structure.js'
+import { parseNativeSource } from '../packages/cli/src/launcher/native-source-structure.js'
 import { resources } from './fixtures/native-submission-structure.js'
 
 const token = 'operation-unique-token'
@@ -35,6 +38,23 @@ function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unkn
 }
 
 describe('structure-based native submission composition', () => {
+  it('shares parsed resource syntax with account discovery and emits valid transformed modules', () => {
+    const source = resources()
+    const initial = source[1]!
+    initial.source +=
+      '\nlet services;async function read(){let input=services?.accessInputs;return input.readAccountInfo()}export {services as Renamed};'
+    const analysis = analyzeNativeSubmissionTransforms(source)
+    const syntax = analysis.syntaxByResource.get(initial)
+    expect(syntax).toBeDefined()
+    expect(discoverNativeAccountCapabilityFromSyntax(initial, syntax!)).toEqual({
+      module: initial.url,
+      exportName: 'Renamed',
+    })
+    for (const transform of analysis.transforms) {
+      const resource = source.find(candidate => candidate.url === transform.url)!
+      expect(() => parseNativeSource(transform.transform(resource.source).source)).not.toThrow()
+    }
+  })
   it('recognizes renamed local bindings, changed asset names and added whitespace', () => {
     const changed = resources().map(resource => ({
       url: resource.url.replace('unrecognized', 'new-content-hash'),

@@ -1,10 +1,12 @@
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
-import { member, one, parseNativeSource, visitSyntax } from './native-source-structure.js'
+import { member, one, parseNativeSource, type SyntaxNode, visitSyntax } from './native-source-structure.js'
 
 /** Resolve the exported service actually used by the native account query. */
-export function discoverNativeAccountCapability(resource: NativeScriptResource): NativeAccountCapabilityDescriptor {
-  const ast = parseNativeSource(resource.source)
+export function discoverNativeAccountCapabilityFromSyntax(
+  resource: NativeScriptResource,
+  ast: SyntaxNode,
+): NativeAccountCapabilityDescriptor {
   const receivers = new Set<string>()
   visitSyntax(ast, (node, parents) => {
     if (node.type !== 'VariableDeclarator' || node.id.type !== 'Identifier') return
@@ -29,4 +31,9 @@ export function discoverNativeAccountCapability(resource: NativeScriptResource):
     }
   }
   return { module: resource.url, exportName: one(exports, 'native-account-service') }
+}
+
+/** Resolve the exported service actually used by the native account query. */
+export function discoverNativeAccountCapability(resource: NativeScriptResource): NativeAccountCapabilityDescriptor {
+  return discoverNativeAccountCapabilityFromSyntax(resource, parseNativeSource(resource.source))
 }

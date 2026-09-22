@@ -18,8 +18,15 @@ import {
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import { readNativeSubmissionResources } from './native-app-resources.js'
-import { discoverNativeSubmissionTransforms, type NativeScriptResource } from './native-submission-structure.js'
-import { discoverNativeAccountCapability } from './native-account-structure.js'
+import {
+  analyzeNativeSubmissionTransforms,
+  type NativeScriptResource,
+  type NativeSubmissionTransformAnalysis,
+} from './native-submission-structure.js'
+import {
+  discoverNativeAccountCapability,
+  discoverNativeAccountCapabilityFromSyntax,
+} from './native-account-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 import { codexConfigModelProviders } from './codex-config-model-providers.js'
@@ -77,8 +84,17 @@ export function nativeSubmissionTransformsForApp(
   buildNumber: string,
   resources: readonly NativeScriptResource[],
 ): readonly NativeResourceTransform[] {
+  return nativeSubmissionTransformAnalysisForApp(appVersion, buildNumber, resources).transforms
+}
+
+function nativeSubmissionTransformAnalysisForApp(
+  appVersion: string,
+  buildNumber: string,
+  resources: readonly NativeScriptResource[],
+): NativeSubmissionTransformAnalysis | Readonly<{ transforms: readonly NativeResourceTransform[] }> {
   try {
-    return legacyNativeSubmissionResources(resources) ?? discoverNativeSubmissionTransforms(resources)
+    const legacy = legacyNativeSubmissionResources(resources)
+    return legacy === undefined ? analyzeNativeSubmissionTransforms(resources) : { transforms: legacy }
   } catch (error) {
     throw new Error(
       `Native submission incompatible with Codex Desktop ${appVersion} (${buildNumber}): ${
@@ -243,12 +259,15 @@ async function nativeSubmissionTransforms(contents: string, cacheDirectory: stri
       ...(cached.accountCapability === undefined ? {} : { accountCapability: cached.accountCapability }),
     }
   }
-  const discovered = nativeSubmissionTransformsForApp(identity.appVersion, identity.buildNumber, resources)
-  const captured = captureTransforms(discovered, resources)
+  const discovered = nativeSubmissionTransformAnalysisForApp(identity.appVersion, identity.buildNumber, resources)
+  const captured = captureTransforms(discovered.transforms, resources)
   const initial = resources.find(resource => resource.url.includes('/app-initial-'))!
   let accountCapability: NativeAccountCapabilityDescriptor | undefined
   try {
-    accountCapability = discoverNativeAccountCapability(initial)
+    const syntax = 'syntaxByResource' in discovered ? discovered.syntaxByResource.get(initial) : undefined
+    accountCapability = syntax === undefined
+      ? discoverNativeAccountCapability(initial)
+      : discoverNativeAccountCapabilityFromSyntax(initial, syntax)
   } catch { /* Account admission reports its own unavailable capability. */ }
   const analysis: NativeSubmissionAnalysisCache = {
     schemaVersion: NATIVE_SUBMISSION_CACHE_SCHEMA,
