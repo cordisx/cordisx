@@ -83,7 +83,7 @@ describe('supervisor startup generation', () => {
       })
     })
     await expect(pending.then(() => 'unexpected ready')).rejects.toThrow(
-      'background supervisor generation changed before renderer readiness',
+      'CordisX background supervisor generation was replaced',
     )
     await publishHost
     expect(phases).toEqual(['host-launched'])
