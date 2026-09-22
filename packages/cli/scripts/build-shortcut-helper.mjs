@@ -46,4 +46,10 @@ if (process.platform === 'darwin') {
     '-o',
     `${out}/CordisXStartupGate`,
   ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/swiftc', [
+    '-O',
+    fileURLToPath(new URL('native/host-open.swift', root)),
+    '-o',
+    `${out}/CordisXHostOpen`,
+  ], { stdio: 'inherit' })
 }

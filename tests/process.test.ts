@@ -1,6 +1,6 @@
 import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -9,6 +9,7 @@ import {
   assertLoopbackPortAvailable,
   codexExecutableCandidates,
   codexLaunchArgs,
+  confirmHiddenCodexOwnership,
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
   HiddenHostIdentityUnconfirmedError,
@@ -331,6 +332,31 @@ setInterval(() => {}, 1000)
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'stops an exact hidden Host when Launch Services uses another process group',
+    async () => {
+      const host = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+      const waiter = spawn(process.execPath, [
+        '-e',
+        'const pid = Number(process.argv[1]); setInterval(() => { try { process.kill(pid, 0) } catch { process.exit(0) } }, 25)',
+        String(host.pid),
+      ], { stdio: 'ignore', detached: true })
+      try {
+        expect(host.pid).toBeDefined()
+        expect(waiter.pid).toBeDefined()
+        const group = Number(execFileSync('ps', ['-p', String(host.pid), '-o', 'pgid='], { encoding: 'utf8' }).trim())
+        expect(group).not.toBe(host.pid)
+        confirmHiddenCodexOwnership({ child: waiter, hostPid: host.pid! })
+        await terminateIsolatedCodex(waiter)
+        expect(host.exitCode !== null || host.signalCode !== null).toBe(true)
+        expect(waiter.exitCode !== null || waiter.signalCode !== null).toBe(true)
+      } finally {
+        if (host.exitCode === null && host.signalCode === null) host.kill('SIGKILL')
+        if (waiter.exitCode === null && waiter.signalCode === null) waiter.kill('SIGKILL')
+      }
+    },
+  )
 
   it.skipIf(process.platform === 'win32')(
     'does not terminate unrelated processes that mention a profile prefix',

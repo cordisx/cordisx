@@ -5,6 +5,7 @@ import path from 'node:path'
 import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
 
 export interface IsolatedCodexProfile {
   readonly userDataDir: string
@@ -541,7 +542,7 @@ function hiddenHostPid(executable: string, debugPort: number, mainInspectorPort?
   )
 }
 
-/** Launch a macOS Host hidden through Launch Services and retain an owned waiter for its exact process. */
+/** Launch a macOS Host hidden through Launch Services without retaining a stale recent Dock tile. */
 export async function launchCodexHidden(
   executable: string,
   debugPort: number,
@@ -557,8 +558,8 @@ export async function launchCodexHidden(
     ...(mainInspectorPort === undefined ? [] : [`--inspect-brk=127.0.0.1:${mainInspectorPort}`]),
   ]
   const child = spawn(
-    '/usr/bin/open',
-    ['-W', '-g', '-j', '-n', '-a', applicationBundleForExecutable(executable), '--args', ...args],
+    fileURLToPath(new URL('../../native/CordisXHostOpen', import.meta.url)),
+    [applicationBundleForExecutable(executable), ...args],
     {
       stdio: 'ignore',
       env: {
@@ -629,9 +630,9 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
   }
   if (ownership?.rootAlive() === true || !exited(child)) {
     ownership?.captureNow()
-    signalLaunchedHost(child, 'SIGTERM', ownership?.pid)
+    signalLaunchedHost(child, 'SIGTERM', ownership)
     if (!await waitForExit(child, 5_000, () => ownership?.captureNow())) {
-      signalLaunchedHost(child, 'SIGKILL', ownership?.pid)
+      signalLaunchedHost(child, 'SIGKILL', ownership)
     }
   }
   if (!exited(child) && !await waitForExit(child, 2_000, () => ownership?.captureNow())) {
@@ -639,11 +640,14 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
   }
   const ownedProcesses = ownership?.stop() ?? []
   launchedProcessOwnership.delete(child)
-  if (profile?.cleanupOwned === true) await terminateOwnedProcesses(ownedProcesses, child.pid)
+  if (profile?.cleanupOwned === true || (ownership !== undefined && ownership.pid !== child.pid)) {
+    await terminateOwnedProcesses(ownedProcesses, child.pid)
+  }
 }
 
-/** Signal only the detached process group created by launchCodex. */
-function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownedRootPid?: number): void {
+/** Stop the verified Host group, or its exact PID when Launch Services chose another group. */
+function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownership?: ProcessOwnershipTracker): void {
+  const ownedRootPid = ownership?.rootAlive() === true ? ownership.pid : undefined
   const pid = ownedRootPid ?? child.pid
   if (pid === undefined) return
   if (process.platform !== 'win32') {
@@ -651,11 +655,19 @@ function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownedRo
       process.kill(-pid, signal)
       return
     } catch (error) {
-      // Unit callers may pass a process not created by launchCodex; retain the
-      // exact-child fallback without ever broadening the target.
+      // Launch Services can place the owned Host outside its own process group.
+      // The fallback below still requires the tracked PID and start identity.
       if (!(error instanceof Error) || !('code' in error) || (error.code !== 'ESRCH' && error.code !== 'EPERM')) {
         throw error
       }
+    }
+  }
+  if (ownedRootPid !== undefined && ownership?.rootAlive() === true) {
+    try {
+      process.kill(ownedRootPid, signal)
+      return
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
     }
   }
   child.kill(signal)
