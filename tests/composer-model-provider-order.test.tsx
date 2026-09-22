@@ -60,6 +60,8 @@ async function fixture(usage: boolean) {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value })
   }
   Object.assign(dom.window.HTMLElement.prototype, {
+    attachEvent() {},
+    detachEvent() {},
     getBoundingClientRect: () => ({ x: 0, y: 0, top: 0, left: 0, right: 20, bottom: 20, width: 20, height: 20 }),
   })
   const listeners = new Set<() => void>()
@@ -102,6 +104,90 @@ async function fixture(usage: boolean) {
 }
 
 describe('native Composer selector order', () => {
+  it('closes an open portal without focusing behind the modal and preserves order during replacement', async () => {
+    const { dom, document, selector, render, registry, order } = await fixture(true)
+    const root = selector()
+    const button = root.querySelector<HTMLButtonElement>('.cxmp-model-trigger')!
+    await act(async () => button.click())
+    expect(document.querySelector('.cxmp-menu')).not.toBeNull()
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('aria-modal', 'true')
+    const cancel = document.createElement('button')
+    dialog.append(cancel)
+    const app = document.getElementById('app')!
+    await act(async () => {
+      document.body.append(dialog)
+      cancel.focus()
+      app.setAttribute('aria-hidden', 'true')
+    })
+    expect(selector()).toBe(root)
+    expect(document.querySelector('.cxmp-menu')).toBeNull()
+    expect(document.activeElement).toBe(cancel)
+    await act(async () => {
+      root.remove()
+      await registry.refresh()
+    })
+    expect(selector()).toBe(root)
+    expect(document.activeElement).toBe(cancel)
+    await render(false, 'replacement')
+    expect(document.querySelectorAll('[data-cordisx-model-provider-selector]')).toHaveLength(1)
+    expect(order()).toEqual(['selector', 'native-group', 'microphone', 'voice'])
+    expect(selector().querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
+    await act(async () => {
+      app.removeAttribute('aria-hidden')
+      dialog.remove()
+      document.getElementById('microphone')!.focus()
+    })
+    expect(document.activeElement?.id).toBe('microphone')
+    expect(selector().querySelector<HTMLButtonElement>('button')!.disabled).toBe(false)
+    await act(async () => selector().querySelector<HTMLButtonElement>('.cxmp-model-trigger')!.click())
+    expect(document.querySelector('.cxmp-menu')).not.toBeNull()
+    await act(async () =>
+      document.querySelector('.cxmp-menu')!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      )
+    )
+    expect(document.activeElement).toBe(selector().querySelector('.cxmp-model-trigger'))
+  })
+
+  it('blocks a synchronous interaction before the observer has projected disabled state', async () => {
+    const { dom, document, selector, registry } = await fixture(false)
+    const refresh = vi.spyOn(registry, 'refresh')
+    const button = selector().querySelector<HTMLButtonElement>('.cxmp-provider-trigger')!
+    await act(async () => {
+      document.getElementById('app')!.setAttribute('aria-hidden', 'true')
+      button.click()
+      button.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    })
+    expect(refresh).not.toHaveBeenCalled()
+    expect(document.querySelector('.cxmp-menu')).toBeNull()
+  })
+
+  it.each(['aria-hidden', 'inert'])('keeps the seat through %s attribute-only blocking', async attribute => {
+    const { dom, document, selector, registry } = await fixture(true)
+    const root = selector()
+    const app = document.getElementById('app')!
+    const trigger = document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
+    const refresh = vi.spyOn(registry, 'refresh')
+    await act(async () => app.setAttribute(attribute, 'true'))
+    expect(selector()).toBe(root)
+    expect(trigger.hidden).toBe(true)
+    for (const button of root.querySelectorAll<HTMLButtonElement>('button')) {
+      expect(button.disabled).toBe(true)
+      await act(async () => {
+        button.click()
+        button.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+      })
+    }
+    expect(document.querySelector('.cxmp-menu')).toBeNull()
+    expect(refresh).not.toHaveBeenCalled()
+    await act(async () => app.removeAttribute(attribute))
+    expect(selector()).toBe(root)
+    expect(root.querySelector<HTMLButtonElement>('.cxmp-model-trigger')!.disabled).toBe(false)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it.each([false, true])(
     'preserves native order when usage initially mounted=%s and React toggles it',
     async initial => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { type SyntheticEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelProviderModelV1, ModelProviderV1 } from '@cordisx/protocol/model-providers/v1'
 import { equivalentModel, type ModelProviderRegistry } from './model-providers.js'
 import { HostBrandIcon } from './host-ui/HostBrandIcon.js'
@@ -9,6 +9,7 @@ import { ModelBrandIcon } from './host-ui/ModelBrandIcon.js'
 import { ProviderAction } from './model-provider-actions.js'
 import { modelProviderCopy } from './model-provider-copy.js'
 import { friendlyModelLabel } from './adapter/native-model-provider-seat.js'
+import { nativeModelProviderInteractionAllowed } from './adapter/native-model-provider-interaction.js'
 import { ProviderReasoningSlider } from './model-provider-reasoning.js'
 import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from './native-provider-selection-client.js'
 import css from './model-providers.css?inline'
@@ -71,10 +72,11 @@ export function selectionModelForProvider(
   return provider.models.find(model => model.id === provider.defaultModelId) ?? provider.models[0]
 }
 
-export function ModelProviderSelector({ registry, transport, locale }: {
+export function ModelProviderSelector({ registry, transport, locale, suspended = false }: {
   readonly registry: ModelProviderRegistry
   readonly transport: ProviderSelectionTransport
   readonly locale: string
+  readonly suspended?: boolean
 }) {
   const catalog = useSyncExternalStore(registry.subscribe, registry.snapshot)
   const native = useSyncExternalStore(listener => transport.subscribe(listener), () => transport.getSnapshot())
@@ -90,6 +92,12 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   const search = useRef<HTMLInputElement>(null)
   const operation = useRef(0)
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
+  const canInteract = () => !suspended && nativeModelProviderInteractionAllowed(anchor.current)
+  const blockInteraction = (event: SyntheticEvent) => {
+    if (canInteract()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
   const copy = modelProviderCopy(locale)
   const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
@@ -134,6 +142,10 @@ export function ModelProviderSelector({ registry, transport, locale }: {
     && (native.nativeModels?.length ?? 0) === 0
 
   useEffect(() => {
+    if (suspended) setOpen(undefined)
+  }, [suspended])
+
+  useEffect(() => {
     operation.current++
     setSwitching(false)
     setOpen(undefined)
@@ -160,6 +172,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   }, [native.submissionError, copy.unsupportedIntent, copy.submitRejected])
 
   const selectReasoningEffort = async (effort: string) => {
+    if (!canInteract()) return
     const generation = ++operation.current
     setSwitching(true)
     setError(undefined)
@@ -182,6 +195,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   }
 
   const selectFastMode = async (enabled: boolean) => {
+    if (!canInteract()) return
     const generation = ++operation.current
     setSwitching(true)
     setError(undefined)
@@ -198,6 +212,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   }
 
   const apply = async (provider: Pick<ModelProviderV1, 'providerId'>, model: ModelProviderModelV1) => {
+    if (!canInteract()) return
     const generation = ++operation.current
     setSwitching(true)
     setError(undefined)
@@ -235,6 +250,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
 
   useEffect(() => {
     // A newly discovered member must not turn a catalog update into a native selection.
+    if (!canInteract()) return
     if (registry.hasLiveSource()) return
     const preference = native.draftPreference
     if (preference === undefined || native.threadId !== undefined || native.pendingProviderId !== undefined) return
@@ -263,6 +279,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
     native.pendingProviderId,
     native.threadId,
     registry,
+    suspended,
     transport,
   ])
 
@@ -278,6 +295,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
     setOpen(undefined)
   }
   const toggle = (kind: 'provider' | 'model', button: HTMLButtonElement) => {
+    if (!canInteract()) return
     returnFocus.current = button
     setOpen(current => current === kind ? undefined : kind)
     void registry.refresh()
@@ -296,6 +314,10 @@ export function ModelProviderSelector({ registry, transport, locale }: {
     <div
       className="cxmp-selector"
       ref={anchor}
+      inert={suspended}
+      onPointerDownCapture={blockInteraction}
+      onClickCapture={blockInteraction}
+      onKeyDownCapture={blockInteraction}
       onPointerDown={event => event.stopPropagation()}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
@@ -305,6 +327,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
         ref={providerTrigger}
         type="button"
         className="cxmp-trigger cxmp-provider-trigger"
+        disabled={suspended}
         aria-label={`${copy.providers}: ${displayedProviderLabel}`}
         title={displayedProviderLabel}
         aria-haspopup="menu"
@@ -339,7 +362,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
             aria-label={copy.disableFastMode}
             title={copy.disableFastMode}
             aria-pressed="true"
-            disabled={!native.available || native.busy || switching}
+            disabled={suspended || !native.available || native.busy || switching}
             onClick={() => void selectFastMode(false)}
           >
             <HostIcon surfaceToken="host:bolt" token="status.info" state="active" />
@@ -350,6 +373,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
         ref={modelTrigger}
         type="button"
         className="cxmp-trigger cxmp-model-trigger"
+        disabled={suspended}
         aria-label={`${copy.models}: ${displayedModelLabel}`}
         title={displayedModelLabel}
         aria-haspopup="menu"
@@ -369,7 +393,8 @@ export function ModelProviderSelector({ registry, transport, locale }: {
       </button>
       {feedback ? <span role={error ? 'alert' : 'status'} className="cxmp-announcement">{feedback}</span> : null}
       <HostMenuSurface
-        open={open !== undefined}
+        open={!suspended && open !== undefined}
+        canFocus={canInteract}
         label={open === 'provider' ? copy.providers : copy.models}
         anchorRef={anchor}
         returnFocusRef={returnFocus}

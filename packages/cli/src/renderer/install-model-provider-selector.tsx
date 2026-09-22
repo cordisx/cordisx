@@ -4,7 +4,14 @@ import { ModelProviderSelector } from './model-provider-selector.js'
 import type { ProviderSelectionSnapshot } from './model-provider-selector.js'
 import type { ModelProviderRegistry } from './model-providers.js'
 import { CodexDesktopNativeModelProviderTransport } from './native-model-provider-transport.js'
-import { hideNativeModelProviderTrigger, locateNativeModelProviderSeat } from './adapter/native-model-provider-seat.js'
+import {
+  hideNativeModelProviderTrigger,
+  locateNativeModelProviderMountSeat,
+} from './adapter/native-model-provider-seat.js'
+import {
+  nativeModelProviderInteractionAllowed,
+  nativeModelProviderObservedAttributes,
+} from './adapter/native-model-provider-interaction.js'
 import type {
   NativeProviderSelectionCommandChannel,
   NativeProviderSelectionOwner,
@@ -58,10 +65,10 @@ export async function installModelProviderSelector(
     scheduled = false
     if (disposed) return
     const state = transport.getSnapshot()
-    const seat = locateNativeModelProviderSeat(document)
+    const seat = locateNativeModelProviderMountSeat(document)
     const catalog = registry.snapshot()
     if (!seat && root && (transport.hasActiveSubmission() || state.submissionError !== undefined)) {
-      root.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} />)
+      root.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} suspended />)
       return
     }
     if (!seat || (!root && !canReplaceNativeModelProviderTrigger(state, catalog))) {
@@ -88,9 +95,16 @@ export async function installModelProviderSelector(
     if (element!.parentElement !== seat.parent || element!.nextSibling !== seat.group) {
       const focused = element!.contains(document.activeElement) ? document.activeElement as HTMLElement : undefined
       seat.parent.insertBefore(element!, seat.group)
-      focused?.focus({ preventScroll: true })
+      if (nativeModelProviderInteractionAllowed(seat.trigger)) focused?.focus({ preventScroll: true })
     }
-    root!.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} />)
+    root!.render(
+      <ModelProviderSelector
+        registry={registry}
+        transport={transport}
+        locale={locale()}
+        suspended={!nativeModelProviderInteractionAllowed(seat.trigger)}
+      />,
+    )
   }
   const schedule = () => {
     if (disposed || scheduled) return
@@ -105,7 +119,12 @@ export async function installModelProviderSelector(
       )
     ) schedule()
   })
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: nativeModelProviderObservedAttributes,
+  })
   const stopCatalog = registry.subscribe(schedule)
   const stopSelection = transport.subscribe(schedule)
   const refresh = setInterval(() => {

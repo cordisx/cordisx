@@ -1,3 +1,5 @@
+import { nativeModelProviderInteractionAllowed } from './native-model-provider-interaction.js'
+
 export interface NativeModelProviderSeat {
   readonly trigger: HTMLElement
   readonly group: HTMLElement
@@ -38,13 +40,7 @@ function visible(element: HTMLElement): boolean {
   if (
     view === null || !element.isConnected
     || (element.hidden && element.dataset.cordisxModelProviderHidden !== 'true')
-    || element.closest('[inert]') !== null
   ) return false
-  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-    if (ancestor.getAttribute('aria-hidden') === 'true' && ancestor.dataset.cordisxModelProviderHidden !== 'true') {
-      return false
-    }
-  }
   const bounds = element.getBoundingClientRect()
   const style = view.getComputedStyle(element)
   if (element.closest('[data-cordisx-model-provider-hidden="true"]')) return true
@@ -87,6 +83,12 @@ function supportsFastMode(model: Record<string, unknown> | undefined): boolean {
  * ambiguous or detached layouts fail closed.
  */
 export function locateNativeModelProviderSeat(document: Document): NativeModelProviderSeat | undefined {
+  const seat = locateNativeModelProviderMountSeat(document)
+  return seat && nativeModelProviderInteractionAllowed(seat.trigger) ? seat : undefined
+}
+
+/** Structural ownership survives the Host temporarily isolating its background. */
+export function locateNativeModelProviderMountSeat(document: Document): NativeModelProviderSeat | undefined {
   const composers = [...document.querySelectorAll<HTMLElement>(
     '[data-codex-composer-root][data-composer-placement]',
   )].filter(visible)

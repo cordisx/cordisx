@@ -212,6 +212,14 @@ selection. Disposal restores native visibility and removes owned React roots,
 portals, subscriptions, timers and action signals. Reasoning controls remain
 reachable alongside model selection.
 
+Modal background isolation (`inert`, `aria-hidden`, or a visible modal dialog)
+does not retire an otherwise valid Composer seat. The replacement remains
+visible in its existing position with its confirmed selection, but closes its
+menu and blocks pointer, keyboard, and selection actions. Modal closure restores
+interaction through DOM observation without waiting for catalog polling. Focus
+stays with the modal; queued menu focus restoration also checks current isolation.
+An actually removed or ambiguous Composer still retires the seat normally.
+
 ## Desktop Compatibility
 
 Native submission admission reads the installed App's initial and primary

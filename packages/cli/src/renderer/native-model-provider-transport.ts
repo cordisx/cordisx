@@ -1,7 +1,12 @@
 import {
+  locateNativeModelProviderMountSeat,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
 } from './adapter/native-model-provider-seat.js'
+import {
+  nativeModelProviderInteractionAllowed,
+  nativeModelProviderObservedAttributes,
+} from './adapter/native-model-provider-interaction.js'
 import type { ProviderSelectionSnapshot, ProviderSelectionTransport } from './model-provider-selector.js'
 import {
   NativeProviderSelectionClient,
@@ -108,6 +113,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private turnGeneration = 0
   private visibleThreadId: string | undefined
   private visibleTrigger: HTMLElement | undefined
+  private suspendedAvailability: boolean | undefined
   private nativeModelUpdate: { readonly key: string; readonly completion: Promise<void> } | undefined
   private readonly selectionClient: NativeProviderSelectionClient
   private submissionError: NativeSubmissionRejection | undefined
@@ -211,7 +217,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ['data-above-composer-conversation-id', 'data-selected-reasoning-effort', 'inert'],
+        attributeFilter: [
+          'data-above-composer-conversation-id',
+          'data-selected-reasoning-effort',
+          ...nativeModelProviderObservedAttributes,
+        ],
       })
     }
   }
@@ -276,7 +286,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }, options: Readonly<{ source: 'preference'; expectedRevision: number }> | undefined = undefined): Promise<
     'accepted' | 'busy' | 'unavailable'
   > {
-    if (this.disposed || !this.state.available) return 'unavailable'
+    if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
     const navigation = this.navigationGeneration
     const threadId = this.state.threadId
     if (target.providerId !== this.state.modelProvider) {
@@ -387,6 +397,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
 
   async selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'> {
     if (this.disposed || !this.nativeManagedModelRoutingAvailable || !this.state.available) return 'unavailable'
+    if (this.modelControl() === undefined) return 'unavailable'
     if (this.state.busy) return 'busy'
     const navigationGeneration = this.navigationGeneration
     const selectionGeneration = ++this.selectionGeneration
@@ -443,6 +454,22 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
 
   private readonly observeComposer = (): void => {
     const threadId = currentThreadId(this.document)
+    const mount = locateNativeModelProviderMountSeat(this.document)
+    // Keep the last confirmed labels during modal isolation, but never authorize interaction from this cache.
+    if (threadId === this.visibleThreadId && mount && !nativeModelProviderInteractionAllowed(mount.trigger)) {
+      if (!this.hasActiveSubmission() && this.suspendedAvailability === undefined) {
+        this.suspendedAvailability = this.state.available
+        this.publishPatch()
+      }
+      return
+    }
+    if (this.suspendedAvailability !== undefined) {
+      const available = this.suspendedAvailability
+      this.suspendedAvailability = undefined
+      if (threadId === this.visibleThreadId && mount?.trigger === this.visibleTrigger) {
+        this.publishPatch({ available })
+      }
+    }
     // Native submit makes its composer inert while awaiting our confirmation.
     if (threadId === this.visibleThreadId && this.hasActiveSubmission()) return
     const trigger = locateNativeModelProviderSeat(this.document)?.trigger
@@ -475,9 +502,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.clearControlDiscoveryRetry()
     const generation = ++this.refreshGeneration
     const threadId = currentThreadId(this.document)
-    const seat = locateNativeModelProviderSeat(this.document)
+    const seat = locateNativeModelProviderMountSeat(this.document)
     const trigger = seat?.trigger
     const control = trigger === undefined ? undefined : locateNativeModelSelectionControl(trigger)
+    if (trigger && !nativeModelProviderInteractionAllowed(trigger)) this.suspendedAvailability = this.state.available
     this.visibleThreadId = threadId
     this.visibleTrigger = trigger
     this.turnBusy = threadId !== undefined
@@ -797,11 +825,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
 
   private replaceState(next: SelectionSnapshot): void {
     if (this.disposed) return
-    const control = this.modelControl()
+    const seat = locateNativeModelProviderMountSeat(this.document)
+    const control = seat === undefined ? undefined : locateNativeModelSelectionControl(seat.trigger)
     const projection = this.selectionClient.snapshot()
     const confirmation: NativeProviderSubmitConfirmation | undefined = this.selectionClient.confirmation()
+    if (this.suspendedAvailability !== undefined) this.suspendedAvailability = next.available
     this.state = Object.freeze({
       ...next,
+      available: this.suspendedAvailability === undefined && next.available,
       modelLabel: control?.model === next.model ? control?.modelLabel : undefined,
       nativeModels: control && control.model === next.model ? control.models : [],
       providerLabel: next.modelProvider === undefined ? undefined : this.providerNames.get(next.modelProvider),
@@ -839,7 +870,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       : this.state.draftPreference
     const error = Object.hasOwn(next, 'error') ? next.error ?? undefined : this.state.error
     this.replaceState({
-      available: next.available ?? this.state.available,
+      available: next.available ?? this.suspendedAvailability ?? this.state.available,
       busy: this.selecting || this.turnBusy,
       ...(threadId === undefined ? {} : { threadId }),
       ...(modelProvider === undefined ? {} : { modelProvider }),

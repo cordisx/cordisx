@@ -37,6 +37,7 @@ export interface HostMenuSurfaceProps {
   readonly children: ReactNode
   readonly onClose: () => void
   readonly onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void
+  readonly canFocus?: () => boolean
 }
 
 /** Internal composable menu surface for Host controls with custom row content. */
@@ -49,8 +50,11 @@ export function HostMenuSurface({
   children,
   onClose,
   onKeyDown,
+  canFocus,
 }: HostMenuSurfaceProps) {
   const menuRef = useRef<HTMLDivElement>(null)
+  const focusAllowed = useRef(canFocus)
+  focusAllowed.current = canFocus
   const menuId = `cxhm-${useId().replace(/:/g, '')}`
 
   useLayoutEffect(() => {
@@ -71,7 +75,7 @@ export function HostMenuSurface({
       menu.style.top = `${Math.max(edge, Math.round(top))}px`
     }
     position()
-    if (!menu.contains(document.activeElement)) {
+    if ((canFocus?.() ?? true) && !menu.contains(document.activeElement)) {
       ;(menu.querySelector<HTMLElement>('[data-menu-initial="true"]:not(:disabled)') ?? enabledItems(menu)[0] ?? menu)
         .focus()
     }
@@ -108,10 +112,19 @@ export function HostMenuSurface({
           event.preventDefault()
           event.stopPropagation()
           onClose()
-          queueMicrotask(() => returnFocusRef?.current?.focus({ preventScroll: true }))
+          const target = returnFocusRef?.current
+          const restoreFocus = () => {
+            if (
+              target?.isConnected && returnFocusRef?.current === target && anchorRef.current?.isConnected
+              && (focusAllowed.current?.() ?? true)
+            ) {
+              target.focus({ preventScroll: true })
+            }
+          }
+          queueMicrotask(restoreFocus)
           // Native Composer restores its own focus after the portal disappears.
           // Restore the invoking control after that layout commit as well.
-          window.requestAnimationFrame?.(() => returnFocusRef?.current?.focus({ preventScroll: true }))
+          window.requestAnimationFrame?.(restoreFocus)
           return
         }
         if (

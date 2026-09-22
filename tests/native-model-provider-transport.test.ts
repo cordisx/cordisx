@@ -240,15 +240,84 @@ describe('native model provider transport', () => {
     h.transport.dispose()
     h.dom.window.close()
   })
-  it('recovers controls when native Send removes inert without replacing the composer', async () => {
-    const { dom, transport } = await harness()
+  it.each(['inert', 'aria-hidden'])('preserves labels and rejects commands until %s is removed', async attribute => {
+    const { dom, transport, trigger, requests, channel, selectModel } = await harness()
     const root = dom.window.document.querySelector('[data-codex-composer-root]')!
-    root.setAttribute('inert', '')
+    const props = (trigger as any).__reactFiber$test.return.memoizedProps
+    props.models[0].displayName = 'Friendly model'
+    props.models[0].additionalSpeedTiers = ['fast']
+    props.modelOptions = [{ model: props.models[0], disabledReason: null }]
+    root.setAttribute('data-state', 'ready')
+    await settle()
+    expect(await transport.selectFastMode(true)).toBe('accepted')
+    const before = transport.getSnapshot()
+    const requestCount = requests.length
+    channel.selectionSelect.mockClear()
+    root.setAttribute(attribute, 'true')
+    expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('unavailable')
     await settle()
     expect(transport.getSnapshot().available).toBe(false)
-    root.removeAttribute('inert')
+    expect(transport.getSnapshot()).toMatchObject({
+      model: before.model,
+      modelProvider: before.modelProvider,
+      modelLabel: before.modelLabel,
+      nativeModels: before.nativeModels,
+      serviceTier: 'priority',
+    })
+    message(dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: { method: 'turn/completed', params: { threadId: 'thread-1' } },
+    })
+    await settle()
+    expect(transport.getSnapshot().nativeModels).toEqual(before.nativeModels)
+    expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('unavailable')
+    expect(await transport.selectReasoningEffort('low')).toBe('unavailable')
+    expect(await transport.selectFastMode(true)).toBe('unavailable')
+    expect(channel.selectionSelect).not.toHaveBeenCalled()
+    expect(selectModel).not.toHaveBeenCalled()
+    expect(requests).toHaveLength(requestCount)
+    root.removeAttribute(attribute)
     await settle()
     expect(transport.getSnapshot()).toMatchObject({ available: true, busy: false })
+    expect(requests).toHaveLength(requestCount)
+    transport.dispose()
+    dom.window.close()
+  })
+
+  it('finishes a pending native refresh behind a modal without losing its display or enabling interaction', async () => {
+    let defer = false
+    let configRequest: Record<string, unknown> | undefined
+    const { dom, transport } = await harness(request => {
+      if (defer && request.method === 'config/read') {
+        configRequest = request
+        return true
+      }
+    })
+    defer = true
+    const replacement = composer(dom.window.document, 'thread-2')
+    const props = (replacement.trigger as any).__reactFiber$test.return.memoizedProps
+    props.models[0].displayName = 'Model A'
+    props.modelOptions = [{ model: props.models[0], disabledReason: null }]
+    await settle()
+    expect(configRequest).toBeDefined()
+    const root = dom.window.document.querySelector('main')!
+    root.setAttribute('aria-hidden', 'true')
+    await settle()
+    message(dom.window, {
+      type: 'mcp-response',
+      hostId: 'local',
+      message: {
+        id: configRequest!.id,
+        result: { config: { model_provider: 'provider-a', model: 'model-a' } },
+      },
+    })
+    await settle()
+    expect(transport.getSnapshot()).toMatchObject({ available: false, model: 'model-a' })
+    expect(transport.getSnapshot().nativeModels).toHaveLength(1)
+    root.removeAttribute('aria-hidden')
+    await settle()
+    expect(transport.getSnapshot()).toMatchObject({ available: true, model: 'model-a' })
     transport.dispose()
     dom.window.close()
   })

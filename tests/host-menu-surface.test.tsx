@@ -55,7 +55,7 @@ const choices = (
   </>
 )
 
-async function renderMenu(children: ReactNode = choices, onClose = vi.fn(), open = true) {
+async function renderMenu(children: ReactNode = choices, onClose = vi.fn(), open = true, canFocus?: () => boolean) {
   await act(async () => {
     root!.render(
       <HostMenuSurface
@@ -64,6 +64,7 @@ async function renderMenu(children: ReactNode = choices, onClose = vi.fn(), open
         anchorRef={{ current: anchor }}
         returnFocusRef={{ current: anchor }}
         onClose={onClose}
+        canFocus={canFocus}
       >
         {children}
       </HostMenuSurface>,
@@ -85,6 +86,32 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 }
 
 describe('HostMenuSurface behavior', () => {
+  it('checks current focus eligibility for initial focus and both queued Escape restorations', async () => {
+    const outside = document.querySelector<HTMLButtonElement>('#outside')!
+    outside.focus()
+    await renderMenu(choices, vi.fn(), true, () => false)
+    expect(document.activeElement).toBe(outside)
+    let frame: FrameRequestCallback | undefined
+    Object.defineProperty(dom.window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frame = callback
+        return 1
+      },
+    })
+    let allowed = true
+    await renderMenu(choices, vi.fn(), true, () => allowed)
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      allowed = false
+      outside.focus()
+    })
+    expect(document.activeElement).toBe(outside)
+    await renderMenu(choices, vi.fn(), false, () => false)
+    frame?.(0)
+    expect(document.activeElement).toBe(outside)
+  })
+
   it('portals into the body and navigates enabled menu items with wrapping, Home and End', async () => {
     const { menu } = await renderMenu()
     expect(menu.parentElement).toBe(document.body)
