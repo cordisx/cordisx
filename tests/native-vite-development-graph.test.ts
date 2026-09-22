@@ -478,7 +478,7 @@ describe('native Vite development transport', () => {
     expect(connections).toBe(1)
   }, 30_000)
 
-  it('injects the first native production graph without replacing the already interactive document', async () => {
+  it('keeps the native production graph gated through interception and renderer readiness', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')
     const port = (server.address() as { port: number }).port
@@ -501,7 +501,33 @@ describe('native Vite development transport', () => {
               : { result: { value } },
           }))
         }
-        if (params.expression === 'navigator.userActivation?.hasBeenActive !== false') {
+        if (item.method === 'Fetch.getResponseBody') {
+          socket.send(JSON.stringify({
+            id: item.id,
+            result: { body: Buffer.from('native resource source').toString('base64'), base64Encoded: true },
+          }))
+          return
+        }
+        if (item.method === 'Page.reload') {
+          reply()
+          queueMicrotask(() => {
+            socket.send(
+              JSON.stringify({ method: 'Page.frameStartedLoading', params: { frameId: 'native-production' } }),
+            )
+            socket.send(JSON.stringify({
+              method: 'Fetch.requestPaused',
+              params: {
+                requestId: 'native-resource',
+                request: { url: 'app://-/assets/native-resource.js' },
+                resourceType: 'Script',
+                responseStatusCode: 200,
+                responseHeaders: [{ name: 'content-type', value: 'text/javascript' }],
+              },
+            }))
+          })
+          return
+        }
+        if (params.expression === 'true') {
           reply(true)
           return
         }
@@ -569,14 +595,12 @@ describe('native Vite development transport', () => {
         item.method === 'Page.setBypassCSP' && item.params.enabled === true
       )
       const registrationIndex = methods.indexOf('Page.addScriptToEvaluateOnNewDocument')
-      const evaluationIndex = requests.findIndex(item =>
-        item.method === 'Runtime.evaluate' && String(item.params.expression).includes(source)
-      )
+      const reloadIndex = requests.findIndex(item => item.method === 'Page.reload')
       expect(grantIndex).toBeGreaterThanOrEqual(0)
       expect(grantIndex).toBeLessThan(bypassIndex)
       expect(bypassIndex).toBeLessThan(registrationIndex)
-      expect(registrationIndex).toBeLessThan(evaluationIndex)
-      expect(requests.some(item => item.method === 'Page.reload')).toBe(false)
+      expect(registrationIndex).toBeLessThan(reloadIndex)
+      expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
       expect(requests.some(item => item.method === 'Fetch.enable')).toBe(true)
       expect(nativeAuthority.install).toHaveBeenCalledOnce()
 
@@ -585,10 +609,7 @@ describe('native Vite development transport', () => {
       expect(installId).toBeDefined()
       expect(installedSource).toContain(`installId: "${installId}"`)
       expect(installedSource).toContain(source)
-      expect(requests.some(item =>
-        item.method === 'Runtime.evaluate'
-        && String(item.params.expression).startsWith('globalThis.__cordisxNativeSubmissionActivate?.(false);')
-      )).toBe(true)
+      expect(requests.some(item => item.method === 'Fetch.fulfillRequest')).toBe(true)
     } finally {
       controller.abort()
       await watching
@@ -617,7 +638,7 @@ describe('native Vite development transport', () => {
       item.method === 'Browser.setPermission' && item.params.setting === 'prompt'
     )
     const cleanReloadIndex = requests.findLastIndex(item => item.method === 'Page.reload')
-    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
     expect(disposeIndex).toBeLessThan(cspRestoreIndex)
     expect(removalIndex).toBeLessThan(cspRestoreIndex)
     expect(cspRestoreIndex).toBeLessThan(permissionRestoreIndex)

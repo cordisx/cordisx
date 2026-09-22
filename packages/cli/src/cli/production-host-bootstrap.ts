@@ -1,8 +1,8 @@
 import type { ChildProcess } from 'node:child_process'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
-  prepareNativeSubmissionBootstrap,
   type NativeSubmissionBootstrap,
+  prepareNativeSubmissionBootstrap,
 } from '../launcher/native-submission-composition.js'
 import {
   acquireCodexProfileLaunchLease,
@@ -23,7 +23,6 @@ export interface ProductionHostBootstrap {
   readonly profile?: IsolatedCodexProfile
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly nativeSubmissionBootstrap?: NativeSubmissionBootstrap
-  readonly nativeSubmissionUnavailable: boolean
   readonly prelaunchedHost?: Readonly<{ child: ChildProcess; inspectorUrl?: Promise<string> }>
 }
 
@@ -76,7 +75,6 @@ export async function prepareProductionHostBootstrap(
       ...(plan === undefined ? {} : { plan }),
       ...(debugPort === undefined ? {} : { debugPort }),
       ...(profile === undefined ? {} : { profile }),
-      nativeSubmissionUnavailable: false,
     }
   }
   let profileLease: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>> | undefined
@@ -85,18 +83,14 @@ export async function prepareProductionHostBootstrap(
   try {
     profileLease = profile === undefined ? undefined : await acquireCodexProfileLaunchLease(profile.userDataDir)
     await adapter.prepareLaunch(plan)
-    let nativeSubmissionUnavailable = false
-    if (shouldEnableNativeSubmission({
-      platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
-      adapterId: adapter.id,
-      preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
-    })) {
-      try {
-        nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable)
-      } catch (error) {
-        nativeSubmissionUnavailable = true
-        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
-      }
+    if (
+      shouldEnableNativeSubmission({
+        platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
+        adapterId: adapter.id,
+        preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
+      })
+    ) {
+      nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable)
     }
     const mainInspector = input.dockInspector && await supportsOwnedMainInspector(plan.executable)
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
@@ -118,7 +112,6 @@ export async function prepareProductionHostBootstrap(
       ...(profile === undefined ? {} : { profile }),
       ...(profileLease === undefined ? {} : { profileLease }),
       ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
-      nativeSubmissionUnavailable,
       prelaunchedHost: { child, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
     }
   } catch (error) {

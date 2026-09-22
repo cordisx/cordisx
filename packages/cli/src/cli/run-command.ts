@@ -221,7 +221,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let nativeSubmission: NativeSubmissionComposition | undefined
   let nativeSubmissionCompletion: Promise<void> | undefined
   let nativeSubmissionBootstrap: ProductionHostBootstrap['nativeSubmissionBootstrap']
-  let nativeSubmissionUnavailable = false
   let rendererComposition: RendererComposition | undefined
   let productionPluginManagement: ProductionPluginManagementComposition | undefined
   let profileLease: ProductionHostBootstrap['profileLease']
@@ -241,7 +240,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       profileLease,
       prelaunchedHost,
       nativeSubmissionBootstrap,
-      nativeSubmissionUnavailable,
     } = bootstrap)
     certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
       homeDir: rootFromConfigPath(configPath),
@@ -434,9 +432,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           : { defaultProviderId: selection.profile.defaultModelProvider },
       ).then(composition => {
         nativeSubmission = composition
-      }).catch(error => {
-        nativeSubmissionUnavailable = true
-        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       })
     }
     rendererComposition = await buildRendererComposition(composition, stdout, {
@@ -856,8 +851,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     try {
       if (prelaunchedHost === undefined) await adapter.prepareLaunch(plan)
       if (
-        !nativeSubmissionUnavailable
-        && shouldEnableNativeSubmission({
+        shouldEnableNativeSubmission({
           platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
           adapterId: adapter.id,
           preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,

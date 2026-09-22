@@ -506,7 +506,7 @@ describe('native Vite development transport', () => {
       'granted',
       'prompt',
     ])
-    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
   })
 
   it('fails a rejected production graph acknowledgement without entering the CDP retry loop', async () => {
@@ -568,7 +568,7 @@ describe('native Vite development transport', () => {
       await once(server, 'close')
     }
     expect(connections).toBe(1)
-    expect(requests.some(item => item.method === 'Page.reload')).toBe(false)
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
     expect(requests.some(item => item.method === 'Page.removeScriptToEvaluateOnNewDocument')).toBe(true)
     expect(requests.filter(item => item.method === 'Page.setBypassCSP').map(item => item.params.enabled)).toEqual([
       true,

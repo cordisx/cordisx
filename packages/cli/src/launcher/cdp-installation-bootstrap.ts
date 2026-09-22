@@ -49,42 +49,6 @@ async function waitForRendererBootstrap(
   else await support.waitForProductionBootstrap(session, installId, deadline, signal, network)
 }
 
-async function currentDocumentHasUserActivation(
-  session: support.CdpSession,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  const evaluated = await support.abortable(
-    session.send('Runtime.evaluate', {
-      expression: 'navigator.userActivation?.hasBeenActive !== false',
-      returnByValue: true,
-    }, support.CDP_INJECTION_TIMEOUT_MS),
-    signal,
-  )
-  const exception = support.runtimeEvaluationException(evaluated)
-  if (exception !== undefined) throw new Error(`Native document interaction check failed: ${exception}`)
-  return (evaluated.result as { value?: unknown } | undefined)?.value === true
-}
-
-async function reloadCurrentDocumentIfUntouched(
-  session: support.CdpSession,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  const evaluated = await support.abortable(
-    session.send('Runtime.evaluate', {
-      expression: `(() => {
-      if (navigator.userActivation?.hasBeenActive !== false) return false
-      queueMicrotask(() => location.reload())
-      return true
-    })()`,
-      returnByValue: true,
-    }, support.CDP_INJECTION_TIMEOUT_MS),
-    signal,
-  )
-  const exception = support.runtimeEvaluationException(evaluated)
-  if (exception !== undefined) throw new Error(`Native document reload check failed: ${exception}`)
-  return (evaluated.result as { value?: unknown } | undefined)?.value === true
-}
-
 async function bootstrapInstalledDocument(
   options: RendererBootstrapOptions,
   observeProductionGraph: boolean,
@@ -92,57 +56,6 @@ async function bootstrapInstalledDocument(
   const { session, target, nativeSubmission, signal } = options
   const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
   await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
-  if (observeProductionGraph) {
-    let nativeInterception: NativeResourceInterception | undefined
-    let reloadScheduled = false
-    if (nativeSubmission !== undefined) {
-      const onStatusChange = (status: string): void => {
-        if (status !== 'unavailable') return
-        void session.send('Runtime.evaluate', {
-          expression: 'globalThis.__cordisxNativeSubmissionActivate?.(false)',
-        }, support.CDP_INJECTION_TIMEOUT_MS).catch(() => undefined)
-      }
-      if (!await currentDocumentHasUserActivation(session, signal)) {
-        nativeInterception = await installNativeResourceInterception({
-          session,
-          target,
-          transforms: nativeSubmission.transforms,
-          reloadDocument: async () => {
-            reloadScheduled = await reloadCurrentDocumentIfUntouched(session, signal)
-            if (!reloadScheduled) throw new Error('native document became interactive before compatibility reload')
-          },
-          timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
-          ...(signal === undefined ? {} : { signal }),
-          onStatusChange,
-        })
-        if (reloadScheduled) {
-          await waitForRendererBootstrap(options, deadline)
-          return nativeInterception
-        }
-        await nativeInterception.dispose().catch(() => undefined)
-      }
-      nativeInterception = await installNativeResourceInterception({
-        session,
-        target,
-        transforms: nativeSubmission.transforms,
-        timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
-        ...(signal === undefined ? {} : { signal }),
-        onStatusChange,
-      })
-    }
-    const evaluated = await support.abortable(
-      session.send('Runtime.evaluate', {
-        expression: nativeSubmission === undefined
-          ? options.evaluationSource
-          : `globalThis.__cordisxNativeSubmissionActivate?.(false);\n${options.evaluationSource}`,
-        allowUnsafeEvalBlockedByCSP: true,
-      }, support.CDP_INJECTION_TIMEOUT_MS),
-      signal,
-    )
-    const exception = support.runtimeEvaluationException(evaluated)
-    if (exception !== undefined) throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
-    return nativeInterception
-  }
   const network = observeProductionGraph
     ? await support.observeProductionGraphNetwork(session, options.documentSource)
     : undefined
@@ -214,7 +127,7 @@ export async function installDocumentBootstrap(
   const identifier = added.identifier
   if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
   state.identifier = identifier
-  state.loopbackReloadStarted = viteDevelopment || (!loopbackModules && nativeSubmission !== undefined)
+  state.loopbackReloadStarted = viteDevelopment || loopbackModules || nativeSubmission !== undefined
   const needsDocumentBootstrap = viteDevelopment || loopbackModules || nativeSubmission !== undefined
   if (!needsDocumentBootstrap) {
     const evaluated = await session.send(

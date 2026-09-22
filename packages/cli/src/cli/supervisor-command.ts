@@ -26,6 +26,7 @@ import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { createShortcut, preflightShortcut, reuseShortcut } from '../shortcuts/create.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { registryFor } from '../shortcuts/store.js'
+import { openNativeStartupGate } from './startup-gate.js'
 
 const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
 const RETRY_DELAY = 50
@@ -582,5 +583,55 @@ export async function runSupervisorCommand(
     return await finishReady(invocation, runtime, result)
   } finally {
     await releaseOperation()
+  }
+}
+
+/** Keep the native Host hidden behind one truthful startup surface until the full launch contract is ready. */
+export async function runSupervisorCommandWithStartupGate(
+  invocation: CordisXCliInvocation,
+  runtime: CordisXCliRuntime,
+  onState?: (ready: ReadyLaunchResult, phase: 'host-launched' | 'ready') => void | Promise<void>,
+): Promise<ReadyLaunchResult | undefined> {
+  if (!isManaged(invocation) || (invocation.action !== 'start' && invocation.action !== 'restart')) {
+    return await runSupervisorCommand(invocation, runtime, onState)
+  }
+  const openGate = runtime.internalOpenStartupGate === false
+    ? undefined
+    : runtime.internalOpenStartupGate
+      ?? (runtime.internalSpawnSupervisor === undefined ? openNativeStartupGate : undefined)
+  if (openGate === undefined) return await runSupervisorCommand(invocation, runtime, onState)
+  const startedAt = performance.now()
+  const gate = await openGate()
+  const stderr = runtime.stderr ?? process.stderr
+  stderr.write(`[cordisx] startup gate visible: ${Math.round(performance.now() - startedAt)} ms\n`)
+  let current = invocation
+  try {
+    for (;;) {
+      await gate.stage('正在检查运行配置')
+      try {
+        const ready = await runSupervisorCommand(current, runtime, async (state, phase) => {
+          if (phase === 'host-launched') {
+            if (!state.state.hostPid || !state.state.hostProcessStartedAt) {
+              throw new Error('CordisX Host identity is unavailable before renderer readiness')
+            }
+            await gate.hostLaunched(state.state.hostPid, state.state.hostProcessStartedAt)
+            await gate.stage('正在准备模型与界面')
+          } else await gate.stage('正在完成启动')
+          await onState?.(state, phase)
+        })
+        if (ready === undefined || !ready.state.hostPid || !ready.state.hostProcessStartedAt) {
+          throw new Error('CordisX startup completed without a verified Host identity')
+        }
+        await gate.ready()
+        stderr.write(`[cordisx] full application ready: ${Math.round(performance.now() - startedAt)} ms\n`)
+        return ready
+      } catch (error) {
+        const action = await gate.failed(failureMessage(error))
+        if (action === 'dismiss') throw error
+        current = { ...current, recoverStartup: true }
+      }
+    }
+  } finally {
+    await gate.close()
   }
 }

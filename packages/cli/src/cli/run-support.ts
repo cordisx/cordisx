@@ -56,6 +56,7 @@ import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
+import type { openNativeStartupGate } from './startup-gate.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
@@ -210,6 +211,8 @@ export interface CordisXCliRuntime {
   }) => Readonly<{ pid: number; unref(): void }>
   /** Repository-only seam for bounded supervisor failure-path integration tests. */
   readonly internalSupervisorReadinessTimeoutMs?: number
+  /** Repository-only startup-gate seam; false keeps command tests headless. */
+  readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is

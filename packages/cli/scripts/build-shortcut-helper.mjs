@@ -29,4 +29,10 @@ if (process.platform === 'darwin') {
     '-o',
     `${out}/CordisXLauncher`,
   ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/swiftc', [
+    '-O',
+    fileURLToPath(new URL('native/startup-gate.swift', root)),
+    '-o',
+    `${out}/CordisXStartupGate`,
+  ], { stdio: 'inherit' })
 }

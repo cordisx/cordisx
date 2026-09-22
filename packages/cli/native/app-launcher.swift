@@ -129,31 +129,15 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
             var response: [String: Any]?
-            let activationLock = NSLock()
-            var activatedEarly = false
             do {
-                response = try self?.invoke(arguments, timeout: 75) { event in
-                    guard let phase = event["event"] as? String,
-                          phase == "host-launched" || phase == "ready" else { return }
-                    activationLock.lock()
-                    activatedEarly = true
-                    activationLock.unlock()
-                    DispatchQueue.main.async { [weak self] in
-                        if let warning = self?.activateOwnedHost(event), phase == "ready" {
-                            self?.appendLog(warning)
-                        }
-                    }
-                }
+                response = try self?.invoke(arguments, timeout: 75)
             }
             catch {
                 failure = error.localizedDescription
                 self?.appendLog(error.localizedDescription)
             }
-            activationLock.lock()
-            let needsFinalActivation = !activatedEarly
-            activationLock.unlock()
             DispatchQueue.main.async {
-                if needsFinalActivation, let response, let warning = self?.activateOwnedHost(response) {
+                if let response, let warning = self?.activateOwnedHost(response) {
                     self?.appendLog(warning)
                 }
                 self?.launchInFlight = false

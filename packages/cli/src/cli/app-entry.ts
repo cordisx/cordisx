@@ -5,7 +5,7 @@ import { loadHomeConfig } from '../config/home-config.js'
 import { type AppLauncherMenu, type AppLauncherRuntime, validAppLauncherRuntime } from '../app-launcher/model.js'
 import { readPrivateJson } from '../shortcuts/store.js'
 import { type CordisXManagedInvocation, parseCordisXCli } from './parse.js'
-import { type ReadyLaunchResult, runSupervisorCommand } from './supervisor-command.js'
+import { type ReadyLaunchResult, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
 import { type ActivatedOwnedHost, activateOwnedHost } from './activate-owned-host.js'
 
 type AppOperation = 'menu' | 'launch-default' | 'launch-profile'
@@ -38,7 +38,7 @@ export async function readAppLauncherMenu(runtime: AppLauncherRuntime): Promise<
 }
 
 export interface AppEntryDependencies {
-  readonly runSupervisor?: typeof runSupervisorCommand
+  readonly runSupervisor?: typeof runSupervisorCommandWithStartupGate
   readonly activate?: (ready: ReadyLaunchResult) => Promise<ActivatedOwnedHost>
   readonly onState?: (
     ready: ReadyLaunchResult,
@@ -68,7 +68,7 @@ export async function runAppLauncherOperation(
     }
     invocation = parseCordisXCli(['start', appId, profileId]) as CordisXManagedInvocation
   }
-  const run = dependencies.runSupervisor ?? runSupervisorCommand
+  const run = dependencies.runSupervisor ?? runSupervisorCommandWithStartupGate
   const runRuntime = {
     cwd: runtime.cwd,
     env: {
@@ -112,11 +112,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const key = `${phase}:${state.hostPid}:${state.hostProcessStartedAt}`
         if (published.has(key)) return
         published.add(key)
-        process.stdout.write(JSON.stringify({
-          event: phase,
-          hostPid: state.hostPid,
-          hostStartedAt: state.hostProcessStartedAt,
-        }) + '\n')
+        process.stdout.write(
+          JSON.stringify({
+            event: phase,
+            hostPid: state.hostPid,
+            hostStartedAt: state.hostProcessStartedAt,
+          }) + '\n',
+        )
       },
     })
     : Promise.reject(new Error('Missing CordisX app operation'))).catch(error => ({
