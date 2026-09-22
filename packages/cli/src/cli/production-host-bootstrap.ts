@@ -26,12 +26,13 @@ export interface ProductionHostBootstrap {
   readonly prelaunchedHost?: Readonly<{ child: ChildProcess; inspectorUrl?: Promise<string> }>
 }
 
-/** Resolve shared CLI/App launch inputs and put the native window ahead of compatibility analysis. */
+/** Resolve and reserve shared CLI/App launch inputs before compatibility analysis. */
 export async function prepareProductionHostBootstrap(
   prepared: PreparedRunCommand,
   runtime: CordisXCliRuntime,
   input: Readonly<{
     prelaunch: boolean
+    prepareNativeSubmission: boolean
     dockInspector: boolean
     markHostLaunched(pid: number, inspectorUrl?: Promise<string>): void | Promise<void>
   }>,
@@ -70,7 +71,7 @@ export async function prepareProductionHostBootstrap(
       ),
     }
     : undefined
-  if (!input.prelaunch || plan === undefined || debugPort === undefined || invocation.options.dryRun) {
+  if (plan === undefined || debugPort === undefined || invocation.options.dryRun) {
     return {
       ...(plan === undefined ? {} : { plan }),
       ...(debugPort === undefined ? {} : { debugPort }),
@@ -84,13 +85,23 @@ export async function prepareProductionHostBootstrap(
     profileLease = profile === undefined ? undefined : await acquireCodexProfileLaunchLease(profile.userDataDir)
     await adapter.prepareLaunch(plan)
     if (
-      shouldEnableNativeSubmission({
+      input.prepareNativeSubmission
+      && shouldEnableNativeSubmission({
         platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
         adapterId: adapter.id,
         preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
       })
     ) {
       nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable)
+    }
+    if (!input.prelaunch) {
+      return {
+        plan,
+        debugPort,
+        ...(profile === undefined ? {} : { profile }),
+        ...(profileLease === undefined ? {} : { profileLease }),
+        ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
+      }
     }
     const mainInspector = input.dockInspector && await supportsOwnedMainInspector(plan.executable)
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)

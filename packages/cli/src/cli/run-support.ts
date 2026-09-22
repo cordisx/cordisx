@@ -48,6 +48,7 @@ import {
   findFreeLoopbackPort,
   type IsolatedCodexProfile,
   launchCodex,
+  launchCodexHidden,
   prepareIsolatedCodexProfile,
   resolveCodexExecutable,
   terminateIsolatedCodex,
@@ -521,6 +522,7 @@ export async function runInjectedHost(input: {
   readonly onHostLaunched?: (pid: number, inspectorUrl?: Promise<string>) => void | Promise<void>
   /** Internal, owned-entry bootstrap only. Never a user Host argument. */
   readonly dockInspector?: boolean
+  readonly hiddenUntilReady?: boolean
 }): Promise<void> {
   const controller = new AbortController()
   const stop = (): void => controller.abort()
@@ -587,9 +589,21 @@ export async function runInjectedHost(input: {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir)
     }
     if (input.prelaunchedHost === undefined) {
-      const mainInspector = input.dockInspector === true && await supportsOwnedMainInspector(input.executable)
+      const hidden = input.hiddenUntilReady === true
+      const mainInspector = !hidden && input.dockInspector === true
+        && await supportsOwnedMainInspector(input.executable)
       input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
-      launched = launchCodex(
+      const hiddenLaunch = hidden
+        ? await launchCodexHidden(
+          input.executable,
+          input.debugPort,
+          input.hostArgs,
+          input.profile,
+          input.launcher.onlineDevtools,
+          input.environment,
+        )
+        : undefined
+      launched = hiddenLaunch?.child ?? launchCodex(
         input.executable,
         input.debugPort,
         input.hostArgs,
@@ -600,7 +614,7 @@ export async function runInjectedHost(input: {
       )
       if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
       const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
-      await input.onHostLaunched?.(launched.pid, inspectorUrl)
+      await input.onHostLaunched?.(hiddenLaunch?.hostPid ?? launched.pid, inspectorUrl)
     } else {
       launched = input.prelaunchedHost.child
       if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
@@ -984,5 +998,3 @@ export async function runDevelopment(
     }
   }
 }
-
-/** Execute one CLI invocation. Exported for package-level integration tests. */

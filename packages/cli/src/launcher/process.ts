@@ -181,6 +181,14 @@ class ProcessOwnershipTracker {
     this.timer.unref()
   }
 
+  get pid(): number {
+    return this.rootPid
+  }
+
+  rootAlive(): boolean {
+    return liveProcessStartedAt(this.rootPid) === this.rootStartedAt
+  }
+
   stop(): readonly ProcessIdentity[] {
     clearInterval(this.timer)
     this.capture()
@@ -450,6 +458,72 @@ export function launchCodex(
   return child
 }
 
+export interface HiddenCodexLaunch {
+  readonly child: ChildProcess
+  readonly hostPid: number
+}
+
+function applicationBundleForExecutable(executable: string): string {
+  const macos = path.dirname(executable)
+  const contents = path.dirname(macos)
+  const bundle = path.dirname(contents)
+  if (path.basename(macos) !== 'MacOS' || path.basename(contents) !== 'Contents' || path.extname(bundle) !== '.app') {
+    throw new Error('Hidden Host launch requires a macOS app-bundle executable')
+  }
+  return bundle
+}
+
+function hiddenHostPid(executable: string, debugPort: number): number | undefined {
+  const portArgument = `--remote-debugging-port=${debugPort}`
+  return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .flatMap(line => {
+      const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+      if (match === null || !match[1] || !match[2]) return []
+      const command = match[2]
+      return command.startsWith(`${executable} `) && command.includes(` ${portArgument}`)
+        ? [Number.parseInt(match[1], 10)]
+        : []
+    })[0]
+}
+
+/** Launch a macOS Host hidden through Launch Services and retain an owned waiter for its exact process. */
+export async function launchCodexHidden(
+  executable: string,
+  debugPort: number,
+  extraArgs: readonly string[],
+  profile?: IsolatedCodexProfile,
+  allowOnlineDevTools = false,
+  environment?: Readonly<Record<string, string>>,
+): Promise<HiddenCodexLaunch> {
+  if (process.platform !== 'darwin') throw new Error('Hidden Host launch requires macOS')
+  const args = codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools)
+  const child = spawn(
+    '/usr/bin/open',
+    ['-W', '-g', '-j', '-n', '-a', applicationBundleForExecutable(executable), '--args', ...args],
+    {
+      stdio: 'ignore',
+      env: environment === undefined ? process.env : { ...process.env, ...environment },
+      detached: true,
+    },
+  )
+  const deadline = Date.now() + 8_000
+  let hostPid: number | undefined
+  while (Date.now() < deadline && hostPid === undefined) {
+    if (child.exitCode !== null || child.signalCode !== null) break
+    hostPid = hiddenHostPid(executable, debugPort)
+    if (hostPid === undefined) await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  if (hostPid === undefined) {
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      process.kill(-child.pid, 'SIGTERM')
+    }
+    throw new Error('Hidden Host launch did not publish an exact process identity')
+  }
+  launchedProcessOwnership.set(child, new ProcessOwnershipTracker(hostPid))
+  return { child, hostPid }
+}
+
 function exited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null
 }
@@ -481,11 +555,11 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
     launchedProcessOwnership.delete(child)
     return
   }
-  if (!exited(child)) {
+  if (ownership?.rootAlive() === true || !exited(child)) {
     ownership?.captureNow()
-    signalLaunchedHost(child, 'SIGTERM')
+    signalLaunchedHost(child, 'SIGTERM', ownership?.pid)
     if (!await waitForExit(child, 5_000, () => ownership?.captureNow())) {
-      signalLaunchedHost(child, 'SIGKILL')
+      signalLaunchedHost(child, 'SIGKILL', ownership?.pid)
     }
   }
   if (!exited(child) && !await waitForExit(child, 2_000, () => ownership?.captureNow())) {
@@ -497,11 +571,12 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
 }
 
 /** Signal only the detached process group created by launchCodex. */
-function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined) return
+function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownedRootPid?: number): void {
+  const pid = ownedRootPid ?? child.pid
+  if (pid === undefined) return
   if (process.platform !== 'win32') {
     try {
-      process.kill(-child.pid, signal)
+      process.kill(-pid, signal)
       return
     } catch (error) {
       // Unit callers may pass a process not created by launchCodex; retain the

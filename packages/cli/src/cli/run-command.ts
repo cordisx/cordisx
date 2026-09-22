@@ -229,7 +229,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let prelaunchedHostHandedOff = false
   try {
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
-      prelaunch: runHost === runInjectedHost,
+      // The native startup gate is already visible. Finish compatibility work
+      // before creating the real Host, then launch that Host hidden until ready.
+      prelaunch: false,
+      prepareNativeSubmission: runHost === runInjectedHost,
       dockInspector: supervisorRuntime.dockInspector,
       markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
     })
@@ -849,7 +852,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir)
     }
     try {
-      if (prelaunchedHost === undefined) await adapter.prepareLaunch(plan)
       if (
         shouldEnableNativeSubmission({
           platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
@@ -959,6 +961,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         },
         onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
         dockInspector: supervisorRuntime.dockInspector,
+        ...(runHost === runInjectedHost && environment.CORDISX_SUPERVISOR_HOME !== undefined
+          ? { hiddenUntilReady: true }
+          : {}),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)

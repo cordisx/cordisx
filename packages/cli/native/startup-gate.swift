@@ -208,8 +208,11 @@ private final class StartupGateDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.hostIdentity = (pid, startedAt)
-                guard host.hide() else {
-                    publish("gate-error", error: "Host window could not be gated before readiness")
+                // Product launches use Launch Services' launch-hidden flag. Do
+                // not activate or mutate the Host here; only reject an identity
+                // that escaped into the foreground before renderer readiness.
+                guard !host.isActive else {
+                    publish("gate-error", error: "Host became active before renderer readiness")
                     return
                 }
                 NSApplication.shared.activate(ignoringOtherApps: true)
