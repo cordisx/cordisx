@@ -103,6 +103,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private selecting = false
   private turnBusy = false
   private refreshGeneration = 0
+  private pendingComposerRefresh: { generation: number; control: string } | undefined
   private navigationGeneration = 0
   private selectionGeneration = 0
   private turnGeneration = 0
@@ -442,6 +443,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }
 
   private readonly observeComposer = (): void => {
+    if (this.disposed) return
     const threadId = currentThreadId(this.document)
     // Native submit makes its composer inert while awaiting our confirmation.
     if (threadId === this.visibleThreadId && this.hasActiveSubmission()) return
@@ -464,9 +466,16 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       void this.refreshComposer()
       return
     }
-    if (!this.state.available && trigger !== undefined && this.modelControl() !== undefined) {
-      void this.refreshComposer()
-      return
+    if (!this.state.available && trigger !== undefined) {
+      const control = this.modelControl()
+      if (
+        control !== undefined
+        && (this.pendingComposerRefresh?.generation !== this.refreshGeneration
+          || this.pendingComposerRefresh.control !== JSON.stringify(control))
+      ) {
+        void this.refreshComposer()
+        return
+      }
     }
     this.syncControl()
   }
@@ -494,10 +503,15 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       }
       return
     }
+    // Native startup mutates the DOM while these bridge reads are pending.
+    // Keep their generation valid until they settle; a different thread/trigger
+    // still starts a new generation through observeComposer's earlier branches.
+    this.pendingComposerRefresh = { generation, control: JSON.stringify(control) }
     try {
       const response = threadId === undefined
         ? undefined
         : record(await this.request('thread/read', { threadId, includeTurns: false }))
+      if (!this.isRefreshCurrent(generation, threadId)) return
       const config = await this.readConfig()
       if (!this.isRefreshCurrent(generation, threadId)) return
       this.providerNames.clear()
@@ -537,6 +551,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       })
     } catch {
       if (this.isRefreshCurrent(generation, threadId)) this.replaceState({ available: false, busy: false })
+    } finally {
+      if (this.pendingComposerRefresh?.generation === generation) this.pendingComposerRefresh = undefined
     }
   }
 

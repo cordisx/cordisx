@@ -197,6 +197,141 @@ async function harness(handler?: (request: Record<string, unknown>, view: Window
 }
 
 describe('native model provider transport', () => {
+  it.each(['thread/read', 'config/read'])(
+    'does not restart an in-flight %s for unrelated startup DOM mutations',
+    async method => {
+      let hold = false
+      const pending: { request: Record<string, unknown>; view: Window }[] = []
+      const h = await harness((request, view) => {
+        if (!hold || request.method !== method) return
+        pending.push({ request, view })
+        return true
+      })
+      try {
+        hold = true
+        composer(h.dom.window.document, 'thread-2')
+        await settle()
+        expect(pending.length).toBe(1)
+        for (let index = 0; index < 5; index++) {
+          h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+          await settle()
+        }
+        expect(pending.length).toBe(1)
+        const first = pending[0]!
+        message(first.view, {
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: first.request.id,
+            result: {
+              thread: { id: 'thread-2', status: { type: 'idle' }, modelProvider: 'provider-a' },
+              config: { model_provider: 'provider-a', model: 'model-a' },
+            },
+          },
+        })
+        await settle()
+        expect(h.transport.getSnapshot()).toMatchObject({ available: true, threadId: 'thread-2' })
+      } finally {
+        h.transport.dispose()
+        h.dom.window.close()
+      }
+    },
+  )
+
+  it.each(['thread', 'trigger', 'model'] as const)(
+    'supersedes a pending read when the native %s changes',
+    async kind => {
+      let hold = false
+      const pending: Record<string, unknown>[] = []
+      const h = await harness(request => {
+        if (!hold || request.method !== 'thread/read') return
+        pending.push(request)
+        return true
+      })
+      const respond = (request: Record<string, unknown>) =>
+        message(h.dom.window, {
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: request.id,
+            result: {
+              thread: { id: (request.params as any).threadId, status: { type: 'idle' }, modelProvider: 'provider-a' },
+            },
+          },
+        })
+      try {
+        hold = true
+        const next = composer(h.dom.window.document, 'thread-2')
+        await settle()
+        if (kind === 'thread') composer(h.dom.window.document, 'thread-3')
+        else if (kind === 'trigger') composer(h.dom.window.document, 'thread-2')
+        else {
+          ;(next.trigger as any).__reactFiber$test.return.memoizedProps.model = 'model-b'
+          h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+        }
+        await settle()
+        expect(pending.length).toBe(2)
+        const configReads = h.requests.filter(request => request.method === 'config/read').length
+        respond(pending[0]!)
+        await settle()
+        expect(h.transport.getSnapshot().available).toBe(false)
+        expect(h.requests.filter(request => request.method === 'config/read').length).toBe(configReads)
+        h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+        await settle()
+        expect(pending.length).toBe(2)
+        respond(pending[1]!)
+        await settle()
+        expect(h.transport.getSnapshot()).toMatchObject({
+          available: true,
+          threadId: kind === 'thread' ? 'thread-3' : 'thread-2',
+          model: kind === 'model' ? 'model-b' : 'model-a',
+        })
+      } finally {
+        h.transport.dispose()
+        h.dom.window.close()
+      }
+    },
+  )
+
+  it.each(['failure', 'dispose'] as const)('releases pending read ownership on %s', async outcome => {
+    let hold = false
+    let pending: Record<string, unknown> | undefined
+    const h = await harness(request => {
+      if (!hold || request.method !== 'config/read') return
+      pending = request
+      return true
+    })
+    try {
+      hold = true
+      composer(h.dom.window.document, 'thread-2')
+      await settle()
+      expect(pending?.method).toBe('config/read')
+      const changed = vi.fn()
+      h.transport.subscribe(changed)
+      if (outcome === 'dispose') h.transport.dispose()
+      message(h.dom.window, {
+        type: 'mcp-response',
+        hostId: 'local',
+        message: { id: pending!.id, error: { message: 'offline' } },
+      })
+      await settle()
+      const requests = h.requests.length
+      hold = false
+      h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+      await settle()
+      if (outcome === 'dispose') {
+        expect(h.requests.length).toBe(requests)
+        expect(changed).not.toHaveBeenCalled()
+      } else {
+        expect(h.requests.length).toBe(requests + 2)
+        expect(h.transport.getSnapshot()).toMatchObject({ available: true, threadId: 'thread-2' })
+      }
+    } finally {
+      h.transport.dispose()
+      h.dom.window.close()
+    }
+  })
+
   it('connects through launcher capability without Desktop identity metadata', async () => {
     const h = await harness()
     expect(h.transport.getSnapshot().available).toBe(true)
