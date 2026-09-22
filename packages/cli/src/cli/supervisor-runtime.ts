@@ -13,6 +13,7 @@ import {
 } from '../shortcuts/dock.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
+import { logHostLifecycle } from './host-lifecycle.js'
 import {
   acquireSupervisorStartLock,
   hasMatchingProcessIdentity,
@@ -170,7 +171,10 @@ export async function createSupervisorRuntime(
       control = await startSupervisorControlServer({
         socketPath: supervisorPaths(home, app, profile).socket,
         token,
-        stop: () => process.kill(process.pid, 'SIGTERM'),
+        stop: () => {
+          logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'supervisor-stop-requested' })
+          process.kill(process.pid, 'SIGTERM')
+        },
         readPresentation: async () => {
           const paths = supervisorPaths(home, app, profile)
           const before = await readSupervisorState(paths)

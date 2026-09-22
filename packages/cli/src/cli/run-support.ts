@@ -56,6 +56,14 @@ import {
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import {
+  logHostLifecycle,
+  observeHostExit,
+  waitForAbort,
+  waitForExit,
+  waitForHostExitAfterReadiness,
+} from './host-lifecycle.js'
+export { waitForAbort, waitForExit, waitForHostExitAfterReadiness } from './host-lifecycle.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
@@ -252,21 +260,6 @@ export function shouldSkipBuiltinSkillDeployment(environment: NodeJS.ProcessEnv)
   return environment.CORDISX_SKIP_BUILTIN_SKILL_DEPLOYMENT === '1'
 }
 
-export function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return child.exitCode === 0 || child.signalCode !== null
-      ? Promise.resolve()
-      : Promise.reject(new Error(`host exited with status ${String(child.exitCode)}`))
-  }
-  return new Promise((resolve, reject) => {
-    child.once('error', reject)
-    child.once('exit', (code, signal) => {
-      if (code === 0 || signal !== null) resolve()
-      else reject(new Error(`host exited with status ${String(code)}`))
-    })
-  })
-}
-
 /** Capture only the ephemeral loopback inspector address from our own Host stderr. */
 export function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
   const stream = child.stderr
@@ -287,11 +280,6 @@ export function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
   })
   void operation.catch(() => undefined)
   return operation
-}
-
-export function waitForAbort(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
-  return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
 }
 
 export function rootFromConfigPath(configPath: string): string {
@@ -428,24 +416,6 @@ export function printPlan(
   stdout(JSON.stringify({ status, plan }, null, 2))
 }
 
-/** A launch is usable only after the CDP watcher has installed a renderer. */
-export async function waitForHostExitAfterReadiness(input: {
-  readonly childExit: Promise<void>
-  readonly ready: Promise<void>
-  readonly signal: AbortSignal
-}): Promise<void> {
-  let ready = false
-  void input.ready.then(() => {
-    ready = true
-  })
-  await Promise.race([
-    input.childExit.then(() => {
-      if (!ready) throw new Error('Host exited before CordisX CDP became ready')
-    }),
-    waitForAbort(input.signal),
-  ])
-}
-
 /** A rejected startup UI callback is terminal, including the user's Close action. */
 export async function completeHostReadiness(
   controller: AbortController,
@@ -512,9 +482,21 @@ export async function runInjectedHost(input: {
   readonly hiddenUntilReady?: boolean
 }): Promise<void> {
   const controller = new AbortController()
-  const stop = (): void => controller.abort()
-  process.once('SIGINT', stop)
-  process.once('SIGTERM', stop)
+  let rendererIsReady = false
+  let launched = input.prelaunchedHost?.child
+  let removeHostObserver = launched === undefined
+    ? undefined
+    : observeHostExit(launched, input.stdout, () => rendererIsReady)
+  const lifecycle = (event: Parameters<typeof logHostLifecycle>[1]): void =>
+    logHostLifecycle(input.stdout, event, { hostPid: launched?.pid, ready: rendererIsReady })
+  const stop = (signal: 'SIGINT' | 'SIGTERM'): void => {
+    lifecycle({ event: 'launcher-signal', signal })
+    controller.abort()
+  }
+  const interrupt = (): void => stop('SIGINT')
+  const terminate = (): void => stop('SIGTERM')
+  process.once('SIGINT', interrupt)
+  process.once('SIGTERM', terminate)
   let markReady!: () => void
   const rendererReady = new Promise<void>(resolve => {
     markReady = resolve
@@ -557,13 +539,20 @@ export async function runInjectedHost(input: {
     onReady: async () => {
       if (reportedReady) return
       reportedReady = true
-      await completeHostReadiness(controller, input.onReady)
+      await completeHostReadiness(controller, async signal => {
+        try {
+          await input.onReady?.(signal)
+        } catch (error) {
+          lifecycle({ event: 'readiness-failed' })
+          throw error
+        }
+      })
+      rendererIsReady = true
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
     },
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
-  let launched: ChildProcess | undefined
   let profileLease = input.profileLease
   let primaryError: unknown
   let retainProfileLease = false
@@ -602,6 +591,7 @@ export async function runInjectedHost(input: {
         mainInspector,
       )
       if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
+      removeHostObserver = observeHostExit(launched, input.stdout, () => rendererIsReady)
       const inspectorUrl = hiddenLaunch?.inspectorUrl ?? (mainInspector ? captureMainInspectorUrl(launched) : undefined)
       const ownershipVerified = await input.onHostLaunched?.(hiddenLaunch?.hostPid ?? launched.pid, inspectorUrl)
       if (hiddenLaunch) {
@@ -621,6 +611,7 @@ export async function runInjectedHost(input: {
       watcher,
     ])
   } catch (error) {
+    lifecycle({ event: 'lifecycle-failed' })
     primaryError = error
     retainProfileLease = retainProfileLeaseAfterHiddenHostFailure(error)
     if (retainProfileLease) {
@@ -628,6 +619,7 @@ export async function runInjectedHost(input: {
     }
     throw error
   } finally {
+    lifecycle({ event: 'cleanup-started' })
     controller.abort()
     const launchedHost = launched
     const cleanup = await settleInjectedHostCleanup({
@@ -638,14 +630,23 @@ export async function runInjectedHost(input: {
       ],
       ...(launchedHost === undefined
         ? {}
-        : { terminateHost: async () => await terminateIsolatedCodex(launchedHost, input.profile) }),
+        : {
+          terminateHost: async () => {
+            lifecycle({
+              event: 'host-termination-requested',
+              alreadyExited: launchedHost.exitCode !== null || launchedHost.signalCode !== null,
+            })
+            await terminateIsolatedCodex(launchedHost, input.profile)
+          },
+        }),
     })
     const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
     const leaseCleanup = hostTermination?.status === 'rejected' || retainProfileLease
       ? []
       : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])
-    process.removeListener('SIGINT', stop)
-    process.removeListener('SIGTERM', stop)
+    process.removeListener('SIGINT', interrupt)
+    process.removeListener('SIGTERM', terminate)
+    removeHostObserver?.()
     if (primaryError !== undefined) {
       for (const result of [...cleanup, ...leaseCleanup]) {
         if (result.status === 'rejected') {

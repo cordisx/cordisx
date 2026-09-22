@@ -292,15 +292,38 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     )
   }
   let watcherFailure: unknown
+  let watcherStage:
+    | 'poll'
+    | 'graph-terminal'
+    | 'target-list'
+    | 'target-retired-cleanup'
+    | 'target-reconnect-cleanup'
+    | 'installation'
+    | 'readiness' = 'poll'
+  const lifecycle = (event: 'watcher-failed' | 'watcher-cleanup-started'): void => {
+    options.onStatus?.(`lifecycle ${
+      JSON.stringify({
+        event,
+        at: Date.now(),
+        launcherPid: process.pid,
+        stage: watcherStage,
+        aborted: options.signal.aborted,
+        installedTargets: installed.size,
+        closedSessions: [...installed.values()].filter(record => record.session.isClosed()).length,
+      })
+    }`)
+  }
   try {
     while (!options.signal.aborted) {
       let attemptedReloadTarget: 'Vite' | 'production' | undefined
       try {
         await hostMutationGate.exclusive(async () => {
           if (fatalProductionGraphError !== undefined) {
+            watcherStage = 'graph-terminal'
             attemptedReloadTarget = 'production'
             throw fatalProductionGraphError
           }
+          watcherStage = 'target-list'
           const listedTargets = await listTargets(options.port)
           const candidates = injectableTargets(listedTargets)
           const candidateIds = new Set(candidates.map(target => target.id))
@@ -321,6 +344,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const live = new Set(targets.map(target => target.id))
           for (const [id, record] of installed) {
             if (live.has(id)) continue
+            watcherStage = 'target-retired-cleanup'
             await support.uninstall(record, viteLoopbackPermissions)
             installed.delete(id)
           }
@@ -329,6 +353,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             if (matchesInstalledTarget(target, current)) continue
             let stale: support.InstalledScript | undefined
             if (current !== undefined) {
+              watcherStage = 'target-reconnect-cleanup'
               await support.uninstall(current, viteLoopbackPermissions)
               installed.delete(target.id)
               stale = current
@@ -358,6 +383,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               : browserGraphTransport
               ? 'production'
               : undefined
+            watcherStage = 'installation'
             const record = await install(
               target,
               selectedSource,
@@ -387,6 +413,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
             )
             installed.set(target.id, record)
+            watcherStage = 'readiness'
             await options.onReady?.()
             options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
           }
@@ -406,11 +433,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
         }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
       }
+      watcherStage = 'poll'
       await delay(750, options.signal)
     }
   } catch (error) {
     watcherFailure = error
+    lifecycle('watcher-failed')
   } finally {
+    lifecycle('watcher-cleanup-started')
     const cleanup = await hostMutationGate.closeAndDrain(async () =>
       await Promise.allSettled(
         [...installed.values()].map(record => support.uninstall(record, viteLoopbackPermissions)),
@@ -420,9 +450,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     if (failures.length > 0) {
       throw new AggregateError(
         watcherFailure === undefined ? failures : [watcherFailure, ...failures],
-        `CordisX renderer cleanup failed: ${
+        `${
+          watcherFailure === undefined ? '' : 'CordisX renderer watcher failed before cleanup; '
+        }CordisX renderer cleanup failed: ${
           failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')
         }`,
+        watcherFailure === undefined ? undefined : { cause: watcherFailure },
       )
     }
   }
