@@ -627,7 +627,14 @@ export async function runSupervisorCommandWithStartupGate(
         stderr.write(`[cordisx] full application ready: ${Math.round(readyAt - startedAt)} ms\n`)
         return ready
       } catch (error) {
-        const action = await gate.failed(failureMessage(error))
+        const message = failureMessage(error)
+        if (current.createShortcut && message.startsWith('Host is ready')) {
+          stderr.write(`[cordisx] ${message}\n`)
+          const { createShortcut: _omit, ...retryWithoutShortcut } = current
+          current = retryWithoutShortcut
+          continue
+        }
+        const action = await gate.failed(message)
         if (action === 'dismiss') throw error
         current = { ...current, recoverStartup: true }
       }
