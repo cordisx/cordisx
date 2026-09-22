@@ -5,6 +5,8 @@ import { createMacOSKeychainBackend, type LauncherKeychainBackend } from '../sec
 import { CatalogError, type DiscoveryConnection, type DiscoveryRequest, object } from './contracts.js'
 import { withAbort } from './abort.js'
 import { createDiscoveryRequestCapability, type DiscoveryFetch } from './request-capability.js'
+import { ManagedCatalogState } from './managed-catalog-state.js'
+import type { NativeManagedGatewayConnectionSession } from '../managed-service-native-connection.js'
 import {
   type ManagedProviderRecord,
   managedProviderSettings,
@@ -42,6 +44,7 @@ export class ManagedProviderOwner {
   #closePromise?: Promise<void>
   #leases = new Set<AbortController>()
   #listeners = new Set<() => void>()
+  readonly #state: ManagedCatalogState
 
   private constructor(
     backend: LauncherKeychainBackend,
@@ -55,6 +58,7 @@ export class ManagedProviderOwner {
     this.#lock = lock
     this.#lockIdentity = identity
     this.#fetcher = fetcher
+    this.#state = new ManagedCatalogState(`${lock}.state`, backend, service, () => this.#assertCurrent())
   }
 
   static async open(options: OwnerOptions): Promise<ManagedProviderOwner> {
@@ -104,6 +108,49 @@ export class ManagedProviderOwner {
     return () => {
       this.#listeners.delete(listener)
     }
+  }
+
+  /** Host-only encrypted configuration/cache/overlay state; never mount these methods on RPC. */
+  readCatalogState(): Promise<unknown> {
+    return this.#serial(() => this.#state.read())
+  }
+  writeCatalogState(value: unknown, authorized: () => boolean): Promise<void> {
+    return this.#serial(() => this.#state.write(value, authorized))
+  }
+
+  validateCurrent(): Promise<void> {
+    return this.#assertCurrent()
+  }
+
+  /** Only the native credential broker consumes this private session. Not an adapter capability. */
+  async nativeConnection(
+    id: string,
+    admittedResponses: () => boolean = () => false,
+  ): Promise<NativeManagedGatewayConnectionSession> {
+    await this.#assertCurrent()
+    const entry = this.#records.get(id)
+    if (!entry || entry.value.settings.protocol !== 'responses' && !admittedResponses()) {
+      throw new CatalogError('unsupported')
+    }
+    const record = await this.#readRecord(entry)
+    await this.#assertCurrent()
+    if (this.#records.get(id) !== entry || record.settings.protocol !== 'responses' && !admittedResponses()) {
+      throw new CatalogError('cancelled')
+    }
+    const endpoint = new URL(record.settings.endpoint)
+    return Object.freeze({
+      value: Object.freeze({
+        service: { pluginId: 'cordisx-host', serviceId: id, generation: record.scopeRevision },
+        endpoint: {
+          origin: endpoint.origin,
+          apiPath: endpoint.pathname as `/${string}`,
+          auth: { scheme: 'bearer' as const, token: record.secret },
+        },
+        models: { generation: record.revision, defaultAlias: '', aliases: [] },
+        cleanup: { authorityId: record.scopeRevision },
+      }),
+      dispose() {},
+    })
   }
 
   /** capture must be a trusted Host-private prompt, not a renderer/plugin secret field. */

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { startNativeSubmissionControlServer } from '../packages/cli/src/launcher/native-submission-control-server.js'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
+import { nextInput, request, responseEvents, responseSse } from './fixtures/deepseek-responses.js'
 
 async function harness() {
   const server = await startNativeSubmissionControlServer()
@@ -102,6 +103,29 @@ async function harness() {
 }
 
 describe('native app-server intermediary', () => {
+  it('preserves offline Responses SSE and stateless tool history as opaque native payloads', async () => {
+    const h = await harness()
+    try {
+      // HTTP/SSE parsing belongs to upstream Codex. This boundary must not convert or truncate its payloads.
+      for (const payload of [request(), request(nextInput), responseSse, ...responseEvents]) {
+        const frame = JSON.stringify({ id: 'responses-fixture', method: 'echo/bytes', params: { payload } })
+        h.send(frame)
+        expect(await h.read()).toBe(frame)
+      }
+      h.send({
+        id: 'tool-turn',
+        method: 'turn/start',
+        params: {
+          threadId: 'thread',
+          input: nextInput,
+          config: { 'cordisx.operation_token': 'allowed-operation-token' },
+        },
+      })
+      expect(JSON.parse(await h.read()).result.received.input).toEqual(nextInput)
+    } finally {
+      await h.close()
+    }
+  })
   it('preserves native frames larger than the private control-message budget', async () => {
     const h = await harness()
     try {

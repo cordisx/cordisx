@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import type {
+  CatalogManagementCommand,
+  CatalogManagementResult,
+  CatalogManagementSnapshot,
+} from '../model-catalog-management.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { CdpSession, CdpTarget } from './cdp-session.js'
 import type {
@@ -95,6 +100,11 @@ export function createNativeSubmissionCdpAuthority(options: {
   catalogSubscribe?(listener: () => void): () => void
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
+  readonly management?: {
+    snapshot(): CatalogManagementSnapshot
+    command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
+    subscribe(listener: () => void): () => void
+  }
 }): NativeSubmissionCdpAuthority {
   const states = new Map<string, State>()
   const threadSelections = new Map<string, NativeProviderSelection>()
@@ -267,6 +277,21 @@ export function createNativeSubmissionCdpAuthority(options: {
           requestId = envelope.requestId
           if (active.has(requestId)) throw new Error('Duplicate native command')
           const input = record(envelope.input)
+          if (envelope.operation === 'catalogManagementRead' || envelope.operation === 'catalogManagementCommand') {
+            if (
+              !options.management || input?.generation !== generation || owner.disposed
+              || documents.get(target.id) !== owner || session.isClosed()
+            ) throw new Error('Management unavailable')
+            active.add(requestId)
+            admitted = true
+            const authorized = () => !owner.disposed && documents.get(target.id) === owner && !session.isClosed()
+            const result = envelope.operation === 'catalogManagementRead'
+              ? options.management.snapshot()
+              : await options.management.command(input.command as CatalogManagementCommand, authorized)
+            if (!authorized()) throw new Error('Management retired')
+            await respond(requestId, result)
+            return
+          }
           if (envelope.operation === 'catalogRead' || envelope.operation === 'catalogSnapshotRead') {
             active.add(requestId)
             admitted = true
@@ -392,27 +417,34 @@ export function createNativeSubmissionCdpAuthority(options: {
       const source = `(() => {
         const generation=${
         JSON.stringify(generation)
-      },pending=new Map(),catalogListeners=new Set();let disposed=false,catalogSequence=-1;
+      },pending=new Map(),catalogListeners=new Set(),managementListeners=new Set();let disposed=false,catalogSequence=-1;
+        globalThis.__cordisxCatalogManagementChanged=(owner,cursor)=>{if(owner!==generation||disposed)return;for(const listener of managementListeners){try{listener(cursor)}catch{}}};
         globalThis.__cordisxCatalogChanged=(owner,sequence)=>{if(owner!==generation||disposed||sequence<=catalogSequence)return;catalogSequence=sequence;for(const listener of catalogListeners){try{listener()}catch{}}};
         let activate;globalThis.__cordisxNativeSubmissionReady=new Promise(resolve=>{activate=resolve});globalThis.__cordisxNativeSubmissionActivate=activate;
         globalThis.__cordisxNativeProviderOwner=Object.freeze({targetId:${
         JSON.stringify(target.id)
       },rendererGeneration:generation});
         globalThis.${RECEIVER}=(owner,message)=>{if(owner!==generation)return;const p=pending.get(message.requestId);if(!p)return;pending.delete(message.requestId);clearTimeout(p.timer);message.ok?p.resolve(message.value):p.reject(new Error('Native submission rejected'))};
-        const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
+        const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},operation==='catalogManagementCommand'?90000:30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
         globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({${
         options.catalogSubscribe === undefined
           ? ''
           : 'catalogSubscribe:listener=>{catalogListeners.add(listener);return()=>catalogListeners.delete(listener)},'
+      }${
+        options.management
+          ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),"
+          : ''
       }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
-        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
+        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined
       let unsubscribeCatalog: (() => void) | undefined
+      let unsubscribeManagement: (() => void) | undefined
       const dispose = async (): Promise<void> => {
         if (owner.disposed) return
         owner.disposed = true
         unsubscribeCatalog?.()
+        unsubscribeManagement?.()
         documents.delete(target.id)
         remove()
         for (const [id, state] of states) {
@@ -434,6 +466,15 @@ export function createNativeSubmissionCdpAuthority(options: {
         if (typeof added.identifier !== 'string') throw new Error('Native channel script registration failed')
         identifier = added.identifier
         await session.send('Runtime.evaluate', { expression: source })
+        unsubscribeManagement = options.management?.subscribe(() => {
+          if (owner.disposed) return
+          const snapshot = options.management!.snapshot()
+          void session.send('Runtime.evaluate', {
+            expression: `globalThis.__cordisxCatalogManagementChanged?.(${JSON.stringify(generation)},${
+              JSON.stringify({ epoch: snapshot.epoch, sequence: snapshot.sequence })
+            })`,
+          }).catch(() => undefined)
+        })
         unsubscribeCatalog = options.catalogSubscribe?.(() => {
           catalogSequence++
           if (!owner.disposed) {

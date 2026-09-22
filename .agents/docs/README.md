@@ -157,4 +157,5 @@ or protocol sources. Availability depends on the installed CordisX version.
 - [Managed source authentication](managed-source-auth.md): explicit peer pins, native account fences and Launcher work submission.
 
 - [Host-profile local wallet authority](local-wallet-auth.md)
+- [Developer script model sources](script-model-source.md): Host-owned configuration, manual execution, validation and lifecycle.
 - [Local wallet spending](wallet-spend.md): experimental native consent, authenticated Node provider and canonical local commerce.

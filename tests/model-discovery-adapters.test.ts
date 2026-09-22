@@ -69,6 +69,7 @@ describe('discovery contracts', () => {
     const fetcher = vi.fn(async () => response(['deepseek-v4-flash', 'deepseek-flash', 'deepseek-flash']))
     const models = await deepSeekDiscoveryAdapter().discover(connection(fetcher), new AbortController().signal)
     expect(models.map(model => model.id)).toEqual(['deepseek-flash', 'deepseek-v4-flash'])
+    expect(models.map(model => model.protocolCapabilities)).toEqual([{ responses: true }, { responses: false }])
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.deepseek.com/models',
       expect.objectContaining({

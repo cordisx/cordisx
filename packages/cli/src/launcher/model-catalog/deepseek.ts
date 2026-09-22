@@ -66,7 +66,7 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<un
 export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
   return Object.freeze({
     id: 'deepseek-official',
-    version: '1',
+    version: '2',
     pagination: 'none',
     matches: isDeepSeekOfficialEndpoint,
     async discover(connection: DiscoveryConnection, externalSignal: AbortSignal) {
@@ -103,7 +103,17 @@ export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
           return model.id
         })
         if (!connection.current()) throw new CatalogError('cancelled')
-        return catalogModels(ids)
+        // Official Codex integration documents these exact IDs. Unknown and legacy IDs stay unconfirmed.
+        return Object.freeze(
+          catalogModels(ids).map(model =>
+            Object.freeze({
+              ...model,
+              protocolCapabilities: Object.freeze({
+                responses: ['deepseek-flash', 'deepseek-v4-pro'].includes(model.id),
+              }),
+            })
+          ),
+        )
       } catch (error) {
         if (externalSignal.aborted) throw new CatalogError('cancelled')
         if (error instanceof CatalogError) throw error

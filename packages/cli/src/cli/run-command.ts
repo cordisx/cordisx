@@ -851,6 +851,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
               plan.executable,
               codexHome({ ...environment, ...plan.environment }),
               {
+                managedCatalog: { homeDir: rootFromConfigPath(configPath), profileId: selection.profileId },
                 ...(selection.profile.dynamicModelCatalog === undefined
                   ? {}
                   : { dynamicModelCatalog: selection.profile.dynamicModelCatalog }),
