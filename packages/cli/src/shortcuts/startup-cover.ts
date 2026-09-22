@@ -7,6 +7,7 @@ import { readNativeStartupReadiness, type StartupSurface } from '../renderer/ada
 import { NATIVE_STARTUP_MARK_SELECTOR } from '../renderer/adapter/startup-presentation.js'
 import { startupBrand } from './startup-brand.js'
 import { observeStartupTiming } from './startup-timing.js'
+import { releaseReadyStartup } from './startup-release.js'
 
 const require = createRequire(import.meta.url)
 const navigationAgent = fileURLToPath(new URL('../../native/startup-navigation.cjs', import.meta.url))
@@ -192,36 +193,32 @@ export async function connectStartupCover(
         for (;;) {
           const readyDeadline = Date.now() + 30000
           while (Date.now() < readyDeadline) {
-            let result: Awaited<ReturnType<typeof readNativeStartupReadiness>> | undefined
+            let result: Awaited<ReturnType<typeof releaseReadyStartup>> | undefined
             try {
               result = await read(
-                `(${readNativeStartupReadiness.toString()})(${JSON.stringify(account)},undefined,${timing.source})`,
+                `(${releaseReadyStartup.toString()})(${readNativeStartupReadiness.toString()},${
+                  JSON.stringify(account)
+                },${timing.source})`,
               )
             } catch {
               check() /* A controlled reload may retire this execution context. */
             }
-            if (result?.ready && result.receipt && result.observations) {
+            if (result?.released) {
               check()
-              const released = await read<boolean>(
-                `globalThis.__cordisxStartupDocument?.release(${JSON.stringify(result.receipt)},${
-                  JSON.stringify(result.observations)
-                }) === true`,
+              // The startup registration must not cover an ordinary later reload.
+              await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+              identifier = undefined
+              console.error(
+                '[cordisx-startup]',
+                JSON.stringify({
+                  event: 'usable-released',
+                  at: Date.now(),
+                  rendererReleasedAt: result.releasedAt,
+                  hostPid: owner.pid,
+                  surface: result.surface,
+                }),
               )
-              if (released) {
-                // The startup registration must not cover an ordinary later reload.
-                await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
-                identifier = undefined
-                console.error(
-                  '[cordisx-startup]',
-                  JSON.stringify({
-                    event: 'usable-released',
-                    at: Date.now(),
-                    hostPid: owner.pid,
-                    surface: result.surface,
-                  }),
-                )
-                return result.surface ?? 'workspace-ready'
-              }
+              return result.surface ?? 'workspace-ready'
             }
             await delay()
           }

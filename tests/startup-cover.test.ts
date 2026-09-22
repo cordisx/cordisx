@@ -61,15 +61,15 @@ function fixture(
         if (params.expression === 'globalThis.__cordisxStartupDocument?.snapshot()') {
           return { result: { value: { phase: 'failed', modal: true, mounted: true, requestedAction: options.action } } }
         }
-        if (params.expression?.includes('?.release(')) {
-          events.push('release-final')
-          return { result: { value: true } }
-        }
         if (options.pending) return await new Promise<never>(() => {})
+        expect(params.expression).toContain('releaseReadyStartup')
+        if (options.ready !== false) events.push('release-final')
         return {
           result: {
             value: {
               ready: options.ready !== false,
+              released: options.ready !== false,
+              releasedAt: 1234,
               surface: options.surface,
               receipt,
               observations: { receipt, authenticated: true, hostUsable: true, cordisxReady: true },

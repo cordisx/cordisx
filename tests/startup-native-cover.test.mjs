@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import { buildCoverSource } from '../packages/cli/native/startup-cover.cjs'
 import { readNativeStartupReadiness } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
+import { releaseReadyStartup } from '../packages/cli/src/shortcuts/startup-release.js'
 import { NATIVE_STARTUP_MARK_SELECTOR } from '../packages/cli/src/renderer/adapter/startup-presentation.js'
 
 const css = await readFile(new URL('../packages/cli/native/startup-cover.css', import.meta.url), 'utf8')
@@ -50,13 +51,39 @@ test('production workspace proof removes the modal and restores input without re
     assert.equal(api.release({ ...proof.receipt, nonce: 'wrong-document' }, proof.observations), false)
     assert.equal(api.release(proof.receipt, { ...proof.observations, cordisxReady: false }), false)
     assert.equal(api.release(proof.receipt, { ...proof.observations, receipt: { nonce: 'wrong-document' } }), false)
-    assert.equal(api.release(proof.receipt, proof.observations), true)
+    const released = await w.eval(
+      `(${releaseReadyStartup.toString()})(${readNativeStartupReadiness.toString()},undefined)`,
+    )
+    assert.equal(released.released, true)
+    assert.ok(released.releasedAt >= w.performance.timeOrigin)
     assert.equal(api.snapshot().phase, 'released')
     assert.equal(api.snapshot().mounted, false)
     assert.equal(api.snapshot().modal, false)
     w.document.querySelector('button').click()
     assert.equal(clicks, 1)
     assert.equal(w.document.querySelector('dialog'), null)
+  } finally {
+    w.close()
+  }
+})
+
+test('a retired document cannot release after an outstanding renderer proof settles', async () => {
+  const dom = await documentFixture()
+  const w = dom.window
+  try {
+    const api = w.__cordisxStartupDocument
+    const receipt = api.snapshot().receipt
+    let resolve
+    w.pendingProof = new Promise(done => {
+      resolve = done
+    })
+    const completion = w.eval(`(${releaseReadyStartup.toString()})(() => globalThis.pendingProof,undefined)`)
+    api.retire(receipt)
+    resolve({ ready: true, receipt, observations: ready(receipt) })
+    const result = await completion
+    assert.equal(result.released, false)
+    assert.equal(result.releasedAt, undefined)
+    assert.equal(api.snapshot().phase, 'retired')
   } finally {
     w.close()
   }
