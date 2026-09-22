@@ -151,7 +151,6 @@ export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
   close(): Promise<void>
 }
-
 export async function openProductionPluginManagementComposition(input: {
   readonly configPath: string
   readonly homeDir: string
@@ -205,7 +204,6 @@ export async function openProductionPluginManagementComposition(input: {
     },
   }
 }
-
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
   const prepared = await prepareCliCommand(argv, runtime)
   if (prepared === undefined) return
@@ -221,6 +219,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
+  let nativeSubmissionCompletion: Promise<void> | undefined
   let nativeSubmissionBootstrap: ProductionHostBootstrap['nativeSubmissionBootstrap']
   let nativeSubmissionUnavailable = false
   let rendererComposition: RendererComposition | undefined
@@ -419,6 +418,27 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       managedServiceUICapabilities,
       managedServiceUI,
     } = rendererLifecycle
+    if (
+      nativeSubmissionBootstrap !== undefined && plan !== undefined
+      && shouldEnableNativeSubmission({
+        platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
+        adapterId: adapter.id,
+        preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
+      })
+    ) {
+      nativeSubmissionCompletion = nativeSubmissionBootstrap.complete(
+        managedServiceActivation,
+        codexHome({ ...environment, ...plan.environment }),
+        selection.profile.defaultModelProvider === undefined
+          ? {}
+          : { defaultProviderId: selection.profile.defaultModelProvider },
+      ).then(composition => {
+        nativeSubmission = composition
+      }).catch(error => {
+        nativeSubmissionUnavailable = true
+        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
+      })
+    }
     rendererComposition = await buildRendererComposition(composition, stdout, {
       appId,
       profileId: selection.profileId,
@@ -815,7 +835,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       }
       return
     }
-
     if (plan === undefined) throw new Error('host launch plan was not resolved')
     if (selection.created) stdout(`[cordisx] created ${appId}/${selection.profileId} (${selection.profile.dataMode})`)
     printPlan(plan, stdout, invocation.options.dryRun ? 'ready' : 'launching')
@@ -844,22 +863,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         })
       ) {
         try {
-          nativeSubmission = nativeSubmissionBootstrap === undefined
-            ? await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
-              managedServiceActivation,
-              plan.executable,
-              codexHome({ ...environment, ...plan.environment }),
-              selection.profile.defaultModelProvider === undefined
-                ? {}
-                : { defaultProviderId: selection.profile.defaultModelProvider },
-            )
-            : await nativeSubmissionBootstrap.complete(
-              managedServiceActivation,
-              codexHome({ ...environment, ...plan.environment }),
-              selection.profile.defaultModelProvider === undefined
-                ? {}
-                : { defaultProviderId: selection.profile.defaultModelProvider },
-            )
+          if (nativeSubmissionBootstrap === undefined) {
+            nativeSubmission =
+              await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
+                managedServiceActivation,
+                plan.executable,
+                codexHome({ ...environment, ...plan.environment }),
+                selection.profile.defaultModelProvider === undefined
+                  ? {}
+                  : { defaultProviderId: selection.profile.defaultModelProvider },
+              )
+          }
         } catch (error) {
           stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
         }
@@ -975,6 +989,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     await productionPluginManagement?.close().catch(() => undefined)
     await rendererComposition?.close().catch(() => undefined)
     await supervisorRuntime.close()
+    await nativeSubmissionCompletion
     await nativeSubmission?.close().catch(() => undefined)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
