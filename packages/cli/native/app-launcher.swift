@@ -16,9 +16,14 @@ func launcherObject(_ path: String) throws -> [String: Any] {
     return value
 }
 
-func launcherOutput(_ process: Process, _ pipe: Pipe, timeout: Double) throws -> Data {
+func launcherOutput(
+    _ process: Process,
+    _ pipe: Pipe,
+    timeout: Double,
+    onObject: (([String: Any]) -> Void)? = nil
+) throws -> Data {
     let lock = NSLock(), terminated = DispatchSemaphore(value: 0), readDone = DispatchSemaphore(value: 0)
-    var bytes = Data(), oversized = false
+    var bytes = Data(), pending = Data(), oversized = false
     process.terminationHandler = { _ in terminated.signal() }
     try process.run()
     DispatchQueue.global().async {
@@ -27,7 +32,17 @@ func launcherOutput(_ process: Process, _ pipe: Pipe, timeout: Double) throws ->
             if chunk.isEmpty { break }
             lock.lock()
             if bytes.count + chunk.count > 96 * 1024 { oversized = true }
-            else { bytes.append(chunk) }
+            else {
+                bytes.append(chunk)
+                pending.append(chunk)
+                while let newline = pending.firstRange(of: Data([0x0a])) {
+                    let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
+                    pending.removeSubrange(pending.startIndex...newline.lowerBound)
+                    if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                        onObject?(object)
+                    }
+                }
+            }
             let stop = oversized
             lock.unlock()
             if stop { process.terminate(); break }
@@ -114,13 +129,31 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
             var response: [String: Any]?
-            do { response = try self?.invoke(arguments, timeout: 75) }
+            let activationLock = NSLock()
+            var activatedEarly = false
+            do {
+                response = try self?.invoke(arguments, timeout: 75) { event in
+                    guard let phase = event["event"] as? String,
+                          phase == "host-launched" || phase == "ready" else { return }
+                    activationLock.lock()
+                    activatedEarly = true
+                    activationLock.unlock()
+                    DispatchQueue.main.async { [weak self] in
+                        if let warning = self?.activateOwnedHost(event), phase == "ready" {
+                            self?.appendLog(warning)
+                        }
+                    }
+                }
+            }
             catch {
                 failure = error.localizedDescription
                 self?.appendLog(error.localizedDescription)
             }
+            activationLock.lock()
+            let needsFinalActivation = !activatedEarly
+            activationLock.unlock()
             DispatchQueue.main.async {
-                if let response, let warning = self?.activateOwnedHost(response) {
+                if needsFinalActivation, let response, let warning = self?.activateOwnedHost(response) {
                     self?.appendLog(warning)
                 }
                 self?.launchInFlight = false
@@ -255,7 +288,11 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.mainMenu = main
     }
 
-    private func invoke(_ arguments: [String], timeout: Double) throws -> [String: Any] {
+    private func invoke(
+        _ arguments: [String],
+        timeout: Double,
+        onEvent: (([String: Any]) -> Void)? = nil
+    ) throws -> [String: Any] {
         let runtime = try launcherObject(runtimePath)
         guard runtime["schemaVersion"] as? Int == 1,
               let node = runtime["node"] as? String,
@@ -276,11 +313,14 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
             "PATH": URL(fileURLWithPath: node).deletingLastPathComponent().path + ":/usr/bin:/bin:/usr/sbin:/sbin",
             "TMPDIR": NSTemporaryDirectory(),
         ]
-        let data = try launcherOutput(process, output, timeout: timeout)
+        let data = try launcherOutput(process, output, timeout: timeout, onObject: onEvent)
+        let responses = String(data: data, encoding: .utf8)?
+            .split(whereSeparator: \.isNewline)
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } ?? []
+        let response = responses.last
         guard process.terminationStatus == 0,
-              let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response,
               response["ok"] as? Bool == true else {
-            let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw launcherFailure(response?["error"] as? String ?? "CordisX operation failed")
         }
         if let warning = response["warning"] as? String { appendLog(warning) }

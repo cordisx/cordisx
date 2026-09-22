@@ -7,6 +7,7 @@ import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
 import { runAppCommand } from './app-command.js'
+import { activateOwnedHost } from './activate-owned-host.js'
 
 export interface PreparedRunCommand {
   readonly invocation: Extract<CordisXCliInvocation, { readonly action: 'launch' }>
@@ -139,7 +140,11 @@ export async function prepareCliCommand(
   const foregroundStart = parsedInvocation.action === 'start'
     && (parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground)
   if (isSupervisorCommand(parsedInvocation) && !foregroundStart) {
-    await runSupervisorCommand(parsedInvocation, runtime)
+    const ready = await runSupervisorCommand(parsedInvocation, runtime)
+    if (ready !== undefined && (parsedInvocation.action === 'start' || parsedInvocation.action === 'restart')) {
+      const activated = await activateOwnedHost(ready)
+      if (activated.warning !== undefined) (runtime.stdout ?? console.log)(`[cordisx] ${activated.warning}`)
+    }
     return
   }
   const foregroundInvocation = (parsedInvocation.action === 'run' || foregroundStart

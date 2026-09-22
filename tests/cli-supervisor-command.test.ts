@@ -116,6 +116,45 @@ describe('supervisor management commands', () => {
     ])
   })
 
+  it('publishes the owned Host identity before renderer readiness', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    const startedAt = await processStartIdentity(process.pid)
+    const phases: string[] = []
+    await runSupervisorCommand(parseCordisXCli(['start', '--json']), {
+      env: { CORDISX_HOME: root },
+      stdout: () => undefined,
+      internalSpawnSupervisor: () => {
+        void (async () => {
+          for (;;) {
+            const state = await readSupervisorState(paths)
+            if (state !== undefined) {
+              await writeSupervisorState(paths, {
+                ...state,
+                hostPid: process.pid,
+                hostProcessStartedAt: startedAt!,
+              })
+              await new Promise(resolve => setTimeout(resolve, 75))
+              await writeSupervisorState(paths, {
+                ...state,
+                phase: 'ready',
+                hostPid: process.pid,
+                hostProcessStartedAt: startedAt!,
+                cdpEndpoint: 'http://127.0.0.1:49998',
+              })
+              return
+            }
+            await new Promise(resolve => setTimeout(resolve, 5))
+          }
+        })()
+        return { pid: process.pid, unref: () => undefined }
+      },
+    }, (_ready, phase) => {
+      phases.push(phase)
+    })
+    expect(phases).toEqual(['host-launched', 'ready'])
+  })
+
   it('does not forward caller Dock metadata to an ordinary managed start', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
     const paths = supervisorPaths(root, 'codex', 'default')

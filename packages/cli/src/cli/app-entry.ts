@@ -40,6 +40,10 @@ export async function readAppLauncherMenu(runtime: AppLauncherRuntime): Promise<
 export interface AppEntryDependencies {
   readonly runSupervisor?: typeof runSupervisorCommand
   readonly activate?: (ready: ReadyLaunchResult) => Promise<ActivatedOwnedHost>
+  readonly onState?: (
+    ready: ReadyLaunchResult,
+    phase: 'host-launched' | 'ready',
+  ) => void | Promise<void>
 }
 
 export async function runAppLauncherOperation(
@@ -82,7 +86,7 @@ export async function runAppLauncherOperation(
   }
   let ready: ReadyLaunchResult | undefined
   try {
-    ready = await run({ ...invocation, createShortcut: true }, runRuntime)
+    ready = await run({ ...invocation, createShortcut: true }, runRuntime, dependencies.onState)
   } catch {
     // Launch/activation is the app's primary contract. A stale private icon
     // cache must not prevent it, and a Host that already became ready is reused.
@@ -91,7 +95,7 @@ export async function runAppLauncherOperation(
       env: runRuntime.env,
       stdout: runRuntime.stdout,
       internalShortcutSpawnCwd: runRuntime.internalShortcutSpawnCwd,
-    })
+    }, dependencies.onState)
   }
   if (!ready) throw new Error('No ready Host instance returned')
   return await (dependencies.activate ?? activateOwnedHost)(ready)
@@ -99,8 +103,22 @@ export async function runAppLauncherOperation(
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const operation = process.argv[3] as AppOperation | undefined
+  const published = new Set<string>()
   const result = await (operation
-    ? runAppLauncherOperation(process.argv[2] ?? '', operation, process.argv[4], process.argv[5])
+    ? runAppLauncherOperation(process.argv[2] ?? '', operation, process.argv[4], process.argv[5], {
+      onState: (ready, phase) => {
+        const state = ready.state
+        if (!state.hostPid || !state.hostProcessStartedAt) return
+        const key = `${phase}:${state.hostPid}:${state.hostProcessStartedAt}`
+        if (published.has(key)) return
+        published.add(key)
+        process.stdout.write(JSON.stringify({
+          event: phase,
+          hostPid: state.hostPid,
+          hostStartedAt: state.hostProcessStartedAt,
+        }) + '\n')
+      },
+    })
     : Promise.reject(new Error('Missing CordisX app operation'))).catch(error => ({
       ok: false,
       error: error instanceof Error ? error.message : 'CordisX app operation failed',

@@ -1,0 +1,130 @@
+import type { ChildProcess } from 'node:child_process'
+import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
+import {
+  prepareNativeSubmissionBootstrap,
+  type NativeSubmissionBootstrap,
+} from '../launcher/native-submission-composition.js'
+import {
+  acquireCodexProfileLaunchLease,
+  assertLoopbackPortAvailable,
+  findFreeLoopbackPort,
+  type IsolatedCodexProfile,
+  launchCodex,
+  terminateIsolatedCodex,
+} from '../launcher/process.js'
+import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
+import type { PreparedRunCommand } from './run-command-dispatch.js'
+import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
+import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
+
+export interface ProductionHostBootstrap {
+  readonly plan?: ResolvedLaunchPlan
+  readonly debugPort?: number
+  readonly profile?: IsolatedCodexProfile
+  readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
+  readonly nativeSubmissionBootstrap?: NativeSubmissionBootstrap
+  readonly nativeSubmissionUnavailable: boolean
+  readonly prelaunchedHost?: Readonly<{ child: ChildProcess; inspectorUrl?: Promise<string> }>
+}
+
+/** Resolve shared CLI/App launch inputs and put the native window ahead of compatibility analysis. */
+export async function prepareProductionHostBootstrap(
+  prepared: PreparedRunCommand,
+  runtime: CordisXCliRuntime,
+  input: Readonly<{
+    prelaunch: boolean
+    dockInspector: boolean
+    markHostLaunched(pid: number, inspectorUrl?: Promise<string>): void | Promise<void>
+  }>,
+): Promise<ProductionHostBootstrap> {
+  const { invocation, selection, adapter, stdout, environment, configPath } = prepared
+  const resolved = invocation.options.attach
+    ? undefined
+    : await adapter.resolveLaunchPlan({
+      cordisxHomeDir: rootFromConfigPath(configPath),
+      profileId: selection.profileId,
+      dataMode: selection.dataMode,
+      ...(invocation.options.executable === undefined ? {} : { executable: invocation.options.executable }),
+      ...(invocation.options.profileDir === undefined ? {} : { chromiumProfileDir: invocation.options.profileDir }),
+    })
+  const plan = resolved === undefined
+    ? undefined
+    : invocation.options.system
+    ? {
+      ...resolved,
+      chromiumProfile: { mode: 'system' as const },
+      isolatedDataRoots: resolved.isolatedDataRoots.filter(root => root.name !== 'Chromium profile'),
+    }
+    : resolved
+  const debugPort = invocation.options.attach || invocation.options.dryRun
+    ? undefined
+    : invocation.options.debugPort ?? await findFreeLoopbackPort()
+  if (debugPort !== undefined && invocation.options.debugPort !== undefined) {
+    await assertLoopbackPortAvailable(debugPort)
+  }
+  const chromiumProfile = plan?.chromiumProfile
+  const profile = chromiumProfile?.mode === 'independent'
+    ? {
+      userDataDir: chromiumProfile.path,
+      cleanupOwned: plan!.isolatedDataRoots.some(root =>
+        root.name === 'Chromium profile' && root.path === chromiumProfile.path && root.managed
+      ),
+    }
+    : undefined
+  if (!input.prelaunch || plan === undefined || debugPort === undefined || invocation.options.dryRun) {
+    return {
+      ...(plan === undefined ? {} : { plan }),
+      ...(debugPort === undefined ? {} : { debugPort }),
+      ...(profile === undefined ? {} : { profile }),
+      nativeSubmissionUnavailable: false,
+    }
+  }
+  let profileLease: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>> | undefined
+  let nativeSubmissionBootstrap: NativeSubmissionBootstrap | undefined
+  let child: ChildProcess | undefined
+  try {
+    profileLease = profile === undefined ? undefined : await acquireCodexProfileLaunchLease(profile.userDataDir)
+    await adapter.prepareLaunch(plan)
+    let nativeSubmissionUnavailable = false
+    if (shouldEnableNativeSubmission({
+      platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
+      adapterId: adapter.id,
+      preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
+    })) {
+      try {
+        nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable)
+      } catch (error) {
+        nativeSubmissionUnavailable = true
+        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
+      }
+    }
+    const mainInspector = input.dockInspector && await supportsOwnedMainInspector(plan.executable)
+    stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
+    child = launchCodex(
+      plan.executable,
+      debugPort,
+      invocation.hostArgs,
+      profile,
+      invocation.options.onlineDevtools,
+      { ...plan.environment, ...nativeSubmissionBootstrap?.environment },
+      mainInspector,
+    )
+    if (child.pid === undefined) throw new Error('launched Host exposed no PID')
+    const inspectorUrl = mainInspector ? captureMainInspectorUrl(child) : undefined
+    await input.markHostLaunched(child.pid, inspectorUrl)
+    return {
+      plan,
+      debugPort,
+      ...(profile === undefined ? {} : { profile }),
+      ...(profileLease === undefined ? {} : { profileLease }),
+      ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
+      nativeSubmissionUnavailable,
+      prelaunchedHost: { child, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
+    }
+  } catch (error) {
+    if (child !== undefined) await terminateIsolatedCodex(child, profile).catch(() => undefined)
+    await nativeSubmissionBootstrap?.close().catch(() => undefined)
+    await profileLease?.release().catch(() => undefined)
+    throw error
+  }
+}

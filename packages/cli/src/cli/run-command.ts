@@ -8,8 +8,6 @@ import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
-import type { ChildProcess } from 'node:child_process'
-import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
   ensureCordisXHomeDirectory,
   type HomeConfigIconThemePreference,
@@ -34,10 +32,7 @@ import {
 } from '../launcher/config.js'
 import {
   acquireCodexProfileLaunchLease,
-  assertLoopbackPortAvailable,
-  findFreeLoopbackPort,
   type IsolatedCodexProfile,
-  launchCodex,
   prepareIsolatedCodexProfile,
   resolveCodexExecutable,
   terminateIsolatedCodex,
@@ -150,6 +145,7 @@ import { shouldEnableNativeSubmission } from './native-submission-launch-policy.
 import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { processStartIdentity } from './supervisor-state.js'
+import { prepareProductionHostBootstrap } from './production-host-bootstrap.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -215,6 +211,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   if (prepared === undefined) return
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const supervisorRuntime = await createSupervisorRuntime(environment)
+  const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
+  const bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
+    prelaunch: runHost === runInjectedHost,
+    dockInspector: supervisorRuntime.dockInspector,
+    markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
+  })
+  const { plan, debugPort, profile } = bootstrap
 
   const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
     homeDir: rootFromConfigPath(configPath),
@@ -230,8 +233,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
+  const nativeSubmissionBootstrap = bootstrap.nativeSubmissionBootstrap
+  const nativeSubmissionUnavailable = bootstrap.nativeSubmissionUnavailable
   let rendererComposition: RendererComposition | undefined
   let productionPluginManagement: ProductionPluginManagementComposition | undefined
+  let profileLease = bootstrap.profileLease
+  const prelaunchedHost = bootstrap.prelaunchedHost
+  let profileLeaseHandedOff = false
+  let prelaunchedHostHandedOff = false
   try {
     pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
     const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
@@ -569,7 +578,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         stdout(`[cordisx] failed to mark CLIProxy startup configuration applied: ${String(error)}`)
       }
     }
-    const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
     const launcherCliProxy = cliProxyConfigured
       ? await (async () => {
         const entry = bundledPluginEntry('plugin-cli-proxy-api')
@@ -794,20 +802,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       return
     }
 
-    const resolvedPlan = await adapter.resolveLaunchPlan({
-      cordisxHomeDir: rootFromConfigPath(configPath),
-      profileId: selection.profileId,
-      dataMode: selection.dataMode,
-      ...(invocation.options.executable === undefined ? {} : { executable: invocation.options.executable }),
-      ...(invocation.options.profileDir === undefined ? {} : { chromiumProfileDir: invocation.options.profileDir }),
-    })
-    const plan: ResolvedLaunchPlan = invocation.options.system
-      ? {
-        ...resolvedPlan,
-        chromiumProfile: { mode: 'system' },
-        isolatedDataRoots: resolvedPlan.isolatedDataRoots.filter(root => root.name !== 'Chromium profile'),
-      }
-      : resolvedPlan
+    if (plan === undefined) throw new Error('host launch plan was not resolved')
     if (selection.created) stdout(`[cordisx] created ${appId}/${selection.profileId} (${selection.profile.dataMode})`)
     printPlan(plan, stdout, invocation.options.dryRun ? 'ready' : 'launching')
     if (invocation.options.dryRun) {
@@ -819,25 +814,15 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
       return
     }
-    const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
-    if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
-    const chromiumProfile = plan.chromiumProfile
-    const profile = chromiumProfile.mode === 'independent'
-      ? {
-        userDataDir: chromiumProfile.path,
-        cleanupOwned: plan.isolatedDataRoots.some(root =>
-          root.name === 'Chromium profile'
-          && root.path === chromiumProfile.path && root.managed
-        ),
-      }
-      : undefined
-    const profileLease = profile === undefined || runHost !== runInjectedHost
-      ? undefined
-      : await acquireCodexProfileLaunchLease(profile.userDataDir)
-    let profileLeaseHandedOff = false
+    if (debugPort === undefined) throw new Error('loopback CDP port was not resolved')
+    if (profile !== undefined && profileLease === undefined && runHost === runInjectedHost) {
+      profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir)
+    }
     try {
-      await adapter.prepareLaunch(plan)
+      if (prelaunchedHost === undefined) await adapter.prepareLaunch(plan)
       if (
+        !nativeSubmissionUnavailable
+        &&
         shouldEnableNativeSubmission({
           platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
           adapterId: adapter.id,
@@ -845,10 +830,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         })
       ) {
         try {
-          nativeSubmission =
-            await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
+          nativeSubmission = nativeSubmissionBootstrap === undefined
+            ? await (runtime.internalCreateNativeSubmissionComposition ?? createNativeSubmissionComposition)(
               managedServiceActivation,
               plan.executable,
+              codexHome({ ...environment, ...plan.environment }),
+              selection.profile.defaultModelProvider === undefined
+                ? {}
+                : { defaultProviderId: selection.profile.defaultModelProvider },
+            )
+            : await nativeSubmissionBootstrap.complete(
+              managedServiceActivation,
               codexHome({ ...environment, ...plan.environment }),
               selection.profile.defaultModelProvider === undefined
                 ? {}
@@ -934,6 +926,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         }),
         publisherGrant,
         executable: plan.executable,
+        ...(prelaunchedHost === undefined ? {} : { prelaunchedHost }),
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
@@ -951,20 +944,25 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         stdout,
       }
       profileLeaseHandedOff = profileLease !== undefined
+      prelaunchedHostHandedOff = prelaunchedHost !== undefined
       await runHost(runHostInput)
     } finally {
       ownerDocuments.walletSpend?.dispose()
       await ownerDocuments.http.dispose()
-      if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release()
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
       await closeProviderFleet()
     }
   } finally {
+    if (prelaunchedHost !== undefined && !prelaunchedHostHandedOff) {
+      await terminateIsolatedCodex(prelaunchedHost.child, profile).catch(() => undefined)
+    }
+    if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release().catch(() => undefined)
     await productionPluginManagement?.close().catch(() => undefined)
     await rendererComposition?.close().catch(() => undefined)
     await supervisorRuntime.close()
     await nativeSubmission?.close().catch(() => undefined)
+    await nativeSubmissionBootstrap?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
     await pluginGenerationArtifactServer?.close()
     await certifiedPermissionAuthority?.dispose()

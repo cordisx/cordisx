@@ -181,10 +181,16 @@ async function terminateOwnedGroups(
 async function waitForState(
   paths: ReturnType<typeof supervisorPaths>,
   timeoutMs: number,
+  onHostLaunched?: (state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>) => void | Promise<void>,
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
   const deadline = Date.now() + timeoutMs
+  let hostPublished = false
   while (Date.now() < deadline) {
     const state = await readSupervisorState(paths)
+    if (!hostPublished && state?.hostPid !== undefined && state.hostProcessStartedAt !== undefined) {
+      hostPublished = true
+      await onHostLaunched?.(state)
+    }
     if (state?.phase === 'ready') return state
     if (state?.phase === 'failed') {
       throw new Error(state.failure ?? 'CordisX background supervisor failed before readiness')
@@ -356,6 +362,7 @@ async function finishReady(
 export async function runSupervisorCommand(
   invocation: CordisXCliInvocation,
   runtime: CordisXCliRuntime,
+  onState?: (ready: ReadyLaunchResult, phase: 'host-launched' | 'ready') => void | Promise<void>,
 ): Promise<ReadyLaunchResult | undefined> {
   if (!isManaged(invocation)) throw new Error('not a supervisor command')
   if (invocation.createShortcut) await preflightShortcut(invocation, runtime.cwd ?? process.cwd())
@@ -468,9 +475,23 @@ export async function runSupervisorCommand(
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
       }
       await releaseOperation()
-      const ready = state.phase === 'ready' ? state : await waitForState(paths, readinessTimeout(runtime))
+      if (
+        state.phase === 'ready'
+        && state.hostPid !== undefined && state.hostProcessStartedAt !== undefined
+      ) {
+        await onState?.({ state, target }, 'host-launched')
+      }
+      const ready = state.phase === 'ready'
+        ? state
+        : await waitForState(
+          paths,
+          readinessTimeout(runtime),
+          current => onState?.({ state: current, target }, 'host-launched'),
+        )
       if (ready === undefined) throw new Error('background supervisor exited before readiness')
-      return await finishReady(invocation, runtime, { state: ready, target })
+      const result = { state: ready, target }
+      await onState?.(result, 'ready')
+      return await finishReady(invocation, runtime, result)
     }
     const log = await open(paths.log, 'a', 0o600)
     await chmod(paths.log, 0o600)
@@ -528,7 +549,11 @@ export async function runSupervisorCommand(
     await releaseOperation()
     let ready: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>
     try {
-      const observedReady = await waitForState(paths, readinessTimeout(runtime))
+      const observedReady = await waitForState(
+        paths,
+        readinessTimeout(runtime),
+        current => onState?.({ state: current, target }, 'host-launched'),
+      )
       if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
       ready = observedReady
     } catch (error) {
@@ -552,7 +577,9 @@ export async function runSupervisorCommand(
       }
       throw error
     }
-    return await finishReady(invocation, runtime, { state: ready, target })
+    const result = { state: ready, target }
+    await onState?.(result, 'ready')
+    return await finishReady(invocation, runtime, result)
   } finally {
     await releaseOperation()
   }

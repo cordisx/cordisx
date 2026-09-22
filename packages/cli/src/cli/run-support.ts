@@ -275,6 +275,11 @@ export function shouldSkipBuiltinSkillDeployment(environment: NodeJS.ProcessEnv)
 }
 
 export function waitForExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return child.exitCode === 0 || child.signalCode !== null
+      ? Promise.resolve()
+      : Promise.reject(new Error(`host exited with status ${String(child.exitCode)}`))
+  }
   return new Promise((resolve, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => {
@@ -285,7 +290,7 @@ export function waitForExit(child: ChildProcess): Promise<void> {
 }
 
 /** Capture only the ephemeral loopback inspector address from our own Host stderr. */
-function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
+export function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
   const stream = child.stderr
   if (!stream) return Promise.reject(new Error('Owned Host inspector stderr unavailable'))
   const operation = new Promise<string>((resolve, reject) => {
@@ -497,6 +502,10 @@ export async function runInjectedHost(input: {
   }>
   readonly managedServiceUI?: WatchInjectionOptions['managedServiceUI']
   readonly executable?: string
+  readonly prelaunchedHost?: Readonly<{
+    child: ChildProcess
+    inspectorUrl?: Promise<string>
+  }>
   readonly debugPort: number
   readonly hostArgs: readonly string[]
   readonly launcher: CordisXLauncherOptions
@@ -574,20 +583,25 @@ export async function runInjectedHost(input: {
     if (input.profile !== undefined && profileLease === undefined) {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir)
     }
-    const mainInspector = input.dockInspector === true && await supportsOwnedMainInspector(input.executable)
-    input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
-    launched = launchCodex(
-      input.executable,
-      input.debugPort,
-      input.hostArgs,
-      input.profile,
-      input.launcher.onlineDevtools,
-      input.environment,
-      mainInspector,
-    )
-    if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
-    const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
-    await input.onHostLaunched?.(launched.pid, inspectorUrl)
+    if (input.prelaunchedHost === undefined) {
+      const mainInspector = input.dockInspector === true && await supportsOwnedMainInspector(input.executable)
+      input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
+      launched = launchCodex(
+        input.executable,
+        input.debugPort,
+        input.hostArgs,
+        input.profile,
+        input.launcher.onlineDevtools,
+        input.environment,
+        mainInspector,
+      )
+      if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
+      const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
+      await input.onHostLaunched?.(launched.pid, inspectorUrl)
+    } else {
+      launched = input.prelaunchedHost.child
+      if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
+    }
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),

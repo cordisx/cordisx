@@ -176,14 +176,23 @@ export async function buildRendererComposition(
     return await hostGraphs.build(nextConfig, nextOptions)
   }
   const { built, newDocumentBuild } = await hostGraphs.transaction(async () => {
-    const built = await buildProductionSource(config, bundleOptions)
-    const newDocumentBuild = options.certifiedPermissionChannelToken === undefined
-      ? undefined
-      : await buildProductionSource(config, {
-        ...bundleOptions,
-        certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
-      })
-    return { built, newDocumentBuild }
+    const builds = await Promise.allSettled([
+      buildProductionSource(config, bundleOptions),
+      ...(options.certifiedPermissionChannelToken === undefined
+        ? []
+        : [buildProductionSource(config, {
+          ...bundleOptions,
+          certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+        })]),
+    ])
+    const rejected = builds.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (rejected !== undefined) throw rejected.reason
+    return {
+      built: (builds[0] as PromiseFulfilledResult<HostGenerationGraphSource>).value,
+      ...(builds[1] === undefined
+        ? {}
+        : { newDocumentBuild: (builds[1] as PromiseFulfilledResult<HostGenerationGraphSource>).value }),
+    }
   })
   const source = built.source
   const newDocumentSource = newDocumentBuild?.source
@@ -248,14 +257,23 @@ export async function buildRendererComposition(
         initialRegistryEpoch,
       }
       const { rebuilt, rebuiltNewDocument } = await hostGraphs.transaction(async () => {
-        const rebuilt = await buildProductionSource(nextConfig, rebuildOptions)
-        const rebuiltNewDocument = options.certifiedPermissionChannelToken === undefined
-          ? undefined
-          : await buildProductionSource(nextConfig, {
-            ...rebuildOptions,
-            certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
-          })
-        return { rebuilt, rebuiltNewDocument }
+        const builds = await Promise.allSettled([
+          buildProductionSource(nextConfig, rebuildOptions),
+          ...(options.certifiedPermissionChannelToken === undefined
+            ? []
+            : [buildProductionSource(nextConfig, {
+              ...rebuildOptions,
+              certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+            })]),
+        ])
+        const rejected = builds.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+        if (rejected !== undefined) throw rejected.reason
+        return {
+          rebuilt: (builds[0] as PromiseFulfilledResult<HostGenerationGraphSource>).value,
+          ...(builds[1] === undefined
+            ? {}
+            : { rebuiltNewDocument: (builds[1] as PromiseFulfilledResult<HostGenerationGraphSource>).value }),
+        }
       })
       return {
         source: rebuilt.source,

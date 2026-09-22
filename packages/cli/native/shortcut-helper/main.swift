@@ -135,6 +135,13 @@ func tool(_ request: [String: Any]) throws -> [String: Any] {
         guard started == (request["startedAt"] as? String), let app = NSRunningApplication(processIdentifier: pid) else {
             throw failure("Host process identity changed")
         }
+        if #available(macOS 14.0, *) {
+            let helper = NSRunningApplication.current
+            NSApplication.shared.setActivationPolicy(.accessory)
+            NSApplication.shared.activate()
+            NSApplication.shared.yieldActivation(to: app)
+            return ["activated": app.activate(from: helper, options: [.activateAllWindows])]
+        }
         return ["activated": app.activate(options: [.activateAllWindows])]
     }
     throw failure("Unknown helper operation")
