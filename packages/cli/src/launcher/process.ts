@@ -464,6 +464,19 @@ export interface HiddenCodexLaunch {
   readonly inspectorUrl?: Promise<string>
 }
 
+export class HiddenHostIdentityUnconfirmedError extends Error {
+  readonly retainProfileLease = true
+
+  constructor() {
+    super('Hidden Host identity was not confirmed; the profile launch lease must be retained')
+    this.name = 'HiddenHostIdentityUnconfirmedError'
+  }
+}
+
+export function retainProfileLeaseAfterHiddenHostFailure(error: unknown): boolean {
+  return error instanceof HiddenHostIdentityUnconfirmedError && error.retainProfileLease
+}
+
 export type HostLaunchIdentityObserver = (
   pid: number,
   inspectorUrl?: Promise<string>,
@@ -565,9 +578,11 @@ export async function launchCodexHidden(
   }
   if (hostPid === undefined) {
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
-      process.kill(-child.pid, 'SIGTERM')
+      try {
+        process.kill(-child.pid, 'SIGTERM')
+      } catch { /* Identity remains unresolved, so the profile lease still fails closed. */ }
     }
-    throw new Error('Hidden Host launch did not publish an exact process identity')
+    throw new HiddenHostIdentityUnconfirmedError()
   }
   return {
     child,

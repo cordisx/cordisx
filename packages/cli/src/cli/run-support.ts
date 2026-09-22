@@ -52,6 +52,7 @@ import {
   launchCodexHidden,
   prepareIsolatedCodexProfile,
   resolveCodexExecutable,
+  retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
@@ -552,6 +553,7 @@ export async function runInjectedHost(input: {
   let launched: ChildProcess | undefined
   let profileLease = input.profileLease
   let primaryError: unknown
+  let retainProfileLease = false
   try {
     if (input.launcher.attach) {
       await Promise.race([waitForAbort(controller.signal), watcher])
@@ -607,6 +609,10 @@ export async function runInjectedHost(input: {
     ])
   } catch (error) {
     primaryError = error
+    retainProfileLease = retainProfileLeaseAfterHiddenHostFailure(error)
+    if (retainProfileLease) {
+      input.stdout('[cordisx] hidden Host identity is unresolved; profile launch lease retained to block unsafe retry')
+    }
     throw error
   } finally {
     controller.abort()
@@ -622,7 +628,7 @@ export async function runInjectedHost(input: {
         : { terminateHost: async () => await terminateIsolatedCodex(launchedHost, input.profile) }),
     })
     const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
-    const leaseCleanup = hostTermination?.status === 'rejected'
+    const leaseCleanup = hostTermination?.status === 'rejected' || retainProfileLease
       ? []
       : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])
     process.removeListener('SIGINT', stop)

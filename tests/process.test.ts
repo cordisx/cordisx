@@ -11,12 +11,14 @@ import {
   codexLaunchArgs,
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
+  HiddenHostIdentityUnconfirmedError,
   hiddenHostPidFromProcessList,
   launchCodex,
   ONLINE_DEVTOOLS_ORIGIN,
   prepareIsolatedCodexProfile,
   projectProfileKey,
   resolveCodexExecutable,
+  retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../packages/cli/src/launcher/process.js'
 
@@ -72,6 +74,11 @@ describe('isolated Codex process support', () => {
     ].join('\n')
     expect(hiddenHostPidFromProcessList(processList, executable, 6000, 7000)).toBe(102)
     expect(hiddenHostPidFromProcessList(processList, executable, 600, 700)).toBeUndefined()
+  })
+
+  it('retains the profile lease only when hidden Host identity is unresolved', () => {
+    expect(retainProfileLeaseAfterHiddenHostFailure(new HiddenHostIdentityUnconfirmedError())).toBe(true)
+    expect(retainProfileLeaseAfterHiddenHostFailure(new Error('ordinary launch failure'))).toBe(false)
   })
 
   it('does not derive a Windows executable from cwd when LOCALAPPDATA is missing or relative', () => {
