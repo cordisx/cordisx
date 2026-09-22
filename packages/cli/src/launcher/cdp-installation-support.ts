@@ -1,3 +1,9 @@
+import { restoreViteLoopbackPermission, type ViteLoopbackPermissionCoordinator } from './loopback-permissions.js'
+export {
+  enableViteLoopbackPermission,
+  restoreViteLoopbackPermission,
+  ViteLoopbackPermissionCoordinator,
+} from './loopback-permissions.js'
 import { publishPluginHttpEnvelope } from './plugin-http-publication.js'
 import { CdpCertifiedPermissionChannel } from './certified-permission-cdp.js'
 import {
@@ -311,116 +317,6 @@ export interface InstalledScript {
   readonly managedServiceUIController?: AbortController
   readonly removeManagedServiceUIBindingListener?: () => void
   readonly managedServiceUIBindingInstalled: boolean
-}
-
-const VITE_LOOPBACK_PERMISSIONS = ['loopback-network', 'local-network-access'] as const
-
-function targetOrigin(target: CdpTarget): string {
-  const match = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/iu.exec(target.url)
-  if (match === null) throw new Error(`target ${target.id} has no permission origin`)
-  return match[0]
-}
-
-export async function enableViteLoopbackPermission(
-  session: CdpSession,
-  target: CdpTarget,
-): Promise<{ readonly name: string; readonly origin: string } | undefined> {
-  const origin = targetOrigin(target)
-  const failures: string[] = []
-  for (const name of VITE_LOOPBACK_PERMISSIONS) {
-    try {
-      await session.send('Browser.setPermission', {
-        permission: { name },
-        setting: 'granted',
-        origin,
-        embeddedOrigin: origin,
-      })
-      return { name, origin }
-    } catch (error) {
-      failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  const version: Record<string, unknown> = await session.send('Browser.getVersion').catch(() => ({}))
-  const product = typeof version.product === 'string' ? version.product : ''
-  const major = Number(/\/(\d+)/u.exec(product)?.[1])
-  if (Number.isFinite(major) && major < 142) return undefined
-  throw new Error(`CordisX could not grant renderer loopback access (${failures.join('; ')})`)
-}
-
-export async function restoreViteLoopbackPermission(
-  session: CdpSession,
-  permission: { readonly name: string; readonly origin: string } | undefined,
-): Promise<void> {
-  if (permission === undefined) return
-  await session.send('Browser.setPermission', {
-    permission: { name: permission.name },
-    setting: 'prompt',
-    origin: permission.origin,
-    embeddedOrigin: permission.origin,
-  })
-}
-
-async function connectBrowserCdpSession(port: number): Promise<CdpSession> {
-  const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })
-  if (!response.ok) throw new Error(`CDP browser version returned HTTP ${response.status}`)
-  const value = await response.json() as { readonly webSocketDebuggerUrl?: unknown }
-  if (typeof value.webSocketDebuggerUrl !== 'string') throw new Error('CDP browser endpoint is unavailable')
-  return await CdpSession.connect(value.webSocketDebuggerUrl)
-}
-
-export class ViteLoopbackPermissionCoordinator {
-  readonly #origins = new Map<string, {
-    readonly permission: { readonly name: string; readonly origin: string }
-    references: number
-  }>()
-
-  constructor(private readonly port: number) {}
-
-  async acquire(
-    session: CdpSession,
-    target: CdpTarget,
-  ): Promise<{ readonly name: string; readonly origin: string } | undefined> {
-    const origin = targetOrigin(target)
-    const current = this.#origins.get(origin)
-    if (current !== undefined) {
-      current.references += 1
-      return current.permission
-    }
-    const permission = await enableViteLoopbackPermission(session, target)
-    if (permission !== undefined) this.#origins.set(origin, { permission, references: 1 })
-    return permission
-  }
-
-  async release(
-    session: CdpSession,
-    permission: { readonly name: string; readonly origin: string } | undefined,
-  ): Promise<void> {
-    if (permission === undefined) return
-    const current = this.#origins.get(permission.origin)
-    if (current === undefined) return
-    if (current.references === 0) return
-    current.references -= 1
-    if (current.references > 0) return
-    try {
-      await restoreViteLoopbackPermission(session, current.permission)
-    } catch (targetError) {
-      let browser: CdpSession | undefined
-      try {
-        browser = await connectBrowserCdpSession(this.port)
-        await restoreViteLoopbackPermission(browser, current.permission)
-      } catch (browserError) {
-        // Retain the zero-reference grant so a later live target can restore it.
-        throw new AggregateError(
-          [targetError, browserError],
-          `CordisX could not restore Vite loopback permission for ${permission.origin}`,
-        )
-      } finally {
-        browser?.close()
-      }
-    }
-    this.#origins.delete(permission.origin)
-  }
 }
 
 export async function waitForViteBootstrap(
