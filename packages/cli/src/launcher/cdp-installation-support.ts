@@ -880,24 +880,31 @@ export async function uninstall(
   await installed.certifiedPermissionChannel?.dispose()
   try {
     const strictProductionCleanup = installed.loopbackModules === true && installed.viteDevelopment !== true
-    const cleanupFailures: unknown[] = nativeCleanup.flatMap(result =>
-      result.status === 'rejected' ? [result.reason] : []
+    const cleanupFailure = (stage: string, cause: unknown): Error =>
+      new Error(`${stage} (session ${installed.session.isClosed() ? 'closed' : 'open'})`, { cause })
+    const cleanupFailures: Error[] = nativeCleanup.flatMap((result, index) =>
+      result.status === 'rejected'
+        ? [cleanupFailure(index === 0 ? 'native-channel' : 'native-interception', result.reason)]
+        : []
     )
-    const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
+    const attemptCleanup = async (stage: string, operation: Promise<unknown>): Promise<boolean> => {
       try {
         await operation
         return true
       } catch (error) {
-        if (strictProductionCleanup) cleanupFailures.push(error)
+        if (strictProductionCleanup) cleanupFailures.push(cleanupFailure(stage, error))
         return false
       }
     }
     if (installed.viteDevelopment) {
-      await attemptCleanup(installed.session.send('Runtime.evaluate', {
-        expression: VITE_DISPOSE_EXPRESSION,
-        awaitPromise: true,
-        allowUnsafeEvalBlockedByCSP: true,
-      }))
+      await attemptCleanup(
+        'vite-dispose',
+        installed.session.send('Runtime.evaluate', {
+          expression: VITE_DISPOSE_EXPRESSION,
+          awaitPromise: true,
+          allowUnsafeEvalBlockedByCSP: true,
+        }),
+      )
     }
     const rendererCleanup = await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
@@ -949,24 +956,40 @@ export async function uninstall(
     const rendererGone = installed.session.isClosed()
     if (strictProductionCleanup && !rendererGone) {
       cleanupFailures.push(
-        ...rendererCleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : []),
+        ...rendererCleanup.flatMap((result, index) =>
+          result.status === 'rejected'
+            ? [cleanupFailure(
+              index === 0 ? 'future-script-removal' : index === 1 ? 'renderer-dispose' : 'binding-removal',
+              result.reason,
+            )]
+            : []
+        ),
       )
     }
     const scriptRemoved = rendererGone || rendererCleanup[0]?.status === 'fulfilled'
     if (installed.loopbackModules) {
       const cspRestored = rendererGone
-        || await attemptCleanup(installed.session.send('Page.setBypassCSP', { enabled: false }))
+        || await attemptCleanup('csp-restore', installed.session.send('Page.setBypassCSP', { enabled: false }))
       if (viteLoopbackPermissions === undefined) {
-        await attemptCleanup(restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission))
+        await attemptCleanup(
+          'loopback-permission-restore',
+          restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission),
+        )
       } else {
-        await attemptCleanup(viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission))
+        await attemptCleanup(
+          'loopback-permission-restore',
+          viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission),
+        )
       }
       if (!rendererGone && !installed.viteDevelopment && scriptRemoved && cspRestored) {
-        await attemptCleanup(installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
+        await attemptCleanup('clean-reload', installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
       }
     }
     if (cleanupFailures.length > 0) {
-      throw new AggregateError(cleanupFailures, 'CordisX production renderer cleanup was incomplete')
+      throw new AggregateError(
+        cleanupFailures,
+        `CordisX production renderer cleanup was incomplete: ${cleanupFailures.map(error => error.message).join('; ')}`,
+      )
     }
   } finally {
     installed.session.close()

@@ -62,3 +62,50 @@ it('refreshes Dock only for the owning token and passes a record path, never cod
   expect(await requestDockRefresh(socket, token, '/private/entry.json')).toBe(true)
   expect(records).toEqual(['/private/entry.json'])
 })
+
+it('allows native icon preparation to exceed the ordinary five-second control deadline', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-dock-slow-'))
+  cleanups.push(() => rm(root, { recursive: true }))
+  const socket = path.join(root, 'c.sock'), token = 'c'.repeat(64)
+  const server = await startSupervisorControlServer({
+    socketPath: socket,
+    token,
+    stop: () => {},
+    refreshDock: async () => {
+      await new Promise(resolve => setTimeout(resolve, 5_100))
+      return true
+    },
+  })
+  cleanups.push(() => server.close())
+  expect(await requestDockRefresh(socket, token, '/private/entry.json')).toBe(true)
+}, 10_000)
+
+it('cancels background icon preparation immediately when the supervisor closes', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-dock-cancel-'))
+  cleanups.push(() => rm(root, { recursive: true }))
+  const socket = path.join(root, 'c.sock'), token = 'd'.repeat(64)
+  let entered!: () => void
+  const preparing = new Promise<void>(resolve => {
+    entered = resolve
+  })
+  let aborted = false
+  const server = await startSupervisorControlServer({
+    socketPath: socket,
+    token,
+    stop: () => {},
+    refreshDock: async (_record, signal) => {
+      entered()
+      return await new Promise<boolean>(resolve => {
+        signal?.addEventListener('abort', () => {
+          aborted = true
+          resolve(false)
+        }, { once: true })
+      })
+    },
+  })
+  const pending = requestDockRefresh(socket, token, '/private/entry.json')
+  await preparing
+  await server.close()
+  expect(await pending).toBe(false)
+  expect(aborted).toBe(true)
+}, 2_000)

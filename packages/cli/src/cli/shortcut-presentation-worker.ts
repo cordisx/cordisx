@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { CordisXManagedInvocation } from './parse.js'
 import { requestDockRefresh, requestShortcutPresentation } from './supervisor-control.js'
-import { readSupervisorState, type SupervisorPaths } from './supervisor-state.js'
+import { hasMatchingProcessIdentity, readSupervisorState, type SupervisorPaths } from './supervisor-state.js'
 import { createShortcut, reuseShortcut } from '../shortcuts/create.js'
 import type { ShortcutLaunchIdentity, ShortcutOutputOptions } from '../shortcuts/model.js'
 import { privateDirectory, readPrivateJson, writePrivateJson } from '../shortcuts/store.js'
@@ -36,12 +36,18 @@ function failureMessage(error: unknown): string {
 
 async function currentGeneration(job: ShortcutPresentationJob): Promise<boolean> {
   const state = await readSupervisorState(job.paths)
-  return state?.phase === 'ready'
+  const matches = state?.phase === 'ready'
     && state.instanceToken === job.instanceToken
     && state.pid === job.launchIdentity.supervisorPid
     && state.processStartedAt === job.launchIdentity.supervisorStartedAt
     && state.hostPid === job.launchIdentity.hostPid
     && state.hostProcessStartedAt === job.launchIdentity.hostStartedAt
+  if (!matches) return false
+  const identities = await Promise.all([
+    hasMatchingProcessIdentity(job.launchIdentity.supervisorPid, job.launchIdentity.supervisorStartedAt),
+    hasMatchingProcessIdentity(job.launchIdentity.hostPid, job.launchIdentity.hostStartedAt),
+  ])
+  return identities.every(Boolean)
 }
 
 export async function updateShortcutPresentation(job: ShortcutPresentationJob): Promise<void> {
@@ -81,6 +87,9 @@ export async function updateShortcutPresentation(job: ShortcutPresentationJob): 
   }
   if (!await currentGeneration(job)) return
   if (!await requestDockRefresh(job.paths.socket, job.instanceToken, job.recordPath)) {
+    // Exiting while detached presentation work is in flight is normal. Keep a
+    // rejection visible only while the exact requesting generation is alive.
+    if (!await currentGeneration(job)) return
     throw new Error('Dock icon refresh was rejected')
   }
 }

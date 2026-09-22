@@ -486,7 +486,7 @@ describe('native Vite development transport', () => {
     try {
       await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
       controller.abort()
-      await expect(watching).rejects.toThrow('CordisX renderer cleanup failed')
+      await expect(watching).rejects.toThrow('renderer-dispose (session open)')
     } finally {
       controller.abort()
       await watching.catch(() => undefined)

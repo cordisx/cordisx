@@ -38,10 +38,11 @@ export async function requireStartupGateHelper(): Promise<void> {
     throw new Error('This CordisX build has no macOS startup gate helper; build the native helper first')
   })
 }
-export async function nativeOperation<T>(request: Record<string, unknown>): Promise<T> {
+export async function nativeOperation<T>(request: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
   await requireShortcutHelper()
   return await new Promise<T>((resolve, reject) => {
-    const child = spawn(shortcutHelper, ['--tool'], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(shortcutHelper, ['--tool'], { stdio: ['pipe', 'pipe', 'pipe'], signal })
     let output = '', error = ''
     const timer = setTimeout(() => {
       child.kill()
@@ -76,6 +77,6 @@ export interface BundleInspection {
   entryId: string
   recordPath: string
 }
-export async function inspectBundle(path: string): Promise<BundleInspection> {
-  return nativeOperation({ operation: 'inspect', path })
+export async function inspectBundle(path: string, signal?: AbortSignal): Promise<BundleInspection> {
+  return nativeOperation({ operation: 'inspect', path }, signal)
 }

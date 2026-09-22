@@ -3,11 +3,12 @@
   --startup-text: #202124;
   --startup-muted: #65676b;
   color-scheme: light dark;
-  background: var(--startup-surface);
+  background: transparent;
   color: var(--startup-text);
   font: 15px/1.6 -apple-system, BlinkMacSystemFont, sans-serif;
 }
 html, body {
+  background: transparent;
   width: 100%;
   height: 100%;
   margin: 0;

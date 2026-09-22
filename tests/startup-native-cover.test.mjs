@@ -26,13 +26,19 @@ const ready = receipt => ({ receipt, hostUsable: true, cordisxReady: true, authe
 
 test('explicit login usability releases input without claiming authentication', async () => {
   const dom = await documentFixture()
+  const w = dom.window
   try {
     const api = dom.window.__cordisxStartupDocument
     const receipt = api.snapshot().receipt
+    const dialog = w.document.querySelector('dialog')
+    const backdrop = [...w.document.querySelectorAll('style')].find(style => style.textContent.includes('::backdrop'))
+    assert.equal(dialog.style.background, 'transparent')
+    assert.equal(backdrop.textContent, `#${dialog.id}::backdrop { background: transparent; }`)
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false }), false)
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false, loginUsable: true }), true)
     assert.equal(api.snapshot().phase, 'released')
     assert.equal(dom.window.document.querySelector('dialog'), null)
+    assert.equal(backdrop.isConnected, false)
   } finally {
     dom.window.close()
   }
@@ -53,6 +59,7 @@ test('cancellation retires the observer, modal and input listeners without ready
     assert.equal(clicks, 1)
     assert.equal(api.snapshot().phase, 'retired')
     assert.equal(w.document.querySelector('dialog'), null)
+    assert.equal(w.document.querySelector('style'), null)
   } finally {
     w.close()
   }

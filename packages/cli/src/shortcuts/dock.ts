@@ -95,7 +95,9 @@ async function clearDockImages(scope: DockScope): Promise<void> {
 export async function prepareDockImage(
   scope: DockScope,
   expected: { home: string; app: string; profile: string },
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  signal?.throwIfAborted()
   let value: unknown
   try {
     value = await readPrivateJson(scope.recordPath)
@@ -110,8 +112,8 @@ export async function prepareDockImage(
     !validRecord(value) || value.entryId !== scope.entryId || value.cordisxHome !== expected.home
     || value.appId !== expected.app || value.profileId !== expected.profile
   ) throw new Error('Dock record identity mismatch')
-  const resolved = await nativeOperation<{ path: string }>({ operation: 'resolve', bookmark: value.bookmark })
-  const inspected = await inspectBundle(resolved.path)
+  const resolved = await nativeOperation<{ path: string }>({ operation: 'resolve', bookmark: value.bookmark }, signal)
+  const inspected = await inspectBundle(resolved.path, signal)
   if (inspected.entryId !== scope.entryId || inspected.recordPath !== scope.recordPath) {
     throw new Error('Dock entry identity mismatch')
   }
@@ -122,7 +124,8 @@ export async function prepareDockImage(
   const temporaryDefault = path.join(scope.directory, `.dock-default-${nonce}.png`)
   try {
     if (inspected.customIcon) {
-      await nativeOperation({ operation: 'render-file-icon', path: resolved.path, output: temporary })
+      await nativeOperation({ operation: 'render-file-icon', path: resolved.path, output: temporary }, signal)
+      signal?.throwIfAborted()
       await publishDockImage(temporary, scope.iconPath)
       await Promise.all([scope.lightIconPath, scope.darkIconPath, scope.defaultIconPath]
         .map(file => rm(file, { force: true })))
@@ -132,19 +135,20 @@ export async function prepareDockImage(
         path: resolved.path,
         output: temporaryLight,
         appearance: 'light',
-      })
+      }, signal)
       await nativeOperation({
         operation: 'render-file-icon',
         path: resolved.path,
         output: temporaryDark,
         appearance: 'dark',
-      })
+      }, signal)
       await nativeOperation({
         operation: 'render-file-icon',
         path: resolved.path,
         output: temporaryDefault,
         appearance: 'default',
-      })
+      }, signal)
+      signal?.throwIfAborted()
       await publishDockImage(temporaryLight, scope.lightIconPath)
       await publishDockImage(temporaryDark, scope.darkIconPath)
       await publishDockImage(temporaryDefault, scope.defaultIconPath)

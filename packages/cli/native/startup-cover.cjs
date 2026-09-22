@@ -13,10 +13,15 @@ function installCover(options, animateMark) {
   let disposed = false
   let requestedAction = null
   const dialog = document.createElement('dialog')
+  dialog.id = `cordisx-startup-${receipt.nonce}`
   dialog.dataset.cordisxStartup = options.generation
   dialog.setAttribute('aria-label', 'CordisX 正在启动')
   dialog.style.cssText =
-    'position:fixed;inset:0;margin:0;max-width:none;max-height:none;width:100vw;height:100vh;border:0;padding:0;color-scheme:light dark;overflow:hidden;'
+    'position:fixed;inset:0;margin:0;max-width:none;max-height:none;width:100vw;height:100vh;border:0;padding:0;background:transparent;color-scheme:light dark;overflow:hidden;'
+  // The modal backdrop lives outside the content's shadow root. Scope its
+  // transparency to this document receipt and retire the rule with the cover.
+  const backdropStyle = document.createElement('style')
+  backdropStyle.textContent = `#${dialog.id}::backdrop { background: transparent; }`
   const content = document.createElement('div')
   content.style.cssText = 'width:100%;height:100%;'
   dialog.append(content)
@@ -58,6 +63,7 @@ function installCover(options, animateMark) {
   // Root-level mounting survives the app replacing its body/root subtree.
   function mount() {
     if (disposed || !globalThis.document?.documentElement) return
+    if (backdropStyle.parentNode !== document.documentElement) document.documentElement.append(backdropStyle)
     if (dialog.parentNode !== document.documentElement) document.documentElement.append(dialog)
     if (!dialog.open) dialog.showModal()
   }
@@ -84,6 +90,7 @@ function installCover(options, animateMark) {
     dialog.removeEventListener('cancel', cancel)
     if (dialog.open) dialog.close()
     dialog.remove()
+    backdropStyle.remove()
   }
   globalThis.addEventListener('pagehide', retire, { once: true })
   const cancel = event => event.preventDefault()
@@ -113,6 +120,7 @@ function installCover(options, animateMark) {
       dialog.removeEventListener('cancel', cancel)
       dialog.close()
       dialog.remove()
+      backdropStyle.remove()
       return true
     },
     fail(value) {

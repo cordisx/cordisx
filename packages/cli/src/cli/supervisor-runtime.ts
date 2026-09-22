@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath, rm } from 'node:fs/promises'
+import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { cdpInstallationAborted } from '../launcher/cdp-session.js'
@@ -187,29 +187,43 @@ export async function createSupervisorRuntime(
         },
         ...(dock
           ? {
-            refreshDock: async (requestedRecord?: string) => {
+            refreshDock: async (requestedRecord?: string, signal?: AbortSignal) => {
+              const paths = supervisorPaths(home, app, profile)
+              let stage = 'owner'
+              let refreshed = false
               try {
-                const paths = supervisorPaths(home, app, profile)
                 const state = await readSupervisorState(paths)
                 if (
                   state?.pid !== process.pid || state.instanceToken !== token || state.phase !== 'ready'
                   || !state.hostPid || !state.hostProcessStartedAt
                   || !await hasMatchingProcessIdentity(state.hostPid, state.hostProcessStartedAt)
                 ) return false
+                stage = 'agent-installed'
                 if (!dockAgentInstalled) return false
+                stage = 'record-identity'
                 const recordPath = requestedRecord ?? dock.recordPath
                 if (!path.isAbsolute(recordPath) || path.basename(recordPath) !== `${dock.entryId}.json`) return false
+                stage = 'record-directory'
                 const parent = await lstat(path.dirname(recordPath))
                 if (
                   !parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== process.getuid?.()
                   || (parent.mode & 0o077) !== 0
                 ) return false
                 const currentDock = { ...dock, recordPath }
-                if (!await prepareDockImage(currentDock, { home: selectedHome!, app, profile })) return false
+                stage = 'image-preparation'
+                if (!await prepareDockImage(currentDock, { home: selectedHome!, app, profile }, signal)) return false
+                signal?.throwIfAborted()
+                stage = 'agent-refresh'
                 await refreshDockAgent(dock, token)
+                refreshed = true
                 return true
               } catch {
                 return false
+              } finally {
+                if (!refreshed) {
+                  // Fixed phase names only: no record contents, tokens or image bytes.
+                  await appendFile(paths.log, `[cordisx] Dock refresh failed at ${stage}\n`).catch(() => undefined)
+                }
               }
             },
           }
