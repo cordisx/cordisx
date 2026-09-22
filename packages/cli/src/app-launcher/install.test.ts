@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { runAppCommand } from '../cli/app-command.js'
@@ -22,23 +22,26 @@ async function fixture() {
   const packageRoot = path.join(root, 'runtime-source')
   const entryScript = path.join(packageRoot, 'dist/src/cli/app-entry.js')
   const dependencyRoot = path.join(root, 'runtime-dependencies')
-  const dependency = path.join(dependencyRoot, 'fixture-dependency')
+  const dependency = path.join(dependencyRoot, '@fixture', 'dependency')
   const dependencyOverlayRoot = path.join(root, 'runtime-dependencies-overlay')
-  const overlayDependency = path.join(dependencyOverlayRoot, 'fixture-overlay')
+  const overlayDependencySource = path.join(root, 'workspace', '@fixture', 'overlay')
+  const overlayDependency = path.join(dependencyOverlayRoot, '@fixture', 'overlay')
   await mkdir(path.dirname(entryScript), { recursive: true })
   await mkdir(dependency, { recursive: true })
-  await mkdir(overlayDependency, { recursive: true })
+  await mkdir(overlayDependencySource, { recursive: true })
+  await mkdir(path.dirname(overlayDependency), { recursive: true })
   await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ type: 'module', version: '1.2.3-test' }))
   await writeFile(path.join(dependency, 'package.json'), JSON.stringify({ type: 'module', exports: './index.js' }))
   await writeFile(path.join(dependency, 'index.js'), 'export default "dependency"\n')
   await writeFile(
-    path.join(overlayDependency, 'package.json'),
+    path.join(overlayDependencySource, 'package.json'),
     JSON.stringify({ type: 'module', exports: './index.js' }),
   )
-  await writeFile(path.join(overlayDependency, 'index.js'), 'export default "overlay"\n')
+  await writeFile(path.join(overlayDependencySource, 'index.js'), 'export default "overlay"\n')
+  await symlink(overlayDependencySource, overlayDependency, 'dir')
   await writeFile(
     entryScript,
-    'import dependency from "fixture-dependency"\nimport overlay from "fixture-overlay"\nexport const runtimeMarker = `first-${dependency}-${overlay}`\n',
+    'import dependency from "@fixture/dependency"\nimport overlay from "@fixture/overlay"\nexport const runtimeMarker = `first-${dependency}-${overlay}`\n',
   )
   const runtime = {
     homedir: root,
@@ -82,6 +85,15 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
     expect(await realpath(path.join(path.dirname(firstRuntime.entryScript), '../../../node_modules'))).toMatch(
       /app-launcher\/dependencies\/[a-f0-9]{64}\/node_modules$/u,
     )
+    const installedOverlay = path.join(
+      await realpath(path.join(path.dirname(firstRuntime.entryScript), '../../../node_modules')),
+      '@fixture/overlay',
+    )
+    expect(await readFile(path.join(path.dirname(installedOverlay), 'dependency/index.js'), 'utf8')).toBe(
+      'export default "dependency"\n',
+    )
+    expect((await lstat(installedOverlay)).isSymbolicLink()).toBe(false)
+    expect(await realpath(installedOverlay)).toBe(installedOverlay)
 
     const second = await runAppCommand(f.runtime)
     expect(second).toEqual({ status: 'reused', path: f.target })
@@ -118,7 +130,7 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
 
     await writeFile(
       f.entryScript,
-      'import dependency from "fixture-dependency"\nimport overlay from "fixture-overlay"\nexport const runtimeMarker = `second-${dependency}-${overlay}`\n',
+      'import dependency from "@fixture/dependency"\nimport overlay from "@fixture/overlay"\nexport const runtimeMarker = `second-${dependency}-${overlay}`\n',
     )
     await runAppCommand(f.runtime)
     const second = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }

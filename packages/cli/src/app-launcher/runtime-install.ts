@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { lstat, mkdtemp, opendir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, opendir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -90,9 +90,33 @@ async function digestTree(root: string): Promise<string> {
   return hash.digest('hex')
 }
 
-async function cloneDirectory(source: string, target: string, merge = false): Promise<void> {
-  if (merge) await run('/usr/bin/ditto', [source, target])
-  else await run('/bin/cp', ['-cRL', source, target])
+async function cloneDirectory(source: string, target: string): Promise<void> {
+  await run('/bin/cp', ['-cRL', source, target])
+}
+
+async function mergeClonedDirectory(source: string, target: string): Promise<void> {
+  await mkdir(target, { recursive: true })
+  const handle = await opendir(source)
+  for await (const entry of handle) {
+    const sourcePath = path.join(source, entry.name)
+    const resolvedSource = entry.isSymbolicLink() ? await realpath(sourcePath) : sourcePath
+    const sourceMetadata = await lstat(resolvedSource)
+    const targetPath = path.join(target, entry.name)
+    let mergeDirectory = false
+    if (sourceMetadata.isDirectory()) {
+      try {
+        const targetMetadata = await lstat(targetPath)
+        mergeDirectory = targetMetadata.isDirectory() && !targetMetadata.isSymbolicLink()
+      } catch (error) {
+        if (!isMissing(error)) throw error
+      }
+    }
+    if (mergeDirectory) await mergeClonedDirectory(resolvedSource, targetPath)
+    else {
+      await rm(targetPath, { recursive: true, force: true })
+      await cloneDirectory(resolvedSource, targetPath)
+    }
+  }
 }
 
 async function validInstalledRuntime(
@@ -135,7 +159,7 @@ async function installDependencyLayer(support: string, roots: readonly string[])
   try {
     const stagedModules = path.join(stage, 'node_modules')
     for (const root of resolvedRoots) {
-      if (await existingDirectory(stagedModules)) await cloneDirectory(root, stagedModules, true)
+      if (await existingDirectory(stagedModules)) await mergeClonedDirectory(root, stagedModules)
       else await cloneDirectory(root, stagedModules)
     }
     await rename(stage, target)
