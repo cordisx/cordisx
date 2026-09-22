@@ -12,6 +12,7 @@ interface RendererBootstrapOptions {
   readonly target: support.CdpTarget
   readonly installId: string
   readonly documentSource: string
+  readonly evaluationSource: string
   readonly viteDevelopment: boolean
   readonly nativeSubmission?: NativeSubmissionInstallation
   readonly signal?: AbortSignal
@@ -127,7 +128,8 @@ export async function installDocumentBootstrap(
   if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
   state.identifier = identifier
   state.loopbackReloadStarted = viteDevelopment || loopbackModules || nativeSubmission !== undefined
-  if (!state.loopbackReloadStarted) {
+  const needsDocumentBootstrap = viteDevelopment || loopbackModules || nativeSubmission !== undefined
+  if (!needsDocumentBootstrap) {
     const evaluated = await session.send(
       'Runtime.evaluate',
       { expression: evaluationSource, allowUnsafeEvalBlockedByCSP: true },
@@ -142,6 +144,7 @@ export async function installDocumentBootstrap(
     target,
     installId: reloadInstallId!,
     documentSource: productionDocumentSource ?? documentSource,
+    evaluationSource,
     viteDevelopment,
     ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
     ...(signal === undefined ? {} : { signal }),

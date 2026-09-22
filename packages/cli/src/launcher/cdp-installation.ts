@@ -1,3 +1,4 @@
+import { installRuntimeBindings } from './cdp-runtime-bindings.js'
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isWalletSpendRequest } from './wallet-spend-authority.js'
@@ -132,28 +133,22 @@ export async function install(
         }),
       )
     }
-    await session.send('Runtime.addBinding', { name: support.MARKETPLACE_BINDING })
-    if (lifecycle !== undefined) {
-      await session.send('Runtime.addBinding', { name: support.MARKETPLACE_ARTIFACT_BINDING })
-    }
-    if (provider !== undefined) await session.send('Runtime.addBinding', { name: support.PROVIDER_BINDING })
-    if (history !== undefined) await session.send('Runtime.addBinding', { name: support.AGENT_HISTORY_BINDING })
-    if (config !== undefined) await session.send('Runtime.addBinding', { name: support.CONFIG_BINDING })
-    if (ownerDocuments !== undefined) await session.send('Runtime.addBinding', { name: support.OWNER_DOCUMENT_BINDING })
-    if (serviceConfig !== undefined) await session.send('Runtime.addBinding', { name: support.SERVICE_CONFIG_BINDING })
-    if (credential !== undefined) await session.send('Runtime.addBinding', { name: support.CHANNEL_CREDENTIAL_BINDING })
-    if (actions !== undefined) await session.send('Runtime.addBinding', { name: support.CHANNEL_ACTIONS_BINDING })
-    if (permission !== undefined) await session.send('Runtime.addBinding', { name: support.PERMISSION_BINDING })
-    if (iconThemePreference !== undefined) {
-      await session.send('Runtime.addBinding', { name: support.ICON_THEME_PREFERENCE_BINDING })
-    }
-    if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: support.PLUGIN_LIFECYCLE_BINDING })
-    if (publisherGrant !== undefined) {
-      await session.send('Runtime.addBinding', { name: support.PUBLISHER_GRANT_BINDING })
-    }
-    if (managedServiceUI !== undefined) {
-      await session.send('Runtime.addBinding', { name: support.MANAGED_SERVICE_UI_BINDING })
-    }
+    await installRuntimeBindings(session, [
+      support.MARKETPLACE_BINDING,
+      ...(lifecycle === undefined ? [] : [support.MARKETPLACE_ARTIFACT_BINDING]),
+      ...(provider === undefined ? [] : [support.PROVIDER_BINDING]),
+      ...(history === undefined ? [] : [support.AGENT_HISTORY_BINDING]),
+      ...(config === undefined ? [] : [support.CONFIG_BINDING]),
+      ...(ownerDocuments === undefined ? [] : [support.OWNER_DOCUMENT_BINDING]),
+      ...(serviceConfig === undefined ? [] : [support.SERVICE_CONFIG_BINDING]),
+      ...(credential === undefined ? [] : [support.CHANNEL_CREDENTIAL_BINDING]),
+      ...(actions === undefined ? [] : [support.CHANNEL_ACTIONS_BINDING]),
+      ...(permission === undefined ? [] : [support.PERMISSION_BINDING]),
+      ...(iconThemePreference === undefined ? [] : [support.ICON_THEME_PREFERENCE_BINDING]),
+      ...(lifecycle === undefined ? [] : [support.PLUGIN_LIFECYCLE_BINDING]),
+      ...(publisherGrant === undefined ? [] : [support.PUBLISHER_GRANT_BINDING]),
+      ...(managedServiceUI === undefined ? [] : [support.MANAGED_SERVICE_UI_BINDING]),
+    ])
     let activeMarketplaceRequests = 0
     removeBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
       if (params.name !== support.MARKETPLACE_BINDING || typeof params.payload !== 'string') return
@@ -803,7 +798,7 @@ export async function install(
       },
       documentInstallation,
     )
-    if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
+    if (loopbackModules || generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await support.evaluateRuntimeOperation(
         session,
         `(async () => { try {

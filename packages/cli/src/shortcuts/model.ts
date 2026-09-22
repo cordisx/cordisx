@@ -18,6 +18,13 @@ export interface ShortcutRecord {
   helperDigest?: string
   iconDigest: string
   iconSource: 'host-default' | 'host-avatar' | 'cordisx-default' | 'cordisx-avatar' | 'user'
+  launchIdentity?: ShortcutLaunchIdentity
+}
+export interface ShortcutLaunchIdentity {
+  supervisorPid: number
+  supervisorStartedAt: string
+  hostPid: number
+  hostStartedAt: string
 }
 export interface ShortcutRuntime {
   schemaVersion: 1
@@ -66,4 +73,10 @@ export function validRecord(value: unknown): value is ShortcutRecord {
     && (v.dataMode === undefined || v.dataMode === 'shared' || v.dataMode === 'host-isolated')
     && [v.cordisxHome, v.cwd, v.runtimePath, v.bundlePath].every(p => typeof p === 'string' && path.isAbsolute(p))
     && Array.isArray(v.argv) && v.argv.every(a => typeof a === 'string') && typeof v.bookmark === 'string'
+    && (v.launchIdentity === undefined || (
+      Number.isInteger(v.launchIdentity.supervisorPid) && v.launchIdentity.supervisorPid > 0
+      && typeof v.launchIdentity.supervisorStartedAt === 'string'
+      && Number.isInteger(v.launchIdentity.hostPid) && v.launchIdentity.hostPid > 0
+      && typeof v.launchIdentity.hostStartedAt === 'string'
+    ))
 }

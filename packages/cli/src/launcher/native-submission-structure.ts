@@ -16,6 +16,10 @@ export interface NativeScriptResource {
   readonly url: string
   readonly source: string
 }
+export interface NativeSubmissionTransformAnalysis {
+  readonly transforms: readonly NativeResourceTransform[]
+  readonly syntaxByResource: ReadonlyMap<NativeScriptResource, SyntaxNode>
+}
 const TOKEN = 'cordisx.operation_token'
 const carrier = '__cordisxOperationToken'
 const decision = '__cordisxAdmissionDecision'
@@ -325,9 +329,9 @@ function modelCompletion(plan: ResourcePlan): void {
 }
 
 /** Compatibility is a complete set of structural capabilities, never an App identity. */
-export function discoverNativeSubmissionTransforms(
+export function analyzeNativeSubmissionTransforms(
   resources: readonly NativeScriptResource[],
-): readonly NativeResourceTransform[] {
+): NativeSubmissionTransformAnalysis {
   const plans = resources.map(resource => new ResourcePlan(resource))
   for (const plan of plans) {
     for (const fn of plan.functions) {
@@ -385,7 +389,7 @@ export function discoverNativeSubmissionTransforms(
   for (const capability of required) {
     one(plans.flatMap(plan => plan.capabilities.filter(c => c === capability)), capability)
   }
-  return plans.filter(plan => plan.edits.length > 0).map(plan => {
+  const transforms = plans.filter(plan => plan.edits.length > 0).map(plan => {
     const sha256 = hash(plan.resource.source)
     const marker = `__cordisxNativeStructure_${sha256.slice(0, 16)}`
     const source = applySourceEdits(plan.resource.source, plan.edits)
@@ -409,4 +413,15 @@ export function discoverNativeSubmissionTransforms(
       },
     })
   })
+  return {
+    transforms,
+    syntaxByResource: new Map(plans.map(plan => [plan.resource, plan.ast])),
+  }
+}
+
+/** Compatibility is a complete set of structural capabilities, never an App identity. */
+export function discoverNativeSubmissionTransforms(
+  resources: readonly NativeScriptResource[],
+): readonly NativeResourceTransform[] {
+  return analyzeNativeSubmissionTransforms(resources).transforms
 }

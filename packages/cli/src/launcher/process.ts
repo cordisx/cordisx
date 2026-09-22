@@ -5,6 +5,7 @@ import path from 'node:path'
 import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
 
 export interface IsolatedCodexProfile {
   readonly userDataDir: string
@@ -41,6 +42,7 @@ interface ProcessIdentity {
 }
 
 const launchedProcessOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
+const pendingHiddenOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
 
 function processTable(): readonly ProcessIdentity[] {
   if (process.platform === 'win32') return []
@@ -179,6 +181,14 @@ class ProcessOwnershipTracker {
     this.capture()
     this.timer = setInterval(() => this.capture(), 250)
     this.timer.unref()
+  }
+
+  get pid(): number {
+    return this.rootPid
+  }
+
+  rootAlive(): boolean {
+    return liveProcessStartedAt(this.rootPid) === this.rootStartedAt
   }
 
   stop(): readonly ProcessIdentity[] {
@@ -450,6 +460,155 @@ export function launchCodex(
   return child
 }
 
+export interface HiddenCodexLaunch {
+  readonly child: ChildProcess
+  readonly hostPid: number
+  readonly inspectorUrl?: Promise<string>
+}
+
+export class HiddenHostIdentityUnconfirmedError extends Error {
+  readonly retainProfileLease = true
+
+  constructor() {
+    super('Hidden Host identity was not confirmed; the profile launch lease must be retained')
+    this.name = 'HiddenHostIdentityUnconfirmedError'
+  }
+}
+
+export function retainProfileLeaseAfterHiddenHostFailure(error: unknown): boolean {
+  return error instanceof HiddenHostIdentityUnconfirmedError && error.retainProfileLease
+}
+
+export type HostLaunchIdentityObserver = (
+  pid: number,
+  inspectorUrl?: Promise<string>,
+) => boolean | void | Promise<boolean | void>
+
+async function mainInspectorUrl(port: number): Promise<string> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+      const targets = await response.json() as readonly { webSocketDebuggerUrl?: unknown }[]
+      const url = targets.find(target =>
+        typeof target.webSocketDebuggerUrl === 'string'
+        && new RegExp(`^ws://127\\.0\\.0\\.1:${port}/[a-f0-9-]+$`, 'u').test(target.webSocketDebuggerUrl)
+      )?.webSocketDebuggerUrl
+      if (typeof url === 'string') return url
+    } catch { /* Inspector publication is asynchronous. */ }
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error('Owned Host main inspector did not publish its endpoint')
+}
+
+function applicationBundleForExecutable(executable: string): string {
+  const macos = path.dirname(executable)
+  const contents = path.dirname(macos)
+  const bundle = path.dirname(contents)
+  if (path.basename(macos) !== 'MacOS' || path.basename(contents) !== 'Contents' || path.extname(bundle) !== '.app') {
+    throw new Error('Hidden Host launch requires a macOS app-bundle executable')
+  }
+  return bundle
+}
+
+export function hiddenHostPidFromProcessList(
+  processList: string,
+  executable: string,
+  debugPort: number,
+  mainInspectorPort?: number,
+): number | undefined {
+  const requiredArguments = [
+    `--remote-debugging-port=${debugPort}`,
+    ...(mainInspectorPort === undefined ? [] : [`--inspect-brk=127.0.0.1:${mainInspectorPort}`]),
+  ]
+  return processList
+    .split('\n')
+    .flatMap(line => {
+      const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
+      if (match === null || !match[1] || !match[2]) return []
+      const command = match[2]
+      const argv = command.split(/\s+/u)
+      return command.startsWith(`${executable} `) && requiredArguments.every(argument => argv.includes(argument))
+        ? [Number.parseInt(match[1], 10)]
+        : []
+    })[0]
+}
+
+function hiddenHostPid(executable: string, debugPort: number, mainInspectorPort?: number): number | undefined {
+  return hiddenHostPidFromProcessList(
+    execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }),
+    executable,
+    debugPort,
+    mainInspectorPort,
+  )
+}
+
+/** Launch a macOS Host hidden through Launch Services without retaining a stale recent Dock tile. */
+export async function launchCodexHidden(
+  executable: string,
+  debugPort: number,
+  extraArgs: readonly string[],
+  profile?: IsolatedCodexProfile,
+  allowOnlineDevTools = false,
+  environment?: Readonly<Record<string, string>>,
+  mainInspectorPort?: number,
+): Promise<HiddenCodexLaunch> {
+  if (process.platform !== 'darwin') throw new Error('Hidden Host launch requires macOS')
+  const args = [
+    ...codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools),
+    ...(mainInspectorPort === undefined ? [] : [`--inspect-brk=127.0.0.1:${mainInspectorPort}`]),
+  ]
+  const child = spawn(
+    fileURLToPath(new URL('../../native/CordisXHostOpen', import.meta.url)),
+    [applicationBundleForExecutable(executable), ...args],
+    {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        ...environment,
+        CODEX_ELECTRON_START_IN_BACKGROUND: '1',
+      },
+      detached: true,
+    },
+  )
+  const deadline = Date.now() + 8_000
+  let hostPid: number | undefined
+  while (Date.now() < deadline && hostPid === undefined) {
+    if (child.exitCode !== null || child.signalCode !== null) break
+    hostPid = hiddenHostPid(executable, debugPort, mainInspectorPort)
+    if (hostPid === undefined) await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  if (hostPid === undefined) {
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      try {
+        process.kill(-child.pid, 'SIGTERM')
+      } catch { /* Identity remains unresolved, so the profile lease still fails closed. */ }
+    }
+    throw new HiddenHostIdentityUnconfirmedError()
+  }
+  // The process list proves the executable plus both fresh loopback ports.
+  // Keep this provisional identity only for exact cleanup if inspector
+  // confirmation fails; it is not an adopted Host until confirmation below.
+  pendingHiddenOwnership.set(child, new ProcessOwnershipTracker(hostPid))
+  return {
+    child,
+    hostPid,
+    ...(mainInspectorPort === undefined ? {} : { inspectorUrl: mainInspectorUrl(mainInspectorPort) }),
+  }
+}
+
+/** Bind cleanup only after the main inspector has reported this exact PID. */
+export function confirmHiddenCodexOwnership(launch: HiddenCodexLaunch): void {
+  const pending = pendingHiddenOwnership.get(launch.child)
+  const ownership = pending ?? new ProcessOwnershipTracker(launch.hostPid)
+  if (ownership.pid !== launch.hostPid || !ownership.rootAlive()) {
+    ownership.stop()
+    throw new Error('Hidden Host launch identity changed before confirmation')
+  }
+  launchedProcessOwnership.set(launch.child, ownership)
+  pendingHiddenOwnership.delete(launch.child)
+}
+
 function exited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null
 }
@@ -475,17 +634,18 @@ async function waitForExit(child: ChildProcess, milliseconds: number, whileWaiti
 
 /** Stop only the exact process returned by launchCodex. */
 export async function terminateIsolatedCodex(child: ChildProcess, profile?: IsolatedCodexProfile): Promise<void> {
-  const ownership = launchedProcessOwnership.get(child)
+  const ownership = launchedProcessOwnership.get(child) ?? pendingHiddenOwnership.get(child)
   if (child.pid === undefined) {
     ownership?.stop()
     launchedProcessOwnership.delete(child)
+    pendingHiddenOwnership.delete(child)
     return
   }
-  if (!exited(child)) {
+  if (ownership?.rootAlive() === true || !exited(child)) {
     ownership?.captureNow()
-    signalLaunchedHost(child, 'SIGTERM')
+    signalLaunchedHost(child, 'SIGTERM', ownership)
     if (!await waitForExit(child, 5_000, () => ownership?.captureNow())) {
-      signalLaunchedHost(child, 'SIGKILL')
+      signalLaunchedHost(child, 'SIGKILL', ownership)
     }
   }
   if (!exited(child) && !await waitForExit(child, 2_000, () => ownership?.captureNow())) {
@@ -493,22 +653,35 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
   }
   const ownedProcesses = ownership?.stop() ?? []
   launchedProcessOwnership.delete(child)
-  if (profile?.cleanupOwned === true) await terminateOwnedProcesses(ownedProcesses, child.pid)
+  pendingHiddenOwnership.delete(child)
+  if (profile?.cleanupOwned === true || (ownership !== undefined && ownership.pid !== child.pid)) {
+    await terminateOwnedProcesses(ownedProcesses, child.pid)
+  }
 }
 
-/** Signal only the detached process group created by launchCodex. */
-function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid === undefined) return
+/** Stop the verified Host group, or its exact PID when Launch Services chose another group. */
+function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownership?: ProcessOwnershipTracker): void {
+  const ownedRootPid = ownership?.rootAlive() === true ? ownership.pid : undefined
+  const pid = ownedRootPid ?? child.pid
+  if (pid === undefined) return
   if (process.platform !== 'win32') {
     try {
-      process.kill(-child.pid, signal)
+      process.kill(-pid, signal)
       return
     } catch (error) {
-      // Unit callers may pass a process not created by launchCodex; retain the
-      // exact-child fallback without ever broadening the target.
+      // Launch Services can place the owned Host outside its own process group.
+      // The fallback below still requires the tracked PID and start identity.
       if (!(error instanceof Error) || !('code' in error) || (error.code !== 'ESRCH' && error.code !== 'EPERM')) {
         throw error
       }
+    }
+  }
+  if (ownedRootPid !== undefined && ownership?.rootAlive() === true) {
+    try {
+      process.kill(ownedRootPid, signal)
+      return
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
     }
   }
   child.kill(signal)

@@ -58,6 +58,20 @@ async function fixture() {
 }
 
 describe('CordisX app runtime', () => {
+  it('preserves the selected request and never retries a failed startup as another Host', async () => {
+    const f = await fixture()
+    const run = vi.fn(async (_invocation: unknown) => {
+      throw new Error('startup failed')
+    })
+    const activate = vi.fn()
+    await expect(runAppLauncherOperation(f.runtimePath, 'launch-profile', 'codex', 'work', {
+      runSupervisor: run,
+      activate,
+    })).rejects.toThrow('startup failed')
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ app: 'codex', profile: 'work', createShortcut: true })
+    expect(activate).not.toHaveBeenCalled()
+  })
   it('lists only real profiles from the current default app without mutating config', async () => {
     const f = await fixture()
     const before = await readFile(f.configPath, 'utf8')

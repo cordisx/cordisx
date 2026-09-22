@@ -156,6 +156,29 @@ describe('native pre-dispatch resource interception', () => {
     )
   })
 
+  it('arms interception without reloading an interactive document and activates on natural navigation', async () => {
+    const session = new FakeSession()
+    const url = 'app://-/assets/pinned.js'
+    const source = 'one ANCHOR'
+    session.bodies.set('natural-navigation', source)
+
+    const installed = await installNativeResourceInterception({
+      session,
+      target: { id: 'native', url: 'app://-/index.html' },
+      transforms: [transform(url, source)],
+      timeoutMs: 100,
+    })
+
+    expect(installed.status).toBe('installing')
+    expect(session.calls.some(call => call.method === 'Page.reload')).toBe(false)
+    session.emit({ frameId: 'native' }, 'Page.frameStartedLoading')
+    pause(session, 'natural-navigation', url)
+    await vi.waitFor(() => expect(installed.status).toBe('active'))
+    expect(installed.evidence[0]?.state).toBe('acknowledged')
+
+    await installed.dispose()
+  })
+
   it('continues the original response and reports unavailable on a pin mismatch', async () => {
     const session = new FakeSession()
     const url = 'app://-/assets/pinned.js'

@@ -1,9 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  locateNativeModelProviderSeat,
-  locateNativeModelSelectionControl,
-} from '../packages/cli/src/renderer/adapter/native-model-provider-seat.js'
+import { composer } from './fixtures/native-model-provider-composer.js'
 import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
 import {
   collaborationMode,
@@ -40,72 +37,6 @@ function nativeRequest(view: Window, request: Record<string, unknown>): void {
       detail: { type: 'mcp-request', hostId: 'local', request },
     }),
   )
-}
-
-function composer(document: Document, threadId: string | null = 'thread-1', model = 'model-a', attachControl = true) {
-  document.body.innerHTML = `<main data-codex-composer-root data-composer-placement="${threadId ? 'thread' : 'home'}">
-    ${threadId ? `<i data-above-composer-conversation-id="${threadId}"></i>` : ''}
-    <footer data-composer-footer-responsive>
-      <span><button data-codex-intelligence-trigger="true" aria-haspopup="menu">Model</button></span>
-    </footer>
-  </main>`
-  const elements = [...document.querySelectorAll<HTMLElement>('*')]
-  for (const element of elements) {
-    element.getBoundingClientRect = () => ({
-      x: 0,
-      y: 0,
-      top: 0,
-      left: 0,
-      right: 20,
-      bottom: 20,
-      width: 20,
-      height: 20,
-      toJSON: () => ({}),
-    })
-  }
-  const trigger = document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
-  const selectModel = vi.fn(async (nextModel: string, nextEffort: string) => {
-    const fiber = (trigger as any).__reactFiber$test
-    if (fiber) {
-      fiber.return.memoizedProps.model = nextModel
-      fiber.return.memoizedProps.reasoningEffort = nextEffort
-    }
-  })
-  const attachNativeControl = () => {
-    Object.defineProperty(trigger, '__reactFiber$test', {
-      configurable: true,
-      value: {
-        memoizedProps: {},
-        return: {
-          memoizedProps: {
-            model: 'model-a',
-            reasoningEffort: 'high',
-            models: [{
-              model,
-              supportedReasoningEfforts: [
-                { reasoningEffort: 'low' },
-                { reasoningEffort: 'high' },
-              ],
-            }],
-            modelOptions: [{ model: { model: 'model-a' }, disabledReason: null }],
-            powerSelections: [
-              { model: 'model-a', reasoningEffort: 'low' },
-              { model: 'model-a', reasoningEffort: 'high' },
-            ],
-            menuView: 'simple',
-            open: false,
-            showReasoningEffortControls: true,
-            onSelectModelOption: () => {},
-            onToggleMenuView: () => {},
-            onSelectModel: selectModel,
-            onSelectReasoningEffort: () => {},
-          },
-        },
-      },
-    })
-  }
-  if (attachControl) attachNativeControl()
-  return { attachNativeControl, selectModel, trigger }
 }
 
 async function settle(): Promise<void> {
@@ -252,6 +183,141 @@ describe('native model provider transport', () => {
     transport.dispose()
     dom.window.close()
   })
+  it.each(['thread/read', 'config/read'])(
+    'does not restart an in-flight %s for unrelated startup DOM mutations',
+    async method => {
+      let hold = false
+      const pending: { request: Record<string, unknown>; view: Window }[] = []
+      const h = await harness((request, view) => {
+        if (!hold || request.method !== method) return
+        pending.push({ request, view })
+        return true
+      })
+      try {
+        hold = true
+        composer(h.dom.window.document, 'thread-2')
+        await settle()
+        expect(pending.length).toBe(1)
+        for (let index = 0; index < 5; index++) {
+          h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+          await settle()
+        }
+        expect(pending.length).toBe(1)
+        const first = pending[0]!
+        message(first.view, {
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: first.request.id,
+            result: {
+              thread: { id: 'thread-2', status: { type: 'idle' }, modelProvider: 'provider-a' },
+              config: { model_provider: 'provider-a', model: 'model-a' },
+            },
+          },
+        })
+        await settle()
+        expect(h.transport.getSnapshot()).toMatchObject({ available: true, threadId: 'thread-2' })
+      } finally {
+        h.transport.dispose()
+        h.dom.window.close()
+      }
+    },
+  )
+
+  it.each(['thread', 'trigger', 'model'] as const)(
+    'supersedes a pending read when the native %s changes',
+    async kind => {
+      let hold = false
+      const pending: Record<string, unknown>[] = []
+      const h = await harness(request => {
+        if (!hold || request.method !== 'thread/read') return
+        pending.push(request)
+        return true
+      })
+      const respond = (request: Record<string, unknown>) =>
+        message(h.dom.window, {
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: request.id,
+            result: {
+              thread: { id: (request.params as any).threadId, status: { type: 'idle' }, modelProvider: 'provider-a' },
+            },
+          },
+        })
+      try {
+        hold = true
+        const next = composer(h.dom.window.document, 'thread-2')
+        await settle()
+        if (kind === 'thread') composer(h.dom.window.document, 'thread-3')
+        else if (kind === 'trigger') composer(h.dom.window.document, 'thread-2')
+        else {
+          ;(next.trigger as any).__reactFiber$test.return.memoizedProps.model = 'model-b'
+          h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+        }
+        await settle()
+        expect(pending.length).toBe(2)
+        const configReads = h.requests.filter(request => request.method === 'config/read').length
+        respond(pending[0]!)
+        await settle()
+        expect(h.transport.getSnapshot().available).toBe(false)
+        expect(h.requests.filter(request => request.method === 'config/read').length).toBe(configReads)
+        h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+        await settle()
+        expect(pending.length).toBe(2)
+        respond(pending[1]!)
+        await settle()
+        expect(h.transport.getSnapshot()).toMatchObject({
+          available: true,
+          threadId: kind === 'thread' ? 'thread-3' : 'thread-2',
+          model: kind === 'model' ? 'model-b' : 'model-a',
+        })
+      } finally {
+        h.transport.dispose()
+        h.dom.window.close()
+      }
+    },
+  )
+
+  it.each(['failure', 'dispose'] as const)('releases pending read ownership on %s', async outcome => {
+    let hold = false
+    let pending: Record<string, unknown> | undefined
+    const h = await harness(request => {
+      if (!hold || request.method !== 'config/read') return
+      pending = request
+      return true
+    })
+    try {
+      hold = true
+      composer(h.dom.window.document, 'thread-2')
+      await settle()
+      expect(pending?.method).toBe('config/read')
+      const changed = vi.fn()
+      h.transport.subscribe(changed)
+      if (outcome === 'dispose') h.transport.dispose()
+      message(h.dom.window, {
+        type: 'mcp-response',
+        hostId: 'local',
+        message: { id: pending!.id, error: { message: 'offline' } },
+      })
+      await settle()
+      const requests = h.requests.length
+      hold = false
+      h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+      await settle()
+      if (outcome === 'dispose') {
+        expect(h.requests.length).toBe(requests)
+        expect(changed).not.toHaveBeenCalled()
+      } else {
+        expect(h.requests.length).toBe(requests + 2)
+        expect(h.transport.getSnapshot()).toMatchObject({ available: true, threadId: 'thread-2' })
+      }
+    } finally {
+      h.transport.dispose()
+      h.dom.window.close()
+    }
+  })
+
   it('connects through launcher capability without Desktop identity metadata', async () => {
     const h = await harness()
     expect(h.transport.getSnapshot().available).toBe(true)
@@ -852,101 +918,6 @@ describe('native model provider transport', () => {
     expect(transport.getSnapshot()).not.toHaveProperty('threadId')
     expect(transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-a', model: 'model-a', busy: false })
     transport.dispose()
-    dom.window.close()
-  })
-})
-
-describe('native model provider seat', () => {
-  it('locates only the unique visible native intelligence trigger in the composer footer', () => {
-    const dom = new JSDOM(`<!doctype html><body>
-      <main data-codex-composer-root data-composer-placement="thread">
-        <footer data-composer-footer-responsive>
-          <span id="seat"><button data-codex-intelligence-trigger="true" aria-haspopup="menu">Model</button></span>
-          <button data-codex-intelligence-trigger="true">Unrelated</button>
-        </footer>
-      </main>
-    </body>`)
-    const elements = [...dom.window.document.querySelectorAll<HTMLElement>('*')]
-    for (const element of elements) {
-      vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        left: 0,
-        right: 20,
-        bottom: 20,
-        width: 20,
-        height: 20,
-        toJSON: () => ({}),
-      })
-    }
-    expect(locateNativeModelProviderSeat(dom.window.document)).toEqual({
-      trigger: dom.window.document.querySelector('button[aria-haspopup]'),
-      group: dom.window.document.getElementById('seat'),
-      parent: dom.window.document.querySelector('footer'),
-    })
-    dom.window.close()
-  })
-
-  it('reads supported reasoning efforts from the audited native owner', () => {
-    const dom = new JSDOM('<!doctype html><body></body>')
-    const { trigger } = composer(dom.window.document)
-    expect(locateNativeModelSelectionControl(trigger)).toMatchObject({
-      model: 'model-a',
-      reasoningEffort: 'high',
-      reasoningEfforts: ['low', 'high'],
-    })
-    dom.window.close()
-  })
-
-  it('fails closed for the superseded build-7119 owner shape', () => {
-    const dom = new JSDOM('<!doctype html><body></body>')
-    const { trigger } = composer(dom.window.document)
-    const fiber = (trigger as unknown as Record<string, unknown>)['__reactFiber$test'] as {
-      return: { memoizedProps: Record<string, unknown> }
-    }
-    delete fiber.return.memoizedProps.modelOptions
-    delete fiber.return.memoizedProps.powerSelections
-    delete fiber.return.memoizedProps.menuView
-    delete fiber.return.memoizedProps.open
-    delete fiber.return.memoizedProps.onSelectModelOption
-    delete fiber.return.memoizedProps.onToggleMenuView
-    expect(locateNativeModelSelectionControl(trigger)).toBeUndefined()
-    dom.window.close()
-  })
-
-  it('fails closed for ambiguous triggers', () => {
-    const dom = new JSDOM(`<!doctype html><body>
-      <main data-codex-composer-root data-composer-placement="thread">
-        <footer data-composer-footer-responsive>
-          <button data-codex-intelligence-trigger="true" aria-haspopup="menu">One</button>
-          <button data-codex-intelligence-trigger="true" aria-haspopup="menu">Two</button>
-        </footer>
-      </main>
-    </body>`)
-    for (const element of dom.window.document.querySelectorAll<HTMLElement>('*')) {
-      vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({
-        x: 0,
-        y: 0,
-        top: 0,
-        left: 0,
-        right: 20,
-        bottom: 20,
-        width: 20,
-        height: 20,
-        toJSON: () => ({}),
-      })
-    }
-    expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
-    dom.window.close()
-  })
-
-  it('rediscovers the trigger hidden by the owning selector', () => {
-    const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://example.test/' })
-    const { trigger } = composer(dom.window.document)
-    trigger.hidden = true
-    trigger.dataset.cordisxModelProviderHidden = 'true'
-    expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
     dom.window.close()
   })
 })

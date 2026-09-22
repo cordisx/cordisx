@@ -478,13 +478,11 @@ describe('native Vite development transport', () => {
     expect(connections).toBe(1)
   }, 30_000)
 
-  it('reloads only the native production renderer and awaits its exact graph bootstrap acknowledgement', async () => {
+  it('keeps the native production graph gated through interception and renderer readiness', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')
     const port = (server.address() as { port: number }).port
     const requests: { path: string; method: string; params: Record<string, unknown> }[] = []
-    let acknowledge: (() => void) | undefined
-    let bootChecks = 0
     server.on('connection', (socket, request) => {
       const socketPath = request.url ?? ''
       socket.on('message', data => {
@@ -495,7 +493,7 @@ describe('native Vite development transport', () => {
         }
         const params = item.params ?? {}
         requests.push({ path: socketPath, method: item.method, params })
-        const reply = (value: Record<string, unknown> = { ok: true }): void => {
+        const reply = (value: unknown = { ok: true }): void => {
           socket.send(JSON.stringify({
             id: item.id,
             result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
@@ -503,15 +501,37 @@ describe('native Vite development transport', () => {
               : { result: { value } },
           }))
         }
-        const bootCheck = item.method === 'Runtime.evaluate'
-          && String(params.expression).includes('cordisx:production-boot-pending')
-        if (!bootCheck) {
-          reply()
+        if (item.method === 'Fetch.getResponseBody') {
+          socket.send(JSON.stringify({
+            id: item.id,
+            result: { body: Buffer.from('native resource source').toString('base64'), base64Encoded: true },
+          }))
           return
         }
-        bootChecks += 1
-        if (bootChecks === 1) reply({ ok: false, error: 'cordisx:production-boot-pending' })
-        else acknowledge = () => reply()
+        if (item.method === 'Page.reload') {
+          reply()
+          queueMicrotask(() => {
+            socket.send(
+              JSON.stringify({ method: 'Page.frameStartedLoading', params: { frameId: 'native-production' } }),
+            )
+            socket.send(JSON.stringify({
+              method: 'Fetch.requestPaused',
+              params: {
+                requestId: 'native-resource',
+                request: { url: 'app://-/assets/native-resource.js' },
+                resourceType: 'Script',
+                responseStatusCode: 200,
+                responseHeaders: [{ name: 'content-type', value: 'text/javascript' }],
+              },
+            }))
+          })
+          return
+        }
+        if (params.expression === 'true') {
+          reply(true)
+          return
+        }
+        reply()
       })
     })
     const originalFetch = globalThis.fetch
@@ -536,6 +556,10 @@ describe('native Vite development transport', () => {
     const source = `globalThis.__cordisxCompositionBoot = Promise.resolve(
       globalThis.__cordisxRuntime = { kind: 'production-graph' }
     )`
+    const nativeAuthority = {
+      install: vi.fn(async () => ({ dispose: vi.fn(async () => undefined) })),
+    }
+    const nativeResource = 'native resource source'
     const ready = vi.fn()
     const controller = new AbortController()
     const watching = watchAndInject({
@@ -544,12 +568,24 @@ describe('native Vite development transport', () => {
       hasLoopbackGraph: true,
       launcherOwnedNativeTarget: true,
       pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      nativeSubmission: {
+        authority: nativeAuthority as never,
+        transforms: [{
+          url: 'app://-/assets/native-resource.js',
+          sha256: createHash('sha256').update(nativeResource).digest('hex'),
+          transform: () => ({
+            source: nativeResource,
+            anchorMatches: 1,
+            acknowledgementExpression: 'true',
+            fenceExpression: 'undefined',
+          }),
+        }],
+      },
       signal: controller.signal,
       onReady: ready,
     })
     try {
-      await vi.waitFor(() => expect(acknowledge).toBeTypeOf('function'))
-      expect(ready).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
       expect(requests.some(item => item.path === '/web')).toBe(false)
       const methods = requests.map(item => item.method)
       const grantIndex = requests.findIndex(item =>
@@ -559,34 +595,21 @@ describe('native Vite development transport', () => {
         item.method === 'Page.setBypassCSP' && item.params.enabled === true
       )
       const registrationIndex = methods.indexOf('Page.addScriptToEvaluateOnNewDocument')
-      const reloadIndex = methods.indexOf('Page.reload')
-      const acknowledgementIndex = requests.findIndex(item =>
-        item.method === 'Runtime.evaluate'
-        && String(item.params.expression).includes('cordisx:production-boot-pending')
-      )
+      const reloadIndex = requests.findIndex(item => item.method === 'Page.reload')
       expect(grantIndex).toBeGreaterThanOrEqual(0)
       expect(grantIndex).toBeLessThan(bypassIndex)
       expect(bypassIndex).toBeLessThan(registrationIndex)
       expect(registrationIndex).toBeLessThan(reloadIndex)
-      expect(reloadIndex).toBeLessThan(acknowledgementIndex)
-      expect(requests.find(item => item.method === 'Page.reload')?.params).toEqual({})
+      expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
+      expect(requests.some(item => item.method === 'Fetch.enable')).toBe(true)
+      expect(nativeAuthority.install).toHaveBeenCalledOnce()
 
       const installedSource = String(requests[registrationIndex]?.params.source)
       const installId = installedSource.match(/__cordisxProductionInstallId = "([^"]+)"/)?.[1]
       expect(installId).toBeDefined()
       expect(installedSource).toContain(`installId: "${installId}"`)
       expect(installedSource).toContain(source)
-      const acknowledgementSource = String(requests[acknowledgementIndex]?.params.expression)
-      expect(acknowledgementSource.match(new RegExp(`__cordisxProductionInstallId !== "${installId}"`, 'g')))
-        .toHaveLength(2)
-      expect(acknowledgementSource).toContain('__cordisxProductionBootstrapState')
-      expect(acknowledgementSource).toContain('CordisX production runtime is undefined after boot')
-      expect(requests.some(item => item.method === 'Runtime.evaluate' && item.params.expression === source)).toBe(
-        false,
-      )
-
-      acknowledge!()
-      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+      expect(requests.some(item => item.method === 'Fetch.fulfillRequest')).toBe(true)
     } finally {
       controller.abort()
       await watching
@@ -617,7 +640,6 @@ describe('native Vite development transport', () => {
     const cleanReloadIndex = requests.findLastIndex(item => item.method === 'Page.reload')
     expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
     expect(disposeIndex).toBeLessThan(cspRestoreIndex)
-    expect(removalIndex).toBeLessThan(cleanReloadIndex)
     expect(removalIndex).toBeLessThan(cspRestoreIndex)
     expect(cspRestoreIndex).toBeLessThan(permissionRestoreIndex)
     expect(permissionRestoreIndex).toBeLessThan(cleanReloadIndex)

@@ -64,8 +64,12 @@ export interface NativeResourceInterceptionOptions {
   readonly session: NativeResourceInterceptionSession
   readonly target: Readonly<{ id: string; url: string }>
   readonly transforms: readonly NativeResourceTransform[]
-  /** Fetch interception is listening and enabled before this exact-document transition runs. */
-  readonly reloadDocument: () => Promise<void>
+  /**
+   * Fetch interception is listening and enabled before this exact-document transition runs.
+   * Omit it to arm interception for the next natural top-level navigation without replacing
+   * an already interactive document.
+   */
+  readonly reloadDocument?: () => Promise<void>
   readonly timeoutMs?: number
   readonly signal?: AbortSignal
   readonly onStatusChange?: (
@@ -329,6 +333,7 @@ export async function installNativeResourceInterception(
       delete item.reason
       item.state = 'pending'
     }
+    state.topLevelLoadPending = false
     if (state.status !== 'installing') publish('installing')
     return state.documentGeneration
   }
@@ -452,7 +457,8 @@ export async function installNativeResourceInterception(
       && transforms.has(event.request.url)
       && event.resourceType === 'Script'
       && Number.isSafeInteger(event.responseStatusCode)
-    const generation = state.status === 'active' && state.topLevelLoadPending && isPinnedScript
+    const generation = state.topLevelLoadPending && isPinnedScript
+        && (state.status === 'active' || state.documentGeneration === 0)
       ? beginDocument()
       : undefined
     const operation = (async () => {
@@ -502,6 +508,7 @@ export async function installNativeResourceInterception(
       })),
     }, timeoutMs)
     state.fetchEnabled = true
+    if (options.reloadDocument === undefined) return handle
     const generation = beginDocument()
     await bounded(options.reloadDocument(), timeoutMs, 'document reload', options.signal)
     await acknowledgeDocument(generation)

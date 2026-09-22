@@ -28,6 +28,7 @@ describe('transient supervisor state', () => {
       appId: 'codex',
       profileId: 'work',
       phase: 'ready',
+      startupSurface: 'workspace-ready',
       pid: process.pid,
       processStartedAt: processStartedAt!,
       instanceToken: 'a'.repeat(32),
@@ -36,7 +37,12 @@ describe('transient supervisor state', () => {
       effectiveConfig: effectiveConfigFingerprint({ mode: 'shared', plugins: [] }),
       cdpEndpoint: 'http://127.0.0.1:43135',
     })
-    expect(await readSupervisorState(paths)).toMatchObject({ phase: 'ready', appId: 'codex', profileId: 'work' })
+    expect(await readSupervisorState(paths)).toMatchObject({
+      phase: 'ready',
+      appId: 'codex',
+      profileId: 'work',
+      startupSurface: 'workspace-ready',
+    })
     expect(await stateFileIsPrivate(paths)).toBe(true)
     expect(await hasMatchingProcess((await readSupervisorState(paths))!)).toBe(true)
   })

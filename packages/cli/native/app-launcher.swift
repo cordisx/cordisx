@@ -16,9 +16,15 @@ func launcherObject(_ path: String) throws -> [String: Any] {
     return value
 }
 
-func launcherOutput(_ process: Process, _ pipe: Pipe, timeout: Double) throws -> Data {
+func launcherOutput(
+    _ process: Process,
+    _ pipe: Pipe,
+    timeout: Double,
+    onObject: (([String: Any]) -> Void)? = nil
+) throws -> Data {
     let lock = NSLock(), terminated = DispatchSemaphore(value: 0), readDone = DispatchSemaphore(value: 0)
-    var bytes = Data(), oversized = false
+    var bytes = Data(), pending = Data(), oversized = false
+    var recoveryHeartbeatUntil: TimeInterval = 0
     process.terminationHandler = { _ in terminated.signal() }
     try process.run()
     DispatchQueue.global().async {
@@ -26,17 +32,43 @@ func launcherOutput(_ process: Process, _ pipe: Pipe, timeout: Double) throws ->
             let chunk = pipe.fileHandleForReading.availableData
             if chunk.isEmpty { break }
             lock.lock()
-            if bytes.count + chunk.count > 96 * 1024 { oversized = true }
-            else { bytes.append(chunk) }
+            if pending.count + chunk.count > 96 * 1024 { oversized = true }
+            else {
+                pending.append(chunk)
+                while let newline = pending.firstRange(of: Data([0x0a])) {
+                    let line = pending.subdata(in: pending.startIndex..<newline.lowerBound)
+                    pending.removeSubrange(pending.startIndex...newline.lowerBound)
+                    if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                        if object["event"] as? String == "waiting-for-user" {
+                            recoveryHeartbeatUntil = ProcessInfo.processInfo.systemUptime + 5
+                        } else if object["event"] as? String == "retrying" {
+                            recoveryHeartbeatUntil = 0
+                        }
+                        onObject?(object)
+                        if object["event"] == nil {
+                            if bytes.count + line.count + 1 > 96 * 1024 { oversized = true }
+                            else { bytes.append(line); bytes.append(0x0a) }
+                        }
+                    }
+                }
+            }
             let stop = oversized
             lock.unlock()
             if stop { process.terminate(); break }
         }
         readDone.signal()
     }
-    guard terminated.wait(timeout: .now() + .milliseconds(Int(timeout * 1000))) == .success else {
-        if process.isRunning { process.terminate() }
-        throw launcherFailure("CordisX operation timed out")
+    var deadline = ProcessInfo.processInfo.systemUptime + timeout
+    while terminated.wait(timeout: .now() + .milliseconds(100)) != .success {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        let recoveryVisible = recoveryHeartbeatUntil > now
+        lock.unlock()
+        if recoveryVisible { deadline = now + timeout }
+        if now >= deadline {
+            if process.isRunning { process.terminate() }
+            throw launcherFailure("CordisX operation timed out")
+        }
     }
     guard readDone.wait(timeout: .now() + 2) == .success else {
         throw launcherFailure("CordisX operation output did not finish")
@@ -50,6 +82,9 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
     private let runtimePath: String
     private var launchInFlight = false
     private var lastError: String?
+    private var profileProjection: (app: String, selected: String, items: [[String: Any]])?
+    private var profileRefreshInFlight = false
+    private var profileRefreshFinished = false
 
     override init() {
         runtimePath = Bundle.main.object(forInfoDictionaryKey: "CordisXAppRuntime") as? String ?? ""
@@ -62,11 +97,13 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
             return
         }
         rebuildMainMenu()
+        refreshProfiles()
         launchDefault(nil)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         rebuildMainMenu()
+        refreshProfiles()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -75,7 +112,8 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
-        profileMenu(includeQuit: false)
+        refreshProfiles()
+        return profileMenu(includeQuit: false)
     }
 
     @objc private func launchDefault(_ sender: Any?) {
@@ -107,17 +145,60 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         rebuildMainMenu()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
-            do { _ = try self?.invoke(arguments, timeout: 75) }
+            var response: [String: Any]?
+            do {
+                response = try self?.invoke(arguments, timeout: 75)
+            }
             catch {
                 failure = error.localizedDescription
                 self?.appendLog(error.localizedDescription)
             }
             DispatchQueue.main.async {
+                if let response, let warning = self?.activateOwnedHost(response) {
+                    self?.appendLog(warning)
+                }
                 self?.launchInFlight = false
                 self?.lastError = failure
                 self?.rebuildMainMenu()
+                self?.refreshProfiles()
                 if let failure { self?.presentError(failure) }
             }
+        }
+    }
+
+    private func activateOwnedHost(_ response: [String: Any]) -> String? {
+        guard let pidNumber = response["hostPid"] as? NSNumber,
+              let startedAt = response["hostStartedAt"] as? String else {
+            return "应用已运行，未能确认对应窗口，未切到前台。"
+        }
+        let pid = pidNumber.int32Value
+        let check = Process(), output = Pipe()
+        check.executableURL = URL(fileURLWithPath: "/bin/ps")
+        check.arguments = ["-p", String(pid), "-o", "lstart="]
+        check.standardOutput = output
+        check.standardError = FileHandle.nullDevice
+        do {
+            try check.run()
+            let actual = String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+            check.waitUntilExit()
+            guard check.terminationStatus == 0, actual == startedAt,
+                  let host = NSRunningApplication(processIdentifier: pid) else {
+                return "应用已运行，未能确认对应窗口，未切到前台。"
+            }
+            let activated: Bool
+            if #available(macOS 14.0, *) {
+                let launcher = NSRunningApplication.current
+                NSApplication.shared.yieldActivation(to: host)
+                activated = host.activate(from: launcher, options: [.activateAllWindows])
+            } else {
+                activated = host.activate(options: [.activateAllWindows])
+            }
+            return activated ? nil : "应用已运行，未能切到前台。"
+        } catch {
+            return "应用已运行，未能确认对应窗口，未切到前台。"
         }
     }
 
@@ -128,6 +209,20 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         return (app, selected, items)
     }
 
+    private func refreshProfiles() {
+        guard !profileRefreshInFlight else { return }
+        profileRefreshInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let projection = self?.profiles()
+            DispatchQueue.main.async {
+                self?.profileRefreshInFlight = false
+                self?.profileRefreshFinished = true
+                if let projection { self?.profileProjection = projection }
+                self?.rebuildMainMenu()
+            }
+        }
+    }
+
     private func profileMenu(includeQuit: Bool) -> NSMenu {
         let menu = NSMenu(title: "CordisX")
         let launch = NSMenuItem(title: "启动默认配置", action: #selector(launchDefault(_:)), keyEquivalent: "")
@@ -135,7 +230,7 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         launch.isEnabled = !launchInFlight
         menu.addItem(launch)
         menu.addItem(.separator())
-        if let projection = profiles() {
+        if let projection = profileProjection {
             for profile in projection.items {
                 guard let id = profile["id"] as? String, let displayName = profile["displayName"] as? String else {
                     continue
@@ -148,7 +243,11 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(item)
             }
         } else {
-            let unavailable = NSMenuItem(title: "配置暂不可用", action: nil, keyEquivalent: "")
+            let unavailable = NSMenuItem(
+                title: profileRefreshFinished ? "配置暂不可用" : "正在载入配置…",
+                action: nil,
+                keyEquivalent: ""
+            )
             unavailable.isEnabled = false
             menu.addItem(unavailable)
         }
@@ -190,7 +289,11 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.mainMenu = main
     }
 
-    private func invoke(_ arguments: [String], timeout: Double) throws -> [String: Any] {
+    private func invoke(
+        _ arguments: [String],
+        timeout: Double,
+        onEvent: (([String: Any]) -> Void)? = nil
+    ) throws -> [String: Any] {
         let runtime = try launcherObject(runtimePath)
         guard runtime["schemaVersion"] as? Int == 1,
               let node = runtime["node"] as? String,
@@ -211,11 +314,14 @@ final class CordisXLauncherDelegate: NSObject, NSApplicationDelegate {
             "PATH": URL(fileURLWithPath: node).deletingLastPathComponent().path + ":/usr/bin:/bin:/usr/sbin:/sbin",
             "TMPDIR": NSTemporaryDirectory(),
         ]
-        let data = try launcherOutput(process, output, timeout: timeout)
+        let data = try launcherOutput(process, output, timeout: timeout, onObject: onEvent)
+        let responses = String(data: data, encoding: .utf8)?
+            .split(whereSeparator: \.isNewline)
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } ?? []
+        let response = responses.last
         guard process.terminationStatus == 0,
-              let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response,
               response["ok"] as? Bool == true else {
-            let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw launcherFailure(response?["error"] as? String ?? "CordisX operation failed")
         }
         if let warning = response["warning"] as? String { appendLog(warning) }

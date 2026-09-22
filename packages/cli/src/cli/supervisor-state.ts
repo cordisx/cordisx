@@ -22,6 +22,10 @@ export interface SupervisorState {
   readonly hostPid?: number
   readonly hostProcessStartedAt?: string
   readonly cdpEndpoint?: string
+  /** Presentation proof only: workspace-ready does not assert account authentication. */
+  readonly startupSurface?: 'workspace-ready' | 'authenticated-ready' | 'auth-required'
+  /** Live heartbeat only while the owning window presents Retry/Close. */
+  readonly startupRecovery?: { readonly waitingForUser: boolean; readonly attempt: number; readonly updatedAt: number }
   /** Sanitized launch diagnosis; detailed output remains in host.log. */
   readonly failure?: string
   readonly failedAt?: string
@@ -89,6 +93,9 @@ function validState(value: unknown): value is SupervisorState {
     && (item.hostPid === undefined || (Number.isSafeInteger(item.hostPid) && (item.hostPid as number) > 0))
     && (item.hostProcessStartedAt === undefined || typeof item.hostProcessStartedAt === 'string')
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')
+    && (item.startupSurface === undefined || item.startupSurface === 'authenticated-ready'
+      || item.startupSurface === 'auth-required' || item.startupSurface === 'workspace-ready')
+    && (item.startupRecovery === undefined || validStartupRecovery(item.startupRecovery))
     && (item.failure === undefined || typeof item.failure === 'string')
     && (item.failedAt === undefined || typeof item.failedAt === 'string')
 }
@@ -98,6 +105,13 @@ export type SupervisorStateReadResult =
   | { readonly status: 'missing' }
   | { readonly status: 'invalid' }
   | { readonly status: 'unreadable'; readonly error: unknown }
+
+function validStartupRecovery(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const state = value as Record<string, unknown>
+  return typeof state.waitingForUser === 'boolean' && Number.isSafeInteger(state.attempt)
+    && Number(state.attempt) >= 0 && typeof state.updatedAt === 'number' && Number.isFinite(state.updatedAt)
+}
 
 export async function readSupervisorStateResult(paths: SupervisorPaths): Promise<SupervisorStateReadResult> {
   try {

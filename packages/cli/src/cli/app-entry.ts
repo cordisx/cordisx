@@ -5,7 +5,7 @@ import { loadHomeConfig } from '../config/home-config.js'
 import { type AppLauncherMenu, type AppLauncherRuntime, validAppLauncherRuntime } from '../app-launcher/model.js'
 import { readPrivateJson } from '../shortcuts/store.js'
 import { type CordisXManagedInvocation, parseCordisXCli } from './parse.js'
-import { type ReadyLaunchResult, runSupervisorCommand } from './supervisor-command.js'
+import { type ReadyLaunchResult, runSupervisorCommandWithStartupGate, type StartupPhase } from './supervisor-command.js'
 import { type ActivatedOwnedHost, activateOwnedHost } from './activate-owned-host.js'
 
 type AppOperation = 'menu' | 'launch-default' | 'launch-profile'
@@ -38,8 +38,12 @@ export async function readAppLauncherMenu(runtime: AppLauncherRuntime): Promise<
 }
 
 export interface AppEntryDependencies {
-  readonly runSupervisor?: typeof runSupervisorCommand
+  readonly runSupervisor?: typeof runSupervisorCommandWithStartupGate
   readonly activate?: (ready: ReadyLaunchResult) => Promise<ActivatedOwnedHost>
+  readonly onState?: (
+    ready: ReadyLaunchResult,
+    phase: StartupPhase,
+  ) => void | Promise<void>
 }
 
 export async function runAppLauncherOperation(
@@ -64,7 +68,7 @@ export async function runAppLauncherOperation(
     }
     invocation = parseCordisXCli(['start', appId, profileId]) as CordisXManagedInvocation
   }
-  const run = dependencies.runSupervisor ?? runSupervisorCommand
+  const run = dependencies.runSupervisor ?? runSupervisorCommandWithStartupGate
   const runRuntime = {
     cwd: runtime.cwd,
     env: {
@@ -77,29 +81,36 @@ export async function runAppLauncherOperation(
       directory: runtime.cacheDirectory,
       registry: runtime.cacheRegistry,
     },
+    internalReuseShortcut: true,
     internalShortcutSpawnCwd: runtime.cwd,
   }
-  let ready: ReadyLaunchResult | undefined
-  try {
-    ready = await run({ ...invocation, createShortcut: true }, runRuntime)
-  } catch {
-    // Launch/activation is the app's primary contract. A stale private icon
-    // cache must not prevent it, and a Host that already became ready is reused.
-    ready = await run(invocation, {
-      cwd: runRuntime.cwd,
-      env: runRuntime.env,
-      stdout: runRuntime.stdout,
-      internalShortcutSpawnCwd: runRuntime.internalShortcutSpawnCwd,
-    })
-  }
+  // Presentation is optional and handled after readiness. A failed launch must
+  // never silently create another Host with a different request.
+  const ready = await run({ ...invocation, createShortcut: true }, runRuntime, dependencies.onState)
   if (!ready) throw new Error('No ready Host instance returned')
   return await (dependencies.activate ?? activateOwnedHost)(ready)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const operation = process.argv[3] as AppOperation | undefined
+  const published = new Set<string>()
   const result = await (operation
-    ? runAppLauncherOperation(process.argv[2] ?? '', operation, process.argv[4], process.argv[5])
+    ? runAppLauncherOperation(process.argv[2] ?? '', operation, process.argv[4], process.argv[5], {
+      onState: (ready, phase) => {
+        const state = ready.state
+        if (!state.hostPid || !state.hostProcessStartedAt) return
+        const key = `${phase}:${state.hostPid}:${state.hostProcessStartedAt}:${state.startupRecovery?.updatedAt ?? 0}`
+        if (published.has(key)) return
+        published.add(key)
+        process.stdout.write(
+          JSON.stringify({
+            event: phase,
+            hostPid: state.hostPid,
+            hostStartedAt: state.hostProcessStartedAt,
+          }) + '\n',
+        )
+      },
+    })
     : Promise.reject(new Error('Missing CordisX app operation'))).catch(error => ({
       ok: false,
       error: error instanceof Error ? error.message : 'CordisX app operation failed',

@@ -486,7 +486,7 @@ describe('native Vite development transport', () => {
     try {
       await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
       controller.abort()
-      await expect(watching).rejects.toThrow('CordisX renderer cleanup failed')
+      await expect(watching).rejects.toThrow('renderer-dispose (session open)')
     } finally {
       controller.abort()
       await watching.catch(() => undefined)
@@ -526,7 +526,7 @@ describe('native Vite development transport', () => {
         const params = request.params ?? {}
         requests.push({ method: request.method, params })
         const failedBoot = request.method === 'Runtime.evaluate'
-          && String(params.expression).includes('cordisx:production-boot-pending')
+          && String(params.expression).includes('CordisX renderer composition and runtime boot promises')
         socket.send(JSON.stringify({
           id: request.id,
           result: request.method === 'Page.addScriptToEvaluateOnNewDocument'

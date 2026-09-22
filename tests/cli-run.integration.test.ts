@@ -12,6 +12,7 @@ import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packa
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
+import { configuredHostLaunchBinding } from './helpers/host-launch-bindings.js'
 
 import {
   createBuiltinSkillFixture,
@@ -129,14 +130,8 @@ describe('functional CordisX CLI', () => {
     let result: unknown
     await runCordisXCli(['codex', 'work', '--dry-run', '--executable', process.execPath], {
       ...runtime,
-      internalObserveOwnerDocuments: async ({ source, handler }) => {
-        const token = source.match(
-          /ownerDocumentBindings\s*:\s*\[\{[^}]*?token\s*:\s*[`'"]([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)[`'"]/,
-        )?.[1]
-        if (token === undefined) throw new Error('configured plugin binding is missing')
-        const moduleGeneration =
-          (JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as { moduleGeneration: string })
-            .moduleGeneration
+      internalObserveOwnerDocuments: async ({ bootstrapSource, source, handler }) => {
+        const { token, moduleGeneration } = await configuredHostLaunchBinding(bootstrapSource, source, entry)
         globalThis.__cordisxOwnerDocumentRequestV1 = (payload: string) => {
           void (async () => {
             const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
@@ -368,6 +363,7 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: home },
       internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: path.join(root, 'shared-home'),
+      internalNativeSubmissionPlatform: 'linux' as const,
       internalAgentHistoryHost: () => {
         throw new Error('history assembly failed')
       },
@@ -381,7 +377,6 @@ describe('functional CordisX CLI', () => {
         '--executable',
         process.execPath,
       ], runtime)
-
     await expect(launch()).rejects.toThrow('history assembly failed')
     await expect(access(`${profile}.cordisx-launch-lock`)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(launch()).rejects.toThrow('history assembly failed')
@@ -414,6 +409,7 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: path.join(root, 'home') },
       internalBuiltinSkillSourceDir: builtinSkillSource,
       internalSharedHomeDir: sharedHome,
+      internalNativeSubmissionPlatform: 'linux',
       stdout: line => {
         output.push(line)
       },
@@ -438,11 +434,11 @@ describe('functional CordisX CLI', () => {
     await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
     await chmod(executable, 0o755)
     const output: string[] = []
-
     await expect(runCordisXCli(['codex', '--executable', executable], {
       env: { CORDISX_HOME: path.join(root, 'cordisx-home') },
       internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: sharedHome,
+      internalNativeSubmissionPlatform: 'linux',
       stdout: line => {
         output.push(line)
       },
@@ -467,7 +463,6 @@ describe('functional CordisX CLI', () => {
     await writeFile(personalSkill, 'personal-sentinel\n')
     await writeFile(executable, '#!/usr/bin/env node\nprocess.exit(0)\n')
     await chmod(executable, 0o755)
-
     await expect(runCordisXCli([
       'codex',
       'private',
@@ -479,9 +474,9 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: cordisxHome },
       internalBuiltinSkillsSourceRootDir: sourceRoot,
       internalSharedHomeDir: sharedHome,
+      internalNativeSubmissionPlatform: 'linux',
       stdout: () => undefined,
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
-
     const privateHome = path.join(cordisxHome, 'apps', 'codex', 'profiles', 'private', 'host-home')
     for (const skillName of BUNDLED_SKILL_NAMES) {
       await expect(access(path.join(privateHome, '.agents', 'skills', skillName, 'SKILL.md'))).resolves.toBeUndefined()

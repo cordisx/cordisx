@@ -3,10 +3,11 @@ import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } f
 import { type CordisXCliInvocation, parseCordisXCli } from './parse.js'
 import { runFeedbackCommand } from './feedback-command.js'
 import { runManagementCommand } from './management-command.js'
-import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
+import { isSupervisorCommand, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
 import { runAppCommand } from './app-command.js'
+import { activateOwnedHost } from './activate-owned-host.js'
 
 export interface PreparedRunCommand {
   readonly invocation: Extract<CordisXCliInvocation, { readonly action: 'launch' }>
@@ -139,7 +140,11 @@ export async function prepareCliCommand(
   const foregroundStart = parsedInvocation.action === 'start'
     && (parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground)
   if (isSupervisorCommand(parsedInvocation) && !foregroundStart) {
-    await runSupervisorCommand(parsedInvocation, runtime)
+    const ready = await runSupervisorCommandWithStartupGate(parsedInvocation, runtime)
+    if (ready !== undefined && (parsedInvocation.action === 'start' || parsedInvocation.action === 'restart')) {
+      const activated = await activateOwnedHost(ready)
+      if (activated.warning !== undefined) (runtime.stdout ?? console.log)(`[cordisx] ${activated.warning}`)
+    }
     return
   }
   const foregroundInvocation = (parsedInvocation.action === 'run' || foregroundStart

@@ -45,17 +45,29 @@ import {
 import {
   acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
+  confirmHiddenCodexOwnership,
   findFreeLoopbackPort,
   type IsolatedCodexProfile,
   launchCodex,
+  launchCodexHidden,
   prepareIsolatedCodexProfile,
   resolveCodexExecutable,
+  retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import {
+  logHostLifecycle,
+  observeHostExit,
+  waitForAbort,
+  waitForExit,
+  waitForHostExitAfterReadiness,
+} from './host-lifecycle.js'
+export { waitForAbort, waitForExit, waitForHostExitAfterReadiness } from './host-lifecycle.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
+import type { openNativeStartupGate } from './startup-gate.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
@@ -145,44 +157,17 @@ import {
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import type { OpenManagementCommandService } from './management-command.js'
-
-export const HELP = `Usage:
-  cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
-  cordisx start|status|logs|stop|restart [app] [profile] [options]
-  cordisx app
-  cordisx setup
-  cordisx config
-  cordisx doctor
-  cordisx feedback <collect|inspect|export> [options]
-  cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
-  cordisx plugin <command> [options]
-  cordisx source <command> [options]
-
-Options:
-  --attach                 Attach to an existing loopback CDP endpoint
-  --system                 Use the host's system Chromium profile (escape hatch)
-  --profile-dir <path>     Override this launch profile's independent Chromium directory
-  --executable <path>      Override the host executable
-  --debug-port <port>      Override the loopback CDP port
-  --online-devtools        Allow the official online DevTools frontend
-  --dry-run                Resolve and print the plan without starting the host
-  --recover-startup        Replace a legacy start lock after older CordisX starts have exited
-  --write-config           Enable plugin saves to an explicit dev --config file
-  --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
-  dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
-  plugin --help            Show plugin management commands
-  source --help            Show source management commands
-  feedback --help          Show local, privacy-filtered feedback commands
-  --create-shortcut        Create/update a macOS launch entry after readiness
-  -h, --help               Show this help`
+export { HELP } from './help.js'
 
 export interface CordisXCliRuntime {
   /** Test-only app installation destination. */
-  readonly internalAppOutput?: { readonly directory: string; readonly path?: string }
+  readonly internalAppOutput?: import('../app-launcher/runtime-install.js').AppCommandOutputOptions
   /** Test-only exact-path replacement for `/usr/bin/open`. */
   readonly internalOpenApp?: (path: string) => void | Promise<void>
   /** Isolated native verification output; never read from user CLI/env. */
   readonly internalShortcutOutput?: import('../shortcuts/model.js').ShortcutOutputOptions
+  /** The persistent app launcher may reuse one verified entry for the same live Host generation. */
+  readonly internalReuseShortcut?: boolean
   /** Only the signed native shortcut entry supplies this internal path. */
   readonly internalShortcutDockRecordPath?: string
   /** GUI children start outside protected project folders; cwd still records launch intent. */
@@ -208,6 +193,9 @@ export interface CordisXCliRuntime {
   }) => Readonly<{ pid: number; unref(): void }>
   /** Repository-only seam for bounded supervisor failure-path integration tests. */
   readonly internalSupervisorReadinessTimeoutMs?: number
+  /** Repository-only startup-gate seam; false keeps command tests headless. */
+  readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
+  readonly internalScheduleShortcutPresentation?: import('./shortcut-presentation-worker.js').PresentationScheduler
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is
@@ -272,18 +260,8 @@ export function shouldSkipBuiltinSkillDeployment(environment: NodeJS.ProcessEnv)
   return environment.CORDISX_SKIP_BUILTIN_SKILL_DEPLOYMENT === '1'
 }
 
-export function waitForExit(child: ChildProcess): Promise<void> {
-  return new Promise((resolve, reject) => {
-    child.once('error', reject)
-    child.once('exit', (code, signal) => {
-      if (code === 0 || signal !== null) resolve()
-      else reject(new Error(`host exited with status ${String(code)}`))
-    })
-  })
-}
-
 /** Capture only the ephemeral loopback inspector address from our own Host stderr. */
-function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
+export function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
   const stream = child.stderr
   if (!stream) return Promise.reject(new Error('Owned Host inspector stderr unavailable'))
   const operation = new Promise<string>((resolve, reject) => {
@@ -302,11 +280,6 @@ function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
   })
   void operation.catch(() => undefined)
   return operation
-}
-
-export function waitForAbort(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve()
-  return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
 }
 
 export function rootFromConfigPath(configPath: string): string {
@@ -443,22 +416,17 @@ export function printPlan(
   stdout(JSON.stringify({ status, plan }, null, 2))
 }
 
-/** A launch is usable only after the CDP watcher has installed a renderer. */
-export async function waitForHostExitAfterReadiness(input: {
-  readonly childExit: Promise<void>
-  readonly ready: Promise<void>
-  readonly signal: AbortSignal
-}): Promise<void> {
-  let ready = false
-  void input.ready.then(() => {
-    ready = true
-  })
-  await Promise.race([
-    input.childExit.then(() => {
-      if (!ready) throw new Error('Host exited before CordisX CDP became ready')
-    }),
-    waitForAbort(input.signal),
-  ])
+/** A rejected startup UI callback is terminal, including the user's Close action. */
+export async function completeHostReadiness(
+  controller: AbortController,
+  ready?: (signal?: AbortSignal) => void | Promise<void>,
+): Promise<void> {
+  try {
+    await ready?.(controller.signal)
+  } catch (error) {
+    controller.abort()
+    throw error
+  }
 }
 
 export async function runInjectedHost(input: {
@@ -495,6 +463,11 @@ export async function runInjectedHost(input: {
   }>
   readonly managedServiceUI?: WatchInjectionOptions['managedServiceUI']
   readonly executable?: string
+  readonly prelaunchedHost?: Readonly<{
+    child: ChildProcess
+    hostPid?: number
+    inspectorUrl?: Promise<string>
+  }>
   readonly debugPort: number
   readonly hostArgs: readonly string[]
   readonly launcher: CordisXLauncherOptions
@@ -503,15 +476,29 @@ export async function runInjectedHost(input: {
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
-  readonly onReady?: () => void | Promise<void>
-  readonly onHostLaunched?: (pid: number, inspectorUrl?: Promise<string>) => void | Promise<void>
+  readonly onReady?: (signal?: AbortSignal) => void | Promise<void>
+  readonly onHostLaunched?: import('../launcher/process.js').HostLaunchIdentityObserver
   /** Internal, owned-entry bootstrap only. Never a user Host argument. */
-  readonly dockInspector?: boolean
+  readonly mainInspector?: boolean
+  readonly hiddenUntilReady?: boolean
 }): Promise<void> {
   const controller = new AbortController()
-  const stop = (): void => controller.abort()
-  process.once('SIGINT', stop)
-  process.once('SIGTERM', stop)
+  let rendererIsReady = false
+  let launched = input.prelaunchedHost?.child
+  let removeHostObserver = launched === undefined
+    ? undefined
+    : observeHostExit(launched, input.stdout, () => rendererIsReady)
+  const hostPid = (): number | undefined => input.prelaunchedHost?.hostPid ?? launched?.pid
+  const lifecycle = (event: Parameters<typeof logHostLifecycle>[1]): void =>
+    logHostLifecycle(input.stdout, event, { hostPid: hostPid(), ready: rendererIsReady })
+  const stop = (signal: 'SIGINT' | 'SIGTERM'): void => {
+    lifecycle({ event: 'launcher-signal', signal })
+    controller.abort()
+  }
+  const interrupt = (): void => stop('SIGINT')
+  const terminate = (): void => stop('SIGTERM')
+  process.once('SIGINT', interrupt)
+  process.once('SIGTERM', terminate)
   let markReady!: () => void
   const rendererReady = new Promise<void>(resolve => {
     markReady = resolve
@@ -554,15 +541,23 @@ export async function runInjectedHost(input: {
     onReady: async () => {
       if (reportedReady) return
       reportedReady = true
-      await input.onReady?.()
+      await completeHostReadiness(controller, async signal => {
+        try {
+          await input.onReady?.(signal)
+        } catch (error) {
+          lifecycle({ event: 'readiness-failed' })
+          throw error
+        }
+      })
+      rendererIsReady = true
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
     },
     onStatus: message => input.stdout(`[cordisx] ${message}`),
   })
-  let launched: ChildProcess | undefined
   let profileLease = input.profileLease
   let primaryError: unknown
+  let retainProfileLease = false
   try {
     if (input.launcher.attach) {
       await Promise.race([waitForAbort(controller.signal), watcher])
@@ -572,20 +567,43 @@ export async function runInjectedHost(input: {
     if (input.profile !== undefined && profileLease === undefined) {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir)
     }
-    const mainInspector = input.dockInspector === true && await supportsOwnedMainInspector(input.executable)
-    input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
-    launched = launchCodex(
-      input.executable,
-      input.debugPort,
-      input.hostArgs,
-      input.profile,
-      input.launcher.onlineDevtools,
-      input.environment,
-      mainInspector,
-    )
-    if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
-    const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
-    await input.onHostLaunched?.(launched.pid, inspectorUrl)
+    if (input.prelaunchedHost === undefined) {
+      const hidden = input.hiddenUntilReady === true
+      const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
+      if (hidden && !mainInspector) throw new Error('Hidden Host launch requires an owned main inspector')
+      input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
+      const hiddenLaunch = hidden
+        ? await launchCodexHidden(
+          input.executable,
+          input.debugPort,
+          input.hostArgs,
+          input.profile,
+          input.launcher.onlineDevtools,
+          input.environment,
+          mainInspector ? await findFreeLoopbackPort() : undefined,
+        )
+        : undefined
+      launched = hiddenLaunch?.child ?? launchCodex(
+        input.executable,
+        input.debugPort,
+        input.hostArgs,
+        input.profile,
+        input.launcher.onlineDevtools,
+        input.environment,
+        mainInspector,
+      )
+      if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
+      removeHostObserver = observeHostExit(launched, input.stdout, () => rendererIsReady)
+      const inspectorUrl = hiddenLaunch?.inspectorUrl ?? (mainInspector ? captureMainInspectorUrl(launched) : undefined)
+      const ownershipVerified = await input.onHostLaunched?.(hiddenLaunch?.hostPid ?? launched.pid, inspectorUrl)
+      if (hiddenLaunch) {
+        if (ownershipVerified !== true) throw new Error('Hidden Host inspector identity was not confirmed')
+        confirmHiddenCodexOwnership(hiddenLaunch)
+      }
+    } else {
+      launched = input.prelaunchedHost.child
+      if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
+    }
     await Promise.race([
       waitForHostExitAfterReadiness({
         childExit: waitForExit(launched),
@@ -595,9 +613,15 @@ export async function runInjectedHost(input: {
       watcher,
     ])
   } catch (error) {
+    lifecycle({ event: 'lifecycle-failed' })
     primaryError = error
+    retainProfileLease = retainProfileLeaseAfterHiddenHostFailure(error)
+    if (retainProfileLease) {
+      input.stdout('[cordisx] hidden Host identity is unresolved; profile launch lease retained to block unsafe retry')
+    }
     throw error
   } finally {
+    lifecycle({ event: 'cleanup-started' })
     controller.abort()
     const launchedHost = launched
     const cleanup = await settleInjectedHostCleanup({
@@ -608,14 +632,23 @@ export async function runInjectedHost(input: {
       ],
       ...(launchedHost === undefined
         ? {}
-        : { terminateHost: async () => await terminateIsolatedCodex(launchedHost, input.profile) }),
+        : {
+          terminateHost: async () => {
+            lifecycle({
+              event: 'host-termination-requested',
+              alreadyExited: launchedHost.exitCode !== null || launchedHost.signalCode !== null,
+            })
+            await terminateIsolatedCodex(launchedHost, input.profile)
+          },
+        }),
     })
     const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
-    const leaseCleanup = hostTermination?.status === 'rejected'
+    const leaseCleanup = hostTermination?.status === 'rejected' || retainProfileLease
       ? []
       : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])
-    process.removeListener('SIGINT', stop)
-    process.removeListener('SIGTERM', stop)
+    process.removeListener('SIGINT', interrupt)
+    process.removeListener('SIGTERM', terminate)
+    removeHostObserver?.()
     if (primaryError !== undefined) {
       for (const result of [...cleanup, ...leaseCleanup]) {
         if (result.status === 'rejected') {
@@ -965,5 +998,3 @@ export async function runDevelopment(
     }
   }
 }
-
-/** Execute one CLI invocation. Exported for package-level integration tests. */

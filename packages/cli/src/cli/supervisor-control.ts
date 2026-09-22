@@ -3,6 +3,9 @@ import { chmod, rm } from 'node:fs/promises'
 import { connect, createServer, type Server, type Socket } from 'node:net'
 
 const MAX_LINE = 8 * 1024
+// A refresh may run five bounded native helper calls (15 s each), followed by
+// the 3 s Dock-agent request. Presentation stays off the startup readiness path.
+const DOCK_REFRESH_TIMEOUT_MS = 90_000
 
 export interface SupervisorControlServer {
   close(): Promise<void>
@@ -14,14 +17,21 @@ export async function startSupervisorControlServer(input: {
   readonly token: string
   readonly stop: () => void
   readonly readPresentation?: () => Promise<ShortcutPresentation>
-  readonly refreshDock?: (recordPath?: string) => Promise<boolean>
+  readonly refreshDock?: (recordPath?: string, signal?: AbortSignal) => Promise<boolean>
 }): Promise<SupervisorControlServer> {
   await rm(input.socketPath, { force: true })
+  const connections = new Set<Socket>()
   const server = createServer({ allowHalfOpen: true }, socket => {
+    connections.add(socket)
+    const controller = new AbortController()
     let handled = false
-    const timer = setTimeout(() => socket.destroy(), 5000)
+    let timer = setTimeout(() => socket.destroy(), 5000)
     socket.on('error', () => {})
-    socket.on('close', () => clearTimeout(timer))
+    socket.on('close', () => {
+      clearTimeout(timer)
+      controller.abort()
+      connections.delete(socket)
+    })
     let buffer = ''
     socket.setEncoding('utf8')
     socket.on('data', async chunk => {
@@ -49,7 +59,9 @@ export async function startSupervisorControlServer(input: {
           if (request.recordPath !== undefined && typeof request.recordPath !== 'string') {
             throw new Error('Invalid Dock record')
           }
-          socket.end(JSON.stringify({ ok: await input.refreshDock(request.recordPath) }) + '\n')
+          clearTimeout(timer)
+          timer = setTimeout(() => socket.destroy(), DOCK_REFRESH_TIMEOUT_MS)
+          socket.end(JSON.stringify({ ok: await input.refreshDock(request.recordPath, controller.signal) }) + '\n')
         } else if (request.command === 'stop') {
           socket.end('{"ok":true}\n')
           input.stop()
@@ -66,6 +78,8 @@ export async function startSupervisorControlServer(input: {
   await chmod(input.socketPath, 0o600)
   return {
     async close(): Promise<void> {
+      // Presentation must never hold supervisor shutdown behind its deadline.
+      for (const socket of connections) socket.destroy()
       await new Promise<void>((resolve, reject) =>
         server.close(error => error === undefined ? resolve() : reject(error))
       )
@@ -78,7 +92,7 @@ export async function requestDockRefresh(socketPath: string, token: string, reco
   return await new Promise(resolve => {
     const socket = connect(socketPath)
     let response = ''
-    const timer = setTimeout(() => socket.destroy(), 5_000)
+    const timer = setTimeout(() => socket.destroy(), DOCK_REFRESH_TIMEOUT_MS)
     socket.setEncoding('utf8')
     socket.on('error', () => {})
     socket.on('data', chunk => {

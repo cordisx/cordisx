@@ -15,6 +15,17 @@ if (process.platform === 'darwin') {
   const out = fileURLToPath(new URL('dist/native', root))
   mkdirSync(out, { recursive: true })
   copyFileSync(fileURLToPath(new URL('native/dock-agent.cjs', root)), `${out}/dock-agent.cjs`)
+  for (
+    const name of [
+      'visibility-agent.cjs',
+      'startup-navigation.cjs',
+      'startup-cover.cjs',
+      'startup-cover.css',
+      'startup-loading.html',
+    ]
+  ) {
+    copyFileSync(fileURLToPath(new URL(`native/${name}`, root)), `${out}/${name}`)
+  }
   execFileSync('/usr/bin/swiftc', [
     '-O',
     ...['Images.swift', 'Runner.swift', 'Entry.swift', 'main.swift'].map(name =>
@@ -28,5 +39,17 @@ if (process.platform === 'darwin') {
     fileURLToPath(new URL('native/app-launcher.swift', root)),
     '-o',
     `${out}/CordisXLauncher`,
+  ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/swiftc', [
+    '-O',
+    fileURLToPath(new URL('native/startup-gate.swift', root)),
+    '-o',
+    `${out}/CordisXStartupGate`,
+  ], { stdio: 'inherit' })
+  execFileSync('/usr/bin/swiftc', [
+    '-O',
+    fileURLToPath(new URL('native/host-open.swift', root)),
+    '-o',
+    `${out}/CordisXHostOpen`,
   ], { stdio: 'inherit' })
 }

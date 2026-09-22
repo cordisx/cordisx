@@ -1,0 +1,78 @@
+:host, :root {
+  --startup-surface: #f4f5f7;
+  --startup-text: #202124;
+  --startup-muted: #65676b;
+  color-scheme: light dark;
+  background: transparent;
+  color: var(--startup-text);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+html, body {
+  background: transparent;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+main {
+  box-sizing: border-box;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  user-select: none;
+}
+.mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 128px;
+  height: 128px;
+  transform: translate(-50%, -50%);
+}
+.mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.mark .mark-dark {
+  display: none;
+}
+.status {
+  position: absolute;
+  top: calc(50% + 92px);
+  left: 16px;
+  right: 16px;
+  font-size: 13px;
+}
+p {
+  margin: 0 0 16px;
+  color: var(--startup-muted);
+}
+button {
+  margin: 0 6px;
+  padding: 8px 18px;
+  border: 1px solid var(--startup-muted);
+  border-radius: 8px;
+  background: var(--startup-surface);
+  color: var(--startup-text);
+  font: inherit;
+  cursor: pointer;
+}
+button:focus-visible {
+  outline: 2px solid var(--startup-text);
+  outline-offset: 3px;
+}
+@media (prefers-color-scheme: dark) {
+  :host, :root {
+    --startup-surface: #17181a;
+    --startup-text: #f2f3f5;
+    --startup-muted: #a7aab0;
+  }
+  .mark .mark-light {
+    display: none;
+  }
+  .mark .mark-dark {
+    display: block;
+  }
+}

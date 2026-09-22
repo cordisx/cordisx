@@ -374,6 +374,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         type="button"
         className="cxmp-trigger cxmp-model-trigger"
         disabled={suspended}
+        data-cordisx-model-ready={native.available && displayedModel !== undefined && !switching ? 'true' : undefined}
         aria-label={`${copy.models}: ${displayedModelLabel}`}
         title={displayedModelLabel}
         aria-haspopup="menu"

@@ -1,15 +1,19 @@
-import { lstat, readFile, realpath, rm } from 'node:fs/promises'
+import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
+import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import { cdpInstallationAborted } from '../launcher/cdp-session.js'
 import { readHostShortcutPresentation } from '../launcher/shortcut-presentation.js'
 import {
   dockScope,
-  installDockAgent,
+  type HostMainAgentController,
+  installHostMainAgents,
   prepareDockImage,
   prepareOptionalDockImage,
   refreshDockAgent,
 } from '../shortcuts/dock.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
+import { logHostLifecycle } from './host-lifecycle.js'
 import {
   acquireSupervisorStartLock,
   hasMatchingProcessIdentity,
@@ -85,10 +89,14 @@ export async function createSupervisorRuntime(
   environment: NodeJS.ProcessEnv,
   options: { readonly publicationTimeoutMs?: number } = {},
 ): Promise<{
-  readonly markReady: (debugPort: number) => Promise<void>
-  readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>) => Promise<void>
+  readonly markReady: (
+    debugPort: number,
+    account?: NativeAccountCapabilityDescriptor,
+    signal?: AbortSignal,
+  ) => Promise<void>
+  readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>, debugPort?: number) => Promise<boolean>
   readonly close: () => Promise<void>
-  readonly dockInspector: boolean
+  readonly mainInspector: boolean
 }> {
   const home = environment.CORDISX_SUPERVISOR_HOME
   const app = environment.CORDISX_SUPERVISOR_APP
@@ -123,8 +131,27 @@ export async function createSupervisorRuntime(
   let supervisorToken: string | undefined
   let releaseStartupOperation: (() => Promise<void>) | undefined
   let inspectorUrl: Promise<string> | undefined
-  let closeMainInspector: (() => Promise<void>) | undefined
+  let mainAgents: HostMainAgentController | undefined
   let dockAgentInstalled = false
+  let recoveryAttempt = 0
+  const onStartupRecovery = async (waitingForUser: boolean): Promise<void> => {
+    if (!home || !app || !profile) throw new Error('Missing startup recovery owner')
+    const paths = supervisorPaths(home, app, profile)
+    const current = await readSupervisorState(paths)
+    if (
+      !current || current.phase !== 'starting' || current.pid !== process.pid
+      || current.instanceToken !== supervisorToken
+      || !current.hostPid || !current.hostProcessStartedAt
+      || !await hasMatchingProcessIdentity(current.hostPid, current.hostProcessStartedAt)
+    ) {
+      throw new Error('Startup recovery owner is no longer current')
+    }
+    if (!waitingForUser) recoveryAttempt++
+    await writeSupervisorState(paths, {
+      ...current,
+      startupRecovery: { waitingForUser, attempt: recoveryAttempt, updatedAt: Date.now() },
+    })
+  }
   if (home !== undefined && app !== undefined && profile !== undefined && tokenFile !== undefined) {
     if (fingerprint === undefined) throw new Error('missing background supervisor fingerprint')
     const token = (await readFile(tokenFile, 'utf8')).trim()
@@ -144,7 +171,10 @@ export async function createSupervisorRuntime(
       control = await startSupervisorControlServer({
         socketPath: supervisorPaths(home, app, profile).socket,
         token,
-        stop: () => process.kill(process.pid, 'SIGTERM'),
+        stop: () => {
+          logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'supervisor-stop-requested' })
+          process.kill(process.pid, 'SIGTERM')
+        },
         readPresentation: async () => {
           const paths = supervisorPaths(home, app, profile)
           const before = await readSupervisorState(paths)
@@ -161,29 +191,43 @@ export async function createSupervisorRuntime(
         },
         ...(dock
           ? {
-            refreshDock: async (requestedRecord?: string) => {
+            refreshDock: async (requestedRecord?: string, signal?: AbortSignal) => {
+              const paths = supervisorPaths(home, app, profile)
+              let stage = 'owner'
+              let refreshed = false
               try {
-                const paths = supervisorPaths(home, app, profile)
                 const state = await readSupervisorState(paths)
                 if (
                   state?.pid !== process.pid || state.instanceToken !== token || state.phase !== 'ready'
                   || !state.hostPid || !state.hostProcessStartedAt
                   || !await hasMatchingProcessIdentity(state.hostPid, state.hostProcessStartedAt)
                 ) return false
+                stage = 'agent-installed'
                 if (!dockAgentInstalled) return false
+                stage = 'record-identity'
                 const recordPath = requestedRecord ?? dock.recordPath
                 if (!path.isAbsolute(recordPath) || path.basename(recordPath) !== `${dock.entryId}.json`) return false
+                stage = 'record-directory'
                 const parent = await lstat(path.dirname(recordPath))
                 if (
                   !parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== process.getuid?.()
                   || (parent.mode & 0o077) !== 0
                 ) return false
                 const currentDock = { ...dock, recordPath }
-                if (!await prepareDockImage(currentDock, { home: selectedHome!, app, profile })) return false
+                stage = 'image-preparation'
+                if (!await prepareDockImage(currentDock, { home: selectedHome!, app, profile }, signal)) return false
+                signal?.throwIfAborted()
+                stage = 'agent-refresh'
                 await refreshDockAgent(dock, token)
+                refreshed = true
                 return true
               } catch {
                 return false
+              } finally {
+                if (!refreshed) {
+                  // Fixed phase names only: no record contents, tokens or image bytes.
+                  await appendFile(paths.log, `[cordisx] Dock refresh failed at ${stage}\n`).catch(() => undefined)
+                }
               }
             },
           }
@@ -196,10 +240,10 @@ export async function createSupervisorRuntime(
     }
   }
   return {
-    dockInspector: dock !== undefined,
-    async markHostLaunched(pid, hostInspectorUrl): Promise<void> {
+    mainInspector: selectedHome !== undefined,
+    async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
-      if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
+      if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return false
       const current = await readSupervisorState(supervisorPaths(home, app, profile))
       if (
         current === undefined
@@ -215,20 +259,26 @@ export async function createSupervisorRuntime(
         hostPid: pid,
         hostProcessStartedAt,
       })
-      if (dock && inspectorUrl) {
-        if (!supervisorToken) throw new Error('Owned Host Dock bootstrap missing')
-        await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        closeMainInspector = await installDockAgent({
-          scope: dock,
-          token: supervisorToken,
+      if (inspectorUrl) {
+        if (debugPort === undefined) throw new Error('Owned Host debug port missing')
+        if (!supervisorToken) throw new Error('Owned Host main bootstrap missing')
+        if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
+        mainAgents = await installHostMainAgents({
           inspectorUrl: await inspectorUrl,
           hostPid: pid,
+          hostCwd: process.cwd(),
+          debugPort,
           hostStartedAt: hostProcessStartedAt,
+          readyStatePath: supervisorPaths(home, app, profile).state,
+          readyInstanceToken: supervisorToken,
+          onStartupRecovery,
+          ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
-        dockAgentInstalled = true
+        dockAgentInstalled = dock !== undefined
       }
+      return mainAgents !== undefined
     },
-    async markReady(debugPort): Promise<void> {
+    async markReady(debugPort, account, signal): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
       const current = await readSupervisorState(supervisorPaths(home, app, profile))
       if (
@@ -238,35 +288,47 @@ export async function createSupervisorRuntime(
         || current.instanceToken !== supervisorToken
         || control === undefined
       ) throw new Error('background supervisor generation is no longer current')
-      if (dock && inspectorUrl && !dockAgentInstalled) {
+      if (inspectorUrl && !mainAgents) {
         if (!current.hostPid || !current.hostProcessStartedAt || !supervisorToken) {
-          throw new Error('Owned Host Dock bootstrap missing')
+          throw new Error('Owned Host main bootstrap missing')
         }
-        await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        closeMainInspector = await installDockAgent({
-          scope: dock,
-          token: supervisorToken,
+        if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
+        mainAgents = await installHostMainAgents({
           inspectorUrl: await inspectorUrl,
           hostPid: current.hostPid,
+          hostCwd: process.cwd(),
+          debugPort,
           hostStartedAt: current.hostProcessStartedAt,
+          readyStatePath: supervisorPaths(home, app, profile).state,
+          readyInstanceToken: supervisorToken,
+          onStartupRecovery,
+          ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
-        dockAgentInstalled = true
+        dockAgentInstalled = dock !== undefined
       }
+      let startupSurface: 'workspace-ready' | 'authenticated-ready' | 'auth-required' | undefined
       await publishReadyAfterInspectorClose(
-        closeMainInspector,
-        async () =>
+        mainAgents
+          ? async () => {
+            startupSurface = await mainAgents!.revealAndClose(account, signal)
+          }
+          : undefined,
+        async () => {
+          if (signal?.aborted) throw cdpInstallationAborted()
           await writeSupervisorState(supervisorPaths(home, app, profile), {
             ...current,
             phase: 'ready',
+            ...(startupSurface === undefined ? {} : { startupSurface }),
             cdpEndpoint: `http://127.0.0.1:${debugPort}`,
-          }),
+          })
+        },
       )
-      closeMainInspector = undefined
+      mainAgents = undefined
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
     },
     async close(): Promise<void> {
-      await closeMainInspector?.().catch(() => undefined)
+      await mainAgents?.close().catch(() => undefined)
       await control?.close().catch(() => undefined)
       await releaseStartupOperation?.().catch(() => undefined)
       releaseStartupOperation = undefined

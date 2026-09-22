@@ -5,6 +5,9 @@ import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
+import type { StartupSurface } from '../renderer/adapter/startup-readiness.js'
+import { connectStartupCover, installStartupNavigation, type StartupCoverController } from './startup-cover.js'
 import { CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import { hasMatchingProcessIdentity } from '../cli/supervisor-state.js'
 import { inspectBundle, nativeOperation } from './native.js'
@@ -12,6 +15,7 @@ import { readPrivateJson } from './store.js'
 import { validRecord } from './model.js'
 
 export const dockAgent = fileURLToPath(new URL('../../native/dock-agent.cjs', import.meta.url))
+export const visibilityAgent = fileURLToPath(new URL('../../native/visibility-agent.cjs', import.meta.url))
 const run = promisify(execFile)
 const FUSE_SENTINEL = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
 
@@ -91,7 +95,9 @@ async function clearDockImages(scope: DockScope): Promise<void> {
 export async function prepareDockImage(
   scope: DockScope,
   expected: { home: string; app: string; profile: string },
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  signal?.throwIfAborted()
   let value: unknown
   try {
     value = await readPrivateJson(scope.recordPath)
@@ -106,8 +112,8 @@ export async function prepareDockImage(
     !validRecord(value) || value.entryId !== scope.entryId || value.cordisxHome !== expected.home
     || value.appId !== expected.app || value.profileId !== expected.profile
   ) throw new Error('Dock record identity mismatch')
-  const resolved = await nativeOperation<{ path: string }>({ operation: 'resolve', bookmark: value.bookmark })
-  const inspected = await inspectBundle(resolved.path)
+  const resolved = await nativeOperation<{ path: string }>({ operation: 'resolve', bookmark: value.bookmark }, signal)
+  const inspected = await inspectBundle(resolved.path, signal)
   if (inspected.entryId !== scope.entryId || inspected.recordPath !== scope.recordPath) {
     throw new Error('Dock entry identity mismatch')
   }
@@ -118,7 +124,8 @@ export async function prepareDockImage(
   const temporaryDefault = path.join(scope.directory, `.dock-default-${nonce}.png`)
   try {
     if (inspected.customIcon) {
-      await nativeOperation({ operation: 'render-file-icon', path: resolved.path, output: temporary })
+      await nativeOperation({ operation: 'render-file-icon', path: resolved.path, output: temporary }, signal)
+      signal?.throwIfAborted()
       await publishDockImage(temporary, scope.iconPath)
       await Promise.all([scope.lightIconPath, scope.darkIconPath, scope.defaultIconPath]
         .map(file => rm(file, { force: true })))
@@ -128,19 +135,20 @@ export async function prepareDockImage(
         path: resolved.path,
         output: temporaryLight,
         appearance: 'light',
-      })
+      }, signal)
       await nativeOperation({
         operation: 'render-file-icon',
         path: resolved.path,
         output: temporaryDark,
         appearance: 'dark',
-      })
+      }, signal)
       await nativeOperation({
         operation: 'render-file-icon',
         path: resolved.path,
         output: temporaryDefault,
         appearance: 'default',
-      })
+      }, signal)
+      signal?.throwIfAborted()
       await publishDockImage(temporaryLight, scope.lightIconPath)
       await publishDockImage(temporaryDark, scope.darkIconPath)
       await publishDockImage(temporaryDefault, scope.defaultIconPath)
@@ -217,20 +225,30 @@ async function inspectorClosed(port: number): Promise<boolean> {
   })
 }
 
-/** One-shot official Electron main inspector; closes before the Host becomes ready. */
-export async function installDockAgent(input: {
-  scope: DockScope
-  token: string
+export interface HostMainAgentController {
+  revealAndClose(account?: NativeAccountCapabilityDescriptor, signal?: AbortSignal): Promise<StartupSurface>
+  close(): Promise<void>
+}
+
+/** Install same-window startup and optional Dock ownership over one inspector. */
+export async function installHostMainAgents(input: {
   inspectorUrl: string
   hostPid: number
   hostStartedAt: string
-}): Promise<() => Promise<void>> {
+  hostCwd?: string
+  debugPort: number
+  readyStatePath: string
+  readyInstanceToken: string
+  onStartupRecovery?: (waiting: boolean) => Promise<void>
+  dock?: { readonly scope: DockScope; readonly token: string }
+}): Promise<HostMainAgentController> {
   const matched = /^ws:\/\/127\.0\.0\.1:(\d+)\/[a-f0-9-]+$/u.exec(input.inspectorUrl)
   if (!matched || !await hasMatchingProcessIdentity(input.hostPid, input.hostStartedAt)) {
     throw new Error('Owned Host main inspector identity mismatch')
   }
   const port = Number(matched[1])
   let session: CdpSession | undefined
+  let startup: StartupCoverController | undefined
   let closed = false
   const closeInspector = async (): Promise<void> => {
     if (closed) return
@@ -248,6 +266,44 @@ export async function installDockAgent(input: {
   }
   try {
     session = await CdpSession.connect(input.inspectorUrl)
+    await session.send('Debugger.enable')
+    await session.send('Debugger.setBreakpointByUrl', {
+      lineNumber: 0,
+      urlRegex: 'early-bootstrap\\.js',
+    })
+    const paused = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        remove()
+        reject(new Error('Owned Host did not pause before its application entry'))
+      }, 5_000)
+      const remove = session!.onEvent('Debugger.paused', params => {
+        clearTimeout(timer)
+        remove()
+        resolve(params)
+      })
+    })
+    await session.send('Runtime.runIfWaitingForDebugger')
+    const pausedEvent = await paused
+    const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
+    if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
+    if (input.hostCwd !== undefined) {
+      const cwdResponse = await session.send('Debugger.evaluateOnCallFrame', {
+        callFrameId: frame.callFrameId,
+        expression: `process.chdir(${JSON.stringify(input.hostCwd)});process.cwd()`,
+        returnByValue: true,
+      })
+      if (
+        runtimeEvaluationException(cwdResponse)
+        || (cwdResponse.result as { value?: unknown })?.value !== input.hostCwd
+      ) {
+        throw new Error('Owned Host working directory could not be restored')
+      }
+    }
+    await installStartupNavigation(session, frame.callFrameId, {
+      pid: input.hostPid,
+      generation: input.readyInstanceToken,
+    })
+    await session.send('Debugger.resume')
     // Electron exposes the inspector before its application entry module is
     // loaded. Wait for the main module rather than racing Node bootstrap.
     const moduleDeadline = Date.now() + 10_000
@@ -261,36 +317,57 @@ export async function installDockAgent(input: {
       if (!moduleReady) await new Promise(resolve => setTimeout(resolve, 100))
     }
     if (!moduleReady) throw new Error('Owned Host main module did not initialize')
-    // All code and arguments are selected by the owning launcher. No socket
-    // request can provide JavaScript, a module path, or an image path.
-    const expression = `process.mainModule.require(${JSON.stringify(dockAgent)}).install(${
-      JSON.stringify({
-        pid: input.hostPid,
-        entryId: input.scope.entryId,
-        token: input.token,
-        socketPath: input.scope.socketPath,
-        iconPath: input.scope.iconPath,
-        lightIconPath: input.scope.lightIconPath,
-        darkIconPath: input.scope.darkIconPath,
-        defaultIconPath: input.scope.defaultIconPath,
-      })
-    })`
-    const response = await session.send('Runtime.evaluate', {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    }, 5_000)
-    const remoteError = runtimeEvaluationException(response)
-    if (
-      remoteError
-      || (response.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
-      || (response.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
-    ) {
-      throw new Error('Owned Host Dock agent initialization failed' + (remoteError ? ': ' + remoteError : ''))
+    startup = await connectStartupCover(
+      session,
+      { pid: input.hostPid, generation: input.readyInstanceToken },
+      input.debugPort,
+      input.onStartupRecovery,
+    )
+    if (input.dock) {
+      // All code and arguments are selected by the owning launcher. No socket
+      // request can provide JavaScript, a module path, or an image path.
+      const { scope, token } = input.dock
+      const dockResponse = await session.send('Runtime.evaluate', {
+        expression: `process.mainModule.require(${JSON.stringify(dockAgent)}).install(${
+          JSON.stringify({
+            pid: input.hostPid,
+            entryId: scope.entryId,
+            token,
+            socketPath: scope.socketPath,
+            iconPath: scope.iconPath,
+            lightIconPath: scope.lightIconPath,
+            darkIconPath: scope.darkIconPath,
+            defaultIconPath: scope.defaultIconPath,
+          })
+        })`,
+        awaitPromise: true,
+        returnByValue: true,
+      }, 5_000)
+      const dockError = runtimeEvaluationException(dockResponse)
+      if (
+        dockError
+        || (dockResponse.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
+        || (dockResponse.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
+      ) {
+        throw new Error('Owned Host Dock agent initialization failed' + (dockError ? ': ' + dockError : ''))
+      }
     }
   } catch (error) {
-    await closeInspector().catch(() => undefined)
+    // The caller owns process-tree cleanup. Do not disconnect/resume a paused
+    // main before that cleanup: its first document may not have a cover yet.
+    await startup?.close()
     throw error
   }
-  return closeInspector
+  return {
+    async revealAndClose(account, signal): Promise<StartupSurface> {
+      if (!startup) throw new Error('Owned startup surface unavailable')
+      const surface = await startup.reveal(account, signal)
+      await closeInspector()
+      return surface
+    },
+    async close() {
+      await startup?.close()
+      await closeInspector()
+    },
+  }
 }
