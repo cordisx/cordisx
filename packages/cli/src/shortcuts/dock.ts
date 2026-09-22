@@ -13,6 +13,7 @@ import { validRecord } from './model.js'
 
 export const dockAgent = fileURLToPath(new URL('../../native/dock-agent.cjs', import.meta.url))
 export const visibilityAgent = fileURLToPath(new URL('../../native/visibility-agent.cjs', import.meta.url))
+const NATIVE_CONTENT_READY_TIMEOUT_MS = 45_000
 const run = promisify(execFile)
 const FUSE_SENTINEL = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
 
@@ -368,13 +369,13 @@ export async function installHostMainAgents(input: {
         })`,
         awaitPromise: true,
         returnByValue: true,
-      }, 5_000)
+      }, NATIVE_CONTENT_READY_TIMEOUT_MS)
       const remoteError = runtimeEvaluationException(response)
       if (
         remoteError
         || (response.result as { value?: { armed?: unknown; pid?: unknown } })?.value?.armed !== true
         || (response.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
-      ) throw new Error('Owned Host visibility release watch failed' + (remoteError ? ': ' + remoteError : ''))
+      ) throw new Error('Owned Host native content readiness failed' + (remoteError ? ': ' + remoteError : ''))
       await closeInspector()
     },
     close: closeInspector,

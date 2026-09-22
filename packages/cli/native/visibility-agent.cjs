@@ -16,10 +16,79 @@ let originalHide
 let originalFocus
 let originalRestore
 let originalSetOpacity
+let ipcMain
+let originalIpcHandle
+let rendererMessageHandlerInstalled = false
 const tracked = new Set()
 const requested = new Set()
 const requestedOpacity = new Map()
+const rendererReady = new Set()
+const rendererPaintPending = new Set()
+let nativeContentReady = false
+let nativeContentReadyResolve
+const nativeContentReadyPromise = new Promise(resolve => {
+  nativeContentReadyResolve = resolve
+})
 let releasePoll
+
+const RENDERER_MESSAGE_CHANNEL = 'codex_desktop:message-from-view'
+// The Host's primary renderer sends `ready` after its route tree mounts, then
+// advances first_content_visible after two visible animation frames. Mirror
+// that public Electron paint boundary without reading React state or DOM shape.
+const PAINT_READY_EXPRESSION = `new Promise(resolve => {
+  if (document.visibilityState !== 'visible') return resolve(false)
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.visibilityState === 'visible')))
+})`
+
+function restoreIpcHandle() {
+  if (ipcMain && originalIpcHandle && ipcMain.handle !== originalIpcHandle) ipcMain.handle = originalIpcHandle
+}
+
+function markNativeContentReady(window) {
+  if (
+    nativeContentReady || !window || window.isDestroyed() || !requested.has(window)
+    || !rendererReady.has(window.webContents)
+  ) return
+  const webContents = window.webContents
+  if (!webContents || webContents.isDestroyed?.() || rendererPaintPending.has(webContents)) return
+  rendererPaintPending.add(webContents)
+  Promise.resolve(webContents.executeJavaScript(PAINT_READY_EXPRESSION, true)).then(painted => {
+    rendererPaintPending.delete(webContents)
+    if (
+      painted !== true || nativeContentReady || window.isDestroyed() || !requested.has(window)
+      || window.webContents !== webContents || webContents.isDestroyed?.()
+    ) return
+    nativeContentReady = true
+    nativeContentReadyResolve()
+  }, () => {
+    rendererPaintPending.delete(webContents)
+  })
+}
+
+function observeRendererReady(webContents) {
+  if (!webContents || webContents.isDestroyed?.() || webContents.getURL?.() !== 'app://-/index.html') return
+  rendererReady.add(webContents)
+  markNativeContentReady(BrowserWindow.fromWebContents(webContents))
+}
+
+function installRendererReadyObserver() {
+  if (!ipcMain || typeof ipcMain.handle !== 'function') {
+    throw new Error('Electron renderer readiness API unavailable')
+  }
+  originalIpcHandle = ipcMain.handle
+  ipcMain.handle = function handle(channel, listener) {
+    if (channel !== RENDERER_MESSAGE_CHANNEL) return originalIpcHandle.call(this, channel, listener)
+    if (rendererMessageHandlerInstalled) throw new Error('Renderer readiness handler was registered more than once')
+    rendererMessageHandlerInstalled = true
+    restoreIpcHandle()
+    return originalIpcHandle.call(this, channel, function rendererMessageHandler(event, message, ...rest) {
+      if (message && typeof message === 'object' && message.type === 'ready') {
+        observeRendererReady(event?.sender)
+      }
+      return listener.call(this, event, message, ...rest)
+    })
+  }
+}
 
 function gateWindow(window, wasRequested) {
   if (!window || window.isDestroyed()) return
@@ -27,7 +96,10 @@ function gateWindow(window, wasRequested) {
   if (wasRequested) requested.add(window)
   if (!requestedOpacity.has(window)) requestedOpacity.set(window, window.getOpacity())
   originalSetOpacity.call(window, 0)
-  originalHide.call(window)
+  if (wasRequested) {
+    originalShowInactive.call(window)
+    markNativeContentReady(window)
+  } else originalHide.call(window)
 }
 
 function onWindow(_event, window) {
@@ -39,7 +111,7 @@ function bindElectron(electron) {
   if (!electron || typeof electron !== 'object' || !electron.app || !electron.BrowserWindow) {
     throw new Error('Electron visibility API unavailable')
   }
-  ;({ app, BrowserWindow } = electron)
+  ;({ app, BrowserWindow, ipcMain } = electron)
   originalShow = BrowserWindow.prototype.show
   originalShowInactive = BrowserWindow.prototype.showInactive
   originalHide = BrowserWindow.prototype.hide
@@ -89,6 +161,7 @@ exports.install = function install(options, electron) {
     return originalSetOpacity.call(this, opacity)
   }
   app.on('browser-window-created', onWindow)
+  installRendererReadyObserver()
   for (const window of BrowserWindow.getAllWindows()) gateWindow(window, window.isVisible())
   installed = true
   return { pid: process.pid, ready: true }
@@ -106,6 +179,7 @@ function reveal(options) {
   BrowserWindow.prototype.focus = originalFocus
   BrowserWindow.prototype.restore = originalRestore
   BrowserWindow.prototype.setOpacity = originalSetOpacity
+  restoreIpcHandle()
   for (const window of tracked) {
     if (!window.isDestroyed()) originalSetOpacity.call(window, requestedOpacity.get(window) ?? 1)
   }
@@ -121,12 +195,13 @@ function reveal(options) {
   return { pid: process.pid, revealed: true }
 }
 
-exports.releaseWhenReady = function releaseWhenReady(options) {
+exports.releaseWhenReady = async function releaseWhenReady(options) {
   if (
     !installed || !gated || releasePoll !== undefined || process.pid !== ownerPID || options.pid !== ownerPID
     || typeof options.statePath !== 'string' || !options.statePath.startsWith('/')
     || typeof options.instanceToken !== 'string' || !/^[a-f0-9]{32,}$/u.test(options.instanceToken)
   ) throw new Error('Invalid visibility gate readiness watch')
+  await nativeContentReadyPromise
   const poll = () => {
     let state
     try {
