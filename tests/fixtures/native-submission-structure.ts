@@ -33,8 +33,10 @@ async function dispatch({manager:manager,operation:n,readPersistedValue:read,own
 }
 async function steer(manager,request) { return await manager.sendRequest('turn/steer',request); }
 async function first(input) {
-  let {projectAssignment:project,threadStartKind:kind,input:prompt,config:incoming,serviceTier:serviceTier,localTurnMetadata:metadata,attachments:attachments}=input;
-  return {model:null,effort:null,multiAgentMode:null,input:prompt,toolOutput:null,collaborationMode:null,serviceTier:serviceTier};
+  let {projectAssignment:project,threadStartKind:kind,input:prompt,config:incoming,serviceTier:serviceTier,localTurnMetadata:metadata,attachments:attachments,collaborationMode:mode}=input;
+  let {conversationResponse:receipt}=await createNativeThread(input);
+  let effectiveMode=mode;
+  return {model:mode==null?receipt.model:null,effort:mode?.settings.reasoning_effort,multiAgentMode:null,input:prompt,toolOutput:null,collaborationMode:effectiveMode,serviceTier:serviceTier};
 }
 globalThis.normalize=normalize;globalThis.dispatch=dispatch;globalThis.first=first;globalThis.steer=steer;
 `

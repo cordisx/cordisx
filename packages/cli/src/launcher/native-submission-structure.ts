@@ -256,7 +256,25 @@ function firstTurn(plan: ResourcePlan, fn: SyntaxNode): void {
   const request = plan.require(fn.body, n =>
     n.type === 'ObjectExpression'
     && has(n, ['model', 'effort', 'multiAgentMode', 'input', 'toolOutput', 'collaborationMode']), 'first-turn-request')
-  plan.addConfig(request, valid(`${incomingConfig}?.[${JSON.stringify(TOKEN)}]`))
+  const token = valid(`${incomingConfig}?.[${JSON.stringify(TOKEN)}]`)
+  const receipt = plan.require(fn.body, n =>
+    n.type === 'VariableDeclarator' && has(n.id, ['conversationResponse'])
+    && n.init?.type === 'AwaitExpression', 'first-turn-receipt')
+  const response = plan.binding(receipt.id, 'conversationResponse')
+  const model = properties(request).get('model')!
+  if (!plan.nodes(model, n => member(n, 'model') && n.object.name === response).length) {
+    throw new Error('Native capability first-turn-receipt: model is not bound to the creation response')
+  }
+  const mode = properties(request).get('collaborationMode')!
+  // The intermediary already routes this first turn to the receipt's model. Seed the
+  // native turn state too, before idle control synchronization can look like a switch.
+  plan.replace(
+    mode,
+    `(${token}===void 0?${plan.text(mode)}:((mode,model)=>
+      mode!=null&&mode.settings!=null&&typeof model==='string'&&model.length>0&&model.length<=512
+      ?{...mode,settings:{...mode.settings,model}}:mode)(${plan.text(mode)},${response}.model))`,
+  )
+  plan.addConfig(request, token)
   plan.serviceTier(request)
   plan.capabilities.push('first-turn')
 }
