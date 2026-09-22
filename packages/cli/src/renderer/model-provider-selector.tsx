@@ -5,12 +5,14 @@ import { HostBrandIcon } from './host-ui/HostBrandIcon.js'
 import { CodexBrandIcon } from './host-ui/CodexBrandIcon.js'
 import { HostIcon } from './host-ui/HostIcon.js'
 import { HostMenuSurface } from './host-ui/HostMenu.js'
+import { ModelBrandIcon } from './host-ui/ModelBrandIcon.js'
 import { ProviderAction } from './model-provider-actions.js'
 import { modelProviderCopy } from './model-provider-copy.js'
 import { friendlyModelLabel } from './adapter/native-model-provider-seat.js'
 import { ProviderReasoningSlider } from './model-provider-reasoning.js'
 import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from './native-provider-selection-client.js'
 import css from './model-providers.css?inline'
+import { inferModelBrand } from '../model-selector-branding.js'
 
 export interface ProviderSelectionSnapshot {
   readonly available: boolean
@@ -316,6 +318,8 @@ export function ModelProviderSelector({ registry, transport, locale }: {
       >
         {displayedProviderId === 'openai'
           ? <CodexBrandIcon />
+          : displayedProvider?.selectorBrand !== undefined
+          ? <ModelBrandIcon brand={displayedProvider.selectorBrand} kind="provider" />
           : displayedProvider?.icon
           ? <HostBrandIcon icon={displayedProvider.icon} />
           : (
@@ -494,7 +498,9 @@ export function ModelProviderSelector({ registry, transport, locale }: {
                       if (model) choose(provider, model)
                     }}
                   >
-                    <HostBrandIcon icon={provider.icon} />
+                    {provider.selectorBrand !== undefined
+                      ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+                      : <HostBrandIcon icon={provider.icon} />}
                     <span>{provider.title}</span>
                     {provider.providerId === displayedProviderId ? <HostIcon token="control.check" /> : <span />}
                   </button>
@@ -528,6 +534,11 @@ export function ModelProviderSelector({ registry, transport, locale }: {
                       if (provider) choose(provider, model)
                     }}
                   >
+                    <ModelBrandIcon
+                      brand={('selectorBrand' in model ? model.selectorBrand : undefined)
+                        ?? inferModelBrand(model.id, model.label)}
+                      kind="model"
+                    />
                     <span>{friendlyModelLabel(model.label)}</span>
                     {model.id === displayedModelId ? <HostIcon token="control.check" /> : <span />}
                   </button>

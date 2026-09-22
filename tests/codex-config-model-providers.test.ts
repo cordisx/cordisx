@@ -47,6 +47,7 @@ describe('Codex config model providers', () => {
       providerId: 'deepseek',
       pluginId: 'cordisx.codex-config',
       title: 'DeepSeek',
+      selectorBrand: { brand: 'deepseek', source: 'inferred' },
       defaultModelId: 'deepseek-reasoner',
       models: [
         { id: 'deepseek-chat', label: 'DeepSeek Chat', aliases: ['chat'] },
@@ -55,6 +56,30 @@ describe('Codex config model providers', () => {
     }])
     expect([...projection.providerIds]).toEqual(['deepseek'])
     expect(JSON.stringify(projection)).not.toMatch(/base_url|env_key|bearer|token|instruction|api\.deepseek/u)
+  })
+
+  it('keeps explicit provider and exact model overrides separate from endpoint inference', async () => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'models.json'),
+      JSON.stringify({
+        models: [{ slug: 'anthropic/claude-sonnet-4', display_name: 'Claude' }],
+      }),
+    )
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      '[model_providers.gateway]\nname="OpenAI"\nbase_url="https://openrouter.ai/api/v1"\n',
+    )
+    const { providers } = await codexConfigModelProviders(
+      codexHome,
+      { gateway: 'models.json' },
+      { providers: { gateway: 'generic' }, models: { gateway: { 'anthropic/claude-sonnet-4': 'claude' } } },
+    )
+    expect(providers[0]).toMatchObject({
+      selectorBrand: { brand: 'generic', source: 'override' },
+      models: [{ id: 'anthropic/claude-sonnet-4', selectorBrand: 'claude' }],
+    })
+    expect(JSON.stringify(providers)).not.toContain('openrouter.ai')
   })
 
   it.each([

@@ -113,4 +113,37 @@ describe('native model provider catalog projection', () => {
     expect((await nativeModelProviderCatalog(activation)()).map(item => item.providerId)).toEqual(['ready'])
     expect(dispose).toHaveBeenCalledTimes(2)
   })
+
+  it('projects only bounded provider/model brand keys and honors provider-local overrides', async () => {
+    const dispose = vi.fn()
+    const activation = {
+      nativeProviderIds: ['gateway'],
+      prepareNativeConnection() {
+        const result = connection('gateway', dispose)
+        return {
+          ...result,
+          value: {
+            ...result.value,
+            endpoint: { ...result.value.endpoint, origin: 'https://openrouter.ai', apiPath: '/api/v1' as const },
+            models: {
+              ...result.value.models,
+              defaultAlias: 'claude',
+              aliases: [{ alias: 'claude', gatewayModelId: 'anthropic/claude-sonnet-4' }],
+            },
+          },
+        }
+      },
+    } as unknown as ManagedServiceNodeActivation
+
+    const [provider] = await nativeModelProviderCatalog(activation, {
+      providers: { gateway: 'generic' },
+      models: { gateway: { 'anthropic/claude-sonnet-4': 'claude' } },
+    })()
+    expect(provider).toMatchObject({
+      providerId: 'gateway',
+      selectorBrand: { brand: 'generic', source: 'override' },
+      models: [{ id: 'anthropic/claude-sonnet-4', selectorBrand: 'claude' }],
+    })
+    expect(JSON.stringify(provider)).not.toMatch(/openrouter|token|endpoint|authority/)
+  })
 })

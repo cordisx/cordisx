@@ -857,6 +857,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
                 ...(selection.profile.configModelCatalogs === undefined
                   ? {}
                   : { configModelCatalogs: selection.profile.configModelCatalogs }),
+                ...(selection.profile.selectorIcons === undefined
+                  ? {}
+                  : { selectorIcons: selection.profile.selectorIcons }),
               },
             )
         } catch (error) {

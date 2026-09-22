@@ -32,6 +32,16 @@ dataset, or provide an icon-library redistribution channel. The retained Reicon
 MIT terms and upstream credits are at `third_party/reicon-MIT.txt` and
 `third_party/reicon-icon-credits.txt`.
 
+The OpenAI model/provider glyph is derived from the MIT-licensed OpenAI Apps SDK
+UI. Its license is included at `third_party/openai-apps-sdk-ui-MIT.txt`.
+
+The bundled MiniMax glyph is sourced from the MIT-licensed LobeHub Icons
+collection. Its license is included at `third_party/lobe-icons-MIT.txt`.
+
+Other bundled provider/model marks are attributed to their respective owners.
+Their inclusion identifies compatible services or model families and does not
+imply sponsorship, certification, or ownership by CordisX.
+
 The exact dependency graph in `package-lock.json` contains MIT, Apache-2.0,
 BSD-3-Clause, BlueOak-1.0.0, ISC, and MPL-2.0 license identifiers for production
 dependencies in this beta. This inventory is evidence for release review, not

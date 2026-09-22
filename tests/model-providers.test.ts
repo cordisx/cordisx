@@ -110,6 +110,33 @@ describe('model provider selector contract', () => {
     expect(() => binding.facade.insert(entry)).toThrow('unavailable')
   })
 
+  it('applies user provider overrides before plugin presentation and plugin presentation before inference', async () => {
+    const overridden = new ModelProviderRegistry(async () => [{
+      ...provider,
+      selectorBrand: { brand: 'generic', source: 'override' },
+    }])
+    overridden.bind('plugin', 'g', () => true).facade.present({
+      providerId: 'one',
+      title: 'Plugin',
+      icon: 'host:bolt',
+    })
+    await overridden.refresh()
+    expect(overridden.snapshot().providers[0]).toMatchObject({ selectorBrand: 'generic', icon: 'host:bolt' })
+
+    const inferred = new ModelProviderRegistry(async () => [{
+      ...provider,
+      selectorBrand: { brand: 'deepseek', source: 'inferred' },
+    }])
+    inferred.bind('plugin', 'g', () => true).facade.present({
+      providerId: 'one',
+      title: 'Plugin',
+      icon: 'host:bolt',
+    })
+    await inferred.refresh()
+    expect(inferred.snapshot().providers[0]).not.toHaveProperty('selectorBrand')
+    expect(inferred.snapshot().providers[0]?.icon).toBe('host:bolt')
+  })
+
   it('aborts removed actions, detaches subscriptions and rejects late generation writes', async () => {
     const registry = new ModelProviderRegistry(async () => [])
     const binding = registry.bind('plugin', 'g', () => true)

@@ -7,18 +7,30 @@ import type {
   ModelProviderV1,
 } from '@cordisx/protocol/model-providers/v1'
 import type { NotificationsV1 } from '../notification-contracts.js'
+import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } from '../model-selector-branding.js'
+import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
   readonly title?: string
-  readonly models: readonly ModelProviderModelV1[]
+  readonly selectorBrand?: ProviderBrandProjection
+  readonly models: readonly (ModelProviderModelV1 & { readonly selectorBrand?: ModelBrandChoice })[]
   readonly defaultModelId?: string
 }
 
+export interface HostModelProviderModel extends ModelProviderModelV1 {
+  readonly selectorBrand?: ModelBrandChoice
+}
+
+export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
+  readonly models: readonly HostModelProviderModel[]
+  readonly selectorBrand?: ProviderBrandChoice
+}
+
 export interface ModelProviderSnapshot {
-  readonly providers: readonly ModelProviderV1[]
+  readonly providers: readonly HostModelProvider[]
   readonly entries: readonly {
     readonly key: string
     readonly entry: ModelProviderSelectorEntryV1
@@ -126,6 +138,10 @@ export class ModelProviderRegistry {
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
           ...(provider.title === undefined ? {} : { title: label(provider.title) }),
+          ...(isProviderBrandChoice(provider.selectorBrand?.brand)
+              && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
+            ? { selectorBrand: Object.freeze({ ...provider.selectorBrand }) }
+            : {}),
           ...(provider.defaultModelId === undefined ? {} : { defaultModelId: label(provider.defaultModelId, 512) }),
           models: Object.freeze(provider.models.map(model =>
             Object.freeze({
@@ -135,6 +151,7 @@ export class ModelProviderRegistry {
                 ? {}
                 : { aliases: Object.freeze(model.aliases.map(alias => label(alias))) }),
               ...(model.group === undefined ? {} : { group: label(model.group) }),
+              ...(isModelBrandChoice(model.selectorBrand) ? { selectorBrand: model.selectorBrand } : {}),
             })
           )),
         })
@@ -288,10 +305,20 @@ export class ModelProviderRegistry {
         const presentation = [...this.presentations.values()].find(item =>
           item.key === key && (this.visibility?.visible(item.generation) ?? true)
         )?.value
+        const projectedBrand = isProviderBrandChoice(provider.selectorBrand?.brand)
+            && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
+          ? provider.selectorBrand
+          : undefined
+        const selectorBrand = projectedBrand?.source === 'override'
+          ? projectedBrand.brand
+          : presentation === undefined
+          ? projectedBrand?.brand
+          : undefined
         return Object.freeze({
           providerId: provider.providerId,
           title: presentation?.title ?? provider.title ?? provider.providerId,
           icon: presentation?.icon ?? 'host:settings',
+          ...(selectorBrand === undefined ? {} : { selectorBrand }),
           models: Object.freeze(provider.models.map(model => {
             const metadata = presentation?.models?.find(item => item.id === model.id)
             return metadata ? Object.freeze({ ...model, ...metadata }) : model

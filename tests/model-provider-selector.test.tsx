@@ -33,6 +33,7 @@ async function setup(model = 'shared', busy = false, options?: {
   readonly draft?: boolean
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference']
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
+  readonly branded?: boolean
 }) {
   dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://example.test' })
   Object.assign(
@@ -53,6 +54,7 @@ async function setup(model = 'shared', busy = false, options?: {
     {
       providerId: 'first',
       pluginId: 'p',
+      ...(options?.branded ? { selectorBrand: { brand: 'openrouter' as const, source: 'override' as const } } : {}),
       models: [{
         id: model,
         label: options?.firstLabel ?? 'Current',
@@ -62,6 +64,7 @@ async function setup(model = 'shared', busy = false, options?: {
     {
       providerId: 'second',
       pluginId: 'q',
+      ...(options?.branded ? { selectorBrand: { brand: 'moonshot' as const, source: 'inferred' as const } } : {}),
       models: options?.secondModels
         ?? [{ id: 'shared', label: 'Equivalent' }, { id: 'other', label: 'Other', group: 'Alternative' }],
       ...(options?.secondDefaultModelId === undefined ? {} : { defaultModelId: options.secondDefaultModelId }),
@@ -291,6 +294,26 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Current')
     await click('[role="menuitemradio"][aria-checked="false"]')
     expect(select).toHaveBeenCalledWith({ providerId: 'second', model: 'shared' })
+  })
+
+  it('renders independent provider and model brand seats without changing labels or selection', async () => {
+    await setup('openai/gpt-5.6', false, {
+      branded: true,
+      firstLabel: 'GPT 5.6',
+      secondModels: [
+        { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4' },
+        { id: 'moonshotai/kimi-k2.5', label: 'Kimi K2.5' },
+      ],
+    })
+    await click(providerTrigger)
+    expect(document.querySelector('[data-provider-id="first"] [data-selector-brand="openrouter"]')).not.toBeNull()
+    expect(document.querySelector('[data-provider-id="second"] [data-selector-brand="moonshot"]')).not.toBeNull()
+    await click(providerTrigger)
+    await click(modelTrigger)
+    const selected = document.querySelector('.cxmp-model-choice[aria-checked="true"]')
+    expect(selected?.textContent).toBe('GPT 5.6')
+    expect(selected?.querySelector('[data-selector-brand="openai"]')).not.toBeNull()
+    expect(selected?.querySelector('[data-selector-brand="openrouter"]')).toBeNull()
   })
 
   it('blocks model routing while busy and keeps plugin setup entries usable', async () => {

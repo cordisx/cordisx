@@ -88,6 +88,44 @@ An action may open authentication, API-key setup or plugin settings; the Host
 does not prescribe a login flow. Plugins remove the supplemental row when it is
 no longer needed. Branding does not register an endpoint or establish readiness.
 
+### Selector icons
+
+The Host may infer a provider brand from its structured endpoint and then a
+bounded exact provider-name alias. Model icons are resolved separately from an
+exact or namespaced model ID and then a display name; they never inherit the
+provider icon. Unknown, deployment-style, and ambiguous IDs retain the generic
+model icon. Branding is presentation only and does not change catalog
+membership, defaults, routing, authentication, or grants.
+
+`apps.codex.profiles.<profile>.selectorIcons` can override those decisions for
+non-native providers. `providers` maps a provider ID to a built-in provider
+brand key or `generic`. `models` maps a provider ID and exact model ID to a
+built-in model brand key or `generic`. An explicit `generic` disables inference.
+Provider and model keys are separate, so a Moonshot provider can show a Kimi
+model and an OpenRouter provider can show OpenAI, Claude, or Gemini models.
+
+```json
+{
+  "selectorIcons": {
+    "providers": { "gateway": "openrouter" },
+    "models": {
+      "gateway": {
+        "openai/gpt-5.6": "openai",
+        "private-deployment": "generic"
+      }
+    }
+  }
+}
+```
+
+The maps accept at most 128 providers and 512 exact model IDs per provider.
+Unknown keys and malformed IDs reject the profile without echoing their values.
+The native `openai` provider ID is reserved and cannot be overridden; its Codex
+provider mark and native model catalog behavior remain unchanged. Plugin
+provider presentation wins over automatic provider inference when no user
+override is present. No URL, external image, SVG source, credential, or
+connection field is accepted by this setting.
+
 ## Selection
 
 Provider changes prefer an exact model ID, then a unique explicit alias. An

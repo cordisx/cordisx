@@ -3,6 +3,7 @@ import path from 'node:path'
 import { parse } from 'smol-toml'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import { parseConfigModelCatalogs } from '../config/home-config-model-catalogs.js'
+import { inferProviderBrand, type ModelSelectorIconOverrides } from '../model-selector-branding.js'
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024
 const MAX_CATALOG_BYTES = 32 * 1024 * 1024
@@ -62,6 +63,7 @@ export interface CodexConfigModelProviderProjection {
 export async function codexConfigModelProviders(
   codexHome: string,
   configModelCatalogs?: Readonly<Record<string, string>>,
+  selectorIcons?: ModelSelectorIconOverrides,
 ): Promise<CodexConfigModelProviderProjection> {
   const mappings = parseConfigModelCatalogs(configModelCatalogs) ?? {}
   const diagnostics: Array<CodexConfigModelProviderProjection['diagnostics'][number]> = []
@@ -124,7 +126,25 @@ export async function codexConfigModelProviders(
         providerId: id,
         pluginId: CONFIG_PLUGIN_ID,
         title: text(record(value)?.name, 256) ?? id,
-        models: Object.freeze([...(boundModels.get(id) ?? [])]),
+        ...(() => {
+          const override = selectorIcons?.providers[id]
+          const baseUrl = text(record(value)?.base_url, 4_096)
+          const title = text(record(value)?.name, 256)
+          const inferred = inferProviderBrand({
+            providerId: id,
+            ...(baseUrl === undefined ? {} : { baseUrl }),
+            ...(title === undefined ? {} : { title }),
+          })
+          return override !== undefined
+            ? { selectorBrand: Object.freeze({ brand: override, source: 'override' as const }) }
+            : inferred === undefined
+            ? {}
+            : { selectorBrand: Object.freeze({ brand: inferred, source: 'inferred' as const }) }
+        })(),
+        models: Object.freeze([...(boundModels.get(id) ?? [])].map(model => {
+          const selectorBrand = selectorIcons?.models[id]?.[model.id]
+          return selectorBrand === undefined ? model : Object.freeze({ ...model, selectorBrand })
+        })),
         ...(activeProvider === id && activeModel !== undefined
             && boundModels.get(id)?.some(model => model.id === activeModel)
           ? { defaultModelId: activeModel }

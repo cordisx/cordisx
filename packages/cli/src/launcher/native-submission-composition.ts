@@ -22,6 +22,7 @@ import type { NativeAccountCapabilityDescriptor } from '../native-account-capabi
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 import { codexConfigModelProviders } from './codex-config-model-providers.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -83,7 +84,11 @@ export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
   codexHome: string,
-  options: Readonly<{ defaultProviderId?: string; configModelCatalogs?: Readonly<Record<string, string>> }> = {},
+  options: Readonly<{
+    defaultProviderId?: string
+    configModelCatalogs?: Readonly<Record<string, string>>
+    selectorIcons?: ModelSelectorIconOverrides
+  }> = {},
 ): Promise<NativeSubmissionComposition> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
@@ -113,11 +118,11 @@ export async function createNativeSubmissionComposition(
       }
     })()
   try {
-    let configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs)
+    let configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
     const managedIds = new Set(activation.nativeProviderIds)
     let lastDiagnostic: string | undefined
     const configuredCatalog = async () => {
-      configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs)
+      configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs, options.selectorIcons)
       const diagnostic = JSON.stringify(configured.diagnostics)
       if (diagnostic !== lastDiagnostic && configured.diagnostics.length > 0) {
         console.warn(
@@ -128,7 +133,10 @@ export async function createNativeSubmissionComposition(
       return configured.providers
     }
     const cdp = createNativeSubmissionCdpAuthority({
-      catalog: combinedNativeModelProviderCatalog(nativeModelProviderCatalog(activation), configuredCatalog),
+      catalog: combinedNativeModelProviderCatalog(
+        nativeModelProviderCatalog(activation, options.selectorIcons),
+        configuredCatalog,
+      ),
       isThreadIdle: id => control.isThreadIdle(id),
       ...(options.defaultProviderId === undefined ? {} : { defaultProviderId: options.defaultProviderId }),
     })

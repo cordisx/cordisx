@@ -161,6 +161,12 @@ provider IDs to local model catalogs for that named profile. See
 for format, path resolution, migration and restart behavior. This does not change
 native endpoint or authentication configuration.
 
+`apps.codex.profiles.<profile>.selectorIcons` optionally maps non-native
+provider IDs and provider-local exact model IDs to bounded built-in brand keys
+or `generic`. It is presentation-only; see
+[selector icons](native-model-providers.md#selector-icons). The reserved native
+`openai` provider cannot be overridden.
+
 Profile fragment:
 
 ```json

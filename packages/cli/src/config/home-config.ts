@@ -109,6 +109,7 @@ export interface HomeConfigProfile {
   /** Launch-scoped default for new native conversation drafts. */
   readonly defaultModelProvider?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
+  readonly selectorIcons?: import('../model-selector-branding.js').ModelSelectorIconOverrides
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
 }
@@ -458,6 +459,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'dataMode',
     'defaultModelProvider',
     'configModelCatalogs',
+    'selectorIcons',
     'iconTheme',
     'management',
   ], label)
