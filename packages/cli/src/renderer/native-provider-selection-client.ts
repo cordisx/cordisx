@@ -3,6 +3,7 @@ import {
   normalizeNativeSubmissionAction,
 } from './adapter/native-submission-action-normalizer.js'
 import type { NormalizedNativeSubmissionAction } from './native-provider-submission-policy.js'
+import type { CatalogManagementChannel } from '../model-catalog-management.js'
 
 export interface NativeSubmissionScope {
   readonly targetId: string
@@ -38,7 +39,7 @@ export interface NativeProviderSubmitConfirmation {
   readonly threadId: string
 }
 
-export interface NativeProviderSelectionCommandChannel {
+export interface NativeProviderSelectionCommandChannel extends Partial<CatalogManagementChannel> {
   catalogRead?(): Promise<readonly import('./model-providers.js').NativeProviderProjection[]>
   catalogSubscribe?(listener: () => void): () => void
   catalogSnapshotRead?(): Promise<{

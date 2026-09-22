@@ -1,0 +1,24 @@
+<!doctype html>
+<html data-theme="light" lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Model services fixture</title>
+    <style>
+      body { margin: 0; font: 13px system-ui; }
+      * { box-sizing: border-box; }
+      .catalog-fixture-shell { height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); background: var(--cx-surface); color: var(--cx-text); }
+      .catalog-fixture-shell > header { padding: 14px 24px; border-bottom: 1px solid var(--cx-border); }
+      h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="manager"></div>
+    <script type="module">
+      import * as Fixture from './catalog-manager.tsx'
+      window.Fixture = Fixture
+      window.disposeFixture = await Fixture.start()
+      if (import.meta.hot) import.meta.hot.dispose(() => window.disposeFixture?.())
+    </script>
+  </body>
+</html>

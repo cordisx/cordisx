@@ -10,6 +10,7 @@ import type { NotificationsV1 } from '../notification-contracts.js'
 import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } from '../model-selector-branding.js'
 import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
+import { ModelCatalogClient } from './model-catalog-client.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
@@ -22,7 +23,7 @@ export interface NativeProviderProjection {
 
 export interface HostModelProviderModel extends ModelProviderModelV1 {
   readonly selectorBrand?: ModelBrandChoice
-  readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement')[]
+  readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
   readonly notListed?: boolean
 }
 
@@ -57,6 +58,13 @@ export function nativeModelProviderRegistry(managed?: {
       : await channel.catalogRead()
   )
   if (channel?.catalogSubscribe) registry.connectSource(channel.catalogSubscribe)
+  if (channel?.catalogManagementRead && channel.catalogManagementSubscribe && channel.catalogManagementCommand) {
+    registry.management = new ModelCatalogClient({
+      catalogManagementRead: () => channel.catalogManagementRead!(),
+      catalogManagementSubscribe: listener => channel.catalogManagementSubscribe!(listener),
+      catalogManagementCommand: command => channel.catalogManagementCommand!(command),
+    })
+  }
   return registry
 }
 
@@ -94,6 +102,7 @@ function label(value: string, maximum = 256): string {
 }
 
 export class ModelProviderRegistry {
+  management?: ModelCatalogClient
   private disconnectSource?: () => void
   private sourceReconcile?: ReturnType<typeof setInterval>
 
@@ -182,7 +191,9 @@ export class ModelProviderRegistry {
               ...(isModelBrandChoice(model.selectorBrand) ? { selectorBrand: model.selectorBrand } : {}),
               ...(model.provenance === undefined ? {} : {
                 provenance: Object.freeze(
-                  model.provenance.filter(value => ['auto', 'native', 'manual', 'manual-supplement'].includes(value)),
+                  model.provenance.filter(value =>
+                    ['auto', 'native', 'manual', 'manual-supplement', 'script', 'script-supplement'].includes(value)
+                  ),
                 ),
               }),
               ...(model.notListed === true ? { notListed: true } : {}),
@@ -321,6 +332,7 @@ export class ModelProviderRegistry {
   }
 
   dispose(): void {
+    this.management?.dispose()
     this.disconnectSource?.()
     if (this.sourceReconcile) clearInterval(this.sourceReconcile)
     this.disposed = true
