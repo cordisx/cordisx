@@ -1,4 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
@@ -17,8 +18,10 @@ import {
 } from './react-virtual-modules.js'
 
 const ENTRY = 'virtual:cordisx-host-generation-entry'
-const COMPOSITION = 'virtual:cordisx-host-generation-composition'
+const LAUNCH = './launch.js'
 const MAX_BOOTLOADER_BYTES = 16 * 1024
+const MAX_CACHE_BYTES = 256 * 1024 * 1024
+const STATIC_GRAPH_CACHE_SCHEMA = 1
 
 interface RollupOutputFile {
   readonly type: 'asset' | 'chunk'
@@ -36,6 +39,7 @@ export interface HostGenerationGraph {
   readonly authoritySource: () => string
   readonly eagerBytes: number
   readonly files: readonly { readonly path: string; readonly bytes: number }[]
+  readonly cacheStatus: 'built' | 'memory' | 'disk' | 'recovered'
   close(): Promise<void>
 }
 
@@ -43,6 +47,40 @@ export interface HostGenerationGraphSource {
   readonly source: string
   readonly authoritySource: () => string
 }
+
+export interface HostGenerationGraphBuildOptions {
+  readonly cacheRoot?: string
+}
+
+interface StaticGraphFile {
+  readonly body: Uint8Array
+  readonly contentType: string
+}
+
+interface StaticGraphArtifact {
+  readonly entryFileName: string
+  readonly files: ReadonlyMap<string, StaticGraphFile>
+}
+
+interface CachedStaticGraphRecord {
+  readonly schemaVersion: 1
+  readonly key: string
+  readonly entryFileName: string
+  readonly files: readonly {
+    readonly path: string
+    readonly contentType: string
+    readonly bytes: number
+    readonly sha256: string
+    readonly body: string
+  }[]
+}
+
+interface LoadedStaticGraph {
+  readonly artifact: StaticGraphArtifact
+  readonly status: 'built' | 'disk' | 'recovered'
+}
+
+const staticGraphBuilds = new Map<string, Promise<LoadedStaticGraph>>()
 
 export function hostGenerationBootloaderSource(origin: string): string {
   const manifestUrl = `${origin}/manifest.json`
@@ -60,12 +98,21 @@ export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbac
 /** Retain every graph admitted by one launch and roll back only graphs from a failed build transaction. */
 export class HostGenerationGraphOwner {
   readonly #graphs: HostGenerationGraph[] = []
+  readonly #cacheRoot: string | undefined
   #closeTask: Promise<void> | undefined
   #closed = false
 
+  constructor(cacheRoot?: string) {
+    this.#cacheRoot = cacheRoot
+  }
+
   async build(config: CordisXConfig, options: BuildRendererBundleOptions): Promise<HostGenerationGraphSource> {
     if (this.#closed) throw new Error('Host generation graph owner is closed')
-    const graph = await buildHostGenerationGraph(config, options)
+    const graph = await buildHostGenerationGraph(
+      config,
+      options,
+      this.#cacheRoot === undefined ? {} : { cacheRoot: this.#cacheRoot },
+    )
     if (this.#closed) {
       await graph.close()
       throw new Error('Host generation graph owner closed during build')
@@ -100,28 +147,104 @@ function digest(bytes: string | Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-/**
- * Build and serve the Host itself as one immutable, launch-scoped Vite graph.
- * The server deliberately retains no plugin/lifecycle state: the existing
- * generation coordinator remains the sole activation ledger.
- */
-export async function buildHostGenerationGraph(
+function missing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === 'ENOENT'
+}
+
+async function ensurePrivateCacheRoot(directory: string): Promise<void> {
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const metadata = await lstat(directory)
+  if (
+    !metadata.isDirectory() || metadata.isSymbolicLink()
+    || (typeof process.getuid === 'function' && metadata.uid !== process.getuid())
+  ) throw new Error(`CordisX Host graph cache path must be a private directory: ${directory}`)
+  await chmod(directory, 0o700)
+}
+
+function defaultCacheRoot(config: CordisXConfig): string {
+  const configuredHome = process.env.CORDISX_HOME?.trim()
+  if (configuredHome && path.isAbsolute(configuredHome)) {
+    return path.join(configuredHome, 'cache', 'host-generation')
+  }
+  if (config.configPath !== undefined) return path.join(path.dirname(config.configPath), 'cache', 'host-generation')
+  return path.join(config.rootDir, '.cordisx', 'cache', 'host-generation')
+}
+
+function safeCachedPath(value: string): boolean {
+  if (!value.startsWith('/') || value.includes('\\')) return false
+  const relative = value.slice(1)
+  return relative !== '' && relative !== '..' && path.posix.normalize(relative) === relative
+    && !relative.startsWith('../')
+}
+
+async function readStaticGraphCache(
+  file: string,
+  key: string,
+): Promise<Readonly<{ artifact?: StaticGraphArtifact; invalid: boolean }>> {
+  try {
+    const metadata = await lstat(file)
+    if (
+      !metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_CACHE_BYTES
+      || (typeof process.getuid === 'function' && metadata.uid !== process.getuid())
+      || (metadata.mode & 0o077) !== 0
+    ) return { invalid: true }
+    const value = JSON.parse(await readFile(file, 'utf8')) as Partial<CachedStaticGraphRecord>
+    if (
+      value.schemaVersion !== STATIC_GRAPH_CACHE_SCHEMA || value.key !== key
+      || typeof value.entryFileName !== 'string' || !Array.isArray(value.files) || value.files.length === 0
+    ) return { invalid: true }
+    const files = new Map<string, StaticGraphFile>()
+    let totalBytes = 0
+    for (const item of value.files) {
+      if (
+        typeof item !== 'object' || item === null || typeof item.path !== 'string'
+        || !safeCachedPath(item.path) || typeof item.contentType !== 'string'
+        || typeof item.bytes !== 'number' || !Number.isSafeInteger(item.bytes) || item.bytes < 0
+        || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(item.sha256)
+        || typeof item.body !== 'string'
+      ) return { invalid: true }
+      const body = new Uint8Array(Buffer.from(item.body, 'base64'))
+      totalBytes += body.byteLength
+      if (totalBytes > MAX_CACHE_BYTES || body.byteLength !== item.bytes || digest(body) !== item.sha256) {
+        return { invalid: true }
+      }
+      files.set(item.path, { body, contentType: item.contentType })
+    }
+    if (!files.has(`/${value.entryFileName}`)) return { invalid: true }
+    return { artifact: { entryFileName: value.entryFileName, files }, invalid: false }
+  } catch (error) {
+    return { invalid: !missing(error) }
+  }
+}
+
+async function writeStaticGraphCache(file: string, key: string, artifact: StaticGraphArtifact): Promise<void> {
+  const value: CachedStaticGraphRecord = {
+    schemaVersion: STATIC_GRAPH_CACHE_SCHEMA,
+    key,
+    entryFileName: artifact.entryFileName,
+    files: [...artifact.files.entries()].map(([filePath, item]) => ({
+      path: filePath,
+      contentType: item.contentType,
+      bytes: item.body.byteLength,
+      sha256: digest(item.body),
+      body: Buffer.from(item.body).toString('base64'),
+    })),
+  }
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
+    await rename(temporary, file)
+  } finally {
+    await rm(temporary, { force: true })
+  }
+}
+
+async function buildStaticHostGraph(
   config: CordisXConfig,
-  options: BuildRendererBundleOptions = {},
-): Promise<HostGenerationGraph> {
-  // The graph entry is virtual, so a path relative to a user's config root
-  // would resolve relative to that virtual id. Pin this private import to the
-  // Host package instead; plugin paths remain configuration-owned below.
+  runtimeImport: string,
+  reactRuntimeImport: string,
+): Promise<StaticGraphArtifact> {
   const runtimeExtension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
-  const runtimeImport = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    `../renderer/runtime.${runtimeExtension}`,
-  )
-  const reactRuntimeImport = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    `../renderer/react-runtime.${runtimeExtension}`,
-  )
-  const baseComposition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
   const virtualModules = new Set([
     CORDISX_MANAGED_SERVICE_UI_MODULE,
     CORDISX_REACT_MODULE,
@@ -134,7 +257,7 @@ export async function buildHostGenerationGraph(
     enforce: 'pre',
     async resolveId(id, importer) {
       if (id === ENTRY) return `\0${ENTRY}`
-      if (id === COMPOSITION) return `\0${COMPOSITION}`
+      if (id === LAUNCH) return { id: LAUNCH, external: true }
       if (id === 'cordisx/contracts') return CONTRACTS_MODULE_PATH
       if (virtualModules.has(id) && importer?.includes('/renderer/')) {
         const suffix = id === CORDISX_REACT_MODULE
@@ -159,10 +282,11 @@ export async function buildHostGenerationGraph(
     load(id) {
       if (id === `\0${ENTRY}`) {
         return `import { installSharedReactRuntime } from ${JSON.stringify(reactRuntimeImport)};
+import { installCordisX, installCordisXComposition } from ${JSON.stringify(runtimeImport)};
+import { bootCordisXComposition } from ${JSON.stringify(LAUNCH)};
 if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
-export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
+export const runtime = await bootCordisXComposition(installCordisX, installCordisXComposition);`
       }
-      if (id === `\0${COMPOSITION}`) return baseComposition.source
       if (id.startsWith('\0cordisx-host:')) return cordisXSharedModuleSource(id.slice('\0cordisx-host:'.length))
       return undefined
     },
@@ -199,12 +323,14 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
   const output = (Array.isArray(result)
     ? result.flatMap(item => (item as { readonly output: readonly RollupOutputFile[] }).output)
     : (result as { readonly output: readonly RollupOutputFile[] }).output) as readonly RollupOutputFile[]
-  const files = new Map<string, { readonly body: Uint8Array; readonly contentType: string }>()
+  const files = new Map<string, StaticGraphFile>()
   let entry: RollupOutputFile | undefined
   for (const item of output) {
     const body = item.type === 'chunk'
       ? new TextEncoder().encode(item.code ?? '')
-      : new TextEncoder().encode(typeof item.source === 'string' ? item.source : '')
+      : typeof item.source === 'string'
+      ? new TextEncoder().encode(item.source)
+      : new Uint8Array(item.source ?? [])
     const fileName = item.fileName
     files.set(`/${fileName}`, {
       body,
@@ -217,10 +343,78 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
     if (item.type === 'chunk' && item.isEntry) entry = item
   }
   if (entry === undefined) throw new Error('Vite produced no Host graph entry')
+  return { entryFileName: entry.fileName, files }
+}
+
+async function loadStaticHostGraph(
+  config: CordisXConfig,
+  runtimeImport: string,
+  reactRuntimeImport: string,
+  cacheRoot: string,
+  stableIdentity: string,
+): Promise<Readonly<{ artifact: StaticGraphArtifact; cacheStatus: HostGenerationGraph['cacheStatus'] }>> {
+  await ensurePrivateCacheRoot(cacheRoot)
+  const key = createHash('sha256')
+    .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}\0`)
+    .update(stableIdentity)
+    .digest('hex')
+  const cacheFile = path.join(cacheRoot, `${key}.json`)
+  const cached = await readStaticGraphCache(cacheFile, key)
+  if (cached.artifact !== undefined) return { artifact: cached.artifact, cacheStatus: 'disk' }
+  const pending = staticGraphBuilds.get(cacheFile)
+  if (pending !== undefined) return { artifact: (await pending).artifact, cacheStatus: 'memory' }
+  const task = (async (): Promise<LoadedStaticGraph> => {
+    const concurrent = await readStaticGraphCache(cacheFile, key)
+    if (concurrent.artifact !== undefined) return { artifact: concurrent.artifact, status: 'disk' }
+    const artifact = await buildStaticHostGraph(config, runtimeImport, reactRuntimeImport)
+    await writeStaticGraphCache(cacheFile, key, artifact)
+    return { artifact, status: cached.invalid || concurrent.invalid ? 'recovered' : 'built' }
+  })()
+  staticGraphBuilds.set(cacheFile, task)
+  try {
+    const loaded = await task
+    return { artifact: loaded.artifact, cacheStatus: loaded.status }
+  } finally {
+    if (staticGraphBuilds.get(cacheFile) === task) staticGraphBuilds.delete(cacheFile)
+  }
+}
+
+/**
+ * Build and serve the Host as a cached stable graph plus one launch-scoped
+ * composition module. The generation coordinator remains the activation ledger.
+ */
+export async function buildHostGenerationGraph(
+  config: CordisXConfig,
+  options: BuildRendererBundleOptions = {},
+  buildOptions: HostGenerationGraphBuildOptions = {},
+): Promise<HostGenerationGraph> {
+  // The graph entry is virtual, so pin private imports to the Host package.
+  const runtimeExtension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
+  const runtimeImport = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../renderer/runtime.${runtimeExtension}`,
+  )
+  const reactRuntimeImport = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../renderer/react-runtime.${runtimeExtension}`,
+  )
+  const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
+  const { artifact, cacheStatus } = await loadStaticHostGraph(
+    config,
+    runtimeImport,
+    reactRuntimeImport,
+    path.resolve(buildOptions.cacheRoot ?? defaultCacheRoot(config)),
+    composition.hostGraphStableIdentity,
+  )
+  const files = new Map(artifact.files)
+  files.set('/launch.js', {
+    body: new TextEncoder().encode(composition.hostGraphLaunchSource),
+    contentType: 'text/javascript',
+  })
   const manifest = JSON.stringify({
     version: 1,
-    entry: `/${entry.fileName}`,
-    digest: `sha256:${digest(entry.code ?? '')}`,
+    entry: `/${artifact.entryFileName}`,
+    digest: `sha256:${digest(artifact.files.get(`/${artifact.entryFileName}`)?.body ?? new Uint8Array())}`,
   })
   files.set('/manifest.json', { body: new TextEncoder().encode(manifest), contentType: 'application/json' })
   const secret = randomBytes(32).toString('hex')
@@ -271,7 +465,7 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
     throw new Error('Host graph bootloader exceeds 16 KiB')
   }
   return {
-    entryUrl: `${origin}/${entry.fileName}`,
+    entryUrl: `${origin}/${artifact.entryFileName}`,
     manifestUrl: `${origin}/manifest.json`,
     bootloader,
     authoritySource: () =>
@@ -284,6 +478,7 @@ export const runtime = (await import(${JSON.stringify(COMPOSITION)})).runtime;`
       0,
     ),
     files: [...files.entries()].map(([file, value]) => ({ path: file, bytes: value.body.byteLength })),
+    cacheStatus,
     close,
   }
 }

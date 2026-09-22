@@ -59,6 +59,10 @@ export interface BuildRendererBundleOptions {
 export interface RendererCompositionSource {
   /** An ESM composition module. The caller chooses whether boot is awaited. */
   readonly source: string
+  /** Launch-specific module loaded by the cached production Host graph. */
+  readonly hostGraphLaunchSource: string
+  /** Secret-free identity for the stable Host graph cache. */
+  readonly hostGraphStableIdentity: string
   /** Host-private composition data reused by alternative development transports. */
   readonly metadataSource: string
   readonly pluginsSource: string
@@ -441,6 +445,31 @@ ${graphRetireSource}
 })`
   const compositionBoot = `const __cordisxCompositionBoot = ${boot}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
+  const hostGraphLaunchSource =
+    `export async function bootCordisXComposition(installCordisX, installCordisXComposition) {
+${compositionBoot}
+return await __cordisxCompositionBoot
+}
+`
+  const hostGraphStableIdentity = createHash('sha256')
+    .update('cordisx.host-generation-composition.v1\0')
+    .update(version)
+    .update('\0')
+    .update(runtimeImport)
+    .update('\0')
+    .update(composition)
+    .update('\0')
+    .update(JSON.stringify({
+      workspaceCwd: config.rootDir,
+      executionPlatform: options.executionPlatform ?? (process.platform === 'win32' ? 'win32' : 'posix'),
+      providers,
+      profileId: permission.profileId,
+      playground: options.playground === true,
+      agentLoopBackend: config.codex.agentLoopBackend,
+      appId: options.appId,
+      iconThemePreference: options.iconThemePreference,
+    }))
+    .digest('hex')
   const source = sourceOptions.awaitBoot === true
     ? `${imports.join('\n')}\n${compositionBoot}\nexport const runtime = await __cordisxCompositionBoot\n`
     : `${
@@ -448,6 +477,8 @@ globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
     }\n${compositionBoot}\nvoid __cordisxCompositionBoot.catch(error => console.error('[cordisx] boot failed', error))\n`
   return {
     source,
+    hostGraphLaunchSource,
+    hostGraphStableIdentity,
     metadataSource: metadata,
     pluginsSource: composition,
     watchFiles: [

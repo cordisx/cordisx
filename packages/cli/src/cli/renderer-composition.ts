@@ -93,6 +93,8 @@ export interface BuildRendererCompositionOptions {
   readonly internalBuildRendererBundle?: typeof buildRendererBundle
   /** Launcher-owned native production uses the immutable Host graph. */
   readonly productionGraph?: boolean
+  /** Test or embedder override for the persistent stable Host graph cache. */
+  readonly productionGraphCacheRoot?: string
   /** Opt-in development transport; normal launches keep immutable package delivery. */
   readonly developmentBuild?: typeof buildRendererBundle
 }
@@ -161,7 +163,7 @@ export async function buildRendererComposition(
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
   }
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
-  const hostGraphs = new HostGenerationGraphOwner()
+  const hostGraphs = new HostGenerationGraphOwner(options.productionGraphCacheRoot)
   const buildProductionSource = async (
     nextConfig: CordisXConfig,
     nextOptions: BuildRendererBundleOptions,
