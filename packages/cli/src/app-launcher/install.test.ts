@@ -19,16 +19,33 @@ async function fixture() {
   const applications = path.join(root, 'Applications')
   const target = path.join(applications, 'CordisX.app')
   const opened: string[] = []
+  const packageRoot = path.join(root, 'runtime-source')
+  const entryScript = path.join(packageRoot, 'dist/src/cli/app-entry.js')
+  const dependencyRoot = path.join(root, 'runtime-dependencies')
+  const dependency = path.join(dependencyRoot, 'fixture-dependency')
+  await mkdir(path.dirname(entryScript), { recursive: true })
+  await mkdir(dependency, { recursive: true })
+  await writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ type: 'module', version: '1.2.3-test' }))
+  await writeFile(path.join(dependency, 'package.json'), JSON.stringify({ type: 'module', exports: './index.js' }))
+  await writeFile(path.join(dependency, 'index.js'), 'export default "dependency"\n')
+  await writeFile(
+    entryScript,
+    'import dependency from "fixture-dependency"\nexport const runtimeMarker = `first-${dependency}`\n',
+  )
   const runtime = {
     homedir: root,
     env: { HOME: root, CORDISX_HOME: path.join(root, '.cordisx') },
-    internalAppOutput: { directory: applications, path: target },
+    internalAppOutput: {
+      directory: applications,
+      path: target,
+      runtimeSource: { entryScript, packageRoot, dependencyRoots: [dependencyRoot] },
+    },
     internalOpenApp: (app: string) => {
       opened.push(app)
     },
     stdout: () => {},
   }
-  return { root, applications, target, opened, runtime }
+  return { root, applications, target, opened, runtime, entryScript }
 }
 
 describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () => {
@@ -40,15 +57,23 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
     expect(await nativeOperation({ operation: 'inspect-app', path: f.target })).toMatchObject({
       bundleIdentifier: 'org.cordisx.launcher',
     })
-    expect(JSON.parse(
+    const firstRuntime = JSON.parse(
       await readFile(
         path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json'),
         'utf8',
       ),
-    )).toMatchObject({
+    ) as { entryScript: string }
+    expect(firstRuntime).toMatchObject({
       schemaVersion: 1,
       cordisxHome: await realpath(path.join(f.root, '.cordisx')),
     })
+    expect(firstRuntime.entryScript).toMatch(
+      /app-launcher\/runtimes\/1\.2\.3-test-[a-f0-9]{64}\/dist\/src\/cli\/app-entry\.js$/u,
+    )
+    expect(firstRuntime.entryScript).not.toBe(await realpath(f.entryScript))
+    expect(await realpath(path.join(path.dirname(firstRuntime.entryScript), '../../../node_modules'))).toMatch(
+      /app-launcher\/dependencies\/[a-f0-9]{64}\/node_modules$/u,
+    )
 
     const second = await runAppCommand(f.runtime)
     expect(second).toEqual({ status: 'reused', path: f.target })
@@ -74,6 +99,24 @@ describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () =>
     await runAppCommand(f.runtime)
     expect((await stat(installedHelper)).mtimeMs).toBe(helperModifiedAt)
     expect(f.opened).toEqual([f.target, f.target, f.target, f.target])
+  })
+
+  it('atomically switches to a new runtime while retaining the previous immutable copy', async () => {
+    const f = await fixture()
+    await runAppCommand(f.runtime)
+    const descriptor = path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json')
+    const first = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    expect(await readFile(first.entryScript, 'utf8')).toContain('first-${dependency}')
+
+    await writeFile(
+      f.entryScript,
+      'import dependency from "fixture-dependency"\nexport const runtimeMarker = `second-${dependency}`\n',
+    )
+    await runAppCommand(f.runtime)
+    const second = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    expect(second.entryScript).not.toBe(first.entryScript)
+    expect(await readFile(first.entryScript, 'utf8')).toContain('first-${dependency}')
+    expect(await readFile(second.entryScript, 'utf8')).toContain('second-${dependency}')
   })
 
   it('does not overwrite an unknown same-name application', async () => {

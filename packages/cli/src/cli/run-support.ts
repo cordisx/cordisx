@@ -179,7 +179,7 @@ Options:
 
 export interface CordisXCliRuntime {
   /** Test-only app installation destination. */
-  readonly internalAppOutput?: { readonly directory: string; readonly path?: string }
+  readonly internalAppOutput?: import('../app-launcher/runtime-install.js').AppCommandOutputOptions
   /** Test-only exact-path replacement for `/usr/bin/open`. */
   readonly internalOpenApp?: (path: string) => void | Promise<void>
   /** Isolated native verification output; never read from user CLI/env. */
@@ -213,7 +213,7 @@ export interface CordisXCliRuntime {
   readonly internalSupervisorReadinessTimeoutMs?: number
   /** Repository-only startup-gate seam; false keeps command tests headless. */
   readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
-  readonly internalScheduleShortcutPresentation?: (job: import('./shortcut-presentation-worker.js').ShortcutPresentationJob) => void | Promise<void>
+  readonly internalScheduleShortcutPresentation?: import('./shortcut-presentation-worker.js').PresentationScheduler
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is

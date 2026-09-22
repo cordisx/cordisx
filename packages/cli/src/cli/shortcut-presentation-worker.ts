@@ -28,6 +28,8 @@ export interface ShortcutPresentationJob {
   readonly reuseExistingAvatar: boolean
 }
 
+export type PresentationScheduler = (job: ShortcutPresentationJob) => void | Promise<void>
+
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

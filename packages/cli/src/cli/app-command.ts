@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { ensureHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import { installVersionedAppRuntime, resolveAppRuntimeSource } from '../app-launcher/runtime-install.js'
 import { appLauncherHelper, nativeOperation, requireAppLauncherHelper } from '../shortcuts/native.js'
 import { entryLock, isMissing, privateDirectory, writePrivateJson } from '../shortcuts/store.js'
 import type { CordisXCliRuntime } from './run-support.js'
@@ -40,7 +41,7 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
   await ensureHomeConfig({ env: environment, homedir: userHome })
   const cordisxHome = await realpath(path.dirname(configPath))
   const node = await persistentRuntimePath(process.execPath)
-  const entryScript = await persistentRuntimePath(fileURLToPath(
+  const sourceEntryScript = await persistentRuntimePath(fileURLToPath(
     new URL(
       import.meta.url.includes('/dist/') ? './app-entry.js' : '../../dist/src/cli/app-entry.js',
       import.meta.url,
@@ -62,6 +63,7 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
   try {
     let status: AppCommandResult['status'] = 'installed'
     let existing = false
+    let inspection: { bundleIdentifier: string; runtimePath: string; helperDigest: string } | undefined
     try {
       const metadata = await lstat(target)
       if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
@@ -72,7 +74,7 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
       if (!isMissing(error)) throw error
     }
     if (existing) {
-      const inspection = await nativeOperation<{
+      inspection = await nativeOperation<{
         bundleIdentifier: string
         runtimePath: string
         helperDigest: string
@@ -86,6 +88,13 @@ export async function runAppCommand(runtime: CordisXCliRuntime): Promise<AppComm
         throw new Error('An unrelated application already exists at ' + target)
       }
       await run('/usr/bin/codesign', ['--verify', '--strict', target])
+    }
+    const entryScript = await installVersionedAppRuntime(
+      support,
+      runtime.internalAppOutput?.runtimeSource ?? await resolveAppRuntimeSource(sourceEntryScript),
+      node,
+    )
+    if (existing && inspection) {
       const installedHelper = path.join(target, 'Contents', 'MacOS', 'CordisXLauncher')
       if (inspection.helperDigest !== helperDigest) {
         stage = await mkdtemp(path.join(applications, '.cordisx-app-update-'))
