@@ -12,6 +12,7 @@ import { readPrivateJson } from './store.js'
 import { validRecord } from './model.js'
 
 export const dockAgent = fileURLToPath(new URL('../../native/dock-agent.cjs', import.meta.url))
+export const visibilityAgent = fileURLToPath(new URL('../../native/visibility-agent.cjs', import.meta.url))
 const run = promisify(execFile)
 const FUSE_SENTINEL = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX')
 
@@ -217,14 +218,20 @@ async function inspectorClosed(port: number): Promise<boolean> {
   })
 }
 
-/** One-shot official Electron main inspector; closes before the Host becomes ready. */
-export async function installDockAgent(input: {
-  scope: DockScope
-  token: string
+export interface HostMainAgentController {
+  revealAndClose(): Promise<void>
+  close(): Promise<void>
+}
+
+/** Gate BrowserWindow.show and optionally install Dock ownership over one inspector. */
+export async function installHostMainAgents(input: {
   inspectorUrl: string
   hostPid: number
   hostStartedAt: string
-}): Promise<() => Promise<void>> {
+  readyStatePath: string
+  readyInstanceToken: string
+  dock?: { readonly scope: DockScope; readonly token: string }
+}): Promise<HostMainAgentController> {
   const matched = /^ws:\/\/127\.0\.0\.1:(\d+)\/[a-f0-9-]+$/u.exec(input.inspectorUrl)
   if (!matched || !await hasMatchingProcessIdentity(input.hostPid, input.hostStartedAt)) {
     throw new Error('Owned Host main inspector identity mismatch')
@@ -248,6 +255,42 @@ export async function installDockAgent(input: {
   }
   try {
     session = await CdpSession.connect(input.inspectorUrl)
+    await session.send('Debugger.enable')
+    await session.send('Debugger.setBreakpointByUrl', {
+      lineNumber: 0,
+      urlRegex: 'early-bootstrap\\.js',
+    })
+    const paused = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        remove()
+        reject(new Error('Owned Host did not pause before its application entry'))
+      }, 5_000)
+      const remove = session!.onEvent('Debugger.paused', params => {
+        clearTimeout(timer)
+        remove()
+        resolve(params)
+      })
+    })
+    await session.send('Runtime.runIfWaitingForDebugger')
+    const pausedEvent = await paused
+    const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
+    if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
+    const earlyVisibility = await session.send('Debugger.evaluateOnCallFrame', {
+      callFrameId: frame.callFrameId,
+      expression: `require(${JSON.stringify(visibilityAgent)}).install(${
+        JSON.stringify({ pid: input.hostPid })
+      }, require('electron'))`,
+      returnByValue: true,
+    }, 5_000)
+    const earlyError = runtimeEvaluationException(earlyVisibility)
+    if (
+      earlyError
+      || (earlyVisibility.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
+      || (earlyVisibility.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
+    ) {
+      throw new Error('Owned Host early visibility gate failed' + (earlyError ? ': ' + earlyError : ''))
+    }
+    await session.send('Debugger.resume')
     // Electron exposes the inspector before its application entry module is
     // loaded. Wait for the main module rather than racing Node bootstrap.
     const moduleDeadline = Date.now() + 10_000
@@ -261,36 +304,79 @@ export async function installDockAgent(input: {
       if (!moduleReady) await new Promise(resolve => setTimeout(resolve, 100))
     }
     if (!moduleReady) throw new Error('Owned Host main module did not initialize')
-    // All code and arguments are selected by the owning launcher. No socket
-    // request can provide JavaScript, a module path, or an image path.
-    const expression = `process.mainModule.require(${JSON.stringify(dockAgent)}).install(${
-      JSON.stringify({
-        pid: input.hostPid,
-        entryId: input.scope.entryId,
-        token: input.token,
-        socketPath: input.scope.socketPath,
-        iconPath: input.scope.iconPath,
-        lightIconPath: input.scope.lightIconPath,
-        darkIconPath: input.scope.darkIconPath,
-        defaultIconPath: input.scope.defaultIconPath,
-      })
-    })`
-    const response = await session.send('Runtime.evaluate', {
-      expression,
+    const visibilityResponse = await session.send('Runtime.evaluate', {
+      expression: `process.mainModule.require(${JSON.stringify(visibilityAgent)}).install(${
+        JSON.stringify({ pid: input.hostPid })
+      })`,
       awaitPromise: true,
       returnByValue: true,
     }, 5_000)
-    const remoteError = runtimeEvaluationException(response)
+    const visibilityError = runtimeEvaluationException(visibilityResponse)
     if (
-      remoteError
-      || (response.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
-      || (response.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
+      visibilityError
+      || (visibilityResponse.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
+      || (visibilityResponse.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
     ) {
-      throw new Error('Owned Host Dock agent initialization failed' + (remoteError ? ': ' + remoteError : ''))
+      throw new Error(
+        'Owned Host visibility agent initialization failed' + (visibilityError ? ': ' + visibilityError : ''),
+      )
+    }
+    if (input.dock) {
+      // All code and arguments are selected by the owning launcher. No socket
+      // request can provide JavaScript, a module path, or an image path.
+      const { scope, token } = input.dock
+      const dockResponse = await session.send('Runtime.evaluate', {
+        expression: `process.mainModule.require(${JSON.stringify(dockAgent)}).install(${
+          JSON.stringify({
+            pid: input.hostPid,
+            entryId: scope.entryId,
+            token,
+            socketPath: scope.socketPath,
+            iconPath: scope.iconPath,
+            lightIconPath: scope.lightIconPath,
+            darkIconPath: scope.darkIconPath,
+            defaultIconPath: scope.defaultIconPath,
+          })
+        })`,
+        awaitPromise: true,
+        returnByValue: true,
+      }, 5_000)
+      const dockError = runtimeEvaluationException(dockResponse)
+      if (
+        dockError
+        || (dockResponse.result as { value?: { ready?: unknown; pid?: unknown } })?.value?.ready !== true
+        || (dockResponse.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
+      ) {
+        throw new Error('Owned Host Dock agent initialization failed' + (dockError ? ': ' + dockError : ''))
+      }
     }
   } catch (error) {
+    await session?.send('Debugger.resume').catch(() => undefined)
     await closeInspector().catch(() => undefined)
     throw error
   }
-  return closeInspector
+  return {
+    async revealAndClose(): Promise<void> {
+      if (!session) throw new Error('Owned Host main inspector session is unavailable')
+      const response = await session.send('Runtime.evaluate', {
+        expression: `process.mainModule.require(${JSON.stringify(visibilityAgent)}).releaseWhenReady(${
+          JSON.stringify({
+            pid: input.hostPid,
+            statePath: input.readyStatePath,
+            instanceToken: input.readyInstanceToken,
+          })
+        })`,
+        awaitPromise: true,
+        returnByValue: true,
+      }, 5_000)
+      const remoteError = runtimeEvaluationException(response)
+      if (
+        remoteError
+        || (response.result as { value?: { armed?: unknown; pid?: unknown } })?.value?.armed !== true
+        || (response.result as { value?: { pid?: unknown } })?.value?.pid !== input.hostPid
+      ) throw new Error('Owned Host visibility release watch failed' + (remoteError ? ': ' + remoteError : ''))
+      await closeInspector()
+    },
+    close: closeInspector,
+  }
 }

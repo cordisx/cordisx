@@ -521,7 +521,7 @@ export async function runInjectedHost(input: {
   readonly onReady?: () => void | Promise<void>
   readonly onHostLaunched?: (pid: number, inspectorUrl?: Promise<string>) => void | Promise<void>
   /** Internal, owned-entry bootstrap only. Never a user Host argument. */
-  readonly dockInspector?: boolean
+  readonly mainInspector?: boolean
   readonly hiddenUntilReady?: boolean
 }): Promise<void> {
   const controller = new AbortController()
@@ -590,8 +590,7 @@ export async function runInjectedHost(input: {
     }
     if (input.prelaunchedHost === undefined) {
       const hidden = input.hiddenUntilReady === true
-      const mainInspector = !hidden && input.dockInspector === true
-        && await supportsOwnedMainInspector(input.executable)
+      const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
       input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
       const hiddenLaunch = hidden
         ? await launchCodexHidden(
@@ -601,6 +600,7 @@ export async function runInjectedHost(input: {
           input.profile,
           input.launcher.onlineDevtools,
           input.environment,
+          mainInspector ? await findFreeLoopbackPort() : undefined,
         )
         : undefined
       launched = hiddenLaunch?.child ?? launchCodex(
@@ -613,7 +613,7 @@ export async function runInjectedHost(input: {
         mainInspector,
       )
       if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
-      const inspectorUrl = mainInspector ? captureMainInspectorUrl(launched) : undefined
+      const inspectorUrl = hiddenLaunch?.inspectorUrl ?? (mainInspector ? captureMainInspectorUrl(launched) : undefined)
       await input.onHostLaunched?.(hiddenLaunch?.hostPid ?? launched.pid, inspectorUrl)
     } else {
       launched = input.prelaunchedHost.child

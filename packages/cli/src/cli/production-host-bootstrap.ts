@@ -33,7 +33,7 @@ export async function prepareProductionHostBootstrap(
   input: Readonly<{
     prelaunch: boolean
     prepareNativeSubmission: boolean
-    dockInspector: boolean
+    mainInspector: boolean
     markHostLaunched(pid: number, inspectorUrl?: Promise<string>): void | Promise<void>
   }>,
 ): Promise<ProductionHostBootstrap> {
@@ -107,7 +107,7 @@ export async function prepareProductionHostBootstrap(
         ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
       }
     }
-    const mainInspector = input.dockInspector && await supportsOwnedMainInspector(plan.executable)
+    const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
     child = launchCodex(
       plan.executable,

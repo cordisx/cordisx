@@ -66,7 +66,7 @@ describe('background supervisor publication handshake', () => {
       effectiveConfig: fingerprint,
     })
     const runtime = await pending
-    expect(runtime.dockInspector).toBe(false)
+    expect(runtime.mainInspector).toBe(process.platform === 'darwin')
     await expect(readFile(paths.bootstrapToken, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(acquireSupervisorStartLock(paths)).rejects.toBeInstanceOf(SupervisorOperationBusyError)
     await runtime.markReady(43123)

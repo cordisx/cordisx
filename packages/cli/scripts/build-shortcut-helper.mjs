@@ -15,6 +15,7 @@ if (process.platform === 'darwin') {
   const out = fileURLToPath(new URL('dist/native', root))
   mkdirSync(out, { recursive: true })
   copyFileSync(fileURLToPath(new URL('native/dock-agent.cjs', root)), `${out}/dock-agent.cjs`)
+  copyFileSync(fileURLToPath(new URL('native/visibility-agent.cjs', root)), `${out}/visibility-agent.cjs`)
   execFileSync('/usr/bin/swiftc', [
     '-O',
     ...['Images.swift', 'Runner.swift', 'Entry.swift', 'main.swift'].map(name =>

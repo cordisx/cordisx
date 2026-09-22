@@ -461,6 +461,24 @@ export function launchCodex(
 export interface HiddenCodexLaunch {
   readonly child: ChildProcess
   readonly hostPid: number
+  readonly inspectorUrl?: Promise<string>
+}
+
+async function mainInspectorUrl(port: number): Promise<string> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
+      const targets = await response.json() as readonly { webSocketDebuggerUrl?: unknown }[]
+      const url = targets.find(target =>
+        typeof target.webSocketDebuggerUrl === 'string'
+        && new RegExp(`^ws://127\\.0\\.0\\.1:${port}/[a-f0-9-]+$`, 'u').test(target.webSocketDebuggerUrl)
+      )?.webSocketDebuggerUrl
+      if (typeof url === 'string') return url
+    } catch { /* Inspector publication is asynchronous. */ }
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error('Owned Host main inspector did not publish its endpoint')
 }
 
 function applicationBundleForExecutable(executable: string): string {
@@ -495,15 +513,23 @@ export async function launchCodexHidden(
   profile?: IsolatedCodexProfile,
   allowOnlineDevTools = false,
   environment?: Readonly<Record<string, string>>,
+  mainInspectorPort?: number,
 ): Promise<HiddenCodexLaunch> {
   if (process.platform !== 'darwin') throw new Error('Hidden Host launch requires macOS')
-  const args = codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools)
+  const args = [
+    ...codexLaunchArgs(debugPort, extraArgs, profile, allowOnlineDevTools),
+    ...(mainInspectorPort === undefined ? [] : [`--inspect-brk=127.0.0.1:${mainInspectorPort}`]),
+  ]
   const child = spawn(
     '/usr/bin/open',
     ['-W', '-g', '-j', '-n', '-a', applicationBundleForExecutable(executable), '--args', ...args],
     {
       stdio: 'ignore',
-      env: environment === undefined ? process.env : { ...process.env, ...environment },
+      env: {
+        ...process.env,
+        ...environment,
+        CODEX_ELECTRON_START_IN_BACKGROUND: '1',
+      },
       detached: true,
     },
   )
@@ -521,7 +547,11 @@ export async function launchCodexHidden(
     throw new Error('Hidden Host launch did not publish an exact process identity')
   }
   launchedProcessOwnership.set(child, new ProcessOwnershipTracker(hostPid))
-  return { child, hostPid }
+  return {
+    child,
+    hostPid,
+    ...(mainInspectorPort === undefined ? {} : { inspectorUrl: mainInspectorUrl(mainInspectorPort) }),
+  }
 }
 
 function exited(child: ChildProcess): boolean {

@@ -208,13 +208,10 @@ private final class StartupGateDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.hostIdentity = (pid, startedAt)
-                // Product launches use Launch Services' launch-hidden flag. Do
-                // not activate or mutate the Host here; only reject an identity
-                // that escaped into the foreground before renderer readiness.
-                guard !host.isActive else {
-                    publish("gate-error", error: "Host became active before renderer readiness")
-                    return
-                }
+                // The owned Electron main-process visibility agent prevents
+                // BrowserWindow.show before renderer readiness. This helper
+                // verifies identity and owns the single visible loading UI.
+                _ = host
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 self.window.makeKeyAndOrderFront(nil)
                 publish("host-hidden")

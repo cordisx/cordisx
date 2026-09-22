@@ -233,7 +233,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       // before creating the real Host, then launch that Host hidden until ready.
       prelaunch: false,
       prepareNativeSubmission: runHost === runInjectedHost,
-      dockInspector: supervisorRuntime.dockInspector,
+      mainInspector: supervisorRuntime.mainInspector,
       markHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
     })
     ;({
@@ -821,7 +821,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
             await supervisorRuntime.markReady(debugPort)
           },
           onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
-          dockInspector: supervisorRuntime.dockInspector,
+          mainInspector: supervisorRuntime.mainInspector,
           stdout,
         })
       } finally {
@@ -960,7 +960,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           await supervisorRuntime.markReady(resolvedDebugPort)
         },
         onHostLaunched: async (pid, inspectorUrl) => await supervisorRuntime.markHostLaunched(pid, inspectorUrl),
-        dockInspector: supervisorRuntime.dockInspector,
+        mainInspector: supervisorRuntime.mainInspector,
         ...(runHost === runInjectedHost && environment.CORDISX_SUPERVISOR_HOME !== undefined
           ? { hiddenUntilReady: true }
           : {}),
