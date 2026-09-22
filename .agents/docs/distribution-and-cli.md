@@ -155,6 +155,12 @@ or a Provider already present in Codex `model_providers`. Unknown, disabled, or
 currently unavailable Providers fall back to the native Codex default and are
 not activated automatically.
 
+`apps.codex.profiles.<profile>.configModelCatalogs` explicitly maps configured
+provider IDs to local model catalogs for that named profile. See
+[config provider catalogs](native-model-providers.md#explicit-config-provider-catalogs)
+for format, path resolution, migration and restart behavior. This does not change
+native endpoint or authentication configuration.
+
 Profile fragment:
 
 ```json

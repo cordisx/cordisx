@@ -850,9 +850,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
               managedServiceActivation,
               plan.executable,
               codexHome({ ...environment, ...plan.environment }),
-              selection.profile.defaultModelProvider === undefined
-                ? {}
-                : { defaultProviderId: selection.profile.defaultModelProvider },
+              {
+                ...(selection.profile.defaultModelProvider === undefined
+                  ? {}
+                  : { defaultProviderId: selection.profile.defaultModelProvider }),
+                ...(selection.profile.configModelCatalogs === undefined
+                  ? {}
+                  : { configModelCatalogs: selection.profile.configModelCatalogs }),
+              },
             )
         } catch (error) {
           stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)

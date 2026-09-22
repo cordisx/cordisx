@@ -314,7 +314,14 @@ describe('native submission document authority', () => {
   })
 
   it('keeps reads observational and commits same-provider model changes only through selection', async () => {
-    const h = await harness()
+    const h = await harness({
+      catalog: () => [{
+        providerId: 'provider',
+        pluginId: 'p',
+        label: 'Provider',
+        models: [{ id: 'chosen', label: 'Chosen', aliases: [] }],
+      }],
+    })
     try {
       const first = { providerId: 'provider', model: 'current' }
       await h.channel.selectionRead({ scope: h.draft, effective: first })
@@ -322,6 +329,42 @@ describe('native submission document authority', () => {
       const read = await h.channel.selectionRead({ scope: h.draft, effective: first })
       expect(read.effective).toEqual({ providerId: 'provider', model: 'chosen' })
       expect(read.revision).toBe(2)
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it.each([false, true])(
+    'rejects stale same-provider models in draft/thread=%s without changing the effective pair',
+    async (existing) => {
+      let models = [{ id: 'valid', label: 'Valid', aliases: [] }]
+      const h = await harness({ catalog: () => [{ providerId: 'provider', pluginId: 'p', label: 'Provider', models }] })
+      const scope = existing ? { ...h.draft, threadId: 'thread' } : h.draft
+      h.setLive(scope)
+      try {
+        const effective = { providerId: 'provider', model: 'old' }
+        await h.channel.selectionRead({ scope, effective })
+        models = []
+        for (const model of ['valid', 'global-native-model', 'old']) {
+          await expect(h.channel.selectionSelect({ scope, providerId: 'provider', model })).rejects.toThrow()
+        }
+        expect(h.authority.selection.snapshot(scope).effective).toEqual(effective)
+        expect(h.controller.commitSelection).not.toHaveBeenCalled()
+      } finally {
+        await h.installed.dispose()
+      }
+    },
+  )
+
+  it('allows cancelling a pending switch to the exact effective pair after catalog removal', async () => {
+    const h = await harness()
+    try {
+      const effective = { providerId: 'retired', model: 'old' }
+      await h.channel.selectionRead({ scope: h.draft, effective })
+      await h.channel.selectionSelect({ scope: h.draft, providerId: 'provider-b', model: 'model-b' })
+      await expect(h.channel.selectionSelect({ scope: h.draft, ...effective }))
+        .resolves.toMatchObject({ status: 'accepted', effective })
+      expect(h.authority.selection.snapshot(h.draft).pending).toBeUndefined()
     } finally {
       await h.installed.dispose()
     }

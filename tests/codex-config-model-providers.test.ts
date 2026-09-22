@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -42,7 +42,7 @@ describe('Codex config model providers', () => {
       ].join('\n'),
     )
 
-    const projection = await codexConfigModelProviders(codexHome)
+    const projection = await codexConfigModelProviders(codexHome, { deepseek: 'models.json' })
     expect(projection.providers).toEqual([{
       providerId: 'deepseek',
       pluginId: 'cordisx.codex-config',
@@ -97,7 +97,7 @@ describe('Codex config model providers', () => {
     await expect(codexConfigModelProviders(codexHome)).resolves.toMatchObject({ providers: [] })
   })
 
-  it('keeps the current model selectable when config omits model_provider and a catalog', async () => {
+  it('does not infer ownership from a single provider when model_provider is omitted', async () => {
     const codexHome = await home()
     await writeFile(
       path.join(codexHome, 'config.toml'),
@@ -114,8 +114,139 @@ describe('Codex config model providers', () => {
         providerId: 'deepseek',
         pluginId: 'cordisx.codex-config',
         title: 'DeepSeek',
-        models: [{ id: 'deepseek-chat', label: 'deepseek-chat', aliases: [] }],
+        models: [],
       }],
     })
+  })
+
+  it('uses global metadata only for explicitly bound model IDs and preserves the source files', async () => {
+    const codexHome = await home()
+    const catalog = JSON.stringify({
+      models: [
+        { slug: 'shared', display_name: 'Shared' },
+        { slug: 'gpt-valid-on-gateway', display_name: 'Gateway model' },
+        { slug: 'unbound', display_name: 'Not owned' },
+      ],
+    })
+    await writeFile(path.join(codexHome, 'models.json'), catalog)
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        'model_provider = "first"',
+        'model = "shared"',
+        'model_catalog_json = "models.json"',
+        '[model_providers.first]',
+        'name = "First"',
+        '[model_providers.second]',
+        'name = "Second"',
+        '[profiles.a]',
+        'model_provider = "second"',
+        'model = "shared"',
+        '[profiles.b]',
+        'model_provider = "second"',
+        'model = "gpt-valid-on-gateway"',
+        '[profiles.unknown]',
+        'model_provider = "unknown"',
+        'model_catalog_json = "models.json"',
+        '[profiles.unbound]',
+        'model = "unbound"',
+        'model_catalog_json = "models.json"',
+      ].join('\n'),
+    )
+    const { providers } = await codexConfigModelProviders(codexHome)
+    expect(providers.map(provider => [provider.providerId, provider.models.map(model => model.id)])).toEqual([
+      ['first', ['shared']],
+      ['second', []],
+    ])
+    expect(providers[0]?.models[0]?.label).toBe('Shared')
+    expect(await readFile(path.join(codexHome, 'models.json'), 'utf8')).toBe(catalog)
+  })
+
+  it('isolates Host profile mappings and keeps shared IDs provider-local without scanning native profiles', async () => {
+    const codexHome = await home()
+    for (
+      const [name, models] of Object.entries({
+        a: [{ slug: 'shared', display_name: 'First label' }, { slug: 'a' }],
+        b: [{ slug: 'shared', display_name: 'Later label' }, { slug: 'b' }],
+        c: [{ slug: 'shared', display_name: 'Other provider label' }],
+      })
+    ) await writeFile(path.join(codexHome, `${name}.json`), JSON.stringify({ models }))
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '[model_providers.first]',
+        '[model_providers.second]',
+        '[model_providers.empty]',
+        '[profiles.a]',
+        'model_provider = "first"',
+        'model_catalog_json = "a.json"',
+        '[profiles.b]',
+        'model_provider = "first"',
+        'model_catalog_json = "b.json"',
+        '[profiles.c]',
+        'model_provider = "second"',
+        'model_catalog_json = "c.json"',
+        '[profiles.missing]',
+        'model_provider = "second"',
+        'model_catalog_json = "missing.json"',
+        'model = "explicit"',
+        '[profiles.empty]',
+        'model_provider = "empty"',
+        'model_catalog_json = "missing.json"',
+      ].join('\n'),
+    )
+    const { providers } = await codexConfigModelProviders(codexHome, {
+      first: 'b.json',
+      second: 'c.json',
+      empty: 'missing.json',
+    })
+    expect(providers.map(provider => provider.models.map(model => [model.id, model.label]))).toEqual([
+      [['shared', 'Later label'], ['b', 'b']],
+      [['shared', 'Other provider label']],
+      [],
+    ])
+    const otherProfile = await codexConfigModelProviders(codexHome, { first: 'a.json' })
+    expect(otherProfile.providers[0]?.models.map(model => model.id)).toEqual(['shared', 'a'])
+    expect(otherProfile.providers[1]?.models).toEqual([])
+  })
+
+  it.each([
+    ['missing', undefined, 'catalog-unavailable'],
+    ['invalid JSON', '{bad', 'catalog-unavailable'],
+    ['invalid shape', '{}', 'catalog-unavailable'],
+    ['invalid entry', '{"models":[{"slug":123}]}', 'catalog-unavailable'],
+    ['empty', '{"models":[]}', 'catalog-empty'],
+  ])('keeps an explicit %s mapping authoritative and emits only sanitized diagnostics', async (_name, body, code) => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      'model_provider="first"\nmodel="old"\n[model_providers.first]\n',
+    )
+    if (body !== undefined) await writeFile(path.join(codexHome, 'catalog.json'), body)
+    const result = await codexConfigModelProviders(codexHome, { first: 'catalog.json', removed: 'do-not-read.json' })
+    expect(result.providers).toEqual([expect.objectContaining({ providerId: 'first', models: [] })])
+    expect(result.providers[0]).not.toHaveProperty('defaultModelId')
+    expect(result.diagnostics).toEqual([{ providerId: 'first', code }, {
+      providerId: 'removed',
+      code: 'provider-missing',
+    }])
+    expect(JSON.stringify(result)).not.toContain(codexHome)
+  })
+
+  it('preserves a multi-vendor gateway and rereads removals without changing global catalogs', async () => {
+    const codexHome = await home()
+    await writeFile(path.join(codexHome, 'config.toml'), '[model_providers.gateway]\n')
+    await writeFile(
+      path.join(codexHome, 'catalog.json'),
+      JSON.stringify({ models: [{ slug: 'deepseek-valid' }, { slug: 'gpt-valid' }] }),
+    )
+    expect(
+      (await codexConfigModelProviders(codexHome, { gateway: 'catalog.json' })).providers[0]?.models.map(model =>
+        model.id
+      ),
+    )
+      .toEqual(['deepseek-valid', 'gpt-valid'])
+    await writeFile(path.join(codexHome, 'catalog.json'), '{"models":[]}')
+    expect((await codexConfigModelProviders(codexHome, { gateway: 'catalog.json' })).providers[0]?.models).toEqual([])
   })
 })

@@ -9,6 +9,7 @@ import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/
 import { nativeSubmissionTransformsForApp } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { resources } from './fixtures/native-submission-structure.js'
 import { createBuiltinSkillsFixture } from './helpers/cli-run-fixtures.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 const temporary = new Set<string>()
 
@@ -36,6 +37,27 @@ describe('Vite development native submission assembly', () => {
     'reports incompatible resources without publishing native submission on %s',
     async command => {
       const f = await fixture('cordisx-incompatible-native-')
+      const config = createDefaultHomeConfig()
+      await mkdir(f.home, { mode: 0o700 })
+      await writeFile(
+        path.join(f.home, 'config.json'),
+        JSON.stringify({
+          ...config,
+          apps: {
+            codex: {
+              defaultProfile: 'default',
+              profiles: {
+                default: {
+                  displayName: 'Default',
+                  dataMode: 'shared',
+                  configModelCatalogs: { fixture: 'scoped.json' },
+                },
+                other: { displayName: 'Other', dataMode: 'shared', configModelCatalogs: { fixture: 'other.json' } },
+              },
+            },
+          },
+        }),
+      )
       const sourceRoot = await createBuiltinSkillsFixture(f.root)
       const activation = {
         nativeProviderIds: [],
@@ -58,6 +80,14 @@ describe('Vite development native submission assembly', () => {
         internalSharedHomeDir: path.join(f.root, 'shared-home'),
       })
       expect(create).toHaveBeenCalledOnce()
+      if (command === 'codex') {
+        expect(create).toHaveBeenCalledWith(
+          expect.anything(),
+          f.executable,
+          expect.any(String),
+          { configModelCatalogs: { fixture: 'scoped.json' } },
+        )
+      } else expect(create.mock.calls[0]).toHaveLength(3)
       expect(runHost).toHaveBeenCalledWith(expect.not.objectContaining({ nativeSubmission: expect.anything() }))
       expect(output.join('\n')).toContain('submit-options')
       if (command === 'dev') expect(activation.dispose).toHaveBeenCalledOnce()

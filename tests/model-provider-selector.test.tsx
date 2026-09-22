@@ -586,7 +586,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector(modelTrigger)?.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('uses only the audited native catalog when the current service is not plugin-published', async () => {
+  it('does not assign the global native catalog to an unowned custom provider', async () => {
     const { update } = await setup()
     await update({
       modelProvider: 'gateway',
@@ -600,9 +600,21 @@ describe('provider selection interaction', () => {
     })
     await click(modelTrigger)
     const menu = document.querySelector('.cxmp-menu')!
-    expect(menu.textContent).toContain('Friendly')
-    expect(menu.textContent).not.toMatch(/Equivalent|Current|internal|Miniapp/)
-    expect(menu.querySelector<HTMLButtonElement>('.cxmp-model-choice[disabled]')?.textContent).toBe('Unavailable model')
+    expect(menu.textContent).toContain('No models available')
+    expect(menu.querySelector('.cxmp-model-choice')).toBeNull()
+  })
+
+  it('rejects a stale option even when it remains in the native global catalog', async () => {
+    const { registry, select } = await setup('shared', false, {
+      nativeModels: [{ id: 'shared', label: 'Global shared', disabled: false }],
+    })
+    await click(modelTrigger)
+    const stale = document.querySelector<HTMLButtonElement>('.cxmp-model-choice')!
+    const current = registry.snapshot()
+    vi.spyOn(registry, 'snapshot').mockReturnValue({ ...current, providers: [] })
+    await act(async () => stale.click())
+    expect(select).not.toHaveBeenCalled()
+    expect(document.querySelector('[role="alert"]')).not.toBeNull()
   })
 
   it('disables reasoning while busy and reflects authoritative readback', async () => {
@@ -725,7 +737,7 @@ describe('provider selection interaction', () => {
   it('filters friendly names from the fixed search header and keeps the reasoning footer available', async () => {
     const { update } = await setup()
     await update({
-      modelProvider: 'gateway',
+      modelProvider: 'openai',
       model: 'sol',
       modelLabel: 'GPT-5.6-Sol',
       nativeModels: [

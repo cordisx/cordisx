@@ -10,14 +10,76 @@ Managed Node plugins register their own service and publish an accepted native
 provider catalog. Providers already configured in the effective Codex
 `config.toml` are projected beside them from `model_providers`,
 `model_catalog_json`, `model_provider`, and `model`. Relative catalog paths are
-resolved from `CODEX_HOME`; a missing or invalid optional catalog retains the
-configured active model as the safe fallback. Managed providers take precedence
+resolved from `CODEX_HOME`. The global catalog describes model capabilities, not
+provider membership. Without an explicit Host mapping, only a top-level explicit
+`model_provider` plus `model` pair establishes membership; the global catalog
+supplies display metadata for that exact ID. An omitted `model_provider` means
+the native default, not the sole custom provider. Managed providers take precedence
 when an ID is present in both sources. No particular gateway plugin is required.
 The launcher writes each ready managed provider's endpoint and authentication
 into the private managed configuration, then exposes only provider titles,
 model IDs, aliases and ownership to the renderer. Config provider bodies and all
 credentials stay outside renderer descriptors. Unauthenticated managed endpoints
 are restricted to loopback.
+
+### Explicit Config Provider Catalogs
+
+Set `apps.codex.profiles.<profile>.configModelCatalogs` in the existing CordisX
+home configuration to map each configured provider ID to a local JSON catalog.
+For example, the profile body may contain:
+
+```json
+{
+  "displayName": "Default",
+  "dataMode": "shared",
+  "configModelCatalogs": {
+    "deepseek": "catalogs/deepseek.json",
+    "modelhub": "catalogs/modelhub.json"
+  }
+}
+```
+
+Each file uses the existing catalog shape:
+
+```json
+{
+  "models": [
+    {
+      "slug": "MODEL_ID_CONFIRMED_FOR_THIS_PROVIDER",
+      "display_name": "Model",
+      "aliases": []
+    }
+  ]
+}
+```
+
+Replace the placeholder only with IDs explicitly confirmed for that endpoint.
+The example is not a supported-model list for either service. A gateway can
+serve multiple vendors, and different providers can share a model ID. Neither
+model prefixes nor display names establish ownership. A single provider's
+explicit file is authoritative; the global catalog and active model cannot add
+missing IDs. Duplicate IDs keep the first entry within that file. There is no
+implicit merge across profiles or discovery of native `*.config.toml` files.
+
+Paths are relative to the effective `CODEX_HOME` (or absolute local paths), not
+the CordisX config directory. URLs are rejected. Files are bounded to 32 MiB;
+the config is bounded to 4 MiB, and at most 128 mappings are accepted. Only model
+IDs, labels and aliases are projected. Empty, missing, malformed catalogs or
+removed providers produce sanitized `configModelCatalogs` launcher diagnostics
+(`catalog-empty`, `catalog-unavailable`, `provider-missing`), with no file paths
+or configuration bodies. Check `cordisx logs codex <profile>` for these codes.
+
+Mapping edits use the normal home configuration and take effect on the next
+launch of that CordisX profile. Catalog contents are reread on menu refresh and
+submission validation. Vite's unnamed `development` profile does not inherit a
+named profile's mappings. No mapping activates a native Codex profile, changes
+endpoint/authentication, or grants permissions. Codex still owns request routing.
+
+Existing union catalogs need explicit per-provider membership before all custom
+choices can be restored. Keep the global catalog intact for Codex capability
+metadata; create the separate files and mappings from known endpoint support.
+Without ownership information, an empty custom-provider menu is intentional and
+is not evidence that migration or desktop acceptance has completed.
 
 The Host owns the Model services settings destination, provider rows, grouped
 model menu, and native selection adapter. Plugins decorate their own published
@@ -52,6 +114,12 @@ initialization do not update the preference. Restarting the App clears the
 launch-scoped memory and reads the profile configuration again.
 Config-backed providers pass only the selected `model_provider` and `model` to
 Codex, which continues to own their configured endpoint and authentication.
+Custom choices are checked against their provider's catalog, including changes
+within the same provider. A stale native global entry cannot bypass membership.
+Pending config selections are revalidated at preparation and marked-request
+authorization; a stale effective config model is rejected before pass-through.
+Canceling a pending switch can still restore the exact prior pair. The built-in
+`openai` path retains native model selection and is not configurable by this map.
 Managed providers continue to use launch-scoped credential leases and provider
 tables.
 Only an accepted native operation changes the selected Provider shown to users.

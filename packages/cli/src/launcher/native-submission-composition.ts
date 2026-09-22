@@ -83,7 +83,7 @@ export async function createNativeSubmissionComposition(
   activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
   desktopExecutable: string,
   codexHome: string,
-  options: Readonly<{ defaultProviderId?: string }> = {},
+  options: Readonly<{ defaultProviderId?: string; configModelCatalogs?: Readonly<Record<string, string>> }> = {},
 ): Promise<NativeSubmissionComposition> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
@@ -113,10 +113,18 @@ export async function createNativeSubmissionComposition(
       }
     })()
   try {
-    let configured = await codexConfigModelProviders(codexHome)
+    let configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs)
     const managedIds = new Set(activation.nativeProviderIds)
+    let lastDiagnostic: string | undefined
     const configuredCatalog = async () => {
-      configured = await codexConfigModelProviders(codexHome)
+      configured = await codexConfigModelProviders(codexHome, options.configModelCatalogs)
+      const diagnostic = JSON.stringify(configured.diagnostics)
+      if (diagnostic !== lastDiagnostic && configured.diagnostics.length > 0) {
+        console.warn(
+          `[cordisx] configModelCatalogs: ${diagnostic}; check the selected CordisX profile's local catalogs`,
+        )
+      }
+      lastDiagnostic = diagnostic
       return configured.providers
     }
     const cdp = createNativeSubmissionCdpAuthority({
@@ -138,6 +146,13 @@ export async function createNativeSubmissionComposition(
           : configured.providerIds.has(providerId)
           ? 'config'
           : undefined,
+      validateSelection: async selection => {
+        if (selection.providerId === 'openai' || managedIds.has(selection.providerId)) return true
+        return (await configuredCatalog()).some(provider =>
+          provider.providerId === selection.providerId
+          && provider.models.some(model => model.id === selection.model)
+        )
+      },
     })
     control.bindController(controller)
     cdp.bindController(controller)

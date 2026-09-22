@@ -63,10 +63,12 @@ it.skipIf(process.platform !== 'darwin')(
       ].join('\n'),
     )
     const prepareNativeConnection = vi.fn()
+    await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'deepseek-chat' }] }))
     const composition = await createNativeSubmissionComposition(
       { nativeProviderIds: [], prepareNativeConnection },
       f.executable,
       codexHome,
+      { configModelCatalogs: { deepseek: 'scoped.json' } },
     )
     try {
       expect(composition.installation.transforms).toHaveLength(2)
@@ -106,6 +108,9 @@ it.skipIf(process.platform !== 'darwin')(
           models: [{ id: 'deepseek-chat', label: 'deepseek-chat', aliases: [] }],
         }])
         expect(JSON.stringify(catalog)).not.toMatch(/base_url|env_key|api\.deepseek/u)
+        await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'shared' }] }))
+        expect((await world.__cordisxNativeProviderCommandChannel.catalogRead())[0].models)
+          .toEqual([{ id: 'shared', label: 'shared', aliases: [] }])
       } finally {
         await installed.dispose()
       }

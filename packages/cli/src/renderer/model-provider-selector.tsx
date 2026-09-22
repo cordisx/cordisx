@@ -114,7 +114,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
   const menuProvider = native.pendingProviderId === undefined ? selected : pendingProvider
   const menuModels = menuProvider?.models
-    ?? (native.pendingProviderId === undefined || native.pendingProviderId === 'openai'
+    ?? (displayedProviderId === 'openai'
       ? native.nativeModels ?? []
       : [])
   const terms = query.trim().toLocaleLowerCase(locale).split(/\s+/).filter(Boolean)
@@ -209,7 +209,7 @@ export function ModelProviderSelector({ registry, transport, locale }: {
       // Recheck catalog membership after confirmation; revoked services never switch.
       if (
         !cancelPending
-        && !((provider.providerId === (native.modelProvider ?? 'openai') || provider.providerId === 'openai')
+        && !(provider.providerId === 'openai'
           && transport.getSnapshot().nativeModels?.some(item => item.id === model.id && !item.disabled))
         && !registry.snapshot().providers.some(item =>
           item.providerId === provider.providerId

@@ -315,7 +315,8 @@ export function createNativeSubmissionCdpAuthority(options: {
               )
             if (
               !catalogContainsSelection
-              && (source === 'preference' || selected.providerId !== state.effective.providerId)
+              && (source === 'preference' || state.pending === undefined
+                || selected.providerId !== state.effective.providerId || selected.model !== state.effective.model)
             ) {
               if (source === 'preference') {
                 delete state.draftPreference

@@ -196,6 +196,7 @@ export interface NativeSubmissionControllerOptions {
   readonly runtime: NativeSubmissionRuntimeAuthority
   readonly existingThread: NativeExistingThreadSwitch
   readonly providerSource?: (providerId: string) => 'managed' | 'config' | undefined
+  readonly validateSelection?: (selection: NativeProviderSelection) => Promise<boolean>
   readonly operationTtlMs?: number
   readonly confirmationTtlMs?: number
   readonly now?: () => number
@@ -346,6 +347,13 @@ export function createNativeSubmissionController(
     throw new Error('native submission confirmation TTL is invalid')
   }
   const now = options.now ?? Date.now
+  const validSelection = async (selection: NativeProviderSelection): Promise<boolean> => {
+    try {
+      return await options.validateSelection?.(selection) ?? true
+    } catch {
+      return false
+    }
+  }
   const createId = options.createId ?? randomUUID
   const confirmations = new Map<string, Confirmation>()
   const operations = new Map<string, PreparedOperation>()
@@ -399,6 +407,7 @@ export function createNativeSubmissionController(
   const prepareOperation = async (prepared: PreparedBase): Promise<PreparedOperation | undefined> => {
     let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
     try {
+      if (!await validSelection(prepared.pending)) return undefined
       let configOverrides: Readonly<Record<string, unknown>>
       const source = prepared.pending.providerId === 'openai'
         ? 'openai'
@@ -485,7 +494,10 @@ export function createNativeSubmissionController(
         return { kind: 'reject', reason: 'thread-switch-failed' }
       }
       try {
-        if (!await options.runtime.revalidate(scope, true) || disposed || !revalidateSelection(prepared)) {
+        if (
+          !await options.runtime.revalidate(scope, true) || !await validSelection(pending)
+          || disposed || !revalidateSelection(prepared)
+        ) {
           throw new Error('native thread changed before switch')
         }
         await options.existingThread.switch({
@@ -539,7 +551,14 @@ export function createNativeSubmissionController(
         return { kind: 'reject', reason: 'scope-mismatch' }
       }
       const decision = decideNativeProviderSubmission(snapshot.pending, action)
-      if (decision.kind === 'pass-through') return { kind: 'pass-through' }
+      if (decision.kind === 'pass-through') {
+        if (!await validSelection(snapshot.effective)) {
+          return { kind: 'reject', reason: 'provider-preparation-failed' }
+        }
+        const current = options.selection.snapshot(scope)
+        if (disposed || current.revision !== snapshot.revision) return { kind: 'reject', reason: 'stale-operation' }
+        return { kind: 'pass-through' }
+      }
       if (decision.kind === 'reject') return { kind: 'reject', reason: decision.reason }
       const prepared: PreparedBase = {
         scope,
@@ -579,7 +598,8 @@ export function createNativeSubmissionController(
       if (operation === undefined) return { kind: 'reject', reason: 'stale-operation' }
       try {
         if (
-          !await options.runtime.revalidate(confirmation.scope, true) || disposed || !revalidateSelection(confirmation)
+          !await options.runtime.revalidate(confirmation.scope, true) || !await validSelection(confirmation.pending)
+          || disposed || !revalidateSelection(confirmation)
         ) {
           throw new Error('native thread changed before switch')
         }
@@ -677,6 +697,7 @@ export function createNativeSubmissionController(
       const currentScope = operation.boundScope ?? operation.scope
       if (
         disposed || operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
+        || !await validSelection(operation.pending)
         || !await options.runtime.revalidate(
           currentScope,
           true,
@@ -713,6 +734,7 @@ export function createNativeSubmissionController(
       const currentScope = operation.boundScope ?? operation.scope
       if (
         operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
+        || !await validSelection(operation.pending)
         || !await options.runtime.revalidate(
           currentScope,
           true,

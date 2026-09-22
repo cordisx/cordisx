@@ -35,6 +35,7 @@ function harness(input: {
   runtimeValid?: () => boolean
   createdNavigation?: () => number
   providerSource?: (providerId: string) => 'managed' | 'config' | undefined
+  validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
 } = {}) {
   const scope = input.scope ?? draftScope
   let snapshot: NativeSubmissionSelectionSnapshot = {
@@ -120,6 +121,7 @@ function harness(input: {
     },
     existingThread: { switch: switchThread },
     ...(input.providerSource === undefined ? {} : { providerSource: input.providerSource }),
+    ...(input.validateSelection === undefined ? {} : { validateSelection: input.validateSelection }),
     operationTtlMs: 100,
     now: input.now,
     createId: () => `opaque-operation-${String(++id).padStart(4, '0')}`,
@@ -140,6 +142,66 @@ function harness(input: {
 }
 
 describe('native submission controller', () => {
+  it('revalidates config membership at preparation, reservation and final authorization', async () => {
+    let valid = true
+    const fixture = harness({
+      pending: pendingDraft,
+      providerSource: () => 'config',
+      validateSelection: async selection =>
+        valid && selection.providerId === pendingDraft.providerId && selection.model === pendingDraft.model,
+    })
+    valid = false
+    expect((await fixture.controller.prepareSubmission(draftScope, draftAction)).kind).toBe('reject')
+    valid = true
+    const prepared = await fixture.controller.prepareSubmission(draftScope, draftAction)
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+    valid = false
+    const request = { method: 'thread/start' as const, requestId, operationToken: prepared.operationToken }
+    expect((await fixture.controller.consumeMarkedRequest(request)).kind).toBe('reject')
+    valid = true
+    const next = await fixture.controller.prepareSubmission(draftScope, draftAction)
+    if (next.kind !== 'allow-original') throw new Error('operation not prepared')
+    const nextRequest = { ...request, operationToken: next.operationToken }
+    expect((await fixture.controller.consumeMarkedRequest(nextRequest)).kind).toBe('dispatch')
+    valid = false
+    expect(await fixture.controller.authorizeMarkedRequest(nextRequest)).toBe(false)
+    expect(fixture.prepare).not.toHaveBeenCalled()
+  })
+
+  it('rejects a stale effective model before native pass-through without replacing its provider', async () => {
+    const fixture = harness({ validateSelection: async () => false })
+    expect((await fixture.controller.prepareSubmission(draftScope, draftAction)).kind).toBe('reject')
+    expect(fixture.switchThread).not.toHaveBeenCalled()
+  })
+
+  it('rejects an existing-thread switch when catalog ownership disappears during idle revalidation', async () => {
+    let valid = true
+    const fixture = harness({
+      scope: threadScope,
+      pending: pendingThread,
+      providerSource: () => 'config',
+      validateSelection: async () => valid,
+    })
+    fixture.runtimeRevalidate.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
+      valid = false
+      return true
+    })
+    expect((await fixture.controller.commitSelection(threadScope)).kind).toBe('reject')
+    expect(fixture.switchThread).not.toHaveBeenCalled()
+    expect(fixture.clearPending).toHaveBeenCalledOnce()
+  })
+
+  it('fails closed on catalog read errors but leaves the native default-provider path legal', async () => {
+    const fixture = harness({
+      validateSelection: async selection => {
+        if (selection.providerId === 'openai') return true
+        throw new Error('private catalog read failure')
+      },
+    })
+    expect((await fixture.controller.prepareSubmission(draftScope, draftAction)).kind).toBe('reject')
+    fixture.setSnapshot({ revision: 5, effective: { providerId: 'openai', model: 'native-default' } })
+    expect(await fixture.controller.prepareSubmission(draftScope, draftAction)).toEqual({ kind: 'pass-through' })
+  })
   it('returns an existing thread to built-in OpenAI without managed credentials or endpoint overrides', async () => {
     const fixture = harness({
       scope: threadScope,
