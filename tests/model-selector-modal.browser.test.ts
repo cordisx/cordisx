@@ -165,6 +165,11 @@ it.skipIf(!executable)(
       await run(
         `document.querySelector('.cxmp-provider-trigger').click();window.stopFocusReturn();await Fixture.settle()`,
       )
+      await run(`window.outlet=document.createElement('section');
+      outlet.dataset.cordisxPageOutlet='app';document.body.append(outlet);await Fixture.settle();
+      Fixture.resetSnapshotReads();
+      for(let i=0;i<200;i++) outlet.style.inset=i%2?'auto':'0px';await Fixture.settle()`)
+      expect(await evaluate('Fixture.snapshotReadCount()')).toBe(0)
       const catalogMeasurements = []
       for (const count of [1, 10, 286, 500]) {
         await run(`await Fixture.catalog(${count});window.measurement=await (async()=>{

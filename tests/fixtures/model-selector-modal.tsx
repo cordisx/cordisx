@@ -11,6 +11,7 @@ let calls = 0
 let modelCount = 1
 let catalogReads = 0
 let focusReturns = 0
+let snapshotReads = 0
 const state = Object.freeze({
   available: true,
   busy: false,
@@ -97,7 +98,10 @@ export async function start() {
   // Only the transport is a fixture; React, portals, installer and DOM probes are production code.
   CodexDesktopNativeModelProviderTransport.connect = async () =>
     ({
-      getSnapshot: () => state,
+      getSnapshot: () => {
+        snapshotReads++
+        return state
+      },
       subscribe: () => () => {},
       hasActiveSubmission: () => false,
       select: async () => {
@@ -149,6 +153,12 @@ export function simulateHostFocusReturn() {
 }
 export function focusReturnCount() {
   return focusReturns
+}
+export function resetSnapshotReads() {
+  snapshotReads = 0
+}
+export function snapshotReadCount() {
+  return snapshotReads
 }
 export async function refresh() {
   await registry.refresh()
