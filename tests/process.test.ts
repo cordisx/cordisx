@@ -108,6 +108,34 @@ describe('isolated Codex process support', () => {
     expect(retainProfileLeaseAfterHiddenHostFailure(new Error('ordinary launch failure'))).toBe(false)
   })
 
+  it.skipIf(process.platform === 'win32')('does not confirm a Host PID whose start identity was never observed', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+    try {
+      expect(() => confirmHiddenCodexOwnership({ child, hostPid: 2_147_483_647 })).toThrow(
+        'Hidden Host launch identity changed before confirmation',
+      )
+    } finally {
+      child.kill('SIGTERM')
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('rechecks a cached live Host identity before confirmation', () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+    const identity = 'Wed Sep 24 00:00:00 2026'
+    vi.mocked(execFileSync)
+      .mockReturnValueOnce(`2147483646 1 ${identity}\n`)
+      .mockReturnValueOnce(`2147483646 1 ${identity}\n`)
+      .mockReturnValueOnce('')
+      .mockReturnValueOnce('')
+    try {
+      expect(() => confirmHiddenCodexOwnership({ child, hostPid: 2_147_483_646 })).toThrow(
+        'Hidden Host launch identity changed before confirmation',
+      )
+    } finally {
+      child.kill('SIGTERM')
+    }
+  })
+
   it('does not derive a Windows executable from cwd when LOCALAPPDATA is missing or relative', () => {
     expect(codexExecutableCandidates('win32', {}, 'C:\\Users\\example')).toEqual([])
     expect(codexExecutableCandidates('win32', { LOCALAPPDATA: 'relative' }, 'C:\\Users\\example')).toEqual([])
