@@ -6,7 +6,7 @@ import { runManagementCommand } from './management-command.js'
 import { isSupervisorCommand, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
-import { runAppCommand } from './app-command.js'
+import { runAppCheckCommand, runAppCommand, runAppUpdateCommand } from './app-command.js'
 import { activateOwnedHost } from './activate-owned-host.js'
 
 export interface PreparedRunCommand {
@@ -125,7 +125,9 @@ export async function prepareCliCommand(
     return
   }
   if (parsedInvocation.action === 'app') {
-    await runAppCommand(runtime)
+    if (parsedInvocation.subcommand === 'check') await runAppCheckCommand(runtime)
+    else if (parsedInvocation.subcommand === 'update') await runAppUpdateCommand(runtime)
+    else await runAppCommand(runtime)
     return
   }
   const internalForeground = [

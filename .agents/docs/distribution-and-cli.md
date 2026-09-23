@@ -22,6 +22,8 @@ cordisx run [app] [profile] [options] [-- host-arguments...]
 cordisx start|status|logs|stop|restart [app] [profile] [options]
 cordisx setup
 cordisx app
+cordisx app check
+cordisx app update
 cordisx config
 cordisx doctor
 cordisx dev [plugin-path]
@@ -58,6 +60,22 @@ process by application name. The command requires CordisX and Node to resolve
 from stable installed paths because the application must remain usable after
 the invoking shell exits. `app` is reserved as this command; use
 `cordisx start app` if a Host adapter is actually named `app`.
+
+A global CLI installation or upgrade refreshes an existing, owned CordisX App
+through its package lifecycle hook. It preserves the App bundle path and the
+recorded CordisX and Codex data roots, and does not open the App or start a
+Host. A first installation never creates an App implicitly. If lifecycle
+scripts are skipped or the refresh fails, `cordisx app update` performs the same
+update explicitly without opening the App. The current running launcher continues
+until it is quit; reopen it to load an updated native helper. This does not
+automatically restart or replace a running Host profile.
+
+`cordisx app check` reports `missing`, `current`, or `update-available` in JSON.
+It reads the owned App and compares its recorded runtime and native helper to
+the installed CLI without creating config, installing files, or opening any
+application. `cordisx app update` refreshes only an existing owned App in place,
+preserves its recorded CordisX and Codex data roots, and leaves the App and Host
+closed. If the App is missing, use `cordisx app` to create it first.
 
 The bare command is an idempotent background `start`; `cordisx run` retains
 the foreground launcher lifecycle for terminals and development diagnostics.

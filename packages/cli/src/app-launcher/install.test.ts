@@ -16,7 +16,8 @@ import {
 } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runAppCommand } from '../cli/app-command.js'
+import { runAppCheckCommand, runAppCommand, runAppUpdateCommand } from '../cli/app-command.js'
+import { refreshInstalledAppAfterUpgrade } from './postinstall.js'
 import { appLauncherHelper, nativeOperation } from '../shortcuts/native.js'
 
 let roots: string[] = []
@@ -72,6 +73,73 @@ async function fixture() {
 }
 
 describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () => {
+  it('checks without creating an App and updates an owned App without opening it', async () => {
+    const f = await fixture()
+    expect(await runAppCheckCommand(f.runtime)).toEqual({ status: 'missing', path: f.target })
+    await expect(runAppUpdateCommand(f.runtime)).rejects.toThrow('not installed')
+    await expect(lstat(path.join(f.root, '.cordisx'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await runAppCommand(f.runtime)
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('current')
+    const firstInode = (await stat(f.target)).ino
+    const descriptor = path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json')
+    const original = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    await writeFile(f.entryScript, 'export const runtimeMarker = "manual-update"\n')
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('update-available')
+    expect(JSON.parse(await readFile(descriptor, 'utf8'))).toMatchObject(original)
+    await runAppUpdateCommand(f.runtime)
+    const updated = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    expect(updated.entryScript).not.toBe(original.entryScript)
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('current')
+    expect((await stat(f.target)).ino).toBe(firstInode)
+    expect(f.opened).toEqual([f.target])
+  })
+
+  it('refreshes an existing App after a global CLI upgrade without opening it or creating a new App', async () => {
+    const f = await fixture()
+    const options = {
+      platform: 'darwin' as const,
+      globalInstall: true,
+      homedir: f.root,
+      internalAppOutput: f.runtime.internalAppOutput,
+    }
+    expect(await refreshInstalledAppAfterUpgrade(options)).toBe(false)
+    expect(f.opened).toEqual([])
+    await expect(lstat(f.target)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(path.join(f.root, '.cordisx'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await runAppCommand({
+      ...f.runtime,
+      env: { ...f.runtime.env, CODEX_HOME: path.join(f.root, 'shared-codex-home') },
+    })
+    const originalInode = (await stat(f.target)).ino
+    const descriptor = path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json')
+    const original = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    await writeFile(f.entryScript, 'export const runtimeMarker = "upgraded"\n')
+    const info = path.join(f.target, 'Contents', 'Info.plist')
+    execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Delete :CordisXAppHelperDigest', info])
+    execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', f.target])
+
+    expect(await refreshInstalledAppAfterUpgrade({ ...options, globalInstall: false })).toBe(false)
+    expect(JSON.parse(await readFile(descriptor, 'utf8'))).toMatchObject(original)
+    expect(await refreshInstalledAppAfterUpgrade(options)).toBe(true)
+    const upgraded = JSON.parse(await readFile(descriptor, 'utf8')) as {
+      entryScript: string
+      cordisxHome: string
+      codexHome: string
+    }
+    expect(upgraded.entryScript).not.toBe(original.entryScript)
+    expect(await readFile(upgraded.entryScript, 'utf8')).toContain('runtimeMarker = "upgraded"')
+    expect(upgraded.cordisxHome).toBe(await realpath(path.join(f.root, '.cordisx')))
+    expect(upgraded.codexHome).toBe(path.join(f.root, 'shared-codex-home'))
+    expect(await nativeOperation({ operation: 'inspect-app', path: f.target })).toMatchObject({
+      helperDigest: createHash('sha256').update(await readFile(appLauncherHelper)).digest('hex'),
+    })
+    expect((await stat(f.target)).ino).toBe(originalInode)
+    expect(await refreshInstalledAppAfterUpgrade(options)).toBe(true)
+    expect((await stat(f.target)).ino).toBe(originalInode)
+    expect(f.opened).toEqual([f.target])
+  })
+
   it('installs a missing app once, then reuses and opens the same owned bundle', async () => {
     const f = await fixture()
     const first = await runAppCommand(f.runtime)

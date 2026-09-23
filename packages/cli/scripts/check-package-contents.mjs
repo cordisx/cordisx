@@ -19,6 +19,12 @@ try {
   const packItem = npmPackItem(report, 'cordisx')
   const files = packItem.files?.map(file => file.path)
   if (!Array.isArray(files)) throw new Error('npm pack did not report package contents')
+  const manifest = JSON.parse(readFileSync(path.join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
+  if (
+    manifest.scripts?.postinstall !== 'node scripts/refresh-existing-app.mjs'
+    || !files.includes('scripts/refresh-existing-app.mjs')
+    || !files.includes('dist/src/app-launcher/postinstall.js')
+  ) throw new Error('cordisx tarball must include its existing-App upgrade hook')
 
   const listFiles = directory =>
     readdirSync(directory, { withFileTypes: true })
@@ -166,6 +172,7 @@ try {
     'README.md',
     'THIRD_PARTY_NOTICES.md',
     'package.json',
+    'scripts/refresh-existing-app.mjs',
   ]
   const bundledRoots = ['@cordisx/schemastery-ui'].map(name => `node_modules/${name}/`)
   for (

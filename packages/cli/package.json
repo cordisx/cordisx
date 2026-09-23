@@ -5,6 +5,7 @@
   "type": "module",
   "files": [
     "dist",
+    "scripts/refresh-existing-app.mjs",
     "README.md",
     "LICENSE",
     "CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md",
@@ -60,6 +61,7 @@
     "generate:brand-animation": "node scripts/generate-animated-brand-marks.mjs",
     "generate:contributors": "node scripts/generate-contributors.mjs",
     "predev": "npm run prepare:dev",
+    "postinstall": "node scripts/refresh-existing-app.mjs",
     "prepare:dev": "npm run build",
     "prepack": "npm run build && node ../../scripts/prepare-bundled-runtime-plugins.mjs",
     "smoke": "node scripts/live-smoke.mjs",

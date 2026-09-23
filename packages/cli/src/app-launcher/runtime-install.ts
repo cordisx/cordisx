@@ -157,24 +157,18 @@ async function validInstalledRuntime(
   }
 }
 
-async function installDependencyLayer(support: string, roots: readonly string[]): Promise<{
+interface DependencyDescription {
+  readonly digest: string
+  readonly sourceDigest: string
+  readonly resolvedRoots: readonly string[]
+}
+
+async function installDependencyLayer(support: string, description?: DependencyDescription): Promise<{
   readonly digest: string
   readonly nodeModules?: string
 }> {
-  if (roots.length === 0) return { digest: 'none' }
-  const hash = createHash('sha256')
-  const resolvedRoots = []
-  for (const root of roots) {
-    const resolved = await existingDirectory(root)
-    if (!resolved) throw new Error(`CordisX runtime dependency root is unavailable: ${root}`)
-    resolvedRoots.push(resolved)
-    hash.update(await digestTree(resolved))
-  }
-  const sourceDigest = hash.digest('hex')
-  const digest = createHash('sha256')
-    .update(`cordisx.app-runtime-dependencies.v${DEPENDENCY_LAYER_SCHEMA}\0`)
-    .update(sourceDigest)
-    .digest('hex')
+  if (!description) return { digest: 'none' }
+  const { digest, resolvedRoots, sourceDigest } = description
   const layers = path.join(support, 'dependencies')
   await privateDirectory(layers)
   const target = path.join(layers, digest)
@@ -211,12 +205,32 @@ async function installDependencyLayer(support: string, roots: readonly string[])
   }
 }
 
-/** Installs one immutable app runtime, then returns its exact copied entry. */
-export async function installVersionedAppRuntime(
-  support: string,
-  source: AppRuntimeSource,
-  node: string,
-): Promise<string> {
+async function describeDependencyLayer(roots: readonly string[]): Promise<DependencyDescription> {
+  const hash = createHash('sha256')
+  const resolvedRoots = []
+  for (const root of roots) {
+    const resolved = await existingDirectory(root)
+    if (!resolved) throw new Error(`CordisX runtime dependency root is unavailable: ${root}`)
+    resolvedRoots.push(resolved)
+    hash.update(await digestTree(resolved))
+  }
+  const sourceDigest = hash.digest('hex')
+  const digest = createHash('sha256')
+    .update(`cordisx.app-runtime-dependencies.v${DEPENDENCY_LAYER_SCHEMA}\0`)
+    .update(sourceDigest)
+    .digest('hex')
+  return { digest, sourceDigest, resolvedRoots }
+}
+
+async function describeRuntimeSource(support: string, source: AppRuntimeSource): Promise<{
+  readonly entryScript: string
+  readonly packageRoot: string
+  readonly dist: string
+  readonly relativeEntry: string
+  readonly manifestText: string
+  readonly dependencies: DependencyDescription | undefined
+  readonly runtimeRoot: string
+}> {
   const packageRoot = await realpath(source.packageRoot)
   const sourceEntry = await realpath(source.entryScript)
   const dist = path.join(packageRoot, 'dist')
@@ -224,21 +238,48 @@ export async function installVersionedAppRuntime(
   if (!relativeEntry.startsWith(`dist${path.sep}`) || path.isAbsolute(relativeEntry)) {
     throw new Error('CordisX app entry is outside its runtime package')
   }
-  const manifestPath = path.join(packageRoot, 'package.json')
-  const manifestText = await readFile(manifestPath, 'utf8')
+  const manifestText = await readFile(path.join(packageRoot, 'package.json'), 'utf8')
   const manifest = JSON.parse(manifestText) as { version?: unknown }
   if (typeof manifest.version !== 'string' || !/^[0-9A-Za-z.+-]+$/u.test(manifest.version)) {
     throw new Error('CordisX runtime package has no portable version')
   }
-  const dependencies = await installDependencyLayer(support, source.dependencyRoots)
+  const dependencies = source.dependencyRoots.length === 0
+    ? undefined
+    : await describeDependencyLayer(source.dependencyRoots)
   const digest = createHash('sha256')
     .update(manifestText)
     .update(await digestTree(dist))
-    .update(dependencies.digest)
+    .update(dependencies?.digest ?? 'none')
     .digest('hex')
+  const runtimeRoot = path.join(support, 'runtimes', `${manifest.version}-${digest}`)
+  return {
+    entryScript: path.join(runtimeRoot, relativeEntry),
+    packageRoot,
+    dist,
+    relativeEntry,
+    manifestText,
+    dependencies,
+    runtimeRoot,
+  }
+}
+
+/** Computes the exact installed entry for a CLI source without writing to disk. */
+export async function expectedVersionedAppRuntimeEntry(support: string, source: AppRuntimeSource): Promise<string> {
+  return (await describeRuntimeSource(support, source)).entryScript
+}
+
+/** Installs one immutable app runtime, then returns its exact copied entry. */
+export async function installVersionedAppRuntime(
+  support: string,
+  source: AppRuntimeSource,
+  node: string,
+): Promise<string> {
+  const description = await describeRuntimeSource(support, source)
+  const { dist, relativeEntry, manifestText, entryScript } = description
+  const dependencies = await installDependencyLayer(support, description.dependencies)
   const runtimes = path.join(support, 'runtimes')
   await privateDirectory(runtimes)
-  const target = path.join(runtimes, `${manifest.version}-${digest}`)
+  const target = description.runtimeRoot
   if (await validInstalledRuntime(target, relativeEntry, dependencies.nodeModules)) {
     return path.join(target, relativeEntry)
   }

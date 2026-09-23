@@ -54,6 +54,7 @@ describe('npm workspace boundary', () => {
       license: 'AGPL-3.0-or-later',
       files: [
         'dist',
+        'scripts/refresh-existing-app.mjs',
         'README.md',
         'LICENSE',
         'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
