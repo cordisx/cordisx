@@ -59,6 +59,15 @@ from stable installed paths because the application must remain usable after
 the invoking shell exits. `app` is reserved as this command; use
 `cordisx start app` if a Host adapter is actually named `app`.
 
+A global CLI installation or upgrade refreshes an existing, owned CordisX App
+through its package lifecycle hook. It preserves the App bundle path and the
+recorded CordisX and Codex data roots, and does not open the App or start a
+Host. A first installation never creates an App implicitly. If lifecycle
+scripts are skipped or the refresh fails, `cordisx app` performs the same
+update explicitly and opens the App. The current running launcher continues
+until it is quit; reopen it to load an updated native helper. This does not
+automatically restart or replace a running Host profile.
+
 The bare command is an idempotent background `start`; `cordisx run` retains
 the foreground launcher lifecycle for terminals and development diagnostics.
 One authority exists per app/profile at `~/.cordisx/run/<app>/<profile>/`.

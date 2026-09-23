@@ -28,6 +28,14 @@ cordisx codex --dry-run
 cordisx codex
 ```
 
+On macOS, `cordisx app` separately creates and opens the optional
+`~/Applications/CordisX.app` desktop entry. Ordinary `cordisx` launches do not
+create it. A later global CLI upgrade refreshes an existing CordisX-owned App
+without opening it or starting a Host; quit and reopen the App to use an updated
+native launcher. If npm lifecycle scripts were disabled or the refresh reported
+an error, run `cordisx app` once after upgrading. This command also repairs a
+launcher whose Node installation moved.
+
 `setup` creates `~/.cordisx/config.json`. Its version-1 defaults select
 `codex/default/shared` and contain `providers: []` and `plugins: []`; CordisX never activates a demo
 plugin implicitly. `setup` is idempotent and refuses an unrelated or invalid
