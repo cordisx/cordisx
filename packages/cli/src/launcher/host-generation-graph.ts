@@ -313,6 +313,8 @@ export function boot(signal) {
       target: 'chrome120',
       rollupOptions: {
         input: ENTRY,
+        // The bootloader imports this entry's API; it is not a side-effect-only app entry.
+        preserveEntrySignatures: 'strict',
         output: {
           entryFileNames: 'host-[hash].js',
           chunkFileNames: 'chunks/[name]-[hash].js',
@@ -356,7 +358,7 @@ async function loadStaticHostGraph(
 ): Promise<Readonly<{ artifact: StaticGraphArtifact; cacheStatus: HostGenerationGraph['cacheStatus'] }>> {
   await ensurePrivateCacheRoot(cacheRoot)
   const key = createHash('sha256')
-    .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}.deferred-boot\0`)
+    .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}.strict-boot\0`)
     .update(stableIdentity)
     .digest('hex')
   const cacheFile = path.join(cacheRoot, `${key}.json`)
