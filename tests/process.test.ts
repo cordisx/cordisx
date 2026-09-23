@@ -3,7 +3,8 @@ import { createServer } from 'node:net'
 import { execFileSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { PROCESS_TABLE_MAX_BUFFER_BYTES } from '../packages/cli/src/launcher/process-identity.js'
 import {
   assertLoopbackPortAvailable,
   codexExecutableCandidates,
@@ -22,6 +23,11 @@ import {
   retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../packages/cli/src/launcher/process.js'
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) }
+})
 
 describe('isolated Codex process support', () => {
   it('creates a stable project profile without inventing an isolated HOME', async () => {
@@ -77,22 +83,24 @@ describe('isolated Codex process support', () => {
     expect(hiddenHostPidFromProcessList(processList, executable, 600, 700)).toBeUndefined()
   })
 
-  it('reads a command table larger than the child-process default buffer', () => {
+  it('reads the hidden Host command table with the shared large-output boundary', () => {
     const executable = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
     const padding = `${'x'.repeat(4096)}\n`.repeat(300)
     const processList = `${padding}102 ${executable} --remote-debugging-port=6000\n`
     expect(Buffer.byteLength(processList)).toBeGreaterThan(1024 * 1024)
-    expect(hiddenHostPid(executable, 6000, undefined, () => processList)).toBe(102)
+    vi.mocked(execFileSync).mockReturnValueOnce(processList)
+
+    expect(hiddenHostPid(executable, 6000)).toBe(102)
+    expect(execFileSync).toHaveBeenLastCalledWith('ps', ['-axo', 'pid=,command='], {
+      encoding: 'utf8',
+      maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+    })
   })
 
   it('keeps hidden Host identity unresolved when process enumeration fails', () => {
     expect(hiddenHostPid('/Applications/ChatGPT.app/Contents/MacOS/ChatGPT', 6000, undefined, () => {
       throw Object.assign(new Error('fixture process table overflow'), { code: 'ENOBUFS' })
     })).toBeUndefined()
-  })
-
-  it.skipIf(process.platform === 'win32')('reads the current command table without the default buffer limit', () => {
-    expect(() => hiddenHostPid('/not/a/running/host', 1)).not.toThrow()
   })
 
   it('retains the profile lease only when hidden Host identity is unresolved', () => {
