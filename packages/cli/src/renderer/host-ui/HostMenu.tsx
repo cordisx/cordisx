@@ -54,8 +54,11 @@ export function HostMenuSurface({
 }: HostMenuSurfaceProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const focusAllowed = useRef(canFocus)
+  const initialFocusRequested = useRef(false)
   focusAllowed.current = canFocus
   const menuId = `cxhm-${useId().replace(/:/g, '')}`
+
+  if (!open) initialFocusRequested.current = false
 
   useLayoutEffect(() => {
     if (!open || menuRef.current === null || anchorRef.current === null) return
@@ -75,7 +78,8 @@ export function HostMenuSurface({
       menu.style.top = `${Math.max(edge, Math.round(top))}px`
     }
     position()
-    if ((canFocus?.() ?? true) && !menu.contains(document.activeElement)) {
+    if (!initialFocusRequested.current && (canFocus?.() ?? true) && !menu.contains(document.activeElement)) {
+      initialFocusRequested.current = true
       ;(menu.querySelector<HTMLElement>('[data-menu-initial="true"]:not(:disabled)') ?? enabledItems(menu)[0] ?? menu)
         .focus()
     }

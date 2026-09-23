@@ -10,6 +10,7 @@ let replaceAnchor: () => void
 let calls = 0
 let modelCount = 1
 let catalogReads = 0
+let focusReturns = 0
 const state = Object.freeze({
   available: true,
   busy: false,
@@ -133,6 +134,21 @@ export function actionCount() {
 }
 export function catalogReadCount() {
   return catalogReads
+}
+export function simulateHostFocusReturn() {
+  const composer = document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+  const draft = document.querySelector<HTMLTextAreaElement>('textarea')!
+  const returnFocus = (event: FocusEvent) => {
+    if (!(event.target instanceof Element) || event.target.closest('.cxmp-menu') === null) return
+    focusReturns++
+    composer.dataset.state = String(focusReturns)
+    draft.focus()
+  }
+  document.addEventListener('focusin', returnFocus)
+  return () => document.removeEventListener('focusin', returnFocus)
+}
+export function focusReturnCount() {
+  return focusReturns
 }
 export async function refresh() {
   await registry.refresh()

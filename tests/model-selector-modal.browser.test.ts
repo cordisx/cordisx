@@ -158,6 +158,13 @@ it.skipIf(!executable)(
         'voice',
       ])
       expect(await evaluate('document.querySelector(".cxmp-model-trigger").disabled')).toBe(false)
+      await run(`window.stopFocusReturn=Fixture.simulateHostFocusReturn();
+      document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle()`)
+      expect(await evaluate('Fixture.focusReturnCount()')).toBe(1)
+      expect(await evaluate('document.activeElement.getAttribute("aria-label")')).toBe('Draft')
+      await run(
+        `document.querySelector('.cxmp-provider-trigger').click();window.stopFocusReturn();await Fixture.settle()`,
+      )
       const catalogMeasurements = []
       for (const count of [1, 10, 286, 500]) {
         await run(`await Fixture.catalog(${count});window.measurement=await (async()=>{
