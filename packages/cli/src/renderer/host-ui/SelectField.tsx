@@ -28,7 +28,7 @@ export function SelectField({ label, icon, options, value, className, disabled, 
       <Select
         className={['cxh-select-field', 'cxr-ui-filter-control', className].filter(Boolean).join(' ')}
         value={value}
-        disabled={disabled}
+        {...(disabled === undefined ? {} : { disabled })}
         options={[...options]}
         prefixIcon={<HostIcon token={icon} />}
         onChange={next => onChange(String(next))}
