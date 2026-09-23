@@ -98,6 +98,26 @@ describe('managed catalog production owner', () => {
     expect(reopened.admits(view.providerId, 'a')).toBe(false)
   })
 
+  it('projects selected managed connections into non-secret provider sync definitions', async () => {
+    const { owner } = await setup()
+    const view = await create(owner)
+    const connectionId = `cx-connection-${view.bindingRef}`
+
+    expect(owner.providerSyncConnections(new Set([connectionId, 'cx-connection-0123456789abcdef']))).toEqual([
+      expect.objectContaining({
+        connectionId,
+        title: 'Fixture',
+        endpoint: 'https://fixture.invalid/v1',
+        protocol: 'responses',
+        credential: expect.objectContaining({ secretRef: connectionId }),
+        models: { ids: ['a', 'b'], completeness: 'complete' },
+        enabled: true,
+      }),
+    ])
+    expect(JSON.stringify(owner.providerSyncConnections(new Set([connectionId]))))
+      .not.toContain('fixture-provider-secret')
+  })
+
   it('retains chat-completions catalog rows but never admits them to native Responses routing', async () => {
     const { owner } = await setup()
     const view = await create(owner, { ...settings, protocol: 'chat-completions' })

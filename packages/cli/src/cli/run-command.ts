@@ -176,6 +176,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
       // The same primary window shows startup while compatibility work proceeds.
       prelaunch: runHost === runInjectedHost && supervisorRuntime.mainInspector
+        && (selection.profile.providerBindings?.length ?? 0) === 0
         && environment.CORDISX_SUPERVISOR_HOME !== undefined,
       prepareNativeSubmission: runHost === runInjectedHost,
       mainInspector: supervisorRuntime.mainInspector,

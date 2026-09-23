@@ -171,6 +171,42 @@ The generic channel secret resolver rejects this namespace. Plugin service
 configuration is deliberately not used: no plugin receives this key, a resolver,
 or a request capability. These APIs are not plugin extension contracts.
 
+### Explicit target-profile synchronization
+
+An optional `apps.codex.profiles.<profile>.providerBindings` list binds an
+existing CordisX-managed connection to one stable provider ID in that selected
+Codex profile. Each entry contains only a stable binding ID, stable connection
+ID, target-local provider ID, enablement, `process-env` credential delivery, and
+optional display overlay. Endpoints and credentials remain in the managed owner;
+they are not duplicated into the CordisX home configuration. The native target
+receives an environment-variable name, while the corresponding secret is added
+only to the launched process environment after the target write is committed and
+read back.
+
+Native `model_providers` remain authoritative and are discoverable without any
+write, import, adoption, or ledger creation. Import and adoption are separate
+explicit lifecycle operations. Stable connection and binding identities, rather
+than names, endpoints, credentials, or model IDs, distinguish connections and
+make repeated startup idempotent. Disable, detach, and tombstone stop management
+without deleting the target table automatically.
+
+Managed updates compare the last-applied, desired, and actual target values in
+coherent `display` and `routing` groups. A user edit that conflicts with one
+group is preserved and reported as a non-modal warning; independent groups and
+other connections continue. Unknown fields, comments, unrelated tables, native
+providers, and catalog paths are preserved. CordisX never silently reverse-
+imports a target edit.
+
+The Codex adapter validates TOML before a compare-and-swap commit, journals the
+target and private non-secret binding ledger for recovery, and reads the actual
+target again for projection. The read model separates persisted, resolved,
+runtime, and synchronization state. A persisted route is not presented as
+runtime-active; layered resolution is unsupported and runtime activation remains
+unverified. Codex direct-profile discovery, synchronization, import, adoption,
+and detach are implemented. Claude Code, Gemini CLI, and OpenCode target adapters
+remain unsupported and are reported as such rather than inferred from similar
+configuration concepts.
+
 The owner issues random connection, scope and credential revisions, never a hash
 of a key or a reference name presented as an upstream account identity. Replacing
 a key, endpoint or protocol rotates the credential-binding scope. Supplement

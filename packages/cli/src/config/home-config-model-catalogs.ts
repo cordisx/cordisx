@@ -14,7 +14,77 @@ export const PROFILE_MODEL_OPTION_KEYS = [
   'configModelCatalogs',
   'dynamicModelCatalog',
   'selectorIcons',
+  'providerBindings',
 ] as const
+
+const SYNC_CONNECTION_ID = /^cx-connection-[A-Za-z0-9_-]{16,96}$/u
+const SYNC_BINDING_ID = /^cx-binding-[A-Za-z0-9_-]{16,96}$/u
+
+export interface HomeConfigProviderBinding {
+  readonly bindingId: string
+  readonly connectionId: string
+  readonly localProviderId: string
+  readonly enabled: boolean
+  readonly credentialDelivery: 'process-env'
+  readonly overlay?: {
+    readonly title?: string
+    readonly iconRef?: string
+  }
+}
+
+export function parseProviderBindings(value: unknown): readonly HomeConfigProviderBinding[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 64) throw new Error('providerBindings must be a bounded array')
+  const bindingIds = new Set<string>()
+  const localProviderIds = new Set<string>()
+  return Object.freeze(value.map((item, index) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`providerBindings[${index}] must be an object`)
+    }
+    const source = item as Record<string, unknown>
+    if (
+      Object.keys(source).some(key =>
+        !['bindingId', 'connectionId', 'localProviderId', 'enabled', 'credentialDelivery', 'overlay'].includes(key)
+      )
+      || typeof source.bindingId !== 'string' || !SYNC_BINDING_ID.test(source.bindingId)
+      || typeof source.connectionId !== 'string' || !SYNC_CONNECTION_ID.test(source.connectionId)
+      || typeof source.localProviderId !== 'string' || !PROVIDER_ID.test(source.localProviderId)
+      || source.localProviderId === 'openai' || typeof source.enabled !== 'boolean'
+      || source.credentialDelivery !== 'process-env'
+    ) throw new Error(`providerBindings[${index}] is invalid`)
+    if (bindingIds.has(source.bindingId) || localProviderIds.has(source.localProviderId)) {
+      throw new Error('providerBindings contains duplicate identity or target ownership')
+    }
+    bindingIds.add(source.bindingId)
+    localProviderIds.add(source.localProviderId)
+    let overlay: HomeConfigProviderBinding['overlay']
+    if (source.overlay !== undefined) {
+      if (source.overlay === null || typeof source.overlay !== 'object' || Array.isArray(source.overlay)) {
+        throw new Error(`providerBindings[${index}].overlay is invalid`)
+      }
+      const candidate = source.overlay as Record<string, unknown>
+      if (
+        Object.keys(candidate).some(key => key !== 'title' && key !== 'iconRef')
+        || candidate.title !== undefined
+          && (typeof candidate.title !== 'string' || !candidate.title.trim() || candidate.title.length > 256)
+        || candidate.iconRef !== undefined
+          && (typeof candidate.iconRef !== 'string' || !candidate.iconRef.trim() || candidate.iconRef.length > 256)
+      ) throw new Error(`providerBindings[${index}].overlay is invalid`)
+      overlay = Object.freeze({
+        ...(candidate.title === undefined ? {} : { title: candidate.title as string }),
+        ...(candidate.iconRef === undefined ? {} : { iconRef: candidate.iconRef as string }),
+      })
+    }
+    return Object.freeze({
+      bindingId: source.bindingId,
+      connectionId: source.connectionId,
+      localProviderId: source.localProviderId,
+      enabled: source.enabled,
+      credentialDelivery: 'process-env' as const,
+      ...(overlay === undefined ? {} : { overlay }),
+    })
+  }))
+}
 
 /** Host-only model membership; never an endpoint, authentication or native-profile override. */
 export function parseDefaultModelProvider(value: unknown, label: string): string | undefined {
@@ -107,10 +177,12 @@ export function parseProfileModelOptions(profile: Record<string, unknown>, label
   const defaultModelProvider = parseDefaultModelProvider(profile.defaultModelProvider, label)
   const configModelCatalogs = parseConfigModelCatalogs(profile.configModelCatalogs)
   const selectorIcons = parseModelSelectorIcons(profile.selectorIcons)
+  const providerBindings = parseProviderBindings(profile.providerBindings)
   return {
     ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
     ...(defaultModelProvider === undefined ? {} : { defaultModelProvider }),
     ...(configModelCatalogs === undefined ? {} : { configModelCatalogs }),
     ...(selectorIcons === undefined ? {} : { selectorIcons }),
+    ...(providerBindings === undefined ? {} : { providerBindings }),
   }
 }

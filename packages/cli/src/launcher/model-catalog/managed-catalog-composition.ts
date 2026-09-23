@@ -22,6 +22,7 @@ import { parseScriptSourceConfig } from './script-schema.js'
 import { composeScriptMembers } from './script-composition.js'
 import { type ScriptSourceConfig, ScriptSourceError } from './script-types.js'
 import { withAbort } from './abort.js'
+import type { ProviderSyncConnectionDefinition } from '../provider-profile-sync-contracts.js'
 
 type ScriptSetting = {
   scopeRevision: string
@@ -369,6 +370,38 @@ export class ManagedCatalogComposition {
           provenance: row.provenance as NonNullable<NativeModelProviderCatalogEntry['models'][number]['provenance']>,
         })),
     }))
+  }
+
+  /** Host-private desired definitions for explicit profile synchronization. */
+  providerSyncConnections(connectionIds: ReadonlySet<string>): readonly ProviderSyncConnectionDefinition[] {
+    return Object.freeze(
+      this.#owner.snapshot().flatMap(view => {
+        const connectionId = `cx-connection-${view.id}`
+        if (!connectionIds.has(connectionId)) return []
+        const members = this.members(view)
+        const source = this.#service.snapshot(view.id)
+        return [Object.freeze({
+          connectionId,
+          revision: this.revision(view),
+          title: view.settings.title,
+          endpoint: view.settings.endpoint,
+          protocol: view.settings.protocol,
+          credential: Object.freeze({
+            secretRef: connectionId,
+            revision: view.credentialRevision,
+          }),
+          models: Object.freeze({
+            ids: Object.freeze(members.map(model => model.id)),
+            completeness: source?.complete === true
+              ? 'complete' as const
+              : members.length > 0
+              ? 'partial' as const
+              : 'unknown' as const,
+          }),
+          enabled: true,
+        })]
+      }),
+    )
   }
 
   owns(id: string): boolean {
