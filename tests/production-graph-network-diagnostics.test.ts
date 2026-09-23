@@ -18,7 +18,7 @@ function evaluation(value: Record<string, unknown>): Record<string, unknown> {
 describe('production Host graph network diagnostics', () => {
   it('labels bootloader failures by stage without preserving the private graph URL', async () => {
     const privateOrigin = 'http://127.0.0.1:43210/cordisx-host-generation/private-secret'
-    const scope: Record<string, unknown> = {}
+    const scope: Record<string, unknown> = { __cordisxProductionBootstrapTimeoutMs: 600 }
     const fetch = vi.fn(async () => {
       throw new TypeError(`Failed to fetch ${privateOrigin}/manifest.json`)
     })
@@ -29,7 +29,7 @@ describe('production Host graph network diagnostics', () => {
     )
 
     await expect(scope.__cordisxCompositionBoot).rejects.toThrow(
-      'CordisX Host manifest fetch failed after 3 attempts: Failed to fetch [host graph]/manifest.json',
+      'CordisX Host manifest fetch deadline exceeded: Failed to fetch [host graph]/manifest.json',
     )
     await expect(scope.__cordisxCompositionBoot).rejects.not.toThrow('private-secret')
     expect(fetch).toHaveBeenCalledTimes(3)
@@ -196,7 +196,14 @@ describe('production Host graph network diagnostics', () => {
     ).rejects.toThrow(
       'CordisX Host manifest fetch was canceled by the renderer document lifecycle (net::ERR_ABORTED)',
     )
-    expect(session.send).toHaveBeenCalledOnce()
+    expect(session.send).toHaveBeenCalledTimes(2)
+    expect(session.send).toHaveBeenLastCalledWith(
+      'Runtime.evaluate',
+      expect.objectContaining({
+        expression: expect.stringContaining('owner.abort()'),
+      }),
+      1000,
+    )
   })
 
   it('keeps waiting through a pending bootstrap when an earlier document was canceled', async () => {

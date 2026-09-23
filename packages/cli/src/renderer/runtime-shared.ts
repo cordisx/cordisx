@@ -792,6 +792,7 @@ export function writeBlockedPlugins(ids: ReadonlySet<string>): void {
 }
 
 export interface CordisXStartOptions {
+  readonly signal?: AbortSignal | undefined
   readonly previousRuntimeDisposed?: boolean
   readonly disposePreparedSharedReactRuntime?: () => void
 }

@@ -252,7 +252,9 @@ import {
 export const createRuntimeMountPlugin = async (
   runtimeScope: RuntimeClosureScope,
   controller: PluginController,
+  signal?: AbortSignal,
 ): Promise<void> => {
+  signal?.throwIfAborted()
   runtimeScope.renewPrincipal()!(controller)
   const module = controller.item.module
   const isolatedArtifactSource = controller.item.isolatedArtifactSource
@@ -347,6 +349,7 @@ export const createRuntimeMountPlugin = async (
       })
       controller.hostDomWorker = boundary
       await boundary.ready
+      signal?.throwIfAborted()
       controller.status = 'active'
       delete controller.error
       delete controller.blockedReason
@@ -761,6 +764,7 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.agentSessionRuntime,
     )
     await controller.agentPageFreshRoomNavigationFiber
+    signal?.throwIfAborted()
     runtimeScope.pluginConsole()!.lifecycle(
       controller.principal,
       controller.activation === 1 ? 'activate' : 'reload',
@@ -771,6 +775,7 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.configuration()!.get(controller.item.id, runtimeScope.generationVisibility()!.view(pluginContext)),
     )
     await controller.fiber
+    signal?.throwIfAborted()
     // Cordis publishes FiberState as a const enum (ACTIVE = 2) so the value is
     // inlined at compile time. When a plugin fails to activate because an
     // inject is missing, the fiber settles in FAILED/LOADING without throwing;

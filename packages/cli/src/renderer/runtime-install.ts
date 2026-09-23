@@ -26,19 +26,29 @@ function assertRequestedGeneration(metadata: CordisXRuntimeMetadata): void {
   }
 }
 
-async function waitForRendererDocument(document: Document): Promise<void> {
+async function waitForRendererDocument(document: Document, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   if (document.documentElement !== null && document.head !== null && document.body !== null) return
-  await new Promise<void>(resolve => {
+  await new Promise<void>((resolve, reject) => {
     let observer: MutationObserver | undefined
-    const ready = (): void => {
-      if (document.documentElement === null || document.head === null || document.body === null) return
+    const cleanup = (): void => {
       document.removeEventListener('readystatechange', ready)
       document.removeEventListener('DOMContentLoaded', ready)
+      signal?.removeEventListener('abort', abort)
       observer?.disconnect()
+    }
+    const abort = (): void => {
+      cleanup()
+      reject(signal?.reason)
+    }
+    const ready = (): void => {
+      if (document.documentElement === null || document.head === null || document.body === null) return
+      cleanup()
       resolve()
     }
     document.addEventListener('readystatechange', ready)
     document.addEventListener('DOMContentLoaded', ready)
+    signal?.addEventListener('abort', abort, { once: true })
     const Observer = document.defaultView?.MutationObserver
     if (Observer !== undefined) {
       observer = new Observer(ready)
@@ -51,7 +61,9 @@ async function waitForRendererDocument(document: Document): Promise<void> {
 function serializeCordisXBoot(
   metadata: CordisXRuntimeMetadata,
   operation: () => Promise<CordisXRuntimeHandle>,
+  signal?: AbortSignal,
 ): Promise<CordisXRuntimeHandle> {
+  signal?.throwIfAborted()
   if (
     metadata.generation !== undefined
     && globalThis.__cordisxBootGeneration === metadata.generation
@@ -64,7 +76,8 @@ function serializeCordisXBoot(
     // their requested generation. A stale CDP registration therefore cannot
     // activate old plugin code before the newest registration supersedes it.
     await new Promise<void>(resolve => setTimeout(resolve, 0))
-    await waitForRendererDocument(document)
+    await waitForRendererDocument(document, signal)
+    signal?.throwIfAborted()
     assertRequestedGeneration(metadata)
     return await operation()
   })
@@ -85,10 +98,12 @@ export function installCordisX(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
   internalBootstrap?: CordisXInternalRendererBootstrap,
+  signal?: AbortSignal,
 ): Promise<CordisXRuntimeHandle> {
   return serializeCordisXBoot(
     metadata,
-    async () => await start(plugins, metadata, internalBootstrap),
+    async () => await start(plugins, metadata, internalBootstrap, { signal }),
+    signal,
   )
 }
 
@@ -98,20 +113,25 @@ export function installCordisXComposition(
   publish: () => void,
   retire: () => void,
   internalBootstrap?: CordisXInternalRendererBootstrap,
+  signal?: AbortSignal,
 ): Promise<CordisXRuntimeHandle> {
   return serializeCordisXBoot(metadata, async () => {
     let disposeSharedReactRuntime: (() => void) | undefined
     let runtime: CordisXRuntimeHandle | undefined
     try {
       await globalThis.__cordisxRuntime?.dispose()
+      signal?.throwIfAborted()
       const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(document)
       disposeSharedReactRuntime = preparedSharedReactRuntimeDisposer
       const plugins = await loadPlugins()
+      signal?.throwIfAborted()
       assertRequestedGeneration(metadata)
       runtime = await start(plugins, metadata, internalBootstrap, {
         previousRuntimeDisposed: true,
         disposePreparedSharedReactRuntime: preparedSharedReactRuntimeDisposer,
+        signal,
       })
+      signal?.throwIfAborted()
       publish()
       return runtime
     } catch (error) {
@@ -129,5 +149,5 @@ export function installCordisXComposition(
       disposeSharedReactRuntime?.()
       throw error
     }
-  })
+  }, signal)
 }

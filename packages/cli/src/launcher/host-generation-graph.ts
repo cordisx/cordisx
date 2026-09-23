@@ -6,6 +6,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, type Plugin } from 'vite'
 import type { CordisXConfig } from './config.js'
+import { hostGenerationBootloaderSource } from './host-generation-bootloader.js'
+export { hostGenerationBootloaderSource } from './host-generation-bootloader.js'
 import { type BuildRendererBundleOptions, buildRendererCompositionSource } from './bundle.js'
 import {
   CONTRACTS_MODULE_PATH,
@@ -81,13 +83,6 @@ interface LoadedStaticGraph {
 }
 
 const staticGraphBuilds = new Map<string, Promise<LoadedStaticGraph>>()
-
-export function hostGenerationBootloaderSource(origin: string): string {
-  const manifestUrl = `${origin}/manifest.json`
-  return `(()=>{const m=${JSON.stringify(manifestUrl)},o=${
-    JSON.stringify(origin)
-  },e=(s,x)=>{let d=x instanceof Error?x.message:String(x);d=d.split(o).join('[host graph]').replace(/https?:\\/\\/[^\\s)]+/g,'[url]').slice(0,256);return Error('CordisX Host '+s+(d?': '+d:''))},f=async(a=0)=>{try{return await fetch(m)}catch(x){if(a>=2)throw e('manifest fetch failed after 3 attempts',x);await new Promise(r=>setTimeout(r,100*(a+1)));return f(a+1)}};const p=f().then(async r=>{if(!r.ok)throw Error('CordisX Host manifest HTTP '+r.status);try{return await r.json()}catch(x){throw e('manifest JSON invalid',x)}}).then(x=>{if(x?.version!==1||typeof x.entry!=='string'||!/^\\/[^/]/.test(x.entry)||typeof x.digest!=='string'||!/^sha256:[a-f0-9]{64}$/.test(x.digest))throw Error('CordisX Host manifest schema invalid');return import(o+x.entry).catch(y=>{throw e('entry import failed',y)})}).then(x=>x.runtime);globalThis.__cordisxCompositionBoot=p;void p.catch(x=>console.error('[cordisx] Host graph boot failed',x))})()`
-}
 
 export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
   if (attach && hasLoopbackGraph) {
@@ -284,8 +279,14 @@ async function buildStaticHostGraph(
         return `import { installSharedReactRuntime } from ${JSON.stringify(reactRuntimeImport)};
 import { installCordisX, installCordisXComposition } from ${JSON.stringify(runtimeImport)};
 import { bootCordisXComposition } from ${JSON.stringify(LAUNCH)};
-if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
-export const runtime = await bootCordisXComposition(installCordisX, installCordisXComposition);`
+export function boot(signal) {
+  signal.throwIfAborted();
+  if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
+  return bootCordisXComposition(
+    (plugins, metadata) => installCordisX(plugins, metadata, undefined, signal),
+    (load, metadata, publish, retire) => installCordisXComposition(load, metadata, publish, retire, undefined, signal)
+  );
+}`
       }
       if (id.startsWith('\0cordisx-host:')) return cordisXSharedModuleSource(id.slice('\0cordisx-host:'.length))
       return undefined
@@ -355,7 +356,7 @@ async function loadStaticHostGraph(
 ): Promise<Readonly<{ artifact: StaticGraphArtifact; cacheStatus: HostGenerationGraph['cacheStatus'] }>> {
   await ensurePrivateCacheRoot(cacheRoot)
   const key = createHash('sha256')
-    .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}\0`)
+    .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}.deferred-boot\0`)
     .update(stableIdentity)
     .digest('hex')
   const cacheFile = path.join(cacheRoot, `${key}.json`)

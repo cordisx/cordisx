@@ -225,6 +225,11 @@ export const VITE_DISPOSE_EXPRESSION = `(async () => {
 export const RENDERER_DISPOSE_EXPRESSION = `(async () => {
   const errors = []
   try {
+    await globalThis.__cordisxHostGraphBoot?.dispose()
+  } catch (error) {
+    errors.push(error instanceof Error ? error.stack ?? error.message : String(error))
+  }
+  try {
     await globalThis.__cordisxRuntime?.dispose?.()
   } catch (error) {
     errors.push(error instanceof Error ? error.stack ?? error.message : String(error))
@@ -236,6 +241,7 @@ export const RENDERER_DISPOSE_EXPRESSION = `(async () => {
   }
   delete globalThis.__cordisxProductionBootstrapState
   delete globalThis.__cordisxProductionInstallId
+  delete globalThis.__cordisxProductionBootstrapTimeoutMs
   return errors.length === 0
     ? { ok: true }
     : { ok: false, error: errors.join('\\n') }
@@ -382,28 +388,30 @@ export async function waitForProductionBootstrap(
   network?: { latest(): ProductionGraphNetworkFailure | undefined },
 ): Promise<void> {
   let lastError: Error | undefined
-  while (Date.now() < deadline) {
-    if (signal?.aborted === true) throw cdpInstallationAborted()
-    try {
-      await abortable(
-        evaluateRuntimeOperation(
-          session,
-          `(async () => { try {
+  let completed = false
+  try {
+    while (Date.now() < deadline) {
+      if (signal?.aborted === true) throw cdpInstallationAborted()
+      try {
+        await abortable(
+          evaluateRuntimeOperation(
+            session,
+            `(async () => { try {
         if (globalThis.__cordisxProductionInstallId !== ${
-            JSON.stringify(installId)
-          }) return { ok: false, error: 'cordisx:production-boot-pending' }
+              JSON.stringify(installId)
+            }) return { ok: false, error: 'cordisx:production-boot-pending' }
         const state = globalThis.__cordisxProductionBootstrapState
         if (state?.installId !== ${
-            JSON.stringify(installId)
-          }) return { ok: false, error: 'CordisX production bootstrap state does not match its install marker' }
+              JSON.stringify(installId)
+            }) return { ok: false, error: 'CordisX production bootstrap state does not match its install marker' }
         if (state.status === 'failed') return { ok: false, error: state.error }
         if (state.status !== 'evaluated') return { ok: false, error: 'cordisx:production-boot-pending' }
         const boot = globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot
         if (!boot) return { ok: false, error: 'CordisX production bootstrap defined no boot promise' }
         await boot
         if (globalThis.__cordisxProductionInstallId !== ${
-            JSON.stringify(installId)
-          }) return { ok: false, error: 'CordisX production bootstrap was superseded during boot' }
+              JSON.stringify(installId)
+            }) return { ok: false, error: 'CordisX production bootstrap was superseded during boot' }
         if (globalThis.__cordisxRuntime === undefined) {
           return { ok: false, error: 'CordisX production runtime is undefined after boot' }
         }
@@ -411,28 +419,40 @@ export async function waitForProductionBootstrap(
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.stack ?? error.message : String(error) }
       } })()`,
-          Math.max(1, deadline - Date.now()),
-        ),
-        signal,
-      )
-      return
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error))
-      const transient = lastError.message === 'cordisx:production-boot-pending'
-        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i
+            Math.max(1, deadline - Date.now()),
+          ),
+          signal,
+        )
+        completed = true
+        return
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error))
+        const transient = lastError.message === 'cordisx:production-boot-pending'
+          || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i
+            .test(lastError.message)
+        if (transient && !session.isClosed()) {
+          await delay(100, signal)
+          continue
+        }
+        const networkFailure = network?.latest()
+        const networkRelated = /Failed to fetch|CordisX Host (?:manifest fetch|manifest HTTP|entry import)/iu
           .test(lastError.message)
-      if (transient && !session.isClosed()) {
-        await delay(100, signal)
-        continue
+        if (networkFailure !== undefined && networkRelated) throw productionGraphNetworkError(networkFailure)
+        throw lastError
       }
-      const networkFailure = network?.latest()
-      const networkRelated = /Failed to fetch|CordisX Host (?:manifest fetch|manifest HTTP|entry import)/iu
-        .test(lastError.message)
-      if (networkFailure !== undefined && networkRelated) throw productionGraphNetworkError(networkFailure)
-      throw lastError
+    }
+    throw new Error(`CordisX production bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
+  } finally {
+    if (!completed && !session.isClosed()) {
+      await session.send('Runtime.evaluate', {
+        expression: `(() => { const owner = globalThis.__cordisxHostGraphBoot; if (owner?.installId === ${
+          JSON.stringify(installId)
+        }) owner.abort() })()`,
+        returnByValue: true,
+        allowUnsafeEvalBlockedByCSP: true,
+      }, 1000).catch(() => undefined)
     }
   }
-  throw new Error(`CordisX production bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
 }
 
 export function installedBindingNames(installed: InstalledScript): readonly string[] {
