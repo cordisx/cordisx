@@ -72,6 +72,7 @@ export interface CordisXSetupInvocation {
 
 export interface CordisXAppInvocation {
   readonly action: 'app'
+  readonly subcommand?: 'check' | 'update'
 }
 
 export interface CordisXConfigInvocation {
@@ -560,10 +561,16 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
     )
   }
   if (action === 'app' || action === 'setup' || action === 'config' || action === 'doctor') {
-    if (positionals.length > 1) {
+    const subcommand = action === 'app' ? positionals[1] : undefined
+    if (
+      positionals.length > (action === 'app' ? 2 : 1)
+      || (subcommand !== undefined && subcommand !== 'check' && subcommand !== 'update')
+    ) {
       throw new CordisXCliParseError(
         'unexpected-positional',
-        `cordisx ${action} does not accept positional arguments`,
+        action === 'app'
+          ? 'cordisx app accepts only check or update'
+          : `cordisx ${action} does not accept positional arguments`,
       )
     }
     if (hostArgs.length > 0) {
@@ -573,7 +580,9 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
       )
     }
     assertNoOptions(options, action)
-    return { action }
+    return action === 'app'
+      ? { action, ...(subcommand ? { subcommand: subcommand as 'check' | 'update' } : {}) }
+      : { action }
   }
 
   if (action === 'dev') {

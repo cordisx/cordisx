@@ -2,8 +2,6 @@ import { lstat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { CordisXCliRuntime } from '../cli/run-support.js'
-import { validAppLauncherRuntime } from './model.js'
-import { readPrivateJson } from '../shortcuts/store.js'
 
 export interface AppPostinstallOptions {
   readonly platform?: NodeJS.Platform
@@ -32,28 +30,18 @@ export async function refreshInstalledAppAfterUpgrade(options: AppPostinstallOpt
     return false
   }
 
-  const runtimePath = path.join(homedir, 'Library', 'Application Support', 'CordisX', 'app-launcher', 'runtime.json')
   try {
-    const runtime = await readPrivateJson(runtimePath)
-    if (!validAppLauncherRuntime(runtime)) throw new Error('Invalid CordisX app runtime')
-    const { runAppCommand } = await import('../cli/app-command.js')
-    await runAppCommand({
+    const { runAppUpdateCommand } = await import('../cli/app-command.js')
+    await runAppUpdateCommand({
       homedir,
-      cwd: runtime.cwd,
-      env: {
-        HOME: homedir,
-        CORDISX_HOME: runtime.cordisxHome,
-        ...(runtime.codexHome ? { CODEX_HOME: runtime.codexHome } : {}),
-      },
       ...(options.internalAppOutput ? { internalAppOutput: options.internalAppOutput } : {}),
-      internalOpenApp: () => {},
       stdout: () => {},
     })
     return true
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     ;(options.warn ?? console.warn)(
-      `[cordisx] Existing CordisX.app was not upgraded: ${detail}. Run \`cordisx app\` to repair it.`,
+      `[cordisx] Existing CordisX.app was not upgraded: ${detail}. Run \`cordisx app update\` to retry.`,
     )
     return false
   }

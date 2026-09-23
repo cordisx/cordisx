@@ -16,7 +16,7 @@ import {
 } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { runAppCommand } from '../cli/app-command.js'
+import { runAppCheckCommand, runAppCommand, runAppUpdateCommand } from '../cli/app-command.js'
 import { refreshInstalledAppAfterUpgrade } from './postinstall.js'
 import { appLauncherHelper, nativeOperation } from '../shortcuts/native.js'
 
@@ -73,6 +73,27 @@ async function fixture() {
 }
 
 describe.skipIf(process.platform !== 'darwin')('CordisX.app installation', () => {
+  it('checks without creating an App and updates an owned App without opening it', async () => {
+    const f = await fixture()
+    expect(await runAppCheckCommand(f.runtime)).toEqual({ status: 'missing', path: f.target })
+    await expect(runAppUpdateCommand(f.runtime)).rejects.toThrow('not installed')
+    await expect(lstat(path.join(f.root, '.cordisx'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await runAppCommand(f.runtime)
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('current')
+    const firstInode = (await stat(f.target)).ino
+    const descriptor = path.join(f.root, 'Library/Application Support/CordisX/app-launcher/runtime.json')
+    const original = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    await writeFile(f.entryScript, 'export const runtimeMarker = "manual-update"\n')
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('update-available')
+    expect(JSON.parse(await readFile(descriptor, 'utf8'))).toMatchObject(original)
+    await runAppUpdateCommand(f.runtime)
+    const updated = JSON.parse(await readFile(descriptor, 'utf8')) as { entryScript: string }
+    expect(updated.entryScript).not.toBe(original.entryScript)
+    expect((await runAppCheckCommand(f.runtime)).status).toBe('current')
+    expect((await stat(f.target)).ino).toBe(firstInode)
+    expect(f.opened).toEqual([f.target])
+  })
+
   it('refreshes an existing App after a global CLI upgrade without opening it or creating a new App', async () => {
     const f = await fixture()
     const options = {

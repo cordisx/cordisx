@@ -72,8 +72,10 @@ describe('parseCordisXCli', () => {
 
   it('reserves app for the native launcher while preserving an explicit host app named app', () => {
     expect(parseCordisXCli(['app'])).toEqual({ action: 'app' })
+    expect(parseCordisXCli(['app', 'check'])).toEqual({ action: 'app', subcommand: 'check' })
+    expect(parseCordisXCli(['app', 'update'])).toEqual({ action: 'app', subcommand: 'update' })
     expect(parseCordisXCli(['start', 'app'])).toMatchObject({ action: 'start', app: 'app' })
-    for (const args of [['app', 'extra'], ['app', '--json'], ['app', '--', 'host-arg']]) {
+    for (const args of [['app', 'extra'], ['app', 'check', 'extra'], ['app', '--json'], ['app', '--', 'host-arg']]) {
       expect(() => parseCordisXCli(args)).toThrow(CordisXCliParseError)
     }
   })

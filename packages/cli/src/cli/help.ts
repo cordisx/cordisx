@@ -1,7 +1,7 @@
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx start|status|logs|stop|restart [app] [profile] [options]
-  cordisx app
+  cordisx app [check|update]
   cordisx setup
   cordisx config
   cordisx doctor

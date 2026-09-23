@@ -33,8 +33,13 @@ On macOS, `cordisx app` separately creates and opens the optional
 create it. A later global CLI upgrade refreshes an existing CordisX-owned App
 without opening it or starting a Host; quit and reopen the App to use an updated
 native launcher. If npm lifecycle scripts were disabled or the refresh reported
-an error, run `cordisx app` once after upgrading. This command also repairs a
-launcher whose Node installation moved.
+an error, run `cordisx app update` once after upgrading. This command also
+repairs a launcher whose Node installation moved.
+Use `cordisx app check` to inspect the existing App without changing files or
+opening it. Use `cordisx app update` to refresh an existing App from the installed
+CLI while preserving its data roots; it does not open the App or start a Host.
+If no App exists yet, use `cordisx app` to create and open it. Reopen a running
+App after updating its native helper.
 
 `setup` creates `~/.cordisx/config.json`. Its version-1 defaults select
 `codex/default/shared` and contain `providers: []` and `plugins: []`; CordisX never activates a demo
