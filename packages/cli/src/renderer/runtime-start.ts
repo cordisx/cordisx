@@ -1,4 +1,5 @@
 import { installDialogHost } from './dialogs/host.js'
+import { completeRuntimeStart } from './runtime-start-completion.js'
 import { installNotificationHost } from './notifications/host.js'
 import { NativeAgentSessionPersistence } from './native-agent-session-recovery.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
@@ -128,6 +129,7 @@ export async function start(
   options: CordisXStartOptions = {},
 ): Promise<CordisXRuntimeHandle> {
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
+  options.signal?.throwIfAborted()
 
   let ctx = new Context()
   let disposeDialogs = () => {}
@@ -782,8 +784,10 @@ export async function start(
     const retirePrincipal = (controller: PluginController, message: string): void =>
       runtimePrincipalClosures.createRuntimeRetirePrincipal(closureScope, controller, message)
 
-    const mountPlugin = async (controller: PluginController): Promise<void> =>
-      runtimeClosures2.createRuntimeMountPlugin(closureScope, controller)
+    const mountPlugin = async (controller: PluginController): Promise<void> => {
+      options.signal?.throwIfAborted()
+      await runtimeClosures2.createRuntimeMountPlugin(closureScope, controller, options.signal)
+    }
 
     const managerSnapshot = (): ManagerSnapshot => runtimeClosures3.createRuntimeManagerSnapshot(closureScope)
 
@@ -974,14 +978,7 @@ export async function start(
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)
     const managerModel: ManagerModel = runtimeClosures5.createRuntimeManagerModel(closureScope)
     await runtimeClosures6.runRuntimeStage4077(closureScope)
-
-    globalThis.__cordisxRuntime = handle
-    document.documentElement.dataset.cordisxReady = 'true'
-    const activeIds = controllers.filter(controller => controller.status === 'active').map(controller =>
-      controller.item.id
-    )
-    console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
-    return handle
+    return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
     disposeDialogs()
     disposeNotifications()

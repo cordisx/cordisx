@@ -6,10 +6,9 @@ import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { type ChildProcess, spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import { build as viteBuild } from 'vite'
-import WebSocket from 'ws'
+import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import {
   type PluginGenerationArtifactServer,
   startPluginGenerationArtifactServer,
@@ -18,6 +17,8 @@ import { buildRendererBundle, buildRendererCompositionSource } from '../packages
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 import { cordisXPluginViteConfig } from '../packages/cli/src/vite.js'
 import { startVitePlayground } from '../packages/cli/src/playground/vite/server.js'
+import { hostGenerationBootloaderSource } from '../packages/cli/src/launcher/host-generation-bootloader.js'
+import { RENDERER_DISPOSE_EXPRESSION } from '../packages/cli/src/launcher/cdp-installation-support.js'
 
 interface ArtifactFile {
   readonly path: `./${string}`
@@ -134,125 +135,6 @@ async function waitForChromeTarget(
   throw new Error(`timed out waiting for Chrome CDP: ${stderr()}`)
 }
 
-class CdpClient {
-  readonly diagnostics: unknown[] = []
-  readonly #socket: WebSocket
-  readonly #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
-  #nextId = 1
-
-  private constructor(socket: WebSocket) {
-    this.#socket = socket
-    socket.on('message', data => {
-      const message = JSON.parse(data.toString()) as {
-        readonly id?: number
-        readonly method?: string
-        readonly params?: unknown
-        readonly error?: { readonly message?: string }
-        readonly result?: unknown
-      }
-      if (message.id === undefined) {
-        if (
-          message.method === 'Runtime.exceptionThrown' || message.method === 'Network.loadingFailed'
-          || message.method === 'Runtime.consoleAPICalled'
-        ) {
-          this.diagnostics.push({ method: message.method, params: message.params })
-          if (this.diagnostics.length > 30) this.diagnostics.shift()
-        }
-        return
-      }
-      const pending = this.#pending.get(message.id)
-      if (pending === undefined) return
-      this.#pending.delete(message.id)
-      if (message.error !== undefined) pending.reject(new Error(message.error.message ?? 'Chrome CDP request failed'))
-      else pending.resolve(message.result)
-    })
-    socket.on('close', () => {
-      for (const pending of this.#pending.values()) pending.reject(new Error('Chrome CDP connection closed'))
-      this.#pending.clear()
-    })
-  }
-
-  static async connect(url: string): Promise<CdpClient> {
-    const socket = new WebSocket(url)
-    await new Promise<void>((resolve, reject) => {
-      socket.once('open', () => resolve())
-      socket.once('error', reject)
-    })
-    return new CdpClient(socket)
-  }
-
-  async send(method: string, params: Record<string, unknown> = {}, timeoutMs = 5_000): Promise<unknown> {
-    const id = this.#nextId
-    this.#nextId += 1
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id)
-        reject(new Error(`Chrome CDP request timed out: ${method}`))
-      }, timeoutMs)
-      const succeed = (value: unknown): void => {
-        clearTimeout(timer)
-        resolve(value)
-      }
-      const fail = (error: Error): void => {
-        clearTimeout(timer)
-        reject(error)
-      }
-      this.#pending.set(id, { resolve: succeed, reject: fail })
-      this.#socket.send(JSON.stringify({ id, method, params }), error => {
-        if (error == null) return
-        const pending = this.#pending.get(id)
-        this.#pending.delete(id)
-        pending?.reject(error)
-      })
-    })
-  }
-
-  async evaluate<T>(expression: string): Promise<T> {
-    const response = await this.send('Runtime.evaluate', {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    }) as {
-      readonly exceptionDetails?: { readonly text?: string; readonly exception?: { readonly description?: string } }
-      readonly result?: { readonly value?: T }
-    }
-    if (response.exceptionDetails !== undefined) {
-      throw new Error(
-        response.exceptionDetails.exception?.description ?? response.exceptionDetails.text
-          ?? 'Chrome evaluation failed',
-      )
-    }
-    return response.result?.value as T
-  }
-
-  async close(): Promise<void> {
-    if (this.#socket.readyState === WebSocket.CLOSED) return
-    const closed = once(this.#socket, 'close')
-    this.#socket.close()
-    await closed
-  }
-}
-
-async function stopChrome(process: ChildProcess): Promise<void> {
-  if (process.exitCode !== null || process.signalCode !== null) return
-  const exited = once(process, 'exit')
-  process.kill('SIGTERM')
-  const stopped = await Promise.race([
-    exited.then(() => true),
-    new Promise<false>(resolve => setTimeout(() => resolve(false), 5_000)),
-  ])
-  if (stopped || process.exitCode !== null || process.signalCode !== null) return
-  process.kill('SIGKILL')
-  if (process.exitCode !== null || process.signalCode !== null) return
-  const killed = await Promise.race([
-    exited.then(() => true),
-    new Promise<false>(resolve => setTimeout(() => resolve(false), 2_000)),
-  ])
-  if (!killed && process.exitCode === null && process.signalCode === null) {
-    throw new Error('Chrome did not exit after SIGKILL')
-  }
-}
-
 const chrome = chromeExecutable()
 const nativeIt = chrome === undefined ? it.skip : it
 
@@ -261,6 +143,81 @@ function javascriptModuleUrl(source: string): string {
 }
 
 describe('plugin generation native browser graph', () => {
+  nativeIt('cancels an actual renderer fetch and fences a late native ESM import', async () => {
+    if (chrome === undefined) throw new Error('Chrome unavailable')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-manifest-cancel-'))
+    temporary.add(root)
+    const prefix = `/cordisx-host-generation/${'a'.repeat(64)}`
+    let moduleRequested = false
+    let releaseModule: (() => void) | undefined
+    let releaseManifest: (() => void) | undefined
+    let manifestClosed = false
+    let mode = 'fetch'
+    const server = createHttpServer((request, response) => {
+      response.setHeader('access-control-allow-origin', '*')
+      if (request.url === `${prefix}/manifest.json`) {
+        const respond = () => {
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify({ version: 1, entry: '/host.js', digest: `sha256:${'b'.repeat(64)}` }))
+        }
+        if (mode === 'fetch') {
+          releaseManifest = respond
+          response.on('close', () => {
+            manifestClosed = true
+          })
+        } else respond()
+      } else if (request.url === `${prefix}/host.js`) {
+        moduleRequested = true
+        releaseModule = () => {
+          if (response.writableEnded) return
+          response.setHeader('content-type', 'text/javascript')
+          response.end('export function boot() { globalThis.fixtureActivated = true; return Promise.resolve({}); }')
+        }
+      } else response.end('<!doctype html><title>manifest fixture</title>')
+    })
+    let browser: ChildProcess | undefined
+    let cdp: CdpClient | undefined
+    try {
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+      const address = server.address()
+      if (address === null || typeof address === 'string') throw Error('No server address')
+      const base = `http://127.0.0.1:${address.port}`
+      const port = await unusedPort()
+      browser = spawn(chrome, chromeLaunchArguments(port, path.join(root, 'profile')), { stdio: 'ignore' })
+      cdp = await CdpClient.connect(await waitForChromeTarget(port, browser, () => ''))
+      await cdp.send('Page.enable')
+      await cdp.send('Page.navigate', { url: base })
+      await expect.poll(() => cdp!.evaluate('document.readyState')).toBe('complete')
+      const source = hostGenerationBootloaderSource(base + prefix)
+      const begin = async () =>
+        await cdp!.evaluate(
+          `(() => { ${source}; globalThis.fixtureResult = globalThis.__cordisxCompositionBoot.then(() => 'ready', error => error.message); return true })()`,
+        )
+      await begin()
+      await expect.poll(() => releaseManifest !== undefined).toBe(true)
+      await cdp.evaluate(RENDERER_DISPOSE_EXPRESSION)
+      expect(await cdp.evaluate('globalThis.fixtureResult')).toContain('startup canceled')
+      await expect.poll(() => manifestClosed).toBe(true)
+      expect(moduleRequested).toBe(false)
+      mode = 'import'
+      await begin()
+      await expect.poll(() => moduleRequested).toBe(true)
+      await cdp.evaluate(RENDERER_DISPOSE_EXPRESSION)
+      releaseModule!()
+      expect(await cdp.evaluate('globalThis.fixtureResult')).toContain('startup canceled')
+      // A cached import proves the original native import has finished evaluating.
+      await cdp.evaluate(`import(${JSON.stringify(base + prefix + '/host.js')}).then(() => true)`)
+      expect(await cdp.evaluate('globalThis.fixtureActivated === true')).toBe(false)
+    } finally {
+      releaseManifest?.()
+      releaseModule?.()
+      await cdp?.close()
+      if (browser !== undefined) await stopChrome(browser)
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  }, 30_000)
+
   it('loads nested lazy CSS through the real Playground Vite composition in a fresh browser', async () => {
     const chrome = chromeExecutable()
     if (chrome === undefined) return

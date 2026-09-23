@@ -109,7 +109,7 @@ export async function installDocumentBootstrap(
   const reloadInstallId = viteDevelopment || loopbackModules ? randomUUID() : undefined
   const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
     ? undefined
-    : support.productionBootstrapSource(documentSource, reloadInstallId)
+    : support.productionBootstrapSource(documentSource, reloadInstallId, support.CDP_INJECTION_TIMEOUT_MS)
   const added = await support.abortable(
     session.send(
       'Page.addScriptToEvaluateOnNewDocument',

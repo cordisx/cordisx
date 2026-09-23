@@ -447,8 +447,7 @@ ${graphRetireSource}
 globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
   const hostGraphLaunchSource =
     `export async function bootCordisXComposition(installCordisX, installCordisXComposition) {
-${compositionBoot}
-return await __cordisxCompositionBoot
+return await ${boot}
 }
 `
   const hostGraphStableIdentity = createHash('sha256')

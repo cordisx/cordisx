@@ -98,6 +98,9 @@ implementation of those contracts, not a second public specification.
 
 ## Read historical plans and delivery evidence
 
+- [Host manifest startup window](history/host-manifest-startup-2026-09-23.md):
+  bounded retries, renderer cancellation, and source/native evidence boundaries.
+
 | Document                                                                                    | Type                        | Use it for                                                            |
 | ------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------- |
 | [development-plan](development-plan.md)                                                     | Historical plan             | Recorded stages and feasibility observations; not the current roadmap |

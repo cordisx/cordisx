@@ -84,6 +84,16 @@ authorities.
 
 ### Package and bundle composition
 
+The launch-private Host manifest has a bounded normal-request window: failed
+fetches retry every 250ms for at most 10 seconds, capped by the renderer startup
+budget. This does not classify browser refusals as transient or override Host
+policy. HTTP responses, invalid manifests, module imports and activation are
+not retried. Manifest redirects are rejected. Cancellation/disposal aborts
+pending renderer requests and timers; a late import cannot initiate activation.
+Already-started activation observes cancellation before further plugin mounts
+and readiness publication. A bounded activation-drain failure remains a cleanup
+error rather than successful disposal. Persistent refusals retain CDP diagnostics.
+
 The launcher implementation of that boundary is specified separately in
 [`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
 package-v2 intake plus a Host-private journal/token/permission/rollback layer

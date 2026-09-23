@@ -151,8 +151,9 @@ export class CdpLifecycleRequestGate {
   }
 }
 
-export function productionBootstrapSource(documentSource: string, installId: string): string {
+export function productionBootstrapSource(documentSource: string, installId: string, timeoutMs = 60_000): string {
   return `globalThis.__cordisxProductionInstallId = ${JSON.stringify(installId)};
+globalThis.__cordisxProductionBootstrapTimeoutMs = ${timeoutMs};
 globalThis.__cordisxProductionBootstrapState = {
   installId: ${JSON.stringify(installId)},
   status: 'evaluating',
@@ -211,7 +212,9 @@ async function compensateProductionGraphPromotion<RecordType extends ProductionG
         const restored = await operations.mutateDocumentScript(
           current.session,
           'Page.addScriptToEvaluateOnNewDocument',
-          { source: productionBootstrapSource(current.documentSource, restoreInstallId) },
+          {
+            source: productionBootstrapSource(current.documentSource, restoreInstallId, operations.injectionTimeoutMs),
+          },
         )
         const identifier = restored.identifier
         if (typeof identifier !== 'string') {
@@ -295,7 +298,13 @@ export async function promoteProductionGraph<RecordType extends ProductionGraphR
         added = await operations.mutateDocumentScript(
           state.current.session,
           'Page.addScriptToEvaluateOnNewDocument',
-          { source: productionBootstrapSource(bootstrap.newDocumentSource ?? bootstrap.source, installId) },
+          {
+            source: productionBootstrapSource(
+              bootstrap.newDocumentSource ?? bootstrap.source,
+              installId,
+              operations.injectionTimeoutMs,
+            ),
+          },
           operations.signal,
         )
       } catch (error) {
