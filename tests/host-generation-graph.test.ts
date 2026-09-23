@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { transform } from 'esbuild'
+import { init, parse } from 'es-module-lexer'
 import {
   buildHostGenerationGraph,
   type HostGenerationGraph,
@@ -80,6 +82,30 @@ describe('Host generation graph', () => {
 
   it('serves only a bounded manifest bootloader and an exact entry graph', async () => {
     const root = await cacheRoot()
+    const composition = await buildRendererCompositionSource(config)
+    const legacyKey = createHash('sha256')
+      .update('cordisx.host-generation-static.v1.deferred-boot\0')
+      .update(composition.hostGraphStableIdentity)
+      .digest('hex')
+    const legacyBody = Buffer.from('export {}')
+    const legacyFile = `${legacyKey}.json`
+    // A valid pre-fix cache entry must not survive the export-contract change.
+    await writeFile(
+      path.join(root, legacyFile),
+      JSON.stringify({
+        schemaVersion: 1,
+        key: legacyKey,
+        entryFileName: 'host-legacy.js',
+        files: [{
+          path: '/host-legacy.js',
+          contentType: 'text/javascript',
+          bytes: legacyBody.length,
+          sha256: createHash('sha256').update(legacyBody).digest('hex'),
+          body: legacyBody.toString('base64'),
+        }],
+      }),
+      { mode: 0o600 },
+    )
     const [graph, shared] = await Promise.all([
       buildHostGenerationGraph(config, { providerBridgeToken: 'first-launch-token' }, { cacheRoot: root }),
       buildHostGenerationGraph(config, {
@@ -98,7 +124,11 @@ describe('Host generation graph', () => {
     expect(value.entry).toMatch(/^\/host-[A-Za-z0-9_-]+\.js$/u)
     expect(value.digest).toMatch(/^sha256:[a-f0-9]{64}$/u)
     expect(await fetch(graph.entryUrl).then(response => response.status)).toBe(200)
-    expect(await fetch(graph.entryUrl).then(response => response.text())).toContain('./launch.js')
+    const entrySource = await fetch(graph.entryUrl).then(response => response.text())
+    expect(entrySource).toContain('./launch.js')
+    // Inspect the real Vite output, not a fixture that supplies the missing export.
+    await init
+    expect(parse(entrySource)[1].map(item => item.n)).toEqual(['boot'])
     await expect(
       fetch(`${graphOrigin(graph.bootloader)}/launch.js`)
         .then(async response => await response.text())
@@ -121,13 +151,15 @@ describe('Host generation graph', () => {
     })
     graphs.push(reused)
     expect(reused.cacheStatus).toBe('disk')
+    expect(await fetch(reused.entryUrl).then(response => response.text())).toBe(entrySource)
     expect(graph.authoritySource()).toContain('first-launch-token')
     expect(graph.authoritySource()).not.toContain('second-launch-token')
     expect(shared.authoritySource()).toContain('second-launch-token')
     expect(shared.authoritySource()).toContain('future-document-token')
     expect(reused.authoritySource()).toContain('third-launch-token')
 
-    const cacheFiles = await readdir(root)
+    expect(await readdir(root)).toContain(legacyFile)
+    const cacheFiles = (await readdir(root)).filter(file => file !== legacyFile)
     expect(cacheFiles).toHaveLength(1)
     const cacheFile = path.join(root, cacheFiles[0]!)
     const cachedSource = await readFile(cacheFile, 'utf8')
@@ -140,6 +172,8 @@ describe('Host generation graph', () => {
     const recovered = await buildHostGenerationGraph(config, {}, { cacheRoot: root })
     graphs.push(recovered)
     expect(recovered.cacheStatus).toBe('recovered')
+    const recoveredSource = await fetch(recovered.entryUrl).then(response => response.text())
+    expect(parse(recoveredSource)[1].map(item => item.n)).toEqual(['boot'])
   })
 
   it('closes initial and rebuilt production graphs through one idempotent lifecycle owner', async () => {
