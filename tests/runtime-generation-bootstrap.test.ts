@@ -157,6 +157,39 @@ afterEach(async () => {
 })
 
 describe('production renderer generation bootstrap', () => {
+  it('does not activate plugins or publish readiness after cancellation during bootstrap', async () => {
+    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    const controller = new AbortController()
+    const applied = vi.fn()
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => {
+      entered = resolve
+    })
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const boot = installCordisX(
+      [localDevelopmentPlugin(true, applied)],
+      metadata('canceled-bootstrap', 'playground', true),
+      async () => {
+        entered()
+        await gate
+      },
+      controller.signal,
+    )
+    await started
+    controller.abort(Error('startup canceled'))
+    const rejected = expect(boot).rejects.toThrow('startup canceled')
+    release()
+    await rejected
+    expect(applied).not.toHaveBeenCalled()
+    expect(globalThis.__cordisxRuntime).toBeUndefined()
+    expect(dom.window.document.documentElement.dataset.cordisxReady).not.toBe('true')
+    dom.window.close()
+  }, 60_000)
+
   it.each(['playground', 'codex'] as const)(
     'does not show a permission dialog for a verified development artifact on %s',
     async hostKind => {
