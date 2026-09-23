@@ -90,6 +90,8 @@ export const MODEL_CATALOG_COPY = {
   },
   'catalog.targetConflict': { en: 'Target has local changes', 'zh-CN': '目标存在本地修改' },
   'catalog.unavailable': { en: 'Currently unavailable', 'zh-CN': '当前不可用' },
+  'catalog.managementUnavailable': { en: 'Model management unavailable', 'zh-CN': '模型管理暂不可用' },
+  'catalog.readOnly': { en: 'Read only', 'zh-CN': '只读' },
   'catalog.failed': { en: 'Changes were not saved. Try again.', 'zh-CN': '更改未保存，请重试。' },
   'catalog.convert': { en: 'Use these models manually', 'zh-CN': '将当前结果转为手动目录' },
   'catalog.convertConfirm': {
