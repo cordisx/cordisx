@@ -90,18 +90,22 @@ describe('Host generation graph', () => {
     const legacyBody = Buffer.from('export {}')
     const legacyFile = `${legacyKey}.json`
     // A valid pre-fix cache entry must not survive the export-contract change.
-    await writeFile(path.join(root, legacyFile), JSON.stringify({
-      schemaVersion: 1,
-      key: legacyKey,
-      entryFileName: 'host-legacy.js',
-      files: [{
-        path: '/host-legacy.js',
-        contentType: 'text/javascript',
-        bytes: legacyBody.length,
-        sha256: createHash('sha256').update(legacyBody).digest('hex'),
-        body: legacyBody.toString('base64'),
-      }],
-    }), { mode: 0o600 })
+    await writeFile(
+      path.join(root, legacyFile),
+      JSON.stringify({
+        schemaVersion: 1,
+        key: legacyKey,
+        entryFileName: 'host-legacy.js',
+        files: [{
+          path: '/host-legacy.js',
+          contentType: 'text/javascript',
+          bytes: legacyBody.length,
+          sha256: createHash('sha256').update(legacyBody).digest('hex'),
+          body: legacyBody.toString('base64'),
+        }],
+      }),
+      { mode: 0o600 },
+    )
     const [graph, shared] = await Promise.all([
       buildHostGenerationGraph(config, { providerBridgeToken: 'first-launch-token' }, { cacheRoot: root }),
       buildHostGenerationGraph(config, {
