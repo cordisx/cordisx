@@ -111,6 +111,7 @@ export interface HomeConfigProfile {
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
   readonly selectorIcons?: import('../model-selector-branding.js').ModelSelectorIconOverrides
+  readonly providerBindings?: readonly import('./home-config-model-catalogs.js').HomeConfigProviderBinding[]
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
 }

@@ -34,6 +34,9 @@ import { combinedNativeModelProviderCatalog } from './native-model-provider-cata
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
+import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
+import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
+import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
 
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
@@ -84,6 +87,7 @@ interface NativeSubmissionCatalogOptions {
   readonly dynamicModelCatalog?: boolean
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
+  readonly providerBindings?: readonly HomeConfigProviderBinding[]
 }
 export function nativeAppServerIntermediaryPath(): string {
   return fileURLToPath(new URL('../../assets/launcher/native-app-server-intermediary.mjs', import.meta.url))
@@ -378,6 +382,65 @@ export async function prepareNativeSubmissionBootstrap(
             })
           } catch { /* An unavailable managed owner must not disable unrelated native providers. */ }
         }
+        let providerSyncEnvironment: Readonly<Record<string, string>> = Object.freeze({})
+        if (managed && completeOptions.managedCatalog && completeOptions.providerBindings?.length) {
+          const targetProfileRef = Object.freeze({
+            adapterId: 'codex' as const,
+            hostInstanceId: `codex-${createHash('sha256').update(path.resolve(codexHome)).digest('hex').slice(0, 24)}`,
+            profileId: completeOptions.managedCatalog.profileId,
+            configRoot: path.resolve(codexHome),
+          })
+          const bindings: ProviderSyncBindingDefinition[] = completeOptions.providerBindings.map(binding => ({
+            ...binding,
+            targetProfileRef,
+          }))
+          const connectionIds = new Set(bindings.map(binding => binding.connectionId))
+          const definitions = managed.providerSyncConnections(connectionIds)
+          const availableConnectionIds = new Set(definitions.map(definition => definition.connectionId))
+          const missing = bindings.filter(binding => !availableConnectionIds.has(binding.connectionId))
+          if (missing.length > 0) {
+            console.warn(`[cordisx] provider profile sync: ${
+              JSON.stringify(missing.map(binding => ({
+                code: 'connection-unavailable',
+                severity: 'warning',
+                bindingId: binding.bindingId,
+                localProviderId: binding.localProviderId,
+              })))
+            }`)
+          }
+          const result = await syncCodexProviderProfile({
+            stateDir: path.join(
+              completeOptions.managedCatalog.homeDir,
+              'apps',
+              'codex',
+              'profiles',
+              completeOptions.managedCatalog.profileId,
+              'provider-sync',
+            ),
+            targetProfileRef,
+            connections: definitions,
+            bindings: bindings.filter(binding => availableConnectionIds.has(binding.connectionId)),
+          })
+          if (result.diagnostics.length > 0) {
+            console.warn(`[cordisx] provider profile sync: ${JSON.stringify(result.diagnostics)}`)
+          }
+          const environment: Record<string, string> = {}
+          for (const binding of bindings) {
+            const projected = result.projection.providers.find(provider => provider.bindingId === binding.bindingId)
+            if (projected?.sync.applied !== true || !binding.enabled) continue
+            const native = await managed.nativeConnection(
+              `cordisx-${binding.connectionId.slice('cx-connection-'.length)}`,
+            )
+            try {
+              if (native.value.endpoint.auth.scheme === 'bearer') {
+                environment[providerSyncCredentialEnvironmentKey(binding.bindingId)] = native.value.endpoint.auth.token
+              }
+            } finally {
+              native.dispose()
+            }
+          }
+          providerSyncEnvironment = Object.freeze(environment)
+        }
         if (completeOptions.dynamicModelCatalog) {
           dynamic = dynamicConfiguredCatalog({
             codexHome,
@@ -467,7 +530,7 @@ export async function prepareNativeSubmissionBootstrap(
         cdp.bindController(controller)
         return {
           installation: { authority: cdp, ...discovered },
-          environment,
+          environment: Object.freeze({ ...environment, ...providerSyncEnvironment }),
           close,
         }
       })()

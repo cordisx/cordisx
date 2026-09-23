@@ -6,7 +6,7 @@ export function nativeSubmissionCatalogOptions(
   profileId: string,
   profile: Pick<
     HomeConfigProfile,
-    'dynamicModelCatalog' | 'defaultModelProvider' | 'configModelCatalogs' | 'selectorIcons'
+    'dynamicModelCatalog' | 'defaultModelProvider' | 'configModelCatalogs' | 'selectorIcons' | 'providerBindings'
   >,
 ) {
   return {
@@ -15,5 +15,6 @@ export function nativeSubmissionCatalogOptions(
     ...(profile.defaultModelProvider === undefined ? {} : { defaultProviderId: profile.defaultModelProvider }),
     ...(profile.configModelCatalogs === undefined ? {} : { configModelCatalogs: profile.configModelCatalogs }),
     ...(profile.selectorIcons === undefined ? {} : { selectorIcons: profile.selectorIcons }),
+    ...(profile.providerBindings === undefined ? {} : { providerBindings: profile.providerBindings }),
   }
 }
