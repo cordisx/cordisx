@@ -45,6 +45,7 @@ export class NativeConfigCatalogDiscovery {
     private readonly options: {
       readonly environment: () => Readonly<Record<string, string | undefined>>
       readonly fetcher?: DiscoveryFetch
+      readonly enabled?: boolean
     },
   ) {
     this.#service = new ModelCatalogService({
@@ -72,7 +73,7 @@ export class NativeConfigCatalogDiscovery {
       input.selectorIcons,
       value => providers = value,
     )
-    this.configure(providers)
+    this.configure(this.options.enabled === false ? [] : providers)
     return projection
   }
 

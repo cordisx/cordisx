@@ -30,7 +30,7 @@ interface NativeCatalogDiscovery {
 }
 
 const bindingRef = (providerId: string) => `codex-config:${providerId}`
-const staticScopeRevision = (providerId: string) =>
+const preferenceScopeRevision = (providerId: string) =>
   createHash('sha256').update(JSON.stringify(['codex-config-v1', providerId])).digest('hex')
 const safeRevision = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
@@ -168,7 +168,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   private scope(providerId: string): string {
-    return this.options.discovery?.snapshot(providerId)?.scopeRevision ?? staticScopeRevision(providerId)
+    return preferenceScopeRevision(providerId)
   }
 
   private sourceModels(provider: NativeModelProviderCatalogEntry) {

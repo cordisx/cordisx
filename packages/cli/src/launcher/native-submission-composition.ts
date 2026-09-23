@@ -86,6 +86,7 @@ interface NativeSubmissionCatalogOptions {
   readonly defaultProviderId?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
+  readonly nativeModelDiscovery?: boolean
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
   readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
@@ -448,10 +449,11 @@ export async function prepareNativeSubmissionBootstrap(
           }
           providerSyncEnvironment = Object.freeze(environment)
         }
+        nativeDiscovery = new NativeConfigCatalogDiscovery({
+          environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
+          enabled: completeOptions.nativeModelDiscovery !== false,
+        })
         if (completeOptions.dynamicModelCatalog) {
-          nativeDiscovery = new NativeConfigCatalogDiscovery({
-            environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
-          })
           dynamic = dynamicConfiguredCatalog({
             codexHome,
             ...(completeOptions.configModelCatalogs === undefined
@@ -470,10 +472,6 @@ export async function prepareNativeSubmissionBootstrap(
                   ? {}
                   : { selectorIcons: completeOptions.selectorIcons }),
               }),
-          })
-        } else {
-          nativeDiscovery = new NativeConfigCatalogDiscovery({
-            environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
           })
         }
         const resolveConnection = (id: string) =>

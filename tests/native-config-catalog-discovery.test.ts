@@ -91,6 +91,35 @@ describe('native config catalog discovery', () => {
     discovery.dispose()
   })
 
+  it('keeps static projection available while profile-level discovery is disabled', async () => {
+    const codexHome = await config([
+      'model_provider = "deepseek"',
+      'model = "deepseek-flash"',
+      '[model_providers.deepseek]',
+      'base_url = "https://api.deepseek.com"',
+      'env_key = "DEEPSEEK_KEY"',
+    ])
+    const fetcher = vi.fn(async () => Response.json({ object: 'list', data: [] }))
+    const discovery = new NativeConfigCatalogDiscovery({
+      environment: () => ({ DEEPSEEK_KEY: 'host-secret' }),
+      fetcher,
+      enabled: false,
+    })
+
+    const projection = await discovery.load({ codexHome })
+    await discovery.refresh('deepseek')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(projection.providers[0]).toMatchObject({
+      providerId: 'deepseek',
+      models: [{ id: 'deepseek-flash' }],
+    })
+    expect(discovery.has('deepseek')).toBe(false)
+    expect(discovery.snapshot('deepseek')).toBeUndefined()
+    expect(fetcher).not.toHaveBeenCalled()
+    discovery.dispose()
+  })
+
   it('cancels an old request and invalidates its LKG when endpoint or credential identity changes', async () => {
     const codexHome = await config([
       '[model_providers.deepseek]',

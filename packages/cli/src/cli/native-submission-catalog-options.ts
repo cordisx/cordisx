@@ -13,7 +13,12 @@ export function nativeSubmissionCatalogOptions(
   profileId: string,
   profile: Pick<
     HomeConfigProfile,
-    'dynamicModelCatalog' | 'defaultModelProvider' | 'configModelCatalogs' | 'selectorIcons' | 'providerBindings'
+    | 'dynamicModelCatalog'
+    | 'nativeModelDiscovery'
+    | 'defaultModelProvider'
+    | 'configModelCatalogs'
+    | 'selectorIcons'
+    | 'providerBindings'
   >,
   environment: Readonly<Record<string, string | undefined>>,
   planEnvironment?: Readonly<Record<string, string>>,
@@ -22,6 +27,7 @@ export function nativeSubmissionCatalogOptions(
     managedCatalog: { homeDir, profileId },
     nativeDiscoveryEnvironment: nativeDiscoveryEnvironment(environment, planEnvironment),
     ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
+    ...(profile.nativeModelDiscovery === undefined ? {} : { nativeModelDiscovery: profile.nativeModelDiscovery }),
     ...(profile.defaultModelProvider === undefined ? {} : { defaultProviderId: profile.defaultModelProvider }),
     ...(profile.configModelCatalogs === undefined ? {} : { configModelCatalogs: profile.configModelCatalogs }),
     ...(profile.selectorIcons === undefined ? {} : { selectorIcons: profile.selectorIcons }),

@@ -16,5 +16,7 @@ describe('native submission catalog options', () => {
     expect(nativeDiscoveryEnvironment(base)).toEqual(base)
     expect(nativeSubmissionCatalogOptions('/home', 'default', {}, base, planned).nativeDiscoveryEnvironment)
       .toEqual(nativeDiscoveryEnvironment(base, planned))
+    expect(nativeSubmissionCatalogOptions('/home', 'default', { nativeModelDiscovery: false }, base))
+      .toMatchObject({ nativeModelDiscovery: false })
   })
 })

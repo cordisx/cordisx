@@ -183,4 +183,125 @@ describe('native catalog management', () => {
     native.close()
     discovery.dispose()
   })
+
+  it('preserves legacy native pin and block preferences after discovery is enabled', async () => {
+    const f = await fixture()
+    const legacy = await NativeCatalogManagement.open({ load: f.load, stateFile: f.stateFile })
+    const initial = legacy.snapshot().views[0]!
+    const pinned = await legacy.command({
+      operation: 'setOverlay',
+      bindingRef: initial.bindingRef,
+      scopeRevision: initial.scopeRevision,
+      expectedRevision: initial.revision,
+      modelId: 'b',
+      pinned: true,
+    }, () => true)
+    expect(pinned.status).toBe('applied')
+    const pinnedView = legacy.snapshot().views[0]!
+    await expect(legacy.command({
+      operation: 'setOverlay',
+      bindingRef: pinnedView.bindingRef,
+      scopeRevision: pinnedView.scopeRevision,
+      expectedRevision: pinnedView.revision,
+      modelId: 'a',
+      blocked: true,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    legacy.close()
+
+    await writeFile(
+      f.configFile,
+      [
+        '[model_providers.gateway]',
+        'name="Gateway"',
+        'base_url="https://api.deepseek.com"',
+        'env_key="DEEPSEEK_KEY"',
+      ].join('\n'),
+    )
+    let fail = false
+    const discovery = new NativeConfigCatalogDiscovery({
+      environment: () => ({ DEEPSEEK_KEY: 'host-secret' }),
+      fetcher: async () => {
+        if (fail) return new Response(null, { status: 503 })
+        return Response.json({
+          object: 'list',
+          data: [{ id: 'deepseek-flash', object: 'model', owned_by: 'deepseek' }],
+        })
+      },
+    })
+    const load = () => discovery.load({ codexHome: f.codexHome, catalogs: { gateway: 'models.json' } })
+    const native = await NativeCatalogManagement.open({ load, stateFile: f.stateFile, discovery })
+    const reopened = native.snapshot().views[0]!
+    expect(reopened.scopeRevision).toBe(initial.scopeRevision)
+    expect(reopened.rows.map(row => [row.id, row.pinned, row.blocked])).toEqual([
+      ['b', true, false],
+      ['a', false, true],
+    ])
+
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: reopened.bindingRef,
+      scopeRevision: reopened.scopeRevision,
+      expectedRevision: reopened.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    const fresh = native.snapshot().views[0]!
+    expect(fresh.rows.slice(0, 2).map(row => [row.id, row.pinned, row.blocked])).toEqual([
+      ['b', true, false],
+      ['a', false, true],
+    ])
+
+    fail = true
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: fresh.bindingRef,
+      scopeRevision: fresh.scopeRevision,
+      expectedRevision: fresh.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(native.snapshot().views[0]?.rows.slice(0, 2).map(row => [row.id, row.pinned, row.blocked])).toEqual([
+      ['b', true, false],
+      ['a', false, true],
+    ])
+    native.close()
+    discovery.dispose()
+  })
+
+  it('keeps Manager refresh local-only when native discovery is disabled', async () => {
+    const f = await fixture()
+    await writeFile(
+      f.configFile,
+      [
+        '[model_providers.gateway]',
+        'name="Gateway"',
+        'base_url="https://api.deepseek.com"',
+        'env_key="DEEPSEEK_KEY"',
+      ].join('\n'),
+    )
+    const fetcher = vi.fn(async () => Response.json({ object: 'list', data: [] }))
+    const discovery = new NativeConfigCatalogDiscovery({
+      environment: () => ({ DEEPSEEK_KEY: 'host-secret' }),
+      fetcher,
+      enabled: false,
+    })
+    const load = () => discovery.load({ codexHome: f.codexHome, catalogs: { gateway: 'models.json' } })
+    const native = await NativeCatalogManagement.open({ load, discovery })
+    const initial = native.snapshot().views[0]!
+    expect(initial).toMatchObject({ sourceKind: 'native', mode: 'only', autoPaused: false })
+
+    await writeFile(f.catalogFile, JSON.stringify({ models: [{ slug: 'local-only' }] }))
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: initial.bindingRef,
+      scopeRevision: initial.scopeRevision,
+      expectedRevision: initial.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(native.snapshot().views[0]).toMatchObject({
+      sourceKind: 'native',
+      mode: 'only',
+      autoPaused: false,
+      rows: [expect.objectContaining({ id: 'local-only', selectable: true })],
+    })
+    native.close()
+    discovery.dispose()
+  })
 })

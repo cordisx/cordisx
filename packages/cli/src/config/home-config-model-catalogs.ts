@@ -13,6 +13,7 @@ export const PROFILE_MODEL_OPTION_KEYS = [
   'defaultModelProvider',
   'configModelCatalogs',
   'dynamicModelCatalog',
+  'nativeModelDiscovery',
   'selectorIcons',
   'providerBindings',
 ] as const
@@ -174,12 +175,16 @@ export function parseProfileModelOptions(profile: Record<string, unknown>, label
   if (profile.dynamicModelCatalog !== undefined && typeof profile.dynamicModelCatalog !== 'boolean') {
     throw new Error(`${label}.dynamicModelCatalog must be a boolean`)
   }
+  if (profile.nativeModelDiscovery !== undefined && typeof profile.nativeModelDiscovery !== 'boolean') {
+    throw new Error(`${label}.nativeModelDiscovery must be a boolean`)
+  }
   const defaultModelProvider = parseDefaultModelProvider(profile.defaultModelProvider, label)
   const configModelCatalogs = parseConfigModelCatalogs(profile.configModelCatalogs)
   const selectorIcons = parseModelSelectorIcons(profile.selectorIcons)
   const providerBindings = parseProviderBindings(profile.providerBindings)
   return {
     ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
+    ...(profile.nativeModelDiscovery === undefined ? {} : { nativeModelDiscovery: profile.nativeModelDiscovery }),
     ...(defaultModelProvider === undefined ? {} : { defaultModelProvider }),
     ...(configModelCatalogs === undefined ? {} : { configModelCatalogs }),
     ...(selectorIcons === undefined ? {} : { selectorIcons }),
