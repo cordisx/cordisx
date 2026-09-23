@@ -12,6 +12,7 @@ import {
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
   HiddenHostIdentityUnconfirmedError,
+  hiddenHostPid,
   hiddenHostPidFromProcessList,
   launchCodex,
   ONLINE_DEVTOOLS_ORIGIN,
@@ -74,6 +75,24 @@ describe('isolated Codex process support', () => {
     ].join('\n')
     expect(hiddenHostPidFromProcessList(processList, executable, 6000, 7000)).toBe(102)
     expect(hiddenHostPidFromProcessList(processList, executable, 600, 700)).toBeUndefined()
+  })
+
+  it('reads a command table larger than the child-process default buffer', () => {
+    const executable = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
+    const padding = `${'x'.repeat(4096)}\n`.repeat(300)
+    const processList = `${padding}102 ${executable} --remote-debugging-port=6000\n`
+    expect(Buffer.byteLength(processList)).toBeGreaterThan(1024 * 1024)
+    expect(hiddenHostPid(executable, 6000, undefined, () => processList)).toBe(102)
+  })
+
+  it('keeps hidden Host identity unresolved when process enumeration fails', () => {
+    expect(hiddenHostPid('/Applications/ChatGPT.app/Contents/MacOS/ChatGPT', 6000, undefined, () => {
+      throw Object.assign(new Error('fixture process table overflow'), { code: 'ENOBUFS' })
+    })).toBeUndefined()
+  })
+
+  it.skipIf(process.platform === 'win32')('reads the current command table without the default buffer limit', () => {
+    expect(() => hiddenHostPid('/not/a/running/host', 1)).not.toThrow()
   })
 
   it('retains the profile lease only when hidden Host identity is unresolved', () => {

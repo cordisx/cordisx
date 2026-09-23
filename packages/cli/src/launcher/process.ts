@@ -6,7 +6,12 @@ import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_pro
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { liveProcessStartedAt, type ProcessIdentity, processTable } from './process-identity.js'
+import {
+  liveProcessStartedAt,
+  PROCESS_TABLE_MAX_BUFFER_BYTES,
+  type ProcessIdentity,
+  processTable,
+} from './process-identity.js'
 
 export {
   acquireCodexProfileLaunchLease,
@@ -396,13 +401,22 @@ export function hiddenHostPidFromProcessList(
     })[0]
 }
 
-function hiddenHostPid(executable: string, debugPort: number, mainInspectorPort?: number): number | undefined {
-  return hiddenHostPidFromProcessList(
-    execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }),
-    executable,
-    debugPort,
-    mainInspectorPort,
-  )
+export function hiddenHostPid(
+  executable: string,
+  debugPort: number,
+  mainInspectorPort?: number,
+  readProcessList: () => string = () =>
+    execFileSync('ps', ['-axo', 'pid=,command='], {
+      encoding: 'utf8',
+      maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+    }),
+): number | undefined {
+  try {
+    return hiddenHostPidFromProcessList(readProcessList(), executable, debugPort, mainInspectorPort)
+  } catch {
+    // Enumeration failure leaves identity unresolved so launch cleanup stays fail-closed.
+    return undefined
+  }
 }
 
 /** Launch a macOS Host hidden through Launch Services without retaining a stale recent Dock tile. */

@@ -10,10 +10,15 @@ export interface ProcessIdentity {
 
 export type RecordedProcessStatus = 'alive' | 'dead' | 'unknown'
 
+export const PROCESS_TABLE_MAX_BUFFER_BYTES = 64 * 1024 * 1024
+
 /** Snapshot of every visible process with its parent and start time; empty where `ps` is unavailable. */
 export function processTable(): readonly ProcessIdentity[] {
   if (process.platform === 'win32') return []
-  return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], { encoding: 'utf8' })
+  return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], {
+    encoding: 'utf8',
+    maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+  })
     .split('\n')
     .flatMap(line => {
       const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line)
@@ -75,7 +80,10 @@ export function processesUsingUserDataDir(userDataDirs: readonly string[]): read
   if (process.platform === 'win32') return undefined
   let output: string
   try {
-    output = execFileSync('ps', ['-axww', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    output = execFileSync('ps', ['-axww', '-o', 'pid=,command='], {
+      encoding: 'utf8',
+      maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+    })
   } catch {
     return undefined
   }
