@@ -1,16 +1,19 @@
 import { createPackage } from '@electron/asar'
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
 import { createNativeSubmissionComposition } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
+import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
 import { resources } from './fixtures/native-submission-structure.js'
 
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 async function bundle(incompatible = false) {
@@ -213,6 +216,130 @@ it.skipIf(process.platform !== 'darwin')(
       } finally {
         await installed.dispose()
       }
+    } finally {
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'commits explicit provider bindings before returning launch credentials and excludes conflicted bindings',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'codex-home')
+    await mkdir(codexHome)
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '# native owner remains authoritative',
+        '[model_providers.native-conflict]',
+        'name = "Native conflict"',
+        'base_url = "https://native.example.test/v1"',
+        'wire_api = "responses"',
+        'env_key = "NATIVE_CONFLICT_KEY"',
+        '',
+      ].join('\n'),
+    )
+    const values = new Map<string, string>()
+    const keychain = {
+      async read(service: string, account: string) {
+        const value = values.get(`${service}/${account}`)
+        if (!value) throw Error()
+        return value
+      },
+      async status(service: string, account: string): Promise<'set' | 'unset'> {
+        return values.has(`${service}/${account}`) ? 'set' : 'unset'
+      },
+      async upsert(service: string, account: string, value: string) {
+        values.set(`${service}/${account}`, value)
+      },
+      async remove(service: string, account: string) {
+        values.delete(`${service}/${account}`)
+      },
+    }
+    const secrets = ['committed-secret', 'conflicted-secret']
+    let secretIndex = 0
+    const owner = await ManagedCatalogComposition.open({
+      homeDir: codexHome,
+      profileId: 'fixture-sync',
+      keychain,
+      responsesAvailable: true,
+      capture: async () => secrets[secretIndex++]!,
+    })
+    const settings = (title: string, endpoint: string) => ({
+      title,
+      endpoint,
+      protocol: 'responses' as const,
+      discoveryEnabled: false,
+      strategy: { kind: 'manual' as const, ids: ['shared-model'] },
+    })
+    expect(
+      (await owner.command({
+        operation: 'createConnection',
+        settings: settings('Committed managed', 'https://committed.example.test/v1'),
+      }, () => true)).status,
+    ).toBe('applied')
+    expect(
+      (await owner.command({
+        operation: 'createConnection',
+        settings: settings('Conflicted managed', 'https://conflicted.example.test/v1'),
+      }, () => true)).status,
+    ).toBe('applied')
+    const committed = owner.snapshot().views.find(view => view.title === 'Committed managed')!
+    const conflicted = owner.snapshot().views.find(view => view.title === 'Conflicted managed')!
+    await owner.close()
+
+    const committedBindingId = 'cx-binding-0123456789abcdef'
+    const conflictedBindingId = 'cx-binding-fedcba9876543210'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const composition = await createNativeSubmissionComposition(
+      { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
+      f.executable,
+      codexHome,
+      {
+        managedCatalog: {
+          homeDir: codexHome,
+          profileId: 'fixture-sync',
+          keychain,
+          capture: async () => {
+            throw new Error('fixture must reuse the stored credential')
+          },
+        },
+        providerBindings: [
+          {
+            bindingId: committedBindingId,
+            connectionId: `cx-connection-${committed.bindingRef}`,
+            localProviderId: 'cordisx-committed',
+            enabled: true,
+            credentialDelivery: 'process-env',
+          },
+          {
+            bindingId: conflictedBindingId,
+            connectionId: `cx-connection-${conflicted.bindingRef}`,
+            localProviderId: 'native-conflict',
+            enabled: true,
+            credentialDelivery: 'process-env',
+          },
+        ],
+      },
+    )
+    try {
+      const raw = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
+      const ledger = await readFile(
+        path.join(codexHome, 'apps/codex/profiles/fixture-sync/provider-sync/provider-profile-bindings.json'),
+        'utf8',
+      )
+      expect(raw).toContain('[model_providers.cordisx-committed]')
+      expect(raw).toContain('base_url = "https://committed.example.test/v1"')
+      expect(raw).toContain('base_url = "https://native.example.test/v1"')
+      expect(raw).not.toContain('https://conflicted.example.test/v1')
+      expect(composition.environment[providerSyncCredentialEnvironmentKey(committedBindingId)])
+        .toBe('committed-secret')
+      expect(composition.environment[providerSyncCredentialEnvironmentKey(conflictedBindingId)]).toBeUndefined()
+      expect(JSON.stringify(composition.environment)).not.toContain('conflicted-secret')
+      expect(`${raw}\n${ledger}`).not.toMatch(/committed-secret|conflicted-secret/u)
+      expect(JSON.parse(ledger).bindings).toHaveLength(1)
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('id-conflict'))
     } finally {
       await composition.close()
     }

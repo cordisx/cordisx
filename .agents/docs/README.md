@@ -104,6 +104,7 @@ implementation of those contracts, not a second public specification.
 | [manager-feedback-ledger-2026-08-26](manager-feedback-ledger-2026-08-26.md)                 | Historical delivery record  | 2026-08-26 requirement batch and its retained evidence states         |
 | [certified-dom-permission-ledger-2026-08-30](certified-dom-permission-ledger-2026-08-30.md) | Historical candidate record | 2026-08-30 candidate SHAs, local checks, and pending gates            |
 | [managed-service-runtime-handoff-2026-09-09](managed-service-runtime-handoff-2026-09-09.md) | Historical candidate record | 2026-09-09 local checkpoint, focused evidence, and pending gates      |
+| [provider-profile-sync-2026-09-23](history/provider-profile-sync-2026-09-23.md)             | Historical delivery record  | SYNC-1..5 Host implementation scope, plan, and retained evidence      |
 
 - [Unified notifications delivery, 2026-09-10](notification-delivery-2026-09-10.md): dated candidate implementation and verification evidence.
 

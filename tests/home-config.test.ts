@@ -125,6 +125,51 @@ describe('CordisX home configuration', () => {
     }
   })
 
+  it('validates explicit provider bindings without accepting connection data or duplicate target ownership', () => {
+    const base = createDefaultHomeConfig()
+    const providerBinding = {
+      bindingId: 'cx-binding-0123456789abcdef',
+      connectionId: 'cx-connection-0123456789abcdef',
+      localProviderId: 'cordisx-work',
+      enabled: true,
+      credentialDelivery: 'process-env' as const,
+      overlay: { title: 'Work', iconRef: 'deepseek' },
+    }
+    const withBindings = (providerBindings: unknown) => ({
+      ...base,
+      apps: {
+        codex: {
+          ...base.apps.codex,
+          profiles: {
+            default: { ...base.apps.codex!.profiles.default, providerBindings },
+          },
+        },
+      },
+    })
+    expect(parseHomeConfig(withBindings([providerBinding])).apps.codex?.profiles.default?.providerBindings)
+      .toEqual([providerBinding])
+    expect(JSON.stringify(parseHomeConfig(withBindings([providerBinding])))).not.toMatch(/endpoint|apiKey|secret/u)
+
+    expect(() =>
+      parseHomeConfig(withBindings([
+        providerBinding,
+        { ...providerBinding, bindingId: 'cx-binding-fedcba9876543210' },
+      ]))
+    ).toThrow('duplicate identity or target ownership')
+    expect(() =>
+      parseHomeConfig(withBindings([
+        providerBinding,
+        { ...providerBinding, localProviderId: 'cordisx-other' },
+      ]))
+    ).toThrow('duplicate identity or target ownership')
+    expect(() => parseHomeConfig(withBindings([{ ...providerBinding, localProviderId: 'openai' }])))
+      .toThrow('providerBindings[0] is invalid')
+    expect(() => parseHomeConfig(withBindings([{ ...providerBinding, endpoint: 'https://private.invalid/v1' }])))
+      .toThrow('providerBindings[0] is invalid')
+    expect(() => parseHomeConfig(withBindings([{ ...providerBinding, overlay: { title: 'Work', secret: 'no' } }])))
+      .toThrow('providerBindings[0].overlay is invalid')
+  })
+
   it('normalizes an exact profile icon-theme preference and drops only a corrupted preference', () => {
     const base = createDefaultHomeConfig()
     const exact = {
