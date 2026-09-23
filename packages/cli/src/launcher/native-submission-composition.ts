@@ -29,12 +29,12 @@ import {
 } from './native-account-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
-import { codexConfigModelProviders } from './codex-config-model-providers.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
+import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-catalog-discovery.js'
 import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
@@ -88,6 +88,7 @@ interface NativeSubmissionCatalogOptions {
   readonly dynamicModelCatalog?: boolean
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
+  readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
 }
 export function nativeAppServerIntermediaryPath(): string {
@@ -341,6 +342,7 @@ export async function prepareNativeSubmissionBootstrap(
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
+  let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
   let nativeManagement: NativeCatalogManagement | undefined
   let management: CompositeCatalogManagement | undefined
   let completion: Promise<NativeSubmissionComposition> | undefined
@@ -348,6 +350,7 @@ export async function prepareNativeSubmissionBootstrap(
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
       dynamic?.dispose()
+      nativeDiscovery?.dispose()
       management?.close()
       try {
         await controller?.dispose()
@@ -446,6 +449,9 @@ export async function prepareNativeSubmissionBootstrap(
           providerSyncEnvironment = Object.freeze(environment)
         }
         if (completeOptions.dynamicModelCatalog) {
+          nativeDiscovery = new NativeConfigCatalogDiscovery({
+            environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
+          })
           dynamic = dynamicConfiguredCatalog({
             codexHome,
             ...(completeOptions.configModelCatalogs === undefined
@@ -454,6 +460,20 @@ export async function prepareNativeSubmissionBootstrap(
             ...(completeOptions.selectorIcons === undefined
               ? {}
               : { selectorIcons: completeOptions.selectorIcons }),
+            load: () =>
+              nativeDiscovery!.load({
+                codexHome,
+                ...(completeOptions.configModelCatalogs === undefined
+                  ? {}
+                  : { catalogs: completeOptions.configModelCatalogs }),
+                ...(completeOptions.selectorIcons === undefined
+                  ? {}
+                  : { selectorIcons: completeOptions.selectorIcons }),
+              }),
+          })
+        } else {
+          nativeDiscovery = new NativeConfigCatalogDiscovery({
+            environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
           })
         }
         const resolveConnection = (id: string) =>
@@ -469,11 +489,15 @@ export async function prepareNativeSubmissionBootstrap(
             await dynamic.refresh()
             projection = dynamic.snapshot()
           } else {
-            projection = await codexConfigModelProviders(
+            projection = await nativeDiscovery!.load({
               codexHome,
-              completeOptions.configModelCatalogs,
-              completeOptions.selectorIcons,
-            )
+              ...(completeOptions.configModelCatalogs === undefined
+                ? {}
+                : { catalogs: completeOptions.configModelCatalogs }),
+              ...(completeOptions.selectorIcons === undefined
+                ? {}
+                : { selectorIcons: completeOptions.selectorIcons }),
+            })
           }
           const diagnostic = JSON.stringify(projection.diagnostics)
           if (diagnostic !== lastDiagnostic && projection.diagnostics.length > 0) {
@@ -500,6 +524,7 @@ export async function prepareNativeSubmissionBootstrap(
               ),
             }),
           refreshBeforeRead: dynamic === undefined,
+          discovery: nativeDiscovery,
           ...(dynamic === undefined
             ? {}
             : {

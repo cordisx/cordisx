@@ -7,6 +7,7 @@ import {
   CompositeCatalogManagement,
   NativeCatalogManagement,
 } from '../packages/cli/src/launcher/model-catalog/native-catalog-management.js'
+import { NativeConfigCatalogDiscovery } from '../packages/cli/src/launcher/model-catalog/native-config-catalog-discovery.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -100,5 +101,86 @@ describe('native catalog management', () => {
     const f = await fixture()
     const native = await NativeCatalogManagement.open({ load: f.load })
     expect(new CompositeCatalogManagement(native).snapshot().views.map(view => view.providerId)).toEqual(['gateway'])
+  })
+
+  it('augments static confirmed rows with committed remote evidence and retains LKG on failure', async () => {
+    const f = await fixture()
+    await writeFile(
+      f.catalogFile,
+      JSON.stringify({
+        models: [{ slug: 'b' }, { slug: 'a' }, { slug: 'deepseek-flash', display_name: 'Pinned label' }],
+      }),
+    )
+    await writeFile(
+      f.configFile,
+      [
+        '[model_providers.gateway]',
+        'name="Gateway"',
+        'base_url="https://api.deepseek.com"',
+        'env_key="DEEPSEEK_KEY"',
+        'wire_api="responses"',
+      ].join('\n'),
+    )
+    let fail = false
+    const fetcher = vi.fn(async () => {
+      if (fail) return new Response(null, { status: 503 })
+      return Response.json({
+        object: 'list',
+        data: [
+          { id: 'deepseek-flash', object: 'model', owned_by: 'deepseek' },
+          { id: 'remote-unknown', object: 'model', owned_by: 'deepseek' },
+        ],
+      })
+    })
+    const discovery = new NativeConfigCatalogDiscovery({
+      environment: () => ({ DEEPSEEK_KEY: 'host-secret' }),
+      fetcher,
+    })
+    const load = () => discovery.load({ codexHome: f.codexHome, catalogs: { gateway: 'models.json' } })
+    const native = await NativeCatalogManagement.open({ load, discovery })
+    const changed = vi.fn()
+    native.subscribe(changed)
+    const before = native.snapshot().views[0]!
+
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: before.bindingRef,
+      scopeRevision: before.scopeRevision,
+      expectedRevision: before.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+
+    const fresh = native.snapshot().views[0]!
+    expect(fresh).toMatchObject({ mode: 'augment', freshness: 'fresh', outcome: 'ok', sourceCount: 4 })
+    expect(fresh.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'a', label: 'a', selectable: true, provenance: ['native'] }),
+      expect.objectContaining({
+        id: 'deepseek-flash',
+        label: 'Pinned label',
+        selectable: true,
+        provenance: ['auto', 'native'],
+        protocolCapabilities: { responses: true },
+      }),
+      expect.objectContaining({ id: 'remote-unknown', selectable: false, reason: 'unconfirmed' }),
+    ]))
+    expect((await native.catalog())[0]?.models.map(model => model.id)).toEqual(['a', 'b', 'deepseek-flash'])
+    expect(changed).toHaveBeenCalled()
+
+    fail = true
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: fresh.bindingRef,
+      scopeRevision: fresh.scopeRevision,
+      expectedRevision: fresh.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    const stale = native.snapshot().views[0]!
+    expect(stale).toMatchObject({ freshness: 'stale', outcome: 'error' })
+    expect(stale.rows.find(row => row.id === 'deepseek-flash')).toMatchObject({
+      label: 'Pinned label',
+      selectable: true,
+      protocolCapabilities: { responses: true },
+    })
+    expect(stale.rows.find(row => row.id === 'a')).toMatchObject({ selectable: true })
+    native.close()
+    discovery.dispose()
   })
 })

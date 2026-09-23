@@ -63,11 +63,24 @@ export interface CodexConfigModelProviderProjection {
   }[]
 }
 
+/** Host-private discovery input. Callers must not serialize or expose this value outside launcher Node. */
+export interface CodexConfigNativeProvider {
+  readonly providerId: string
+  readonly title: string
+  readonly endpoint?: string
+  readonly wireApi?: 'responses' | 'chat-completions'
+  readonly credential:
+    | { readonly kind: 'environment'; readonly reference: string }
+    | { readonly kind: 'inline-private'; readonly token: string }
+    | { readonly kind: 'none' | 'unknown' }
+}
+
 /** Reads Codex configuration privately and returns only selector-safe provider/model metadata. */
 export async function codexConfigModelProviders(
   codexHome: string,
   configModelCatalogs?: Readonly<Record<string, string>>,
   selectorIcons?: ModelSelectorIconOverrides,
+  inspectNativeProviders?: (providers: readonly CodexConfigNativeProvider[]) => void,
 ): Promise<CodexConfigModelProviderProjection> {
   const mappings = parseConfigModelCatalogs(configModelCatalogs) ?? {}
   const diagnostics: Array<CodexConfigModelProviderProjection['diagnostics'][number]> = []
@@ -78,6 +91,7 @@ export async function codexConfigModelProviders(
     config = record(parse(raw)) ?? {}
     sourceRevision = createHash('sha256').update(raw).digest('hex')
   } catch {
+    inspectNativeProviders?.(Object.freeze([]))
     return Object.freeze({
       providers: Object.freeze([]),
       sourceAvailable: false,
@@ -90,6 +104,33 @@ export async function codexConfigModelProviders(
   const configured = record(config.model_providers) ?? {}
   const activeProvider = text(config.model_provider, 128)
   const activeModel = text(config.model, 512)
+  inspectNativeProviders?.(Object.freeze(
+    Object.entries(configured).flatMap(([providerId, value]) => {
+      const id = text(providerId, 128)
+      const provider = record(value)
+      if (id === undefined || id === 'openai' || provider === undefined) return []
+      const endpoint = text(provider.base_url, 4_096)
+      const wireApi = provider.wire_api === 'responses' || provider.wire_api === 'chat-completions'
+        ? provider.wire_api
+        : undefined
+      const envKey = text(provider.env_key, 512)
+      const inlineToken = text(provider.experimental_bearer_token, 16_384)
+      const credential: CodexConfigNativeProvider['credential'] = envKey !== undefined
+        ? Object.freeze({ kind: 'environment', reference: envKey })
+        : inlineToken !== undefined
+        ? Object.freeze({ kind: 'inline-private', token: inlineToken })
+        : provider.requires_openai_auth === false
+        ? Object.freeze({ kind: 'none' })
+        : Object.freeze({ kind: 'unknown' })
+      return [Object.freeze({
+        providerId: id,
+        title: text(provider.name, 256) ?? id,
+        ...(endpoint === undefined ? {} : { endpoint }),
+        ...(wireApi === undefined ? {} : { wireApi }),
+        credential,
+      })]
+    }),
+  ))
   const readCatalog = async (
     value: unknown,
     providerId?: string,

@@ -14,6 +14,7 @@ import {
 } from '../../model-catalog/management-overlay.js'
 import type { CodexConfigModelProviderProjection } from '../codex-config-model-providers.js'
 import type { NativeModelProviderCatalogEntry } from '../native-model-provider-catalog.js'
+import type { CatalogSnapshot } from './contracts.js'
 
 type CatalogManagementAuthority = {
   snapshot(): CatalogManagementSnapshot
@@ -21,11 +22,20 @@ type CatalogManagementAuthority = {
   subscribe(listener: () => void): () => void
 }
 
+interface NativeCatalogDiscovery {
+  has(providerId: string): boolean
+  snapshot(providerId: string): CatalogSnapshot | undefined
+  refresh(providerId: string): Promise<void>
+  subscribe(listener: () => void): () => void
+}
+
 const bindingRef = (providerId: string) => `codex-config:${providerId}`
-const scopeRevision = (providerId: string) =>
+const staticScopeRevision = (providerId: string) =>
   createHash('sha256').update(JSON.stringify(['codex-config-v1', providerId])).digest('hex')
 const safeRevision = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
+const discoveryCode = (value: NonNullable<CatalogSnapshot['error']>) =>
+  value === 'ambiguous' ? 'unsupported' as const : value
 
 async function readOverlayState(file: string): Promise<unknown> {
   try {
@@ -91,6 +101,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       stateFile?: string
       refreshBeforeRead?: boolean
       shadowed?(providerId: string): boolean
+      discovery?: NativeCatalogDiscovery
     },
   ) {
     this.#projection = projection
@@ -108,6 +119,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     stateFile?: string
     refreshBeforeRead?: boolean
     shadowed?(providerId: string): boolean
+    discovery?: NativeCatalogDiscovery
     subscribeSource?(listener: (projection: CodexConfigModelProviderProjection) => void): () => void
   }): Promise<NativeCatalogManagement> {
     const [projection, initialOverlay] = await Promise.all([
@@ -115,7 +127,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       options.stateFile === undefined ? undefined : readOverlayState(options.stateFile).catch(() => undefined),
     ])
     const authority = new NativeCatalogManagement(projection, initialOverlay, options)
-    authority.#unsubscribeSource = options.subscribeSource?.(projection => authority.replace(projection))
+    const unsubscribes = [
+      options.subscribeSource?.(projection => authority.replace(projection)),
+      options.discovery?.subscribe(() => authority.changed()),
+    ].filter((unsubscribe): unsubscribe is () => void => unsubscribe !== undefined)
+    authority.#unsubscribeSource = () => unsubscribes.forEach(unsubscribe => unsubscribe())
     return authority
   }
 
@@ -151,6 +167,33 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     this.replace(await this.options.load(), force)
   }
 
+  private scope(providerId: string): string {
+    return this.options.discovery?.snapshot(providerId)?.scopeRevision ?? staticScopeRevision(providerId)
+  }
+
+  private sourceModels(provider: NativeModelProviderCatalogEntry) {
+    const automatic = this.options.discovery?.snapshot(provider.providerId)?.models ?? []
+    const models = new Map(automatic.map(model => [model.id, model]))
+    for (const model of provider.models) {
+      const discovered = models.get(model.id)
+      models.set(
+        model.id,
+        Object.freeze({
+          ...discovered,
+          ...model,
+          provenance: Object.freeze([
+            ...(discovered === undefined ? [] : ['auto' as const]),
+            'native' as const,
+          ]),
+          ...(discovered?.protocolCapabilities === undefined
+            ? {}
+            : { protocolCapabilities: discovered.protocolCapabilities }),
+        }),
+      )
+    }
+    return Object.freeze([...models.values()].sort((left, right) => left.id.localeCompare(right.id)))
+  }
+
   private providersForManagement(): readonly NativeModelProviderCatalogEntry[] {
     const providers = this.#projection.sourceAvailable === false
       ? [...this.#lastGood.values()]
@@ -163,17 +206,26 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   private rows(provider: NativeModelProviderCatalogEntry) {
+    const discovery = this.options.discovery?.snapshot(provider.providerId)
+    const denied = ['authentication', 'permission', 'account'].includes(discovery?.error ?? '')
     const available = diagnosticCode(this.#projection, provider.providerId) === undefined && !this.#persistError
+      && !denied
+    const confirmed = new Set(provider.models.map(model => model.id))
     const projected = projectManagementOverlay(
-      provider.models.map(model => ({ ...model, selectable: available })),
-      this.#overlay.read(bindingRef(provider.providerId), scopeRevision(provider.providerId)),
+      this.sourceModels(provider).map(model => ({
+        ...model,
+        selectable: available && (confirmed.has(model.id) || model.protocolCapabilities?.responses === true),
+      })),
+      this.#overlay.read(bindingRef(provider.providerId), this.scope(provider.providerId)),
     )
     return [
       ...projected.active.map(row => ({
         ...row,
-        provenance: ['native' as const],
+        provenance: row.provenance ?? ['native' as const],
         notListed: row.notListed ?? false,
-        ...(!row.selectable && !row.blocked && !available ? { reason: 'unconfirmed' as const } : {}),
+        ...(!row.selectable && !row.blocked
+          ? { reason: denied ? 'permission' as const : 'unconfirmed' as const }
+          : {}),
         ...(row.blocked ? { reason: 'blocked' as const } : {}),
       })),
       ...projected.dormant.map(row => ({
@@ -186,10 +238,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   private revision(provider: NativeModelProviderCatalogEntry): string {
-    const scope = scopeRevision(provider.providerId)
+    const scope = this.scope(provider.providerId)
     const overlay = this.#overlay.read(bindingRef(provider.providerId), scope)
     return safeRevision({
       provider,
+      discovery: this.options.discovery?.snapshot(provider.providerId),
       overlay: overlay.revision,
       sourceAvailable: this.#projection.sourceAvailable,
       diagnostics: this.#projection.diagnostics.filter(item => item.providerId === provider.providerId),
@@ -202,19 +255,32 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     const views = this.providersForManagement().map((provider): CatalogManagementView => {
       const rows = this.rows(provider)
       const unavailable = diagnosticCode(this.#projection, provider.providerId) !== undefined || this.#persistError
+      const discovery = this.options.discovery?.snapshot(provider.providerId)
+      const sourceCount = this.sourceModels(provider).length
+      const errorCode = unavailable
+        ? this.#persistError ? 'persist-failed' as const : 'unavailable' as const
+        : discovery?.error === undefined
+        ? undefined
+        : discoveryCode(discovery.error)
       return {
         bindingRef: bindingRef(provider.providerId),
         providerId: provider.providerId,
         title: provider.title ?? provider.providerId,
-        scopeRevision: scopeRevision(provider.providerId),
+        scopeRevision: this.scope(provider.providerId),
         revision: this.revision(provider),
         sourceKind: 'native',
-        mode: 'only',
-        freshness: unavailable ? 'stale' : 'fresh',
-        activity: 'idle',
-        outcome: unavailable ? 'error' : provider.models.length === 0 ? 'empty' : 'ok',
+        mode: discovery === undefined ? 'only' : 'augment',
+        freshness: unavailable ? 'stale' : discovery?.freshness ?? 'fresh',
+        activity: discovery?.loading ? 'loading' : 'idle',
+        outcome: unavailable
+          ? 'error'
+          : discovery?.error !== undefined
+          ? discovery.error === 'unsupported' ? 'unsupported' : discovery.error === 'cancelled' ? 'cancelled' : 'error'
+          : sourceCount === 0
+          ? 'empty'
+          : 'ok',
         autoPaused: false,
-        sourceCount: provider.models.length,
+        sourceCount,
         selectableCount: rows.filter(row => row.selectable).length,
         rows,
         supplement: [],
@@ -222,7 +288,8 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
         diagnostics: {
           scopeConfirmed: true,
           targetState: unavailable ? 'unavailable' : 'applied',
-          ...(unavailable ? { code: this.#persistError ? 'persist-failed' : 'unavailable' } : {}),
+          ...(errorCode === undefined ? {} : { code: errorCode }),
+          ...(discovery?.lastSuccessAt === undefined ? {} : { lastSuccessAt: discovery.lastSuccessAt }),
         },
       }
     })
@@ -245,8 +312,15 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       return [Object.freeze({
         ...base,
         models: Object.freeze(rows.map(row => {
-          const source = provider.models.find(model => model.id === row.id)!
-          return Object.freeze({ ...source })
+          const source = provider.models.find(model => model.id === row.id)
+          return Object.freeze({
+            id: row.id,
+            label: row.label,
+            aliases: Object.freeze([...(source?.aliases ?? [])]),
+            ...(source?.selectorBrand === undefined ? {} : { selectorBrand: source.selectorBrand }),
+            provenance: row.provenance,
+            notListed: row.notListed,
+          })
         })),
         ...(defaultModelId === undefined ? {} : { defaultModelId }),
       })]
@@ -289,13 +363,16 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       const provider = this.providersForManagement().find(candidate =>
         bindingRef(candidate.providerId) === command.bindingRef
       )
-      if (!provider || command.scopeRevision !== scopeRevision(provider.providerId)) {
+      if (!provider || command.scopeRevision !== this.scope(provider.providerId)) {
         return { status: 'conflict', code: 'scope-changed' }
       }
       if (command.expectedRevision !== this.revision(provider)) return { status: 'conflict', code: 'conflict' }
       try {
         if (command.operation === 'refresh') {
           await this.refresh(true)
+          if (this.options.discovery?.has(provider.providerId)) {
+            await this.options.discovery.refresh(provider.providerId)
+          }
         } else {
           const scope = {
             bindingRef: command.bindingRef,
@@ -305,11 +382,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
           this.#writeAllowed = () => !this.#closed && authorized()
           try {
             if (command.operation === 'setOverlay') {
-              await this.#overlay.mutate({ ...command, ...scope }, provider.models.map(model => model.id))
+              await this.#overlay.mutate({ ...command, ...scope }, this.sourceModels(provider).map(model => model.id))
             } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
               await this.#overlay.mutate(
                 { ...scope, operation: command.operation },
-                provider.models.map(model => model.id),
+                this.sourceModels(provider).map(model => model.id),
               )
             } else {
               return { status: 'rejected', code: 'unsupported' }
