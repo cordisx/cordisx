@@ -8,6 +8,8 @@ import { CodexDesktopNativeModelProviderTransport } from '../../packages/cli/src
 let openModal: (value: boolean) => void
 let replaceAnchor: () => void
 let calls = 0
+let modelCount = 1
+let catalogReads = 0
 const state = Object.freeze({
   available: true,
   busy: false,
@@ -16,12 +18,20 @@ const state = Object.freeze({
   modelLabel: 'Fixture Model',
   reasoningEffort: 'high',
 })
-const registry = new ModelProviderRegistry(async () => [{
-  providerId: 'fixture',
-  title: 'Fixture',
-  pluginId: 'fixture',
-  models: [{ id: 'model', label: 'Fixture Model' }],
-}])
+const registry = new ModelProviderRegistry(async () => {
+  catalogReads++
+  return [{
+    providerId: 'fixture',
+    title: 'Fixture',
+    pluginId: 'fixture',
+    selectorBrand: { brand: 'openrouter', source: 'override' },
+    models: Array.from({ length: modelCount }, (_, index) => ({
+      id: index === 0 ? 'model' : `openrouter/model-${index}`,
+      label: index === 0 ? 'Fixture Model' : `OpenRouter Model ${index}`,
+    })),
+  }]
+})
+registry.connectSource(() => () => {})
 
 function Modal({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -121,7 +131,15 @@ export async function replace() {
 export function actionCount() {
   return calls
 }
+export function catalogReadCount() {
+  return catalogReads
+}
 export async function refresh() {
+  await registry.refresh()
+  await settle()
+}
+export async function catalog(count: number) {
+  modelCount = count
   await registry.refresh()
   await settle()
 }
