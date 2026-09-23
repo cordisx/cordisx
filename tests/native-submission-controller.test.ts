@@ -925,4 +925,19 @@ describe('native submission controller', () => {
     })).resolves.toBe(true)
     expect(fixture.prepare).not.toHaveBeenCalled()
   })
+
+  it('rejects a config-backed resume when catalog admission blocks the model', async () => {
+    const validateSelection = vi.fn(async () => false)
+    const fixture = harness({
+      providerSource: id => id === 'deepseek' ? 'config' : undefined,
+      validateSelection,
+    })
+    await expect(fixture.controller.prepareThreadResume({
+      threadId: 'thread-1',
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+    })).resolves.toEqual({ kind: 'reject', reason: 'unknown-provider' })
+    expect(validateSelection).toHaveBeenCalledWith({ providerId: 'deepseek', model: 'deepseek-chat' })
+    expect(fixture.prepare).not.toHaveBeenCalled()
+  })
 })

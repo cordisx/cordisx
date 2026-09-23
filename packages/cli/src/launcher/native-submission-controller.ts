@@ -830,6 +830,9 @@ export function createNativeSubmissionController(
       if (options.providerSource !== undefined && source === undefined) {
         return { kind: 'reject', reason: 'unknown-provider' }
       }
+      if (!await validSelection({ providerId: input.providerId, model: input.model })) {
+        return { kind: 'reject', reason: 'unknown-provider' }
+      }
       let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
       try {
         let configOverrides: Readonly<Record<string, unknown>>
