@@ -58,7 +58,8 @@ launcher process and its start time. A normal `stop`, `restart`, or launcher
 exit releases it.
 
 When that launcher no longer exists, for example after `kill -9`, a crash, or
-a reboot, the next launch reclaims the lock automatically and writes
+a reboot, the next launch reclaims a version-2 lock automatically when no Host
+holder remains and the process scan is unambiguous, and writes
 `reclaimed stale Codex profile launch lock` to `host.log`. That case needs no
 manual cleanup. `--recover-startup` is unrelated: it converts only the legacy
 `start.lock` under `~/.cordisx/run/<app>/<profile>/`.
@@ -75,6 +76,15 @@ says:
   missing, belongs to another profile path, or its process identity could not
   be verified. Inspect the named lock directory and remove it only after
   confirming that nothing uses the profile.
+- `Legacy v1 locks require manual cleanup`: stop all older CordisX launchers
+  and Hosts using that profile before removing the named lock directory. Old
+  reclaimers do not participate in the new mutex; do not migrate a v1 lock
+  while they might still be running.
+- `another launch or release operation`: retry after that operation completes.
+
+Do not remove `<profile>.cordisx-launch-mutex`. Ambiguous process arguments
+(including spaced paths or trailing arguments) conservatively block recovery,
+even for a potentially unrelated profile; inspect before manual cleanup.
 
 The reclaim rule is defined in the
 [launcher runtime reference](launcher-runtime.md#host-profiles-cleanup-and-skill-deployment).

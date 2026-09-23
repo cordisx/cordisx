@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process'
+import { realpathSync } from 'node:fs'
+import path from 'node:path'
 
 export interface ProcessIdentity {
   readonly pid: number
@@ -63,18 +65,11 @@ export function recordedProcessStatus(pid: number, startedAt: string): RecordedP
   return current.startedAt === startedAt ? 'alive' : 'dead'
 }
 
-function commandUsesUserDataDir(command: string, argument: string): boolean {
-  for (let index = command.indexOf(argument); index !== -1; index = command.indexOf(argument, index + 1)) {
-    const next = command[index + argument.length]
-    if (next === undefined || /\s/u.test(next)) return true
-  }
-  return false
-}
-
 /**
  * Live processes launched with one of the given `--user-data-dir` values, such
  * as a Host tree that outlived a killed launcher. `undefined` means the
- * platform cannot enumerate command lines, which callers must treat as unsafe.
+ * platform cannot enumerate command lines or a candidate's path is ambiguous,
+ * which callers must treat as unsafe. ps is not a lossless argv transport.
  */
 export function processesUsingUserDataDir(userDataDirs: readonly string[]): readonly number[] | undefined {
   if (process.platform === 'win32') return undefined
@@ -84,12 +79,40 @@ export function processesUsingUserDataDir(userDataDirs: readonly string[]): read
   } catch {
     return undefined
   }
-  const arguments_ = [...new Set(userDataDirs)].map(directory => `--user-data-dir=${directory}`)
-  return output.split('\n').flatMap(line => {
+  const directories = new Set(userDataDirs.map(directory => path.resolve(directory)))
+  for (const directory of userDataDirs) {
+    try {
+      directories.add(realpathSync(directory))
+    } catch {
+      // Exact spelling can still identify a holder of a not-yet-created profile.
+    }
+  }
+  const holders: number[] = []
+  for (const line of output.split('\n')) {
     const match = /^\s*(\d+)\s+(.*)$/u.exec(line)
-    if (match === null) return []
+    if (match === null) continue
     const pid = Number(match[1])
     const command = match[2] ?? ''
-    return pid !== process.pid && arguments_.some(argument => commandUsesUserDataDir(command, argument)) ? [pid] : []
-  })
+    if (pid === process.pid || !command.includes('--user-data-dir')) continue
+    // A final, unquoted, absolute value is the only ps spelling we resolve.
+    // Whitespace/quotes, multiple switches or trailing argv cannot be decoded
+    // reliably; never mistake a prefix of a spaced alias for an unrelated path.
+    const values = [...command.matchAll(/--user-data-dir(?:=|\s+)([^\s'"`]+)(?=\s|$)/gu)]
+    const value = values[0]
+    if (
+      values.length !== 1 || value === undefined || !path.isAbsolute(value[1]!)
+      || command.slice(value.index! + value[0].length).trim() !== ''
+    ) return undefined
+    const directory = value[1]!
+    if (directories.has(directory)) {
+      holders.push(pid)
+      continue
+    }
+    try {
+      if (directories.has(realpathSync(directory))) holders.push(pid)
+    } catch {
+      return undefined
+    }
+  }
+  return holders
 }

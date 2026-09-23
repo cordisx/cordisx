@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
-import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import path from 'node:path'
 
 export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
@@ -157,14 +156,6 @@ export class LegacySupervisorLockError extends Error {
   }
 }
 
-function operationLockCommand(fd: number): { readonly command: string; readonly args: readonly string[] } {
-  if (process.platform === 'darwin') return { command: '/usr/bin/lockf', args: ['-s', '-t', '0', String(fd)] }
-  if (process.platform === 'linux') {
-    return { command: '/usr/bin/flock', args: ['--exclusive', '--nonblock', '--conflict-exit-code', '75', String(fd)] }
-  }
-  throw new Error(`CordisX background supervision is unsupported on ${process.platform}: no kernel lock backend`)
-}
-
 async function ensureLegacyFence(paths: SupervisorPaths, recoverLegacy: boolean): Promise<void> {
   try {
     const metadata = await lstat(paths.lock)
@@ -193,35 +184,20 @@ export async function acquireSupervisorStartLock(
   options: { readonly recoverLegacy?: boolean } = {},
 ): Promise<() => Promise<void>> {
   await ensureSupervisorDirectory(paths)
-  const flags = constants.O_CREAT | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
-  const handle = await open(paths.mutex, flags, 0o600)
+  let release: () => Promise<void>
   try {
-    await chmod(paths.mutex, 0o600)
-    const invocation = operationLockCommand(3)
-    const locked = spawnSync(invocation.command, invocation.args, {
-      stdio: ['ignore', 'ignore', 'pipe', handle.fd],
-      encoding: 'utf8',
-    })
-    if (locked.error !== undefined) throw locked.error
-    if (locked.status === 75) throw new SupervisorOperationBusyError()
-    if (locked.status !== 0) {
-      throw new Error(
-        `failed to acquire CordisX startup operation lock (${
-          locked.status ?? locked.signal ?? 'unknown'
-        }): ${locked.stderr.trim()}`,
-      )
-    }
-    await ensureLegacyFence(paths, options.recoverLegacy === true)
+    release = await acquireKernelOperationLock(paths.mutex)
   } catch (error) {
-    await handle.close().catch(() => undefined)
+    if (error instanceof KernelOperationBusyError) throw new SupervisorOperationBusyError()
     throw error
   }
-  let released = false
-  return async () => {
-    if (released) return
-    released = true
-    await handle.close()
+  try {
+    await ensureLegacyFence(paths, options.recoverLegacy === true)
+  } catch (error) {
+    await release().catch(() => undefined)
+    throw error
   }
+  return release
 }
 
 /**

@@ -48,8 +48,8 @@ npx cordisx@beta start codex default --recover-startup
 其中的 `owner.json` 记录持有它的启动器进程及其启动时间。正常的 `stop`、
 `restart` 或启动器退出都会释放它。
 
-如果该启动器已不存在（例如被 `kill -9`、崩溃或重启机器），下次启动会自动
-回收这个锁，并在 `host.log` 中写入 `reclaimed stale Codex profile launch lock`；
+如果该启动器已不存在（例如被 `kill -9`、崩溃或重启机器），且没有存活宿主、进程参数
+可明确识别，下次启动会自动回收 v2 锁，并在 `host.log` 中写入 `reclaimed stale Codex profile launch lock`；
 这种情况不需要手工清理。`--recover-startup` 与它无关：该选项只转换
 `~/.cordisx/run/<app>/<profile>/` 下的旧版 `start.lock`。
 
@@ -62,6 +62,12 @@ npx cordisx@beta start codex default --recover-startup
 - `unrecognized launch lock` 或 `requires inspection`：owner 记录缺失、指向其他
   profile 路径，或进程身份无法核实。请检查提示中的锁目录，确认没有任何进程在
   使用该 profile 后再删除。
+- `Legacy v1 locks require manual cleanup`：旧版回收器不遵守新互斥锁，必须先停止
+  所有旧版 CordisX 启动器及使用此 profile 的宿主，再手工删除提示中的锁目录。
+- `another launch or release operation`：等待当前启动或释放操作完成后重试。
+
+不要删除 `<profile>.cordisx-launch-mutex`。包含空格、引号或后续参数等无法可靠还原的
+进程参数会保守地阻止回收，即使该进程可能使用其他 profile；请先检查再手工清理。
 
 回收规则见[启动器运行时参考](launcher-runtime.md#host-profiles-cleanup-and-skill-deployment)。
 后台启动因上述任一原因失败时，`cordisx start` 和 `cordisx status` 会直接报告

@@ -2,6 +2,7 @@ import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promis
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { liveProcessStartedAt, processesUsingUserDataDir, recordedProcessStatus } from './process-identity.js'
+import { acquireKernelOperationLock, KernelOperationBusyError } from './kernel-operation-lock.js'
 
 export interface CodexProfileLaunchLease {
   readonly userDataDir: string
@@ -14,7 +15,7 @@ export interface CodexProfileLaunchLeaseOptions {
 }
 
 interface ProfileLeaseRecord {
-  readonly version: 1
+  readonly version: 2
   readonly pid: number
   readonly processStartedAt: string
   readonly token: string
@@ -41,7 +42,7 @@ function parseProfileLeaseRecord(source: string): ProfileLeaseRecord | undefined
   try {
     const value = JSON.parse(source) as Partial<ProfileLeaseRecord>
     if (
-      value.version !== 1 || !Number.isInteger(value.pid) || value.pid! <= 0
+      value.version !== 2 || !Number.isInteger(value.pid) || value.pid! <= 0
       || typeof value.processStartedAt !== 'string' || value.processStartedAt === ''
       || typeof value.token !== 'string' || value.token === ''
       || typeof value.userDataDir !== 'string' || !path.isAbsolute(value.userDataDir)
@@ -53,9 +54,8 @@ function parseProfileLeaseRecord(source: string): ProfileLeaseRecord | undefined
 }
 
 /**
- * Move a stale lock aside before deleting it. The rename is atomic, so two
- * launchers that observed the same exited owner cannot both delete a
- * replacement lock that a third launcher created in between.
+ * Called only under the stable profile operation mutex, including inspection
+ * and replacement publication. Rename alone cannot fence delayed reclaimers.
  */
 async function reclaimStaleProfileLease(lockPath: string, stale: ProfileLeaseRecord): Promise<void> {
   const quarantine = `${lockPath}.stale-${randomUUID()}`
@@ -94,6 +94,29 @@ export async function acquireCodexProfileLaunchLease(
   options: CodexProfileLaunchLeaseOptions = {},
 ): Promise<CodexProfileLaunchLease> {
   const resolvedProfile = await canonicalProfileLeaseTarget(userDataDir)
+  const unlock = await acquireProfileOperationLock(resolvedProfile)
+  try {
+    return await acquireLockedProfileLease(resolvedProfile, options)
+  } finally {
+    await unlock()
+  }
+}
+
+async function acquireProfileOperationLock(profile: string): Promise<() => Promise<void>> {
+  try {
+    return await acquireKernelOperationLock(`${profile}.cordisx-launch-mutex`)
+  } catch (error) {
+    if (error instanceof KernelOperationBusyError) {
+      throw new Error(`Codex profile is in use by another launch or release operation: ${profile}`)
+    }
+    throw error
+  }
+}
+
+async function acquireLockedProfileLease(
+  resolvedProfile: string,
+  options: CodexProfileLaunchLeaseOptions,
+): Promise<CodexProfileLaunchLease> {
   const lockPath = profileLeasePath(resolvedProfile)
   const ownerPath = path.join(lockPath, 'owner.json')
   const processStartedAt = liveProcessStartedAt(process.pid)
@@ -105,7 +128,7 @@ export async function acquireCodexProfileLaunchLease(
       await mkdir(lockPath, { mode: 0o700 })
       createdLock = true
       const record: ProfileLeaseRecord = {
-        version: 1,
+        version: 2,
         pid: process.pid,
         processStartedAt,
         token: randomUUID(),
@@ -120,12 +143,17 @@ export async function acquireCodexProfileLaunchLease(
           if (released) return
           if (releasing !== undefined) return await releasing
           const operation = (async () => {
-            const current = parseProfileLeaseRecord(await readFile(ownerPath, 'utf8').catch(() => ''))
-            if (current?.token !== record.token) {
-              throw new Error(`Codex profile launch lease ownership changed: ${resolvedProfile}`)
+            const unlock = await acquireProfileOperationLock(resolvedProfile)
+            try {
+              const current = parseProfileLeaseRecord(await readFile(ownerPath, 'utf8').catch(() => ''))
+              if (current?.token !== record.token) {
+                throw new Error(`Codex profile launch lease ownership changed: ${resolvedProfile}`)
+              }
+              await rm(lockPath, { recursive: true })
+              released = true
+            } finally {
+              await unlock()
             }
-            await rm(lockPath, { recursive: true })
-            released = true
           })()
           releasing = operation
           try {
@@ -144,7 +172,7 @@ export async function acquireCodexProfileLaunchLease(
       const owner = parseProfileLeaseRecord(await readFile(ownerPath, 'utf8').catch(() => ''))
       if (owner === undefined || owner.userDataDir !== resolvedProfile) {
         throw new Error(
-          `Codex profile is in use or has an unrecognized launch lock; inspect ${lockPath} before launching: ${resolvedProfile}`,
+          `Codex profile is in use or has an unrecognized launch lock; inspect ${lockPath} before launching: ${resolvedProfile}. Legacy v1 locks require manual cleanup only after all older CordisX launchers and profile Hosts have exited`,
         )
       }
       const status = recordedProcessStatus(owner.pid, owner.processStartedAt)
@@ -161,7 +189,7 @@ export async function acquireCodexProfileLaunchLease(
           `Codex profile launch lock was replaced during recovery by another exited launcher process ${owner.pid}; inspect ${lockPath}`,
         )
       }
-      const holders = processesUsingUserDataDir([path.resolve(userDataDir), resolvedProfile])
+      const holders = processesUsingUserDataDir([resolvedProfile])
       if (holders === undefined) {
         throw new Error(
           `Codex profile has a stale launch lock that requires inspection because live Host processes could not be enumerated: ${lockPath}`,

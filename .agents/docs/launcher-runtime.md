@@ -139,12 +139,27 @@ user-supplied `--profile-dir` never grants a broad helper-cleanup target.
 Each independent `user-data-dir` is reserved by an adjacent
 `<profile>.cordisx-launch-lock` directory whose `owner.json` records the
 launcher PID, its process start time, a random token, and the canonical profile
-path; release verifies the token before removing the directory. A lock whose
+path in a version-2 record; release verifies the token before removing the directory. A lock whose
 recorded launcher identity is gone (the PID is absent or has a different start
 time) is reclaimed automatically only after the process table shows no live
-command line using that `--user-data-dir`. The reclaim renames the stale
-directory aside atomically and re-verifies its token before deletion, so
-concurrent launchers cannot delete each other's replacement lock. A live owner,
+command line using that `--user-data-dir`. On macOS and Linux, acquisition,
+inspection, reclaim, owner publication, failure cleanup and release all hold
+the same canonical-profile kernel mutex, `<profile>.cordisx-launch-mutex`.
+Never delete or rename that mutex, even after release. It is independent of
+CordisX home, app/profile names, and foreground/background launch mode.
+Other platforms fail closed without a kernel backend.
+
+Version-1 locks are not automatically migrated: older reclaimers do not honor
+the mutex and may already have inspected the stale record. Stop all older
+CordisX launchers and Hosts using the profile before manually removing a v1
+lock directory. New v2 records are unrecognized by those older launchers.
+This does not fence already-running legacy operations after unsafe manual cleanup.
+
+Holder detection resolves symlink aliases for an absolute, unquoted final
+`--user-data-dir` value. Because `ps` command text is not lossless argv, spaced,
+quoted, relative, unresolved, duplicate or non-final values make stale recovery
+fail closed, including when that process might belong to an unrelated profile.
+Known unrelated resolvable profiles do not block recovery. A live owner,
 a profile still used by a surviving Host tree, an unrecognized owner record, or
 an unverifiable process identity fails closed and names the lock to inspect.
 This lease is distinct from the app/profile startup lock described in

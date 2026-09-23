@@ -2,8 +2,24 @@ import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, write
 import { type ChildProcess, spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+const fixturePids = vi.hoisted(() => new Set<number>())
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...actual,
+    execFileSync: (file: string, args: string[], options: { encoding: 'utf8' }) => {
+      const output = actual.execFileSync(file, args, options)
+      // Keep real child argv evidence without depending on unrelated desktop apps.
+      return args.includes('pid=,command=')
+        ? output.split('\n').filter(line => fixturePids.has(Number(/^\s*(\d+)/u.exec(line)?.[1]))).join('\n')
+        : output
+    },
+  }
+})
 import { acquireCodexProfileLaunchLease } from '../packages/cli/src/launcher/profile-launch-lease.js'
+import { acquireKernelOperationLock } from '../packages/cli/src/launcher/kernel-operation-lock.js'
 import {
   liveProcessStartedAt,
   processesUsingUserDataDir,
@@ -23,7 +39,7 @@ async function writeLock(
       path.join(lock, 'owner.json'),
       `${
         JSON.stringify({
-          version: 1,
+          version: 2,
           pid: NEVER_A_PID,
           processStartedAt: 'gone',
           token: 'stale-token',
@@ -38,9 +54,11 @@ async function writeLock(
 
 /** A process whose command line carries the profile, like a Host tree that outlived its launcher. */
 function spawnProfileHolder(profile: string): ChildProcess {
-  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', `--user-data-dir=${profile}`], {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', '--', `--user-data-dir=${profile}`], {
     stdio: 'ignore',
   })
+  fixturePids.add(child.pid!)
+  return child
 }
 
 async function waitForHolderVisibility(profile: string, pid: number): Promise<void> {
@@ -52,6 +70,7 @@ async function waitForHolderVisibility(profile: string, pid: number): Promise<vo
 }
 
 async function stop(child: ChildProcess): Promise<void> {
+  fixturePids.delete(child.pid!)
   if (child.exitCode !== null || child.signalCode !== null) return
   const exited = new Promise(resolve => child.once('exit', resolve))
   child.kill('SIGKILL')
@@ -59,6 +78,55 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 
 describe('Codex profile launch lease', () => {
+  it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+    'shares the canonical operation fence across foreground processes and separate homes',
+    async () => {
+      const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cordisx-cross-home-lease-')))
+      const profile = path.join(directory, 'profile')
+      const alias = path.join(directory, 'alias')
+      await mkdir(profile)
+      await symlink(profile, alias)
+      const moduleUrl = new URL('../packages/cli/src/launcher/profile-launch-lease.ts', import.meta.url).href
+      const unlock = await acquireKernelOperationLock(`${profile}.cordisx-launch-mutex`)
+      const children: ChildProcess[] = []
+      try {
+        for (const [index, target] of [profile, alias].entries()) {
+          const child = spawn(process.execPath, [
+            '--import',
+            'tsx',
+            '--input-type=module',
+            '-e',
+            `import { acquireCodexProfileLaunchLease } from ${JSON.stringify(moduleUrl)};
+             try { await acquireCodexProfileLaunchLease(process.argv[1]); process.exitCode = 1 }
+             catch (error) { process.stdout.write(error.message) }`,
+            target,
+          ], {
+            env: { ...process.env, CORDISX_HOME: path.join(directory, `home-${index}`) },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+          children.push(child)
+          let output = ''
+          child.stdout!.on('data', chunk => {
+            output += String(chunk)
+          })
+          child.stderr!.on('data', chunk => {
+            output += String(chunk)
+          })
+          const code = await new Promise<number | null>((resolve, reject) => {
+            child.once('error', reject)
+            child.once('exit', resolve)
+          })
+          expect(code, output).toBe(0)
+          expect(output).toContain('another launch or release operation')
+        }
+      } finally {
+        await unlock()
+        for (const child of children) await stop(child)
+        await rm(directory, { recursive: true, force: true })
+      }
+    },
+  )
+
   it('holds an exclusive launch lease without deleting the persistent profile', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-lease-test-'))
     const profile = path.join(directory, 'profile')
@@ -225,6 +293,8 @@ describe('recorded process identity', () => {
     async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-holder-test-'))
       const profile = path.join(directory, 'profile')
+      await mkdir(profile)
+      await mkdir(`${profile}-other`)
       const exact = spawnProfileHolder(profile)
       const longer = spawnProfileHolder(`${profile}-other`)
       try {
