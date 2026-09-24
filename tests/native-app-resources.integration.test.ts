@@ -6,7 +6,10 @@ import vm from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
-import { createNativeSubmissionComposition } from '../packages/cli/src/launcher/native-submission-composition.js'
+import {
+  createNativeSubmissionComposition,
+  prepareNativeSubmissionBootstrap,
+} from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
 import { resources } from './fixtures/native-submission-structure.js'
@@ -216,6 +219,41 @@ it.skipIf(process.platform !== 'darwin')(
       } finally {
         await installed.dispose()
       }
+    } finally {
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'reports fixed completion stages without letting the observer alter startup',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'stage-codex-home')
+    await mkdir(codexHome)
+    const stages: string[] = []
+    const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+      cacheDirectory: path.join(f.contents, 'stage-cache'),
+    })
+    const composition = await bootstrap.complete(
+      { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
+      codexHome,
+      {
+        nativeModelDiscovery: false,
+        onStage: stage => {
+          stages.push(stage)
+          throw new Error('fixture observer failure')
+        },
+      },
+    )
+    try {
+      expect(stages).toEqual([
+        'native-submission-completion-start',
+        'native-submission-resource-analysis-ready',
+        'native-submission-managed-catalog-ready',
+        'native-submission-native-catalog-ready',
+        'native-submission-controller-bound',
+      ])
     } finally {
       await composition.close()
     }

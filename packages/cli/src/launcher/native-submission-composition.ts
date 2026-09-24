@@ -83,6 +83,7 @@ export interface NativeSubmissionBootstrap {
   close(): Promise<void>
 }
 interface NativeSubmissionCatalogOptions {
+  readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
@@ -92,6 +93,12 @@ interface NativeSubmissionCatalogOptions {
   readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
 }
+export type NativeSubmissionCompletionStage =
+  | 'native-submission-completion-start'
+  | 'native-submission-resource-analysis-ready'
+  | 'native-submission-managed-catalog-ready'
+  | 'native-submission-native-catalog-ready'
+  | 'native-submission-controller-bound'
 export function nativeAppServerIntermediaryPath(): string {
   return fileURLToPath(new URL('../../assets/launcher/native-app-server-intermediary.mjs', import.meta.url))
 }
@@ -377,10 +384,17 @@ export async function prepareNativeSubmissionBootstrap(
     environment,
     complete(activation, codexHome, completeOptions = {}) {
       completion ??= (async () => {
+        const reportStage = (stage: NativeSubmissionCompletionStage): void => {
+          try {
+            completeOptions.onStage?.(stage)
+          } catch { /* Diagnostics must not change native submission startup. */ }
+        }
+        reportStage('native-submission-completion-start')
         const discovered = await (capabilities ??= nativeSubmissionTransforms(
           contents,
           options.cacheDirectory ?? defaultNativeSubmissionCacheDirectory(),
         ))
+        reportStage('native-submission-resource-analysis-ready')
         if (closePromise !== undefined) throw new Error('Native submission bootstrap was closed')
         if (completeOptions.managedCatalog) {
           try {
@@ -390,6 +404,7 @@ export async function prepareNativeSubmissionBootstrap(
             })
           } catch { /* An unavailable managed owner must not disable unrelated native providers. */ }
         }
+        reportStage('native-submission-managed-catalog-ready')
         let providerSyncEnvironment: Readonly<Record<string, string>> = Object.freeze({})
         if (managed && completeOptions.managedCatalog && completeOptions.providerBindings?.length) {
           const targetProfileRef = Object.freeze({
@@ -529,6 +544,7 @@ export async function prepareNativeSubmissionBootstrap(
               subscribeSource: listener => dynamic!.subscribe(() => listener(dynamic!.snapshot())),
             }),
         })
+        reportStage('native-submission-native-catalog-ready')
         management = new CompositeCatalogManagement(nativeManagement, managed)
         const cdp = createNativeSubmissionCdpAuthority({
           catalogSubscribe: (listener: () => void) => {
@@ -572,6 +588,7 @@ export async function prepareNativeSubmissionBootstrap(
         })
         control.bindController(controller)
         cdp.bindController(controller)
+        reportStage('native-submission-controller-bound')
         return {
           installation: { authority: cdp, ...discovered },
           environment: Object.freeze({ ...environment, ...providerSyncEnvironment }),
