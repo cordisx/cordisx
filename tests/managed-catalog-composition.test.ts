@@ -11,6 +11,7 @@ import { createNativeProviderCredentialBroker } from '../packages/cli/src/launch
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { output, scriptFixture } from './script-source-helpers.js'
 
 class Keychain implements LauncherKeychainBackend {
   values = new Map<string, string>()
@@ -40,6 +41,11 @@ const settings = {
   protocol: 'responses' as const,
   discoveryEnabled: false,
   strategy: { kind: 'manual' as const, ids: ['b', 'a'] },
+}
+function deferred<Value>() {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>(done => resolve = done)
+  return { promise, resolve }
 }
 
 describe('managed catalog production owner', () => {
@@ -497,6 +503,51 @@ describe('managed catalog production owner', () => {
     })
     expect(owner.snapshot().views[0]?.revision).toBe(before.revision)
     expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
+  })
+
+  it('rejects a queued preference command when its source membership changes', async () => {
+    const { owner, options } = await setup()
+    const script = await scriptFixture(output([{ id: 'a' }]))
+    await create(owner)
+    try {
+      await owner.command({
+        ...scope(owner),
+        operation: 'configureScript',
+        mode: 'replace',
+        config: script.config,
+      }, () => true)
+      expect((await owner.command({ ...scope(owner), operation: 'runScript' }, () => true)).status).toBe('applied')
+      await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows[0]?.id).toBe('a'))
+      await writeFile(script.file, `setTimeout(() => ${output([{ id: 'scripted' }])}, 100)`)
+      expect((await owner.command({ ...scope(owner), operation: 'runScript' }, () => true)).status).toBe('applied')
+      const durable = await readFile(statePath(options.homeDir), 'utf8')
+      const entered = deferred<void>()
+      const release = deferred<void>()
+      const mutate = owner.preferenceStore.mutate.bind(owner.preferenceStore)
+      vi.spyOn(owner.preferenceStore, 'mutate').mockImplementationOnce(async (...args) => {
+        entered.resolve()
+        await release.promise
+        return await mutate(...args)
+      })
+      const command = owner.command({
+        ...scope(owner),
+        operation: 'setOverlay',
+        modelId: 'a',
+        blocked: true,
+      }, () => true)
+      try {
+        await entered.promise
+        await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows.some(row => row.id === 'scripted')).toBe(true))
+      } finally {
+        release.resolve()
+      }
+
+      await expect(command).resolves.toEqual({ status: 'conflict', code: 'conflict' })
+      expect(owner.preferenceStore.snapshot().bindings).toEqual([])
+      expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
+    } finally {
+      await script.close()
+    }
   })
 
   it('keeps supported blocked managed rows recoverable across reopen', async () => {

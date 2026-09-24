@@ -385,8 +385,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult> {
+    const admitted = () => !this.#closed && authorized()
     const execute = async (): Promise<CatalogManagementResult> => {
-      if (this.#closed || !authorized()) return { status: 'rejected', code: 'permission' }
+      if (!admitted()) return { status: 'rejected', code: 'permission' }
       if (command.operation === 'createConnection') return { status: 'rejected', code: 'unsupported' }
       if (!['refresh', 'setOverlay', 'resetOrder', 'restoreBlocked'].includes(command.operation)) {
         return { status: 'rejected', code: 'unsupported' }
@@ -414,23 +415,23 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
             await this.#overlay.mutate(
               { ...command, ...scope },
               this.sourceModels(provider).map(model => model.id),
-              authorized,
+              admitted,
             )
           } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
             await this.#overlay.mutate(
               { ...scope, operation: command.operation },
               this.sourceModels(provider).map(model => model.id),
-              authorized,
+              admitted,
             )
           } else {
             return { status: 'rejected', code: 'unsupported' }
           }
           this.changed()
         }
-        if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (!admitted()) return { status: 'rejected', code: 'permission' }
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
-        if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (!admitted()) return { status: 'rejected', code: 'permission' }
         return {
           status: 'rejected',
           code: error instanceof ManagementOverlayError ? error.code : 'unavailable',

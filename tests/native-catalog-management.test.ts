@@ -8,8 +8,14 @@ import {
   NativeCatalogManagement,
 } from '../packages/cli/src/launcher/model-catalog/native-catalog-management.js'
 import { NativeConfigCatalogDiscovery } from '../packages/cli/src/launcher/model-catalog/native-config-catalog-discovery.js'
+import { ManagementOverlayStore } from '../packages/cli/src/model-catalog/management-overlay.js'
 
 const roots: string[] = []
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => resolve = done)
+  return { promise, resolve }
+}
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
@@ -74,6 +80,52 @@ describe('native catalog management', () => {
     expect((await reopened.catalog())[0]?.models.map(model => model.id)).toEqual(['a'])
     reopened.close()
     management.close()
+  })
+
+  it('does not publish a shared preference write queued when the native authority closes', async () => {
+    const f = await fixture()
+    const entered = deferred()
+    const release = deferred()
+    let attempts = 0, commits = 0
+    const overlayStore = new ManagementOverlayStore(async (_data, _expectedRevision, authorized) => {
+      attempts++
+      if (attempts === 1) {
+        entered.resolve()
+        await release.promise
+      }
+      if (!authorized()) throw new Error('permission')
+      commits++
+    })
+    const blocking = overlayStore.mutate({
+      bindingRef: 'fixture:blocking',
+      scopeRevision: 'fixture-scope',
+      expectedRevision: '0',
+      operation: 'setOverlay',
+      modelId: 'held',
+      pinned: true,
+    }, ['held'])
+    await entered.promise
+
+    const native = await NativeCatalogManagement.open({ load: f.load, overlayStore })
+    const view = native.snapshot().views[0]!
+    const authorized = vi.fn(() => true)
+    const command = native.command({
+      operation: 'setOverlay',
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: view.revision,
+      modelId: 'a',
+      blocked: true,
+    }, authorized)
+    await vi.waitFor(() => expect(authorized).toHaveBeenCalled())
+    native.close()
+    release.resolve()
+    await blocking
+
+    await expect(command).resolves.toEqual({ status: 'rejected', code: 'permission' })
+    expect(attempts).toBe(2)
+    expect(commits).toBe(1)
+    expect(overlayStore.read(view.bindingRef, view.scopeRevision).entries).toEqual([])
   })
 
   it('rereads a static catalog on refresh and emits a sanitized native view update', async () => {

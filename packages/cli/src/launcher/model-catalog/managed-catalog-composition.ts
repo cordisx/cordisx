@@ -443,11 +443,22 @@ export class ManagedCatalogComposition {
 
   private revision(view: ManagedProviderView): string {
     return [
-      view.revision,
-      this.#service.snapshot(view.id)?.revision ?? 0,
+      this.sourceRevision(view),
       this.preferenceStore.read(view.id, view.scopeRevision).revision,
-      this.#scripts.readStatus(view.id)?.revision ?? 0,
     ].join(':')
+  }
+
+  private sourceRevision(view: ManagedProviderView): string {
+    return createHash('sha256').update(JSON.stringify([
+      view.revision,
+      view.scopeRevision,
+      this.members(view),
+    ])).digest('hex')
+  }
+
+  private currentSourceRevision(bindingRef: string): string | undefined {
+    const view = this.#owner.snapshot().find(candidate => candidate.id === bindingRef)
+    return view === undefined ? undefined : this.sourceRevision(view)
   }
 
   catalog(): readonly NativeModelProviderCatalogEntry[] {
@@ -550,6 +561,8 @@ export class ManagedCatalogComposition {
     command = structuredClone(command)
     const admitted = () => !this.#closing && !this.#closed && authorized()
     return this.serial(async () => {
+      let expectedSourceRevision: string | undefined
+      let sourceBindingRef: string | undefined
       try {
         if (this.#closed || this.#closing || !authorized()) return { status: 'rejected', code: 'permission' }
         const input = object(command)
@@ -598,18 +611,28 @@ export class ManagedCatalogComposition {
             return { status: 'conflict', code: 'scope-changed' }
           }
           if (this.revision(view) !== command.expectedRevision) return { status: 'conflict', code: 'conflict' }
+          sourceBindingRef = view.id
+          expectedSourceRevision = this.sourceRevision(view)
+          const sourceAdmitted = () => admitted() && this.currentSourceRevision(view.id) === expectedSourceRevision
           if (
             view.settings.supplement.length && (command.operation === 'requestCredentialReplacement'
               || command.operation === 'updateConnection'
                 && (command.settings.endpoint !== view.settings.endpoint
                   || command.settings.protocol !== view.settings.protocol))
           ) return { status: 'conflict', code: 'scope-changed' }
-          await this.apply(view, command, admitted)
+          await this.apply(view, command, sourceAdmitted)
         }
         this.changed()
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
         if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (
+          expectedSourceRevision !== undefined
+          && sourceBindingRef !== undefined
+          && this.currentSourceRevision(sourceBindingRef) !== expectedSourceRevision
+        ) {
+          return { status: 'conflict', code: 'conflict' }
+        }
         const code = error instanceof CatalogError
           ? error.code === 'ambiguous' ? 'unsupported' : error.code
           : error instanceof ScriptSourceError || error instanceof ManagementOverlayError
