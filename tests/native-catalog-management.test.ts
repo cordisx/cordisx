@@ -107,7 +107,7 @@ describe('native catalog management', () => {
     const f = await fixture()
     const native = await NativeCatalogManagement.open({ load: f.load })
     const initial = native.snapshot().views[0]!
-    expect(initial.rows.find(row => row.id === 'a')).toMatchObject({ selectable: true })
+    expect(initial.rows.find(row => row.id === 'a')).toMatchObject({ compatibility: 'supported', selectable: true })
     await expect(native.command({
       operation: 'setOverlay',
       bindingRef: initial.bindingRef,
@@ -119,6 +119,7 @@ describe('native catalog management', () => {
     expect(native.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
       selectable: false,
       blocked: true,
+      compatibility: 'supported',
       reason: 'blocked',
     })
     const blocked = native.snapshot().views[0]!
@@ -131,6 +132,7 @@ describe('native catalog management', () => {
     expect(native.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
       selectable: true,
       blocked: false,
+      compatibility: 'supported',
     })
 
     await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\nwire_api="chat-completions"\n')
@@ -142,13 +144,24 @@ describe('native catalog management', () => {
       expectedRevision: beforeRouteChange.revision,
     }, () => true)).resolves.toMatchObject({ status: 'applied' })
     const chat = native
-    expect(chat.snapshot().views[0]?.rows.every(row => !row.selectable)).toBe(true)
+    expect(chat.snapshot().views[0]?.rows).toEqual([
+      expect.objectContaining({ compatibility: 'unsupported', selectable: false }),
+      expect.objectContaining({ compatibility: 'unsupported', selectable: false }),
+    ])
     expect(await chat.catalog()).toEqual([expect.objectContaining({ models: [] })])
 
-    await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\n')
+    await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\nwire_api="future"\n')
     const unknown = await NativeCatalogManagement.open({ load: f.load })
-    expect(unknown.snapshot().views[0]?.rows.every(row => !row.selectable)).toBe(true)
+    expect(unknown.snapshot().views[0]?.rows).toEqual([
+      expect.objectContaining({ compatibility: 'unknown', selectable: false }),
+      expect.objectContaining({ compatibility: 'unknown', selectable: false }),
+    ])
     unknown.close()
+
+    await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\n')
+    const defaulted = await NativeCatalogManagement.open({ load: f.load })
+    expect(defaulted.snapshot().views[0]?.rows.every(row => row.selectable)).toBe(true)
+    defaulted.close()
     native.close()
   })
 
@@ -205,11 +218,17 @@ describe('native catalog management', () => {
       expect.objectContaining({
         id: 'deepseek-flash',
         label: 'Pinned label',
+        compatibility: 'supported',
         selectable: true,
         provenance: ['auto', 'native'],
         protocolCapabilities: { responses: true },
       }),
-      expect.objectContaining({ id: 'remote-unknown', selectable: false, reason: 'unconfirmed' }),
+      expect.objectContaining({
+        id: 'remote-unknown',
+        compatibility: 'unknown',
+        selectable: false,
+        reason: 'unconfirmed',
+      }),
     ]))
     expect((await native.catalog())[0]?.models.map(model => model.id)).toEqual(['a', 'b', 'deepseek-flash'])
     expect(changed).toHaveBeenCalled()
@@ -225,6 +244,7 @@ describe('native catalog management', () => {
     expect(stale).toMatchObject({ freshness: 'stale', outcome: 'error' })
     expect(stale.rows.find(row => row.id === 'deepseek-flash')).toMatchObject({
       label: 'Pinned label',
+      compatibility: 'supported',
       selectable: true,
       protocolCapabilities: { responses: true },
     })

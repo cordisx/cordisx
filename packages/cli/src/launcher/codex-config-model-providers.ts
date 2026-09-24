@@ -115,7 +115,9 @@ export async function codexConfigModelProviders(
       const provider = record(value)
       if (id === undefined || id === 'openai' || provider === undefined) return []
       const endpoint = text(provider.base_url, 4_096)
-      const wireApi = provider.wire_api === 'responses' || provider.wire_api === 'chat-completions'
+      const wireApi = provider.wire_api === undefined
+        ? 'responses'
+        : provider.wire_api === 'responses' || provider.wire_api === 'chat-completions'
         ? provider.wire_api
         : undefined
       if (wireApi !== undefined) providerWireApis.set(id, wireApi)

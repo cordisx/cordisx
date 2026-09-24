@@ -225,7 +225,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
           routeAvailable: available,
           userDisabled: false,
         })
-        return { ...model, selectable: eligibility.selectable }
+        return {
+          ...model,
+          compatibility: eligibility.compatibility,
+          selectable: eligibility.selectable,
+        }
       }),
       this.#overlay.read(bindingRef(provider.providerId), this.scope(provider.providerId)),
     )

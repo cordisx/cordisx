@@ -135,12 +135,14 @@ describe('Codex config model providers', () => {
         'wire_api = "chat-completions"',
         '[model_providers.unknown]',
         'wire_api = "future"',
+        '[model_providers.defaulted]',
       ].join('\n'),
     )
     const projection = await codexConfigModelProviders(codexHome)
     expect([...projection.providerWireApis]).toEqual([
       ['responses', 'responses'],
       ['chat', 'chat-completions'],
+      ['defaulted', 'responses'],
     ])
     expect(JSON.stringify(projection)).not.toContain('wire_api')
   })

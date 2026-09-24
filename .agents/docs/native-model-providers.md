@@ -282,12 +282,17 @@ model is not proof of protocol support. Compatibility, route availability and
 the user's blocked preference are independent. The Host keeps the configured
 provider's `wire_api` in launcher-private state: `responses` is required for the
 current native submission path, `chat-completions` is explicitly unsupported,
-and a missing protocol remains unknown. On a Responses connection, exact native
-catalog or manual membership is an explicit usable declaration. Automatic
-membership still requires per-model `protocolCapabilities.responses: true`;
-`false` is explicitly unsupported and a missing capability remains unknown.
-Unknown and explicitly unsupported automatic members remain visible but
-unselectable. A compatible blocked row remains visible and can be restored.
+and omission uses Codex's current `responses` default. An explicit unrecognized
+protocol remains unknown in the bounded Host projection and receives no
+eligibility; current Codex rejects such a value when it loads configuration. On
+a Responses connection, exact native catalog or manual membership is an explicit
+usable declaration. Automatic membership still requires per-model
+`protocolCapabilities.responses: true`; `false` is explicitly unsupported and a
+missing capability remains unknown. Management rows retain this tri-state
+compatibility separately from `selectable`, route availability and the user's
+blocked preference. Unknown and explicitly unsupported automatic members remain
+visible for management but are not ordinary selector choices. A compatible
+blocked row remains visible in blocked management and can be restored.
 
 OpenCode Go accepts the bounded OpenAI-compatible list returned by its dedicated
 Go endpoint without treating one observed model count as a limit. OpenRouter
@@ -295,10 +300,13 @@ retains every structurally valid namespaced catalog row for management. It marks
 only bounded interactive rows with text input, text output, `tools` and
 `tool_choice` metadata as Responses candidates; dynamic `~` aliases, batch
 routes and rows missing any required metadata remain visible with an explicit
-unsupported capability. The candidate rule is service-contract evidence, not
-an individual runtime test or a GPT-family allowlist. Fixture coverage,
-including previously observed IDs, is not a permanent allowlist or a live
-upstream acceptance claim.
+unsupported capability for this synchronous native-selector path. OpenRouter
+documents `~` names as moving latest-version aliases and `:batch` models as
+asynchronous batch routes; excluding them is a CordisX reproducibility and
+interaction policy, not an upstream statement that they lack Responses support.
+The candidate rule is service-contract evidence, not an individual runtime test
+or a GPT-family allowlist. Fixture coverage, including previously observed IDs,
+is not a permanent allowlist or a live upstream acceptance claim.
 
 The [official DeepSeek Responses guide](https://api-docs.deepseek.com/guides/responses_api)
 and [Codex integration](https://api-docs.deepseek.com/quick_start/agent_integrations/codex)
