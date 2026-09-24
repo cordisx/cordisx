@@ -5,7 +5,12 @@ import path from 'node:path'
 import { ManagedProviderOwner } from '../packages/cli/src/launcher/model-catalog/managed-provider-owner.js'
 import { createManagedProviderApi } from '../packages/cli/src/launcher/model-catalog/managed-provider-api.js'
 import { builtinDiscoveryRegistry } from '../packages/cli/src/launcher/model-catalog/builtin-registry.js'
-import { type LauncherKeychainBackend, LauncherKeychainError } from '../packages/cli/src/launcher/secret-store.js'
+import {
+  createMacOSKeychainBackend,
+  type LauncherKeychainBackend,
+  LauncherKeychainError,
+  runKeychainHelperProcess,
+} from '../packages/cli/src/launcher/secret-store.js'
 import { resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
 
 class Keychain implements LauncherKeychainBackend {
@@ -57,6 +62,45 @@ describe('Host-owned managed Provider credentials', () => {
     owners.push(owner)
     return { owner, options, keychain, fetcher }
   }
+
+  it('waits on the initial Keychain status before opening the owner', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => release = resolve)
+    const keychain = new Keychain()
+    keychain.status = async () => {
+      await blocked
+      return 'unset'
+    }
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'provider-owner-blocked-'))
+    homes.push(homeDir)
+    let settled = false
+    const opening = ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain }).finally(() => settled = true)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(settled).toBe(false)
+    release()
+    const owner = await opening
+    owners.push(owner)
+  })
+
+  it('releases the owner lock after a bounded Keychain failure so startup can retry', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'provider-owner-timeout-'))
+    homes.push(homeDir)
+    const storedKeychain = new Keychain()
+    const initial = await ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain: storedKeychain })
+    const view = await initial.save({ settings }, async () => 'fixture-secret')
+    await initial.close()
+    const keychain = createMacOSKeychainBackend({
+      timeoutMs: 20,
+      invoke: async () =>
+        await runKeychainHelperProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], undefined, 20),
+    })
+    await expect(ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain })).rejects.toThrow(
+      'credential-unavailable',
+    )
+    const retried = await ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain: storedKeychain })
+    owners.push(retried)
+    expect(retried.snapshot()).toEqual([view])
+  })
 
   it('persists only in Keychain, restarts with stable scope, and exposes no raw credential', async () => {
     const { owner, options, keychain, fetcher } = await setup()

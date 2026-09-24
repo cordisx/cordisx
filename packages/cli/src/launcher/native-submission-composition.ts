@@ -400,9 +400,14 @@ export async function prepareNativeSubmissionBootstrap(
           try {
             managed = await ManagedCatalogComposition.open({
               ...completeOptions.managedCatalog,
+              keychainAuthenticationUI: false,
+              keychainTimeoutMs: 10_000,
               responsesAvailable: true,
             })
-          } catch { /* An unavailable managed owner must not disable unrelated native providers. */ }
+          } catch {
+            // Preserve stored providers for a later retry without blocking unrelated native providers.
+            console.warn('[cordisx] native managed model providers unavailable')
+          }
         }
         reportStage('native-submission-managed-catalog-ready')
         let providerSyncEnvironment: Readonly<Record<string, string>> = Object.freeze({})

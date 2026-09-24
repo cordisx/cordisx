@@ -27,6 +27,8 @@ interface OwnerOptions {
   readonly keychain?: LauncherKeychainBackend
   readonly fetcher?: DiscoveryFetch
   readonly platform?: NodeJS.Platform
+  readonly keychainAuthenticationUI?: boolean
+  readonly keychainTimeoutMs?: number
 }
 
 /** Host composition only. Never register this object as a plugin context service or renderer global. */
@@ -83,7 +85,12 @@ export class ManagedProviderOwner {
     const identity = await lstat(lock)
     const scope = createHash('sha256').update(JSON.stringify([home, options.profileId])).digest('hex')
     const owner = new ManagedProviderOwner(
-      options.keychain ?? createMacOSKeychainBackend(),
+      options.keychain ?? createMacOSKeychainBackend({
+        ...(options.keychainAuthenticationUI === undefined
+          ? {}
+          : { allowAuthenticationUI: options.keychainAuthenticationUI }),
+        ...(options.keychainTimeoutMs === undefined ? {} : { timeoutMs: options.keychainTimeoutMs }),
+      }),
       `cordisx/host-provider/v1/${scope}`,
       lock,
       identity,

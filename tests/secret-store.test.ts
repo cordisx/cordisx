@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   channelKeychainReference,
+  createMacOSKeychainBackend,
   type LauncherKeychainBackend,
   LauncherKeychainError,
   LauncherSecretStore,
+  runKeychainHelperProcess,
 } from '../packages/cli/src/launcher/secret-store.js'
 import { resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
 
@@ -29,6 +31,35 @@ class MemoryKeychain implements LauncherKeychainBackend {
 }
 
 describe('launcher Host-private channel secret store', () => {
+  it('can deny Keychain authentication UI for hidden startup access', async () => {
+    const invoke = vi.fn(async operation => Buffer.from(operation === 'status' ? 'unset' : 'fixture-secret'))
+    const backend = createMacOSKeychainBackend({ allowAuthenticationUI: false, timeoutMs: 10_000, invoke })
+    await expect(backend.status('fixture-service', 'fixture-account')).resolves.toBe('unset')
+    await expect(backend.read('fixture-service', 'fixture-account')).resolves.toBe('fixture-secret')
+    await backend.upsert('fixture-service', 'fixture-account', 'new-fixture-secret')
+    await backend.remove('fixture-service', 'fixture-account')
+    expect(invoke.mock.calls.map(call => [call[0], call[4], call[5]])).toEqual([
+      ['status', false, 10_000],
+      ['read', false, 10_000],
+      ['set', false, 10_000],
+      ['remove', false, 10_000],
+    ])
+  })
+
+  it('terminates a timed-out Keychain helper before rejecting', async () => {
+    const startedAt = Date.now()
+    await expect(runKeychainHelperProcess(
+      process.execPath,
+      [
+        '-e',
+        "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80));setInterval(()=>{},1000)",
+      ],
+      undefined,
+      200,
+    )).rejects.toMatchObject({ code: 'UNAVAILABLE' })
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250)
+  })
+
   it('writes, resolves, replaces and deletes with no secret/ref in renderer-safe results', async () => {
     const backend = new MemoryKeychain()
     const store = new LauncherSecretStore({ platform: 'darwin', backend })

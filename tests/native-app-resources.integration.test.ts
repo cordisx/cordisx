@@ -232,20 +232,48 @@ it.skipIf(process.platform !== 'darwin')(
     const codexHome = path.join(f.contents, 'stage-codex-home')
     await mkdir(codexHome)
     const stages: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    let releaseStatus!: () => void
+    const blockedStatus = new Promise<void>(resolve => releaseStatus = resolve)
+    const values = new Map<string, string>()
+    const keychain = {
+      async read(service: string, account: string) {
+        const value = values.get(`${service}/${account}`)
+        if (value === undefined) throw new Error('missing fixture value')
+        return value
+      },
+      async status(service: string, account: string): Promise<'set' | 'unset'> {
+        await blockedStatus
+        return values.has(`${service}/${account}`) ? 'set' : 'unset'
+      },
+      async upsert(service: string, account: string, value: string) {
+        values.set(`${service}/${account}`, value)
+      },
+      async remove(service: string, account: string) {
+        values.delete(`${service}/${account}`)
+      },
+    }
     const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
       cacheDirectory: path.join(f.contents, 'stage-cache'),
     })
-    const composition = await bootstrap.complete(
+    let settled = false
+    const completing = bootstrap.complete(
       { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
       codexHome,
       {
+        managedCatalog: { homeDir: codexHome, profileId: 'stage-fixture', keychain },
         nativeModelDiscovery: false,
         onStage: stage => {
           stages.push(stage)
           throw new Error('fixture observer failure')
         },
       },
-    )
+    ).finally(() => settled = true)
+    await vi.waitFor(() => expect(stages).toContain('native-submission-resource-analysis-ready'))
+    expect(settled).toBe(false)
+    expect(stages).not.toContain('native-submission-managed-catalog-ready')
+    releaseStatus()
+    const composition = await completing
     try {
       expect(stages).toEqual([
         'native-submission-completion-start',
@@ -254,6 +282,43 @@ it.skipIf(process.platform !== 'darwin')(
         'native-submission-native-catalog-ready',
         'native-submission-controller-bound',
       ])
+      expect(warn).not.toHaveBeenCalledWith('[cordisx] native managed model providers unavailable')
+    } finally {
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'continues native startup when managed Keychain ownership is unavailable',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'unavailable-owner-codex-home')
+    await mkdir(codexHome)
+    const stages: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const unavailable = async (): Promise<never> => {
+      throw new Error('fixture unavailable')
+    }
+    const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+      cacheDirectory: path.join(f.contents, 'unavailable-owner-cache'),
+    })
+    const composition = await bootstrap.complete(
+      { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
+      codexHome,
+      {
+        managedCatalog: {
+          homeDir: codexHome,
+          profileId: 'unavailable-owner',
+          keychain: { read: unavailable, status: unavailable, upsert: unavailable, remove: unavailable },
+        },
+        nativeModelDiscovery: false,
+        onStage: stage => stages.push(stage),
+      },
+    )
+    try {
+      expect(stages.at(-1)).toBe('native-submission-controller-bound')
+      expect(warn).toHaveBeenCalledWith('[cordisx] native managed model providers unavailable')
     } finally {
       await composition.close()
     }
