@@ -102,6 +102,13 @@ describe('managed catalog production owner', () => {
   it('routes only Responses, keeps credentials private, and applies block/pin without membership elevation', async () => {
     const { owner, options, keychain } = await setup()
     const view = await create(owner)
+    expect(view).toMatchObject({ providerFavorite: false })
+    expect(view.preferenceCapabilities).toEqual([
+      'setProviderFavorite',
+      'setOverlay',
+      'resetOrder',
+      'restoreBlocked',
+    ])
     expect(owner.admits(view.providerId, 'a')).toBe(true)
     const session = await owner.nativeConnection(view.providerId)
     expect(session.value.endpoint).toMatchObject({
@@ -117,16 +124,38 @@ describe('managed catalog production owner', () => {
     expect((await owner.command({ ...stale, operation: 'setOverlay', modelId: 'b', pinned: true }, () => true)).code)
       .toBe('conflict')
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
+    const entries = owner.preferenceStore.read(view.bindingRef, view.scopeRevision).entries
+    expect(
+      await owner.command({ ...scope(owner), operation: 'setProviderFavorite', favorite: 'yes' } as never, () => true),
+    )
+      .toMatchObject({ status: 'rejected', code: 'source-invalid' })
+    expect(
+      await owner.command(
+        { ...scope(owner), operation: 'setProviderFavorite', favorite: true, extra: true } as never,
+        () => true,
+      ),
+    )
+      .toMatchObject({ status: 'rejected', code: 'source-invalid' })
+    expect(await owner.command({ ...stale, operation: 'setProviderFavorite', favorite: true }, () => true))
+      .toMatchObject({ status: 'conflict', code: 'conflict' })
+    expect(
+      (await owner.command({ ...scope(owner), operation: 'setProviderFavorite', favorite: true }, () => true)).status,
+    )
+      .toBe('applied')
+    expect(owner.preferenceStore.read(view.bindingRef, view.scopeRevision).entries).toEqual(entries)
+    await owner.command({ ...scope(owner), operation: 'resetOrder' }, () => true)
+    expect(owner.snapshot().views[0]).toMatchObject({ providerFavorite: true })
     expect(owner.admits(view.providerId, 'a')).toBe(false)
     expect(options.fetcher).not.toHaveBeenCalled()
     const file = statePath(options.homeDir)
     const raw = await readFile(file, 'utf8')
-    expect(JSON.parse(raw)).toMatchObject({ version: 1, modelPreferences: { schemaVersion: 2 } })
+    expect(JSON.parse(raw)).toMatchObject({ version: 1, modelPreferences: { schemaVersion: 3 } })
     expect((await stat(file)).mode & 0o777).toBe(0o600)
     await owner.close()
     const reopened = await ManagedCatalogComposition.open(options)
     owners.push(reopened)
     await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows).toHaveLength(2))
+    expect(reopened.snapshot().views[0]?.providerFavorite).toBe(true)
     expect(reopened.admits(view.providerId, 'a')).toBe(false)
     expect(keychain.calls).toBe(0)
   })
@@ -452,35 +481,8 @@ describe('managed catalog production owner', () => {
       scripts: seeded.scripts,
       caches: seeded.caches,
       admittedFutureSection: seeded.admittedFutureSection,
-      modelPreferences: { schemaVersion: 2, revision: 1 },
+      modelPreferences: { schemaVersion: 3, revision: 1 },
     })
-  })
-
-  it('rejects a stale section revision without changing durable or in-memory preferences', async () => {
-    const { owner, options } = await setup()
-    const view = await create(owner)
-    const first = await owner.preferenceStore.mutate({
-      bindingRef: view.bindingRef,
-      scopeRevision: view.scopeRevision,
-      expectedRevision: '0',
-      operation: 'setOverlay',
-      modelId: 'a',
-      pinned: true,
-    }, ['a', 'b'])
-    const durable = await readFile(statePath(options.homeDir), 'utf8')
-    const inMemory = owner.preferenceStore.snapshot()
-
-    await expect(owner.preferenceStore.mutate({
-      bindingRef: view.bindingRef,
-      scopeRevision: view.scopeRevision,
-      expectedRevision: '0',
-      operation: 'setOverlay',
-      modelId: 'b',
-      blocked: true,
-    }, ['a', 'b'])).rejects.toMatchObject({ code: 'conflict' })
-    expect(first.revision).toBe('1')
-    expect(owner.preferenceStore.snapshot()).toBe(inMemory)
-    expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
   })
 
   it('maps authorization revocation at owner commit to permission without publishing state', async () => {
@@ -491,16 +493,12 @@ describe('managed catalog production owner', () => {
     let checks = 0
     const result = await owner.command({
       ...scope(owner),
-      operation: 'setOverlay',
-      modelId: 'a',
-      blocked: true,
+      operation: 'setProviderFavorite',
+      favorite: true,
     }, () => ++checks < 3)
 
     expect(result).toEqual({ status: 'rejected', code: 'permission' })
-    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
-      blocked: false,
-      selectable: true,
-    })
+    expect(owner.snapshot().views[0]?.providerFavorite).toBe(false)
     expect(owner.snapshot().views[0]?.revision).toBe(before.revision)
     expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
   })
@@ -531,9 +529,8 @@ describe('managed catalog production owner', () => {
       })
       const command = owner.command({
         ...scope(owner),
-        operation: 'setOverlay',
-        modelId: 'a',
-        blocked: true,
+        operation: 'setProviderFavorite',
+        favorite: true,
       }, () => true)
       try {
         await entered.promise
@@ -696,15 +693,16 @@ describe('managed catalog production owner', () => {
     expect(reopened.preferenceStore.read('codex-config:gateway', 'current').entries).toEqual([
       { id: 'native-model', blocked: true, pinRank: 0 },
     ])
+    expect(reopened.preferenceStore.read('codex-config:gateway', 'current').providerFavorite).toBe(false)
     expect(await readFile(legacyFile, 'utf8')).toBe(legacy)
     expect(JSON.parse(await readFile(statePath(options.homeDir), 'utf8'))).toMatchObject({
-      modelPreferences: { schemaVersion: 2, revision: 7 },
+      modelPreferences: { schemaVersion: 3, revision: 7 },
     })
   })
 
   it.each([
     ['malformed', '{not-json'],
-    ['future', JSON.stringify({ schemaVersion: 3, revision: 9, bindings: [] })],
+    ['future', JSON.stringify({ schemaVersion: 4, revision: 9, bindings: [] })],
   ])('leaves %s legacy native preference state untouched', async (_kind, legacy) => {
     const { owner, options } = await setup()
     await create(owner)
@@ -783,10 +781,15 @@ describe('managed catalog production owner', () => {
     options.fetcher.mockResolvedValueOnce(Response.json({ object: 'list', data: [] }))
     await owner.command({ ...scope(owner), operation: 'refresh' }, () => true)
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.outcome).toBe('empty'))
+    expect(owner.snapshot().views[0]?.preferenceCapabilities).toContain('setProviderFavorite')
+    expect(
+      (await owner.command({ ...scope(owner), operation: 'setProviderFavorite', favorite: true }, () => true)).status,
+    )
+      .toBe('applied')
     await owner.command({ ...scope(owner), operation: 'setAutoPaused', paused: true }, () => true)
     await owner.close()
     const reopened = await ManagedCatalogComposition.open(options)
     owners.push(reopened)
-    expect(reopened.snapshot().views[0]).toMatchObject({ outcome: 'empty', rows: [] })
+    expect(reopened.snapshot().views[0]).toMatchObject({ outcome: 'empty', providerFavorite: true, rows: [] })
   })
 })

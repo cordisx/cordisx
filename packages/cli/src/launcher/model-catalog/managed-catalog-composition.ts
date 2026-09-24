@@ -8,6 +8,7 @@ import type {
 } from '../../model-catalog-management.js'
 import {
   emptyManagementPreferenceData,
+  type ManagementOverlay,
   ManagementOverlayError,
   ManagementOverlayStore,
   parseManagementOverlayData,
@@ -80,7 +81,7 @@ async function importLegacyNativePreferences(
   return {
     ...state,
     modelPreferences: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       revision: Math.max(current.revision, legacy?.revision ?? 0),
       bindings: [
         ...current.bindings,
@@ -290,7 +291,10 @@ export class ManagedCatalogComposition {
     })
   }
 
-  private rows(view: ManagedProviderView) {
+  private rows(
+    view: ManagedProviderView,
+    overlay: ManagementOverlay = this.preferenceStore.read(view.id, view.scopeRevision),
+  ) {
     const denied = ['authentication', 'permission', 'account'].includes(this.#service.snapshot(view.id)?.error ?? '')
     const route = this.options.responsesAvailable && !this.#persistError
       && !denied
@@ -316,7 +320,7 @@ export class ManagedCatalogComposition {
         exactConfiguredMembership: userDeclared,
       }
     })
-    const projected = projectManagementOverlay(source, this.preferenceStore.read(view.id, view.scopeRevision))
+    const projected = projectManagementOverlay(source, overlay)
     return [
       ...projected.active.map(row => {
         const eligibility = resolveNativeModelEligibility({
@@ -357,7 +361,8 @@ export class ManagedCatalogComposition {
     if (this.#closed) return { epoch: this.#epoch, sequence: this.#sequence, views: [], canCreateConnection: false }
     const views = this.#owner.snapshot().map((view): CatalogManagementView => {
       const snapshot = this.#service.snapshot(view.id), script = this.#scripts.readStatus(view.id)
-      const rows = this.rows(view), strategy = view.settings.strategy
+      const overlay = this.preferenceStore.read(view.id, view.scopeRevision)
+      const rows = this.rows(view, overlay), strategy = view.settings.strategy
       const replacing = script?.mode === 'replace'
       const status = replacing ? script : snapshot
       const supportsResponses = rows.some(row => row.compatibility === 'supported')
@@ -368,7 +373,7 @@ export class ManagedCatalogComposition {
         providerId: providerId(view.id),
         title: view.settings.title,
         scopeRevision: view.scopeRevision,
-        revision: this.revision(view),
+        revision: this.revision(view, overlay),
         sourceKind: replacing ? 'script' : strategy.kind === 'auto' ? 'auto' : 'manual',
         mode: replacing
           ? 'replace'
@@ -379,6 +384,7 @@ export class ManagedCatalogComposition {
         activity: status?.loading ? 'loading' : 'idle',
         outcome: status?.error ? 'error' : status?.complete ? this.members(view).length ? 'ok' : 'empty' : 'none',
         autoPaused: !view.settings.discoveryEnabled,
+        providerFavorite: overlay.providerFavorite,
         sourceCount: rows.filter(row => row.present && row.compatibility === 'supported').length,
         selectableCount: rows.filter(row => row.selectable).length,
         rows: rows.map(row => ({
@@ -390,7 +396,9 @@ export class ManagedCatalogComposition {
         })),
         protocolCapabilities: { responses: route && supportsResponses },
         supplement: view.settings.supplement,
+        preferenceCapabilities: ['setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'],
         capabilities: [
+          'setProviderFavorite',
           'setOverlay',
           'resetOrder',
           'restoreBlocked',
@@ -441,10 +449,13 @@ export class ManagedCatalogComposition {
     return Object.freeze({ epoch: this.#epoch, sequence: this.#sequence, views, canCreateConnection: true })
   }
 
-  private revision(view: ManagedProviderView): string {
+  private revision(
+    view: ManagedProviderView,
+    overlay: ManagementOverlay = this.preferenceStore.read(view.id, view.scopeRevision),
+  ): string {
     return [
       this.sourceRevision(view),
-      this.preferenceStore.read(view.id, view.scopeRevision).revision,
+      overlay.revision,
     ].join(':')
   }
 
@@ -578,6 +589,7 @@ export class ManagedCatalogComposition {
           )
         } else {
           const extra: Record<string, readonly string[]> = {
+            setProviderFavorite: ['favorite'],
             setOverlay: ['modelId', 'blocked', 'pinned'],
             setAutoPaused: ['paused'],
             editManual: ['models'],
@@ -604,6 +616,9 @@ export class ManagedCatalogComposition {
             throw new CatalogError('source-invalid')
           }
           if (command.operation === 'setAutoPaused' && typeof command.paused !== 'boolean') {
+            throw new CatalogError('source-invalid')
+          }
+          if (command.operation === 'setProviderFavorite' && typeof command.favorite !== 'boolean') {
             throw new CatalogError('source-invalid')
           }
           const view = this.#owner.snapshot().find(view => view.id === command.bindingRef)
@@ -649,13 +664,18 @@ export class ManagedCatalogComposition {
     authorized: () => boolean,
   ): Promise<void> {
     const operation = command.operation
-    if (operation === 'setOverlay' || operation === 'resetOrder' || operation === 'restoreBlocked') {
+    if (
+      operation === 'setProviderFavorite' || operation === 'setOverlay' || operation === 'resetOrder'
+      || operation === 'restoreBlocked'
+    ) {
       const scope = {
         bindingRef: view.id,
         scopeRevision: view.scopeRevision,
         expectedRevision: this.preferenceStore.read(view.id, view.scopeRevision).revision,
       }
-      const mutation = command.operation === 'setOverlay'
+      const mutation = command.operation === 'setProviderFavorite'
+        ? { ...scope, operation: 'setProviderFavorite' as const, favorite: command.favorite }
+        : command.operation === 'setOverlay'
         ? { ...command, ...scope }
         : { ...scope, operation: operation as 'resetOrder' | 'restoreBlocked' }
       await this.preferenceStore.mutate(mutation, this.members(view).map(model => model.id), authorized)
