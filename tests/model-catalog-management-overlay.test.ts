@@ -126,12 +126,55 @@ describe('Host catalog preferences', () => {
     expect(serializeManagementOverlayData(failing.snapshot())).toBe(durable)
   })
 
+  it('persists provider favorite independently of model preferences and accepts empty providers', async () => {
+    const store = new ManagementOverlayStore(async () => {})
+    const favorite = await store.mutate({ ...scope, operation: 'setProviderFavorite', favorite: true }, [])
+    expect(favorite).toMatchObject({ providerFavorite: true, entries: [] })
+    const pinned = await store.mutate({
+      ...scope,
+      expectedRevision: favorite.revision,
+      operation: 'setOverlay',
+      modelId: 'A',
+      pinned: true,
+    }, ['A'])
+    expect(pinned).toMatchObject({ providerFavorite: true, entries: [{ id: 'A', blocked: false, pinRank: 0 }] })
+    const reset = await store.mutate({
+      ...scope,
+      expectedRevision: pinned.revision,
+      operation: 'resetOrder',
+    }, [])
+    expect(reset).toMatchObject({ providerFavorite: true, entries: [] })
+    const unfavorite = await store.mutate({
+      ...scope,
+      expectedRevision: reset.revision,
+      operation: 'setProviderFavorite',
+      favorite: false,
+    }, [])
+    expect(unfavorite).toMatchObject({ providerFavorite: false, entries: [] })
+  })
+
+  it('serializes concurrent favorite and model writes through the existing section CAS', async () => {
+    let release!: () => void
+    const persist = vi.fn(() => new Promise<void>(resolve => release = resolve))
+    const store = new ManagementOverlayStore(persist)
+    const favorite = store.mutate({ ...scope, operation: 'setProviderFavorite', favorite: true }, [])
+    const model = store.mutate({ ...scope, operation: 'setOverlay', modelId: 'A', blocked: true }, ['A'])
+    const rejected = expect(model).rejects.toMatchObject({ code: 'conflict' })
+    await Promise.resolve()
+    release()
+    await expect(favorite).resolves.toMatchObject({ providerFavorite: true })
+    await rejected
+    expect(store.snapshot().bindings).toEqual([
+      { bindingRef: 'binding', revision: '1', providerFavorite: true, entries: [] },
+    ])
+  })
+
   it('validates bounded versioned data and rejects hidden executable or authority fields', () => {
-    const empty = { schemaVersion: 2, revision: 0, bindings: [] }
+    const empty = { schemaVersion: 3, revision: 0, bindings: [] }
     expect(parseManagementOverlayData(empty)).toEqual(empty)
     for (
       const data of [
-        { ...empty, schemaVersion: 3 },
+        { ...empty, schemaVersion: 4 },
         { ...empty, secret: 'not-allowed' },
         { ...empty, bindings: [{ ...scope, entries: [] }] },
         {
@@ -164,12 +207,34 @@ describe('Host catalog preferences', () => {
         },
       ],
     })).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       revision: 9,
       bindings: [{
         bindingRef: 'plugin:aiden:main',
         revision: '8',
+        providerFavorite: false,
         entries: [{ id: 'same-name', blocked: true }],
+      }],
+    })
+  })
+
+  it('migrates v2 bindings without losing model preferences or revisions', () => {
+    expect(parseManagementOverlayData({
+      schemaVersion: 2,
+      revision: 7,
+      bindings: [{
+        bindingRef: 'plugin:aiden:main',
+        revision: '5',
+        entries: [{ id: 'same-name', blocked: true, pinRank: 0 }],
+      }],
+    })).toEqual({
+      schemaVersion: 3,
+      revision: 7,
+      bindings: [{
+        bindingRef: 'plugin:aiden:main',
+        revision: '5',
+        providerFavorite: false,
+        entries: [{ id: 'same-name', blocked: true, pinRank: 0 }],
       }],
     })
   })

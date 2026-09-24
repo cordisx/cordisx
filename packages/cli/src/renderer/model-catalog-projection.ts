@@ -41,6 +41,7 @@ export const safeManagementCode = (value: unknown): value is CatalogManagementCo
 const operations = [
   'refresh',
   'setAutoPaused',
+  'setProviderFavorite',
   'setOverlay',
   'resetOrder',
   'restoreBlocked',
@@ -55,7 +56,7 @@ const operations = [
   'cancelScript',
   'updateConnection',
 ]
-const preferenceOperations = ['setOverlay', 'resetOrder', 'restoreBlocked'] as const
+const preferenceOperations = ['setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'] as const
 const sourceOperations = operations.filter(value => !preferenceOperations.includes(value as never))
 const fail = (): never => {
   throw new Error('Invalid catalog projection')
@@ -167,6 +168,7 @@ function view(value: unknown): CatalogManagementView {
     activity: choice(item.activity, ['idle', 'scheduled', 'loading', 'applying']),
     outcome: choice(item.outcome, ['none', 'ok', 'empty', 'error', 'unsupported', 'cancelled']),
     autoPaused: bool(item.autoPaused),
+    providerFavorite: bool(item.providerFavorite),
     sourceCount: rows.filter(row => row.present && row.compatibility === 'supported').length,
     selectableCount: rows.filter(row => row.present && row.compatibility === 'supported' && row.selectable).length,
     rows,
@@ -186,7 +188,7 @@ function view(value: unknown): CatalogManagementView {
         preferenceCapabilities: list(
           item.preferenceCapabilities,
           value => choice(value, preferenceOperations) as CatalogPreferenceOperation,
-          3,
+          4,
         ),
       }),
     capabilities: list(item.capabilities, value => choice(value, operations) as CatalogManagementOperation, 32),

@@ -23,6 +23,7 @@ export function catalogView(patch: Partial<CatalogManagementView> = {}): Catalog
     activity: 'idle',
     outcome: 'ok',
     autoPaused: false,
+    providerFavorite: false,
     sourceCount: 2,
     selectableCount: 2,
     rows: ['Model-A', 'model-a'].map(id => ({
@@ -49,10 +50,11 @@ export function catalogView(patch: Partial<CatalogManagementView> = {}): Catalog
       'configureScript',
       'runScript',
     ],
-    preferenceCapabilities: ['setOverlay', 'resetOrder', 'restoreBlocked'],
+    preferenceCapabilities: ['setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'],
     capabilities: [
       'refresh',
       'setAutoPaused',
+      'setProviderFavorite',
       'setOverlay',
       'resetOrder',
       'restoreBlocked',
@@ -101,6 +103,7 @@ export function catalogFixture(views: readonly CatalogManagementView[] = [catalo
           ...view,
           revision: String(Number(view.revision) + 1),
           ...(command.operation === 'setAutoPaused' ? { autoPaused: command.paused } : {}),
+          ...(command.operation === 'setProviderFavorite' ? { providerFavorite: command.favorite } : {}),
           ...(command.operation === 'configureScript'
             ? {
               sourceKind: command.mode === 'replace' ? 'script' as const : view.sourceKind,

@@ -9,6 +9,7 @@ import {
   ModelProviderRegistry,
   nativeModelProviderRegistry,
 } from '../packages/cli/src/renderer/model-providers.js'
+import { catalogFixture, catalogView } from './helpers/catalog-management-fixture.js'
 
 const provider = { providerId: 'one', pluginId: 'plugin', models: [{ id: 'm', label: 'Model' }] }
 const entry = {
@@ -74,6 +75,34 @@ describe('model provider selector contract', () => {
       if (previous === undefined) delete page.__cordisxNativeProviderCommandChannel
       else page.__cordisxNativeProviderCommandChannel = previous
     }
+  })
+
+  it('projects Host-owned provider favorite metadata without changing provider order', async () => {
+    const catalog = catalogFixture([catalogView({
+      providerId: 'one',
+      providerFavorite: true,
+      sourceKind: 'native',
+      rows: [{
+        id: 'm',
+        label: 'Model',
+        provenance: ['native'],
+        notListed: false,
+        present: true,
+        compatibility: 'supported',
+        selectable: true,
+        blocked: false,
+        pinned: false,
+      }],
+    })])
+    const registry = new ModelProviderRegistry(async () => [provider])
+    registry.management = catalog.client
+    await catalog.client.refresh()
+    await registry.refresh()
+    expect(registry.snapshot().providers).toEqual([expect.objectContaining({
+      providerId: 'one',
+      providerFavorite: true,
+    })])
+    registry.dispose()
   })
 
   it('matches actual IDs before explicit aliases, never labels or ambiguous aliases', () => {

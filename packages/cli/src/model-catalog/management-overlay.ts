@@ -8,12 +8,13 @@ export interface ManagementPreferenceEntry {
 export interface ManagementPreferenceBinding {
   readonly bindingRef: string
   readonly revision: string
+  readonly providerFavorite: boolean
   readonly entries: readonly ManagementPreferenceEntry[]
 }
 
 /** Versioned section embedded in the profile-owned managed catalog document. */
 export interface ManagementPreferenceData {
-  readonly schemaVersion: 2
+  readonly schemaVersion: 3
   readonly revision: number
   readonly bindings: readonly ManagementPreferenceBinding[]
 }
@@ -39,6 +40,7 @@ export type ManagementOverlayMutation =
       readonly blocked?: boolean
       readonly pinned?: boolean
     }
+    | { readonly operation: 'setProviderFavorite'; readonly favorite: boolean }
     | { readonly operation: 'resetOrder' | 'restoreBlocked' }
   )
 
@@ -49,7 +51,7 @@ export class ManagementOverlayError extends Error {
 }
 
 export const emptyManagementPreferenceData = (): ManagementPreferenceData =>
-  Object.freeze({ schemaVersion: 2, revision: 0, bindings: Object.freeze([]) })
+  Object.freeze({ schemaVersion: 3, revision: 0, bindings: Object.freeze([]) })
 
 const invalid = (): never => {
   throw new ManagementOverlayError('source-invalid')
@@ -98,13 +100,24 @@ function parseEntries(value: unknown): readonly ManagementPreferenceEntry[] {
   }))
 }
 
-function parseBinding(value: unknown, legacy = false): ManagementPreferenceBinding {
+function parseBinding(value: unknown, schemaVersion: 1 | 2 | 3): ManagementPreferenceBinding {
   const item = object(value)
-  exact(item, legacy ? ['bindingRef', 'scopeRevision', 'revision', 'entries'] : ['bindingRef', 'revision', 'entries'])
-  if (!text(item.bindingRef) || !text(item.revision) || legacy && !text(item.scopeRevision)) invalid()
+  exact(
+    item,
+    schemaVersion === 1
+      ? ['bindingRef', 'scopeRevision', 'revision', 'entries']
+      : schemaVersion === 2
+      ? ['bindingRef', 'revision', 'entries']
+      : ['bindingRef', 'revision', 'providerFavorite', 'entries'],
+  )
+  if (
+    !text(item.bindingRef) || !text(item.revision) || schemaVersion === 1 && !text(item.scopeRevision)
+    || schemaVersion === 3 && typeof item.providerFavorite !== 'boolean'
+  ) invalid()
   return freezeBinding({
     bindingRef: item.bindingRef as string,
     revision: item.revision as string,
+    providerFavorite: schemaVersion === 3 ? item.providerFavorite as boolean : false,
     entries: parseEntries(item.entries),
   })
 }
@@ -113,23 +126,24 @@ function parseBinding(value: unknown, legacy = false): ManagementPreferenceBindi
 export function parseManagementOverlayData(value: unknown): ManagementPreferenceData {
   const input = object(value)
   if (!Number.isSafeInteger(input.revision) || Number(input.revision) < 0) invalid()
-  if (input.schemaVersion === 2) {
+  if (input.schemaVersion === 2 || input.schemaVersion === 3) {
     exact(input, ['schemaVersion', 'revision', 'bindings'])
     if (!Array.isArray(input.bindings) || input.bindings.length > 512) invalid()
+    const schemaVersion = input.schemaVersion
     const seen = new Set<string>()
     const bindings = (input.bindings as unknown[]).map(value => {
-      const binding = parseBinding(value)
+      const binding = parseBinding(value, schemaVersion)
       if (seen.has(binding.bindingRef)) invalid()
       seen.add(binding.bindingRef)
       return binding
     })
-    return Object.freeze({ schemaVersion: 2, revision: Number(input.revision), bindings: Object.freeze(bindings) })
+    return Object.freeze({ schemaVersion: 3, revision: Number(input.revision), bindings: Object.freeze(bindings) })
   }
   exact(input, ['schemaVersion', 'revision', 'overlays'])
   if (input.schemaVersion !== 1 || !Array.isArray(input.overlays) || input.overlays.length > 512) invalid()
   const latest = new Map<string, ManagementPreferenceBinding>()
   for (const value of input.overlays as unknown[]) {
-    const binding = parseBinding(value, true)
+    const binding = parseBinding(value, 1)
     const prior = latest.get(binding.bindingRef)
     if (!prior) {
       latest.set(binding.bindingRef, binding)
@@ -143,7 +157,7 @@ export function parseManagementOverlayData(value: unknown): ManagementPreference
     if (nextRevision > priorRevision) latest.set(binding.bindingRef, binding)
   }
   return Object.freeze({
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: Number(input.revision),
     bindings: Object.freeze([...latest.values()].sort((a, b) => order(a.bindingRef, b.bindingRef))),
   })
@@ -219,7 +233,7 @@ export class ManagementOverlayStore {
   read(bindingRef: string, scopeRevision: string): ManagementOverlay {
     if (!text(bindingRef) || !text(scopeRevision)) invalid()
     const binding = this.state.bindings.find(item => item.bindingRef === bindingRef)
-      ?? freezeBinding({ bindingRef, revision: '0', entries: [] })
+      ?? freezeBinding({ bindingRef, revision: '0', providerFavorite: false, entries: [] })
     return overlayView(binding, scopeRevision)
   }
 
@@ -232,7 +246,11 @@ export class ManagementOverlayStore {
       const current = this.read(input.bindingRef, input.scopeRevision)
       if (current.revision !== input.expectedRevision) throw new ManagementOverlayError('conflict')
       const entries = new Map(current.entries.map(entry => [entry.id, { ...entry }]))
-      if (input.operation === 'setOverlay') {
+      let providerFavorite = current.providerFavorite
+      if (input.operation === 'setProviderFavorite') {
+        if (typeof input.favorite !== 'boolean') invalid()
+        providerFavorite = input.favorite
+      } else if (input.operation === 'setOverlay') {
         if (
           !text(input.modelId) || (input.blocked === undefined && input.pinned === undefined)
           || input.blocked !== undefined && typeof input.blocked !== 'boolean'
@@ -260,11 +278,12 @@ export class ManagementOverlayStore {
       const next = freezeBinding({
         bindingRef: current.bindingRef,
         revision: String(revision),
+        providerFavorite,
         entries: [...entries.values()].filter(item => item.blocked || item.pinRank !== undefined)
           .sort((a, b) => order(a.id, b.id)),
       })
       const data = parseManagementOverlayData({
-        schemaVersion: 2,
+        schemaVersion: 3,
         revision,
         bindings: [
           ...this.state.bindings.filter(item => item.bindingRef !== current.bindingRef),

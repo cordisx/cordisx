@@ -75,10 +75,26 @@ describe('Host-private catalog management contract', () => {
   it('separates read-only source authority from Host-owned model preferences', () => {
     const view = {
       sourceKind: 'plugin',
+      providerFavorite: true,
       sourceCapabilities: [] as readonly CatalogSourceOperation[],
-      preferenceCapabilities: ['setOverlay', 'resetOrder', 'restoreBlocked'] as readonly CatalogPreferenceOperation[],
+      preferenceCapabilities: [
+        'setProviderFavorite',
+        'setOverlay',
+        'resetOrder',
+        'restoreBlocked',
+      ] as readonly CatalogPreferenceOperation[],
     }
     expect(view.sourceCapabilities).toEqual([])
+    expect(view.providerFavorite).toBe(true)
+    expect(view.preferenceCapabilities).toContain('setProviderFavorite')
     expect(view.preferenceCapabilities).toContain('setOverlay')
+  })
+
+  it('defines provider favorite as a binding-scoped preference command', () => {
+    type Favorite = Extract<CatalogManagementCommand, { operation: 'setProviderFavorite' }>
+    expectTypeOf<Favorite['favorite']>().toEqualTypeOf<boolean>()
+    expectTypeOf<keyof Favorite>().toEqualTypeOf<
+      'operation' | 'bindingRef' | 'scopeRevision' | 'expectedRevision' | 'favorite'
+    >()
   })
 })

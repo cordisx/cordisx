@@ -18,6 +18,7 @@ export interface NativeProviderProjection {
   readonly pluginId: string
   /** Exact Host-private management identity for plugin-owned catalog sources. */
   readonly managementBindingRef?: string
+  readonly providerFavorite?: boolean
   readonly title?: string
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly HostModelProviderModel[]
@@ -33,6 +34,7 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
   readonly models: readonly HostModelProviderModel[]
   readonly selectorBrand?: ProviderBrandChoice
+  readonly providerFavorite?: boolean
 }
 
 export interface ModelProviderSnapshot {
@@ -388,6 +390,7 @@ export class ModelProviderRegistry {
             providerId: provider.providerId,
             title: presentation?.title ?? provider.title ?? provider.providerId,
             icon: presentation?.icon ?? 'host:settings',
+            providerFavorite: provider.providerFavorite === true,
             ...(selectorBrand === undefined ? {} : { selectorBrand }),
             models: Object.freeze(provider.models.map(model => {
               const metadata = presentation?.models?.find(item => item.id === model.id)

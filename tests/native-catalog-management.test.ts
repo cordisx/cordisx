@@ -48,7 +48,7 @@ describe('native catalog management', () => {
     expect(initial.views).toEqual([expect.objectContaining({
       providerId: 'gateway',
       sourceKind: 'native',
-      capabilities: ['refresh', 'setOverlay', 'resetOrder', 'restoreBlocked'],
+      capabilities: ['refresh', 'setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'],
       rows: [expect.objectContaining({ id: 'a' }), expect.objectContaining({ id: 'b' })],
     })])
     const view = initial.views[0]!
@@ -82,6 +82,69 @@ describe('native catalog management', () => {
     management.close()
   })
 
+  it('favorites an empty live native provider, persists it, and restores composite source order', async () => {
+    const f = await fixture()
+    await writeFile(f.catalogFile, JSON.stringify({ models: [] }))
+    const native = await NativeCatalogManagement.open({ load: f.load, stateFile: f.stateFile })
+    const initial = native.snapshot().views[0]!
+    expect(initial).toMatchObject({ outcome: 'empty', providerFavorite: false, rows: [] })
+    expect(initial.preferenceCapabilities).toContain('setProviderFavorite')
+
+    const managedView = {
+      ...initial,
+      bindingRef: 'managed:connection',
+      providerId: 'managed',
+      title: 'Managed',
+      sourceKind: 'manual' as const,
+      providerFavorite: false,
+    }
+    const managed = {
+      snapshot: () => ({ epoch: 'managed', sequence: 0, views: [managedView], canCreateConnection: true }),
+      command: async () => ({ status: 'rejected' as const, code: 'unsupported' as const }),
+      subscribe: () => () => {},
+    }
+    const management = new CompositeCatalogManagement(native, managed)
+    await expect(management.command({
+      operation: 'setProviderFavorite',
+      bindingRef: initial.bindingRef,
+      scopeRevision: initial.scopeRevision,
+      expectedRevision: initial.revision,
+      favorite: true,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(management.snapshot().views.map(view => view.bindingRef)).toEqual([
+      initial.bindingRef,
+      managedView.bindingRef,
+    ])
+
+    const favorite = native.snapshot().views[0]!
+    expect(favorite.providerFavorite).toBe(true)
+    await expect(management.command({
+      operation: 'setProviderFavorite',
+      bindingRef: favorite.bindingRef,
+      scopeRevision: favorite.scopeRevision,
+      expectedRevision: favorite.revision,
+      favorite: false,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(management.snapshot().views.map(view => view.bindingRef)).toEqual([
+      managedView.bindingRef,
+      initial.bindingRef,
+    ])
+
+    const unfavorite = native.snapshot().views[0]!
+    await expect(management.command({
+      operation: 'setProviderFavorite',
+      bindingRef: unfavorite.bindingRef,
+      scopeRevision: unfavorite.scopeRevision,
+      expectedRevision: unfavorite.revision,
+      favorite: true,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    management.close()
+
+    const reopened = await NativeCatalogManagement.open({ load: f.load, stateFile: f.stateFile })
+    expect(reopened.snapshot().views[0]).toMatchObject({ providerFavorite: true, rows: [] })
+    reopened.close()
+  })
+
   it('does not publish a shared preference write queued when the native authority closes', async () => {
     const f = await fixture()
     const entered = deferred()
@@ -110,12 +173,11 @@ describe('native catalog management', () => {
     const view = native.snapshot().views[0]!
     const authorized = vi.fn(() => true)
     const command = native.command({
-      operation: 'setOverlay',
+      operation: 'setProviderFavorite',
       bindingRef: view.bindingRef,
       scopeRevision: view.scopeRevision,
       expectedRevision: view.revision,
-      modelId: 'a',
-      blocked: true,
+      favorite: true,
     }, authorized)
     await vi.waitFor(() => expect(authorized).toHaveBeenCalled())
     native.close()
@@ -125,7 +187,38 @@ describe('native catalog management', () => {
     await expect(command).resolves.toEqual({ status: 'rejected', code: 'permission' })
     expect(attempts).toBe(2)
     expect(commits).toBe(1)
-    expect(overlayStore.read(view.bindingRef, view.scopeRevision).entries).toEqual([])
+    expect(overlayStore.read(view.bindingRef, view.scopeRevision)).toMatchObject({
+      providerFavorite: false,
+      entries: [],
+    })
+  })
+
+  it('does not expose or accept provider favorite writes for a last-known unavailable native binding', async () => {
+    const f = await fixture()
+    let available = true
+    const native = await NativeCatalogManagement.open({
+      load: async () =>
+        available
+          ? await f.load()
+          : { ...(await f.load()), sourceAvailable: false },
+    })
+    const initial = native.snapshot().views[0]!
+    available = false
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: initial.bindingRef,
+      scopeRevision: initial.scopeRevision,
+      expectedRevision: initial.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    const stale = native.snapshot().views[0]!
+    expect(stale.preferenceCapabilities).not.toContain('setProviderFavorite')
+    await expect(native.command({
+      operation: 'setProviderFavorite',
+      bindingRef: stale.bindingRef,
+      scopeRevision: stale.scopeRevision,
+      expectedRevision: stale.revision,
+      favorite: true,
+    }, () => true)).resolves.toEqual({ status: 'rejected', code: 'unavailable' })
   })
 
   it('rereads a static catalog on refresh and emits a sanitized native view update', async () => {

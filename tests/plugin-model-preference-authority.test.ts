@@ -45,6 +45,73 @@ describe('plugin model preference authority', () => {
     expect(authority.preferences().bindings[0]?.entries[0]?.id).toBe('same-name')
   })
 
+  it('favorites exact empty plugin bindings, restores source order, and survives reload', async () => {
+    const firstProvider = { ...provider('a', 'shared'), models: [] }
+    const secondProvider = { ...provider('b', 'shared'), models: [] }
+    let durable: ManagementPreferenceData | undefined
+    const open = () =>
+      PluginPreferenceAuthority.open({
+        load: async () => [firstProvider, secondProvider],
+        initial: durable,
+        persist: async (next, expectedRevision) => {
+          expect(durable?.revision ?? 0).toBe(expectedRevision)
+          durable = next
+        },
+      })
+    const authority = await open()
+    const second = authority.snapshot().views[1]!
+    await expect(authority.command({
+      operation: 'setProviderFavorite',
+      bindingRef: second.bindingRef,
+      scopeRevision: second.scopeRevision,
+      expectedRevision: second.revision,
+      favorite: true,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(authority.snapshot().views.map(view => [view.bindingRef, view.providerFavorite])).toEqual([
+      [second.bindingRef, true],
+      [pluginPreferenceBindingRef(firstProvider), false],
+    ])
+    authority.close()
+
+    const reopened = await open()
+    expect(reopened.snapshot().views[0]).toMatchObject({
+      bindingRef: second.bindingRef,
+      providerFavorite: true,
+      rows: [],
+    })
+    const favorite = reopened.snapshot().views[0]!
+    await expect(reopened.command({
+      operation: 'setProviderFavorite',
+      bindingRef: favorite.bindingRef,
+      scopeRevision: favorite.scopeRevision,
+      expectedRevision: favorite.revision,
+      favorite: false,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(reopened.snapshot().views.map(view => view.bindingRef)).toEqual([
+      pluginPreferenceBindingRef(firstProvider),
+      second.bindingRef,
+    ])
+    reopened.close()
+  })
+
+  it('rejects provider favorite writes after the exact plugin binding is removed', async () => {
+    let source = [{ ...provider('aiden', 'empty'), models: [] }]
+    const persist = vi.fn(async () => {})
+    const authority = await PluginPreferenceAuthority.open({ load: async () => source, persist })
+    const view = authority.snapshot().views[0]!
+    source = []
+    await authority.refresh()
+    await expect(authority.command({
+      operation: 'setProviderFavorite',
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: view.revision,
+      favorite: true,
+    }, () => true)).resolves.toEqual({ status: 'conflict', code: 'scope-changed' })
+    expect(persist).not.toHaveBeenCalled()
+    authority.close()
+  })
+
   it('survives reload and plugin re-registration while disabled models remain recoverable', async () => {
     let source = [provider('aiden', 'primary')]
     let durable: ManagementPreferenceData | undefined
@@ -85,7 +152,12 @@ describe('plugin model preference authority', () => {
       pinned: true,
       selectable: false,
     })
-    expect(current.preferenceCapabilities).toEqual(['setOverlay', 'resetOrder', 'restoreBlocked'])
+    expect(current.preferenceCapabilities).toEqual([
+      'setProviderFavorite',
+      'setOverlay',
+      'resetOrder',
+      'restoreBlocked',
+    ])
     expect(current.sourceCapabilities).toEqual([])
     expect(
       (await reloaded.command({

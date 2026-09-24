@@ -6,6 +6,7 @@ export interface PreferenceProvider<Model extends PreferenceProviderModel = Pref
   readonly providerId: string
   readonly pluginId: string
   readonly managementBindingRef?: string
+  readonly providerFavorite?: boolean
   readonly models: readonly Model[]
   readonly defaultModelId?: string
 }
@@ -14,6 +15,7 @@ export interface PreferenceManagementView {
   readonly bindingRef: string
   readonly providerId: string
   readonly sourceKind: 'native' | 'plugin' | 'auto' | 'manual' | 'script'
+  readonly providerFavorite: boolean
   readonly rows: readonly {
     readonly id: string
     readonly present: boolean
@@ -34,7 +36,11 @@ export function applyCatalogManagementPreferences<Provider extends PreferencePro
       ? views.find(view => view.sourceKind !== 'plugin' && view.providerId === provider.providerId)
       : views.find(view => view.sourceKind === 'plugin' && view.bindingRef === provider.managementBindingRef)
     if (!view) {
-      const { defaultModelId: _sourceDefaultModelId, ...sourceProvider } = provider
+      const {
+        defaultModelId: _sourceDefaultModelId,
+        providerFavorite: _sourceProviderFavorite,
+        ...sourceProvider
+      } = provider
       return Object.freeze({ ...sourceProvider, models: Object.freeze([]) }) as unknown as Provider
     }
     const source = new Map(provider.models.map(model => [model.id, model]))
@@ -48,9 +54,14 @@ export function applyCatalogManagementPreferences<Provider extends PreferencePro
       )
       ? provider.defaultModelId
       : undefined
-    const { defaultModelId: _sourceDefaultModelId, ...sourceProvider } = provider
+    const {
+      defaultModelId: _sourceDefaultModelId,
+      providerFavorite: _sourceProviderFavorite,
+      ...sourceProvider
+    } = provider
     return Object.freeze({
       ...sourceProvider,
+      providerFavorite: view.providerFavorite,
       models: Object.freeze(models),
       ...(defaultModelId === undefined ? {} : { defaultModelId }),
     }) as unknown as Provider

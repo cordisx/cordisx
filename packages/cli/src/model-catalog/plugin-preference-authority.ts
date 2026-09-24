@@ -5,6 +5,7 @@ import type {
   CatalogManagementSnapshot,
   CatalogManagementView,
 } from '../model-catalog-management.js'
+import { favoriteCatalogManagementViews } from '../model-catalog-management.js'
 import {
   ManagementOverlayError,
   ManagementOverlayStore,
@@ -231,7 +232,12 @@ export class PluginPreferenceAuthority {
       const scope = scopeRevision(provider)
       const overlay = this.#overlay.read(ref, scope)
       const rows = this.rows(provider)
-      const preferences = ['setOverlay', 'resetOrder', 'restoreBlocked'] as const
+      const preferences = [
+        ...(this.#available && !this.#persistError ? ['setProviderFavorite' as const] : []),
+        'setOverlay' as const,
+        'resetOrder' as const,
+        'restoreBlocked' as const,
+      ]
       return Object.freeze({
         bindingRef: ref,
         providerId: provider.providerId,
@@ -244,6 +250,7 @@ export class PluginPreferenceAuthority {
         activity: this.#loading ? 'loading' : 'idle',
         outcome: this.#available ? rows.length === 0 ? 'empty' : 'ok' : 'error',
         autoPaused: false,
+        providerFavorite: overlay.providerFavorite,
         sourceCount: rows.filter(row => row.present && row.compatibility === 'supported').length,
         selectableCount: rows.filter(row => row.selectable).length,
         rows,
@@ -260,7 +267,7 @@ export class PluginPreferenceAuthority {
         }),
       })
     })
-    return Object.freeze({ epoch: this.#epoch, sequence: this.#sequence, views: Object.freeze(views) })
+    return Object.freeze({ epoch: this.#epoch, sequence: this.#sequence, views: favoriteCatalogManagementViews(views) })
   }
 
   refresh(failOnInitialInvalid = false): Promise<void> {
@@ -311,7 +318,7 @@ export class PluginPreferenceAuthority {
     const execute = async (): Promise<CatalogManagementResult> => {
       if (this.#closed || !authorized()) return { status: 'rejected', code: 'permission' }
       if (command.operation === 'createConnection') return { status: 'rejected', code: 'unsupported' }
-      if (!['setOverlay', 'resetOrder', 'restoreBlocked'].includes(command.operation)) {
+      if (!['setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'].includes(command.operation)) {
         return { status: 'rejected', code: 'unsupported' }
       }
       const provider = this.providerFor(command)
@@ -331,7 +338,13 @@ export class PluginPreferenceAuthority {
           scopeRevision: command.scopeRevision,
           expectedRevision: overlay.revision,
         }
-        if (command.operation === 'setOverlay') {
+        if (command.operation === 'setProviderFavorite') {
+          await this.#overlay.mutate(
+            { ...scope, operation: 'setProviderFavorite', favorite: command.favorite },
+            provider.models.map(model => model.id),
+            stillAuthorized,
+          )
+        } else if (command.operation === 'setOverlay') {
           await this.#overlay.mutate(
             {
               ...scope,
@@ -428,7 +441,7 @@ export class PluginPreferenceManagementAdapter implements CatalogManagementAutho
     return Object.freeze({
       epoch: this.#epoch,
       sequence: this.#sequence,
-      views: Object.freeze([...base.views, ...this.plugins.snapshot().views]),
+      views: favoriteCatalogManagementViews([...base.views, ...this.plugins.snapshot().views]),
       ...(base.canCreateConnection === undefined ? {} : { canCreateConnection: base.canCreateConnection }),
     })
   }

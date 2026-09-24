@@ -16,6 +16,7 @@ describe('model provider preference projection', () => {
         bindingRef: 'plugin:plugin-a:provider-a',
         providerId: 'provider-a',
         sourceKind: 'plugin',
+        providerFavorite: false,
         rows: [{ id: 'model-a', present: true, compatibility: 'supported', selectable: true }],
       }],
     })).toEqual([{ pluginId: 'plugin-a', providerId: 'provider-a', models: [] }])
@@ -43,12 +44,14 @@ describe('model provider preference projection', () => {
           bindingRef: 'codex-config:shared',
           providerId: 'shared',
           sourceKind: 'native',
+          providerFavorite: false,
           rows: [{ id: 'same', present: true, compatibility: 'supported', selectable: true }],
         },
         {
           bindingRef: 'plugin:plugin-a:shared',
           providerId: 'shared',
           sourceKind: 'plugin',
+          providerFavorite: false,
           rows: [
             { id: 'same', present: true, compatibility: 'supported', selectable: true },
             { id: 'removed', present: false, compatibility: 'supported', selectable: true },
@@ -73,6 +76,7 @@ describe('model provider preference projection', () => {
         bindingRef: 'codex-config:aiden',
         providerId: 'aiden',
         sourceKind: 'native',
+        providerFavorite: false,
         rows: [
           { id: 'two', present: true, compatibility: 'supported', selectable: true },
           { id: 'disabled', present: true, compatibility: 'supported', selectable: false },
@@ -84,7 +88,49 @@ describe('model provider preference projection', () => {
     })).toEqual([{
       pluginId: 'host',
       providerId: 'aiden',
+      providerFavorite: false,
       models: [{ id: 'two' }, { id: 'one' }],
     }])
+  })
+
+  it('projects exact favorite metadata without changing canonical provider order', () => {
+    const providers = [
+      { pluginId: 'native', providerId: 'shared', models: [] },
+      { pluginId: 'plugin-a', providerId: 'shared', managementBindingRef: 'plugin:a:shared', models: [] },
+      { pluginId: 'plugin-b', providerId: 'shared', managementBindingRef: 'plugin:b:shared', models: [] },
+    ]
+    const views = [
+      {
+        bindingRef: 'codex-config:shared',
+        providerId: 'shared',
+        sourceKind: 'native' as const,
+        providerFavorite: false,
+        rows: [],
+      },
+      {
+        bindingRef: 'plugin:a:shared',
+        providerId: 'shared',
+        sourceKind: 'plugin' as const,
+        providerFavorite: false,
+        rows: [],
+      },
+      {
+        bindingRef: 'plugin:b:shared',
+        providerId: 'shared',
+        sourceKind: 'plugin' as const,
+        providerFavorite: true,
+        rows: [],
+      },
+    ]
+    expect(
+      applyCatalogManagementPreferences(providers, { views }).map(provider => [
+        provider.pluginId,
+        provider.providerFavorite,
+      ]),
+    ).toEqual([
+      ['native', false],
+      ['plugin-a', false],
+      ['plugin-b', true],
+    ])
   })
 })

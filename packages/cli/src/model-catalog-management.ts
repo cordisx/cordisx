@@ -73,6 +73,7 @@ export interface CatalogSafeDiagnostics {
 export type CatalogManagementOperation =
   | 'refresh'
   | 'setAutoPaused'
+  | 'setProviderFavorite'
   | 'setOverlay'
   | 'resetOrder'
   | 'restoreBlocked'
@@ -89,11 +90,16 @@ export type CatalogManagementOperation =
 
 export type CatalogPreferenceOperation = Extract<
   CatalogManagementOperation,
-  'setOverlay' | 'resetOrder' | 'restoreBlocked'
+  'setProviderFavorite' | 'setOverlay' | 'resetOrder' | 'restoreBlocked'
 >
 export type CatalogSourceOperation = Exclude<CatalogManagementOperation, CatalogPreferenceOperation>
 
-const preferenceOperations: readonly CatalogPreferenceOperation[] = ['setOverlay', 'resetOrder', 'restoreBlocked']
+const preferenceOperations: readonly CatalogPreferenceOperation[] = [
+  'setProviderFavorite',
+  'setOverlay',
+  'resetOrder',
+  'restoreBlocked',
+]
 export function catalogPreferenceCapabilities(view: CatalogManagementView): readonly CatalogPreferenceOperation[] {
   return view.preferenceCapabilities
     ?? view.capabilities.filter((operation): operation is CatalogPreferenceOperation =>
@@ -128,6 +134,7 @@ export interface CatalogManagementView {
   readonly activity: 'idle' | 'scheduled' | 'loading' | 'applying'
   readonly outcome: 'none' | 'ok' | 'empty' | 'error' | 'unsupported' | 'cancelled'
   readonly autoPaused: boolean
+  readonly providerFavorite: boolean
   /** Present source members explicitly supported by the current Host. */
   readonly sourceCount: number
   /** Supported source members that are also currently route-available and not user-blocked. */
@@ -182,6 +189,7 @@ export type CatalogManagementCommand =
           | 'cancelScript'
       }
       | { readonly operation: 'setAutoPaused'; readonly paused: boolean }
+      | { readonly operation: 'setProviderFavorite'; readonly favorite: boolean }
       | {
         readonly operation: 'setOverlay'
         readonly modelId: string
@@ -198,6 +206,16 @@ export type CatalogManagementCommand =
         readonly mode: 'replace' | 'supplement'
       }
     )
+
+/** Stable favorite-first partition; unfavoriting restores the owner's canonical order. */
+export function favoriteCatalogManagementViews(
+  views: readonly CatalogManagementView[],
+): readonly CatalogManagementView[] {
+  return Object.freeze([
+    ...views.filter(view => view.providerFavorite),
+    ...views.filter(view => !view.providerFavorite),
+  ])
+}
 
 export interface CatalogManagementResult {
   readonly status: 'applied' | 'queued' | 'conflict' | 'unavailable' | 'rejected'
