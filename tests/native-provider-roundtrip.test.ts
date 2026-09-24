@@ -159,4 +159,34 @@ describe('native provider roundtrip', () => {
       h.close()
     }
   })
+
+  it('retires an older resume when canceling a pending switch back to the displayed provider', async () => {
+    const h = await harness()
+    try {
+      const stale = h.resume('old-resume', 'deepseek')
+      h.channel.selectionSelect
+        .mockResolvedValueOnce({
+          status: 'accepted',
+          revision: 2,
+          effective: { providerId: 'provider-a', model: 'shared' },
+          pending: { providerId: 'deepseek', model: 'shared', generation: 1 },
+        })
+        .mockResolvedValueOnce({
+          status: 'accepted',
+          revision: 3,
+          effective: { providerId: 'provider-a', model: 'shared' },
+        })
+
+      expect(await h.transport.select({ providerId: 'deepseek', model: 'shared' })).toBe('accepted')
+      expect(h.transport.getSnapshot()).toMatchObject({
+        modelProvider: 'provider-a',
+        pendingProviderId: 'deepseek',
+      })
+      expect(await h.transport.select({ providerId: 'provider-a', model: 'shared' })).toBe('accepted')
+      stale()
+      expect(h.transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-a', model: 'shared' })
+    } finally {
+      h.close()
+    }
+  })
 })

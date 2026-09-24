@@ -298,6 +298,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       if (this.state.busy) return 'busy'
       const result = await this.selectionClient.select(target, options)
       if (!this.isCurrent(navigation, threadId)) return 'unavailable'
+      if (result === 'accepted') this.retireNativeResumes(threadId)
       if (result !== 'accepted' && options?.source === 'preference') await this.selectionClient.refresh()
       this.publishPatch({ error: null, submissionError: null })
       return result
@@ -310,6 +311,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         model: this.state.model ?? target.model,
       }, options)
       if (result !== 'accepted' || !this.isCurrent(navigation, threadId)) return 'unavailable'
+      this.retireNativeResumes(threadId)
       this.publishPatch({ error: null, submissionError: null })
       if (target.model === this.state.model) return 'accepted'
     }
@@ -329,6 +331,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         throw new Error('Native selection commit failed')
       }
       this.assertCurrent(navigation, threadId)
+      this.retireNativeResumes(threadId)
       this.publishPatch({
         model: target.model,
         reasoningEffort: effort,

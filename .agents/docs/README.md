@@ -102,6 +102,8 @@ implementation of those contracts, not a second public specification.
   bounded retries, renderer cancellation, and source/native evidence boundaries.
 - [Model service preferences, 2026-09-25](history/model-service-preferences-2026-09-25.md):
   local PREF / UX-6 checkpoint, consumer APIs, and pending integration gates.
+- [Provider roundtrip repair, 2026-09-25](history/provider-roundtrip-repair-2026-09-25.md):
+  stale native resume fencing, focused fixture evidence, and remaining native acceptance boundary.
 
 | Document                                                                                                | Type                        | Use it for                                                            |
 | ------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------- |
