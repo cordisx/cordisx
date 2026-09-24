@@ -4,6 +4,86 @@ import { describe, expect, it, vi } from 'vitest'
 import { watchAndInject } from '../packages/cli/src/launcher/cdp.js'
 
 describe('production graph watcher', () => {
+  it('reports startup handoff and target-list stages in order', async () => {
+    let resolveHandoff!: (value: undefined) => void
+    const handoff = new Promise<undefined>(resolve => {
+      resolveHandoff = resolve
+    })
+    const originalFetch = globalThis.fetch
+    const fetchTargets = vi.fn(async () => new Response(JSON.stringify([])))
+    globalThis.fetch = fetchTargets as typeof fetch
+    const controller = new AbortController()
+    const statuses: string[] = []
+    const watching = watchAndInject({
+      port: 43123,
+      source: 'globalThis.__cordisxRuntime = {}',
+      startupNavigation: handoff,
+      signal: controller.signal,
+      onStatus: message => statuses.push(message),
+    })
+    try {
+      await vi.waitFor(() => expect(statuses).toContain('startup-handoff-wait'))
+      expect(fetchTargets).not.toHaveBeenCalled()
+      resolveHandoff(undefined)
+      await vi.waitFor(() => expect(statuses).toContain('target-list-ready'))
+      expect(statuses.slice(0, 4)).toEqual([
+        'startup-handoff-wait',
+        'startup-handoff-ready',
+        'target-list-start',
+        'target-list-ready',
+      ])
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('does not admit a different data seed through the startup handoff', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'other-seed',
+        title: 'Loading',
+        type: 'page',
+        url: 'data:text/html;charset=utf-8,loading',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:43123/other',
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    const activate = vi.fn(async () => {})
+    const statuses: string[] = []
+    const watching = watchAndInject({
+      port: 43123,
+      source: 'globalThis.__cordisxRuntime = {}',
+      launcherOwnedNativeTarget: true,
+      startupNavigation: Promise.resolve({
+        target: {
+          id: 'held-seed',
+          title: 'CordisX startup',
+          type: 'page',
+          url: 'app://-/index.html',
+          webSocketDebuggerUrl: 'ws://127.0.0.1:43123/held',
+        },
+        activate,
+      }),
+      signal: controller.signal,
+      onStatus: message => statuses.push(message),
+    })
+    try {
+      await vi.waitFor(() =>
+        expect(statuses.some(message => message.includes('Owned startup target disappeared before activation')))
+          .toBe(true)
+      )
+      expect(statuses).not.toContain('renderer-install-start')
+      expect(activate).not.toHaveBeenCalled()
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('installs on the exact held seed and activates its original navigation without a reload', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')
@@ -275,7 +355,7 @@ describe('production graph watcher', () => {
     })
     try {
       await vi.waitFor(() => expect(enteredReady).toHaveBeenCalledOnce(), { timeout: 10_000 })
-      expect(status).not.toHaveBeenCalled()
+      expect(status).not.toHaveBeenCalledWith(expect.stringContaining('injected target'))
       finishReady()
       await vi.waitFor(() => expect(status).toHaveBeenCalledWith(expect.stringContaining('injected target')), {
         timeout: 10_000,

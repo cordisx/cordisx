@@ -189,6 +189,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   const installed = new Map<string, support.InstalledScript>()
   let startupNavigation: StartupNavigationHandoff | undefined
   let startupNavigationPending = startupNavigation !== undefined
+  const startupStages = new Set<string>()
+  const startupStage = (stage: string): void => {
+    if (startupStages.has(stage)) return
+    startupStages.add(stage)
+    options.onStatus?.(stage)
+  }
   const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port)
   const hostMutationGate = new support.CdpLifecycleRequestGate()
   let fatalProductionGraphError: unknown
@@ -358,10 +364,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           }
           watcherStage = 'target-list'
           if (startupNavigation === undefined && options.startupNavigation !== undefined) {
+            startupStage('startup-handoff-wait')
             startupNavigation = await support.abortable(options.startupNavigation, options.signal)
+            startupStage('startup-handoff-ready')
             startupNavigationPending = true
           }
+          startupStage('target-list-start')
           const listedTargets = await listTargets(options.port)
+          startupStage('target-list-ready')
           const candidates = injectableTargets(listedTargets)
           const pendingStartupNavigation = startupNavigationPending ? startupNavigation : undefined
           let startupSeed: CdpTarget | undefined
@@ -441,6 +451,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ? 'production'
               : undefined
             watcherStage = 'installation'
+            startupStage('renderer-install-start')
             const activateStartupDocument = startupSeed?.id === target.id && pendingStartupNavigation !== undefined
               ? async (identifier: string): Promise<void> => {
                 await pendingStartupNavigation.activate(identifier)

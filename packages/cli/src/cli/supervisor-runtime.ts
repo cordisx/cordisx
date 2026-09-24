@@ -88,7 +88,12 @@ async function acquirePublishedSupervisor(input: {
 /** Binds a detached supervisor child to the normal foreground Host lifecycle. */
 export async function createSupervisorRuntime(
   environment: NodeJS.ProcessEnv,
-  options: { readonly publicationTimeoutMs?: number } = {},
+  options: {
+    readonly publicationTimeoutMs?: number
+    /** Host-private seams for deterministic supervisor runtime tests. */
+    readonly platform?: NodeJS.Platform
+    readonly installMainAgents?: typeof installHostMainAgents
+  } = {},
 ): Promise<{
   readonly markReady: (
     debugPort: number,
@@ -111,7 +116,7 @@ export async function createSupervisorRuntime(
   }
   const fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
   const tokenFile = environment.CORDISX_SUPERVISOR_TOKEN_FILE
-  const selectedHome = home && app === 'codex' && profile && process.platform === 'darwin'
+  const selectedHome = home && app === 'codex' && profile && (options.platform ?? process.platform) === 'darwin'
     ? await realpath(home)
     : undefined
   const selectedEntry = selectedHome && profile && dataMode
@@ -145,6 +150,16 @@ export async function createSupervisorRuntime(
       rejectStartupNavigation = reject
     })
   void startupNavigation?.catch(() => undefined)
+  const publishStartupNavigation = (
+    handoff: StartupNavigationHandoff | undefined,
+    hostPid: number,
+  ): void => {
+    if (resolveStartupNavigation === undefined) return
+    resolveStartupNavigation(handoff)
+    logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'startup-handoff-resolved' }, { hostPid })
+    resolveStartupNavigation = undefined
+    rejectStartupNavigation = undefined
+  }
   let dockAgentInstalled = false
   let recoveryAttempt = 0
   const onStartupRecovery = async (waitingForUser: boolean): Promise<void> => {
@@ -277,7 +292,7 @@ export async function createSupervisorRuntime(
         if (debugPort === undefined) throw new Error('Owned Host debug port missing')
         if (!supervisorToken) throw new Error('Owned Host main bootstrap missing')
         if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        mainAgents = await installHostMainAgents({
+        mainAgents = await (options.installMainAgents ?? installHostMainAgents)({
           inspectorUrl: await inspectorUrl,
           hostPid: pid,
           hostCwd: process.cwd(),
@@ -288,14 +303,10 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
-        resolveStartupNavigation?.(mainAgents.startupNavigation)
-        resolveStartupNavigation = undefined
-        rejectStartupNavigation = undefined
+        publishStartupNavigation(mainAgents.startupNavigation, pid)
         dockAgentInstalled = dock !== undefined
       } else {
-        resolveStartupNavigation?.(undefined)
-        resolveStartupNavigation = undefined
-        rejectStartupNavigation = undefined
+        publishStartupNavigation(undefined, pid)
       }
       return mainAgents !== undefined
     },
@@ -314,7 +325,7 @@ export async function createSupervisorRuntime(
           throw new Error('Owned Host main bootstrap missing')
         }
         if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        mainAgents = await installHostMainAgents({
+        mainAgents = await (options.installMainAgents ?? installHostMainAgents)({
           inspectorUrl: await inspectorUrl,
           hostPid: current.hostPid,
           hostCwd: process.cwd(),
@@ -325,9 +336,7 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
-        resolveStartupNavigation?.(mainAgents.startupNavigation)
-        resolveStartupNavigation = undefined
-        rejectStartupNavigation = undefined
+        publishStartupNavigation(mainAgents.startupNavigation, current.hostPid)
         dockAgentInstalled = dock !== undefined
       }
       let startupSurface: 'workspace-ready' | 'authenticated-ready' | 'auth-required' | undefined

@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 
 type LifecycleEvent =
   | { readonly event: 'supervisor-stop-requested' }
+  | { readonly event: 'startup-handoff-resolved' }
   | { readonly event: 'launcher-signal'; readonly signal: 'SIGINT' | 'SIGTERM' }
   | { readonly event: 'host-exit'; readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }
   | { readonly event: 'host-process-error' }

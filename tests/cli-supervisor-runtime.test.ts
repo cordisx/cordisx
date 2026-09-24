@@ -1,7 +1,8 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createSupervisorRuntime, publishReadyAfterInspectorClose } from '../packages/cli/src/cli/supervisor-runtime.js'
+import type { StartupNavigationHandoff } from '../packages/cli/src/shortcuts/startup-cover.js'
 import {
   acquireSupervisorStartLock,
   processStartIdentity,
@@ -74,6 +75,61 @@ describe('background supervisor publication handshake', () => {
     const release = await acquireSupervisorStartLock(paths)
     await release()
     await runtime.close()
+  })
+
+  it('resolves the exposed startup promise with the main-agent handoff', async () => {
+    const root = await mkdtemp(path.join('/tmp', 'cx-runtime-'))
+    const paths = supervisorPaths(root, 'codex', 'work')
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(paths.directory, { recursive: true })
+    const token = '9'.repeat(64)
+    await writeFile(paths.bootstrapToken, token, { mode: 0o600 })
+    await writeSupervisorState(paths, {
+      schemaVersion: 1,
+      appId: 'codex',
+      profileId: 'work',
+      phase: 'starting',
+      pid: process.pid,
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      instanceToken: token,
+      createdAt: new Date().toISOString(),
+      version: 'test',
+      effectiveConfig: 'current',
+    })
+    const handoff = {
+      target: {
+        id: 'startup',
+        title: 'CordisX startup',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:43123/startup',
+      },
+      activate: vi.fn(async () => {}),
+    } satisfies StartupNavigationHandoff
+    const runtime = await createSupervisorRuntime({
+      CORDISX_SUPERVISOR_HOME: root,
+      CORDISX_SUPERVISOR_APP: 'codex',
+      CORDISX_SUPERVISOR_PROFILE: 'work',
+      CORDISX_SUPERVISOR_DATA_MODE: 'shared',
+      CORDISX_SUPERVISOR_FINGERPRINT: 'current',
+      CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
+    }, {
+      platform: 'darwin',
+      installMainAgents: async () => ({
+        startupNavigation: handoff,
+        revealAndClose: async () => 'workspace-ready',
+        close: async () => {},
+      }),
+    })
+    try {
+      const exposed = runtime.startupNavigation
+      expect(exposed).toBeDefined()
+      await expect(runtime.markHostLaunched(process.pid, Promise.resolve('ws://127.0.0.1:43123/main'), 43123))
+        .resolves.toBe(true)
+      await expect(exposed).resolves.toBe(handoff)
+    } finally {
+      await runtime.close()
+    }
   })
 
   it('waits past an older published generation and times out without consuming the token', async () => {
