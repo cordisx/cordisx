@@ -29,6 +29,7 @@ interface ElectronBridge {
 
 interface PendingNativeRequest {
   readonly method: 'thread/start' | 'thread/resume'
+  readonly navigationGeneration: number
   readonly threadId?: string
   readonly provider?: string
   readonly model?: string
@@ -192,6 +193,9 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         ? { ...projection.draftPreference, revision: projection.revision }
         : null
       if (effective !== undefined && this.selectionClient.confirmation() === undefined) {
+        if (effective.providerId !== this.state.modelProvider || effective.model !== this.state.model) {
+          this.retireNativeResumes(this.visibleThreadId)
+        }
         if (this.selectionClient.submissionActive()) this.refreshGeneration++
         if (this.visibleThreadId !== undefined) this.effectiveByThread.set(this.visibleThreadId, effective)
         this.publishPatch({ modelProvider: effective.providerId, model: effective.model, draftPreference })
@@ -675,6 +679,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     return left !== undefined && left.length === right.length && left.every((value, index) => value === right[index])
   }
 
+  // A later resume or accepted selection supersedes pending native readback for that thread.
+  private retireNativeResumes(threadId: string | undefined): void {
+    if (threadId === undefined) return
+    for (const [id, request] of this.nativeRequests) {
+      if (request.method === 'thread/resume' && request.threadId === threadId) this.nativeRequests.delete(id)
+    }
+  }
+
   private readonly observeNativeRequest = (event: CustomEvent<unknown>): void => {
     if (this.disposed) return
     const envelope = record(event.detail)
@@ -686,10 +698,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (requestId === undefined || params === undefined) return
     if (method === 'thread/start' || method === 'thread/resume') {
       const threadId = string(params.threadId)
+      if (method === 'thread/resume') this.retireNativeResumes(threadId)
       const provider = string(params.modelProvider)
       const model = string(params.model)
       this.nativeRequests.set(requestId, {
         method,
+        navigationGeneration: this.navigationGeneration,
         ...(threadId === undefined ? {} : { threadId }),
         ...(provider === undefined ? {} : { provider }),
         ...(model === undefined ? {} : { model }),
@@ -773,7 +787,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const visibleThreadId = currentThreadId(this.document)
     if (
       threadId === undefined || threadId !== visibleThreadId
-      || (native.method === 'thread/resume' && native.threadId !== visibleThreadId)
+      || (native.method === 'thread/resume'
+        && (native.threadId !== visibleThreadId || native.navigationGeneration !== this.navigationGeneration))
     ) return
     const control = this.modelControl()
     this.turnBusy = false
