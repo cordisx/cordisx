@@ -7,7 +7,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const allowPendingLicense = process.argv.includes('--allow-pending-license')
 const expectedVersion = '0.1.0-beta.23'
 const expectedProtocolVersion = '0.1.0-beta.7'
-const expectedCliProxySource = 'github:cordisx/plugin-cli-proxy-api#12d5daa36dbd5dd565b96d22859afb1d0f3f3e1d'
+const expectedCliProxySource = 'github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e'
 const expectedRepository = 'git+https://github.com/cordisx/cordisx.git'
 
 async function json(relative) {
