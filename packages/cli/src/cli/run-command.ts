@@ -370,6 +370,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       rootFromConfigPath(configPath),
       selection.profileId,
       selection.profile,
+      environment,
+      plan?.environment,
     )
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined

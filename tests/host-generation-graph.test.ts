@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { transform } from 'esbuild'
@@ -209,5 +209,26 @@ describe('Host generation graph', () => {
 
     await expect(fetch(initialManifest!, { signal: AbortSignal.timeout(1_000) })).rejects.toThrow()
     await expect(fetch(rebuiltManifest!, { signal: AbortSignal.timeout(1_000) })).rejects.toThrow()
+  }, 30_000)
+
+  it('invalidates a same-path cache entry when installed Host source content changes', async () => {
+    const root = await cacheRoot()
+    const sourceIdentityRoot = path.join(root, 'installed-cli-source')
+    await mkdir(sourceIdentityRoot)
+    const marker = path.join(sourceIdentityRoot, 'host.js')
+    await writeFile(marker, 'export const revision = 1\n')
+
+    const first = await buildHostGenerationGraph(config, {}, { cacheRoot: root, sourceIdentityRoot })
+    const unchanged = await buildHostGenerationGraph(config, {}, { cacheRoot: root, sourceIdentityRoot })
+    graphs.push(first, unchanged)
+    expect(first.cacheStatus).toBe('built')
+    expect(unchanged.cacheStatus).toBe('disk')
+
+    await writeFile(marker, 'export const revision = 2\n')
+    const changed = await buildHostGenerationGraph(config, {}, { cacheRoot: root, sourceIdentityRoot })
+    const changedUnchanged = await buildHostGenerationGraph(config, {}, { cacheRoot: root, sourceIdentityRoot })
+    graphs.push(changed, changedUnchanged)
+    expect(changed.cacheStatus).toBe('built')
+    expect(changedUnchanged.cacheStatus).toBe('disk')
   }, 30_000)
 })

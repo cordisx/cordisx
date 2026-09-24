@@ -90,6 +90,7 @@ describe('Vite development native submission assembly', () => {
             configModelCatalogs: { fixture: 'scoped.json' },
             dynamicModelCatalog: true,
             managedCatalog: { homeDir: f.home, profileId: 'default' },
+            nativeDiscoveryEnvironment: { CORDISX_HOME: f.home },
           },
         )
       } else expect(create.mock.calls[0]).toHaveLength(3)

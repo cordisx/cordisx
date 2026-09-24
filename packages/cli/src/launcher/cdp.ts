@@ -292,6 +292,29 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     )
   }
   let watcherFailure: unknown
+  let readinessFailure:
+    | Readonly<{ error: unknown; attemptedReloadTarget: 'Vite' | 'production' | undefined }>
+    | undefined
+  const readinessOperations = new Set<Promise<void>>()
+  let readinessTail = Promise.resolve()
+  const beginReadiness = (
+    target: CdpTarget,
+    attemptedReloadTarget: 'Vite' | 'production' | undefined,
+  ): void => {
+    let operation!: Promise<void>
+    operation = readinessTail
+      .then(async () => {
+        if (readinessFailure !== undefined) return
+        await options.onReady?.()
+        options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
+      })
+      .catch(error => {
+        readinessFailure ??= { error, attemptedReloadTarget }
+      })
+      .finally(() => readinessOperations.delete(operation))
+    readinessTail = operation
+    readinessOperations.add(operation)
+  }
   let watcherStage:
     | 'poll'
     | 'graph-terminal'
@@ -318,6 +341,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       let attemptedReloadTarget: 'Vite' | 'production' | undefined
       try {
         await hostMutationGate.exclusive(async () => {
+          if (readinessFailure !== undefined) {
+            watcherStage = 'readiness'
+            attemptedReloadTarget = readinessFailure.attemptedReloadTarget
+            throw readinessFailure.error
+          }
           if (fatalProductionGraphError !== undefined) {
             watcherStage = 'graph-terminal'
             attemptedReloadTarget = 'production'
@@ -413,9 +441,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
             )
             installed.set(target.id, record)
-            watcherStage = 'readiness'
-            await options.onReady?.()
-            options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
+            beginReadiness(target, attemptedReloadTarget)
           }
         })
       } catch (error) {
@@ -440,6 +466,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     watcherFailure = error
     lifecycle('watcher-failed')
   } finally {
+    await Promise.allSettled([...readinessOperations])
+    if (watcherFailure === undefined && readinessFailure !== undefined) {
+      watcherStage = 'readiness'
+      watcherFailure = readinessFailure.error
+      lifecycle('watcher-failed')
+    }
     lifecycle('watcher-cleanup-started')
     const cleanup = await hostMutationGate.closeAndDrain(async () =>
       await Promise.allSettled(

@@ -147,17 +147,40 @@ The option preserves branding and never changes native endpoints, credentials,
 defaults, or an active request. Live updates do not apply draft model fallbacks.
 Full model-source management and script execution are not provided by this flag.
 
-Host-private discovery foundations additionally provide an explicit owner-binding
-capability and an adapter registry. The built-in registry has separate strict
-adapters for DeepSeek, OpenCode Go and OpenRouter. Selection receives the saved
-Provider endpoint and title, but a title alone never redirects a credential to a
-different endpoint. Each adapter uses only its official HTTPS API base, one
-`GET /models`, bounded JSON parsing, and a credential callback supplied by the
-effective connection owner. It never obtains keys from renderer data or infers
-credential ownership from a provider name.
-There is currently no production resolver for arbitrary native layered credentials;
-these bindings remain unsupported for auto discovery. Adapter fixtures are not
-evidence that native automatic discovery is usable or that a real account works.
+Host-private discovery provides an explicit owner-binding capability and an
+adapter registry. The built-in registry has separate strict adapters for
+DeepSeek, OpenCode Go and OpenRouter. For those exact official endpoints, the
+selected profile may use its effective `env_key` or inline private bearer token
+for one bounded `GET /models`. Selection receives only safe model metadata; the
+credential and endpoint remain in launcher Node. A title alone never redirects a
+credential to a different endpoint. Unsupported endpoints, unauthenticated
+providers and unknown or layered credential shapes remain static/manual.
+
+Remote discovery is enabled by default for supported native config providers.
+Set `nativeModelDiscovery: false` on the selected CordisX profile to keep only
+its native active-model and `configModelCatalogs` membership:
+
+```json
+{
+  "displayName": "Default",
+  "dataMode": "shared",
+  "nativeModelDiscovery": false,
+  "configModelCatalogs": {
+    "deepseek": "catalogs/deepseek.json"
+  }
+}
+```
+
+This profile-wide setting takes effect on the next launch. It is independent of
+`dynamicModelCatalog`, which only watches local files. When disabled, startup,
+timers and Manager refresh make no remote model-list request. This stage does
+not provide per-Provider source strategy editing or a native-config script source;
+those require a separate configuration and management contract.
+
+Automatic native-config results and their last-known-good copy are session-only
+Host memory. `native-catalog-management.json` stores display overlays, not the
+remote model list, endpoint or credential. A restart reacquires the list in the
+background; failed same-scope refreshes retain only the current session's LKG.
 
 ### CordisX-Owned And Native-Only Connections
 

@@ -115,7 +115,9 @@ export async function installModelProviderSelector(
     if (
       records.some(record =>
         !(record.target instanceof Element)
-        || !record.target.closest('[data-cordisx-model-provider-selector],.cxmp-menu,.cxmp-confirm')
+        || !record.target.closest(
+          '[data-cordisx-model-provider-selector], [data-cordisx-page-outlet], .cxmp-menu, .cxmp-confirm',
+        )
       )
     ) schedule()
   })

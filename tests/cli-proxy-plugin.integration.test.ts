@@ -82,8 +82,13 @@ describe('CLIProxy provider plugin renderer', () => {
     const manifest = JSON.parse(await readFile(path.join(externalPackageRoot, 'package.json'), 'utf8')) as {
       readonly name?: unknown
       readonly version?: unknown
+      readonly exports?: Record<string, { readonly default?: unknown }>
     }
-    expect(manifest).toMatchObject({ name: '@cordisx/plugin-cli-proxy-api', version: '0.1.0' })
+    expect(manifest).toMatchObject({
+      name: '@cordisx/plugin-cli-proxy-api',
+      version: '0.1.1',
+      exports: { './extensions/v1': { default: './dist/extensions.mjs' } },
+    })
     expect(externalEntry).toBe(path.join(externalPackageRoot, 'dist', 'runtime', 'module.js'))
     await expect(access(path.join(externalPackageRoot, 'dist', 'service.mjs'))).resolves.toBeUndefined()
     await expect(readFile(path.join(externalPackageRoot, 'src', 'index.ts'))).rejects.toThrow()
@@ -255,9 +260,10 @@ describe('CLIProxy provider plugin renderer', () => {
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
     const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
     expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
-    expect(bundledPlugin?.readme).toContain('standalone owner')
-    expect(bundledPlugin?.readme).toContain('The Host owns endpoint and credential resolution')
-    expect(bundledPlugin?.readme).toContain('The plugin receives no endpoint, credential, process')
+    expect(bundledPlugin?.readme).toContain('The Host resolves credentials, starts managed processes')
+    expect(bundledPlugin?.readme).toContain('owns the Provider Fleet')
+    expect(bundledPlugin?.readme).toContain('The plugin never receives raw credentials')
+    expect(bundledPlugin?.readme).toContain('filesystem paths, process handles, or transport handles')
     expect(bundledPlugin?.configuration).toMatchObject({
       schemaKind: 'schemastery',
       applies: 'plugin-restart',
@@ -345,8 +351,8 @@ describe('CLIProxy provider plugin renderer', () => {
     await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') !== null)
     const readmePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(readmePanel?.querySelector('.cxm-readme h1')?.textContent).toBe('CLIProxy Providers')
-    expect(readmePanel?.textContent).toContain('standalone owner')
-    expect(readmePanel?.textContent).toContain('Host owns endpoint and credential resolution')
+    expect(readmePanel?.textContent).toContain('The Host resolves credentials, starts managed processes')
+    expect(readmePanel?.textContent).toContain('owns the Provider Fleet')
     expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
     await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="Configuration"]') !== null)

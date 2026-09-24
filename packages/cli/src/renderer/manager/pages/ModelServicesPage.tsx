@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ModelProviderRegistry, ModelProviderSnapshot } from '../../model-providers.js'
 import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
+import { ModelBrandIcon } from '../../host-ui/ModelBrandIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { SearchField } from '../../host-ui/SearchField.js'
 import { ProviderAction } from '../../model-provider-actions.js'
@@ -34,14 +35,20 @@ export function ModelServicesPage({ registry, locale }: {
     void registry?.refresh()
   }, [registry])
   const normalized = catalogQuery(query)
+  const managementState = !client ? 'no-channel' : catalog.loading && !catalog.epoch
+    ? 'loading'
+    : catalog.connected
+    ? 'ready'
+    : 'disconnected'
   const managedIds = new Set(catalog.views.map(view => view.providerId))
-  const providers = state.providers.filter(provider =>
-    !managedIds.has(provider.providerId)
-    && `${provider.providerId} ${provider.title} ${
-      provider.models.map(model => `${model.id} ${model.label}`).join(' ')
-    }`
-      .toLocaleLowerCase().includes(normalized)
-  )
+  const providers = state.providers.flatMap(provider => {
+    if (managedIds.has(provider.providerId) || filter === 'blocked' || filter === 'removed') return []
+    const matchesProvider = catalogQuery(`${provider.providerId} ${provider.title}`).includes(normalized)
+    const models = provider.models.filter(model =>
+      matchesProvider || catalogQuery(`${model.id} ${model.label}`).includes(normalized)
+    )
+    return matchesProvider || models.length > 0 ? [{ ...provider, models }] : []
+  })
   const views = catalog.views.filter(view =>
     catalogQuery(
       `${view.title} ${view.providerId} ${view.scopeLabel ?? ''} ${
@@ -51,7 +58,7 @@ export function ModelServicesPage({ registry, locale }: {
       .includes(normalized)
   )
   return (
-    <section className="cxr-page cxmp-management">
+    <section className="cxr-page cxmp-management" data-catalog-management={managementState}>
       <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
       <div className="cxmp-toolbar">
         <SearchField
@@ -61,20 +68,17 @@ export function ModelServicesPage({ registry, locale }: {
           aria-label={copy.search}
           placeholder={copy.search}
         />
-        {client
-          ? (
-            <SelectField
-              label={t('catalog.filter')}
-              icon="models-read"
-              value={filter}
-              options={(['all', 'selectable', 'blocked', 'removed'] as const).map(value => ({
-                value,
-                label: t(`catalog.${value}`),
-              }))}
-              onChange={value => setFilter(value as CatalogFilter)}
-            />
-          )
-          : null}
+        <SelectField
+          label={t('catalog.filter')}
+          icon="models-read"
+          value={filter}
+          disabled={!client}
+          options={(['all', 'selectable', 'blocked', 'removed'] as const).map(value => ({
+            value,
+            label: t(`catalog.${value}`),
+          }))}
+          onChange={value => setFilter(value as CatalogFilter)}
+        />
         {catalog.canCreateConnection && client
           ? (
             <IconButton
@@ -120,8 +124,8 @@ export function ModelServicesPage({ registry, locale }: {
           </section>
         )}
         {state.error || !registry ? <p role="alert">{copy.unavailable}</p> : null}
-        {client && !catalog.connected && catalog.views.length === 0
-          ? <p role="status">{t('catalog.unavailable')}</p>
+        {registry && managementState !== 'loading' && !catalog.connected && catalog.views.length === 0
+          ? <p role="status">{t('catalog.managementUnavailable')}</p>
           : null}
         {client
           ? views.map(view => (
@@ -138,9 +142,16 @@ export function ModelServicesPage({ registry, locale }: {
           ))
           : null}
         {providers.map(provider => (
-          <details className="cxmp-provider-detail cxms-provider" key={provider.providerId} open>
+          <details
+            className="cxmp-provider-detail cxms-provider"
+            key={provider.providerId}
+            data-catalog-binding={catalog.connected ? 'unbound' : managementState}
+            open
+          >
             <summary>
-              <HostBrandIcon icon={provider.icon} />
+              {provider.selectorBrand
+                ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+                : <HostBrandIcon icon={provider.icon} />}
               <span className="cxms-provider-identity">
                 <strong>{provider.title}</strong>
                 {provider.title.toLocaleLowerCase() === provider.providerId.toLocaleLowerCase()
@@ -149,6 +160,7 @@ export function ModelServicesPage({ registry, locale }: {
               </span>
               <span className="cxms-model-count">{copy.models}: {provider.models.length}</span>
             </summary>
+            {catalog.connected ? <p className="cxmc-muted">{t('catalog.readOnly')}</p> : null}
             <ul aria-label={`${provider.title} · ${copy.models}`}>
               {provider.models.map(model => (
                 <li key={model.id}>

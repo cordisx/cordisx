@@ -128,10 +128,12 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       ? native.nativeModels ?? []
       : [])
   const terms = query.trim().toLocaleLowerCase(locale).split(/\s+/).filter(Boolean)
-  const filteredModels = menuModels.filter(model => {
-    const label = friendlyModelLabel(model.label).toLocaleLowerCase(locale)
-    return terms.every(term => label.includes(term))
-  })
+  const filteredModels = open === 'model'
+    ? menuModels.filter(model => {
+      const label = friendlyModelLabel(model.label).toLocaleLowerCase(locale)
+      return terms.every(term => label.includes(term))
+    })
+    : []
   const feedback = error ?? status
   const displayedNativeModel = native.nativeModels?.find(model => model.id === displayedModelId)
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
@@ -297,8 +299,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const toggle = (kind: 'provider' | 'model', button: HTMLButtonElement) => {
     if (!canInteract()) return
     returnFocus.current = button
-    setOpen(current => current === kind ? undefined : kind)
-    void registry.refresh()
+    const next = open === kind ? undefined : kind
+    setOpen(next)
+    // Live catalogs already invalidate the registry and reconcile periodically.
+    // Avoid transferring and rebuilding the full catalog on the interaction turn.
+    if (next !== undefined && !registry.hasLiveSource()) void registry.refresh()
   }
   const nativeProvider = {
     providerId: native.modelProvider ?? 'openai',

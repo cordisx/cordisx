@@ -100,10 +100,25 @@ test('explicit login usability releases input without claiming authentication', 
     assert.equal(dialog.style.background, 'transparent')
     assert.ok(backdrop.textContent.includes(`#${dialog.id}::backdrop { background: transparent; }`))
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false }), false)
+    assert.equal(api.release(receipt, { receipt, hostUsable: true, loginUsable: true }), false)
+    const observations = { receipt, hostUsable: true, cordisxReady: true, loginUsable: true }
+    assert.equal(api.release(receipt, observations), true)
+    assert.equal(Object.hasOwn(observations, 'authenticated'), false)
+    assert.equal(backdrop.isConnected, false)
+  } finally {
+    dom.window.close()
+  }
+})
+
+test('explicit signed-out login usability remains accepted', async () => {
+  const dom = await documentFixture()
+  const w = dom.window
+  try {
+    const api = dom.window.__cordisxStartupDocument
+    const receipt = api.snapshot().receipt
     assert.equal(api.release(receipt, { receipt, hostUsable: true, authenticated: false, loginUsable: true }), true)
     assert.equal(api.snapshot().phase, 'released')
     assert.equal(dom.window.document.querySelector('dialog'), null)
-    assert.equal(backdrop.isConnected, false)
   } finally {
     dom.window.close()
   }

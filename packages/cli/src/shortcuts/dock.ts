@@ -230,6 +230,54 @@ export interface HostMainAgentController {
   close(): Promise<void>
 }
 
+type MainAgentStage =
+  | 'inspector-connected'
+  | 'debugger-enabled'
+  | 'breakpoint-installed'
+  | 'startup-paused'
+  | 'navigation-install'
+  | 'navigation-installed'
+  | 'breakpoint-remove'
+  | 'breakpoint-removed'
+  | 'debugger-resume'
+  | 'debugger-resumed'
+  | 'main-module-wait'
+  | 'main-module-ready'
+  | 'cover-connect'
+  | 'cover-connected'
+
+function mainAgentStage(hostPid: number, startedAt: number, stage: MainAgentStage): void {
+  console.error(
+    '[cordisx-startup]',
+    JSON.stringify({
+      event: 'main-agent-stage',
+      at: Date.now(),
+      hostPid,
+      stage,
+      elapsedMs: Date.now() - startedAt,
+    }),
+  )
+}
+
+function mainAgentFailure(error: unknown): 'cdp-timeout' | 'cdp-closed' | 'operation-failed' {
+  if (error instanceof Error && error.message.startsWith('CDP request timed out:')) return 'cdp-timeout'
+  if (error instanceof Error && error.message.includes('CDP connection')) return 'cdp-closed'
+  return 'operation-failed'
+}
+
+export async function installOneShotStartupBreakpoint(
+  session: Pick<CdpSession, 'send'>,
+): Promise<() => Promise<void>> {
+  const breakpoint = await session.send('Debugger.setBreakpointByUrl', {
+    lineNumber: 0,
+    urlRegex: 'early-bootstrap\\.js',
+  })
+  if (typeof breakpoint.breakpointId !== 'string') throw new Error('Owned Host startup breakpoint was not installed')
+  return async () => {
+    await session.send('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
+  }
+}
+
 /** Install same-window startup and optional Dock ownership over one inspector. */
 export async function installHostMainAgents(input: {
   inspectorUrl: string
@@ -250,6 +298,8 @@ export async function installHostMainAgents(input: {
   let session: CdpSession | undefined
   let startup: StartupCoverController | undefined
   let closed = false
+  const startedAt = Date.now()
+  let stage: MainAgentStage | 'inspector-connect' = 'inspector-connect'
   const closeInspector = async (): Promise<void> => {
     if (closed) return
     if (session) {
@@ -266,11 +316,14 @@ export async function installHostMainAgents(input: {
   }
   try {
     session = await CdpSession.connect(input.inspectorUrl)
+    stage = 'inspector-connected'
+    mainAgentStage(input.hostPid, startedAt, stage)
     await session.send('Debugger.enable')
-    await session.send('Debugger.setBreakpointByUrl', {
-      lineNumber: 0,
-      urlRegex: 'early-bootstrap\\.js',
-    })
+    stage = 'debugger-enabled'
+    mainAgentStage(input.hostPid, startedAt, stage)
+    const removeStartupBreakpoint = await installOneShotStartupBreakpoint(session)
+    stage = 'breakpoint-installed'
+    mainAgentStage(input.hostPid, startedAt, stage)
     const paused = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         remove()
@@ -284,6 +337,8 @@ export async function installHostMainAgents(input: {
     })
     await session.send('Runtime.runIfWaitingForDebugger')
     const pausedEvent = await paused
+    stage = 'startup-paused'
+    mainAgentStage(input.hostPid, startedAt, stage)
     const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
     if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
     if (input.hostCwd !== undefined) {
@@ -299,13 +354,28 @@ export async function installHostMainAgents(input: {
         throw new Error('Owned Host working directory could not be restored')
       }
     }
+    stage = 'navigation-install'
+    mainAgentStage(input.hostPid, startedAt, stage)
     await installStartupNavigation(session, frame.callFrameId, {
       pid: input.hostPid,
       generation: input.readyInstanceToken,
     })
+    stage = 'navigation-installed'
+    mainAgentStage(input.hostPid, startedAt, stage)
+    stage = 'breakpoint-remove'
+    mainAgentStage(input.hostPid, startedAt, stage)
+    await removeStartupBreakpoint()
+    stage = 'breakpoint-removed'
+    mainAgentStage(input.hostPid, startedAt, stage)
+    stage = 'debugger-resume'
+    mainAgentStage(input.hostPid, startedAt, stage)
     await session.send('Debugger.resume')
+    stage = 'debugger-resumed'
+    mainAgentStage(input.hostPid, startedAt, stage)
     // Electron exposes the inspector before its application entry module is
     // loaded. Wait for the main module rather than racing Node bootstrap.
+    stage = 'main-module-wait'
+    mainAgentStage(input.hostPid, startedAt, stage)
     const moduleDeadline = Date.now() + 10_000
     let moduleReady = false
     while (!moduleReady && Date.now() < moduleDeadline) {
@@ -317,12 +387,18 @@ export async function installHostMainAgents(input: {
       if (!moduleReady) await new Promise(resolve => setTimeout(resolve, 100))
     }
     if (!moduleReady) throw new Error('Owned Host main module did not initialize')
+    stage = 'main-module-ready'
+    mainAgentStage(input.hostPid, startedAt, stage)
+    stage = 'cover-connect'
+    mainAgentStage(input.hostPid, startedAt, stage)
     startup = await connectStartupCover(
       session,
       { pid: input.hostPid, generation: input.readyInstanceToken },
       input.debugPort,
       input.onStartupRecovery,
     )
+    stage = 'cover-connected'
+    mainAgentStage(input.hostPid, startedAt, stage)
     if (input.dock) {
       // All code and arguments are selected by the owning launcher. No socket
       // request can provide JavaScript, a module path, or an image path.
@@ -353,6 +429,17 @@ export async function installHostMainAgents(input: {
       }
     }
   } catch (error) {
+    console.error(
+      '[cordisx-startup]',
+      JSON.stringify({
+        event: 'main-agent-failed',
+        at: Date.now(),
+        hostPid: input.hostPid,
+        stage,
+        elapsedMs: Date.now() - startedAt,
+        reason: mainAgentFailure(error),
+      }),
+    )
     // The caller owns process-tree cleanup. Do not disconnect/resume a paused
     // main before that cleanup: its first document may not have a cover yet.
     await startup?.close()

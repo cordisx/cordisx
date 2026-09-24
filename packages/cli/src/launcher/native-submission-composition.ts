@@ -29,11 +29,12 @@ import {
 } from './native-account-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
-import { codexConfigModelProviders } from './codex-config-model-providers.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
+import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
+import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-catalog-discovery.js'
 import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
@@ -85,8 +86,10 @@ interface NativeSubmissionCatalogOptions {
   readonly defaultProviderId?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
+  readonly nativeModelDiscovery?: boolean
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
+  readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
 }
 export function nativeAppServerIntermediaryPath(): string {
@@ -340,11 +343,16 @@ export async function prepareNativeSubmissionBootstrap(
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
+  let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
+  let nativeManagement: NativeCatalogManagement | undefined
+  let management: CompositeCatalogManagement | undefined
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
       dynamic?.dispose()
+      nativeDiscovery?.dispose()
+      management?.close()
       try {
         await controller?.dispose()
       } finally {
@@ -441,6 +449,10 @@ export async function prepareNativeSubmissionBootstrap(
           }
           providerSyncEnvironment = Object.freeze(environment)
         }
+        nativeDiscovery = new NativeConfigCatalogDiscovery({
+          environment: () => completeOptions.nativeDiscoveryEnvironment ?? {},
+          enabled: completeOptions.nativeModelDiscovery !== false,
+        })
         if (completeOptions.dynamicModelCatalog) {
           dynamic = dynamicConfiguredCatalog({
             codexHome,
@@ -450,6 +462,16 @@ export async function prepareNativeSubmissionBootstrap(
             ...(completeOptions.selectorIcons === undefined
               ? {}
               : { selectorIcons: completeOptions.selectorIcons }),
+            load: () =>
+              nativeDiscovery!.load({
+                codexHome,
+                ...(completeOptions.configModelCatalogs === undefined
+                  ? {}
+                  : { catalogs: completeOptions.configModelCatalogs }),
+                ...(completeOptions.selectorIcons === undefined
+                  ? {}
+                  : { selectorIcons: completeOptions.selectorIcons }),
+              }),
           })
         }
         const resolveConnection = (id: string) =>
@@ -457,44 +479,69 @@ export async function prepareNativeSubmissionBootstrap(
             ? managed.nativeConnection(id)
             : activation.prepareNativeConnection(id)
         credentials = createNativeProviderCredentialBroker({ resolve: resolveConnection })
-        let configured = dynamic?.snapshot()
-          ?? await codexConfigModelProviders(
-            codexHome,
-            completeOptions.configModelCatalogs,
-            completeOptions.selectorIcons,
-          )
         const managedIds = new Set(activation.nativeProviderIds)
         let lastDiagnostic: string | undefined
-        const configuredCatalog = async () => {
-          configured = dynamic?.snapshot()
-            ?? await codexConfigModelProviders(
+        const loadConfigured = async () => {
+          let projection
+          if (dynamic) {
+            await dynamic.refresh()
+            projection = dynamic.snapshot()
+          } else {
+            projection = await nativeDiscovery!.load({
               codexHome,
-              completeOptions.configModelCatalogs,
-              completeOptions.selectorIcons,
-            )
-          const diagnostic = JSON.stringify(configured.diagnostics)
-          if (diagnostic !== lastDiagnostic && configured.diagnostics.length > 0) {
+              ...(completeOptions.configModelCatalogs === undefined
+                ? {}
+                : { catalogs: completeOptions.configModelCatalogs }),
+              ...(completeOptions.selectorIcons === undefined
+                ? {}
+                : { selectorIcons: completeOptions.selectorIcons }),
+            })
+          }
+          const diagnostic = JSON.stringify(projection.diagnostics)
+          if (diagnostic !== lastDiagnostic && projection.diagnostics.length > 0) {
             console.warn(
               `[cordisx] configModelCatalogs: ${diagnostic}; check the selected CordisX profile's local catalogs`,
             )
           }
           lastDiagnostic = diagnostic
-          return configured.providers
+          return projection
         }
+        nativeManagement = await NativeCatalogManagement.open({
+          load: loadConfigured,
+          shadowed: providerId => managed?.owns(providerId) === true || managedIds.has(providerId),
+          ...(completeOptions.managedCatalog === undefined
+            ? {}
+            : {
+              stateFile: path.join(
+                completeOptions.managedCatalog.homeDir,
+                'apps',
+                'codex',
+                'profiles',
+                completeOptions.managedCatalog.profileId,
+                'native-catalog-management.json',
+              ),
+            }),
+          refreshBeforeRead: dynamic === undefined,
+          discovery: nativeDiscovery,
+          ...(dynamic === undefined
+            ? {}
+            : {
+              subscribeSource: listener => dynamic!.subscribe(() => listener(dynamic!.snapshot())),
+            }),
+        })
+        management = new CompositeCatalogManagement(nativeManagement, managed)
         const cdp = createNativeSubmissionCdpAuthority({
-          ...(!dynamic && !managed ? {} : {
-            catalogSubscribe: (listener: () => void) => {
-              const subscriptions = [dynamic?.subscribe(listener), managed?.subscribe(listener)]
-              return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
-            },
-          }),
-          ...(managed ? { management: managed } : {}),
+          catalogSubscribe: (listener: () => void) => {
+            const subscriptions = [nativeManagement!.subscribe(listener), managed?.subscribe(listener)]
+            return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
+          },
+          management,
           catalog: combinedNativeModelProviderCatalog(
             combinedNativeModelProviderCatalog(
               async () => managed?.catalog() ?? [],
               nativeModelProviderCatalog(activation, completeOptions.selectorIcons),
             ),
-            configuredCatalog,
+            () => nativeManagement!.catalog(),
           ),
           isThreadIdle: id => control.isThreadIdle(id),
           ...(completeOptions.defaultProviderId === undefined
@@ -512,7 +559,7 @@ export async function prepareNativeSubmissionBootstrap(
           providerSource: providerId =>
             managed?.owns(providerId) || managedIds.has(providerId)
               ? 'managed'
-              : (dynamic?.snapshot() ?? configured).providerIds.has(providerId)
+              : nativeManagement!.hasProvider(providerId)
               ? 'config'
               : undefined,
           validateSelection: async selection => {
@@ -520,10 +567,7 @@ export async function prepareNativeSubmissionBootstrap(
               return await managed?.validateSelection(selection.providerId, selection.model) ?? false
             }
             if (selection.providerId === 'openai' || managedIds.has(selection.providerId)) return true
-            return (await configuredCatalog()).some(provider =>
-              provider.providerId === selection.providerId
-              && provider.models.some(model => model.id === selection.model)
-            )
+            return nativeManagement!.validateSelection(selection.providerId, selection.model)
           },
         })
         control.bindController(controller)

@@ -63,6 +63,76 @@ function readyLeaseEcho(payload: Record<string, unknown> | undefined): Record<st
 }
 
 describe('watchAndInject session replacement', () => {
+  it('reconnects a same-target renderer while initial readiness is still pending', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    const connections: import('ws').WebSocket[] = []
+    const registrations: string[] = []
+    server.on('connection', connection => {
+      connections.push(connection)
+      connection.on('message', data => {
+        const request = JSON.parse(String(data)) as {
+          id: number
+          method: string
+          params?: Record<string, unknown>
+        }
+        if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
+          registrations.push(String(request.params?.source))
+          connection.send(JSON.stringify({ id: request.id, result: { identifier: `bootstrap-${connections.length}` } }))
+          return
+        }
+        connection.send(JSON.stringify({ id: request.id, result: { result: { value: { ok: true } } } }))
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'pending-ready-target',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
+    const enteredReady = deferred()
+    const finishReady = deferred()
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'current-live-bootstrap',
+      newDocumentSource: 'future-document-bootstrap',
+      signal: abort.signal,
+      onReady: async () => {
+        enteredReady.resolve()
+        await finishReady.promise
+      },
+    })
+    try {
+      await enteredReady.promise
+      expect(registrations).toEqual(['future-document-bootstrap'])
+
+      connections[0]!.close()
+      await once(connections[0]!, 'close')
+      await vi.waitFor(() =>
+        expect(registrations).toEqual([
+          'future-document-bootstrap',
+          'future-document-bootstrap',
+        ]), { timeout: 10_000 })
+    } finally {
+      finishReady.resolve()
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
   it('removes the old script and bindings before a same-target reconnect installs one future bootstrap', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
@@ -52,6 +52,8 @@ export interface HostGenerationGraphSource {
 
 export interface HostGenerationGraphBuildOptions {
   readonly cacheRoot?: string
+  /** Override the installed CLI source root for cache-identity integration tests. */
+  readonly sourceIdentityRoot?: string
 }
 
 interface StaticGraphFile {
@@ -140,6 +142,30 @@ export class HostGenerationGraphOwner {
 
 function digest(bytes: string | Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+async function hostSourceIdentity(root: string): Promise<string> {
+  const hash = createHash('sha256').update('cordisx.host-generation-source.v1\0')
+  const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+    for (const entry of entries) {
+      const relative = path.posix.join(relativeDirectory, entry.name)
+      const absolute = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        hash.update(`d\0${relative}\0`)
+        await visit(absolute, relative)
+      } else if (entry.isFile()) {
+        hash.update(`f\0${relative}\0`)
+        hash.update(await readFile(absolute))
+        hash.update('\0')
+      } else {
+        throw new Error(`CordisX Host graph source tree contains an unsupported entry: ${absolute}`)
+      }
+    }
+  }
+  await visit(root, '')
+  return hash.digest('hex')
 }
 
 function missing(error: unknown): boolean {
@@ -355,11 +381,14 @@ async function loadStaticHostGraph(
   reactRuntimeImport: string,
   cacheRoot: string,
   stableIdentity: string,
+  sourceIdentity: string,
 ): Promise<Readonly<{ artifact: StaticGraphArtifact; cacheStatus: HostGenerationGraph['cacheStatus'] }>> {
   await ensurePrivateCacheRoot(cacheRoot)
   const key = createHash('sha256')
     .update(`cordisx.host-generation-static.v${STATIC_GRAPH_CACHE_SCHEMA}.strict-boot\0`)
     .update(stableIdentity)
+    .update('\0')
+    .update(sourceIdentity)
     .digest('hex')
   const cacheFile = path.join(cacheRoot, `${key}.json`)
   const cached = await readStaticGraphCache(cacheFile, key)
@@ -402,12 +431,17 @@ export async function buildHostGenerationGraph(
     `../renderer/react-runtime.${runtimeExtension}`,
   )
   const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
+  const sourceIdentity = await hostSourceIdentity(path.resolve(
+    buildOptions.sourceIdentityRoot ?? path.dirname(fileURLToPath(import.meta.url)),
+    buildOptions.sourceIdentityRoot === undefined ? '..' : '.',
+  ))
   const { artifact, cacheStatus } = await loadStaticHostGraph(
     config,
     runtimeImport,
     reactRuntimeImport,
     path.resolve(buildOptions.cacheRoot ?? defaultCacheRoot(config)),
     composition.hostGraphStableIdentity,
+    sourceIdentity,
   )
   console.error('[cordisx-startup]', JSON.stringify({ event: 'host-graph', at: Date.now(), cacheStatus }))
   const files = new Map(artifact.files)

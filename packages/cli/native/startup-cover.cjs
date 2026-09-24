@@ -231,7 +231,9 @@ function installCover(options, animateMark) {
         || !(observations?.workspaceUsable === true && observations?.cordisxReady === true
             && observations?.authenticated === undefined
           || observations?.authenticated === true && observations?.cordisxReady === true
-          || observations?.authenticated === false && observations?.loginUsable === true)
+          || observations?.authenticated === false && observations?.loginUsable === true
+          || observations?.authenticated === undefined && observations?.loginUsable === true
+            && observations?.cordisxReady === true)
       ) return false
       disposed = true
       phase = 'released'

@@ -8,6 +8,10 @@ import { CodexDesktopNativeModelProviderTransport } from '../../packages/cli/src
 let openModal: (value: boolean) => void
 let replaceAnchor: () => void
 let calls = 0
+let modelCount = 1
+let catalogReads = 0
+let focusReturns = 0
+let snapshotReads = 0
 const state = Object.freeze({
   available: true,
   busy: false,
@@ -16,12 +20,20 @@ const state = Object.freeze({
   modelLabel: 'Fixture Model',
   reasoningEffort: 'high',
 })
-const registry = new ModelProviderRegistry(async () => [{
-  providerId: 'fixture',
-  title: 'Fixture',
-  pluginId: 'fixture',
-  models: [{ id: 'model', label: 'Fixture Model' }],
-}])
+const registry = new ModelProviderRegistry(async () => {
+  catalogReads++
+  return [{
+    providerId: 'fixture',
+    title: 'Fixture',
+    pluginId: 'fixture',
+    selectorBrand: { brand: 'openrouter', source: 'override' },
+    models: Array.from({ length: modelCount }, (_, index) => ({
+      id: index === 0 ? 'model' : `openrouter/model-${index}`,
+      label: index === 0 ? 'Fixture Model' : `OpenRouter Model ${index}`,
+    })),
+  }]
+})
+registry.connectSource(() => () => {})
 
 function Modal({ close }: { close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -86,7 +98,10 @@ export async function start() {
   // Only the transport is a fixture; React, portals, installer and DOM probes are production code.
   CodexDesktopNativeModelProviderTransport.connect = async () =>
     ({
-      getSnapshot: () => state,
+      getSnapshot: () => {
+        snapshotReads++
+        return state
+      },
       subscribe: () => () => {},
       hasActiveSubmission: () => false,
       select: async () => {
@@ -121,7 +136,36 @@ export async function replace() {
 export function actionCount() {
   return calls
 }
+export function catalogReadCount() {
+  return catalogReads
+}
+export function simulateHostFocusReturn() {
+  const composer = document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+  const draft = document.querySelector<HTMLTextAreaElement>('textarea')!
+  const returnFocus = (event: FocusEvent) => {
+    if (!(event.target instanceof Element) || event.target.closest('.cxmp-menu') === null) return
+    focusReturns++
+    composer.dataset.state = String(focusReturns)
+    draft.focus()
+  }
+  document.addEventListener('focusin', returnFocus)
+  return () => document.removeEventListener('focusin', returnFocus)
+}
+export function focusReturnCount() {
+  return focusReturns
+}
+export function resetSnapshotReads() {
+  snapshotReads = 0
+}
+export function snapshotReadCount() {
+  return snapshotReads
+}
 export async function refresh() {
+  await registry.refresh()
+  await settle()
+}
+export async function catalog(count: number) {
+  modelCount = count
   await registry.refresh()
   await settle()
 }

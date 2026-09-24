@@ -158,6 +158,67 @@ it.skipIf(!executable)(
         'voice',
       ])
       expect(await evaluate('document.querySelector(".cxmp-model-trigger").disabled')).toBe(false)
+      await run(`window.stopFocusReturn=Fixture.simulateHostFocusReturn();
+      document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle()`)
+      expect(await evaluate('Fixture.focusReturnCount()')).toBe(1)
+      expect(await evaluate('document.activeElement.getAttribute("aria-label")')).toBe('Draft')
+      await run(
+        `document.querySelector('.cxmp-provider-trigger').click();window.stopFocusReturn();await Fixture.settle()`,
+      )
+      await run(`window.outlet=document.createElement('section');
+      outlet.dataset.cordisxPageOutlet='app';document.body.append(outlet);await Fixture.settle();
+      Fixture.resetSnapshotReads();
+      for(let i=0;i<200;i++) outlet.style.inset=i%2?'auto':'0px';await Fixture.settle()`)
+      expect(await evaluate('Fixture.snapshotReadCount()')).toBe(0)
+      await run(`document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle();
+      Fixture.resetSnapshotReads();window.outletTimer=false;setTimeout(()=>{window.outletTimer=true},0);
+      for(let i=0;i<200;i++) outlet.style.inset=i%2?'auto':'0px';
+      await new Promise(resolve=>setTimeout(resolve,0));await Fixture.settle()`)
+      expect(await evaluate('Fixture.snapshotReadCount()')).toBe(0)
+      expect(await evaluate('window.outletTimer')).toBe(true)
+      expect(await evaluate('!!document.querySelector(".cxmp-menu")')).toBe(true)
+      await run(`document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle()`)
+      expect(await evaluate('!!document.querySelector(".cxmp-menu")')).toBe(false)
+      const catalogMeasurements = []
+      for (const count of [1, 10, 286, 500]) {
+        await run(`await Fixture.catalog(${count});window.measurement=await (async()=>{
+        const measure=async selector=>{let timer=false;const reads=Fixture.catalogReadCount();
+          const started=performance.now();setTimeout(()=>{timer=true},0);document.querySelector(selector).click();
+          await new Promise(resolve=>setTimeout(resolve,0));const menu=document.querySelector('.cxmp-menu');
+          const result={elapsed:performance.now()-started,timer,reads:Fixture.catalogReadCount()-reads,
+            nodes:menu.querySelectorAll('*').length,models:menu.querySelectorAll('.cxmp-model-choice').length};
+          document.querySelector(selector).click();await Fixture.settle();return result};
+        return {count:${count},provider:await measure('.cxmp-provider-trigger'),model:await measure('.cxmp-model-trigger')}})()`)
+        catalogMeasurements.push(await evaluate('window.measurement'))
+      }
+      for (
+        const measurement of catalogMeasurements as {
+          count: number
+          provider: { elapsed: number; timer: boolean; reads: number; nodes: number; models: number }
+          model: { elapsed: number; timer: boolean; reads: number; nodes: number; models: number }
+        }[]
+      ) {
+        expect(measurement.provider).toMatchObject({ timer: true, reads: 0, nodes: 13, models: 0 })
+        expect(measurement.model.timer).toBe(true)
+        expect(measurement.model.reads).toBe(0)
+        expect(measurement.model.models).toBe(measurement.count)
+        expect(measurement.provider.elapsed).toBeLessThan(250)
+        expect(measurement.model.elapsed).toBeLessThan(1000)
+      }
+      if (process.env.MODEL_SELECTOR_MEASUREMENTS) console.info(JSON.stringify(catalogMeasurements))
+      expect(catalogMeasurements.map(measurement => measurement.provider.nodes)).toEqual([13, 13, 13, 13])
+      await run(`await Fixture.catalog(500);
+      document.querySelector('.cxmp-model-trigger').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
+      await Fixture.settle()`)
+      expect(await evaluate('document.querySelectorAll(".cxmp-model-choice").length')).toBe(500)
+      await run(`const search=document.querySelector('input[type=search]');search.value='Model 499';
+      search.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:'9'}));await Fixture.settle()`)
+      expect(await evaluate('document.querySelectorAll(".cxmp-model-choice").length')).toBe(1)
+      await run(
+        `document.querySelector('.cxmp-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      await Fixture.settle()`,
+      )
+      expect(await evaluate('document.activeElement.classList.contains("cxmp-model-trigger")')).toBe(true)
       await run('document.querySelector(".cxmp-model-trigger").click(); await Fixture.settle()')
       await cdp.send('Input.dispatchKeyEvent', {
         type: 'keyDown',

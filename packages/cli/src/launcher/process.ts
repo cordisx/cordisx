@@ -6,7 +6,14 @@ import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_pro
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { liveProcessStartedAt, type ProcessIdentity, processTable } from './process-identity.js'
+import {
+  liveProcessStartedAt,
+  PROCESS_TABLE_MAX_BUFFER_BYTES,
+  type ProcessIdentity,
+  processTable,
+  type RecordedProcessStatus,
+} from './process-identity.js'
+import { waitForMainInspectorUrl } from './main-inspector.js'
 
 export {
   acquireCodexProfileLaunchLease,
@@ -35,10 +42,16 @@ const pendingHiddenOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker
 class ProcessOwnershipTracker {
   private readonly identities = new Map<number, string>()
   private readonly rootStartedAt: string | undefined
+  private rootState: RecordedProcessStatus
   private readonly timer: NodeJS.Timeout
 
   constructor(private readonly rootPid: number) {
-    this.rootStartedAt = liveProcessStartedAt(rootPid)
+    try {
+      this.rootStartedAt = liveProcessStartedAt(rootPid)
+    } catch {
+      this.rootStartedAt = undefined
+    }
+    this.rootState = this.rootStartedAt === undefined ? 'unknown' : 'alive'
     if (this.rootStartedAt !== undefined) this.identities.set(rootPid, this.rootStartedAt)
     this.capture()
     this.timer = setInterval(() => this.capture(), 250)
@@ -49,8 +62,17 @@ class ProcessOwnershipTracker {
     return this.rootPid
   }
 
+  rootStatus(): RecordedProcessStatus {
+    return this.rootState
+  }
+
   rootAlive(): boolean {
-    return liveProcessStartedAt(this.rootPid) === this.rootStartedAt
+    if (this.rootStartedAt === undefined) return false
+    try {
+      return liveProcessStartedAt(this.rootPid) === this.rootStartedAt
+    } catch {
+      return false
+    }
   }
 
   stop(): readonly ProcessIdentity[] {
@@ -64,8 +86,20 @@ class ProcessOwnershipTracker {
   }
 
   private capture(): void {
-    const table = processTable()
+    let table: readonly ProcessIdentity[]
+    try {
+      table = processTable()
+    } catch {
+      this.rootState = 'unknown'
+      return
+    }
     const live = new Map(table.map(item => [item.pid, item]))
+    const root = live.get(this.rootPid)
+    this.rootState = this.rootStartedAt === undefined
+      ? 'unknown'
+      : root?.startedAt === this.rootStartedAt
+      ? 'alive'
+      : 'dead'
     const owned = new Set<number>()
     for (const [pid, startedAt] of this.identities) {
       if (live.get(pid)?.startedAt === startedAt) owned.add(pid)
@@ -346,23 +380,6 @@ export type HostLaunchIdentityObserver = (
   inspectorUrl?: Promise<string>,
 ) => boolean | void | Promise<boolean | void>
 
-async function mainInspectorUrl(port: number): Promise<string> {
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
-      const targets = await response.json() as readonly { webSocketDebuggerUrl?: unknown }[]
-      const url = targets.find(target =>
-        typeof target.webSocketDebuggerUrl === 'string'
-        && new RegExp(`^ws://127\\.0\\.0\\.1:${port}/[a-f0-9-]+$`, 'u').test(target.webSocketDebuggerUrl)
-      )?.webSocketDebuggerUrl
-      if (typeof url === 'string') return url
-    } catch { /* Inspector publication is asynchronous. */ }
-    await new Promise(resolve => setTimeout(resolve, 50))
-  }
-  throw new Error('Owned Host main inspector did not publish its endpoint')
-}
-
 function applicationBundleForExecutable(executable: string): string {
   const macos = path.dirname(executable)
   const contents = path.dirname(macos)
@@ -396,13 +413,22 @@ export function hiddenHostPidFromProcessList(
     })[0]
 }
 
-function hiddenHostPid(executable: string, debugPort: number, mainInspectorPort?: number): number | undefined {
-  return hiddenHostPidFromProcessList(
-    execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }),
-    executable,
-    debugPort,
-    mainInspectorPort,
-  )
+export function hiddenHostPid(
+  executable: string,
+  debugPort: number,
+  mainInspectorPort?: number,
+  readProcessList: () => string = () =>
+    execFileSync('ps', ['-axo', 'pid=,command='], {
+      encoding: 'utf8',
+      maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+    }),
+): number | undefined {
+  try {
+    return hiddenHostPidFromProcessList(readProcessList(), executable, debugPort, mainInspectorPort)
+  } catch {
+    // Enumeration failure leaves identity unresolved so launch cleanup stays fail-closed.
+    return undefined
+  }
 }
 
 /** Launch a macOS Host hidden through Launch Services without retaining a stale recent Dock tile. */
@@ -451,11 +477,21 @@ export async function launchCodexHidden(
   // The process list proves the executable plus both fresh loopback ports.
   // Keep this provisional identity only for exact cleanup if inspector
   // confirmation fails; it is not an adopted Host until confirmation below.
-  pendingHiddenOwnership.set(child, new ProcessOwnershipTracker(hostPid))
+  const ownership = new ProcessOwnershipTracker(hostPid)
+  pendingHiddenOwnership.set(child, ownership)
   return {
     child,
     hostPid,
-    ...(mainInspectorPort === undefined ? {} : { inspectorUrl: mainInspectorUrl(mainInspectorPort) }),
+    ...(mainInspectorPort === undefined
+      ? {}
+      : {
+        inspectorUrl: waitForMainInspectorUrl({
+          port: mainInspectorPort,
+          hostPid,
+          hostStatus: () => ownership.rootStatus(),
+          helperExited: () => child.exitCode !== null || child.signalCode !== null,
+        }),
+      }),
   }
 }
 

@@ -13,10 +13,11 @@ export interface SelectFieldProps {
   readonly options: readonly SelectFieldOption[]
   readonly value: string
   readonly className?: string
+  readonly disabled?: boolean
   readonly onChange: (value: string) => void
 }
 
-export function SelectField({ label, icon, options, value, className, onChange }: SelectFieldProps) {
+export function SelectField({ label, icon, options, value, className, disabled, onChange }: SelectFieldProps) {
   const root = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
     // Keep the accessible name on the official control's real focus target.
@@ -27,6 +28,7 @@ export function SelectField({ label, icon, options, value, className, onChange }
       <Select
         className={['cxh-select-field', 'cxr-ui-filter-control', className].filter(Boolean).join(' ')}
         value={value}
+        {...(disabled === undefined ? {} : { disabled })}
         options={[...options]}
         prefixIcon={<HostIcon token={icon} />}
         onChange={next => onChange(String(next))}

@@ -24,6 +24,11 @@ afterEach(async () => {
 async function setup(model = 'shared', busy = false, options?: {
   readonly firstLabel?: string
   readonly firstAliases?: readonly string[]
+  readonly firstModels?: readonly {
+    readonly id: string
+    readonly label: string
+    readonly aliases?: readonly string[]
+  }[]
   readonly secondModels?: readonly {
     readonly id: string
     readonly label: string
@@ -56,7 +61,7 @@ async function setup(model = 'shared', busy = false, options?: {
       providerId: 'first',
       pluginId: 'p',
       ...(options?.branded ? { selectorBrand: { brand: 'openrouter' as const, source: 'override' as const } } : {}),
-      models: [{
+      models: options?.firstModels ?? [{
         id: model,
         label: options?.firstLabel ?? 'Current',
         ...(options?.firstAliases === undefined ? {} : { aliases: options.firstAliases }),
@@ -159,6 +164,45 @@ const providerTrigger = '.cxmp-provider-trigger'
 const modelTrigger = '.cxmp-model-trigger'
 
 describe('provider selection interaction', () => {
+  it('opens a subscribed provider catalog without re-reading it on the interaction turn', async () => {
+    const { registry } = await setup('model-0', false, {
+      liveCatalog: true,
+      branded: true,
+      firstModels: Array.from({ length: 500 }, (_, index) => ({
+        id: `openrouter/model-${index}`,
+        label: `OpenRouter Model ${index}`,
+      })),
+    })
+    const refresh = vi.spyOn(registry, 'refresh')
+    let timerFired = false
+    const timer = new Promise<void>(resolve =>
+      setTimeout(() => {
+        timerFired = true
+        resolve()
+      }, 0)
+    )
+
+    await click(providerTrigger)
+    await timer
+
+    expect(refresh).not.toHaveBeenCalled()
+    expect(timerFired).toBe(true)
+    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(3)
+    expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(0)
+    await click(providerTrigger)
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('refreshes a fallback catalog when either selector is opened', async () => {
+    const { registry } = await setup()
+    const refresh = vi.spyOn(registry, 'refresh').mockResolvedValue()
+    await click(providerTrigger)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await click(providerTrigger)
+    await click(modelTrigger)
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
   it('does not apply draft fallback when a live catalog refresh changes members', async () => {
     const result = await setup('shared', false, {
       draft: true,

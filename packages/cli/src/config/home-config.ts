@@ -102,7 +102,6 @@ export interface HomeConfigProvider {
   readonly enabled?: boolean
   readonly timeoutMs?: number
 }
-
 export interface HomeConfigProfile {
   readonly displayName: string
   readonly dataMode: HomeDataMode
@@ -110,6 +109,7 @@ export interface HomeConfigProfile {
   readonly defaultModelProvider?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
+  readonly nativeModelDiscovery?: boolean
   readonly selectorIcons?: import('../model-selector-branding.js').ModelSelectorIconOverrides
   readonly providerBindings?: readonly import('./home-config-model-catalogs.js').HomeConfigProviderBinding[]
   readonly iconTheme?: HomeConfigIconThemePreference

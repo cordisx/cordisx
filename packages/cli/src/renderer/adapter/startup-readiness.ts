@@ -80,16 +80,18 @@ export async function readNativeStartupReadiness(
   }
   // Account reads cross the typed native bridge. Avoid polling that bridge
   // while this document cannot yet satisfy the final usable-control proof.
-  // Installed login-route renders a native h1 and enabled sign-in controls.
+  // The audited native login route renders this centered fixed-width form.
   // A positive typed signed-out result is still required; layout alone cannot
   // classify a connection error, loading skeleton, or stale account as logout.
   const loginControlsReady = (): boolean => {
-    const heading = [...document.querySelectorAll<HTMLElement>('h1')].find(element =>
+    const heading = [...document.querySelectorAll<HTMLElement>('h1.w-\\[316px\\].text-center')].find(element =>
       !element.closest('dialog') && visible(element)
     )
-    const panel = heading?.parentElement?.parentElement
-    const ready = !!panel
-      && [...panel.querySelectorAll<HTMLElement>('button, input')].some(element =>
+    const panel = heading?.closest<HTMLElement>('.flex.w-\\[340px\\].flex-col.items-center.gap-8')
+    const surface = panel?.parentElement
+    const ready = !!surface
+      && surface.matches('.flex.h-full.w-full.items-center.justify-center.overflow-hidden')
+      && [...panel.querySelectorAll<HTMLElement>('button[type="button"], input')].some(element =>
         !element.closest('dialog') && visible(element) && !element.hasAttribute('disabled')
         && element.getAttribute('aria-disabled') !== 'true'
       )
@@ -160,6 +162,41 @@ export async function readNativeStartupReadiness(
       ? account.status
       : 'unknown'
     trace?.('account-read-complete', { durationMs: performance.now() - accountStarted, status })
+    if (account?.status === 'unavailable') {
+      const boot = root.__cordisxCompositionBoot ?? root.__cordisxBoot
+      if (!boot || root.__cordisxRuntime === undefined) return { ready: false, reason: 'cordisx-pending' }
+      const installId = root.__cordisxProductionInstallId
+      const runtime = root.__cordisxRuntime
+      if (
+        installId && (root.__cordisxProductionBootstrapState?.installId !== installId
+          || root.__cordisxProductionBootstrapState.status !== 'evaluated')
+      ) {
+        return { ready: false, reason: 'production-bootstrap-pending' }
+      }
+      try {
+        await boot
+      } catch {
+        return { ready: false, reason: 'cordisx-boot-failed' }
+      }
+      if (
+        !current() || root.__cordisxProductionInstallId !== installId || root.__cordisxRuntime !== runtime
+        || (root.__cordisxCompositionBoot ?? root.__cordisxBoot) !== boot
+      ) return { ready: false, reason: 'document-changed' }
+      if (
+        installId && (root.__cordisxProductionBootstrapState?.installId !== installId
+          || root.__cordisxProductionBootstrapState.status !== 'evaluated')
+      ) {
+        return { ready: false, reason: 'production-bootstrap-pending' }
+      }
+      if (!loginControlsReady()) return { ready: false, reason: 'login-controls-pending' }
+      if (!current()) return { ready: false, reason: 'document-changed' }
+      return {
+        ready: true,
+        surface: 'auth-required',
+        receipt: initial.receipt,
+        observations: { receipt: initial.receipt, hostUsable: true, cordisxReady: true, loginUsable: true },
+      }
+    }
     if (account?.status !== 'ready' || account.data === undefined) return { ready: false, reason: 'account-not-ready' }
     authenticated = account.data !== null
   } catch {
