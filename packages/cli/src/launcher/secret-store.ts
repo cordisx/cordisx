@@ -195,36 +195,62 @@ let helperDirectory = path.join(os.tmpdir(), 'cordisx-keychain-helper-v1')
 let helperPath = path.join(helperDirectory, helperSourceHash)
 let helperBuild = new Map<string, Promise<string>>()
 
-async function waitForChildExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return true
-  return await new Promise(resolve => {
-    const finish = (value: boolean): void => {
-      clearTimeout(timeout)
-      child.removeListener('exit', onExit)
-      resolve(value)
-    }
-    const onExit = (): void => finish(true)
-    const timeout = setTimeout(() => finish(false), timeoutMs)
-    child.once('exit', onExit)
-  })
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw error
+  }
 }
 
-async function terminateChild(child: ReturnType<typeof spawn>): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  child.kill('SIGTERM')
-  if (await waitForChildExit(child, 1_000)) return
-  child.kill('SIGKILL')
-  if (!await waitForChildExit(child, 1_000)) throw new LauncherKeychainError('UNAVAILABLE')
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) return false
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  return true
+}
+
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+async function terminateOwnedProcessGroup(
+  child: ReturnType<typeof spawn>,
+  timeouts: { readonly gracefulMs: number; readonly forceMs: number },
+): Promise<void> {
+  if (child.pid === undefined) return
+  const target = process.platform === 'win32' ? child.pid : -child.pid
+  if (!processExists(target)) return
+  signalProcess(target, 'SIGTERM')
+  if (await waitForProcessExit(target, timeouts.gracefulMs)) return
+  signalProcess(target, 'SIGKILL')
+  if (!await waitForProcessExit(target, timeouts.forceMs)) throw new LauncherKeychainError('UNAVAILABLE')
 }
 
 export async function runKeychainHelperProcess(
   command: string,
   args: readonly string[],
   input?: Buffer,
-  timeoutMs?: number,
+  options: {
+    readonly timeoutMs?: number
+    readonly terminationTimeouts?: { readonly gracefulMs: number; readonly forceMs: number }
+    readonly onSpawn?: (pid: number) => void
+  } = {},
 ): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+    const child = spawn(command, args, {
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    if (child.pid !== undefined) options.onSpawn?.(child.pid)
     const output: Buffer[] = []
     let settled = false
     const cleanup = (): void => {
@@ -243,17 +269,20 @@ export async function runKeychainHelperProcess(
     child.stdout.on('data', value => output.push(Buffer.from(value)))
     child.once('error', fail)
     child.once('exit', exit)
-    const timer = timeoutMs === undefined
+    const timer = options.timeoutMs === undefined
       ? undefined
       : setTimeout(() => {
         if (settled) return
         settled = true
         cleanup()
-        void terminateChild(child).then(
+        void terminateOwnedProcessGroup(
+          child,
+          options.terminationTimeouts ?? { gracefulMs: 1_000, forceMs: 1_000 },
+        ).then(
           () => reject(new LauncherKeychainError('UNAVAILABLE')),
           error => reject(error),
         )
-      }, timeoutMs)
+      }, options.timeoutMs)
     child.stdin.end(input)
   })
 }
@@ -276,7 +305,7 @@ async function macOSHelper(): Promise<string> {
           'xcrun',
           ['--sdk', 'macosx', 'swiftc', source, '-framework', 'Security', '-o', output],
           undefined,
-          KEYCHAIN_HELPER_BUILD_TIMEOUT_MS,
+          { timeoutMs: KEYCHAIN_HELPER_BUILD_TIMEOUT_MS },
         )
         await chmod(output, 0o700)
         await rename(output, helperPath)
@@ -310,7 +339,7 @@ async function invokeMacOSHelper(
   const request = Buffer.from(
     JSON.stringify({ operation, service, account, allowAuthenticationUI, ...(value === undefined ? {} : { value }) }),
   )
-  return await runKeychainHelperProcess(helper, [], request, timeoutMs)
+  return await runKeychainHelperProcess(helper, [], request, timeoutMs === undefined ? {} : { timeoutMs })
 }
 
 /** Native Security.framework backend; secret input is written only to helper stdin. */

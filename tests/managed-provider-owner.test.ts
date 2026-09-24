@@ -92,7 +92,12 @@ describe('Host-owned managed Provider credentials', () => {
     const keychain = createMacOSKeychainBackend({
       timeoutMs: 20,
       invoke: async () =>
-        await runKeychainHelperProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], undefined, 20),
+        await runKeychainHelperProcess(
+          process.execPath,
+          ['-e', 'setInterval(()=>{},1000)'],
+          undefined,
+          { timeoutMs: 20 },
+        ),
     })
     await expect(ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain })).rejects.toThrow(
       'credential-unavailable',

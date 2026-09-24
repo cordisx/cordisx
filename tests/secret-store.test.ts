@@ -46,19 +46,28 @@ describe('launcher Host-private channel secret store', () => {
     ])
   })
 
-  it('terminates a timed-out Keychain helper before rejecting', async () => {
-    const startedAt = Date.now()
-    await expect(runKeychainHelperProcess(
-      process.execPath,
-      [
-        '-e',
-        "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),80));setInterval(()=>{},1000)",
-      ],
-      undefined,
-      200,
-    )).rejects.toMatchObject({ code: 'UNAVAILABLE' })
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250)
-  })
+  it.skipIf(process.platform === 'win32')(
+    'terminates a timed-out Keychain helper process group before rejecting',
+    async () => {
+      let processGroup = 0
+      await expect(runKeychainHelperProcess(
+        process.execPath,
+        [
+          '-e',
+          "require('node:child_process').spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"],{stdio:'ignore'});process.on('SIGTERM',()=>{});setInterval(()=>{},1000)",
+        ],
+        undefined,
+        {
+          timeoutMs: 100,
+          terminationTimeouts: { gracefulMs: 100, forceMs: 500 },
+          onSpawn: pid => processGroup = pid,
+        },
+      )).rejects.toMatchObject({ code: 'UNAVAILABLE' })
+      expect(processGroup).toBeGreaterThan(0)
+      expect(() => process.kill(-processGroup, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+    },
+    5_000,
+  )
 
   it('writes, resolves, replaces and deletes with no secret/ref in renderer-safe results', async () => {
     const backend = new MemoryKeychain()
