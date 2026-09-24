@@ -472,15 +472,14 @@ export async function runInjectedHost(input: {
   readonly hostArgs: readonly string[]
   readonly launcher: CordisXLauncherOptions
   readonly profile?: IsolatedCodexProfile
-  /** Product launch may acquire before profile preparation and hand ownership to this lifecycle. */
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly environment?: Readonly<Record<string, string>>
   readonly stdout: (line: string) => void
   readonly onReady?: (signal?: AbortSignal) => void | Promise<void>
   readonly onHostLaunched?: import('../launcher/process.js').HostLaunchIdentityObserver
-  /** Internal, owned-entry bootstrap only. Never a user Host argument. */
   readonly mainInspector?: boolean
   readonly hiddenUntilReady?: boolean
+  readonly startupNavigation?: WatchInjectionOptions['startupNavigation']
 }): Promise<void> {
   const controller = new AbortController()
   let rendererIsReady = false
@@ -531,6 +530,7 @@ export async function runInjectedHost(input: {
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
     hasLoopbackGraph: input.hasLoopbackGraph,
     launcherOwnedNativeTarget: !input.launcher.attach,
+    ...(input.startupNavigation === undefined ? {} : { startupNavigation: input.startupNavigation }),
     ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
     ...(input.productionGraphBootstrap === undefined
       ? {}

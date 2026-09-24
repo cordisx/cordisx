@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { waitForInitialDocument } from './cdp-document-ready.js'
 import * as support from './cdp-installation-support.js'
+import { cdpInstallationAborted } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import {
   installNativeResourceInterception,
@@ -16,6 +17,7 @@ interface RendererBootstrapOptions {
   readonly viteDevelopment: boolean
   readonly nativeSubmission?: NativeSubmissionInstallation
   readonly signal?: AbortSignal
+  readonly activateDocument?: () => Promise<void>
 }
 
 export interface InstallDocumentBootstrapOptions {
@@ -27,6 +29,7 @@ export interface InstallDocumentBootstrapOptions {
   readonly loopbackModules: boolean
   readonly nativeSubmission?: NativeSubmissionInstallation
   readonly signal?: AbortSignal
+  readonly activateDocument?: (identifier: string) => Promise<void>
 }
 
 export interface DocumentInstallationState {
@@ -49,11 +52,31 @@ async function waitForRendererBootstrap(
   else await support.waitForProductionBootstrap(session, installId, deadline, signal, network)
 }
 
+async function waitForActivatedDocument(options: RendererBootstrapOptions): Promise<void> {
+  const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (options.signal?.aborted === true) throw cdpInstallationAborted()
+    try {
+      const response = await options.session.send('Runtime.evaluate', {
+        expression: `document.readyState === "complete" && location.href === ${JSON.stringify(options.target.url)}`,
+        returnByValue: true,
+      }, Math.max(1, deadline - Date.now()))
+      if ((response.result as { value?: unknown } | undefined)?.value === true) return
+    } catch (error) {
+      if (!/Execution context was destroyed|Cannot find context|Inspected target navigated/u.test(String(error))) {
+        throw error
+      }
+    }
+    await support.abortable(new Promise(resolve => setTimeout(resolve, 50)), options.signal)
+  }
+  throw new Error('Activated Host document did not finish loading')
+}
+
 async function bootstrapInstalledDocument(
   options: RendererBootstrapOptions,
   observeProductionGraph: boolean,
 ): Promise<NativeResourceInterception | undefined> {
-  const { session, target, nativeSubmission, signal } = options
+  const { session, target, nativeSubmission, signal, activateDocument } = options
   const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
   await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
   const network = observeProductionGraph
@@ -66,12 +89,12 @@ async function bootstrapInstalledDocument(
         session,
         target,
         transforms: nativeSubmission.transforms,
-        reloadDocument: async () => {
+        reloadDocument: activateDocument ?? (async () => {
           await support.abortable(
             session.send('Page.reload', { ignoreCache: true }, support.CDP_INJECTION_TIMEOUT_MS),
             signal,
           )
-        },
+        }),
         timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal }),
       })
@@ -80,11 +103,18 @@ async function bootstrapInstalledDocument(
       }
       await waitForRendererBootstrap(options, deadline, network)
     } else {
-      await support.reloadAndWaitForBootstrap(
-        session,
-        options.viteDevelopment ? { ignoreCache: true } : {},
-        async () => await waitForRendererBootstrap(options, deadline, network),
-      )
+      if (activateDocument === undefined) {
+        await support.reloadAndWaitForBootstrap(
+          session,
+          options.viteDevelopment ? { ignoreCache: true } : {},
+          async () => await waitForRendererBootstrap(options, deadline, network),
+        )
+      } else {
+        let rejectActivation!: (error: unknown) => void
+        const activationFailure = new Promise<never>((_resolve, reject) => rejectActivation = reject)
+        void activateDocument().catch(rejectActivation)
+        await Promise.race([waitForRendererBootstrap(options, deadline, network), activationFailure])
+      }
     }
     return nativeInterception
   } finally {
@@ -105,6 +135,7 @@ export async function installDocumentBootstrap(
     loopbackModules,
     nativeSubmission,
     signal,
+    activateDocument,
   } = options
   const reloadInstallId = viteDevelopment || loopbackModules ? randomUUID() : undefined
   const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
@@ -130,6 +161,19 @@ export async function installDocumentBootstrap(
   state.loopbackReloadStarted = viteDevelopment || loopbackModules || nativeSubmission !== undefined
   const needsDocumentBootstrap = viteDevelopment || loopbackModules || nativeSubmission !== undefined
   if (!needsDocumentBootstrap) {
+    if (activateDocument !== undefined) {
+      await activateDocument(identifier)
+      await waitForActivatedDocument({
+        session,
+        target,
+        installId: '',
+        documentSource,
+        evaluationSource,
+        viteDevelopment,
+        ...(signal === undefined ? {} : { signal }),
+      })
+      return
+    }
     const evaluated = await session.send(
       'Runtime.evaluate',
       { expression: evaluationSource, allowUnsafeEvalBlockedByCSP: true },
@@ -148,5 +192,6 @@ export async function installDocumentBootstrap(
     viteDevelopment,
     ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
     ...(signal === undefined ? {} : { signal }),
+    ...(activateDocument === undefined ? {} : { activateDocument: async () => await activateDocument(identifier) }),
   }, loopbackModules && !viteDevelopment)
 }

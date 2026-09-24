@@ -66,7 +66,11 @@ it('removes the startup breakpoint before resuming the real main-agent sequence'
   vi.mocked(installStartupNavigation).mockImplementation(async () => {
     calls.push('installStartupNavigation')
   })
-  vi.mocked(connectStartupCover).mockResolvedValue({ reveal: vi.fn(), close: vi.fn() })
+  vi.mocked(connectStartupCover).mockResolvedValue({
+    startupNavigation: { target: {} as never, activate: vi.fn() },
+    reveal: vi.fn(),
+    close: vi.fn(),
+  })
   vi.spyOn(console, 'error').mockImplementation(() => {})
 
   await installHostMainAgents({

@@ -86,4 +86,53 @@ describe('production document bootstrap', () => {
 
     await state.nativeInterception?.dispose()
   })
+
+  it('activates an exact held startup document without reloading it', async () => {
+    const session = new GatedDocumentSession()
+    const target = {
+      id: 'native',
+      type: 'page',
+      title: 'CordisX startup',
+      url: 'app://-/index.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1/native',
+    } as CdpTarget
+    const state = createDocumentInstallationState()
+    const activate = async (): Promise<void> => {
+      session.listeners.get('Page.frameStartedLoading')?.({ frameId: 'native' })
+      session.listeners.get('Fetch.requestPaused')?.({
+        requestId: 'native-resource',
+        request: { url: 'app://-/assets/native-resource.js' },
+        resourceType: 'Script',
+        responseStatusCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'text/javascript' }],
+      })
+    }
+
+    await installDocumentBootstrap({
+      session: session as unknown as CdpSession,
+      target,
+      documentSource: 'future-production-source',
+      evaluationSource: 'current-production-source',
+      viteDevelopment: false,
+      loopbackModules: true,
+      nativeSubmission: {
+        authority: {} as never,
+        transforms: [{
+          url: 'app://-/assets/native-resource.js',
+          sha256: createHash('sha256').update(session.resource).digest('hex'),
+          transform: source => ({
+            source,
+            anchorMatches: 1,
+            acknowledgementExpression: 'true',
+            fenceExpression: 'true',
+          }),
+        }],
+      },
+      activateDocument: activate,
+    }, state)
+
+    expect(state.nativeInterception?.status).toBe('active')
+    expect(session.calls.some(call => call.method === 'Page.reload')).toBe(false)
+    await state.nativeInterception?.dispose()
+  })
 })

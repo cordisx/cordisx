@@ -913,6 +913,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         onHostLaunched: async (pid, inspectorUrl) =>
           await supervisorRuntime.markHostLaunched(pid, inspectorUrl, resolvedDebugPort),
         mainInspector: supervisorRuntime.mainInspector,
+        ...(supervisorRuntime.startupNavigation === undefined
+          ? {}
+          : { startupNavigation: supervisorRuntime.startupNavigation }),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)

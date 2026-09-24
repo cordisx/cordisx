@@ -7,7 +7,12 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import type { StartupSurface } from '../renderer/adapter/startup-readiness.js'
-import { connectStartupCover, installStartupNavigation, type StartupCoverController } from './startup-cover.js'
+import {
+  connectStartupCover,
+  installStartupNavigation,
+  type StartupCoverController,
+  type StartupNavigationHandoff,
+} from './startup-cover.js'
 import { CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import { hasMatchingProcessIdentity } from '../cli/supervisor-state.js'
 import { inspectBundle, nativeOperation } from './native.js'
@@ -226,6 +231,7 @@ async function inspectorClosed(port: number): Promise<boolean> {
 }
 
 export interface HostMainAgentController {
+  readonly startupNavigation: StartupNavigationHandoff
   revealAndClose(account?: NativeAccountCapabilityDescriptor, signal?: AbortSignal): Promise<StartupSurface>
   close(): Promise<void>
 }
@@ -446,6 +452,7 @@ export async function installHostMainAgents(input: {
     throw error
   }
   return {
+    startupNavigation: startup.startupNavigation,
     async revealAndClose(account, signal): Promise<StartupSurface> {
       if (!startup) throw new Error('Owned startup surface unavailable')
       const surface = await startup.reveal(account, signal)

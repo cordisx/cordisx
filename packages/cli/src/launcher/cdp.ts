@@ -4,6 +4,7 @@ import { install } from './cdp-installation.js'
 import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
+import type { StartupNavigationHandoff } from '../shortcuts/startup-cover.js'
 import {
   type ProductionGraphBootstrap,
   type ProductionGraphOperations,
@@ -117,6 +118,8 @@ export interface WatchInjectionOptions {
   readonly hasLoopbackGraph?: boolean
   /** Production compatibility reload is restricted to a Host process launched by this watcher. */
   readonly launcherOwnedNativeTarget?: boolean
+  /** Exact main-agent-proven seed target whose original app navigation remains held. */
+  readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
   /** Rebuild the exact current last-good renderer before the first production browser graph is admitted. */
   readonly productionGraphBootstrap?: (
     active: CordisXPluginActivationRecordV1,
@@ -184,6 +187,8 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     }
   }
   const installed = new Map<string, support.InstalledScript>()
+  let startupNavigation: StartupNavigationHandoff | undefined
+  let startupNavigationPending = startupNavigation !== undefined
   const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port)
   const hostMutationGate = new support.CdpLifecycleRequestGate()
   let fatalProductionGraphError: unknown
@@ -352,8 +357,32 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             throw fatalProductionGraphError
           }
           watcherStage = 'target-list'
+          if (startupNavigation === undefined && options.startupNavigation !== undefined) {
+            startupNavigation = await support.abortable(options.startupNavigation, options.signal)
+            startupNavigationPending = true
+          }
           const listedTargets = await listTargets(options.port)
           const candidates = injectableTargets(listedTargets)
+          const pendingStartupNavigation = startupNavigationPending ? startupNavigation : undefined
+          let startupSeed: CdpTarget | undefined
+          if (pendingStartupNavigation !== undefined) {
+            startupSeed = listedTargets.find(target =>
+              target.id === pendingStartupNavigation.target.id
+              && target.type === 'page'
+              && target.webSocketDebuggerUrl === pendingStartupNavigation.target.webSocketDebuggerUrl
+              && target.url.startsWith('data:text/html;charset=utf-8,')
+            )
+            if (startupSeed !== undefined) {
+              const admittedStartup = { ...startupSeed, url: pendingStartupNavigation.target.url }
+              const existingIndex = candidates.findIndex(target => target.id === startupSeed!.id)
+              if (existingIndex === -1) candidates.unshift(admittedStartup)
+              else candidates[existingIndex] = admittedStartup
+            } else if (!listedTargets.some(target => target.id === pendingStartupNavigation.target.id)) {
+              throw new Error('Owned startup target disappeared before activation')
+            } else {
+              throw new Error('Owned startup target identity changed before activation')
+            }
+          }
           const candidateIds = new Set(candidates.map(target => target.id))
           for (const target of listedTargets) {
             if (candidateIds.has(target.id) || !retainInstalledNativeTarget(target, installed.get(target.id))) continue
@@ -412,6 +441,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ? 'production'
               : undefined
             watcherStage = 'installation'
+            const activateStartupDocument = startupSeed?.id === target.id && pendingStartupNavigation !== undefined
+              ? async (identifier: string): Promise<void> => {
+                await pendingStartupNavigation.activate(identifier)
+                startupNavigationPending = false
+              }
+              : undefined
             const record = await install(
               target,
               selectedSource,
@@ -439,6 +474,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               hostMutationGate,
               options.managedServiceUI,
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
+              activateStartupDocument,
             )
             installed.set(target.id, record)
             beginReadiness(target, attemptedReloadTarget)

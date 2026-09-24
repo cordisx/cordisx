@@ -11,6 +11,7 @@ import {
   prepareOptionalDockImage,
   refreshDockAgent,
 } from '../shortcuts/dock.js'
+import type { StartupNavigationHandoff } from '../shortcuts/startup-cover.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
 import { logHostLifecycle } from './host-lifecycle.js'
@@ -99,6 +100,7 @@ export async function createSupervisorRuntime(
   readonly markFailed: (failure: string) => Promise<void>
   readonly close: () => Promise<void>
   readonly mainInspector: boolean
+  readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
 }> {
   const home = environment.CORDISX_SUPERVISOR_HOME
   const app = environment.CORDISX_SUPERVISOR_APP
@@ -134,6 +136,15 @@ export async function createSupervisorRuntime(
   let releaseStartupOperation: (() => Promise<void>) | undefined
   let inspectorUrl: Promise<string> | undefined
   let mainAgents: HostMainAgentController | undefined
+  let resolveStartupNavigation: ((handoff: StartupNavigationHandoff | undefined) => void) | undefined
+  let rejectStartupNavigation: ((error: unknown) => void) | undefined
+  const startupNavigation = selectedHome === undefined
+    ? undefined
+    : new Promise<StartupNavigationHandoff | undefined>((resolve, reject) => {
+      resolveStartupNavigation = resolve
+      rejectStartupNavigation = reject
+    })
+  void startupNavigation?.catch(() => undefined)
   let dockAgentInstalled = false
   let recoveryAttempt = 0
   const onStartupRecovery = async (waitingForUser: boolean): Promise<void> => {
@@ -243,6 +254,7 @@ export async function createSupervisorRuntime(
   }
   return {
     mainInspector: selectedHome !== undefined,
+    ...(startupNavigation === undefined ? {} : { startupNavigation }),
     async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return false
@@ -276,7 +288,14 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        resolveStartupNavigation?.(mainAgents.startupNavigation)
+        resolveStartupNavigation = undefined
+        rejectStartupNavigation = undefined
         dockAgentInstalled = dock !== undefined
+      } else {
+        resolveStartupNavigation?.(undefined)
+        resolveStartupNavigation = undefined
+        rejectStartupNavigation = undefined
       }
       return mainAgents !== undefined
     },
@@ -306,6 +325,9 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        resolveStartupNavigation?.(mainAgents.startupNavigation)
+        resolveStartupNavigation = undefined
+        rejectStartupNavigation = undefined
         dockAgentInstalled = dock !== undefined
       }
       let startupSurface: 'workspace-ready' | 'authenticated-ready' | 'auth-required' | undefined
@@ -349,6 +371,9 @@ export async function createSupervisorRuntime(
       })
     },
     async close(): Promise<void> {
+      rejectStartupNavigation?.(new Error('Owned startup navigation closed before handoff'))
+      resolveStartupNavigation = undefined
+      rejectStartupNavigation = undefined
       await mainAgents?.close().catch(() => undefined)
       await control?.close().catch(() => undefined)
       await releaseStartupOperation?.().catch(() => undefined)
