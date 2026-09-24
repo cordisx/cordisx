@@ -1,4 +1,5 @@
 import type { CatalogManagementCommand } from '../../model-catalog-management.js'
+import type { ModelSelectorIconOverrides } from '../../model-selector-branding.js'
 import type {
   PluginPreferenceAuthorityOptions,
   PluginPreferenceProvider,
@@ -39,8 +40,11 @@ function exactCurrentSource(
 /** Production plugin catalog hook; source membership stays owned by the live managed-service generation. */
 export function pluginPreferenceSource(
   activation: LivePluginModelCatalogActivation,
+  selectorIcons?: ModelSelectorIconOverrides,
 ): PluginPreferenceSourceOptions {
-  const load = nativeModelProviderCatalog(activation) as () => Promise<readonly NativeModelProviderCatalogEntry[]>
+  const load = nativeModelProviderCatalog(activation, selectorIcons) as () => Promise<
+    readonly NativeModelProviderCatalogEntry[]
+  >
   let sourceRevision = 0
   return Object.freeze({
     load: async () =>

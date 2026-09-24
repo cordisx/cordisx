@@ -372,7 +372,7 @@ describe('plugin model preference authority', () => {
       managementBindingRef: view.bindingRef,
     })
     expect(plugins.catalog()[0]).not.toHaveProperty('sourceRevision')
-    expect(management.catalog()).toEqual(plugins.catalog())
+    await expect(management.catalog()).resolves.toEqual(plugins.catalog())
     expect(management.snapshot()).toMatchObject({ canCreateConnection: true, views: [{ bindingRef: view.bindingRef }] })
 
     active = false
@@ -398,6 +398,84 @@ describe('plugin model preference authority', () => {
       },
     }, () => true)
     expect(baseCommand).toHaveBeenCalledOnce()
+    management.close()
+  })
+
+  it('preserves explicit provider and model icon overrides through the production source adapter', async () => {
+    const activation = {
+      nativeProviderIds: ['primary'],
+      prepareNativeConnection: () => ({
+        value: {
+          service: { pluginId: 'aiden', serviceId: 'gateway', generation: 'one' },
+          endpoint: { origin: 'https://api.deepseek.com', apiPath: '/v1', auth: { scheme: 'none' as const } },
+          models: {
+            generation: 'models-one',
+            defaultAlias: 'same-name',
+            aliases: [{ alias: 'same-name', gatewayModelId: 'same-name' }],
+          },
+          cleanup: { authorityId: 'one' },
+        },
+        dispose() {},
+      }),
+      subscribeNativeProviders: () => () => {},
+    }
+    const plugins = await PluginPreferenceAuthority.open({
+      ...pluginPreferenceSource(activation, {
+        providers: { primary: 'generic' },
+        models: { primary: { 'same-name': 'generic' } },
+      }),
+      persist: async () => {},
+    })
+
+    expect(plugins.catalog()[0]).toMatchObject({
+      selectorBrand: { brand: 'generic', source: 'override' },
+      models: [{ id: 'same-name', selectorBrand: 'generic' }],
+    })
+    plugins.close()
+  })
+
+  it('pulls same-generation model changes through each catalog read without a lifecycle event', async () => {
+    let modelId = 'first'
+    const activation = {
+      nativeProviderIds: ['primary'],
+      prepareNativeConnection: () => ({
+        value: {
+          service: { pluginId: 'aiden', serviceId: 'gateway', generation: 'same-generation' },
+          endpoint: { origin: 'https://example.test', apiPath: '/v1', auth: { scheme: 'none' as const } },
+          models: {
+            generation: `models-${modelId}`,
+            defaultAlias: modelId,
+            aliases: [{ alias: modelId, gatewayModelId: modelId }],
+          },
+          cleanup: { authorityId: 'same-generation' },
+        },
+        dispose() {},
+      }),
+      subscribeNativeProviders: () => () => {},
+    }
+    const plugins = await PluginPreferenceAuthority.open({
+      ...pluginPreferenceSource(activation),
+      persist: async () => {},
+    })
+    const base: CatalogManagementAuthority = {
+      snapshot: () => ({ epoch: 'base', sequence: 0, views: [] }),
+      command: async () => ({ status: 'rejected', code: 'unsupported' }),
+      subscribe: () => () => {},
+    }
+    const management = new PluginPreferenceManagementAdapter(base, plugins)
+    const catalogChanged = vi.fn()
+    const unsubscribeCatalog = management.catalogSubscribe(catalogChanged)
+    await expect(management.catalog()).resolves.toMatchObject([{ models: [{ id: 'first' }] }])
+    await expect(management.catalog()).resolves.toMatchObject([{ models: [{ id: 'first' }] }])
+    expect(catalogChanged).not.toHaveBeenCalled()
+
+    modelId = 'second'
+    await expect(management.catalog()).resolves.toMatchObject([{ models: [{ id: 'second' }] }])
+    expect(catalogChanged).toHaveBeenCalledOnce()
+    await expect(management.catalog()).resolves.toMatchObject([{ models: [{ id: 'second' }] }])
+    expect(catalogChanged).toHaveBeenCalledOnce()
+    expect(plugins.snapshot().views[0]?.rows.map(row => row.id)).toEqual(['second'])
+    unsubscribeCatalog()
     management.close()
   })
 

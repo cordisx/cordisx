@@ -47,7 +47,16 @@ plugin contract or permanent ownership instruction.
   Subscription is established before the initial read so changes during startup
   are replayed. The adapter stamps a private source generation into
   `scopeRevision` and rechecks exact plugin, provider, and model membership at
-  the persistence boundary.
+  the persistence boundary. Its optional `selectorIcons` argument is forwarded
+  unchanged to the native catalog projection, including explicit `generic`
+  provider and model overrides.
+- Same-generation login/logout and model publication currently expose no source
+  event. `PluginPreferenceManagementAdapter.catalog()` therefore refreshes from
+  the live activation before every catalog read. Existing renderer catalog
+  reconciliation bounds passive freshness, while explicit reads observe the
+  current source immediately. Catalog subscriptions compare effective projected
+  content and stay silent for loading-only or identical pull snapshots, avoiding
+  a read/invalidate loop.
 - Source refreshes use a dirty loop, so an invalidation received during an
   in-flight load is replayed. A valid-to-invalid refresh retains last-known rows
   as stale and unselectable, consumes subscription rejections, and later recovers
@@ -82,9 +91,11 @@ const management = new PluginPreferenceManagementAdapter(
 )
 ```
 
-Use `management.catalog()` and `management.catalogSubscribe(...)` in the same
-native catalog composition. Rebuild all three authorities around a new shared
-store after a profile/root reload; never retain independent section snapshots.
+Use async `management.catalog()` and `management.catalogSubscribe(...)` in the
+same native catalog composition. Pass `completeOptions.selectorIcons` as the
+second argument to `pluginPreferenceSource`. Rebuild all three authorities
+around a new shared store after a profile/root reload; never retain independent
+section snapshots.
 
 The corrected FILE-STORE source input is
 `485fa1fd0c810e08877126ea0d392dcec44b8bf8`, delta
@@ -116,12 +127,13 @@ integration input.
 
 ## Verification And Limits
 
-- Six focused core/renderer files pass 35 tests covering v2 validation, legacy
+- Six focused core/renderer files pass 37 tests covering v2 validation, legacy
   conversion, CAS, reload, plugin re-registration, exact identity isolation,
   permission revocation, revoke-before-commit, in-flight invalidation replay,
-  transient and invalid source recovery, live lifecycle invalidation, shared
-  native/plugin interleaving, dormant preferences, capability separation, and
-  renderer membership intersection.
+  transient and invalid source recovery, live lifecycle invalidation,
+  same-generation pull refresh, selector-icon preservation, shared native/plugin
+  interleaving, dormant preferences, capability separation, and renderer
+  membership intersection.
 - Changed-file dprint, ESLint, and `git diff --check` pass using an existing
   dependency checkout without installing, copying, or linking dependencies.
 - Adjacent registry/owner/composer suites were selected but could not be

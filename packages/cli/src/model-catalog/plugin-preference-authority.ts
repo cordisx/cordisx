@@ -110,6 +110,7 @@ function normalizeProviders(providers: readonly PluginPreferenceProvider[]): rea
 export class PluginPreferenceAuthority {
   readonly #epoch = randomUUID()
   readonly #listeners = new Set<() => void>()
+  readonly #catalogListeners = new Set<() => void>()
   readonly #overlay: ManagementOverlayStore
   #providers: readonly PluginPreferenceProvider[] = []
   #sequence = 0
@@ -276,13 +277,16 @@ export class PluginPreferenceAuthority {
 
   private invalidateSource(): void {
     if (this.#closed) return
+    const catalog = this.catalogRevision()
     this.#available = false
     this.changed()
+    this.catalogChanged(catalog)
   }
 
   private async refreshLoop(failOnInitialInvalid: boolean): Promise<void> {
     while (this.#refreshDirty && !this.#closed) {
       this.#refreshDirty = false
+      const catalog = this.catalogRevision()
       this.#loading = true
       this.changed()
       try {
@@ -298,6 +302,7 @@ export class PluginPreferenceAuthority {
       } finally {
         this.#loading = false
         this.changed()
+        this.catalogChanged(catalog)
       }
     }
   }
@@ -319,6 +324,7 @@ export class PluginPreferenceAuthority {
       }
       const stillAuthorized = () => authorized() && this.sourceAuthorized(provider, command)
       if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
+      const catalog = this.catalogRevision()
       try {
         const scope = {
           bindingRef: command.bindingRef,
@@ -348,6 +354,7 @@ export class PluginPreferenceAuthority {
         }
         if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
         this.changed()
+        this.catalogChanged(catalog)
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
         if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
@@ -367,10 +374,29 @@ export class PluginPreferenceAuthority {
     return () => this.#listeners.delete(listener)
   }
 
+  subscribeCatalog(listener: () => void): () => void {
+    this.#catalogListeners.add(listener)
+    return () => this.#catalogListeners.delete(listener)
+  }
+
   close(): void {
     this.#closed = true
     this.#unsubscribe?.()
     this.#listeners.clear()
+    this.#catalogListeners.clear()
+  }
+
+  private catalogRevision(): string {
+    return JSON.stringify(this.catalog())
+  }
+
+  private catalogChanged(before: string): void {
+    if (before === this.catalogRevision()) return
+    for (const listener of this.#catalogListeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
   }
 
   private changed(): void {
@@ -407,12 +433,13 @@ export class PluginPreferenceManagementAdapter implements CatalogManagementAutho
     })
   }
 
-  catalog(): readonly PluginPreferenceCatalogProvider[] {
+  async catalog(): Promise<readonly PluginPreferenceCatalogProvider[]> {
+    await this.plugins.refresh()
     return this.plugins.catalog()
   }
 
   catalogSubscribe(listener: () => void): () => void {
-    return this.plugins.subscribe(listener)
+    return this.plugins.subscribeCatalog(listener)
   }
 
   async command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult> {
