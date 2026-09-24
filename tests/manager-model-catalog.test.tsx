@@ -8,7 +8,11 @@ describe('binding catalog Manager', () => {
   it('does not reuse a manual draft as supplemental declarations when switching editors', async () => {
     const fixture = reactManagerFixture()
     const host = catalogFixture([
-      catalogView({ capabilities: ['editManual', 'editSupplement'], supplement: [{ id: 'supplement-only' }] }),
+      catalogView({
+        capabilities: ['editManual', 'editSupplement'],
+        sourceCapabilities: ['editManual', 'editSupplement'],
+        supplement: [{ id: 'supplement-only' }],
+      } as never),
     ])
     const { CatalogBinding } = await import(
       '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
@@ -155,6 +159,63 @@ describe('binding catalog Manager', () => {
       expect(toggle.getAttribute('aria-expanded')).toBe('true')
       await fixture.type('[aria-label="Search services or models"]', '')
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps ordinary catalog filters limited to explicitly supported rows', async () => {
+    const base = catalogView().rows[0]!
+    const rows = [
+      { ...base, id: 'supported-ready', label: 'Supported ready', compatibility: 'supported' },
+      {
+        ...base,
+        id: 'supported-blocked',
+        label: 'Supported blocked',
+        compatibility: 'supported',
+        selectable: false,
+        blocked: true,
+      },
+      {
+        ...base,
+        id: 'supported-offline',
+        label: 'Supported offline',
+        compatibility: 'supported',
+        selectable: false,
+      },
+      { ...base, id: 'unknown', label: 'Unknown', compatibility: 'unknown', selectable: false },
+      { ...base, id: 'unsupported', label: 'Unsupported', compatibility: 'unsupported', selectable: false },
+    ] as never
+    const view = catalogView({ rows, sourceCount: 3, selectableCount: 1 })
+    const host = catalogFixture([view])
+    const fixture = reactManagerFixture()
+    const { CatalogBinding } = await import(
+      '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
+    )
+    const render = (filter: 'all' | 'selectable' | 'blocked') =>
+      fixture.render(
+        <CatalogBinding
+          view={view}
+          client={host.client}
+          locale="en"
+          query=""
+          filter={filter}
+          connected
+        />,
+      )
+    const visibleIds = () =>
+      [...fixture.document.querySelectorAll('[data-model-id]')].map(row => row.getAttribute('data-model-id'))
+    try {
+      await render('all')
+      expect(fixture.element('.cxms-model-count').textContent).toBe('Models: 3')
+      expect(visibleIds()).toEqual(['supported-ready', 'supported-blocked', 'supported-offline'])
+
+      await render('blocked')
+      expect(visibleIds()).toEqual(['supported-blocked'])
+
+      await render('selectable')
+      expect(visibleIds()).toEqual(['supported-ready'])
     } finally {
       host.client.dispose()
       await fixture.dispose()

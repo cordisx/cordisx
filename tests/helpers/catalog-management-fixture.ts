@@ -7,6 +7,8 @@ import type {
 } from '../../packages/cli/src/model-catalog-management.js'
 import { ModelCatalogClient } from '../../packages/cli/src/renderer/model-catalog-client.js'
 
+const supportedCompatibility = { compatibility: 'supported' as const }
+
 export function catalogView(patch: Partial<CatalogManagementView> = {}): CatalogManagementView {
   return {
     bindingRef: 'binding-a',
@@ -33,6 +35,7 @@ export function catalogView(patch: Partial<CatalogManagementView> = {}): Catalog
       selectable: true,
       blocked: false,
       pinned: false,
+      ...supportedCompatibility,
     })),
     supplement: [],
     sourceCapabilities: [

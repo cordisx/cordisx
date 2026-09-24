@@ -141,7 +141,10 @@ export function CatalogBinding(
     () => confirm({ operation: 'requestCredentialReplacement' }, 'catalog.replaceConfirm'),
   )
   const matchesProvider = catalogQuery(`${view.title} ${view.providerId} ${view.scopeLabel ?? ''}`).includes(query)
-  const rows = view.rows.filter(row =>
+  const supportedRows = view.rows.filter(row =>
+    (row as typeof row & { readonly compatibility?: string }).compatibility === 'supported'
+  )
+  const rows = supportedRows.filter(row =>
     (matchesProvider || catalogQuery(`${row.id} ${row.label}`).includes(query))
     && (filter === 'all' || filter === 'selectable' && row.selectable || filter === 'blocked' && row.blocked
       || filter === 'removed' && !row.present)
@@ -189,7 +192,7 @@ export function CatalogBinding(
             <strong>{view.title}</strong>
             <code>{view.scopeLabel ?? view.providerId}</code>
           </span>
-          <span className="cxms-model-count">{t('catalog.sourceCount')}: {rows.length}</span>
+          <span className="cxms-model-count">{t('catalog.sourceCount')}: {view.sourceCount}</span>
         </button>
         <div className="cxmc-binding-actions" data-menu-open={actionMenuOpen}>
           {view.sourceKind === 'auto' && sourceCapabilities.includes('setAutoPaused')

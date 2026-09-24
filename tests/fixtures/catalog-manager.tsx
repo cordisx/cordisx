@@ -7,6 +7,8 @@ import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
 import { catalogFixture, catalogView } from '../helpers/catalog-management-fixture.js'
 
+const supportedCompatibility = { compatibility: 'supported' as const }
+
 const longRows = Array.from({ length: 180 }, (_, index) => ({
   id: index === 179 ? 'openrouter/final-search-target' : `openrouter/model-${String(index + 1).padStart(3, '0')}`,
   label: index === 179 ? 'Final search target' : `OpenRouter model ${index + 1}`,
@@ -16,6 +18,7 @@ const longRows = Array.from({ length: 180 }, (_, index) => ({
   selectable: true,
   blocked: false,
   pinned: index === 0,
+  ...supportedCompatibility,
 }))
 
 const host = catalogFixture([
@@ -43,6 +46,7 @@ const host = catalogFixture([
       selectable: true,
       blocked: false,
       pinned: false,
+      ...supportedCompatibility,
     }],
     sourceCount: 1,
     selectableCount: 1,
