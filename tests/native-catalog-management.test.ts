@@ -22,7 +22,7 @@ async function fixture() {
   await mkdir(codexHome, { recursive: true })
   const configFile = path.join(codexHome, 'config.toml')
   const catalogFile = path.join(codexHome, 'models.json')
-  const config = '[model_providers.gateway]\nname="Gateway"\n'
+  const config = '[model_providers.gateway]\nname="Gateway"\nwire_api="responses"\n'
   await writeFile(configFile, config)
   await writeFile(catalogFile, JSON.stringify({ models: [{ slug: 'b' }, { slug: 'a' }] }))
   const load = () => codexConfigModelProviders(codexHome, { gateway: 'models.json' })
@@ -101,6 +101,55 @@ describe('native catalog management', () => {
     const f = await fixture()
     const native = await NativeCatalogManagement.open({ load: f.load })
     expect(new CompositeCatalogManagement(native).snapshot().views.map(view => view.providerId)).toEqual(['gateway'])
+  })
+
+  it('requires a Responses route while keeping compatible blocked rows restorable', async () => {
+    const f = await fixture()
+    const native = await NativeCatalogManagement.open({ load: f.load })
+    const initial = native.snapshot().views[0]!
+    expect(initial.rows.find(row => row.id === 'a')).toMatchObject({ selectable: true })
+    await expect(native.command({
+      operation: 'setOverlay',
+      bindingRef: initial.bindingRef,
+      scopeRevision: initial.scopeRevision,
+      expectedRevision: initial.revision,
+      modelId: 'a',
+      blocked: true,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(native.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
+      selectable: false,
+      blocked: true,
+      reason: 'blocked',
+    })
+    const blocked = native.snapshot().views[0]!
+    await expect(native.command({
+      operation: 'restoreBlocked',
+      bindingRef: blocked.bindingRef,
+      scopeRevision: blocked.scopeRevision,
+      expectedRevision: blocked.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    expect(native.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
+      selectable: true,
+      blocked: false,
+    })
+
+    await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\nwire_api="chat-completions"\n')
+    const beforeRouteChange = native.snapshot().views[0]!
+    await expect(native.command({
+      operation: 'refresh',
+      bindingRef: beforeRouteChange.bindingRef,
+      scopeRevision: beforeRouteChange.scopeRevision,
+      expectedRevision: beforeRouteChange.revision,
+    }, () => true)).resolves.toMatchObject({ status: 'applied' })
+    const chat = native
+    expect(chat.snapshot().views[0]?.rows.every(row => !row.selectable)).toBe(true)
+    expect(await chat.catalog()).toEqual([expect.objectContaining({ models: [] })])
+
+    await writeFile(f.configFile, '[model_providers.gateway]\nname="Gateway"\n')
+    const unknown = await NativeCatalogManagement.open({ load: f.load })
+    expect(unknown.snapshot().views[0]?.rows.every(row => !row.selectable)).toBe(true)
+    unknown.close()
+    native.close()
   })
 
   it('augments static confirmed rows with committed remote evidence and retains LKG on failure', async () => {
@@ -215,6 +264,7 @@ describe('native catalog management', () => {
         'name="Gateway"',
         'base_url="https://api.deepseek.com"',
         'env_key="DEEPSEEK_KEY"',
+        'wire_api="responses"',
       ].join('\n'),
     )
     let fail = false
@@ -273,6 +323,7 @@ describe('native catalog management', () => {
         'name="Gateway"',
         'base_url="https://api.deepseek.com"',
         'env_key="DEEPSEEK_KEY"',
+        'wire_api="responses"',
       ].join('\n'),
     )
     const fetcher = vi.fn(async () => Response.json({ object: 'list', data: [] }))

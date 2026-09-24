@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decideNativeProviderSelection,
   decideNativeProviderSubmission,
+  resolveNativeModelEligibility,
   revalidatePreparedNativeProviderChange,
 } from '../packages/cli/src/renderer/native-provider-submission-policy.js'
 
@@ -19,6 +20,45 @@ const action = Object.freeze({
 })
 
 describe('native provider ordinary-send policy', () => {
+  it('keeps compatibility, route availability, and user preference independent', () => {
+    expect(resolveNativeModelEligibility({
+      wireApi: 'responses',
+      protocolCapabilities: { responses: true },
+      routeAvailable: true,
+      userDisabled: false,
+    })).toEqual({ compatibility: 'supported', routeAvailable: true, userDisabled: false, selectable: true })
+    expect(resolveNativeModelEligibility({
+      wireApi: 'responses',
+      exactConfiguredMembership: true,
+      routeAvailable: true,
+      userDisabled: true,
+    })).toEqual({ compatibility: 'supported', routeAvailable: true, userDisabled: true, selectable: false })
+    expect(
+      resolveNativeModelEligibility({
+        wireApi: 'chat-completions',
+        protocolCapabilities: { responses: true },
+        routeAvailable: true,
+        userDisabled: false,
+      }).compatibility,
+    ).toBe('unsupported')
+    expect(
+      resolveNativeModelEligibility({
+        protocolCapabilities: { responses: true },
+        routeAvailable: true,
+        userDisabled: false,
+      }).compatibility,
+    ).toBe('unknown')
+    expect(
+      resolveNativeModelEligibility({
+        wireApi: 'responses',
+        protocolCapabilities: { responses: false },
+        exactConfiguredMembership: true,
+        routeAvailable: true,
+        userDisabled: false,
+      }).compatibility,
+    ).toBe('supported')
+  })
+
   it('keeps cross-provider choice pending and treats a same-provider model as an immediate model choice', () => {
     expect(decideNativeProviderSelection('provider-a', pending)).toEqual({
       kind: 'pending-provider-change',

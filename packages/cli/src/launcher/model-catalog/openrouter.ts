@@ -26,7 +26,7 @@ function candidate(value: unknown): CatalogModel | undefined {
   const model = object(value)
   if (
     !model || !boundedString(model.id)
-    || !/^[a-z0-9][a-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,447}$/u.test(model.id)
+    || !/^~?[a-z0-9][a-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,447}$/u.test(model.id)
   ) {
     throw new CatalogError('protocol')
   }
@@ -36,18 +36,21 @@ function candidate(value: unknown): CatalogModel | undefined {
   const inputs = stringList(architecture?.input_modalities)
   const outputs = stringList(architecture?.output_modalities)
   if (!architecture || !supported || !inputs || !outputs) throw new CatalogError('protocol')
-  if (!inputs.includes('text') || !outputs.includes('text') || !supported.includes('tools')) return undefined
+  const interactive = !model.id.startsWith('~') && !model.id.endsWith(':batch')
+  const responses = interactive && inputs.includes('text') && outputs.includes('text')
+    && supported.includes('tools') && supported.includes('tool_choice')
   return Object.freeze({
     id: model.id,
     label: typeof model.name === 'string' ? model.name : model.id,
     aliases: Object.freeze([]),
+    protocolCapabilities: Object.freeze({ responses }),
   })
 }
 
 export function openRouterDiscoveryAdapter(): DiscoveryAdapter {
   return Object.freeze({
     id: 'openrouter',
-    version: '1',
+    version: '2',
     pagination: 'none',
     matches: (target: DiscoveryTarget) => isOpenRouterEndpoint(target.endpoint),
     async discover(connection: DiscoveryConnection, signal: AbortSignal) {

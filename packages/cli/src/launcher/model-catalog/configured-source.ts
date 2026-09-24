@@ -10,7 +10,12 @@ export function dynamicConfiguredCatalog(input: {
   readonly selectorIcons?: ModelSelectorIconOverrides
   readonly load?: () => Promise<CodexConfigModelProviderProjection>
 }) {
-  let snapshot: CodexConfigModelProviderProjection = { providers: [], providerIds: new Set(), diagnostics: [] }
+  let snapshot: CodexConfigModelProviderProjection = {
+    providers: [],
+    providerIds: new Set(),
+    providerWireApis: new Map(),
+    diagnostics: [],
+  }
   let disposed = false
   let dirty = false
   let generation = 0
@@ -61,7 +66,13 @@ export function dynamicConfiguredCatalog(input: {
       } catch {
         if (disposed || generation !== epoch) return
         // Unexpected source failure is not proof that the native binding stayed unchanged.
-        snapshot = { providers: [], providerIds: new Set(), diagnostics: [], sourceAvailable: false }
+        snapshot = {
+          providers: [],
+          providerIds: new Set(),
+          providerWireApis: new Map(),
+          diagnostics: [],
+          sourceAvailable: false,
+        }
         notify()
       } finally {
         job = undefined

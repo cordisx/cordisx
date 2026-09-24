@@ -102,11 +102,24 @@ describe('discovery contracts', () => {
     ).toThrow('unsupported')
   })
 
-  it('requests only the fixed list operation and preserves exact legacy IDs', async () => {
-    const fetcher = vi.fn(async () => response(['deepseek-v4-flash', 'deepseek-flash', 'deepseek-flash']))
+  it('requests only the fixed list operation and preserves exact current and legacy IDs', async () => {
+    const ids = [
+      'deepseek-v4-flash',
+      'deepseek-v4-flash-vision-exp',
+      'deepseek-flash',
+      'deepseek-v4-pro',
+      'unrelated',
+      'deepseek-flash',
+    ]
+    const fetcher = vi.fn(async () => response(ids))
     const models = await deepSeekDiscoveryAdapter().discover(connection({ fetcher }), new AbortController().signal)
-    expect(models.map(model => model.id)).toEqual(['deepseek-flash', 'deepseek-v4-flash'])
-    expect(models.map(model => model.protocolCapabilities)).toEqual([{ responses: true }, undefined])
+    expect(models.map(model => [model.id, model.protocolCapabilities?.responses])).toEqual([
+      ['deepseek-flash', true],
+      ['deepseek-v4-flash', true],
+      ['deepseek-v4-flash-vision-exp', true],
+      ['deepseek-v4-pro', true],
+      ['unrelated', undefined],
+    ])
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.deepseek.com/models',
       expect.objectContaining({
@@ -208,28 +221,42 @@ describe('discovery contracts', () => {
     )
   })
 
-  it('filters OpenRouter to text tool candidates while leaving Responses capability unknown', async () => {
-    const data = [
-      {
-        id: 'openai/o4-mini',
-        name: 'OpenAI: o4-mini',
+  it('retains the complete OpenRouter catalog while marking bounded interactive Responses candidates', async () => {
+    const compatible = Array.from({ length: 293 }, (_, index) => ({
+      id: index === 0 ? 'openai/o4-mini' : `fixture/compatible-${index}`,
+      name: `Compatible ${index}`,
+      architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+      supported_parameters: ['tools', 'tool_choice'],
+    }))
+    const incompatible = [
+      ...Array.from({ length: 161 }, (_, index) => ({
+        id: `fixture/unconfirmed-${index}`,
         architecture: { input_modalities: ['text'], output_modalities: ['text'] },
-        supported_parameters: ['tools', 'reasoning'],
-      },
-      {
-        id: 'openai/gpt-image-1',
-        name: 'OpenAI: Image',
-        architecture: { input_modalities: ['text'], output_modalities: ['image'] },
         supported_parameters: ['tools'],
-      },
-      ...Array.from({ length: 442 }, (_, index) => ({
-        id: `fixture/model-${index}`,
-        name: `Fixture ${index}`,
-        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
-        supported_parameters: ['temperature'],
       })),
+      {
+        id: '~fixture/dynamic-latest',
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['tools', 'tool_choice'],
+      },
+      {
+        id: 'fixture/batch:batch',
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['tools', 'tool_choice'],
+      },
+      {
+        id: 'fixture/image-output',
+        architecture: { input_modalities: ['text'], output_modalities: ['image'] },
+        supported_parameters: ['tools', 'tool_choice'],
+      },
+      {
+        id: 'fixture/no-tools',
+        architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+        supported_parameters: ['tool_choice'],
+      },
     ]
-    const fetcher = vi.fn(async () => Response.json({ data, total_count: 444, links: { next: null } }))
+    const data = [...compatible, ...incompatible]
+    const fetcher = vi.fn(async () => Response.json({ data, total_count: 458, links: { next: null } }))
     const models = await openRouterDiscoveryAdapter().discover(
       connection({
         endpoint: 'https://openrouter.ai/api/v1',
@@ -238,11 +265,12 @@ describe('discovery contracts', () => {
       }),
       new AbortController().signal,
     )
-    expect(models).toEqual([{
-      id: 'openai/o4-mini',
-      label: 'OpenAI: o4-mini',
-      aliases: [],
-    }])
+    expect(models).toHaveLength(458)
+    expect(models.filter(model => model.protocolCapabilities?.responses === true)).toHaveLength(293)
+    expect(models.find(model => model.id === 'openai/o4-mini')).toMatchObject({
+      protocolCapabilities: { responses: true },
+    })
+    expect(models.slice(-4).every(model => model.protocolCapabilities?.responses === false)).toBe(true)
     expect(fetcher).toHaveBeenCalledWith(
       'https://openrouter.ai/api/v1/models',
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fixture-key' }) }),

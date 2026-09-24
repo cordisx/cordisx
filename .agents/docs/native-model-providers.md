@@ -278,25 +278,37 @@ submissions even when retained rows remain visible.
 Responses connections use the existing Host-private native credential broker.
 Management snapshots never include its secret, command or lease. Overlay blocks
 are enforced at submission admission; pinning changes only ordering. A listed
-model is not proof of protocol support. The discovery adapter reports per-model
-`protocolCapabilities.responses` only when it has positive evidence. Missing
-capability metadata remains unknown rather than becoming `false` or inheriting
-the connection protocol. Unknown and explicitly unsupported automatic members
-remain visible but unselectable.
+model is not proof of protocol support. Compatibility, route availability and
+the user's blocked preference are independent. The Host keeps the configured
+provider's `wire_api` in launcher-private state: `responses` is required for the
+current native submission path, `chat-completions` is explicitly unsupported,
+and a missing protocol remains unknown. On a Responses connection, exact native
+catalog or manual membership is an explicit usable declaration. Automatic
+membership still requires per-model `protocolCapabilities.responses: true`;
+`false` is explicitly unsupported and a missing capability remains unknown.
+Unknown and explicitly unsupported automatic members remain visible but
+unselectable. A compatible blocked row remains visible and can be restored.
 
 OpenCode Go accepts the bounded OpenAI-compatible list returned by its dedicated
 Go endpoint without treating one observed model count as a limit. OpenRouter
-requires namespaced IDs plus text input, text output and tool-parameter metadata,
-so its broad public catalog is reduced to conservative Codex candidates. Neither
-adapter infers Responses, streaming, tool execution or other runtime capability
-from membership or a display name. Fixture coverage, including previously
-observed IDs, is not a permanent allowlist or a live upstream acceptance claim.
+retains every structurally valid namespaced catalog row for management. It marks
+only bounded interactive rows with text input, text output, `tools` and
+`tool_choice` metadata as Responses candidates; dynamic `~` aliases, batch
+routes and rows missing any required metadata remain visible with an explicit
+unsupported capability. The candidate rule is service-contract evidence, not
+an individual runtime test or a GPT-family allowlist. Fixture coverage,
+including previously observed IDs, is not a permanent allowlist or a live
+upstream acceptance claim.
 
 The [official DeepSeek Responses guide](https://api-docs.deepseek.com/guides/responses_api)
 and [Codex integration](https://api-docs.deepseek.com/quick_start/agent_integrations/codex)
-confirm native Responses support. The built-in adapter confirms only the exact
-`deepseek-flash` and `deepseek-v4-pro` IDs on the official endpoint; it does not
-infer support for unknown or legacy IDs. The base URL stays
+confirm native Responses support. The built-in adapter confirms the exact
+`deepseek-flash`, `deepseek-v4-pro`, `deepseek-v4-flash` and
+`deepseek-v4-flash-vision-exp` identifiers on the official endpoint. The latter
+two are retained only as accepted legacy identifiers routed by DeepSeek to the
+current service; CordisX preserves the submitted ID and does not create an
+execution alias or claim a separate current vision model. Other IDs remain
+unknown. The base URL stays
 `https://api.deepseek.com/`, not `/responses`: upstream Codex appends the operation
 path. No Responses/Chat conversion layer is required or implemented.
 Upstream Codex owns HTTP, semantic SSE events and full stateless conversation

@@ -3,6 +3,43 @@ export interface NativeProviderSelection {
   readonly model: string
 }
 
+export type NativeProviderWireApi = 'responses' | 'chat-completions'
+export type NativeModelResponsesCompatibility = 'supported' | 'unsupported' | 'unknown'
+
+export interface NativeModelEligibilityInput {
+  readonly wireApi?: NativeProviderWireApi
+  readonly exactConfiguredMembership?: boolean
+  readonly protocolCapabilities?: { readonly responses: boolean }
+  readonly routeAvailable: boolean
+  readonly userDisabled: boolean
+}
+
+export interface NativeModelEligibility {
+  readonly compatibility: NativeModelResponsesCompatibility
+  readonly routeAvailable: boolean
+  readonly userDisabled: boolean
+  readonly selectable: boolean
+}
+
+/** Resolves Responses compatibility without conflating route health or user preference. */
+export function resolveNativeModelEligibility(input: NativeModelEligibilityInput): NativeModelEligibility {
+  const compatibility: NativeModelResponsesCompatibility = input.wireApi === undefined
+    ? 'unknown'
+    : input.wireApi === 'chat-completions'
+    ? 'unsupported'
+    : input.exactConfiguredMembership === true || input.protocolCapabilities?.responses === true
+    ? 'supported'
+    : input.protocolCapabilities?.responses === false
+    ? 'unsupported'
+    : 'unknown'
+  return Object.freeze({
+    compatibility,
+    routeAvailable: input.routeAvailable,
+    userDisabled: input.userDisabled,
+    selectable: compatibility === 'supported' && input.routeAvailable && !input.userDisabled,
+  })
+}
+
 export type NativeProviderSelectionDecision =
   | Readonly<{ kind: 'same-provider-model'; target: NativeProviderSelection; clearsPending: true }>
   | Readonly<{ kind: 'pending-provider-change'; pending: NativeProviderSelection }>

@@ -5,6 +5,7 @@ import { parse } from 'smol-toml'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import { parseConfigModelCatalogs } from '../config/home-config-model-catalogs.js'
 import { inferProviderBrand, type ModelSelectorIconOverrides } from '../model-selector-branding.js'
+import type { NativeProviderWireApi } from '../renderer/native-provider-submission-policy.js'
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024
 const MAX_CATALOG_BYTES = 32 * 1024 * 1024
@@ -54,6 +55,8 @@ function catalogModels(value: unknown, strict = false): NativeModelProviderCatal
 export interface CodexConfigModelProviderProjection {
   readonly providers: readonly NativeModelProviderCatalogEntry[]
   readonly providerIds: ReadonlySet<string>
+  /** Host-private route protocol used for model compatibility admission. */
+  readonly providerWireApis: ReadonlyMap<string, NativeProviderWireApi>
   /** Private source identity, not an effective native endpoint/account attestation. */
   readonly sourceRevision?: string
   readonly sourceAvailable?: boolean
@@ -96,15 +99,17 @@ export async function codexConfigModelProviders(
       providers: Object.freeze([]),
       sourceAvailable: false,
       providerIds: new Set<string>(),
+      providerWireApis: new Map<string, NativeProviderWireApi>(),
       diagnostics: Object.freeze(
         Object.keys(mappings).map(providerId => ({ providerId, code: 'provider-missing' as const })),
       ),
     })
   }
   const configured = record(config.model_providers) ?? {}
+  const providerWireApis = new Map<string, NativeProviderWireApi>()
   const activeProvider = text(config.model_provider, 128)
   const activeModel = text(config.model, 512)
-  inspectNativeProviders?.(Object.freeze(
+  const nativeProviders = Object.freeze(
     Object.entries(configured).flatMap(([providerId, value]) => {
       const id = text(providerId, 128)
       const provider = record(value)
@@ -113,6 +118,7 @@ export async function codexConfigModelProviders(
       const wireApi = provider.wire_api === 'responses' || provider.wire_api === 'chat-completions'
         ? provider.wire_api
         : undefined
+      if (wireApi !== undefined) providerWireApis.set(id, wireApi)
       const envKey = text(provider.env_key, 512)
       const inlineToken = text(provider.experimental_bearer_token, 16_384)
       const credential: CodexConfigNativeProvider['credential'] = envKey !== undefined
@@ -130,7 +136,8 @@ export async function codexConfigModelProviders(
         credential,
       })]
     }),
-  ))
+  )
+  inspectNativeProviders?.(nativeProviders)
   const readCatalog = async (
     value: unknown,
     providerId?: string,
@@ -206,6 +213,7 @@ export async function codexConfigModelProviders(
     sourceAvailable: true,
     sourceRevision,
     providerIds: new Set(providers.map(provider => provider.providerId)),
+    providerWireApis,
     diagnostics: Object.freeze(diagnostics),
   })
 }

@@ -14,6 +14,7 @@ import {
 } from '../../model-catalog/management-overlay.js'
 import type { CodexConfigModelProviderProjection } from '../codex-config-model-providers.js'
 import type { NativeModelProviderCatalogEntry } from '../native-model-provider-catalog.js'
+import { resolveNativeModelEligibility } from '../../renderer/native-provider-submission-policy.js'
 import type { CatalogSnapshot } from './contracts.js'
 
 type CatalogManagementAuthority = {
@@ -157,7 +158,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   private replace(projection: CodexConfigModelProviderProjection, force = false): void {
-    const changed = safeRevision(this.#projection) !== safeRevision(projection)
+    const comparable = (value: CodexConfigModelProviderProjection) => ({
+      ...value,
+      providerWireApis: [...value.providerWireApis],
+    })
+    const changed = safeRevision(comparable(this.#projection)) !== safeRevision(comparable(projection))
     this.#projection = projection
     this.recordGood(projection)
     if (changed || force) this.changed()
@@ -212,10 +217,16 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       && !denied
     const confirmed = new Set(provider.models.map(model => model.id))
     const projected = projectManagementOverlay(
-      this.sourceModels(provider).map(model => ({
-        ...model,
-        selectable: available && (confirmed.has(model.id) || model.protocolCapabilities?.responses === true),
-      })),
+      this.sourceModels(provider).map(model => {
+        const eligibility = resolveNativeModelEligibility({
+          wireApi: this.#projection.providerWireApis.get(provider.providerId),
+          exactConfiguredMembership: confirmed.has(model.id),
+          protocolCapabilities: model.protocolCapabilities,
+          routeAvailable: available,
+          userDisabled: false,
+        })
+        return { ...model, selectable: eligibility.selectable }
+      }),
       this.#overlay.read(bindingRef(provider.providerId), this.scope(provider.providerId)),
     )
     return [
@@ -244,6 +255,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       provider,
       discovery: this.options.discovery?.snapshot(provider.providerId),
       overlay: overlay.revision,
+      wireApi: this.#projection.providerWireApis.get(provider.providerId),
       sourceAvailable: this.#projection.sourceAvailable,
       diagnostics: this.#projection.diagnostics.filter(item => item.providerId === provider.providerId),
       persistError: this.#persistError,
