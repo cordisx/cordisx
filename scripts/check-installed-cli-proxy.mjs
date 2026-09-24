@@ -21,6 +21,7 @@ export async function verifyInstalledCliProxy(input) {
   if (
     plugin.entry !== path.join(packageRoot, 'dist', 'runtime', 'module.js')
     || manifest.name !== '@cordisx/plugin-cli-proxy-api'
+    || manifest.exports?.['./extensions/v1']?.default !== './dist/extensions.mjs'
   ) {
     throw new Error('installed cordisx:cli-proxy-api alias did not resolve the bundled package export')
   }
@@ -36,6 +37,12 @@ export async function verifyInstalledCliProxy(input) {
     || packageManifest.runtimeManifest.schema !== runtimeManifest.$schema
     || packageManifest.runtimeManifest.digest !== `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`
     || runtimeManifest.capabilities.length !== 7
+    || !runtimeManifest.services.some(service => (
+      service.id === 'gateway-runtime'
+      && service.runtimeResources?.some(resource => (
+        resource.path.includes('/runtime/cli-proxy-plugins/') && resource.mode === 'executable'
+      ))
+    ))
     || runtimeManifest.capabilities.some(capability => (
       JSON.stringify(capability.scope) !== JSON.stringify(
         exact.has(capability.name)

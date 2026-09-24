@@ -697,7 +697,7 @@ createElement(AgentAvatar, props)
   const installedBundle = await buildRendererBundle(installedConfig)
   if (
     !installedBundle.includes('# CLIProxy Providers')
-    || !installedBundle.includes('standalone owner')
+    || !installedBundle.includes('/manager/extensions/cli-proxy-api/subscriptions')
     || !installedBundle.includes('/manager/extensions/channels')
   ) {
     throw new Error('installed external plugin composition is incomplete')
