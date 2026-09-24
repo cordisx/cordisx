@@ -152,6 +152,6 @@
   ],
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#1b6def3a53758e5d2fd93af922d2ed29b2706822",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#12d5daa36dbd5dd565b96d22859afb1d0f3f3e1d"
   }
 }
