@@ -1,10 +1,20 @@
 .cxmp-management .cxmp-toolbar {
-  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 38px;
+  gap: 0;
+  border: 1px solid var(--cx-border);
+  border-radius: 8px;
+  background: var(--cx-surface-raised);
+  overflow: hidden;
 }
 
 .cxmp-management .cxmp-toolbar .cxr-search {
   flex: 1 1 180px;
   min-width: 120px;
+  height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .cxmp-management .cxmp-toolbar .cxh-select-field {
@@ -12,17 +22,74 @@
   flex: 0 0 160px;
 }
 
+.cxmp-management .cxmp-toolbar .t-select__wrap {
+  height: 36px;
+}
+
+.cxmp-management .cxmp-toolbar .t-input {
+  min-height: 36px;
+  border: 0;
+  border-left: 1px solid var(--cx-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cxmp-management .cxmp-toolbar > .t-button {
+  width: 36px;
+  height: 36px;
+  border-left: 1px solid var(--cx-border);
+  border-radius: 0;
+}
+
+.cxmp-management .cxmp-toolbar:focus-within {
+  border-color: var(--cx-primary);
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 1px;
+}
+
 .cxmc-binding {
   min-width: 0;
   border-bottom: 1px solid var(--cx-border);
-  padding: 14px 0;
+  padding: 0;
 }
 
 .cxmc-binding-header {
+  position: sticky;
+  z-index: 3;
+  top: 0;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 156px;
+  align-items: center;
+  min-height: 46px;
+  background: var(--cx-surface);
+}
+
+.cxmc-binding-toggle {
+  display: grid;
+  min-width: 0;
+  min-height: 46px;
+  grid-template-columns: 10px 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.cxmc-binding-toggle:hover,
+.cxmc-binding-toggle:focus-visible {
+  background: var(--cx-hover);
+}
+
+.cxmc-binding-toggle:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: -2px;
 }
 
 .cxmc-binding-actions,
@@ -32,6 +99,20 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.cxmc-binding-actions {
+  width: 156px;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cxmc-binding:hover .cxmc-binding-actions,
+.cxmc-binding:focus-within .cxmc-binding-actions,
+.cxmc-binding-actions[data-menu-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .cxmc-status {
@@ -85,6 +166,17 @@
 .cxmc-row-state {
   display: grid;
   gap: 2px;
+}
+
+.cxmc-row-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cxmc-models > li:hover .cxmc-row-actions,
+.cxmc-models > li:focus-within .cxmc-row-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .cxmc-diagnostics {
@@ -187,8 +279,13 @@
 }
 
 @media (max-width: 600px) {
+  .cxmp-management .cxmp-toolbar {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
   .cxmp-management .cxmp-toolbar .cxr-search {
-    flex-basis: calc(100% - 76px);
+    flex-basis: calc(100% - 72px);
   }
 
   .cxmp-management .cxmp-toolbar .cxh-select-field {
@@ -196,12 +293,26 @@
     width: 100%;
     flex-basis: 100%;
   }
+
+  .cxmp-management .cxmp-toolbar .t-input {
+    border-top: 1px solid var(--cx-border);
+    border-left: 0;
+  }
+
   .cxmc-binding-header {
-    grid-template-columns: 20px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 120px;
+  }
+
+  .cxmc-binding-toggle {
+    grid-template-columns: 10px 20px minmax(0, 1fr);
+  }
+
+  .cxmc-binding-toggle .cxms-model-count {
+    grid-column: 3;
   }
 
   .cxmc-binding-actions {
-    grid-column: 2;
+    width: 120px;
   }
 
   .cxmc-models,
@@ -250,5 +361,13 @@
   .cxmc-environment > :last-child {
     grid-column: 2;
     grid-row: 1 / 4;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cxmc-binding-actions,
+  .cxmc-row-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 }

@@ -12,7 +12,11 @@ export interface MoreMenuItem {
   readonly onSelect: () => void
 }
 
-export function MoreMenu({ label, items }: { readonly label: string; readonly items: readonly MoreMenuItem[] }) {
+export function MoreMenu({ label, items, onOpenChange }: {
+  readonly label: string
+  readonly items: readonly MoreMenuItem[]
+  readonly onOpenChange?: (open: boolean) => void
+}) {
   const options: DropdownOption[] = items.map(item => ({
     value: item.id,
     content: item.label,
@@ -26,6 +30,7 @@ export function MoreMenu({ label, items }: { readonly label: string; readonly it
       placement="bottom-right"
       options={options}
       minColumnWidth={180}
+      {...(onOpenChange ? { popupProps: { onVisibleChange: onOpenChange } } : {})}
       onClick={item => items.find(candidate => candidate.id === item.value)?.onSelect()}
     >
       <span>

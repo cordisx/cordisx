@@ -14,6 +14,7 @@ import { ConnectionEditor } from './model-catalog/ConnectionEditor.js'
 import { SelectField } from '../../host-ui/SelectField.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
+import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
 
 const empty: ModelProviderSnapshot = { providers: [], entries: [], loading: false }
 const noop = () => () => {}
@@ -29,6 +30,7 @@ export function ModelServicesPage({ registry, locale }: {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<CatalogFilter>('all')
   const [creating, setCreating] = useState(false)
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const copy = modelProviderCopy(locale)
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   useEffect(() => {
@@ -57,10 +59,18 @@ export function ModelServicesPage({ registry, locale }: {
     )
       .includes(normalized)
   )
+  const setProviderExpanded = (key: string, open: boolean) => {
+    setExpanded(current => {
+      const next = new Set(current)
+      if (open) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
   return (
     <section className="cxr-page cxmp-management" data-catalog-management={managementState}>
       <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
-      <div className="cxmp-toolbar">
+      <div className="cxmp-toolbar" role="search" aria-label={t('catalog.tools')}>
         <SearchField
           className="cxr-search"
           value={query}
@@ -138,45 +148,87 @@ export function ModelServicesPage({ registry, locale }: {
               query={normalized}
               filter={filter}
               connected={catalog.connected}
+              expanded={normalized.length > 0 || expanded.has(view.bindingRef)}
+              onExpandedChange={open => {
+                if (!normalized) setProviderExpanded(view.bindingRef, open)
+              }}
             />
           ))
           : null}
         {providers.map(provider => (
-          <details
-            className="cxmp-provider-detail cxms-provider"
+          <LegacyProvider
             key={provider.providerId}
-            data-catalog-binding={catalog.connected ? 'unbound' : managementState}
-            open
-          >
-            <summary>
-              {provider.selectorBrand
-                ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
-                : <HostBrandIcon icon={provider.icon} />}
-              <span className="cxms-provider-identity">
-                <strong>{provider.title}</strong>
-                {provider.title.toLocaleLowerCase() === provider.providerId.toLocaleLowerCase()
-                  ? null
-                  : <code>{provider.providerId}</code>}
-              </span>
-              <span className="cxms-model-count">{copy.models}: {provider.models.length}</span>
-            </summary>
-            {catalog.connected ? <p className="cxmc-muted">{t('catalog.readOnly')}</p> : null}
-            <ul aria-label={`${provider.title} · ${copy.models}`}>
-              {provider.models.map(model => (
-                <li key={model.id}>
-                  <span className="cxms-model-identity">
-                    <strong>{model.label}</strong>
-                    {model.label.toLocaleLowerCase() === model.id.toLocaleLowerCase() ? null : <code>{model.id}</code>}
-                  </span>
-                  {model.group ? <small>{model.group}</small> : null}
-                </li>
-              ))}
-            </ul>
-          </details>
+            provider={provider}
+            modelsLabel={copy.models}
+            {...(catalog.connected ? { readOnly: t('catalog.readOnly') } : {})}
+            bindingState={catalog.connected ? 'unbound' : managementState}
+            expanded={normalized.length > 0 || expanded.has(provider.providerId)}
+            onExpandedChange={open => {
+              if (!normalized) setProviderExpanded(provider.providerId, open)
+            }}
+            resetKey={`${normalized}:${filter}`}
+          />
         ))}
         {providers.length === 0 && views.length === 0 && !state.error
           ? <p className="cxr-empty">{copy.empty}</p>
           : null}
+      </div>
+    </section>
+  )
+}
+
+function LegacyProvider({ provider, modelsLabel, readOnly, bindingState, expanded, onExpandedChange, resetKey }: {
+  readonly provider: ModelProviderSnapshot['providers'][number]
+  readonly modelsLabel: string
+  readonly readOnly?: string
+  readonly bindingState: string
+  readonly expanded: boolean
+  readonly onExpandedChange: (open: boolean) => void
+  readonly resetKey: string
+}) {
+  const rows = useProgressiveModelRows(provider.models.length, resetKey)
+  const contentId = `cxms-provider-${provider.providerId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+  return (
+    <section
+      className="cxmp-provider-detail cxms-provider"
+      data-catalog-binding={bindingState}
+      data-expanded={expanded}
+    >
+      <header className="cxms-provider-header">
+        <button
+          type="button"
+          className="cxms-provider-toggle"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          onClick={() => onExpandedChange(!expanded)}
+        >
+          <span className="cxms-disclosure-mark" aria-hidden="true" />
+          {provider.selectorBrand
+            ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+            : <HostBrandIcon icon={provider.icon} />}
+          <span className="cxms-provider-identity">
+            <strong>{provider.title}</strong>
+            {provider.title.toLocaleLowerCase() === provider.providerId.toLocaleLowerCase()
+              ? null
+              : <code>{provider.providerId}</code>}
+          </span>
+          <span className="cxms-model-count">{modelsLabel}: {provider.models.length}</span>
+        </button>
+      </header>
+      <div id={contentId} hidden={!expanded}>
+        {readOnly ? <p className="cxmc-muted">{readOnly}</p> : null}
+        <ul aria-label={`${provider.title} · ${modelsLabel}`}>
+          {provider.models.slice(0, rows.limit).map(model => (
+            <li key={model.id}>
+              <span className="cxms-model-identity">
+                <strong>{model.label}</strong>
+                {model.label.toLocaleLowerCase() === model.id.toLocaleLowerCase() ? null : <code>{model.id}</code>}
+              </span>
+              {model.group ? <small>{model.group}</small> : null}
+            </li>
+          ))}
+          {rows.sentinel ? <li ref={rows.sentinel} className="cxms-list-sentinel" aria-hidden="true" /> : null}
+        </ul>
       </div>
     </section>
   )

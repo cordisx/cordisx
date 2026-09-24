@@ -72,12 +72,13 @@ it.skipIf(!executable)(
       const run = (code: string) => evaluate(`(async()=>{${code}})()`)
       await expect.poll(() => evaluate('typeof Fixture')).toBe('object')
       await run('window.disposeFixture=await Fixture.start()')
+      expect(await evaluate('document.querySelectorAll(".cxmc-binding-toggle[aria-expanded=true]").length')).toBe(0)
       for (const [width, height] of [[1440, 900], [800, 600], [390, 844]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
         for (const theme of ['light', 'dark']) {
           await run(`await Fixture.setTheme('${theme}')`)
           const geometry = await evaluate(
-            `(() => {const nodes=[...document.querySelectorAll('.cxmp-toolbar,.cxmc-binding-header,.cxmc-models,.cxmc-row-actions')];return nodes.map(n=>{const r=n.getBoundingClientRect();return {width:r.width,left:r.left,right:r.right}})})()`,
+            `(() => {const nodes=[...document.querySelectorAll('.cxmp-toolbar,.cxmc-binding-header,.cxmc-models,.cxmc-row-actions')].filter(n=>n.getClientRects().length>0);return nodes.map(n=>{const r=n.getBoundingClientRect();return {width:r.width,left:r.left,right:r.right}})})()`,
           )
           for (const box of geometry as { width: number; left: number; right: number }[]) {
             expect(box.width).toBeGreaterThan(0)
@@ -95,21 +96,94 @@ it.skipIf(!executable)(
         }
       }
       await run(
-        `window.pin=document.querySelector('[aria-label="Pin model: Model-A"]');pin.focus();await Fixture.refreshState('error')`,
+        `document.querySelector('[data-binding-ref="binding-a"] .cxmc-binding-toggle').click();await Fixture.settle()`,
       )
-      expect(await evaluate('document.activeElement===pin')).toBe(true)
-      await run(`document.querySelector('[aria-label="Block model: Model-A"]').click();await Fixture.settle()`)
+      expect(
+        await evaluate(
+          'document.querySelectorAll("[data-binding-ref=binding-a] .cxmc-models>li[data-model-id]").length',
+        ),
+      )
+        .toBeLessThan(180)
+      await run(`document.querySelector('.cxmp-results').scrollTop=100000;await Fixture.settle()`)
+      await expect.poll(() =>
+        evaluate('document.querySelectorAll("[data-binding-ref=binding-a] .cxmc-models>li[data-model-id]").length')
+      ).toBeGreaterThan(48)
+      expect(
+        await evaluate(
+          `(() => {const results=document.querySelector('.cxmp-results').getBoundingClientRect();const header=document.querySelector('[data-binding-ref="binding-a"] .cxmc-binding-header').getBoundingClientRect();return Math.abs(header.top-results.top)<2})()`,
+        ),
+      ).toBe(true)
+      if (process.env.CATALOG_SCREENSHOT_DIR) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+        await writeFile(
+          join(process.env.CATALOG_SCREENSHOT_DIR, 'catalog-sticky-deep-scroll.png'),
+          Buffer.from(screenshot.data as string, 'base64'),
+        )
+      }
+      await run(
+        `document.querySelector('[data-binding-ref="binding-a"] .cxmc-binding-toggle').click();await Fixture.search('final-search-target')`,
+      )
+      expect(await evaluate('document.querySelector("[data-model-id=\\"openrouter/final-search-target\\"]")!==null'))
+        .toBe(true)
+      await run(`await Fixture.search('')`)
+      expect(
+        await evaluate(
+          'document.querySelector("[data-binding-ref=binding-a] .cxmc-binding-toggle").getAttribute("aria-expanded")',
+        ),
+      ).toBe('false')
+      await run(
+        `document.querySelector('[data-binding-ref="binding-a"] .cxmc-binding-toggle').focus();await Fixture.settle()`,
+      )
+      expect(
+        await evaluate(
+          'getComputedStyle(document.querySelector("[data-binding-ref=binding-a] .cxmc-binding-actions")).opacity',
+        ),
+      ).toBe('1')
+      await run(
+        `document.querySelector('[data-binding-ref="binding-a"] .cxmc-binding-toggle').click();window.pin=document.querySelector('[aria-label="Unpin model: openrouter/model-001"]');pin.focus();await Fixture.settle()`,
+      )
+      expect(await evaluate('pin.disabled')).toBe(false)
+      await run(`pin.blur();await Fixture.settle()`)
+      const actionPoint = await evaluate(
+        `(() => {const r=document.querySelector('[data-binding-ref="binding-a"] .cxmc-models>li').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`,
+      ) as { x: number; y: number }
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: actionPoint.x, y: actionPoint.y })
+      expect(
+        await evaluate(
+          'getComputedStyle(document.querySelector("[data-binding-ref=binding-a] .cxmc-row-actions")).opacity',
+        ),
+      ).toBe('1')
+      if (process.env.CATALOG_SCREENSHOT_DIR) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+        await writeFile(
+          join(process.env.CATALOG_SCREENSHOT_DIR, 'catalog-row-hover.png'),
+          Buffer.from(screenshot.data as string, 'base64'),
+        )
+      }
+      await run(`pin.focus();await Fixture.settle()`)
+      if (process.env.CATALOG_SCREENSHOT_DIR) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+        await writeFile(
+          join(process.env.CATALOG_SCREENSHOT_DIR, 'catalog-keyboard-actions.png'),
+          Buffer.from(screenshot.data as string, 'base64'),
+        )
+      }
+      await run(`await Fixture.refreshState('error')`)
+      expect(await evaluate('pin.isConnected')).toBe(true)
+      await run(
+        `document.querySelector('[aria-label="Block model: openrouter/model-001"]').click();await Fixture.settle()`,
+      )
       expect(await evaluate('Fixture.commands()[0]')).toMatchObject({
         operation: 'setOverlay',
-        modelId: 'Model-A',
+        modelId: 'openrouter/model-001',
         bindingRef: 'binding-a',
       })
       await run(
-        `await Fixture.refreshState('slow');document.querySelector('[data-binding-ref="binding-b"] [aria-label^="Pin model"]').click();await Fixture.settle()`,
+        `await Fixture.refreshState('slow');document.querySelector('[data-binding-ref="binding-b"] .cxmc-binding-toggle').click();document.querySelector('[data-binding-ref="binding-b"] [aria-label^="Pin model"]').click();await Fixture.settle()`,
       )
       expect(await evaluate('Fixture.commands()[1].bindingRef')).toBe('binding-b')
       await run(
-        `await Fixture.refreshState('restore');document.querySelector('[aria-label="More catalog actions: Provider A"]').click();await Fixture.settle();[...document.querySelectorAll('.t-dropdown__item')].find(n=>n.textContent==='Configure model script').click();await Fixture.settle()`,
+        `await Fixture.refreshState('restore');document.querySelector('[aria-label="More catalog actions: OpenRouter"]').click();await Fixture.settle();[...document.querySelectorAll('.t-dropdown__item')].find(n=>n.textContent==='Configure model script').click();await Fixture.settle()`,
       )
       for (const [width, height] of [[1440, 900], [390, 844]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })

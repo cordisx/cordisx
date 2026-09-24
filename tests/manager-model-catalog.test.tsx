@@ -62,6 +62,7 @@ describe('binding catalog Manager', () => {
     try {
       await host.client.refresh()
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+      await fixture.click('.cxmc-binding-toggle')
       expect(fixture.document.querySelectorAll('[data-binding-ref]')).toHaveLength(1)
       expect(fixture.document.querySelector('.cxms-provider')).toBeNull()
       expect(fixture.element('.cxmc-status').textContent).toContain('AutomaticUp to dateModels: 2Selectable: 2')
@@ -120,6 +121,73 @@ describe('binding catalog Manager', () => {
       expect(fixture.document.activeElement).toBe(button)
       expect((fixture.element('[aria-label="Search services or models"]') as HTMLInputElement).value).toBe('Model-A')
       expect(fixture.element('[data-model-id="Model-A"]').textContent).toContain('Removed')
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps manual provider expansion through refresh and restores it after search', async () => {
+    const host = catalogFixture()
+    const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+    const legacy = { loading: false, entries: [], providers: [] }
+    const registry = {
+      management: host.client,
+      subscribe: () => () => {},
+      refresh: async () => {},
+      snapshot: () => legacy,
+    } as unknown as ModelProviderRegistry
+    try {
+      await host.client.refresh()
+      await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+      const toggle = fixture.element('.cxmc-binding-toggle') as HTMLButtonElement
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      await fixture.click('.cxmc-binding-toggle')
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      await act(async () => {
+        host.publish({ ...host.snapshot(), sequence: 2 })
+        await host.client.refresh()
+      })
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      await fixture.click('.cxmc-binding-toggle')
+      await fixture.type('[aria-label="Search services or models"]', 'Model-A')
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      await fixture.type('[aria-label="Search services or models"]', '')
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('separates plugin source controls from Host preference controls', async () => {
+    const pluginView = catalogView({
+      sourceKind: 'plugin' as never,
+      capabilities: ['setOverlay', 'resetOrder', 'restoreBlocked'],
+      sourceCapabilities: [],
+      preferenceCapabilities: ['setOverlay', 'resetOrder', 'restoreBlocked'],
+    } as never)
+    const host = catalogFixture()
+    const fixture = reactManagerFixture()
+    const { CatalogBinding } = await import(
+      '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
+    )
+    try {
+      await host.client.refresh()
+      await fixture.render(
+        <CatalogBinding
+          view={pluginView}
+          client={host.client}
+          locale="en"
+          query=""
+          filter="all"
+          connected
+        />,
+      )
+      expect(fixture.document.querySelector('[aria-label="Refresh models: Provider A"]')).toBeNull()
+      expect((fixture.element('[aria-label="Pin model: Model-A"]') as HTMLButtonElement).disabled).toBe(false)
+      expect(fixture.element('.cxmc-status').textContent).toContain('Plugin')
     } finally {
       host.client.dispose()
       await fixture.dispose()
