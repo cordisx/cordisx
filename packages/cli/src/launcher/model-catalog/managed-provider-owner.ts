@@ -1,8 +1,8 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises'
 import path from 'node:path'
-import { createMacOSKeychainBackend, type LauncherKeychainBackend } from '../secret-store.js'
-import { CatalogError, type DiscoveryConnection, type DiscoveryRequest, object } from './contracts.js'
+import { ensureHomeConfig, type HomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../../config/home-config.js'
+import { CatalogError, type DiscoveryConnection, type DiscoveryRequest } from './contracts.js'
 import { withAbort } from './abort.js'
 import { createDiscoveryRequestCapability, type DiscoveryFetch } from './request-capability.js'
 import { ManagedCatalogState } from './managed-catalog-state.js'
@@ -12,35 +12,30 @@ import {
   managedProviderSettings,
   type ManagedProviderView,
   managedProviderView,
-  opaqueProviderId,
   parseManagedProviderRecord,
 } from './managed-provider-schema.js'
 
 const nonce = () => randomBytes(32).toString('base64url')
 const failure = () => new CatalogError('credential-unavailable')
-type StoredEntry = { ref: string; value: Omit<ManagedProviderRecord, 'secret'> }
-const metadataOf = ({ secret: _secret, ...value }: ManagedProviderRecord) => Object.freeze(value)
+const recordsSource = (records: readonly ManagedProviderRecord[]) => JSON.stringify(records)
 
 interface OwnerOptions {
   readonly homeDir: string
   readonly profileId: string
-  readonly keychain?: LauncherKeychainBackend
+  readonly appId?: string
   readonly fetcher?: DiscoveryFetch
-  readonly platform?: NodeJS.Platform
-  readonly keychainAuthenticationUI?: boolean
-  readonly keychainTimeoutMs?: number
 }
 
 /** Host composition only. Never register this object as a plugin context service or renderer global. */
 export class ManagedProviderOwner {
-  readonly #backend: LauncherKeychainBackend
-  readonly #service: string
+  readonly #configPath: string
+  readonly #appId: string
+  readonly #profileId: string
   readonly #lock: string
   readonly #lockIdentity: { dev: number; ino: number }
   readonly #fetcher: DiscoveryFetch | undefined
-  #records = new Map<string, StoredEntry>()
-  #retired: string[] = []
-  #index = ''
+  #records = new Map<string, ManagedProviderRecord>()
+  #source = ''
   #tail: Promise<unknown> = Promise.resolve()
   #closed = false
   #closePromise?: Promise<void>
@@ -49,24 +44,27 @@ export class ManagedProviderOwner {
   readonly #state: ManagedCatalogState
 
   private constructor(
-    backend: LauncherKeychainBackend,
-    service: string,
+    configPath: string,
+    appId: string,
+    profileId: string,
     lock: string,
     identity: { dev: number; ino: number },
     fetcher?: DiscoveryFetch,
   ) {
-    this.#backend = backend
-    this.#service = service
+    this.#configPath = configPath
+    this.#appId = appId
+    this.#profileId = profileId
     this.#lock = lock
     this.#lockIdentity = identity
     this.#fetcher = fetcher
-    this.#state = new ManagedCatalogState(`${lock}.state`, backend, service, () => this.#assertCurrent())
+    this.#state = new ManagedCatalogState(`${lock}.state`, () => this.#assertCurrent())
   }
 
   static async open(options: OwnerOptions): Promise<ManagedProviderOwner> {
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(options.profileId)) throw failure()
-    if (!options.keychain && (options.platform ?? process.platform) !== 'darwin') throw failure()
     const home = await realpath(options.homeDir)
+    const configPath = path.join(home, 'config.json')
+    await ensureHomeConfig({ configPath })
     const directory = path.join(home, 'state', 'host-provider-owners')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const metadata = await lstat(directory)
@@ -83,15 +81,10 @@ export class ManagedProviderOwner {
       throw failure()
     }
     const identity = await lstat(lock)
-    const scope = createHash('sha256').update(JSON.stringify([home, options.profileId])).digest('hex')
     const owner = new ManagedProviderOwner(
-      options.keychain ?? createMacOSKeychainBackend({
-        ...(options.keychainAuthenticationUI === undefined
-          ? {}
-          : { allowAuthenticationUI: options.keychainAuthenticationUI }),
-        ...(options.keychainTimeoutMs === undefined ? {} : { timeoutMs: options.keychainTimeoutMs }),
-      }),
-      `cordisx/host-provider/v1/${scope}`,
+      configPath,
+      options.appId ?? 'codex',
+      options.profileId,
       lock,
       identity,
       options.fetcher,
@@ -107,7 +100,7 @@ export class ManagedProviderOwner {
 
   snapshot(): readonly ManagedProviderView[] {
     if (this.#closed) return []
-    return Object.freeze([...this.#records.values()].map(record => managedProviderView(record.value)))
+    return Object.freeze([...this.#records.values()].map(managedProviderView))
   }
 
   subscribe(listener: () => void): () => void {
@@ -117,7 +110,7 @@ export class ManagedProviderOwner {
     }
   }
 
-  /** Host-only encrypted configuration/cache/overlay state; never mount these methods on RPC. */
+  /** Host-only configuration/cache/overlay state; never mount these methods on RPC. */
   readCatalogState(): Promise<unknown> {
     return this.#serial(() => this.#state.read())
   }
@@ -135,13 +128,12 @@ export class ManagedProviderOwner {
     admittedResponses: () => boolean = () => false,
   ): Promise<NativeManagedGatewayConnectionSession> {
     await this.#assertCurrent()
-    const entry = this.#records.get(id)
-    if (!entry || entry.value.settings.protocol !== 'responses' && !admittedResponses()) {
+    const record = this.#records.get(id)
+    if (!record || record.settings.protocol !== 'responses' && !admittedResponses()) {
       throw new CatalogError('unsupported')
     }
-    const record = await this.#readRecord(entry)
     await this.#assertCurrent()
-    if (this.#records.get(id) !== entry || record.settings.protocol !== 'responses' && !admittedResponses()) {
+    if (this.#records.get(id) !== record || record.settings.protocol !== 'responses' && !admittedResponses()) {
       throw new CatalogError('cancelled')
     }
     const endpoint = new URL(record.settings.endpoint)
@@ -169,10 +161,9 @@ export class ManagedProviderOwner {
     return this.#serial(async () => {
       if (!authorized()) throw new CatalogError('permission')
       await this.#assertCurrent()
-      await this.#cleanup()
       const settings = managedProviderSettings(input.settings)
       const prior = input.id === undefined ? undefined : this.#records.get(input.id)
-      if (input.id !== undefined && (!prior || prior.value.revision !== input.expectedRevision)) {
+      if (input.id !== undefined && (!prior || prior.revision !== input.expectedRevision)) {
         throw new CatalogError('source-invalid')
       }
       if (!prior && (input.expectedRevision !== undefined || !capture || this.#records.size >= 64)) {
@@ -185,38 +176,25 @@ export class ManagedProviderOwner {
       try {
         const secret = capture
           ? await withAbort(capture(abort.signal), abort.signal)
-          : (await this.#readRecord(prior!)).secret
+          : prior!.secret
         await this.#assertCurrent()
         if (!authorized()) throw new CatalogError('permission')
-        const changedScope = !prior || capture !== undefined || settings.endpoint !== prior.value.settings.endpoint
-          || settings.protocol !== prior.value.settings.protocol
+        const changedScope = !prior || capture !== undefined || settings.endpoint !== prior.settings.endpoint
+          || settings.protocol !== prior.settings.protocol
         if (changedScope && prior && settings.supplement.length) throw new CatalogError('source-invalid')
         const record = parseManagedProviderRecord({
-          id: prior?.value.id ?? nonce(),
+          id: prior?.id ?? nonce(),
           revision: nonce(),
-          scopeRevision: changedScope ? nonce() : prior!.value.scopeRevision,
-          credentialRevision: capture ? nonce() : prior!.value.credentialRevision,
-          credentialRef: capture ? nonce() : prior!.value.credentialRef,
+          scopeRevision: changedScope ? nonce() : prior!.scopeRevision,
+          credentialRevision: capture ? nonce() : prior!.credentialRevision,
+          credentialRef: capture ? nonce() : prior!.credentialRef,
           settings,
           secret,
         })
-        const ref = nonce()
         const raw = JSON.stringify(record)
         if (raw.length > 16 * 1024) throw new CatalogError('source-invalid')
-        // Journal the new slot before writing it so interrupted provisioning can erase it on reopen.
-        await this.#commit(this.#records, [ref], authorized)
-        // The new Keychain record is immutable. The index switch is the durable commit point.
-        await this.#backend.upsert(this.#service, ref, raw)
-        const next = new Map(this.#records).set(record.id, { ref, value: metadataOf(record) })
-        try {
-          await this.#commit(next, prior ? [prior.ref] : [], authorized)
-        } catch (error) {
-          // A backend failure may occur after its write. Never delete a possibly committed record.
-          this.#closed = true
-          this.#revoke()
-          throw error
-        }
-        await this.#cleanup()
+        const next = new Map(this.#records).set(record.id, record)
+        await this.#commit(next, authorized)
         return managedProviderView(record)
       } finally {
         clearTimeout(timer)
@@ -230,24 +208,21 @@ export class ManagedProviderOwner {
     return this.#serial(async () => {
       if (!authorized()) throw new CatalogError('permission')
       await this.#assertCurrent()
-      await this.#cleanup()
       const prior = this.#records.get(id)
-      if (!prior || prior.value.revision !== expectedRevision) throw new CatalogError('source-invalid')
+      if (!prior || prior.revision !== expectedRevision) throw new CatalogError('source-invalid')
       const next = new Map(this.#records)
       next.delete(id)
-      await this.#commit(next, [prior.ref], authorized)
-      await this.#cleanup()
+      await this.#commit(next, authorized)
     })
   }
 
   /** At most one fixed operation. No plugin-supplied adapter, URL, headers or credential lookup. */
   connection(id: string): DiscoveryConnection | undefined {
-    const entry = this.#records.get(id)
+    const record = this.#records.get(id)
     if (
-      this.#closed || !entry || !entry.value.settings.discoveryEnabled || entry.value.settings.strategy.kind !== 'auto'
+      this.#closed || !record || !record.settings.discoveryEnabled || record.settings.strategy.kind !== 'auto'
     ) return undefined
-    const record = entry.value
-    const current = () => !this.#closed && this.#records.get(id) === entry
+    const current = () => !this.#closed && this.#records.get(id) === record
     const endpoint = new URL(record.settings.endpoint)
     endpoint.pathname = endpoint.pathname.replace(/\/$/u, '')
     const baseUrl = endpoint.href.replace(/\/$/u, '')
@@ -270,8 +245,8 @@ export class ManagedProviderOwner {
             current: () => current() && !signal.aborted,
             bearer: async () => {
               await this.#assertCurrent()
-              const latest = await this.#readRecord(entry)
-              return latest.secret
+              if (this.#records.get(id) !== record) throw new CatalogError('cancelled')
+              return record.secret
             },
             ...(this.#fetcher ? { fetcher: this.#fetcher } : {}),
           })
@@ -290,41 +265,9 @@ export class ManagedProviderOwner {
   }
 
   async #load(): Promise<void> {
-    if (await this.#backend.status(this.#service, 'index') === 'unset') {
-      this.#index = JSON.stringify({ version: 1, entries: [], retired: [] })
-      await this.#backend.upsert(this.#service, 'index', this.#index)
-    } else this.#index = await this.#backend.read(this.#service, 'index')
-    const index = object(JSON.parse(this.#index))
-    if (
-      !index || index.version !== 1 || Object.keys(index).length !== 3 || !Array.isArray(index.entries)
-      || index.entries.length > 64
-      || !Array.isArray(index.retired) || index.retired.length > 64 || !index.retired.every(opaqueProviderId)
-    ) throw failure()
-    this.#retired = [...index.retired]
-    for (const value of index.entries) {
-      const item = object(value)
-      if (
-        !item || Object.keys(item).length !== 2 || !opaqueProviderId(item.id) || !opaqueProviderId(item.ref)
-        || this.#records.has(item.id)
-      ) throw failure()
-      const record = parseManagedProviderRecord(JSON.parse(await this.#backend.read(this.#service, item.ref)))
-      if (record.id !== item.id) throw failure()
-      if (this.#retired.includes(item.ref)) throw failure()
-      this.#records.set(item.id, { ref: item.ref, value: metadataOf(record) })
-    }
-    await this.#cleanup()
-  }
-
-  async #readRecord(entry: StoredEntry): Promise<ManagedProviderRecord> {
-    const latest = parseManagedProviderRecord(JSON.parse(await this.#backend.read(this.#service, entry.ref)))
-    if (JSON.stringify(metadataOf(latest)) !== JSON.stringify(entry.value)) throw failure()
-    return latest
-  }
-
-  async #cleanup(): Promise<void> {
-    if (!this.#retired.length) return
-    for (const ref of this.#retired) await this.#backend.remove(this.#service, ref)
-    await this.#commit(this.#records, [])
+    const records = this.#profileRecords(await loadHomeConfig(this.#configPath))
+    this.#source = recordsSource(records)
+    this.#records = new Map(records.map(record => [record.id, record]))
   }
 
   async #assertCurrent(): Promise<void> {
@@ -332,8 +275,13 @@ export class ManagedProviderOwner {
     const metadata = await lstat(this.#lock).catch(() => undefined)
     if (
       !metadata?.isDirectory() || metadata.dev !== this.#lockIdentity.dev || metadata.ino !== this.#lockIdentity.ino
-      || await this.#backend.read(this.#service, 'index') !== this.#index
     ) {
+      this.#closed = true
+      this.#revoke()
+      throw failure()
+    }
+    const source = recordsSource(this.#profileRecords(await loadHomeConfig(this.#configPath)))
+    if (source !== this.#source) {
       this.#closed = true
       this.#revoke()
       throw failure()
@@ -341,22 +289,37 @@ export class ManagedProviderOwner {
     if (this.#closed) throw failure()
   }
 
-  async #commit(
-    next: Map<string, StoredEntry>,
-    retired: string[],
-    authorized: () => boolean = () => true,
-  ): Promise<void> {
+  #profileRecords(config: HomeConfig): readonly ManagedProviderRecord[] {
+    const profile = config.apps[this.#appId]?.profiles[this.#profileId]
+    if (!profile) throw new CatalogError('source-invalid')
+    return profile.managedProviders ?? []
+  }
+
+  async #commit(next: Map<string, ManagedProviderRecord>, authorized: () => boolean = () => true): Promise<void> {
     await this.#assertCurrent()
     if (!authorized()) throw new CatalogError('permission')
-    const index = JSON.stringify({
-      version: 1,
-      entries: [...next].map(([id, record]) => ({ id, ref: record.ref })),
-      retired,
-    })
-    await this.#backend.upsert(this.#service, 'index', index)
-    this.#index = index
+    const records = [...next.values()]
+    const updated = await updateHomeConfigAtomic(current => {
+      if (!authorized()) throw new CatalogError('permission')
+      if (recordsSource(this.#profileRecords(current)) !== this.#source) throw new CatalogError('source-invalid')
+      const app = current.apps[this.#appId]!
+      const profile = app.profiles[this.#profileId]!
+      return {
+        ...current,
+        apps: {
+          ...current.apps,
+          [this.#appId]: {
+            ...app,
+            profiles: {
+              ...app.profiles,
+              [this.#profileId]: { ...profile, managedProviders: records },
+            },
+          },
+        },
+      }
+    }, { configPath: this.#configPath })
+    this.#source = recordsSource(this.#profileRecords(updated))
     this.#records = next
-    this.#retired = retired
     this.#revoke()
     if (this.#closed) return
     for (const listener of this.#listeners) {

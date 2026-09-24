@@ -4,10 +4,25 @@ import os from 'node:os'
 import { expect, it, vi } from 'vitest'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
 import { output, scriptFixture } from './script-source-helpers.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 it('persists write-only script config, runs explicitly, publishes exact results, and restarts without execution', async () => {
   const fixture = await scriptFixture(output([{ id: 'scripted' }]))
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'managed-script-'))
+  const config = createDefaultHomeConfig()
+  await writeFile(
+    path.join(homeDir, 'config.json'),
+    JSON.stringify({
+      ...config,
+      apps: {
+        codex: {
+          defaultProfile: 'fixture',
+          profiles: { fixture: { displayName: 'Fixture', dataMode: 'shared' } },
+        },
+      },
+    }),
+    { mode: 0o600 },
+  )
   const values = new Map<string, string>()
   const options = {
     homeDir,
@@ -64,7 +79,8 @@ it('persists write-only script config, runs explicitly, publishes exact results,
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.outcome).toBe('empty'))
     await owner.close()
     const raw = await readFile(path.join(homeDir, 'state/host-provider-owners/fixture.lock.state'), 'utf8')
-    expect(raw).not.toContain(fixture.file)
+    expect(raw).toContain(fixture.file)
+    expect(raw).not.toContain('fixture-key')
     owner = await ManagedCatalogComposition.open(options)
     expect(owner.snapshot().views[0]).toMatchObject({ sourceKind: 'script', outcome: 'none', rows: [] })
     await owner.command({ ...scope(), operation: 'refresh' }, () => true)

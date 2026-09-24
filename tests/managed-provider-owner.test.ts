@@ -1,36 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ManagedProviderOwner } from '../packages/cli/src/launcher/model-catalog/managed-provider-owner.js'
 import { createManagedProviderApi } from '../packages/cli/src/launcher/model-catalog/managed-provider-api.js'
 import { builtinDiscoveryRegistry } from '../packages/cli/src/launcher/model-catalog/builtin-registry.js'
-import {
-  createMacOSKeychainBackend,
-  type LauncherKeychainBackend,
-  LauncherKeychainError,
-  runKeychainHelperProcess,
-} from '../packages/cli/src/launcher/secret-store.js'
+import { type LauncherKeychainBackend, LauncherKeychainError } from '../packages/cli/src/launcher/secret-store.js'
 import { resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
+import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 
 class Keychain implements LauncherKeychainBackend {
   values = new Map<string, string>()
-  failDelete = false
-  failRecordWrite = false
+  calls = 0
   async read(service: string, account: string) {
+    this.calls++
     const value = this.values.get(`${service}/${account}`)
     if (value === undefined) throw new LauncherKeychainError('MISSING')
     return value
   }
   async status(service: string, account: string): Promise<'set' | 'unset'> {
+    this.calls++
     return this.values.has(`${service}/${account}`) ? 'set' : 'unset'
   }
   async upsert(service: string, account: string, value: string) {
-    if (this.failRecordWrite && account !== 'index') throw new Error('fixture-secret write failure')
+    this.calls++
     this.values.set(`${service}/${account}`, value)
   }
   async remove(service: string, account: string) {
-    if (this.failDelete) throw new Error('fixture-secret must not escape')
+    this.calls++
     this.values.delete(`${service}/${account}`)
   }
 }
@@ -54,6 +51,20 @@ describe('Host-owned managed Provider credentials', () => {
   const setup = async (keychain = new Keychain()) => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'provider-owner-'))
     homes.push(homeDir)
+    const config = createDefaultHomeConfig()
+    await writeFile(
+      path.join(homeDir, 'config.json'),
+      JSON.stringify({
+        ...config,
+        apps: {
+          codex: {
+            defaultProfile: 'test',
+            profiles: { test: { displayName: 'Test', dataMode: 'shared' } },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    )
     const fetcher = vi.fn(async () =>
       Response.json({ object: 'list', data: [{ id: 'listed', object: 'model', owned_by: 'deepseek' }] })
     )
@@ -63,51 +74,7 @@ describe('Host-owned managed Provider credentials', () => {
     return { owner, options, keychain, fetcher }
   }
 
-  it('waits on the initial Keychain status before opening the owner', async () => {
-    let release!: () => void
-    const blocked = new Promise<void>(resolve => release = resolve)
-    const keychain = new Keychain()
-    keychain.status = async () => {
-      await blocked
-      return 'unset'
-    }
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'provider-owner-blocked-'))
-    homes.push(homeDir)
-    let settled = false
-    const opening = ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain }).finally(() => settled = true)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    expect(settled).toBe(false)
-    release()
-    const owner = await opening
-    owners.push(owner)
-  })
-
-  it('releases the owner lock after a bounded Keychain failure so startup can retry', async () => {
-    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'provider-owner-timeout-'))
-    homes.push(homeDir)
-    const storedKeychain = new Keychain()
-    const initial = await ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain: storedKeychain })
-    const view = await initial.save({ settings }, async () => 'fixture-secret')
-    await initial.close()
-    const keychain = createMacOSKeychainBackend({
-      timeoutMs: 20,
-      invoke: async () =>
-        await runKeychainHelperProcess(
-          process.execPath,
-          ['-e', 'setInterval(()=>{},1000)'],
-          undefined,
-          { timeoutMs: 20 },
-        ),
-    })
-    await expect(ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain })).rejects.toThrow(
-      'credential-unavailable',
-    )
-    const retried = await ManagedProviderOwner.open({ homeDir, profileId: 'test', keychain: storedKeychain })
-    owners.push(retried)
-    expect(retried.snapshot()).toEqual([view])
-  })
-
-  it('persists only in Keychain, restarts with stable scope, and exposes no raw credential', async () => {
+  it('persists in private profile config, restarts with stable scope, and exposes no raw credential', async () => {
     const { owner, options, keychain, fetcher } = await setup()
     const view = await owner.save({ settings }, async () => 'fixture-secret')
     expect(JSON.stringify(owner)).toBe('{}')
@@ -126,16 +93,19 @@ describe('Host-owned managed Provider credentials', () => {
     )
     expect((await stat(path.join(options.homeDir, 'state/host-provider-owners/test.lock'))).mode & 0o777).toBe(0o700)
     expect(await readdir(path.join(options.homeDir, 'state/host-provider-owners'))).toEqual(['test.lock'])
+    const configPath = path.join(options.homeDir, 'config.json')
+    expect((await stat(configPath)).mode & 0o777).toBe(0o600)
+    expect(await readFile(configPath, 'utf8')).toContain('fixture-secret')
     await owner.close()
     expect(connection.current()).toBe(false)
     const reopened = await ManagedProviderOwner.open(options)
     owners.push(reopened)
     expect(reopened.snapshot()).toEqual([view])
-    expect(keychain.values.size).toBe(2)
+    expect(keychain.calls).toBe(0)
   })
 
   it('rotates scope and leases, rejects stale writes, and deletes the credential', async () => {
-    const { owner, keychain } = await setup()
+    const { owner, options, keychain } = await setup()
     const first = await owner.save({ settings }, async () => 'fixture-first')
     const old = owner.connection(first.id)!
     const second = await owner.save(
@@ -148,13 +118,13 @@ describe('Host-owned managed Provider credentials', () => {
     await expect(owner.save({ id: first.id, expectedRevision: first.revision, settings })).rejects.toThrow(
       'source-invalid',
     )
-    expect([...keychain.values.values()].join()).not.toContain('fixture-first')
     await owner.remove(second.id, second.revision)
     expect(owner.snapshot()).toEqual([])
-    expect([...keychain.values.values()].join()).not.toContain('fixture-second')
+    expect(await readFile(path.join(options.homeDir, 'config.json'), 'utf8')).not.toContain('fixture-second')
+    expect(keychain.calls).toBe(0)
   })
 
-  it('fences exact operation, explicit opt-in, owner lock and foreign keychain edits', async () => {
+  it('fences exact operation, explicit opt-in, owner lock and foreign managed-record edits', async () => {
     const { owner, options, keychain, fetcher } = await setup()
     await expect(ManagedProviderOwner.open(options)).rejects.toThrow('credential-unavailable')
     const first = await owner.save({ settings }, async () => 'fixture-secret')
@@ -169,12 +139,24 @@ describe('Host-owned managed Provider credentials', () => {
       settings: { ...settings, discoveryEnabled: false },
     })
     expect(owner.connection(disabled.id)).toBeUndefined()
-    const index = [...keychain.values.keys()].find(key => key.endsWith('/index'))!
-    keychain.values.set(index, '{}')
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      apps: {
+        ...config.apps,
+        codex: {
+          ...config.apps.codex!,
+          profiles: {
+            ...config.apps.codex!.profiles,
+            test: { ...config.apps.codex!.profiles.test!, managedProviders: [] },
+          },
+        },
+      },
+    }), { configPath: path.join(options.homeDir, 'config.json') })
     await expect(owner.save({ id: disabled.id, expectedRevision: disabled.revision, settings })).rejects.toThrow(
       'credential-unavailable',
     )
     expect(owner.snapshot()).toEqual([])
+    expect(keychain.calls).toBe(0)
   })
 
   it('derives the models request capability from each saved official connection', async () => {
@@ -208,18 +190,26 @@ describe('Host-owned managed Provider credentials', () => {
     await expect(connection.request(operation, signal())).rejects.toThrow('permission')
   })
 
-  it('retries physical deletion after restart without resurrecting the removed connection', async () => {
+  it('preserves unrelated concurrent configuration edits', async () => {
     const { owner, options, keychain } = await setup()
     const view = await owner.save({ settings }, async () => 'fixture-secret')
-    keychain.failDelete = true
-    await expect(owner.remove(view.id, view.revision)).rejects.toThrow('credential-unavailable')
-    expect(owner.snapshot()).toEqual([])
-    await owner.close()
-    keychain.failDelete = false
-    const reopened = await ManagedProviderOwner.open(options)
-    owners.push(reopened)
-    expect(reopened.snapshot()).toEqual([])
-    expect(keychain.values.size).toBe(1)
+    await updateHomeConfigAtomic(config => ({
+      ...config,
+      apps: {
+        ...config.apps,
+        codex: {
+          ...config.apps.codex!,
+          profiles: {
+            ...config.apps.codex!.profiles,
+            test: { ...config.apps.codex!.profiles.test!, displayName: 'Changed elsewhere' },
+          },
+        },
+      },
+    }), { configPath: path.join(options.homeDir, 'config.json') })
+    await owner.save({ id: view.id, expectedRevision: view.revision, settings: { ...settings, title: 'Updated' } })
+    expect(JSON.parse(await readFile(path.join(options.homeDir, 'config.json'), 'utf8')).apps.codex.profiles.test)
+      .toMatchObject({ displayName: 'Changed elsewhere', managedProviders: [{ secret: 'fixture-secret' }] })
+    expect(keychain.calls).toBe(0)
   })
 
   it('uses Host capture and denies renderer secrets, stale generations and revoked grants', async () => {
@@ -293,7 +283,7 @@ describe('Host-owned managed Provider credentials', () => {
   })
 
   it('cancels an uncooperative Host prompt on disposal without persisting its secret', async () => {
-    const { owner, keychain } = await setup()
+    const { owner, keychain, options } = await setup()
     let started!: () => void
     const ready = new Promise<void>(resolve => {
       started = resolve
@@ -306,22 +296,21 @@ describe('Host-owned managed Provider credentials', () => {
     await ready
     await owner.close()
     await rejected
-    expect(keychain.values.size).toBe(1)
+    expect(await readFile(path.join(options.homeDir, 'config.json'), 'utf8')).not.toContain('fixture-secret')
+    expect(keychain.calls).toBe(0)
   })
 
-  it('recovers a journaled failed record write and preserves the previous binding', async () => {
-    const { owner, options, keychain } = await setup()
-    const first = await owner.save({ settings }, async () => 'fixture-first')
-    keychain.failRecordWrite = true
-    await expect(owner.save({ id: first.id, expectedRevision: first.revision, settings }, async () => 'fixture-second'))
-      .rejects.toThrow('credential-unavailable')
-    expect(owner.snapshot()).toEqual([first])
+  it('does not overwrite malformed configuration and leaves legacy Keychain records untouched', async () => {
+    const keychain = new Keychain()
+    keychain.values.set('cordisx/host-provider/v1/legacy/index', 'legacy-record')
+    const { owner, options } = await setup(keychain)
     await owner.close()
-    keychain.failRecordWrite = false
-    const reopened = await ManagedProviderOwner.open(options)
-    owners.push(reopened)
-    expect(reopened.snapshot()).toEqual([first])
-    expect(keychain.values.size).toBe(2)
+    const configPath = path.join(options.homeDir, 'config.json')
+    await writeFile(configPath, '{ invalid', { mode: 0o600 })
+    await expect(ManagedProviderOwner.open(options)).rejects.toThrow('invalid JSON in home config')
+    expect(await readFile(configPath, 'utf8')).toBe('{ invalid')
+    expect(keychain.calls).toBe(0)
+    expect(keychain.values.get('cordisx/host-provider/v1/legacy/index')).toBe('legacy-record')
   })
 
   it('checks management authority again after a Host prompt completes', async () => {
@@ -338,7 +327,7 @@ describe('Host-owned managed Provider credentials', () => {
     })
     await expect(api.save({ generation: 'launch', settings, replaceCredential: true })).rejects.toThrow('permission')
     expect(owner.snapshot()).toEqual([])
-    expect(keychain.values.size).toBe(1)
+    expect(keychain.calls).toBe(0)
   })
 
   it('rejects untrusted adapter names, credential references, scripts and unsafe endpoints', async () => {

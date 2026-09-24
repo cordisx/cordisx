@@ -13,6 +13,7 @@ import {
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
 import { resources } from './fixtures/native-submission-structure.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -46,6 +47,24 @@ async function bundle(incompatible = false) {
   return { contents, executable }
 }
 
+async function writeManagedProfile(homeDir: string, profileId: string): Promise<void> {
+  await chmod(homeDir, 0o700)
+  const config = createDefaultHomeConfig()
+  await writeFile(
+    path.join(homeDir, 'config.json'),
+    JSON.stringify({
+      ...config,
+      apps: {
+        codex: {
+          defaultProfile: profileId,
+          profiles: { [profileId]: { displayName: 'Fixture', dataMode: 'shared' } },
+        },
+      },
+    }),
+    { mode: 0o600 },
+  )
+}
+
 it('reads the actual ASAR resource layout without relying on asset hash names', async () => {
   const f = await bundle()
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
@@ -68,24 +87,9 @@ it.skipIf(process.platform !== 'darwin')(
         'env_key = "DEEPSEEK_API_KEY"',
       ].join('\n'),
     )
+    const nativeConfigBefore = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
+    await writeManagedProfile(codexHome, 'fixture')
     const prepareNativeConnection = vi.fn()
-    const values = new Map<string, string>()
-    const keychain = {
-      async read(service: string, account: string) {
-        const value = values.get(`${service}/${account}`)
-        if (!value) throw Error()
-        return value
-      },
-      async status(service: string, account: string): Promise<'set' | 'unset'> {
-        return values.has(`${service}/${account}`) ? 'set' : 'unset'
-      },
-      async upsert(service: string, account: string, value: string) {
-        values.set(`${service}/${account}`, value)
-      },
-      async remove(service: string, account: string) {
-        values.delete(`${service}/${account}`)
-      },
-    }
     await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'deepseek-chat' }] }))
     const composition = await createNativeSubmissionComposition(
       { nativeProviderIds: [], prepareNativeConnection },
@@ -96,7 +100,6 @@ it.skipIf(process.platform !== 'darwin')(
         managedCatalog: {
           homeDir: codexHome,
           profileId: 'fixture',
-          keychain,
           capture: async () => 'fixture-managed-secret',
           fetcher: async () =>
             Response.json({
@@ -151,12 +154,18 @@ it.skipIf(process.platform !== 'darwin')(
           pluginId: 'cordisx.codex-config',
           title: 'DeepSeek',
           selectorBrand: { brand: 'deepseek', source: 'inferred' },
-          models: [{ id: 'deepseek-chat', label: 'deepseek-chat', aliases: [] }],
+          models: [{
+            id: 'deepseek-chat',
+            label: 'deepseek-chat',
+            aliases: [],
+            notListed: false,
+            provenance: ['native'],
+          }],
         }])
         expect(JSON.stringify(catalog)).not.toMatch(/base_url|env_key|api\.deepseek/u)
         await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'shared' }] }))
         expect((await world.__cordisxNativeProviderCommandChannel.catalogRead())[0].models)
-          .toEqual([{ id: 'shared', label: 'shared', aliases: [] }])
+          .toEqual([{ id: 'shared', label: 'shared', aliases: [], notListed: false, provenance: ['native'] }])
         const channel = world.__cordisxNativeProviderCommandChannel
         const scope = liveScope()
         await channel.selectionRead({ scope, effective: { providerId: 'openai', model: 'native-default' } })
@@ -222,6 +231,7 @@ it.skipIf(process.platform !== 'darwin')(
     } finally {
       await composition.close()
     }
+    expect(await readFile(path.join(codexHome, 'config.toml'), 'utf8')).toBe(nativeConfigBefore)
   },
 )
 
@@ -343,29 +353,12 @@ it.skipIf(process.platform !== 'darwin')(
         '',
       ].join('\n'),
     )
-    const values = new Map<string, string>()
-    const keychain = {
-      async read(service: string, account: string) {
-        const value = values.get(`${service}/${account}`)
-        if (!value) throw Error()
-        return value
-      },
-      async status(service: string, account: string): Promise<'set' | 'unset'> {
-        return values.has(`${service}/${account}`) ? 'set' : 'unset'
-      },
-      async upsert(service: string, account: string, value: string) {
-        values.set(`${service}/${account}`, value)
-      },
-      async remove(service: string, account: string) {
-        values.delete(`${service}/${account}`)
-      },
-    }
+    await writeManagedProfile(codexHome, 'fixture-sync')
     const secrets = ['committed-secret', 'conflicted-secret']
     let secretIndex = 0
     const owner = await ManagedCatalogComposition.open({
       homeDir: codexHome,
       profileId: 'fixture-sync',
-      keychain,
       responsesAvailable: true,
       capture: async () => secrets[secretIndex++]!,
     })
@@ -403,7 +396,6 @@ it.skipIf(process.platform !== 'darwin')(
         managedCatalog: {
           homeDir: codexHome,
           profileId: 'fixture-sync',
-          keychain,
           capture: async () => {
             throw new Error('fixture must reuse the stored credential')
           },

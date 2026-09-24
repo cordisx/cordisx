@@ -1,28 +1,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
 import type { LauncherKeychainBackend } from '../packages/cli/src/launcher/secret-store.js'
 import type { CatalogConnectionSettings } from '../packages/cli/src/model-catalog-management.js'
 import { createNativeProviderCredentialBroker } from '../packages/cli/src/launcher/native-provider-credential-broker.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 class Keychain implements LauncherKeychainBackend {
   values = new Map<string, string>()
+  calls = 0
   async read(service: string, account: string) {
+    this.calls++
     const value = this.values.get(`${service}/${account}`)
     if (!value) throw Error()
     return value
   }
   async status(service: string, account: string): Promise<'set' | 'unset'> {
+    this.calls++
     return this.values.has(`${service}/${account}`) ? 'set' : 'unset'
   }
   async upsert(service: string, account: string, value: string) {
+    this.calls++
     this.values.set(`${service}/${account}`, value)
   }
   async remove(service: string, account: string) {
+    this.calls++
     this.values.delete(`${service}/${account}`)
   }
 }
@@ -43,10 +49,25 @@ describe('managed catalog production owner', () => {
   async function setup() {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'managed-catalog-'))
     homes.push(homeDir)
+    const config = createDefaultHomeConfig()
+    await writeFile(
+      path.join(homeDir, 'config.json'),
+      JSON.stringify({
+        ...config,
+        apps: {
+          codex: {
+            defaultProfile: 'fixture',
+            profiles: { fixture: { displayName: 'Fixture', dataMode: 'shared' } },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    )
+    const keychain = new Keychain()
     const options = {
       homeDir,
       profileId: 'fixture',
-      keychain: new Keychain(),
+      keychain,
       responsesAvailable: true,
       capture: async () => 'fixture-provider-secret',
       fetcher: vi.fn(async () =>
@@ -55,7 +76,7 @@ describe('managed catalog production owner', () => {
     }
     const owner = await ManagedCatalogComposition.open(options)
     owners.push(owner)
-    return { owner, options }
+    return { owner, options, keychain }
   }
   async function create(owner: ManagedCatalogComposition, candidate: CatalogConnectionSettings = settings) {
     expect((await owner.command({ operation: 'createConnection', settings: candidate }, () => true)).status).toBe(
@@ -70,7 +91,7 @@ describe('managed catalog production owner', () => {
   }
 
   it('routes only Responses, keeps credentials private, and applies block/pin without membership elevation', async () => {
-    const { owner, options } = await setup()
+    const { owner, options, keychain } = await setup()
     const view = await create(owner)
     expect(owner.admits(view.providerId, 'a')).toBe(true)
     const session = await owner.nativeConnection(view.providerId)
@@ -89,13 +110,16 @@ describe('managed catalog production owner', () => {
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
     expect(owner.admits(view.providerId, 'a')).toBe(false)
     expect(options.fetcher).not.toHaveBeenCalled()
-    const raw = await readFile(path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state'), 'utf8')
-    expect(raw).not.toContain('bindingRef')
+    const statePath = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state')
+    const raw = await readFile(statePath, 'utf8')
+    expect(JSON.parse(raw)).toMatchObject({ version: 1, overlays: { schemaVersion: 1 } })
+    expect((await stat(statePath)).mode & 0o777).toBe(0o600)
     await owner.close()
     const reopened = await ManagedCatalogComposition.open(options)
     owners.push(reopened)
     await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows).toHaveLength(2))
     expect(reopened.admits(view.providerId, 'a')).toBe(false)
+    expect(keychain.calls).toBe(0)
   })
 
   it('projects selected managed connections into non-secret provider sync definitions', async () => {
@@ -342,12 +366,12 @@ describe('managed catalog production owner', () => {
     expect(active.snapshot().views).toEqual([])
   }, 2000)
 
-  it('does not overwrite invalid ciphertext or publish a failed overlay write', async () => {
+  it('does not overwrite invalid state or publish a failed overlay write', async () => {
     const { owner, options } = await setup()
     await create(owner)
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
     const file = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state')
-    await writeFile(file, 'invalid ciphertext', { mode: 0o600 })
+    await writeFile(file, 'invalid state', { mode: 0o600 })
     expect(
       (await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true))
         .status,
@@ -356,7 +380,7 @@ describe('managed catalog production owner', () => {
     await expect(owner.close()).rejects.toThrow()
     owners.splice(owners.indexOf(owner), 1)
     await expect(ManagedCatalogComposition.open(options)).rejects.toThrow('source-invalid')
-    expect(await readFile(file, 'utf8')).toBe('invalid ciphertext')
+    expect(await readFile(file, 'utf8')).toBe('invalid state')
   })
 
   it('does not carry overlay preferences into a new endpoint scope', async () => {

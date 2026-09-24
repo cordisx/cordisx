@@ -1,6 +1,6 @@
 import React, { act } from 'react'
 import vm from 'node:vm'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
@@ -9,25 +9,28 @@ import { ScriptSourceRuntime } from '../packages/cli/src/launcher/model-catalog/
 import { createNativeSubmissionCdpAuthority } from '../packages/cli/src/launcher/native-submission-cdp-channel.js'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
-import type { LauncherKeychainBackend } from '../packages/cli/src/launcher/secret-store.js'
 import { nativeModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 it('connects the production Host channel to Manager, selector membership and write-only script commands', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'catalog-manager-composition-'))
+  const config = createDefaultHomeConfig()
+  await writeFile(
+    join(homeDir, 'config.json'),
+    JSON.stringify({
+      ...config,
+      apps: {
+        codex: {
+          defaultProfile: 'fixture',
+          profiles: { fixture: { displayName: 'Fixture', dataMode: 'shared' } },
+        },
+      },
+    }),
+    { mode: 0o600 },
+  )
   const fixture = reactManagerFixture()
   const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
-  const secrets = new Map<string, string>()
-  const keychain: LauncherKeychainBackend = {
-    read: async (service, account) => secrets.get(`${service}/${account}`)!,
-    upsert: async (service, account, value) => {
-      secrets.set(`${service}/${account}`, value)
-    },
-    remove: async (service, account) => {
-      secrets.delete(`${service}/${account}`)
-    },
-    status: async (service, account) => secrets.has(`${service}/${account}`) ? 'set' : 'unset',
-  }
   const fetcher = vi.fn(async () => {
     throw new Error('Fixture forbids network')
   })
@@ -36,7 +39,6 @@ it('connects the production Host channel to Manager, selector membership and wri
   const composition = await ManagedCatalogComposition.open({
     homeDir,
     profileId: 'fixture',
-    keychain,
     fetcher,
     capture,
     responsesAvailable: true,

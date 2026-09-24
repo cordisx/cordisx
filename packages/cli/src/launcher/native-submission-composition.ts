@@ -406,7 +406,7 @@ export async function prepareNativeSubmissionBootstrap(
             })
           } catch {
             // Preserve stored providers for a later retry without blocking unrelated native providers.
-            console.warn('[cordisx] native managed model providers unavailable')
+            console.warn('[cordisx] managed Provider catalog is unavailable')
           }
         }
         reportStage('native-submission-managed-catalog-ready')

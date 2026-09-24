@@ -8,6 +8,7 @@ import {
   ensureHomeConfig,
   loadHomeConfig,
   parseHomeConfig,
+  redactedHomeConfig,
   resolveHomeConfigPath,
   updateHomeConfigAtomic,
 } from '../packages/cli/src/config/home-config.js'
@@ -19,6 +20,40 @@ async function fixturePath(): Promise<{ root: string; configPath: string }> {
 }
 
 describe('CordisX home configuration', () => {
+  it('redacts managed Provider credentials from printable configuration', () => {
+    const config = createDefaultHomeConfig()
+    const record = {
+      id: 'a'.repeat(43),
+      revision: 'b'.repeat(43),
+      scopeRevision: 'c'.repeat(43),
+      credentialRevision: 'd'.repeat(43),
+      credentialRef: 'e'.repeat(43),
+      secret: 'fixture-provider-secret',
+      settings: {
+        title: 'Fixture',
+        endpoint: 'https://fixture.invalid/v1',
+        protocol: 'responses' as const,
+        discoveryEnabled: false,
+        strategy: { kind: 'manual' as const, ids: ['fixture-model'] },
+        supplement: [],
+      },
+    }
+    const parsed = parseHomeConfig({
+      ...config,
+      apps: {
+        codex: {
+          ...config.apps.codex,
+          profiles: {
+            default: { ...config.apps.codex!.profiles.default, managedProviders: [record] },
+          },
+        },
+      },
+    })
+    const printable = JSON.stringify(redactedHomeConfig(parsed))
+    expect(printable).toContain('"credentialState":"set"')
+    expect(printable).not.toMatch(/fixture-provider-secret|eeeeeeee/u)
+  })
+
   it('resolves CORDISX_HOME ahead of the platform home without consulting cwd', () => {
     expect(resolveHomeConfigPath({
       env: { CORDISX_HOME: '/var/tmp/cordisx-test-home' },

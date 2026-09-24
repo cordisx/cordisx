@@ -187,12 +187,14 @@ background; failed same-scope refreshes retain only the current session's LKG.
 CordisX-owned Provider discovery and native-only credential reuse are different
 paths. The Host-private `ManagedProviderOwner` owns explicitly provisioned
 endpoint, protocol, discovery consent, strategy and supplement settings. It
-stores its index and connection records through the existing OS Keychain backend
-in a dedicated `cordisx/host-provider/v1` namespace. There is no plaintext file
-fallback and no automatic import of Codex configuration, environment or secrets.
-The generic channel secret resolver rejects this namespace. Plugin service
-configuration is deliberately not used: no plugin receives this key, a resolver,
-or a request capability. These APIs are not plugin extension contracts.
+stores complete connection records, including API keys, in the selected
+`apps.<app>.profiles.<profile>.managedProviders` section of the owner-only
+CordisX `config.json`. This path does not use Keychain or another password store,
+and it does not automatically import Codex configuration, environment or
+secrets. Legacy `cordisx/host-provider/v1` Keychain records are left untouched.
+Plugin service configuration is deliberately not used: no plugin receives this
+key, a resolver, or a request capability. These APIs are not plugin extension
+contracts.
 
 ### Explicit target-profile synchronization
 
@@ -201,10 +203,9 @@ existing CordisX-managed connection to one stable provider ID in that selected
 Codex profile. Each entry contains only a stable binding ID, stable connection
 ID, target-local provider ID, enablement, `process-env` credential delivery, and
 optional display overlay. Endpoints and credentials remain in the managed owner;
-they are not duplicated into the CordisX home configuration. The native target
-receives an environment-variable name, while the corresponding secret is added
-only to the launched process environment after the target write is committed and
-read back.
+the native target receives an environment-variable name, while the corresponding
+secret is read from the CordisX profile configuration and added only to the
+launched process environment after the target write is committed and read back.
 
 Native `model_providers` remain authoritative and are discoverable without any
 write, import, adoption, or ledger creation. Import and adoption are separate
@@ -235,18 +236,19 @@ of a key or a reference name presented as an upstream account identity. Replacin
 a key, endpoint or protocol rotates the credential-binding scope. Supplement
 migration across that boundary requires a separate explicit action; an update
 with old nonempty supplements is rejected. Other setting changes preserve scope
-but retire old request leases. Removing a connection retires the durable index
-entry before deleting its secret. A Keychain cleanup journal retries retired
-items on reopen; cleanup failures are reported without reactivating them.
+but retire old request leases. Removing a connection atomically removes its
+record and secret from the selected profile configuration.
 
 One owner holds a private, profile-scoped directory lock. It never steals a
 possibly live lock; abnormal termination requires explicit stale-lock recovery.
-Keychain index changes or lock loss retire the owner. Records remain in Keychain,
-not ordinary home configuration, catalog JSON, feedback exports or backups of
-CordisX files. OS Keychain backup policy remains controlled by the operating
-system. A 60-second Host-private capture callback is the only secret input to
-the internal management API; read/save results contain safe metadata and status,
-not keys or keychain locations. No shared renderer secret field is provided.
+Managed-record changes or lock loss retire the owner. Writes use the shared
+validated home-config lock and atomic replacement, preserving unrelated
+concurrent edits; invalid existing content is never overwritten. The file and
+owner directories remain `0600` and `0700` respectively. A 60-second
+Host-private capture callback is the only secret input to the internal management
+API; read/save results, CLI config output, logs and feedback contain safe metadata
+and status, not keys or credential references. No shared renderer secret field
+is provided.
 
 Built-in adapters receive only a fixed request capability. It admits exactly the
 saved official API base plus `/models`, with no caller headers, body or redirects:
@@ -255,7 +257,7 @@ saved official API base plus `/models`, with no caller headers, body or redirect
 credential for a short operation, bounds the body to 8 MiB and cancels old
 operations on update, deletion or disposal. Its production registry contains
 only built-in Host adapters and accepts no plugin registration.
-Errors from Keychain and transport are value-free. The existing trusted-code
+Errors from configuration persistence and transport are value-free. The existing trusted-code
 model still applies: this is capability isolation, not a sandbox against arbitrary
 code running with the user's OS identity.
 
@@ -267,9 +269,10 @@ when explicitly saved; see [developer script sources](script-model-source.md).
 Restoring settings never executes a script, and generic refresh never runs one.
 
 Profile catalog state contains source LKG, overlay preferences and script
-configuration, encrypted with AES-256-GCM using a separate Keychain-held key.
-The owning profile lock serializes writes, rejects observed external replacement,
-and fences encrypted state to its profile namespace. Complete empty replaces the
+configuration as validated plaintext JSON in the owner-only profile state file.
+The owning profile lock serializes atomic writes, rejects observed external
+replacement, and fences state to its profile namespace without a Keychain-held
+encryption key. Complete empty replaces the
 source cache. Scope/strategy changes do not reuse an unrelated cache. Script
 results remain session-only. Pausing discovery cancels acquisition without
 deleting source members. Explicit authentication/account denials prevent new
@@ -326,8 +329,8 @@ and intermediary pass-through checks are not real App or upstream HTTP acceptanc
 The admitted native document channel exposes read, cursor subscription and
 CAS commands, with full snapshot resynchronization. No plugin API is registered.
 As elsewhere in the trusted renderer architecture, this is not an OS or arbitrary
-same-document-code sandbox. Tests use injected Keychain/transport and fixture App
-resources; no real App or live provider usability is established by those tests.
+same-document-code sandbox. Tests use fixture configuration/transport and fixture
+App resources; no real App or live provider usability is established by those tests.
 Native-only connections continue to use native/manual catalogs until
 their actual native owner can provide an audited discovery capability. That
 optional compatibility dependency does not block CordisX-owned credentials.
@@ -348,8 +351,8 @@ an explicit usable membership declaration, while a label-only supplement for an
 automatically listed unknown model does not elevate it. The Manager ships manual
 and supplement editors plus the separately trusted developer script controls.
 
-The encrypted state is a single-owner store, not a cross-process transaction
-service or an upstream account-attested disk cache. Real native
+The plaintext state file is a single-owner store, not a cross-process transaction
+service or an upstream account-attested cache. Real native
 flow verification and user acceptance remain separate
 delivery gates. No provider API request is made by enabling the local-file flag.
 
