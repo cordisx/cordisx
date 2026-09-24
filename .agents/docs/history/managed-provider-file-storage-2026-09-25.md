@@ -22,6 +22,8 @@ remain independent and are not imported or duplicated.
   credential use.
 - Store catalog cache, script, and overlay state as validated plaintext JSON
   with owner-only permissions, atomic replacement, and external-edit detection.
+- Use the versioned `<profile>.lock.state.v2.json` path so a preserved legacy
+  encrypted `<profile>.lock.state` cannot block valid file-backed Providers.
 - Remove all Provider-owner and catalog-state Keychain access. Existing legacy
   Keychain records are neither read, migrated, nor deleted.
 - Redact managed secrets and credential references from printable CLI
@@ -31,14 +33,15 @@ remain independent and are not imported or duplicated.
 
 ## Verification
 
-- Focused Vitest: 53 tests pass across home config, managed Provider owner,
+- Focused Vitest: 55 tests pass across home config, managed Provider owner,
   managed catalog composition, script persistence, Manager channel composition,
   and native resource composition.
 - `npm run typecheck --workspace=cordisx` passes.
 - Fixtures cover create/update/remove/reload, model discovery with zero Keychain
   calls, plaintext catalog/script/overlay reload, `0600` files, concurrent edit
   preservation, malformed input non-overwrite, legacy Keychain preservation,
-  redacted CLI/snapshots, and exact native `config.toml` byte preservation.
+  legacy encrypted-state isolation, redacted CLI/snapshots, and exact native
+  `config.toml` byte preservation.
 - No real Provider request, real credential, real user configuration, Keychain,
   running App, installation, packaging, publication, or user acceptance was used.
 - The new CLI redaction case passes independently. An accidental full-file CLI
@@ -68,7 +71,8 @@ branch.
 - stageBase: `cc34216bcb60a1a24ee297b90756d3aebfcd8f28`
 - outputRef: `.agents/docs/history/managed-provider-file-storage-2026-09-25.md`
 - ownedRequirements: FILE-1, FILE-2, FILE-3, FILE-4, FILE-5
-- sourceCheckpoint: the commit containing this record
+- sourceCheckpoint: `ed60928bd9aab1790c39a877efa4167dea5ccb90` plus the
+  compatibility follow-up commit containing this revision
 - remainingGaps: integrated
   START/MENU/PREF/CAPS candidate, packaging, native-App verification, and user
   acceptance remain separate

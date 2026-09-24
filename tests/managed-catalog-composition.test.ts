@@ -110,7 +110,7 @@ describe('managed catalog production owner', () => {
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
     expect(owner.admits(view.providerId, 'a')).toBe(false)
     expect(options.fetcher).not.toHaveBeenCalled()
-    const statePath = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state')
+    const statePath = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
     const raw = await readFile(statePath, 'utf8')
     expect(JSON.parse(raw)).toMatchObject({ version: 1, overlays: { schemaVersion: 1 } })
     expect((await stat(statePath)).mode & 0o777).toBe(0o600)
@@ -370,7 +370,7 @@ describe('managed catalog production owner', () => {
     const { owner, options } = await setup()
     await create(owner)
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
-    const file = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state')
+    const file = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
     await writeFile(file, 'invalid state', { mode: 0o600 })
     expect(
       (await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true))
@@ -381,6 +381,34 @@ describe('managed catalog production owner', () => {
     owners.splice(owners.indexOf(owner), 1)
     await expect(ManagedCatalogComposition.open(options)).rejects.toThrow('source-invalid')
     expect(await readFile(file, 'utf8')).toBe('invalid state')
+  })
+
+  it('ignores and preserves legacy encrypted state while using new file-backed Providers', async () => {
+    const { owner, options, keychain } = await setup()
+    const view = await create(owner)
+    await owner.close()
+    const directory = path.join(options.homeDir, 'state/host-provider-owners')
+    const legacyPath = path.join(directory, 'fixture.lock.state')
+    const currentPath = path.join(directory, 'fixture.lock.state.v2.json')
+    const legacy = JSON.stringify({ version: 1, iv: 'legacy-iv', tag: 'legacy-tag', body: 'legacy-body' })
+    await rm(currentPath, { force: true })
+    await writeFile(legacyPath, legacy, { mode: 0o600 })
+
+    const reopened = await ManagedCatalogComposition.open(options)
+    owners.push(reopened)
+    await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows).toHaveLength(2))
+    expect(reopened.snapshot().views[0]?.bindingRef).toBe(view.bindingRef)
+    expect(await readFile(legacyPath, 'utf8')).toBe(legacy)
+    expect(keychain.calls).toBe(0)
+
+    await reopened.command({ ...scope(reopened), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true)
+    await reopened.close()
+    expect(JSON.parse(await readFile(currentPath, 'utf8'))).toMatchObject({ version: 1 })
+    expect(await readFile(legacyPath, 'utf8')).toBe(legacy)
+
+    const again = await ManagedCatalogComposition.open(options)
+    owners.push(again)
+    expect(again.snapshot().views[0]?.rows.find(row => row.id === 'a')?.blocked).toBe(true)
   })
 
   it('does not carry overlay preferences into a new endpoint scope', async () => {

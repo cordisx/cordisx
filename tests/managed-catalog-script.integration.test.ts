@@ -78,7 +78,7 @@ it('persists write-only script config, runs explicitly, publishes exact results,
     await owner.command({ ...scope(), operation: 'runScript' }, () => true)
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.outcome).toBe('empty'))
     await owner.close()
-    const raw = await readFile(path.join(homeDir, 'state/host-provider-owners/fixture.lock.state'), 'utf8')
+    const raw = await readFile(path.join(homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json'), 'utf8')
     expect(raw).toContain(fixture.file)
     expect(raw).not.toContain('fixture-key')
     owner = await ManagedCatalogComposition.open(options)

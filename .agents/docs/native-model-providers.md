@@ -269,7 +269,11 @@ when explicitly saved; see [developer script sources](script-model-source.md).
 Restoring settings never executes a script, and generic refresh never runs one.
 
 Profile catalog state contains source LKG, overlay preferences and script
-configuration as validated plaintext JSON in the owner-only profile state file.
+configuration as validated plaintext JSON in the owner-only versioned profile
+state file, `<profile>.lock.state.v2.json`. The former unversioned encrypted
+state file is not read, overwritten, deleted, or treated as a successful
+migration; a missing v2 file starts with empty transient catalog state while
+managed Provider records continue to load from `config.json`.
 The owning profile lock serializes atomic writes, rejects observed external
 replacement, and fences state to its profile namespace without a Keychain-held
 encryption key. Complete empty replaces the

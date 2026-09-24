@@ -57,7 +57,7 @@ export class ManagedProviderOwner {
     this.#lock = lock
     this.#lockIdentity = identity
     this.#fetcher = fetcher
-    this.#state = new ManagedCatalogState(`${lock}.state`, () => this.#assertCurrent())
+    this.#state = new ManagedCatalogState(`${lock}.state.v2.json`, () => this.#assertCurrent())
   }
 
   static async open(options: OwnerOptions): Promise<ManagedProviderOwner> {
