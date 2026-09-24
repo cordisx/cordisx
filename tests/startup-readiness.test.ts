@@ -46,7 +46,15 @@ function readyDocument() {
   }
 }
 function showLogin() {
-  document.body.innerHTML = '<main><div><h1>登录 ChatGPT</h1></div><button>继续登录</button></main>'
+  document.body.innerHTML = `
+    <main class="flex h-full w-full items-center justify-center overflow-hidden bg-surface pb-6 text-default">
+      <div class="flex w-[340px] flex-col items-center gap-8">
+        <div class="flex w-full flex-col items-center gap-4">
+          <h1 class="w-[316px] text-center text-[28px] leading-9 font-normal text-default">登录 ChatGPT</h1>
+        </div>
+        <button type="button">继续登录</button>
+      </div>
+    </main>`
   for (const element of document.querySelectorAll('h1, button')) {
     element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
   }
@@ -172,12 +180,88 @@ describe('startup surface readiness is independent of workspace account enrichme
     expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
   })
 
-  it.each(['unavailable', 'error'])('never classifies %s account state as signed-out', async status => {
+  it('releases a proven usable login for unavailable without classifying it as signed-out', async () => {
     readyDocument()
     showLogin()
-    vi.stubGlobal('__startupAccountRead', async () => ({ status, data: null }))
+    vi.stubGlobal('__cordisxProductionInstallId', 'current')
+    vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'evaluated' })
+    vi.stubGlobal('__startupAccountRead', async () => ({ status: 'unavailable', data: null }))
+    const result = await read()
+    expect(result).toMatchObject({
+      ready: true,
+      surface: 'auth-required',
+      observations: { hostUsable: true, cordisxReady: true, loginUsable: true },
+    })
+    expect(result.observations).not.toHaveProperty('authenticated')
+  })
+
+  it('does not treat an arbitrary heading and button as the native login surface', async () => {
+    readyDocument()
+    document.body.innerHTML = '<main><div><h1>Workspace</h1></div><button type="button">Create</button></main>'
+    for (const element of document.querySelectorAll('h1, button')) {
+      element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
+    }
+    expect(await read()).toMatchObject({ ready: false, reason: 'native-controls-pending' })
+  })
+
+  it('keeps typed errors covered', async () => {
+    readyDocument()
+    showLogin()
+    vi.stubGlobal('__startupAccountRead', async () => ({ status: 'error', data: null }))
     expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
   })
+
+  it.each(['boot-missing', 'boot-rejected', 'runtime-missing', 'bootstrap-pending'])(
+    'keeps unavailable login covered when %s',
+    async kind => {
+      readyDocument()
+      showLogin()
+      vi.stubGlobal('__cordisxProductionInstallId', 'current')
+      vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'evaluated' })
+      vi.stubGlobal('__startupAccountRead', async () => ({ status: 'unavailable' }))
+      if (kind === 'boot-missing') vi.stubGlobal('__cordisxBoot', undefined)
+      if (kind === 'boot-rejected') {
+        const rejected = Promise.reject(new Error('boot failed'))
+        void rejected.catch(() => {})
+        vi.stubGlobal('__cordisxBoot', rejected)
+      }
+      if (kind === 'runtime-missing') vi.stubGlobal('__cordisxRuntime', undefined)
+      if (kind === 'bootstrap-pending') {
+        vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'loading' })
+      }
+      expect(await read()).toMatchObject({ ready: false })
+    },
+  )
+
+  it.each(['document', 'install', 'runtime', 'boot', 'bootstrap', 'controls'])(
+    'rejects changed unavailable-login %s after asynchronous boot proof',
+    async kind => {
+      const { navigate } = readyDocument()
+      showLogin()
+      let finish!: () => void
+      vi.stubGlobal(
+        '__cordisxBoot',
+        new Promise<void>(resolve => {
+          finish = resolve
+        }),
+      )
+      vi.stubGlobal('__cordisxProductionInstallId', 'current')
+      vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'evaluated' })
+      vi.stubGlobal('__startupAccountRead', async () => ({ status: 'unavailable' }))
+      const pending = read()
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      if (kind === 'document') navigate()
+      if (kind === 'install') vi.stubGlobal('__cordisxProductionInstallId', 'new')
+      if (kind === 'runtime') vi.stubGlobal('__cordisxRuntime', {})
+      if (kind === 'boot') vi.stubGlobal('__cordisxBoot', Promise.resolve())
+      if (kind === 'bootstrap') {
+        vi.stubGlobal('__cordisxProductionBootstrapState', { installId: 'current', status: 'loading' })
+      }
+      if (kind === 'controls') document.querySelector('button')!.disabled = true
+      finish()
+      expect(await pending).toMatchObject({ ready: false })
+    },
+  )
 
   it('does not release a stale login for an authenticated account or accept a stale signed-out result', async () => {
     const { navigate } = readyDocument()
@@ -197,7 +281,7 @@ describe('startup surface readiness is independent of workspace account enrichme
     const { accountRead } = readyDocument()
     showLogin()
     accountRead.mockRejectedValueOnce(new Error('temporary native failure'))
-      .mockResolvedValueOnce({ status: 'unavailable', data: undefined } as never)
+      .mockResolvedValueOnce({ status: 'error', data: undefined } as never)
     expect(await read()).toMatchObject({ ready: false, reason: 'account-unavailable' })
     expect(await read()).toMatchObject({ ready: false, reason: 'account-not-ready' })
     const dispose = vi.fn()
