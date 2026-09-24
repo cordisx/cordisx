@@ -3,8 +3,10 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
+import { NativeCatalogManagement } from '../packages/cli/src/launcher/model-catalog/native-catalog-management.js'
 import type { LauncherKeychainBackend } from '../packages/cli/src/launcher/secret-store.js'
 import type { CatalogConnectionSettings } from '../packages/cli/src/model-catalog-management.js'
+import { PluginPreferenceAuthority } from '../packages/cli/src/model-catalog/plugin-preference-authority.js'
 import { createNativeProviderCredentialBroker } from '../packages/cli/src/launcher/native-provider-credential-broker.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { execFile } from 'node:child_process'
@@ -89,6 +91,7 @@ describe('managed catalog production owner', () => {
     const view = owner.snapshot().views[0]!
     return { bindingRef: view.bindingRef, scopeRevision: view.scopeRevision, expectedRevision: view.revision }
   }
+  const statePath = (homeDir: string) => path.join(homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
 
   it('routes only Responses, keeps credentials private, and applies block/pin without membership elevation', async () => {
     const { owner, options, keychain } = await setup()
@@ -110,10 +113,10 @@ describe('managed catalog production owner', () => {
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
     expect(owner.admits(view.providerId, 'a')).toBe(false)
     expect(options.fetcher).not.toHaveBeenCalled()
-    const statePath = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
-    const raw = await readFile(statePath, 'utf8')
-    expect(JSON.parse(raw)).toMatchObject({ version: 1, overlays: { schemaVersion: 1 } })
-    expect((await stat(statePath)).mode & 0o777).toBe(0o600)
+    const file = statePath(options.homeDir)
+    const raw = await readFile(file, 'utf8')
+    expect(JSON.parse(raw)).toMatchObject({ version: 1, modelPreferences: { schemaVersion: 2 } })
+    expect((await stat(file)).mode & 0o777).toBe(0o600)
     await owner.close()
     const reopened = await ManagedCatalogComposition.open(options)
     owners.push(reopened)
@@ -158,7 +161,7 @@ describe('managed catalog production owner', () => {
       settings: {
         ...settings,
         endpoint: 'https://api.deepseek.com',
-        protocol: 'chat-completions',
+        protocol: 'responses',
         discoveryEnabled: true,
         strategy: { kind: 'auto', mode: 'augment', adapter: 'detect', ttlMs: 60000 },
       },
@@ -219,20 +222,28 @@ describe('managed catalog production owner', () => {
       settings: {
         ...settings,
         endpoint: 'https://api.deepseek.com',
-        protocol: 'chat-completions',
+        protocol: 'responses',
         discoveryEnabled: true,
         strategy: { kind: 'auto', mode: 'only', adapter: 'detect', ttlMs: 60000 },
       },
     }, () => true)
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows).toHaveLength(4))
-    expect(owner.catalog()[0]?.models.map(row => row.id)).toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+    expect(owner.catalog()[0]?.models.map(row => row.id)).toEqual([
+      'deepseek-flash',
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
+    ])
     const session = await owner.nativeConnection(owner.snapshot().views[0]!.providerId)
     expect(session.value.endpoint).toMatchObject({ origin: 'https://api.deepseek.com', apiPath: '/' })
     await owner.command({ ...scope(owner), operation: 'setAutoPaused', paused: true }, () => true)
     await owner.close()
     const reopened = await ManagedCatalogComposition.open(options)
     owners.push(reopened)
-    expect(reopened.catalog()[0]?.models.map(row => row.id)).toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+    expect(reopened.catalog()[0]?.models.map(row => row.id)).toEqual([
+      'deepseek-flash',
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
+    ])
   })
 
   it('keeps automatic capability unknown until an exact scoped user declaration overrides it', async () => {
@@ -370,7 +381,7 @@ describe('managed catalog production owner', () => {
     const { owner, options } = await setup()
     await create(owner)
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', pinned: true }, () => true)
-    const file = path.join(options.homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
+    const file = statePath(options.homeDir)
     await writeFile(file, 'invalid state', { mode: 0o600 })
     expect(
       (await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true))
@@ -381,6 +392,280 @@ describe('managed catalog production owner', () => {
     owners.splice(owners.indexOf(owner), 1)
     await expect(ManagedCatalogComposition.open(options)).rejects.toThrow('source-invalid')
     expect(await readFile(file, 'utf8')).toBe('invalid state')
+  })
+
+  it('preserves scripts, caches, and admitted root sections during preference writes', async () => {
+    const { owner, options } = await setup()
+    expect(
+      (await owner.command({
+        operation: 'createConnection',
+        settings: {
+          ...settings,
+          endpoint: 'https://api.deepseek.com',
+          discoveryEnabled: true,
+          strategy: { kind: 'auto', mode: 'augment', adapter: 'detect', ttlMs: 60000 },
+        },
+      }, () => true)).status,
+    ).toBe('applied')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows.some(row => row.id === 'discovered')).toBe(true))
+    expect(
+      (await owner.command({
+        ...scope(owner),
+        operation: 'configureScript',
+        mode: 'supplement',
+        config: {
+          schemaVersion: 1,
+          command: { kind: 'exec', executable: process.execPath, args: [] },
+          cwd: options.homeDir,
+        },
+      }, () => true)).status,
+    ).toBe('applied')
+    await owner.close()
+    const file = statePath(options.homeDir)
+    const seeded = {
+      ...JSON.parse(await readFile(file, 'utf8')),
+      admittedFutureSection: { retained: ['exact'] },
+    }
+    expect(Object.keys(seeded.scripts)).not.toHaveLength(0)
+    expect(Object.keys(seeded.caches)).not.toHaveLength(0)
+    await writeFile(file, JSON.stringify(seeded), { mode: 0o600 })
+
+    const reopened = await ManagedCatalogComposition.open(options)
+    owners.push(reopened)
+    await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows[0]?.id).toBe('discovered'))
+    const view = reopened.snapshot().views[0]!
+    const result = await reopened.command({
+      ...scope(reopened),
+      operation: 'setOverlay',
+      modelId: view.rows[0]!.id,
+      pinned: true,
+    }, () => true)
+    expect(result).toMatchObject({ status: 'applied' })
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
+      scripts: seeded.scripts,
+      caches: seeded.caches,
+      admittedFutureSection: seeded.admittedFutureSection,
+      modelPreferences: { schemaVersion: 2, revision: 1 },
+    })
+  })
+
+  it('rejects a stale section revision without changing durable or in-memory preferences', async () => {
+    const { owner, options } = await setup()
+    const view = await create(owner)
+    const first = await owner.preferenceStore.mutate({
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: '0',
+      operation: 'setOverlay',
+      modelId: 'a',
+      pinned: true,
+    }, ['a', 'b'])
+    const durable = await readFile(statePath(options.homeDir), 'utf8')
+    const inMemory = owner.preferenceStore.snapshot()
+
+    await expect(owner.preferenceStore.mutate({
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: '0',
+      operation: 'setOverlay',
+      modelId: 'b',
+      blocked: true,
+    }, ['a', 'b'])).rejects.toMatchObject({ code: 'conflict' })
+    expect(first.revision).toBe('1')
+    expect(owner.preferenceStore.snapshot()).toBe(inMemory)
+    expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
+  })
+
+  it('maps authorization revocation at owner commit to permission without publishing state', async () => {
+    const { owner, options } = await setup()
+    await create(owner)
+    const before = owner.snapshot().views[0]!
+    const durable = await readFile(statePath(options.homeDir), 'utf8')
+    let checks = 0
+    const result = await owner.command({
+      ...scope(owner),
+      operation: 'setOverlay',
+      modelId: 'a',
+      blocked: true,
+    }, () => ++checks < 3)
+
+    expect(result).toEqual({ status: 'rejected', code: 'permission' })
+    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
+      blocked: false,
+      selectable: true,
+    })
+    expect(owner.snapshot().views[0]?.revision).toBe(before.revision)
+    expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(durable)
+  })
+
+  it('keeps supported blocked managed rows recoverable across reopen', async () => {
+    const { owner, options } = await setup()
+    await create(owner)
+    await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true)
+    expect(owner.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
+      compatibility: 'supported',
+      blocked: true,
+      selectable: false,
+    })
+    await owner.close()
+
+    const reopened = await ManagedCatalogComposition.open(options)
+    owners.push(reopened)
+    await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows).toHaveLength(2))
+    const blocked = reopened.snapshot().views[0]!
+    expect(blocked.rows.find(row => row.id === 'a')).toMatchObject({
+      compatibility: 'supported',
+      blocked: true,
+      selectable: false,
+    })
+    const result = await reopened.command({
+      bindingRef: blocked.bindingRef,
+      scopeRevision: blocked.scopeRevision,
+      expectedRevision: blocked.revision,
+      operation: 'restoreBlocked',
+    }, () => true)
+    expect(result).toMatchObject({ status: 'applied' })
+    expect(reopened.snapshot().views[0]?.rows.find(row => row.id === 'a')).toMatchObject({
+      compatibility: 'supported',
+      blocked: false,
+      selectable: true,
+    })
+  })
+
+  it('serializes native and plugin preferences through one profile store and reopens both bindings', async () => {
+    const { owner, options } = await setup()
+    const projection = {
+      providers: [{
+        providerId: 'native-fixture',
+        pluginId: 'cordisx.codex-config',
+        models: [{ id: 'native-model', label: 'Native model', aliases: [] }],
+      }],
+      providerIds: new Set(['native-fixture']),
+      providerWireApis: new Map([['native-fixture', 'responses' as const]]),
+      sourceAvailable: true,
+      diagnostics: [],
+    }
+    const native = await NativeCatalogManagement.open({
+      load: async () => projection,
+      overlayStore: owner.preferenceStore,
+    })
+    const plugins = await PluginPreferenceAuthority.open({
+      load: async () => [{
+        pluginId: 'fixture-plugin',
+        providerId: 'plugin-fixture',
+        models: [{ id: 'plugin-model', label: 'Plugin model', selectable: true }],
+      }],
+      overlayStore: owner.preferenceStore,
+    })
+    try {
+      const nativeView = native.snapshot().views[0]!
+      expect(
+        (await native.command({
+          bindingRef: nativeView.bindingRef,
+          scopeRevision: nativeView.scopeRevision,
+          expectedRevision: nativeView.revision,
+          operation: 'setOverlay',
+          modelId: 'native-model',
+          pinned: true,
+        }, () => true)).status,
+      ).toBe('applied')
+
+      const pluginView = plugins.snapshot().views[0]!
+      expect(
+        (await plugins.command({
+          bindingRef: pluginView.bindingRef,
+          scopeRevision: pluginView.scopeRevision,
+          expectedRevision: pluginView.revision,
+          operation: 'setOverlay',
+          modelId: 'plugin-model',
+          blocked: true,
+        }, () => true)).status,
+      ).toBe('applied')
+
+      const pinnedNative = native.snapshot().views[0]!
+      expect(
+        (await native.command({
+          bindingRef: pinnedNative.bindingRef,
+          scopeRevision: pinnedNative.scopeRevision,
+          expectedRevision: pinnedNative.revision,
+          operation: 'setOverlay',
+          modelId: 'native-model',
+          pinned: false,
+        }, () => true)).status,
+      ).toBe('applied')
+
+      const blockedPlugin = plugins.snapshot().views[0]!
+      expect(
+        (await plugins.command({
+          bindingRef: blockedPlugin.bindingRef,
+          scopeRevision: blockedPlugin.scopeRevision,
+          expectedRevision: blockedPlugin.revision,
+          operation: 'restoreBlocked',
+        }, () => true)).status,
+      ).toBe('applied')
+    } finally {
+      plugins.close()
+      native.close()
+      await owner.close()
+    }
+
+    const reopened = await ManagedCatalogComposition.open(options)
+    owners.push(reopened)
+    expect(reopened.preferenceStore.snapshot().bindings.map(binding => binding.bindingRef).sort()).toEqual([
+      'codex-config:native-fixture',
+      'plugin:fixture-plugin:plugin-fixture',
+    ].sort())
+    expect(reopened.preferenceStore.read('codex-config:native-fixture', 'native-scope').entries).toEqual([])
+    expect(reopened.preferenceStore.read('plugin:fixture-plugin:plugin-fixture', 'plugin-scope').entries).toEqual([])
+  })
+
+  it('imports valid legacy native preferences once without changing legacy bytes', async () => {
+    const { owner, options } = await setup()
+    await create(owner)
+    await owner.close()
+    const legacyFile = path.join(options.homeDir, 'native-catalog-management.json')
+    const legacy = JSON.stringify(
+      {
+        schemaVersion: 2,
+        revision: 7,
+        bindings: [{
+          bindingRef: 'codex-config:gateway',
+          revision: '7',
+          entries: [{ id: 'native-model', blocked: true, pinRank: 0 }],
+        }],
+      },
+      null,
+      2,
+    ) + '\n'
+    await writeFile(legacyFile, legacy, { mode: 0o600 })
+
+    const reopened = await ManagedCatalogComposition.open({ ...options, legacyNativePreferenceFile: legacyFile })
+    owners.push(reopened)
+    expect(reopened.preferenceStore.read('codex-config:gateway', 'current').entries).toEqual([
+      { id: 'native-model', blocked: true, pinRank: 0 },
+    ])
+    expect(await readFile(legacyFile, 'utf8')).toBe(legacy)
+    expect(JSON.parse(await readFile(statePath(options.homeDir), 'utf8'))).toMatchObject({
+      modelPreferences: { schemaVersion: 2, revision: 7 },
+    })
+  })
+
+  it.each([
+    ['malformed', '{not-json'],
+    ['future', JSON.stringify({ schemaVersion: 3, revision: 9, bindings: [] })],
+  ])('leaves %s legacy native preference state untouched', async (_kind, legacy) => {
+    const { owner, options } = await setup()
+    await create(owner)
+    await owner.close()
+    const legacyFile = path.join(options.homeDir, 'native-catalog-management.json')
+    await writeFile(legacyFile, legacy, { mode: 0o600 })
+    const before = await readFile(statePath(options.homeDir), 'utf8')
+
+    const reopened = await ManagedCatalogComposition.open({ ...options, legacyNativePreferenceFile: legacyFile })
+    owners.push(reopened)
+    expect(await readFile(legacyFile, 'utf8')).toBe(legacy)
+    expect(await readFile(statePath(options.homeDir), 'utf8')).toBe(before)
   })
 
   it('ignores and preserves legacy encrypted state while using new file-backed Providers', async () => {
@@ -411,7 +696,7 @@ describe('managed catalog production owner', () => {
     expect(again.snapshot().views[0]?.rows.find(row => row.id === 'a')?.blocked).toBe(true)
   })
 
-  it('does not carry overlay preferences into a new endpoint scope', async () => {
+  it('retains durable preferences across a new endpoint scope', async () => {
     const { owner } = await setup()
     const initial = await create(owner)
     await owner.command({ ...scope(owner), operation: 'setOverlay', modelId: 'a', blocked: true }, () => true)
@@ -424,7 +709,7 @@ describe('managed catalog production owner', () => {
     ).toBe('applied')
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows).toHaveLength(2))
     expect(owner.snapshot().views[0]?.scopeRevision).not.toBe(initial.scopeRevision)
-    expect(owner.admits(initial.providerId, 'a')).toBe(true)
+    expect(owner.admits(initial.providerId, 'a')).toBe(false)
   })
 
   it('keeps denied cached rows visible but not selectable and persists a complete empty result', async () => {

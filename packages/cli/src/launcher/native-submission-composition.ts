@@ -7,7 +7,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
-import { nativeModelProviderCatalog } from './native-model-provider-catalog.js'
+import { nativeModelProviderCatalog, type NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import { createNativeProviderCredentialBroker } from './native-provider-credential-broker.js'
 import { nativeSubmissionCredentialBroker } from './native-submission-credentials.js'
 import { createNativeSubmissionController, type NativeSubmissionController } from './native-submission-controller.js'
@@ -38,6 +38,19 @@ import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-cata
 import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
+import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
+import { pluginPreferenceSource } from './model-catalog/plugin-preference-source.js'
+import {
+  type CatalogManagementAuthority,
+  PluginPreferenceAuthority,
+  PluginPreferenceManagementAdapter,
+} from '../model-catalog/plugin-preference-authority.js'
+
+type NativeSubmissionActivation =
+  & Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
+  & {
+    subscribeNativeProviders?(listener: () => void): () => void
+  }
 
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
@@ -76,7 +89,7 @@ export interface NativeSubmissionComposition {
 export interface NativeSubmissionBootstrap {
   readonly environment: Readonly<Record<string, string>>
   complete(
-    activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
+    activation: NativeSubmissionActivation,
     codexHome: string,
     options?: NativeSubmissionCatalogOptions,
   ): Promise<NativeSubmissionComposition>
@@ -313,7 +326,7 @@ async function nativeSubmissionTransforms(contents: string, cacheDirectory: stri
 }
 
 export async function createNativeSubmissionComposition(
-  activation: Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>,
+  activation: NativeSubmissionActivation,
   desktopExecutable: string,
   codexHome: string,
   options: NativeSubmissionCatalogOptions & Readonly<{ cacheDirectory?: string }> = {},
@@ -352,7 +365,9 @@ export async function prepareNativeSubmissionBootstrap(
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
   let nativeManagement: NativeCatalogManagement | undefined
-  let management: CompositeCatalogManagement | undefined
+  let management: CatalogManagementAuthority | undefined
+  let pluginManagement: PluginPreferenceManagementAdapter | undefined
+  let pluginCatalog: () => Promise<readonly NativeModelProviderCatalogEntry[]> = async () => []
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
   const close = (): Promise<void> =>
@@ -396,6 +411,16 @@ export async function prepareNativeSubmissionBootstrap(
         ))
         reportStage('native-submission-resource-analysis-ready')
         if (closePromise !== undefined) throw new Error('Native submission bootstrap was closed')
+        const legacyNativePreferenceFile = completeOptions.managedCatalog === undefined
+          ? undefined
+          : path.join(
+            completeOptions.managedCatalog.homeDir,
+            'apps',
+            'codex',
+            'profiles',
+            completeOptions.managedCatalog.profileId,
+            'native-catalog-management.json',
+          )
         if (completeOptions.managedCatalog) {
           try {
             managed = await ManagedCatalogComposition.open({
@@ -403,6 +428,7 @@ export async function prepareNativeSubmissionBootstrap(
               keychainAuthenticationUI: false,
               keychainTimeoutMs: 10_000,
               responsesAvailable: true,
+              ...(legacyNativePreferenceFile === undefined ? {} : { legacyNativePreferenceFile }),
             })
           } catch {
             // Preserve stored providers for a later retry without blocking unrelated native providers.
@@ -499,7 +525,7 @@ export async function prepareNativeSubmissionBootstrap(
             ? managed.nativeConnection(id)
             : activation.prepareNativeConnection(id)
         credentials = createNativeProviderCredentialBroker({ resolve: resolveConnection })
-        const managedIds = new Set(activation.nativeProviderIds)
+        const hasPluginProvider = (providerId: string) => activation.nativeProviderIds.includes(providerId)
         let lastDiagnostic: string | undefined
         const loadConfigured = async () => {
           let projection
@@ -528,19 +554,15 @@ export async function prepareNativeSubmissionBootstrap(
         }
         nativeManagement = await NativeCatalogManagement.open({
           load: loadConfigured,
-          shadowed: providerId => managed?.owns(providerId) === true || managedIds.has(providerId),
-          ...(completeOptions.managedCatalog === undefined
+          shadowed: providerId => managed?.owns(providerId) === true || hasPluginProvider(providerId),
+          ...(managed === undefined
             ? {}
             : {
-              stateFile: path.join(
-                completeOptions.managedCatalog.homeDir,
-                'apps',
-                'codex',
-                'profiles',
-                completeOptions.managedCatalog.profileId,
-                'native-catalog-management.json',
-              ),
+              overlayStore: managed.preferenceStore,
             }),
+          ...(managed !== undefined || legacyNativePreferenceFile === undefined
+            ? {}
+            : { stateFile: legacyNativePreferenceFile }),
           refreshBeforeRead: dynamic === undefined,
           discovery: nativeDiscovery,
           ...(dynamic === undefined
@@ -550,17 +572,37 @@ export async function prepareNativeSubmissionBootstrap(
             }),
         })
         reportStage('native-submission-native-catalog-ready')
-        management = new CompositeCatalogManagement(nativeManagement, managed)
+        const baseManagement = new CompositeCatalogManagement(nativeManagement, managed)
+        management = baseManagement
+        if (managed && activation.subscribeNativeProviders) {
+          const pluginPreferences = await PluginPreferenceAuthority.open({
+            ...pluginPreferenceSource(
+              activation as ManagedServiceNativeActivation,
+              completeOptions.selectorIcons,
+            ),
+            overlayStore: managed.preferenceStore,
+          })
+          pluginManagement = new PluginPreferenceManagementAdapter(baseManagement, pluginPreferences)
+          management = pluginManagement
+          pluginCatalog = async () => await pluginManagement!.catalog() as readonly NativeModelProviderCatalogEntry[]
+        }
+        if (pluginManagement === undefined) {
+          pluginCatalog = nativeModelProviderCatalog(activation, completeOptions.selectorIcons)
+        }
         const cdp = createNativeSubmissionCdpAuthority({
           catalogSubscribe: (listener: () => void) => {
-            const subscriptions = [nativeManagement!.subscribe(listener), managed?.subscribe(listener)]
+            const subscriptions = [
+              nativeManagement!.subscribe(listener),
+              managed?.subscribe(listener),
+              pluginManagement?.catalogSubscribe(listener),
+            ]
             return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
           },
           management,
           catalog: combinedNativeModelProviderCatalog(
             combinedNativeModelProviderCatalog(
               async () => managed?.catalog() ?? [],
-              nativeModelProviderCatalog(activation, completeOptions.selectorIcons),
+              pluginCatalog,
             ),
             () => nativeManagement!.catalog(),
           ),
@@ -578,7 +620,7 @@ export async function prepareNativeSubmissionBootstrap(
             resolveEndpoint: resolveConnection,
           }),
           providerSource: providerId =>
-            managed?.owns(providerId) || managedIds.has(providerId)
+            managed?.owns(providerId) || hasPluginProvider(providerId)
               ? 'managed'
               : nativeManagement!.hasProvider(providerId)
               ? 'config'
@@ -587,7 +629,7 @@ export async function prepareNativeSubmissionBootstrap(
             if (selection.providerId.startsWith('cordisx-')) {
               return await managed?.validateSelection(selection.providerId, selection.model) ?? false
             }
-            if (selection.providerId === 'openai' || managedIds.has(selection.providerId)) return true
+            if (selection.providerId === 'openai' || hasPluginProvider(selection.providerId)) return true
             return nativeManagement!.validateSelection(selection.providerId, selection.model)
           },
         })

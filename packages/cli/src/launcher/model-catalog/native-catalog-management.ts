@@ -92,7 +92,6 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   #persistError = false
   #tail: Promise<unknown> = Promise.resolve()
   #unsubscribeSource: (() => void) | undefined
-  #writeAllowed: () => boolean = () => true
 
   private constructor(
     projection: CodexConfigModelProviderProjection,
@@ -100,6 +99,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     private readonly options: {
       load(): Promise<CodexConfigModelProviderProjection>
       stateFile?: string
+      overlayStore?: ManagementOverlayStore
       refreshBeforeRead?: boolean
       shadowed?(providerId: string): boolean
       discovery?: NativeCatalogDiscovery
@@ -107,17 +107,27 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   ) {
     this.#projection = projection
     this.recordGood(projection)
-    try {
-      this.#overlay = new ManagementOverlayStore(data => this.persist(data), initialOverlay)
-    } catch {
-      this.#persistError = true
-      this.#overlay = new ManagementOverlayStore(data => this.persist(data))
+    if (options.overlayStore) {
+      this.#overlay = options.overlayStore
+    } else {
+      try {
+        this.#overlay = new ManagementOverlayStore(
+          (data, _expectedRevision, authorized) => this.persist(data, authorized),
+          initialOverlay,
+        )
+      } catch {
+        this.#persistError = true
+        this.#overlay = new ManagementOverlayStore(
+          (data, _expectedRevision, authorized) => this.persist(data, authorized),
+        )
+      }
     }
   }
 
   static async open(options: {
     load(): Promise<CodexConfigModelProviderProjection>
     stateFile?: string
+    overlayStore?: ManagementOverlayStore
     refreshBeforeRead?: boolean
     shadowed?(providerId: string): boolean
     discovery?: NativeCatalogDiscovery
@@ -125,7 +135,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }): Promise<NativeCatalogManagement> {
     const [projection, initialOverlay] = await Promise.all([
       options.load(),
-      options.stateFile === undefined ? undefined : readOverlayState(options.stateFile).catch(() => undefined),
+      options.overlayStore !== undefined || options.stateFile === undefined
+        ? undefined
+        : readOverlayState(options.stateFile).catch(() => undefined),
     ])
     const authority = new NativeCatalogManagement(projection, initialOverlay, options)
     const unsubscribes = [
@@ -136,10 +148,13 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     return authority
   }
 
-  private async persist(data: ReturnType<ManagementOverlayStore['snapshot']>): Promise<void> {
+  private async persist(
+    data: ReturnType<ManagementOverlayStore['snapshot']>,
+    authorized: () => boolean,
+  ): Promise<void> {
     if (this.options.stateFile === undefined) return
     try {
-      await writeOverlayState(this.options.stateFile, data, this.#writeAllowed)
+      await writeOverlayState(this.options.stateFile, data, () => !this.#closed && authorized())
       this.#persistError = false
     } catch (error) {
       this.#persistError = true
@@ -395,26 +410,27 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
             scopeRevision: command.scopeRevision,
             expectedRevision: this.#overlay.read(command.bindingRef, command.scopeRevision).revision,
           }
-          this.#writeAllowed = () => !this.#closed && authorized()
-          try {
-            if (command.operation === 'setOverlay') {
-              await this.#overlay.mutate({ ...command, ...scope }, this.sourceModels(provider).map(model => model.id))
-            } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
-              await this.#overlay.mutate(
-                { ...scope, operation: command.operation },
-                this.sourceModels(provider).map(model => model.id),
-              )
-            } else {
-              return { status: 'rejected', code: 'unsupported' }
-            }
-          } finally {
-            this.#writeAllowed = () => true
+          if (command.operation === 'setOverlay') {
+            await this.#overlay.mutate(
+              { ...command, ...scope },
+              this.sourceModels(provider).map(model => model.id),
+              authorized,
+            )
+          } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
+            await this.#overlay.mutate(
+              { ...scope, operation: command.operation },
+              this.sourceModels(provider).map(model => model.id),
+              authorized,
+            )
+          } else {
+            return { status: 'rejected', code: 'unsupported' }
           }
           this.changed()
         }
         if (!authorized()) return { status: 'rejected', code: 'permission' }
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
+        if (!authorized()) return { status: 'rejected', code: 'permission' }
         return {
           status: 'rejected',
           code: error instanceof ManagementOverlayError ? error.code : 'unavailable',
