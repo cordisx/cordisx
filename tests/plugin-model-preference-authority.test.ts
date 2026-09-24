@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  type CatalogManagementAuthority,
   PluginPreferenceAuthority,
   pluginPreferenceBindingRef,
+  PluginPreferenceManagementAdapter,
 } from '../packages/cli/src/model-catalog/plugin-preference-authority.js'
-import type { ManagementPreferenceData } from '../packages/cli/src/model-catalog/management-overlay.js'
+import { pluginPreferenceSource } from '../packages/cli/src/launcher/model-catalog/plugin-preference-source.js'
+import {
+  ManagementOverlayStore,
+  type ManagementPreferenceData,
+  serializeManagementOverlayData,
+} from '../packages/cli/src/model-catalog/management-overlay.js'
 
 const provider = (pluginId: string, providerId: string, selectable = true) => ({
   pluginId,
@@ -141,6 +148,33 @@ describe('plugin model preference authority', () => {
     expect(authority.preferences().bindings).toEqual([])
   })
 
+  it('rechecks live plugin source membership before persistence commits', async () => {
+    let release!: () => void
+    let current = true
+    const authority = await PluginPreferenceAuthority.open({
+      load: async () => [provider('aiden', 'primary')],
+      sourceCurrent: () => current,
+      persist: async (_next, _expectedRevision, authorized) =>
+        new Promise<void>((resolve, reject) => {
+          release = () => authorized() ? resolve() : reject(new Error('source-retired'))
+        }),
+    })
+    const view = authority.snapshot().views[0]!
+    const command = authority.command({
+      operation: 'setOverlay',
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: view.revision,
+      modelId: 'same-name',
+      blocked: true,
+    }, () => true)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    current = false
+    release()
+    await expect(command).resolves.toEqual({ status: 'rejected', code: 'permission' })
+    expect(authority.preferences().bindings).toEqual([])
+  })
+
   it('retains last-known source and preferences across a transient source failure', async () => {
     let failing = false
     const authority = await PluginPreferenceAuthority.open({
@@ -173,6 +207,248 @@ describe('plugin model preference authority', () => {
     await authority.refresh()
     expect(authority.snapshot().views[0]).toMatchObject({ freshness: 'fresh', outcome: 'ok' })
     expect(authority.catalog()[0]?.models).toEqual([])
+  })
+
+  it('keeps invalid subscription updates stale and recovers on the next valid source', async () => {
+    let source = [provider('aiden', 'primary')]
+    let notify!: () => void
+    const authority = await PluginPreferenceAuthority.open({
+      load: async () => source,
+      persist: async () => {},
+      subscribeSource: listener => {
+        notify = listener
+        return () => {}
+      },
+    })
+
+    source = [provider('aiden', 'primary'), provider('aiden', 'primary')]
+    notify()
+    await vi.waitFor(() => expect(authority.snapshot().views[0]?.freshness).toBe('stale'))
+    expect(authority.snapshot().views[0]).toMatchObject({ outcome: 'error', selectableCount: 0 })
+    expect(authority.snapshot().views[0]?.rows[0]).toMatchObject({ id: 'same-name', selectable: false })
+
+    source = [{
+      ...provider('aiden', 'primary'),
+      models: [{ id: 'new-model', label: 'New model' }],
+    }]
+    notify()
+    await vi.waitFor(() => expect(authority.snapshot().views[0]?.freshness).toBe('fresh'))
+    expect(authority.snapshot().views[0]?.rows.map(row => row.id)).toEqual(['new-model'])
+  })
+
+  it('replays a source invalidation received while a load is pending', async () => {
+    let notify!: () => void
+    let source = [provider('aiden', 'primary')]
+    let release!: (value: typeof source) => void
+    let calls = 0
+    const authority = await PluginPreferenceAuthority.open({
+      load: async () => {
+        calls++
+        if (calls === 2) {
+          return new Promise<typeof source>(resolve => {
+            release = resolve
+          })
+        }
+        return source
+      },
+      persist: async () => {},
+      subscribeSource: listener => {
+        notify = listener
+        return () => {}
+      },
+    })
+
+    const pending = authority.refresh()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    source = [{ ...provider('aiden', 'primary'), models: [{ id: 'latest', label: 'Latest' }] }]
+    notify()
+    release([provider('aiden', 'primary')])
+    await pending
+    expect(calls).toBe(3)
+    expect(authority.snapshot().views[0]?.rows.map(row => row.id)).toEqual(['latest'])
+  })
+
+  it('shares one section authority across native and plugin binding writes', async () => {
+    let durable: ManagementPreferenceData | undefined
+    const store = new ManagementOverlayStore(async (next, expectedRevision, authorized) => {
+      expect(authorized()).toBe(true)
+      expect(durable?.revision ?? 0).toBe(expectedRevision)
+      durable = next
+    })
+    const authority = await PluginPreferenceAuthority.open({
+      load: async () => [provider('aiden', 'primary')],
+      overlayStore: store,
+    })
+    const nativeScope = { bindingRef: 'codex-config:native', scopeRevision: 'native-scope' }
+    const nativePinned = await store.mutate({
+      ...nativeScope,
+      expectedRevision: '0',
+      operation: 'setOverlay',
+      modelId: 'native-model',
+      pinned: true,
+    }, ['native-model'])
+    const plugin = authority.snapshot().views[0]!
+    await authority.command({
+      operation: 'setOverlay',
+      bindingRef: plugin.bindingRef,
+      scopeRevision: plugin.scopeRevision,
+      expectedRevision: plugin.revision,
+      modelId: 'same-name',
+      blocked: true,
+    }, () => true)
+    await store.mutate({
+      ...nativeScope,
+      expectedRevision: nativePinned.revision,
+      operation: 'setOverlay',
+      modelId: 'native-model',
+      pinned: false,
+    }, ['native-model'])
+    const currentPlugin = authority.snapshot().views[0]!
+    await authority.command({
+      operation: 'restoreBlocked',
+      bindingRef: currentPlugin.bindingRef,
+      scopeRevision: currentPlugin.scopeRevision,
+      expectedRevision: currentPlugin.revision,
+    }, () => true)
+
+    const reopened = new ManagementOverlayStore(async () => {}, JSON.parse(serializeManagementOverlayData(durable!)))
+    expect(reopened.snapshot().bindings.map(binding => binding.bindingRef).sort()).toEqual([
+      'codex-config:native',
+      plugin.bindingRef,
+    ].sort())
+    expect(reopened.read(nativeScope.bindingRef, nativeScope.scopeRevision).entries).toEqual([])
+    expect(reopened.read(plugin.bindingRef, plugin.scopeRevision).entries).toEqual([])
+  })
+
+  it('adapts the live managed-service catalog and composes its management channel', async () => {
+    let notify!: () => void
+    let active = true
+    const activation = {
+      nativeProviderIds: ['primary'],
+      prepareNativeConnection: vi.fn(() => {
+        if (!active) throw new Error('retired')
+        return {
+          value: {
+            service: { pluginId: 'aiden', serviceId: 'gateway', generation: 'one' },
+            endpoint: { origin: 'https://example.test', apiPath: '/v1', auth: { scheme: 'none' as const } },
+            models: {
+              generation: 'models-one',
+              defaultAlias: 'same-name',
+              aliases: [{ alias: 'same-name', gatewayModelId: 'same-name' }],
+            },
+            cleanup: { authorityId: 'one' },
+          },
+          dispose: vi.fn(),
+        }
+      }),
+      subscribeNativeProviders: (listener: () => void) => {
+        notify = listener
+        return () => {}
+      },
+    }
+    const source = pluginPreferenceSource(activation)
+    const plugins = await PluginPreferenceAuthority.open({
+      ...source,
+      persist: async (_next, _expectedRevision, authorized) => {
+        if (!authorized()) throw new Error('retired')
+      },
+    })
+    const baseCommand = vi.fn(async () => ({ status: 'rejected' as const, code: 'unsupported' as const }))
+    const base: CatalogManagementAuthority = {
+      snapshot: () => ({
+        epoch: 'base',
+        sequence: 1,
+        views: [],
+        canCreateConnection: true,
+      }),
+      command: baseCommand,
+      subscribe: () => () => {},
+    }
+    const management = new PluginPreferenceManagementAdapter(base, plugins)
+    const view = plugins.snapshot().views[0]!
+    expect(plugins.catalog()[0]).toMatchObject({
+      pluginId: 'aiden',
+      providerId: 'primary',
+      managementBindingRef: view.bindingRef,
+    })
+    expect(plugins.catalog()[0]).not.toHaveProperty('sourceRevision')
+    expect(management.catalog()).toEqual(plugins.catalog())
+    expect(management.snapshot()).toMatchObject({ canCreateConnection: true, views: [{ bindingRef: view.bindingRef }] })
+
+    active = false
+    notify()
+    expect(plugins.snapshot().views[0]).toMatchObject({ freshness: 'stale', selectableCount: 0 })
+    await expect(plugins.command({
+      operation: 'setOverlay',
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: view.revision,
+      modelId: 'same-name',
+      blocked: true,
+    }, () => true)).resolves.toEqual({ status: 'rejected', code: 'permission' })
+
+    await management.command({
+      operation: 'createConnection',
+      settings: {
+        title: 'Base',
+        endpoint: 'https://example.test/v1',
+        protocol: 'responses',
+        discoveryEnabled: false,
+        strategy: { kind: 'manual', ids: ['same-name'] },
+      },
+    }, () => true)
+    expect(baseCommand).toHaveBeenCalledOnce()
+    management.close()
+  })
+
+  it('retires an admitted command when the plugin generation changes without changing model IDs', async () => {
+    let notify!: () => void
+    let release!: () => void
+    let generation = 'one'
+    const activation = {
+      nativeProviderIds: ['primary'],
+      prepareNativeConnection: () => ({
+        value: {
+          service: { pluginId: 'aiden', serviceId: 'gateway', generation },
+          endpoint: { origin: 'https://example.test', apiPath: '/v1', auth: { scheme: 'none' as const } },
+          models: {
+            generation,
+            defaultAlias: 'same-name',
+            aliases: [{ alias: 'same-name', gatewayModelId: 'same-name' }],
+          },
+          cleanup: { authorityId: generation },
+        },
+        dispose() {},
+      }),
+      subscribeNativeProviders: (listener: () => void) => {
+        notify = listener
+        return () => {}
+      },
+    }
+    const plugins = await PluginPreferenceAuthority.open({
+      ...pluginPreferenceSource(activation),
+      persist: async (_next, _expectedRevision, authorized) =>
+        new Promise<void>((resolve, reject) => {
+          release = () => authorized() ? resolve() : reject(new Error('retired'))
+        }),
+    })
+    const view = plugins.snapshot().views[0]!
+    const command = plugins.command({
+      operation: 'setOverlay',
+      bindingRef: view.bindingRef,
+      scopeRevision: view.scopeRevision,
+      expectedRevision: view.revision,
+      modelId: 'same-name',
+      blocked: true,
+    }, () => true)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    generation = 'two'
+    notify()
+    release()
+    await expect(command).resolves.toEqual({ status: 'rejected', code: 'permission' })
+    expect(plugins.preferences().bindings).toEqual([])
+    await vi.waitFor(() => expect(plugins.snapshot().views[0]?.scopeRevision).not.toBe(view.scopeRevision))
+    plugins.close()
   })
 
   it('rejects duplicate bindings and duplicate exact model IDs', async () => {

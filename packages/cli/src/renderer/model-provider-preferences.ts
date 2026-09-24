@@ -5,6 +5,7 @@ export interface PreferenceProviderModel {
 export interface PreferenceProvider<Model extends PreferenceProviderModel = PreferenceProviderModel> {
   readonly providerId: string
   readonly pluginId: string
+  readonly managementBindingRef?: string
   readonly models: readonly Model[]
   readonly defaultModelId?: string
 }
@@ -29,11 +30,9 @@ export function applyCatalogManagementPreferences<Provider extends PreferencePro
   if (management === undefined) return providers
   const views = management.connected === false ? [] : management.views
   return Object.freeze(providers.map(provider => {
-    const pluginBindingRef = `plugin:${encodeURIComponent(provider.pluginId)}:${
-      encodeURIComponent(provider.providerId)
-    }`
-    const view = views.find(view => view.sourceKind === 'plugin' && view.bindingRef === pluginBindingRef)
-      ?? views.find(view => view.sourceKind !== 'plugin' && view.providerId === provider.providerId)
+    const view = provider.managementBindingRef === undefined
+      ? views.find(view => view.sourceKind !== 'plugin' && view.providerId === provider.providerId)
+      : views.find(view => view.sourceKind === 'plugin' && view.bindingRef === provider.managementBindingRef)
     if (!view) {
       const { defaultModelId: _sourceDefaultModelId, ...sourceProvider } = provider
       return Object.freeze({ ...sourceProvider, models: Object.freeze([]) }) as unknown as Provider

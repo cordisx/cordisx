@@ -23,8 +23,19 @@ describe('model provider preference projection', () => {
 
   it('isolates equal model names by provider and never restores absent source members', () => {
     const providers = [
-      { pluginId: 'plugin-a', providerId: 'shared', models: [{ id: 'same' }] },
-      { pluginId: 'plugin-b', providerId: 'shared', models: [{ id: 'same' }] },
+      { pluginId: 'cordisx.codex-config', providerId: 'shared', models: [{ id: 'same' }] },
+      {
+        pluginId: 'plugin-a',
+        providerId: 'shared',
+        managementBindingRef: 'plugin:plugin-a:shared',
+        models: [{ id: 'same' }],
+      },
+      {
+        pluginId: 'plugin-b',
+        providerId: 'shared',
+        managementBindingRef: 'plugin:plugin-b:shared',
+        models: [{ id: 'same' }],
+      },
     ]
     const projected = applyCatalogManagementPreferences(providers, {
       views: [
@@ -39,14 +50,15 @@ describe('model provider preference projection', () => {
           providerId: 'shared',
           sourceKind: 'plugin',
           rows: [
-            { id: 'same', present: true, compatibility: 'supported', selectable: false },
+            { id: 'same', present: true, compatibility: 'supported', selectable: true },
             { id: 'removed', present: false, compatibility: 'supported', selectable: true },
           ],
         },
       ],
     })
-    expect(projected.find(item => item.pluginId === 'plugin-a')?.models).toEqual([])
-    expect(projected.find(item => item.pluginId === 'plugin-b')?.models).toEqual([{ id: 'same' }])
+    expect(projected.find(item => item.pluginId === 'cordisx.codex-config')?.models).toEqual([{ id: 'same' }])
+    expect(projected.find(item => item.pluginId === 'plugin-a')?.models).toEqual([{ id: 'same' }])
+    expect(projected.find(item => item.pluginId === 'plugin-b')?.models).toEqual([])
     expect(projected.flatMap(item => item.models).some(model => model.id === 'removed')).toBe(false)
   })
 

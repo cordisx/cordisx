@@ -17,7 +17,9 @@ plugin contract or permanent ownership instruction.
   fail-closes on malformed or future data, and conservatively converts legacy
   v1 scope-keyed data only when a unique latest numeric revision exists.
 - Persistence receives `(nextSection, expectedSectionRevision)` so the profile
-  owner can merge the section under its existing lease and root CAS. Source
+  owner can merge the section under its existing lease and root CAS. The same
+  `ManagementOverlayStore` instance is injected into native, managed, and plugin
+  authorities for one serialized section write queue per profile. Source
   `scopeRevision` remains command fencing and is not durable preference identity.
 - Plugin preference identity is
   `plugin:${encodeURIComponent(pluginId)}:${encodeURIComponent(providerId)}`.
@@ -34,9 +36,22 @@ plugin contract or permanent ownership instruction.
   ordinary/all model lists to use the same explicit-supported rule.
   Compatibility, route availability, and user `blocked` state remain independent.
 - Renderer projection intersects ordered Host rows with exact current source
-  membership. Plugin views use the full plugin/provider binding identity;
-  non-plugin views retain provider-based matching. Disabled models disappear
-  from selection, retain recoverable preferences, and return when restored.
+  membership. A provider carrying `managementBindingRef` matches only that exact
+  plugin view; a provider without it matches only a non-plugin view, so an absent
+  plugin view can never inherit same-`providerId` native authorization. Disabled
+  models disappear from selection, retain recoverable preferences, and return
+  when restored.
+- `pluginPreferenceSource(...)` adapts the production
+  `ManagedServicePluginLifecycleRuntime.nativeActivation()` source. Lifecycle
+  publish, rollback, commit, and disposal invalidate the source immediately.
+  Subscription is established before the initial read so changes during startup
+  are replayed. The adapter stamps a private source generation into
+  `scopeRevision` and rechecks exact plugin, provider, and model membership at
+  the persistence boundary.
+- Source refreshes use a dirty loop, so an invalidation received during an
+  in-flight load is replayed. A valid-to-invalid refresh retains last-known rows
+  as stale and unselectable, consumes subscription rejections, and later recovers
+  from the next valid snapshot. Initial invalid sources still fail closed.
 
 ## Consumer Handoff
 
@@ -47,10 +62,29 @@ FILE-STORE must import
 - `ManagementOverlayStore`
 - `emptyManagementPreferenceData`
 
-Construction is `new ManagementOverlayStore((next, expectedRevision) => ...,
-initialSection)`. The callback must merge `next` into the profile root under the
-existing lease/root CAS and reject an unexpected section revision; it must not
+Construction is `new ManagementOverlayStore((next, expectedRevision,
+authorized) => ..., initialSection)`. The callback must recheck `authorized()`
+immediately before committing, merge `next` into the profile root under the
+existing lease/root CAS, and reject an unexpected section revision; it must not
 blindly replace the root document.
+
+The production plugin hook is:
+
+```ts
+const overlayStore = new ManagementOverlayStore(persistSection, initialSection)
+const pluginPreferences = await PluginPreferenceAuthority.open({
+  ...pluginPreferenceSource(managedServiceActivation),
+  overlayStore,
+})
+const management = new PluginPreferenceManagementAdapter(
+  baseManagement,
+  pluginPreferences,
+)
+```
+
+Use `management.catalog()` and `management.catalogSubscribe(...)` in the same
+native catalog composition. Rebuild all three authorities around a new shared
+store after a profile/root reload; never retain independent section snapshots.
 
 The corrected FILE-STORE source input is
 `485fa1fd0c810e08877126ea0d392dcec44b8bf8`, delta
@@ -82,10 +116,12 @@ integration input.
 
 ## Verification And Limits
 
-- Five focused core/renderer files pass 28 tests covering v2 validation, legacy
+- Six focused core/renderer files pass 35 tests covering v2 validation, legacy
   conversion, CAS, reload, plugin re-registration, exact identity isolation,
-  permission revocation, transient source failure, dormant preferences,
-  capability separation, and renderer membership intersection.
+  permission revocation, revoke-before-commit, in-flight invalidation replay,
+  transient and invalid source recovery, live lifecycle invalidation, shared
+  native/plugin interleaving, dormant preferences, capability separation, and
+  renderer membership intersection.
 - Changed-file dprint, ESLint, and `git diff --check` pass using an existing
   dependency checkout without installing, copying, or linking dependencies.
 - Adjacent registry/owner/composer suites were selected but could not be

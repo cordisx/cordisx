@@ -16,6 +16,8 @@ import { applyCatalogManagementPreferences } from './model-provider-preferences.
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
+  /** Exact Host-private management identity for plugin-owned catalog sources. */
+  readonly managementBindingRef?: string
   readonly title?: string
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly HostModelProviderModel[]
@@ -186,6 +188,9 @@ export class ModelProviderRegistry {
         Object.freeze({
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
+          ...(provider.managementBindingRef === undefined
+            ? {}
+            : { managementBindingRef: label(provider.managementBindingRef, 512) }),
           ...(provider.title === undefined ? {} : { title: label(provider.title) }),
           ...(isProviderBrandChoice(provider.selectorBrand?.brand)
               && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')

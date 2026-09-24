@@ -15,6 +15,8 @@ import {
 export interface PluginPreferenceProvider {
   readonly providerId: string
   readonly pluginId: string
+  /** Host-private source generation; changes retire commands even when membership is identical. */
+  readonly sourceRevision?: string
   readonly title?: string
   readonly models: readonly {
     readonly id: string
@@ -25,16 +27,44 @@ export interface PluginPreferenceProvider {
   }[]
 }
 
-export interface PluginPreferenceAuthorityOptions {
-  readonly load: () => Promise<readonly PluginPreferenceProvider[]>
-  readonly persist: (
-    preferences: ManagementPreferenceData,
-    expectedRevision: number,
-    authorized: () => boolean,
-  ) => Promise<void>
-  readonly initial?: unknown
-  readonly subscribeSource?: (listener: () => void) => () => void
+export interface PluginPreferenceCatalogProvider extends PluginPreferenceProvider {
+  readonly managementBindingRef: string
 }
+
+interface PluginPreferenceAuthorityCommonOptions {
+  readonly load: () => Promise<readonly PluginPreferenceProvider[]>
+  readonly subscribeSource?: (listener: () => void) => () => void
+  readonly sourceCurrent?: (
+    provider: PluginPreferenceProvider,
+    command: Exclude<CatalogManagementCommand, { operation: 'createConnection' }>,
+  ) => boolean
+}
+
+export interface CatalogManagementAuthority {
+  snapshot(): CatalogManagementSnapshot
+  command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
+  subscribe(listener: () => void): () => void
+  close?(): void
+}
+
+export type PluginPreferenceAuthorityOptions =
+  & PluginPreferenceAuthorityCommonOptions
+  & (
+    | {
+      readonly overlayStore: ManagementOverlayStore
+      readonly persist?: never
+      readonly initial?: never
+    }
+    | {
+      readonly overlayStore?: never
+      readonly persist: (
+        preferences: ManagementPreferenceData,
+        expectedRevision: number,
+        authorized: () => boolean,
+      ) => Promise<void>
+      readonly initial?: unknown
+    }
+  )
 
 export const pluginPreferenceBindingRef = (
   provider: Pick<PluginPreferenceProvider, 'pluginId' | 'providerId'>,
@@ -44,6 +74,7 @@ const scopeRevision = (provider: PluginPreferenceProvider) =>
     'plugin-provider-v1',
     provider.pluginId,
     provider.providerId,
+    provider.sourceRevision ?? null,
     provider.models.map(model => model.id).sort(),
   ])).digest('hex')
 const revision = (provider: PluginPreferenceProvider, overlayRevision: string) =>
@@ -54,7 +85,10 @@ const bounded = (value: string, maximum = 512) =>
 function normalizeProviders(providers: readonly PluginPreferenceProvider[]): readonly PluginPreferenceProvider[] {
   const bindings = new Set<string>()
   return Object.freeze(providers.map(provider => {
-    if (!bounded(provider.pluginId, 128) || !bounded(provider.providerId, 128)) {
+    if (
+      !bounded(provider.pluginId, 128) || !bounded(provider.providerId, 128)
+      || provider.sourceRevision !== undefined && !bounded(provider.sourceRevision)
+    ) {
       throw new ManagementOverlayError('source-invalid')
     }
     const ref = pluginPreferenceBindingRef(provider)
@@ -82,32 +116,41 @@ export class PluginPreferenceAuthority {
   #closed = false
   #loading = false
   #available = true
+  #loaded = false
   #persistError = false
-  #persistAuthorized: (() => boolean) | undefined
+  #refreshDirty = false
+  #refreshing: Promise<void> | undefined
   #tail: Promise<unknown> = Promise.resolve()
   #unsubscribe: (() => void) | undefined
 
   private constructor(private readonly options: PluginPreferenceAuthorityOptions) {
-    this.#overlay = new ManagementOverlayStore(async (preferences, expectedRevision) => {
-      try {
-        await options.persist(
-          preferences,
-          expectedRevision,
-          () => !this.#closed && (this.#persistAuthorized?.() ?? false),
-        )
-        this.#persistError = false
-      } catch (error) {
-        this.#persistError = true
-        throw error
-      }
-    }, options.initial)
+    this.#overlay = options.overlayStore ?? new ManagementOverlayStore(
+      async (preferences, expectedRevision, authorized) => {
+        try {
+          await options.persist(preferences, expectedRevision, () => !this.#closed && authorized())
+          this.#persistError = false
+        } catch (error) {
+          this.#persistError = true
+          throw error
+        }
+      },
+      options.initial,
+    )
   }
 
   static async open(options: PluginPreferenceAuthorityOptions): Promise<PluginPreferenceAuthority> {
     const authority = new PluginPreferenceAuthority(options)
-    await authority.refresh()
-    authority.#unsubscribe = options.subscribeSource?.(() => void authority.refresh())
-    return authority
+    authority.#unsubscribe = options.subscribeSource?.(() => {
+      authority.invalidateSource()
+      void authority.refresh().catch(() => undefined)
+    })
+    try {
+      await authority.refresh(true)
+      return authority
+    } catch (error) {
+      authority.close()
+      throw error
+    }
   }
 
   static bindingRef = pluginPreferenceBindingRef
@@ -120,9 +163,25 @@ export class PluginPreferenceAuthority {
     return this.#providers.find(provider => pluginPreferenceBindingRef(provider) === command.bindingRef)
   }
 
-  catalog(): readonly PluginPreferenceProvider[] {
+  private sourceAuthorized(
+    provider: PluginPreferenceProvider,
+    command: Exclude<CatalogManagementCommand, { operation: 'createConnection' }>,
+  ): boolean {
+    if (this.#closed || !this.#available) return false
+    const current = this.providerFor(command)
+    if (!current || scopeRevision(current) !== command.scopeRevision) return false
+    if (command.operation === 'setOverlay' && !current.models.some(model => model.id === command.modelId)) return false
+    try {
+      return this.options.sourceCurrent?.(provider, command) ?? true
+    } catch {
+      return false
+    }
+  }
+
+  catalog(): readonly PluginPreferenceCatalogProvider[] {
     if (this.#closed || !this.#available) return Object.freeze([])
     return Object.freeze(this.#providers.map(provider => {
+      const { sourceRevision: _sourceRevision, ...catalogProvider } = provider
       const source = new Map(provider.models.map(model => [model.id, model]))
       const models = this.rows(provider).flatMap(row => {
         if (!row.present || !row.selectable) return []
@@ -130,7 +189,8 @@ export class PluginPreferenceAuthority {
         return model === undefined ? [] : [model]
       })
       return Object.freeze({
-        ...provider,
+        ...catalogProvider,
+        managementBindingRef: pluginPreferenceBindingRef(provider),
         models: Object.freeze(models),
       })
     }))
@@ -202,19 +262,43 @@ export class PluginPreferenceAuthority {
     return Object.freeze({ epoch: this.#epoch, sequence: this.#sequence, views: Object.freeze(views) })
   }
 
-  async refresh(): Promise<void> {
-    if (this.#closed || this.#loading) return
-    this.#loading = true
+  refresh(failOnInitialInvalid = false): Promise<void> {
+    if (this.#closed) return Promise.resolve()
+    this.#refreshDirty = true
+    if (this.#refreshing) return this.#refreshing
+    const run = this.refreshLoop(failOnInitialInvalid)
+    this.#refreshing = run.finally(() => {
+      this.#refreshing = undefined
+      if (this.#refreshDirty && !this.#closed) void this.refresh().catch(() => undefined)
+    })
+    return this.#refreshing
+  }
+
+  private invalidateSource(): void {
+    if (this.#closed) return
+    this.#available = false
     this.changed()
-    try {
-      this.#providers = normalizeProviders(await this.options.load())
-      this.#available = true
-    } catch (error) {
-      if (error instanceof ManagementOverlayError) throw error
-      this.#available = false
-    } finally {
-      this.#loading = false
+  }
+
+  private async refreshLoop(failOnInitialInvalid: boolean): Promise<void> {
+    while (this.#refreshDirty && !this.#closed) {
+      this.#refreshDirty = false
+      this.#loading = true
       this.changed()
+      try {
+        const providers = normalizeProviders(await this.options.load())
+        if (this.#closed) return
+        this.#providers = providers
+        this.#available = true
+        this.#loaded = true
+      } catch (error) {
+        if (this.#closed) return
+        this.#available = false
+        if (failOnInitialInvalid && !this.#loaded && error instanceof ManagementOverlayError) throw error
+      } finally {
+        this.#loading = false
+        this.changed()
+      }
     }
   }
 
@@ -233,37 +317,44 @@ export class PluginPreferenceAuthority {
       if (command.expectedRevision !== revision(provider, overlay.revision)) {
         return { status: 'conflict', code: 'conflict' }
       }
+      const stillAuthorized = () => authorized() && this.sourceAuthorized(provider, command)
+      if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
       try {
-        this.#persistAuthorized = authorized
         const scope = {
           bindingRef: command.bindingRef,
           scopeRevision: command.scopeRevision,
           expectedRevision: overlay.revision,
         }
         if (command.operation === 'setOverlay') {
-          await this.#overlay.mutate({
-            ...scope,
-            operation: 'setOverlay',
-            modelId: command.modelId,
-            ...(command.blocked === undefined ? {} : { blocked: command.blocked }),
-            ...(command.pinned === undefined ? {} : { pinned: command.pinned }),
-          }, provider.models.map(model => model.id))
+          await this.#overlay.mutate(
+            {
+              ...scope,
+              operation: 'setOverlay',
+              modelId: command.modelId,
+              ...(command.blocked === undefined ? {} : { blocked: command.blocked }),
+              ...(command.pinned === undefined ? {} : { pinned: command.pinned }),
+            },
+            provider.models.map(model => model.id),
+            stillAuthorized,
+          )
         } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
-          await this.#overlay.mutate({ ...scope, operation: command.operation }, provider.models.map(model => model.id))
+          await this.#overlay.mutate(
+            { ...scope, operation: command.operation },
+            provider.models.map(model => model.id),
+            stillAuthorized,
+          )
         } else {
           return { status: 'rejected', code: 'unsupported' }
         }
-        if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
         this.changed()
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
-        if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (!stillAuthorized()) return { status: 'rejected', code: 'permission' }
         return {
           status: 'rejected',
           code: error instanceof ManagementOverlayError ? error.code : 'unavailable',
         }
-      } finally {
-        this.#persistAuthorized = undefined
       }
     }
     const result = this.#tail.then(execute)
@@ -280,6 +371,68 @@ export class PluginPreferenceAuthority {
     this.#closed = true
     this.#unsubscribe?.()
     this.#listeners.clear()
+  }
+
+  private changed(): void {
+    this.#sequence++
+    for (const listener of this.#listeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
+  }
+}
+
+/** Adds plugin preference views and commands to an existing Host-private management channel. */
+export class PluginPreferenceManagementAdapter implements CatalogManagementAuthority {
+  readonly #epoch = randomUUID()
+  readonly #listeners = new Set<() => void>()
+  readonly #unsubscribes: (() => void)[]
+  #sequence = 0
+
+  constructor(
+    private readonly base: CatalogManagementAuthority,
+    private readonly plugins: PluginPreferenceAuthority,
+  ) {
+    this.#unsubscribes = [base.subscribe(() => this.changed()), plugins.subscribe(() => this.changed())]
+  }
+
+  snapshot(): CatalogManagementSnapshot {
+    const base = this.base.snapshot()
+    return Object.freeze({
+      epoch: this.#epoch,
+      sequence: this.#sequence,
+      views: Object.freeze([...base.views, ...this.plugins.snapshot().views]),
+      ...(base.canCreateConnection === undefined ? {} : { canCreateConnection: base.canCreateConnection }),
+    })
+  }
+
+  catalog(): readonly PluginPreferenceCatalogProvider[] {
+    return this.plugins.catalog()
+  }
+
+  catalogSubscribe(listener: () => void): () => void {
+    return this.plugins.subscribe(listener)
+  }
+
+  async command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult> {
+    const owner = command.operation !== 'createConnection' && command.bindingRef.startsWith('plugin:')
+      ? this.plugins
+      : this.base
+    const result = await owner.command(command, authorized)
+    return result.snapshot === undefined ? result : { ...result, snapshot: this.snapshot() }
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
+
+  close(): void {
+    for (const unsubscribe of this.#unsubscribes) unsubscribe()
+    this.#listeners.clear()
+    this.plugins.close()
+    this.base.close?.()
   }
 
   private changed(): void {

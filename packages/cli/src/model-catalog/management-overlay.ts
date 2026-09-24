@@ -205,7 +205,11 @@ export class ManagementOverlayStore {
   private writes: Promise<unknown> = Promise.resolve()
 
   constructor(
-    private readonly persist: (data: ManagementPreferenceData, expectedRevision: number) => Promise<void>,
+    private readonly persist: (
+      data: ManagementPreferenceData,
+      expectedRevision: number,
+      authorized: () => boolean,
+    ) => Promise<void>,
     initial?: unknown,
   ) {
     this.state = initial === undefined ? emptyManagementPreferenceData() : parseManagementOverlayData(initial)
@@ -219,7 +223,11 @@ export class ManagementOverlayStore {
     return overlayView(binding, scopeRevision)
   }
 
-  mutate(input: ManagementOverlayMutation, currentModelIds: readonly string[]): Promise<ManagementOverlay> {
+  mutate(
+    input: ManagementOverlayMutation,
+    currentModelIds: readonly string[],
+    authorized: () => boolean = () => true,
+  ): Promise<ManagementOverlay> {
     const execute = async () => {
       const current = this.read(input.bindingRef, input.scopeRevision)
       if (current.revision !== input.expectedRevision) throw new ManagementOverlayError('conflict')
@@ -264,7 +272,7 @@ export class ManagementOverlayStore {
         ],
       })
       try {
-        await this.persist(data, this.state.revision)
+        await this.persist(data, this.state.revision, authorized)
       } catch {
         throw new ManagementOverlayError('persist-failed')
       }
