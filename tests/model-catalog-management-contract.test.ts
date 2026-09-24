@@ -4,6 +4,8 @@ import type {
   CatalogManagementCommand,
   CatalogManagementRow,
   CatalogManagementView,
+  CatalogPreferenceOperation,
+  CatalogSourceOperation,
 } from '../packages/cli/src/model-catalog-management.js'
 import type {
   ScriptErrorCode,
@@ -56,6 +58,7 @@ describe('Host-private catalog management contract', () => {
       provenance: ['auto', 'script-supplement'],
       notListed: false,
       present: true,
+      compatibility: 'supported',
       selectable: false,
       blocked: true,
       pinned: false,
@@ -64,7 +67,18 @@ describe('Host-private catalog management contract', () => {
     expectTypeOf<CatalogManagementView['protocolCapabilities']>()
       .toEqualTypeOf<CatalogManagementRow['protocolCapabilities']>()
     expect(row.provenance).toEqual(['auto', 'script-supplement'])
+    expect(row.compatibility).toBe('supported')
     expect(row.selectable).toBe(false)
     expect(row.protocolCapabilities?.responses).toBe(true)
+  })
+
+  it('separates read-only source authority from Host-owned model preferences', () => {
+    const view = {
+      sourceKind: 'plugin',
+      sourceCapabilities: [] as readonly CatalogSourceOperation[],
+      preferenceCapabilities: ['setOverlay', 'resetOrder', 'restoreBlocked'] as readonly CatalogPreferenceOperation[],
+    }
+    expect(view.sourceCapabilities).toEqual([])
+    expect(view.preferenceCapabilities).toContain('setOverlay')
   })
 })

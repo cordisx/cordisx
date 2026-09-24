@@ -30,7 +30,8 @@ describe('Host catalog preferences', () => {
       ['unknown', false, false],
       ['z', false, true],
     ])
-    expect(store.read('binding', 'new-account').entries).toEqual([])
+    expect(store.read('binding', 'new-account').entries).toEqual([{ id: 'A', blocked: true, pinRank: 0 }])
+    expect(store.read('binding', 'new-account').scopeRevision).toBe('new-account')
     expect(store.read('other-binding', scope.scopeRevision).entries).toEqual([])
     expect(store.read('binding', scope.scopeRevision).entries).toEqual([{ id: 'A', blocked: true, pinRank: 0 }])
   })
@@ -101,7 +102,7 @@ describe('Host catalog preferences', () => {
 
   it('commits after atomic persistence, serializes concurrent CAS and keeps last durable state on error', async () => {
     let release!: () => void
-    const persist = vi.fn(() =>
+    const persist = vi.fn((_data, _expectedRevision) =>
       new Promise<void>(resolve => {
         release = resolve
       })
@@ -111,7 +112,7 @@ describe('Host catalog preferences', () => {
     const second = store.mutate({ ...scope, operation: 'setOverlay', modelId: 'z', pinned: true }, ['z'])
     const rejected = expect(second).rejects.toMatchObject({ code: 'conflict' })
     await Promise.resolve()
-    expect(store.snapshot().overlays).toEqual([])
+    expect(store.snapshot().bindings).toEqual([])
     release()
     const overlay = await first
     await rejected
@@ -126,27 +127,74 @@ describe('Host catalog preferences', () => {
   })
 
   it('validates bounded versioned data and rejects hidden executable or authority fields', () => {
-    const empty = { schemaVersion: 1, revision: 0, overlays: [] }
+    const empty = { schemaVersion: 2, revision: 0, bindings: [] }
     expect(parseManagementOverlayData(empty)).toEqual(empty)
     for (
       const data of [
-        { ...empty, schemaVersion: 2 },
+        { ...empty, schemaVersion: 3 },
         { ...empty, secret: 'not-allowed' },
-        { ...empty, overlays: [{ ...scope, entries: [] }] },
+        { ...empty, bindings: [{ ...scope, entries: [] }] },
         {
           ...empty,
-          overlays: [{ bindingRef: 'b', scopeRevision: 's', revision: '1', entries: [{ id: 'a\n', blocked: true }] }],
+          bindings: [{ bindingRef: 'b', revision: '1', entries: [{ id: 'a\n', blocked: true }] }],
         },
         {
           ...empty,
-          overlays: [{
+          bindings: [{
             bindingRef: 'b',
-            scopeRevision: 's',
             revision: '1',
             entries: [{ id: 'a', blocked: true, capability: 'allow' }],
           }],
         },
       ]
     ) expect(() => parseManagementOverlayData(data)).toThrow('source-invalid')
+  })
+
+  it('migrates legacy scope-keyed entries to the latest stable binding preference', () => {
+    expect(parseManagementOverlayData({
+      schemaVersion: 1,
+      revision: 9,
+      overlays: [
+        { bindingRef: 'plugin:aiden:main', scopeRevision: 'generation-1', revision: '3', entries: [] },
+        {
+          bindingRef: 'plugin:aiden:main',
+          scopeRevision: 'generation-2',
+          revision: '8',
+          entries: [{ id: 'same-name', blocked: true }],
+        },
+      ],
+    })).toEqual({
+      schemaVersion: 2,
+      revision: 9,
+      bindings: [{
+        bindingRef: 'plugin:aiden:main',
+        revision: '8',
+        entries: [{ id: 'same-name', blocked: true }],
+      }],
+    })
+  })
+
+  it('rejects ambiguous opaque legacy duplicates instead of guessing which is newer', () => {
+    expect(() =>
+      parseManagementOverlayData({
+        schemaVersion: 1,
+        revision: 2,
+        overlays: [
+          { bindingRef: 'plugin:aiden:main', scopeRevision: 'one', revision: 'opaque-a', entries: [] },
+          { bindingRef: 'plugin:aiden:main', scopeRevision: 'two', revision: 'opaque-b', entries: [] },
+        ],
+      })
+    ).toThrow('source-invalid')
+  })
+
+  it('passes the exact prior section revision to the persistence CAS', async () => {
+    const persist = vi.fn(async () => {})
+    const store = new ManagementOverlayStore(persist)
+    const first = await store.mutate({ ...scope, operation: 'setOverlay', modelId: 'A', blocked: true }, ['A'])
+    await store.mutate(
+      { ...scope, expectedRevision: first.revision, operation: 'setOverlay', modelId: 'A', pinned: true },
+      ['A'],
+    )
+    expect(persist.mock.calls.map(call => call[1])).toEqual([0, 1])
   })
 })

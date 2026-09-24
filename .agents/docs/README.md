@@ -100,6 +100,8 @@ implementation of those contracts, not a second public specification.
 
 - [Host manifest startup window](history/host-manifest-startup-2026-09-23.md):
   bounded retries, renderer cancellation, and source/native evidence boundaries.
+- [Model service preferences, 2026-09-25](history/model-service-preferences-2026-09-25.md):
+  local PREF / UX-6 checkpoint, consumer APIs, and pending integration gates.
 
 | Document                                                                                                | Type                        | Use it for                                                            |
 | ------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------- |

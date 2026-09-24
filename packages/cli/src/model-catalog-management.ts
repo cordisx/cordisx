@@ -5,7 +5,7 @@ import type {
 } from './launcher/model-catalog/script-types.js'
 
 /** Host-private management DTOs. Script configuration is write-only, never a snapshot. */
-export type CatalogSourceKind = 'native' | 'auto' | 'manual' | 'script'
+export type CatalogSourceKind = 'native' | 'plugin' | 'auto' | 'manual' | 'script'
 export type CatalogManagementCode =
   | 'unsupported'
   | 'unavailable'
@@ -44,12 +44,16 @@ export interface CatalogProtocolCapabilities {
   readonly responses: boolean
 }
 
+export type CatalogModelCompatibility = 'supported' | 'unsupported' | 'unknown'
+
 export interface CatalogManagementRow {
   readonly id: string
   readonly label: string
   readonly provenance: readonly ('native' | 'auto' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
   readonly notListed: boolean
   readonly present: boolean
+  /** Host submission compatibility. Missing is accepted only from transitional producers and means unknown. */
+  readonly compatibility?: CatalogModelCompatibility
   readonly selectable: boolean
   readonly blocked: boolean
   readonly pinned: boolean
@@ -83,6 +87,34 @@ export type CatalogManagementOperation =
   | 'cancelScript'
   | 'updateConnection'
 
+export type CatalogPreferenceOperation = Extract<
+  CatalogManagementOperation,
+  'setOverlay' | 'resetOrder' | 'restoreBlocked'
+>
+export type CatalogSourceOperation = Exclude<CatalogManagementOperation, CatalogPreferenceOperation>
+
+const preferenceOperations: readonly CatalogPreferenceOperation[] = ['setOverlay', 'resetOrder', 'restoreBlocked']
+export function catalogPreferenceCapabilities(view: CatalogManagementView): readonly CatalogPreferenceOperation[] {
+  return view.preferenceCapabilities
+    ?? view.capabilities.filter((operation): operation is CatalogPreferenceOperation =>
+      preferenceOperations.includes(operation as CatalogPreferenceOperation)
+    )
+}
+export function catalogSourceCapabilities(view: CatalogManagementView): readonly CatalogSourceOperation[] {
+  return view.sourceCapabilities
+    ?? view.capabilities.filter((operation): operation is CatalogSourceOperation =>
+      !preferenceOperations.includes(operation as CatalogPreferenceOperation)
+    )
+}
+export function catalogOperationAvailable(
+  view: CatalogManagementView,
+  operation: CatalogManagementOperation,
+): boolean {
+  return preferenceOperations.includes(operation as CatalogPreferenceOperation)
+    ? catalogPreferenceCapabilities(view).includes(operation as CatalogPreferenceOperation)
+    : catalogSourceCapabilities(view).includes(operation as CatalogSourceOperation)
+}
+
 export interface CatalogManagementView {
   readonly bindingRef: string
   readonly providerId: string
@@ -96,11 +128,18 @@ export interface CatalogManagementView {
   readonly activity: 'idle' | 'scheduled' | 'loading' | 'applying'
   readonly outcome: 'none' | 'ok' | 'empty' | 'error' | 'unsupported' | 'cancelled'
   readonly autoPaused: boolean
+  /** Present source members explicitly supported by the current Host. */
   readonly sourceCount: number
+  /** Supported source members that are also currently route-available and not user-blocked. */
   readonly selectableCount: number
   /** Host orders rows and includes dormant preferences. Renderer never adds members. */
   readonly rows: readonly CatalogManagementRow[]
   readonly supplement: readonly CatalogEditableModel[]
+  /** Source membership/configuration authority. Empty means the source itself is read-only. */
+  readonly sourceCapabilities?: readonly CatalogSourceOperation[]
+  /** Host-owned profile preferences, independent from source mutability. */
+  readonly preferenceCapabilities?: readonly CatalogPreferenceOperation[]
+  /** Transitional combined list consumed by existing Manager controls. */
   readonly capabilities: readonly CatalogManagementOperation[]
   readonly diagnostics: CatalogSafeDiagnostics
   readonly connection?: CatalogConnectionSettings
