@@ -17,7 +17,7 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
   const [flowing, setFlowing] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   const flow = useRef<HTMLSpanElement>(null)
-  const pointerId = useRef<number>()
+  const pointerId = useRef<number | undefined>(undefined)
   const draftRef = useRef<string | undefined>(undefined)
   const committing = useRef(false)
   const displayed = draft ?? value ?? ''
