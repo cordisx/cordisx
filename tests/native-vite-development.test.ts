@@ -712,7 +712,7 @@ describe('native Vite development transport', () => {
       const bootSource = await get('@id/__x00__virtual:cordisx-native-boot')
       expect(bootSource).toContain('virtual:cordisx-native-react-prepare')
       expect(bootSource).toContain("import.meta.hot.on('cordisx:restart-host'")
-      expect(bootSource).toContain("virtual:cordisx-native-entry') + '?t=' + Date.now()")
+      expect(bootSource).toContain("virtual:cordisx-native-entry\" + '?t=' + Date.now()")
       expect(bootSource.indexOf('virtual:cordisx-native-react-prepare')).toBeLessThan(
         bootSource.indexOf('virtual:cordisx-native-entry'),
       )
