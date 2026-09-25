@@ -1,4 +1,4 @@
-import React, { act, type ReactNode } from 'react'
+import React, { act, type ReactNode, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -186,6 +186,40 @@ describe('HostMenuSurface behavior', () => {
     expect(document.activeElement).toBe(anchor)
     expect(ancestorKeyDown).not.toHaveBeenCalled()
     document.removeEventListener('keydown', ancestorKeyDown)
+  })
+
+  it('does not let a stale Escape frame steal focus after the menu reopens', async () => {
+    let frame: FrameRequestCallback | undefined
+    Object.defineProperty(dom.window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frame = callback
+        return 1
+      },
+    })
+    let reopen!: () => void
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      reopen = () => setOpen(true)
+      return (
+        <HostMenuSurface
+          open={open}
+          label="Test menu"
+          anchorRef={{ current: anchor }}
+          returnFocusRef={{ current: anchor }}
+          onClose={() => setOpen(false)}
+        >
+          {choices}
+        </HostMenuSurface>
+      )
+    }
+    await act(async () => root!.render(<Harness />))
+    await press('Escape')
+    expect(document.activeElement).toBe(anchor)
+    await act(async () => reopen())
+    expect(document.activeElement?.id).toBe('first')
+    frame?.(0)
+    expect(document.activeElement?.id).toBe('first')
   })
 
   it('repositions on viewport resize and captured nested scroll with edge clamping', async () => {

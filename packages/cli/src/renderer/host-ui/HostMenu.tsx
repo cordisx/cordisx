@@ -157,7 +157,8 @@ export function HostMenuSurface({
           const target = returnFocusRef?.current
           const restoreFocus = () => {
             if (
-              target?.isConnected && returnFocusRef?.current === target && anchorRef.current?.isConnected
+              menuRef.current === null && target?.isConnected && returnFocusRef?.current === target
+              && anchorRef.current?.isConnected
               && (focusAllowed.current?.() ?? true)
             ) {
               target.focus({ preventScroll: true })
