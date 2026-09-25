@@ -1,13 +1,9 @@
 import type {
-  ManagedNativeProviderPublicationInputV1,
-  ManagedServiceApplyInputV1,
-  ManagedServiceBoundClientV1,
   ManagedServiceControlResultV1,
   ManagedServiceDefinitionV1,
   ManagedServiceIdentityV1,
   ManagedServiceOwnerV1,
   ManagedServiceRegistrationHandleV1,
-  ManagedServiceRegistryV1,
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn as nodeSpawn } from 'node:child_process'
@@ -20,23 +16,23 @@ import type {
 import { createNativeManagedGatewayConnection } from './managed-service-native-connection.js'
 import { ManagedNativeProviderPublications } from './managed-service-native-publications.js'
 import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js'
-import { managedServiceResourceMatchesTarget } from './managed-service-package-resources.js'
+import {
+  createManagedServiceActivationBinding,
+  createManagedServiceRegistrationHandle,
+  type ManagedServiceActivationBinding,
+  type ManagedServiceContextAuthorityV1,
+} from './managed-service-runtime-binding.js'
+import { registerManagedService } from './managed-service-registration.js'
 import {
   assertManagedServiceEnvironmentBindings,
   resolveManagedServiceEnvironment,
 } from './managed-service-runtime-files.js'
 import {
   type ManagedServiceActivationAccess,
-  type ManagedServiceClientState,
   type ManagedServiceRecord,
   projectManagedServiceRecord,
 } from './managed-service-runtime-record.js'
-import {
-  managedServiceEnvironment,
-  managedServiceHome,
-  runManagedServiceChildAction,
-  terminateManagedServiceChild,
-} from './managed-service-process.js'
+import { runManagedServiceChildAction, terminateManagedServiceChild } from './managed-service-process.js'
 import type { ManagedServiceChildTerminationTimeouts } from './managed-service-process.js'
 import { ManagedServiceRuntimeProcess } from './managed-service-runtime-process.js'
 import {
@@ -48,6 +44,10 @@ import {
 } from './managed-service-runtime-support.js'
 
 export type { ManagedServiceActivationAccess } from './managed-service-runtime-record.js'
+export type {
+  ManagedServiceActivationBinding,
+  ManagedServiceContextAuthorityV1,
+} from './managed-service-runtime-binding.js'
 
 export interface ManagedServiceRuntimeOptions {
   readonly homeDir: string
@@ -68,19 +68,6 @@ export interface ManagedServiceRuntimeOptions {
   }) => Promise<NodeJS.ProcessEnv>
   readonly childTerminationTimeouts?: ManagedServiceChildTerminationTimeouts
   readonly failuresBeforeUnhealthy?: number
-}
-
-export interface ManagedServiceActivationBinding extends ManagedServiceApplyInputV1 {
-  readonly authority: ManagedServiceContextAuthorityV1
-  readonly registry: ManagedServiceRegistryV1
-  dispose(): Promise<void>
-}
-
-export interface ManagedServiceContextAuthorityV1 {
-  readonly pluginId: string
-  readonly pluginGeneration: string
-  readonly serviceId: string
-  readonly serviceGeneration: string
 }
 
 class BorrowedServiceUnavailableError extends Error {
@@ -125,61 +112,30 @@ export class ManagedServiceRuntime {
   }
 
   bind(access: ManagedServiceActivationAccess, signal: AbortSignal): ManagedServiceActivationBinding {
-    const authority = Object.freeze({
-      pluginId: access.owner.pluginId,
-      pluginGeneration: access.owner.pluginGeneration,
-      serviceId: access.declaration.id,
-      serviceGeneration: randomUUID(),
-    })
-    const clientState: ManagedServiceClientState = {
-      key: managedHandle('msc'),
-      pluginId: access.owner.pluginId,
-      pluginGeneration: access.owner.pluginGeneration,
-      active: true,
-      leases: new Set(),
-    }
-    const owned = new Set<ManagedServiceRecord>()
-    const pendingRegistrations = new Set<Promise<unknown>>()
-    const registry: ManagedServiceRegistryV1 = Object.freeze({
-      register: (
-        definition: ManagedServiceDefinitionV1,
-        options: { readonly revision: `sha256:${string}` },
-      ) => {
-        if (!clientState.active) return Promise.reject(new Error('managed service plugin binding is disposed'))
-        const registration = (async () => {
-          const record = await this.register(access, authority.serviceGeneration, definition, options.revision)
-          if (!clientState.active) {
-            await this.disposeRecord(record)
-            throw new Error('managed service plugin binding was disposed during registration')
-          }
-          owned.add(record)
-          return this.registrationHandle(record)
-        })()
-        pendingRegistrations.add(registration)
-        registration.then(
-          () => pendingRegistrations.delete(registration),
-          () => pendingRegistrations.delete(registration),
-        )
-        return registration
-      },
-    })
-    const client = this.boundClient(clientState)
-    let disposal: Promise<void> | undefined
-    return Object.freeze({
-      owner: access.owner,
-      authority,
-      registry,
-      client,
+    return createManagedServiceActivationBinding({
+      access,
       signal,
-      dispose: () => {
-        if (disposal !== undefined) return disposal
-        client.dispose()
-        disposal = (async () => {
-          await Promise.allSettled([...pendingRegistrations])
-          await this.disposeRecords(owned)
-        })()
-        return disposal
-      },
+      register: (nextAccess, serviceGeneration, definition, revision) =>
+        registerManagedService({
+          access: nextAccess,
+          serviceGeneration,
+          definition,
+          revision,
+          schemas: this.schemas,
+          homeDir: this.options.homeDir,
+          ...(this.options.environment === undefined ? {} : { environment: this.options.environment }),
+          ...(this.options.projectEnvironment === undefined
+            ? {}
+            : { projectEnvironment: this.options.projectEnvironment }),
+          records: this.records,
+          registrations: this.registrations,
+          pendingRegistrations: this.pendingRegistrations,
+          disposeRecord: record => this.disposeRecord(record),
+        }),
+      registrationHandle: record => this.registrationHandle(record),
+      boundClient: state => this.broker.boundClient(state),
+      disposeRecord: record => this.disposeRecord(record),
+      disposeRecords: records => this.disposeRecords(records),
     })
   }
 
@@ -275,177 +231,15 @@ export class ManagedServiceRuntime {
     return authentication?.mode === 'cli' && authentication.logout !== undefined
   }
 
-  private async register(
-    access: ManagedServiceActivationAccess,
-    serviceGeneration: string,
-    definition: ManagedServiceDefinitionV1,
-    revision: `sha256:${string}`,
-  ): Promise<ManagedServiceRecord> {
-    await this.schemas.validateDefinition(definition)
-    if (definition.serviceId !== access.declaration.id) throw new Error('managed service definition id mismatch')
-    if (!/^sha256:[a-f0-9]{64}$/.test(revision)) throw new Error('managed service revision is invalid')
-    if (!access.owner.sourceDigest.startsWith('sha256:')) throw new Error('managed service source digest is invalid')
-    if (!access.owner.pluginId || !access.owner.pluginGeneration || !access.owner.hostGeneration) {
-      throw new Error('managed service owner authority is incomplete')
-    }
-    const assignedDeliveries = definition.launch.arguments.filter(
-      argument => typeof argument !== 'string' && argument.kind === 'host-assigned-loopback',
-    ).length + definition.protectedBindings.filter(binding => binding.source === 'host-assigned-loopback').length
-    if (
-      (definition.discovery.kind === 'host-assigned-loopback' && assignedDeliveries !== 1)
-      || (definition.discovery.kind !== 'host-assigned-loopback' && assignedDeliveries !== 0)
-    ) throw new Error('managed service must declare exactly one Host-assigned loopback delivery')
-    const identity: ManagedServiceIdentityV1 = {
-      source: access.source,
-      pluginId: access.owner.pluginId,
-      serviceId: definition.serviceId,
-    }
-    const key = managedIdentityKey(identity)
-    while (true) {
-      const pending = this.pendingRegistrations.get(key)
-      if (pending !== undefined) {
-        const record = await pending
-        if (
-          record.access.owner.pluginGeneration === access.owner.pluginGeneration
-          && record.revision === revision
-          && !record.disposed
-        ) return record
-        continue
-      }
-      const registration = (async (): Promise<ManagedServiceRecord> => {
-        const prior = this.records.get(key)
-        if (prior !== undefined) {
-          if (
-            prior.access.owner.pluginGeneration === access.owner.pluginGeneration
-            && prior.revision === revision && !prior.disposed
-          ) return prior
-          await this.disposeRecord(prior)
-        }
-        const operations = new Set(definition.operations.map(operation => operation.operationId))
-        if (operations.size !== definition.operations.length) {
-          throw new Error('managed service operation ids must be unique')
-        }
-        for (const grant of access.declaration.consumerGrants) {
-          if (grant.operations.some(operation => !operations.has(operation))) {
-            throw new Error('managed service grant references an undeclared operation')
-          }
-        }
-        for (const operation of definition.operations) {
-          const authentication = operation.httpAuthentication
-          if (authentication?.mode !== 'authorization-header') continue
-          const binding = definition.protectedBindings.find(item => item.slot === authentication.slot)
-          if (binding === undefined || binding.source === 'composition') {
-            throw new Error('managed service operation authorization references an invalid secret slot')
-          }
-        }
-        const registrationHandle = managedHandle('msr') as `msr_${string}`
-        const serviceHome = managedServiceHome(this.options.homeDir, access.owner.pluginId, definition.serviceId)
-        const projectedEnvironment = await this.options.projectEnvironment?.({
-          owner: access.owner,
-          serviceId: definition.serviceId,
-          serviceHome,
-        })
-        const runtimeResources = access.runtimeResources
-          ?? access.declaration.runtimeResources.filter(resource => managedServiceResourceMatchesTarget(resource))
-        const packageSchemas = runtimeResources
-          ?.filter(resource => resource.path.startsWith('./schemas/'))
-          .map(({ path, byteLength, digest }) => ({ path, byteLength, digest }))
-        const record: ManagedServiceRecord = {
-          access,
-          serviceHome,
-          revision,
-          definition: structuredClone(definition),
-          schemas: packageSchemas === undefined || packageSchemas.length === 0
-            ? this.schemas
-            : this.schemas.forPackage({
-              source: access.source,
-              artifactDirectory: access.artifactDirectory,
-              resources: packageSchemas,
-            }),
-          environment: managedServiceEnvironment(
-            serviceHome,
-            this.options.environment ?? process.env,
-            projectedEnvironment,
-          ),
-          registrationHandle,
-          ownerHandle: access.owner.ownerHandle,
-          lifecycle: new AbortController(),
-          operations: new Set(),
-          binding: Object.freeze({
-            registrationHandle,
-            serviceHandle: managedHandle('mss') as `mss_${string}`,
-            identity: Object.freeze(identity),
-            hostGeneration: access.owner.hostGeneration,
-            serviceGeneration,
-          }),
-          state: 'registered',
-          health: 'stopped',
-          processOwnership: 'host-owned',
-          diagnostic: undefined,
-          child: undefined,
-          origin: undefined,
-          brokerHandle: undefined,
-          authenticationHandle: undefined,
-          authorizationHandle: undefined,
-          secrets: new Map(),
-          leases: new Map(),
-          materializations: new Map(),
-          invocations: new Map(),
-          selectedMaterialization: undefined,
-          assignedPort: undefined,
-          preparing: undefined,
-          restarting: undefined,
-          healthMonitor: undefined,
-          disposal: undefined,
-          disposed: false,
-        }
-        this.records.set(key, record)
-        this.registrations.set(registrationHandle, record)
-        return record
-      })()
-      this.pendingRegistrations.set(key, registration)
-      registration.then(
-        () => {
-          if (this.pendingRegistrations.get(key) === registration) this.pendingRegistrations.delete(key)
-        },
-        () => {
-          if (this.pendingRegistrations.get(key) === registration) this.pendingRegistrations.delete(key)
-        },
-      )
-      return await registration
-    }
-  }
-
   private registrationHandle(record: ManagedServiceRecord): ManagedServiceRegistrationHandleV1 {
-    const runtime = this
-    return Object.freeze({
-      get binding() {
-        return record.binding
-      },
-      revision: record.revision,
-      inspect: async () => runtime.projection(record),
-      authenticate: async (
-        action: 'login' | 'refresh' | 'logout',
-        options?: { readonly signal?: AbortSignal },
-      ) => await runtime.authenticate(record, action, options?.signal),
-      ensureReady: async (options?: {
-        readonly materialization?: {
-          readonly materializationHandle: `msm_${string}`
-          readonly revision: `sha256:${string}`
-        }
-        readonly signal?: AbortSignal
-      }) => await runtime.ensureReady(record, options),
-      restart: async (options?: { readonly signal?: AbortSignal }) => await runtime.restart(record, options?.signal),
-      publishNativeProvider: async (
-        input: ManagedNativeProviderPublicationInputV1,
-        options?: { readonly signal?: AbortSignal },
-      ) => runtime.nativePublications.publish(record, input, options?.signal),
-      dispose: () => runtime.disposeRecord(record),
+    return createManagedServiceRegistrationHandle(record, {
+      inspect: async () => this.projection(record),
+      authenticate: async (action, signal) => await this.authenticate(record, action, signal),
+      ensureReady: async options => await this.ensureReady(record, options),
+      restart: async signal => await this.restart(record, signal),
+      publishNativeProvider: async (input, signal) => this.nativePublications.publish(record, input, signal),
+      dispose: () => this.disposeRecord(record),
     })
-  }
-
-  private boundClient(state: ManagedServiceClientState): ManagedServiceBoundClientV1 {
-    return this.broker.boundClient(state)
   }
 
   private projection(record: ManagedServiceRecord) {
