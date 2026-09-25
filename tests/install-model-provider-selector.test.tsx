@@ -197,7 +197,8 @@ describe('native model provider selector installation', () => {
       install('electronBridge', {
         getSentryInitOptions: async () => ({ appVersion: 'future', buildNumber: 'unknown', buildFlavor: 'prod' }),
         sendMessageFromView: async (envelope: { request?: { id?: string; method?: string } }) => {
-          if (envelope.request?.method !== 'config/read') return
+          const method = envelope.request?.method
+          if (method !== 'config/read' && method !== 'model/list') return
           queueMicrotask(() => {
             dom.window.dispatchEvent(
               new dom.window.MessageEvent('message', {
@@ -206,13 +207,18 @@ describe('native model provider selector installation', () => {
                   hostId: 'local',
                   message: {
                     id: envelope.request!.id,
-                    result: {
-                      config: {
-                        model_provider: 'provider-a',
-                        model: 'model-a',
-                        model_reasoning_effort: 'high',
+                    result: method === 'config/read'
+                      ? {
+                        config: {
+                          model_provider: 'provider-a',
+                          model: 'model-a',
+                          model_reasoning_effort: 'high',
+                        },
+                      }
+                      : {
+                        data: [{ id: 'protocol-model-a', model: 'model-a', displayName: 'Model A', hidden: false }],
+                        nextCursor: null,
                       },
-                    },
                   },
                 },
                 source: dom.window,

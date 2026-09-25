@@ -68,7 +68,7 @@ it('restores provider-scoped members, order and checkmark across roundtrip and m
     expect(rows.filter(row => row.getAttribute('aria-checked') === 'true').map(row => row.textContent)).toEqual([
       checked,
     ])
-    expect(document.querySelector('.cxmp-search')).not.toBeNull()
+    expect(document.querySelector('.cxmp-search')).toBeNull()
   }
   try {
     await act(async () =>
