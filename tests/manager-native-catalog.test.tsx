@@ -103,7 +103,8 @@ describe('Manager native catalog coverage', () => {
         ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
           .find(item => item.textContent?.includes('Blocked'))!.click()
       })
-      expect(fixture.document.querySelector('.cxms-provider')).toBeNull()
+      expect((fixture.element('.cxms-provider-toggle') as HTMLButtonElement).disabled).toBe(true)
+      expect(fixture.element('.cxms-model-count').textContent).toBe('No models available')
       await act(async () => {
         ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
           .find(item => item.textContent?.includes('All models'))!.click()
@@ -123,6 +124,7 @@ describe('Manager native catalog coverage', () => {
               provenance: ['native'],
               notListed: false,
               present: true,
+              compatibility: 'supported',
               selectable: true,
               blocked: false,
               pinned: false,

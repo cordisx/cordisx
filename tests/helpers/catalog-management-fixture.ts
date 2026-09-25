@@ -119,6 +119,10 @@ export function catalogFixture(views: readonly CatalogManagementView[] = [catalo
           ...(command.operation === 'runScript'
             ? {
               activity: 'loading' as const,
+              sourceCapabilities: [
+                ...view.sourceCapabilities.filter(value => value !== 'runScript'),
+                'cancelScript' as const,
+              ],
               capabilities: [...view.capabilities.filter(value => value !== 'runScript'), 'cancelScript' as const],
             }
             : {}),
@@ -126,6 +130,10 @@ export function catalogFixture(views: readonly CatalogManagementView[] = [catalo
             ? {
               activity: 'idle' as const,
               outcome: 'cancelled' as const,
+              sourceCapabilities: [
+                ...view.sourceCapabilities.filter(value => value !== 'cancelScript'),
+                'runScript' as const,
+              ],
               capabilities: [...view.capabilities.filter(value => value !== 'cancelScript'), 'runScript' as const],
             }
             : {}),

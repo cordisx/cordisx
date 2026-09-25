@@ -79,6 +79,12 @@ describe('binding catalog Manager', () => {
         modelId: 'Model-A',
         blocked: true,
       })
+      expect(fixture.document.querySelector('[data-model-id="Model-A"]')).toBeNull()
+      await fixture.click('[aria-label="Model visibility"]')
+      await act(async () => {
+        ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
+          .find(item => item.textContent?.includes('Blocked'))!.click()
+      })
       expect(fixture.element('[aria-label="Unblock model: Model-A"]').getAttribute('aria-pressed')).toBe('true')
       await fixture.click('[aria-label="Pause automatic refresh"]')
       expect(host.commands[1]).toMatchObject({ operation: 'setAutoPaused', paused: true, expectedRevision: '2' })
@@ -91,7 +97,7 @@ describe('binding catalog Manager', () => {
     }
   })
 
-  it('retains search/focused exact ID after an event and presents dormant preferences as unavailable', async () => {
+  it('retains search and moves focus safely when an exact ID leaves the selectable filter', async () => {
     const host = catalogFixture()
     const fixture = reactManagerFixture()
     const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
@@ -122,8 +128,14 @@ describe('binding catalog Manager', () => {
         })
         await host.client.refresh()
       })
-      expect(fixture.document.activeElement).toBe(button)
+      expect(fixture.document.activeElement).toBe(fixture.element('[data-catalog-list]'))
       expect((fixture.element('[aria-label="Search services or models"]') as HTMLInputElement).value).toBe('Model-A')
+      expect(fixture.document.querySelector('[data-model-id="Model-A"]')).toBeNull()
+      await fixture.click('[aria-label="Model visibility"]')
+      await act(async () => {
+        ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
+          .find(item => item.textContent?.includes('Removed'))!.click()
+      })
       expect(fixture.element('[data-model-id="Model-A"]').textContent).toContain('Removed')
     } finally {
       host.client.dispose()
@@ -175,11 +187,12 @@ describe('binding catalog Manager', () => {
     const host = catalogFixture([emptyView])
     const fixture = reactManagerFixture()
     const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+    const legacy = { loading: false, entries: [], providers: [] }
     const registry = {
       management: host.client,
       subscribe: () => () => {},
       refresh: async () => {},
-      snapshot: () => ({ loading: false, entries: [], providers: [] }),
+      snapshot: () => legacy,
     } as unknown as ModelProviderRegistry
     try {
       await host.client.refresh()
@@ -346,11 +359,12 @@ describe('binding catalog Manager', () => {
     })])
     const fixture = reactManagerFixture()
     const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+    const legacy = { loading: false, entries: [], providers: [] }
     const registry = {
       management: host.client,
       subscribe: () => () => {},
       refresh: async () => {},
-      snapshot: () => ({ loading: false, entries: [], providers: [] }),
+      snapshot: () => legacy,
     } as unknown as ModelProviderRegistry
     const menuItem = (label: string) =>
       [...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]

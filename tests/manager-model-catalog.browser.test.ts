@@ -209,6 +209,12 @@ it.skipIf(!executable)(
       await run(`document.querySelector('.cxmc-editor-actions button').click();await Fixture.settle()`)
       await run(`await Fixture.refreshState('empty')`)
       expect(await evaluate('!!document.querySelector(".cxmp-toolbar input")')).toBe(true)
+      expect(await evaluate('document.querySelectorAll("[data-present=false]").length')).toBe(0)
+      expect(await evaluate('document.querySelector("[data-binding-ref=binding-a] .cxmc-binding-toggle").disabled'))
+        .toBe(true)
+      await run(
+        `document.querySelector('[aria-label="Model visibility"]').click();await Fixture.settle();[...document.querySelectorAll('[role="menuitemcheckbox"]')].find(n=>n.textContent.includes('Removed')).click();await Fixture.settle()`,
+      )
       expect(await evaluate('document.querySelectorAll("[data-present=false]").length')).toBe(2)
       await run(`await Fixture.setLocale('zh-CN')`)
       expect(await evaluate('document.querySelector("h1").textContent')).toBe('模型服务')
