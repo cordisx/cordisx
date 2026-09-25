@@ -20,7 +20,7 @@ import { useProgressiveModelRows } from './model-service-list.js'
 type Intent = Exclude<CatalogManagementCommand, { operation: 'createConnection' }> extends infer C
   ? C extends CatalogManagementCommand ? Omit<C, 'bindingRef' | 'scopeRevision' | 'expectedRevision'> : never
   : never
-export type CatalogFilter = 'all' | 'selectable' | 'blocked' | 'removed'
+export type CatalogFilter = 'selectable' | 'blocked' | 'removed'
 export const catalogQuery = (value: string) => value.normalize('NFKC').toLocaleLowerCase().trim()
 export const catalogTime = (value: number | undefined, locale: string): string =>
   value === undefined
@@ -28,13 +28,13 @@ export const catalogTime = (value: number | undefined, locale: string): string =
     : new Date(value).toLocaleString(locale)
 
 export function CatalogBinding(
-  { view, client, provider, locale, query, filter, connected, expanded, onExpandedChange }: {
+  { view, client, provider, locale, query, filters, connected, expanded, onExpandedChange }: {
     readonly view: CatalogManagementView
     readonly client: ModelCatalogClient
     readonly provider?: HostModelProvider | undefined
     readonly locale: string
     readonly query: string
-    readonly filter: CatalogFilter
+    readonly filters: ReadonlySet<CatalogFilter>
     readonly connected: boolean
     readonly expanded?: boolean
     readonly onExpandedChange?: (open: boolean) => void
@@ -51,10 +51,7 @@ export function CatalogBinding(
   >()
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
-  const capabilityView = view as CatalogManagementView & {
-    readonly sourceCapabilities?: readonly CatalogManagementOperation[]
-    readonly preferenceCapabilities?: readonly CatalogManagementOperation[]
-  }
+  const capabilityView = view
   const sourceCapabilities = capabilityView.sourceCapabilities ?? view.capabilities
   const preferenceCapabilities = capabilityView.preferenceCapabilities ?? view.capabilities
   const effectiveExpanded = expanded ?? true
@@ -82,7 +79,6 @@ export function CatalogBinding(
   }
   const items: MoreMenuItem[] = []
   const openEditor = (next: NonNullable<typeof editor>) => {
-    changeExpanded(true)
     setConfirmation(undefined)
     setEditor(next)
     setError(undefined)
@@ -146,10 +142,26 @@ export function CatalogBinding(
   )
   const rows = supportedRows.filter(row =>
     (matchesProvider || catalogQuery(`${row.id} ${row.label}`).includes(query))
-    && (filter === 'all' || filter === 'selectable' && row.selectable || filter === 'blocked' && row.blocked
-      || filter === 'removed' && !row.present)
+    && (filters.size === 0 || filters.has('selectable') && row.selectable || filters.has('blocked') && row.blocked
+      || filters.has('removed') && !row.present)
   )
-  const progressive = useProgressiveModelRows(rows.length, `${query}:${filter}`)
+  const canExpand = rows.length > 0
+  const listExpanded = canExpand && effectiveExpanded
+  const scriptUnavailable = view.sourceKind === 'script' && !sourceCapabilities.includes('runScript') && !scriptRunning
+  const detailVisible = listExpanded || diagnosticsOpen || confirmation !== undefined || editor !== undefined
+    || error !== undefined || !connected || scriptUnavailable
+  const emptyLabel = view.activity !== 'idle'
+    ? t('catalog.refreshing')
+    : view.outcome === 'error'
+    ? t('catalog.error')
+    : view.sourceCount === 0
+    ? t('catalog.noModels')
+    : query !== ''
+    ? t('catalog.noMatchingModels')
+    : filters.has('selectable')
+    ? t('catalog.noSelectableModels')
+    : t('catalog.noMatchingModels')
+  const progressive = useProgressiveModelRows(rows.length, `${query}:${[...filters].sort().join(',')}`)
   useLayoutEffect(() => {
     const previous = focused.current
     const document = root.current?.ownerDocument
@@ -158,11 +170,6 @@ export function CatalogBinding(
       focused.current = null
     }
   })
-  const status = view.outcome === 'error'
-    ? 'catalog.error'
-    : view.activity !== 'idle'
-    ? 'catalog.refreshing'
-    : `catalog.${view.freshness}` as const
   const sameConfirmation = confirmation?.revision === view.revision && confirmation.scope === view.scopeRevision
   const credentialBlocked = confirmation?.intent.operation === 'requestCredentialReplacement'
     && view.supplement.length > 0
@@ -174,15 +181,16 @@ export function CatalogBinding(
       onFocusCapture={event => {
         focused.current = event.target as HTMLElement
       }}
-      data-expanded={effectiveExpanded}
+      data-expanded={listExpanded}
     >
       <header className="cxmc-binding-header">
         <button
           type="button"
           className="cxmc-binding-toggle"
-          aria-expanded={effectiveExpanded}
+          aria-expanded={listExpanded}
           aria-controls={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-          onClick={() => changeExpanded(!effectiveExpanded)}
+          disabled={!canExpand}
+          onClick={() => changeExpanded(!listExpanded)}
         >
           <span className="cxms-disclosure-mark" aria-hidden="true" />
           {provider?.selectorBrand
@@ -192,7 +200,9 @@ export function CatalogBinding(
             <strong>{view.title}</strong>
             <code>{view.scopeLabel ?? view.providerId}</code>
           </span>
-          <span className="cxms-model-count">{t('catalog.sourceCount')}: {view.sourceCount}</span>
+          <span className="cxms-model-count">
+            {canExpand ? `${t('catalog.sourceCount')}: ${view.sourceCount}` : emptyLabel}
+          </span>
         </button>
         <div className="cxmc-binding-actions" data-menu-open={actionMenuOpen}>
           {view.sourceKind === 'auto' && sourceCapabilities.includes('setAutoPaused')
@@ -234,7 +244,6 @@ export function CatalogBinding(
             label={`${t('catalog.diagnostics')}: ${view.title}`}
             aria-expanded={diagnosticsOpen}
             onClick={() => {
-              changeExpanded(true)
               setDiagnosticsOpen(!diagnosticsOpen)
             }}
           />
@@ -247,26 +256,29 @@ export function CatalogBinding(
               />
             )
             : null}
+          {preferenceCapabilities.includes('setProviderFavorite')
+            ? (
+              <IconButton
+                tag="button"
+                className="cxmc-provider-favorite"
+                icon={capabilityView.providerFavorite ? 'favorite-active' : 'favorite'}
+                label={`${
+                  t(capabilityView.providerFavorite ? 'catalog.unfavoriteProvider' : 'catalog.favoriteProvider')
+                }: ${view.title}`}
+                aria-pressed={capabilityView.providerFavorite}
+                disabled={!preferenceAllowed('setProviderFavorite')}
+                onClick={() =>
+                  void run({
+                    operation: 'setProviderFavorite',
+                    favorite: !capabilityView.providerFavorite,
+                  })}
+              />
+            )
+            : null}
         </div>
       </header>
-      <div id={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`} hidden={!effectiveExpanded}>
-        <div className="cxmc-status" data-freshness={view.freshness} data-outcome={view.outcome}>
-          <span>{t(`catalog.${view.sourceKind}`)}</span>
-          <span>{t(status)}</span>
-          {view.diagnostics.targetState === 'pending-restart'
-            ? <span>{t('catalog.pending-restart')}</span>
-            : view.diagnostics.targetState === 'conflict'
-            ? <span>{t('catalog.targetConflict')}</span>
-            : null}
-          {view.scriptState ? <span>{t('catalog.sessionOnly')}</span> : null}
-          {view.autoPaused && view.sourceKind === 'auto' ? <span>{t('catalog.paused')}</span> : null}
-          <span>{t('catalog.sourceCount')}: {view.sourceCount}</span>
-          <span>{t('catalog.selectable')}: {view.selectableCount}</span>
-          <span>
-            {t('catalog.lastSuccess')}: <time>{catalogTime(view.diagnostics.lastSuccessAt, locale)}</time>
-          </span>
-        </div>
-        {view.sourceKind === 'script' && !sourceCapabilities.includes('runScript') && !scriptRunning
+      <div id={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`} hidden={!detailVisible}>
+        {scriptUnavailable
           ? <p className="cxmc-muted">{t('catalog.scriptUnavailable')}</p>
           : null}
         {!connected
@@ -368,7 +380,13 @@ export function CatalogBinding(
             />
           )
           : null}
-        <ul className="cxmc-models" data-catalog-list="true" tabIndex={-1} aria-label={view.title}>
+        <ul
+          className="cxmc-models"
+          data-catalog-list="true"
+          tabIndex={-1}
+          aria-label={view.title}
+          hidden={!listExpanded}
+        >
           {rows.slice(0, progressive.limit).map(row => (
             <li key={row.id} data-model-id={row.id} data-present={row.present}>
               <div className="cxms-model-identity">
@@ -418,7 +436,6 @@ export function CatalogBinding(
             ? <li ref={progressive.sentinel} className="cxms-list-sentinel" aria-hidden="true" />
             : null}
         </ul>
-        {rows.length === 0 ? <p className="cxmc-muted">{t('catalog.noModels')}</p> : null}
       </div>
     </section>
   )

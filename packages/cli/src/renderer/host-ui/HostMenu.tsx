@@ -33,6 +33,7 @@ export interface HostMenuSurfaceProps {
   readonly label: string
   readonly anchorRef: RefObject<HTMLElement | null>
   readonly returnFocusRef?: RefObject<HTMLElement | null>
+  readonly align?: 'start' | 'end'
   readonly className?: string
   readonly children: ReactNode
   readonly onClose: () => void
@@ -46,6 +47,7 @@ export function HostMenuSurface({
   label,
   anchorRef,
   returnFocusRef,
+  align = 'start',
   className,
   children,
   onClose,
@@ -71,7 +73,8 @@ export function HostMenuSurface({
       const gap = 6
       const anchorRect = anchor.getBoundingClientRect()
       const menuRect = menu.getBoundingClientRect()
-      const left = Math.min(Math.max(edge, anchorRect.left), Math.max(edge, window.innerWidth - menuRect.width - edge))
+      const preferredLeft = align === 'end' ? anchorRect.right - menuRect.width : anchorRect.left
+      const left = Math.min(Math.max(edge, preferredLeft), Math.max(edge, window.innerWidth - menuRect.width - edge))
       const above = anchorRect.top - menuRect.height - gap
       const top = above >= edge ? above : Math.min(window.innerHeight - menuRect.height - edge, anchorRect.bottom + gap)
       menu.style.left = `${Math.round(left)}px`

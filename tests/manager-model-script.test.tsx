@@ -19,7 +19,7 @@ describe('model script Manager configuration', () => {
     const { CatalogBinding } = await import(
       '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
     )
-    const props = { client: host.client, locale: 'en', query: '', filter: 'all' as const, connected: true }
+    const props = { client: host.client, locale: 'en', query: '', filters: new Set(), connected: true }
     const scriptState = {
       authorityRevision: 'authority',
       runGeneration: 1,

@@ -57,6 +57,8 @@ export const MODEL_CATALOG_COPY = {
   'catalog.paused': { en: 'Automatic refresh paused', 'zh-CN': '自动刷新已暂停' },
   'catalog.selectable': { en: 'Selectable', 'zh-CN': '可选' },
   'catalog.sourceCount': { en: 'Models', 'zh-CN': '模型' },
+  'catalog.favoriteProvider': { en: 'Favorite provider', 'zh-CN': '收藏服务' },
+  'catalog.unfavoriteProvider': { en: 'Remove provider from favorites', 'zh-CN': '取消收藏服务' },
   'catalog.block': { en: 'Block model', 'zh-CN': '屏蔽模型' },
   'catalog.unblock': { en: 'Unblock model', 'zh-CN': '解除屏蔽' },
   'catalog.pin': { en: 'Pin model', 'zh-CN': '置顶模型' },
@@ -160,4 +162,6 @@ export const MODEL_CATALOG_COPY = {
   },
   'catalog.showMore': { en: 'Show more models', 'zh-CN': '显示更多模型' },
   'catalog.noModels': { en: 'No models', 'zh-CN': '暂无模型' },
+  'catalog.noMatchingModels': { en: 'No matching models', 'zh-CN': '无匹配模型' },
+  'catalog.noSelectableModels': { en: 'No selectable models', 'zh-CN': '暂无可选模型' },
 } as const satisfies ProductCopyCatalog<'catalog'>

@@ -1,6 +1,9 @@
 import React, { act } from 'react'
 import { describe, expect, it } from 'vitest'
-import { nativeModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import {
+  type ModelProviderSnapshot,
+  nativeModelProviderRegistry,
+} from '../packages/cli/src/renderer/model-providers.js'
 import { catalogFixture, catalogView } from './helpers/catalog-management-fixture.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 
@@ -13,6 +16,43 @@ const providers = [{
 }]
 
 describe('Manager native catalog coverage', () => {
+  it('keeps an empty legacy provider visible and restores its disclosure when models arrive', async () => {
+    const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+    let snapshot: ModelProviderSnapshot = {
+      loading: false,
+      entries: [],
+      providers: [{ ...providers[0]!, models: [] }],
+    }
+    const listeners = new Set<() => void>()
+    const registry = {
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      refresh: async () => {},
+      snapshot: () => snapshot,
+    }
+    try {
+      await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+      const toggle = fixture.element('.cxms-provider-toggle') as HTMLButtonElement
+      expect(toggle.disabled).toBe(true)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      expect(fixture.element('.cxms-provider-identity').textContent).toContain('DeepSeek')
+      expect(fixture.element('.cxms-model-count').textContent).toBe('No models available')
+
+      await act(async () => {
+        snapshot = { ...snapshot, providers }
+        listeners.forEach(listener => listener())
+      })
+      expect(toggle.disabled).toBe(false)
+      await fixture.click('.cxms-provider-toggle')
+      expect(fixture.document.querySelector('[aria-label="DeepSeek · Models"]')).not.toBeNull()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
   it('keeps native branding, search and disabled filter when management is absent', async () => {
     const fixture = reactManagerFixture()
     const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
@@ -56,9 +96,18 @@ describe('Manager native catalog coverage', () => {
       expect(fixture.element('.cxmp-management').dataset.catalogManagement).toBe('ready')
       expect(fixture.element('.cxms-provider').dataset.catalogBinding).toBe('unbound')
       expect(fixture.element('.cxmc-muted').textContent).toBe('Read only')
-      await fixture.choose('input[aria-label="Model visibility"]', 'Blocked')
+      await fixture.click('[aria-label="Model visibility"]')
+      await act(async () => {
+        ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
+          .find(item => item.textContent?.includes('All models'))!.click()
+        ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
+          .find(item => item.textContent?.includes('Blocked'))!.click()
+      })
       expect(fixture.document.querySelector('.cxms-provider')).toBeNull()
-      await fixture.choose('input[aria-label="Model visibility"]', 'All models')
+      await act(async () => {
+        ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
+          .find(item => item.textContent?.includes('All models'))!.click()
+      })
       await act(async () => {
         host.publish({
           epoch: 'epoch-a',

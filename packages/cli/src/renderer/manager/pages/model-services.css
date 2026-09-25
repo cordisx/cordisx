@@ -34,9 +34,18 @@
   text-align: left;
 }
 
-.cxms-provider-toggle:hover,
+.cxms-provider-toggle:hover:not(:disabled),
 .cxms-provider-toggle:focus-visible {
   background: var(--cx-hover);
+}
+
+.cxms-provider-toggle:disabled {
+  color: inherit;
+  cursor: default;
+}
+
+.cxms-provider-toggle:disabled .cxms-disclosure-mark {
+  opacity: 0.32;
 }
 
 .cxms-provider-toggle:focus-visible {
