@@ -58,8 +58,13 @@ export function HostMenuSurface({
   const focusAllowed = useRef(canFocus)
   const initialFocusRequested = useRef(false)
   const placement = useRef<'above' | 'below' | undefined>(undefined)
+  const openGeneration = useRef(0)
+  const previouslyOpen = useRef(false)
   focusAllowed.current = canFocus
   const menuId = `cxhm-${useId().replace(/:/g, '')}`
+
+  if (open && !previouslyOpen.current) openGeneration.current += 1
+  previouslyOpen.current = open
 
   if (!open) {
     initialFocusRequested.current = false
@@ -153,11 +158,12 @@ export function HostMenuSurface({
         if (event.key === 'Escape') {
           event.preventDefault()
           event.stopPropagation()
-          onClose()
           const target = returnFocusRef?.current
+          const closingGeneration = openGeneration.current
+          onClose()
           const restoreFocus = () => {
             if (
-              menuRef.current === null && target?.isConnected && returnFocusRef?.current === target
+              openGeneration.current === closingGeneration && target?.isConnected && returnFocusRef?.current === target
               && anchorRef.current?.isConnected
               && (focusAllowed.current?.() ?? true)
             ) {
