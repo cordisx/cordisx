@@ -55,7 +55,13 @@ const choices = (
   </>
 )
 
-async function renderMenu(children: ReactNode = choices, onClose = vi.fn(), open = true, canFocus?: () => boolean) {
+async function renderMenu(
+  children: ReactNode = choices,
+  onClose = vi.fn(),
+  open = true,
+  canFocus?: () => boolean,
+  align?: 'start' | 'end',
+) {
   await act(async () => {
     root!.render(
       <HostMenuSurface
@@ -63,6 +69,7 @@ async function renderMenu(children: ReactNode = choices, onClose = vi.fn(), open
         label="Test menu"
         anchorRef={{ current: anchor }}
         returnFocusRef={{ current: anchor }}
+        align={align}
         onClose={onClose}
         canFocus={canFocus}
       >
@@ -190,7 +197,8 @@ describe('HostMenuSurface behavior', () => {
     })
     const { menu } = await renderMenu()
     expect(menu.style.left).toBe('592px')
-    expect(menu.style.top).toBe('274px')
+    expect(menu.style.top).toBe('394px')
+    expect(menu.style.transform).toBe('translateY(-100%)')
     anchorRect = rect(100, 20, 80, 28)
     Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 250 })
     await act(async () => {
@@ -203,7 +211,61 @@ describe('HostMenuSurface behavior', () => {
       anchor.dispatchEvent(new dom.window.Event('scroll', { bubbles: false }))
     })
     expect(menu.style.left).toBe('8px')
-    expect(menu.style.top).toBe('374px')
+    expect(menu.style.top).toBe('494px')
+    expect(menu.style.transform).toBe('translateY(-100%)')
+  })
+
+  it('tracks animated content size against the same anchor side without duplicate focus', async () => {
+    Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 800 })
+    Object.defineProperty(dom.window, 'innerHeight', { configurable: true, value: 600 })
+    let menuHeight = 120
+    vi.spyOn(dom.window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function() {
+      return this === anchor ? rect(600, 400, 80, 28) : rect(0, 0, 200, menuHeight)
+    })
+    let resize!: () => void
+    const disconnectObserver = vi.fn()
+    Object.defineProperty(dom.window, 'ResizeObserver', {
+      configurable: true,
+      value: class {
+        constructor(callback: () => void) {
+          resize = callback
+        }
+        observe() {}
+        disconnect = disconnectObserver
+      },
+    })
+    let frame: FrameRequestCallback | undefined
+    const cancel = vi.fn()
+    Object.defineProperty(dom.window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frame = callback
+        return 7
+      },
+    })
+    Object.defineProperty(dom.window, 'cancelAnimationFrame', { configurable: true, value: cancel })
+    const focus = vi.spyOn(dom.window.HTMLElement.prototype, 'focus')
+    const { menu } = await renderMenu(choices, vi.fn(), true, undefined, 'end')
+    expect(menu.style.left).toBe('480px')
+    expect(menu.style.top).toBe('394px')
+    expect(menu.style.transform).toBe('translateY(-100%)')
+    expect(menu.style.getPropertyValue('--cxhm-available-height')).toBe('386px')
+    expect(focus).toHaveBeenCalledOnce()
+
+    menuHeight = 180
+    resize()
+    resize()
+    expect(frame).toBeDefined()
+    frame?.(0)
+    expect(menu.style.top).toBe('394px')
+    expect(focus).toHaveBeenCalledOnce()
+
+    menuHeight = 90
+    resize()
+    await act(async () => root!.unmount())
+    root = undefined
+    expect(cancel).toHaveBeenCalledWith(7)
+    expect(disconnectObserver).toHaveBeenCalledOnce()
   })
 
   it('removes portal, position and outside listeners, and theme observation on unmount', async () => {

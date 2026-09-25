@@ -57,10 +57,14 @@ export function HostMenuSurface({
   const menuRef = useRef<HTMLDivElement>(null)
   const focusAllowed = useRef(canFocus)
   const initialFocusRequested = useRef(false)
+  const placement = useRef<'above' | 'below' | undefined>(undefined)
   focusAllowed.current = canFocus
   const menuId = `cxhm-${useId().replace(/:/g, '')}`
 
-  if (!open) initialFocusRequested.current = false
+  if (!open) {
+    initialFocusRequested.current = false
+    placement.current = undefined
+  }
 
   useLayoutEffect(() => {
     if (!open || menuRef.current === null || anchorRef.current === null) return
@@ -68,6 +72,7 @@ export function HostMenuSurface({
     const anchor = anchorRef.current
     const theme = new HostThemeProjection(document)
     const detachTheme = theme.attach(menu)
+    let positionFrame: number | undefined
     const position = () => {
       const edge = 8
       const gap = 6
@@ -75,10 +80,34 @@ export function HostMenuSurface({
       const menuRect = menu.getBoundingClientRect()
       const preferredLeft = align === 'end' ? anchorRect.right - menuRect.width : anchorRect.left
       const left = Math.min(Math.max(edge, preferredLeft), Math.max(edge, window.innerWidth - menuRect.width - edge))
-      const above = anchorRect.top - menuRect.height - gap
-      const top = above >= edge ? above : Math.min(window.innerHeight - menuRect.height - edge, anchorRect.bottom + gap)
+      const availableAbove = Math.max(0, anchorRect.top - gap - edge)
+      const availableBelow = Math.max(0, window.innerHeight - edge - anchorRect.bottom - gap)
+      placement.current ??= menuRect.height <= availableAbove
+          || (menuRect.height > availableBelow && availableAbove >= availableBelow)
+        ? 'above'
+        : 'below'
+      const placeAbove = placement.current === 'above'
+      const availableHeight = placeAbove ? availableAbove : availableBelow
+      menu.style.setProperty('--cxhm-available-height', `${Math.floor(availableHeight)}px`)
+      const top = placeAbove ? anchorRect.top - gap : anchorRect.bottom + gap
       menu.style.left = `${Math.round(left)}px`
-      menu.style.top = `${Math.max(edge, Math.round(top))}px`
+      menu.style.top = `${Math.round(top)}px`
+      menu.style.transform = placeAbove ? 'translateY(-100%)' : 'none'
+    }
+    const schedulePosition = () => {
+      if (positionFrame !== undefined) return
+      if (typeof window.requestAnimationFrame !== 'function') {
+        position()
+        return
+      }
+      positionFrame = window.requestAnimationFrame(() => {
+        positionFrame = undefined
+        position()
+      })
+    }
+    const reposition = () => {
+      placement.current = undefined
+      schedulePosition()
     }
     position()
     if (!initialFocusRequested.current && (canFocus?.() ?? true) && !menu.contains(document.activeElement)) {
@@ -91,12 +120,18 @@ export function HostMenuSurface({
       if (!(target instanceof Node) || menu.contains(target) || anchor.contains(target)) return
       onClose()
     }
-    window.addEventListener('resize', position)
-    document.addEventListener('scroll', position, true)
+    window.addEventListener('resize', reposition)
+    document.addEventListener('scroll', reposition, true)
     document.addEventListener('pointerdown', outside, true)
+    const ResizeObserver = document.defaultView?.ResizeObserver
+    const resizeObserver = ResizeObserver === undefined ? undefined : new ResizeObserver(schedulePosition)
+    resizeObserver?.observe(menu)
+    resizeObserver?.observe(anchor)
     return () => {
-      window.removeEventListener('resize', position)
-      document.removeEventListener('scroll', position, true)
+      if (positionFrame !== undefined) window.cancelAnimationFrame?.(positionFrame)
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', reposition)
+      document.removeEventListener('scroll', reposition, true)
       document.removeEventListener('pointerdown', outside, true)
       detachTheme()
       theme.dispose()

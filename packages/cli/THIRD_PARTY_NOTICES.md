@@ -38,6 +38,13 @@ UI. Its license is included at `third_party/openai-apps-sdk-ui-MIT.txt`.
 The bundled MiniMax glyph is sourced from the MIT-licensed LobeHub Icons
 collection. Its license is included at `third_party/lobe-icons-MIT.txt`.
 
+The model disclosure brain glyph is the upstream `brain.svg` asset from Lucide
+`0.468.0`, sourced from
+`https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/icons/brain.svg`.
+Its ISC license is included at `third_party/lucide-0.468.0-ISC.txt`. CordisX
+bundles only this single asset and does not install or redistribute the Lucide
+package.
+
 Other bundled provider/model marks are attributed to their respective owners.
 Their inclusion identifies compatible services or model families and does not
 imply sponsorship, certification, or ownership by CordisX.
