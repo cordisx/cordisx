@@ -409,7 +409,7 @@ describe('Vite development native submission assembly', () => {
       expect(entrySource).toContain('"origin":"local-dev"')
     })
 
-    await runCordisXCli(['dev', f.entry], {
+    await runCordisXCli(['dev', f.entry, '--executable', f.executable], {
       cwd: f.project,
       env: { CORDISX_HOME: f.home },
       internalRunInjectedHost: runHost,

@@ -805,8 +805,9 @@ export async function startNativeViteServer(
     },
   }
   try {
+    const initialPlugins = initialConfig.plugins.filter(plugin => plugin.enabled)
     const initialGenerations = await Promise.all(
-      initialConfig.plugins.filter(plugin => plugin.enabled).map(ensureGeneration),
+      initialPlugins.map(ensureGeneration),
     )
     const roots = [...new Set(initialGenerations.map(item => item.root))]
     server = await createServer({
@@ -875,7 +876,7 @@ export async function startNativeViteServer(
     })
     await listenNativeViteServer(
       server,
-      initialConfig.plugins.flatMap((plugin, index) =>
+      initialPlugins.flatMap((plugin, index) =>
         plugin.package !== undefined && plugin.development === undefined
           ? []
           : initialGenerations[index]!.watchFiles
