@@ -13,7 +13,7 @@ import { verifyCandidateDirectory, writeCandidateRelease } from './ci-release-ca
 const root = fileURLToPath(new URL('..', import.meta.url))
 const commit = 'a'.repeat(40)
 const repository = 'cordisx/cordisx'
-const version = '0.1.0-beta.23'
+const version = '0.1.0-beta.24'
 const tag = `v${version}`
 
 function integrity(content) {
