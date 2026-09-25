@@ -3,9 +3,8 @@
 Date: 2026-09-25. Status: local source checkpoint; not integrated, installed,
 released, natively verified, or user-accepted.
 
-This record covers PREF / UX-6 for task
-`01a0d44a-74f9-7861-9fbd-eb3e8f059182`. It is a dated handoff, not a public
-plugin contract or permanent ownership instruction.
+This record covers the PREF / UX-6 implementation route. It is a dated handoff,
+not a public plugin contract or permanent ownership instruction.
 
 ## Implemented Scope
 
@@ -105,10 +104,10 @@ The corrected FILE-STORE source input is
 `modelPreferences.schemaVersion = 2`. FILE-STORE wiring is not part of this
 checkpoint and must be completed by its owner using this checkpoint's exact SHA.
 
-UX task `01a0d44a-2f2a-75d2-850f-0671ffb76120` consumed the split capability
-names at `3d41bea0a8706137e551b902ab7f7143589ee0c4`. The coordinator must combine the
-checkpoints and rerun its focused UI tests. CAPS task
-`01a0d44a-c7dd-7c90-91e9-50f2ee9eb588` exposes its immutable checkpoint at
+The UX owner consumed the split capability names at
+`3d41bea0a8706137e551b902ab7f7143589ee0c4`. The integration owner must combine
+the checkpoints and rerun the focused UI tests. The CAPS owner exposes its
+immutable checkpoint at
 `c4f0401cf98d476014c4c785505a1bdc84ba9908` (parent
 `c9f5d2601ef0286f8f11b41d0504fbcfb5cf3142`) and exports
 `resolveNativeModelEligibility(...)` from
@@ -122,8 +121,7 @@ data but is not selectable, and compatible blocked/offline rows remain available
 for management and recovery. No consumer may infer compatibility from
 `selectable` or `blocked`. A disconnected management transport retains those
 diagnostic rows for management but fails closed to an empty selector projection.
-ROUNDTRIP task `01a0c901-87d6-7292-91ed-2e53c2cadb41` remains a separate
-integration input.
+The ROUNDTRIP owner remains a separate integration input.
 
 ## Verification And Limits
 
@@ -151,10 +149,10 @@ integration input.
 ## RouteSpecHandoff
 
 - route: PREF / UX-6
-- routeTaskRef: `01a0d44a-74f9-7861-9fbd-eb3e8f059182`
+- routeOwner: PREF / UX-6 implementation
 - sourceBase: `2a9fccd2209966780f68807867476566d2fc706b`
 - formalMainAtStart: `bc54b83790ba07e28d76a7aafee929b2d5b7954a`
 - outputRef: this document and the exact local checkpoint reported after commit
-- coordinatorTaskRef: `01a095b6-4e9b-7341-8a17-f6d206e7f6ad`
+- integrationOwner: release candidate coordinator
 - coordinatorContinuationRequired: true
 - coordinatorMayComplete: false

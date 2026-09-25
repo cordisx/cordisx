@@ -113,7 +113,7 @@ implementation of those contracts, not a second public specification.
 | [managed-service-runtime-handoff-2026-09-09](managed-service-runtime-handoff-2026-09-09.md)             | Historical candidate record | 2026-09-09 local checkpoint, focused evidence, and pending gates      |
 | [provider-profile-sync-2026-09-23](history/provider-profile-sync-2026-09-23.md)                         | Historical delivery record  | SYNC-1..5 Host implementation scope, plan, and retained evidence      |
 | [model-service-capability-evidence-2026-09-25](history/model-service-capability-evidence-2026-09-25.md) | Historical evidence record  | UX-7..9 Responses eligibility and provider catalog evidence           |
-| [managed-provider-file-storage-2026-09-25](history/managed-provider-file-storage-2026-09-25.md) | Historical candidate record | FILE-STORE plaintext profile persistence and focused evidence         |
+| [managed-provider-file-storage-2026-09-25](history/managed-provider-file-storage-2026-09-25.md)         | Historical candidate record | FILE-STORE plaintext profile persistence and focused evidence         |
 
 - [Unified notifications delivery, 2026-09-10](notification-delivery-2026-09-10.md): dated candidate implementation and verification evidence.
 

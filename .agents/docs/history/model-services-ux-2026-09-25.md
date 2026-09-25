@@ -6,12 +6,11 @@ is not a product contract or release record.
 
 ## Source and ownership
 
-- routeTaskRef: `01a0d44a-2f2a-75d2-850f-0671ffb76120`
-- coordinator: `01a095b6-4e9b-7341-8a17-f6d206e7f6ad`
+- route: UX-1 through UX-5 and UX-7 compatibility integration
+- integration owner: release candidate coordinator
 - formal Host main: `bc54b83790ba07e28d76a7aafee929b2d5b7954a`
 - experimental input: `2a9fccd2209966780f68807867476566d2fc706b`
 - branch: `codex/model-services-ux-20260925`
-- worktree: `/private/tmp/cordisx-model-services-ux-20260925`
 
 The change owns only the Manager model-services components, their feature
 styles, adjacent UI helpers/copy, and focused fixtures/tests. It does not own
@@ -48,7 +47,7 @@ distinctions without treating unknown capability as supported.
 The compatibility field and count contract was reviewed at PREF checkpoint
 `b53a05e4ca939ef1771a34fe2876d005a080e41d` and CAPS checkpoint
 `c4f0401cf98d476014c4c785505a1bdc84ba9908`. This branch does not cherry-pick
-either checkpoint; the coordinator must combine this UX checkpoint with the
+either checkpoint; the integration owner must combine this UX checkpoint with the
 PREF owner's final follow-up SHA and the immutable CAPS input.
 
 ## Evidence limits
@@ -63,8 +62,8 @@ renderer tests and the 1/1 catalog browser fixture. The standalone UX branch
 does not contain PREF's parser update and therefore is not the authoritative
 runtime test graph for compatibility-bearing fixture rows.
 
-The retained preview is `http://127.0.0.1:41737/`, with screenshots under
-`artifacts/model-services-ux/` in the UX worktree. Existing screenshots remain
+The retained preview used screenshots under `artifacts/model-services-ux/` in
+the owner-local checkout. Existing screenshots remain
 representative because UX-7 changes row eligibility and counts without changing
 layout or styles.
 

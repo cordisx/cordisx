@@ -66,7 +66,7 @@ branch.
 ## RouteSpecHandoff
 
 - route: FILE-STORE
-- routeTaskRef: `01a0c7a0-2f65-7423-9128-418409a67fb6`
+- routeOwner: managed Provider file-storage implementation
 - formalMain: `bc54b83790ba07e28d76a7aafee929b2d5b7954a`
 - stageBase: `cc34216bcb60a1a24ee297b90756d3aebfcd8f28`
 - outputRef: `.agents/docs/history/managed-provider-file-storage-2026-09-25.md`
