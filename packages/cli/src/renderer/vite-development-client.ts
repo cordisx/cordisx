@@ -1,5 +1,6 @@
 import type { installCordisX, RendererPluginMutation } from './runtime.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../plugin-lifecycle-contracts.js'
+import type { CertifiedPermissionDocumentChannel } from './certified-permission-channel.js'
 
 type Install = typeof installCordisX
 type Runtime = Awaited<ReturnType<Install>>
@@ -34,6 +35,7 @@ export class NativeViteDevelopmentClient {
       pluginId: string,
       moduleGeneration: string,
     ) => Promise<ViteDevelopmentGenerationTransaction>,
+    private certifiedPermissionChannel?: CertifiedPermissionDocumentChannel,
   ) {
     this.plugins = [...plugins]
   }
@@ -68,12 +70,14 @@ export class NativeViteDevelopmentClient {
           enabled: true,
         })),
       }
-      const certifiedPermissionChannel = this.runtime?.releaseCertifiedPermissionChannel()
-      await this.runtime?.dispose()
-      // The native document and launcher authority remain the same; only the
-      // CordisX renderer is recreated. Clear the initial-injection deduplicator.
-      globalThis.__cordisxBootGeneration = undefined
+      const certifiedPermissionChannel = this.certifiedPermissionChannel
+        ?? this.runtime?.releaseCertifiedPermissionChannel()
+      this.certifiedPermissionChannel = undefined
       try {
+        await this.runtime?.dispose()
+        // The native document and launcher authority remain the same; only the
+        // CordisX renderer is recreated. Clear the initial-injection deduplicator.
+        globalThis.__cordisxBootGeneration = undefined
         this.runtime = await install(
           this.plugins.map(item => item.plugin),
           {
@@ -91,6 +95,12 @@ export class NativeViteDevelopmentClient {
       }
       return this.runtime
     })
+  }
+
+  releaseCertifiedPermissionChannel(): CertifiedPermissionDocumentChannel | undefined {
+    const channel = this.certifiedPermissionChannel ?? this.runtime?.releaseCertifiedPermissionChannel()
+    this.certifiedPermissionChannel = undefined
+    return channel
   }
 
   update(artifact: ViteDevelopmentPlugin): Promise<void> {
@@ -190,6 +200,8 @@ export class NativeViteDevelopmentClient {
       await this.runtime?.dispose()
     } finally {
       this.runtime = undefined
+      this.certifiedPermissionChannel?.dispose()
+      this.certifiedPermissionChannel = undefined
       if (!preserveSharedReactRuntime) this.disposeSharedReactRuntime()
     }
   }

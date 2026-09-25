@@ -281,7 +281,7 @@ export class ManagedServiceNodeHost {
         get nativeProviderIds() {
           return runtime.listNativeProviderIds()
         },
-        subscribeNativeProviders: listener => runtime.subscribeNativeProviders(listener),
+        subscribeNativeProviders: (listener: () => void) => runtime.subscribeNativeProviders(listener),
         prepareNativeConnection: (providerId: string) => {
           if (!PROVIDER_ID.test(providerId) || cleanupPromise !== undefined) {
             throw new Error('native managed gateway provider is unavailable')

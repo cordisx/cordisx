@@ -7,6 +7,8 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createNativeViteEntityGenerationHandler,
+  nativeViteBootModuleSource,
+  nativeViteEntryModuleSource,
   nativeViteHotPayload,
   startNativeViteServer,
 } from '../packages/cli/src/launcher/vite-development.js'
@@ -50,7 +52,7 @@ afterEach(async () => {
 })
 
 describe('native Vite development transport', () => {
-  it('retains one Certified document channel across a same-document Host restart', async () => {
+  it('transfers one Certified document channel between Vite clients on a same-document Host restart', async () => {
     const activation = {
       $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
       schemaVersion: 1 as const,
@@ -106,13 +108,22 @@ describe('native Vite development transport', () => {
       options?.certifiedPermissionChannel?.replaceSink(runtime.sink)
       return runtime as never
     })
-    const client = new NativeViteDevelopmentClient(
+    const previous = new NativeViteDevelopmentClient(
       { profileId: 'default', generation: 'runtime-generation' } as never,
       [],
       () => undefined,
     )
 
-    await client.restart(install as never)
+    await previous.restart(install as never)
+    const transferred = previous.releaseCertifiedPermissionChannel()
+    await previous.dispose(true)
+    const client = new NativeViteDevelopmentClient(
+      { profileId: 'default', generation: 'runtime-generation' } as never,
+      [],
+      () => undefined,
+      undefined,
+      transferred,
+    )
     await client.restart(install as never)
     endpoint.deliver(JSON.stringify({
       contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
@@ -128,6 +139,70 @@ describe('native Vite development transport', () => {
     expect(secondSink.replaceCertifiedPermissionSnapshot).toHaveBeenCalledWith({ revision: 1, projections: [] })
     expect(secondSink.replaceCertifiedPermissionSnapshot).toHaveBeenCalledWith({ revision: 2, projections: [] })
     channel.dispose()
+  })
+
+  it('allows the generated entry failure path to close a channel transferred before old-client disposal', async () => {
+    const channel = {
+      documentEpoch: 'document-epoch-1234',
+      ready: Promise.resolve(),
+      replaceSink: vi.fn(),
+      dispose: vi.fn(),
+    }
+    const runtime = {
+      activePluginGeneration: () => ({
+        $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+        schemaVersion: 1 as const,
+        recordKind: 'active' as const,
+        profileId: 'default',
+        runtimeGeneration: 'runtime-generation',
+        revision: 0,
+        lastGoodRevision: 0,
+        plugins: [],
+      }),
+      releaseCertifiedPermissionChannel: vi.fn(() => channel),
+      dispose: vi.fn(async () => {
+        throw new Error('old runtime disposal failed')
+      }),
+    }
+    const install = vi.fn(async () => runtime as never)
+    const previous = new NativeViteDevelopmentClient(
+      { profileId: 'default', generation: 'runtime-generation' } as never,
+      [],
+      () => undefined,
+    )
+    await previous.restart(install as never)
+    const transferred = previous.releaseCertifiedPermissionChannel()
+    await expect(previous.dispose(true)).rejects.toThrow('old runtime disposal failed')
+    transferred?.dispose()
+
+    expect(runtime.releaseCertifiedPermissionChannel).toHaveBeenCalledOnce()
+    expect(channel.dispose).toHaveBeenCalledOnce()
+    expect(install).toHaveBeenCalledOnce()
+  })
+
+  it('generates a cache-busted Host restart that transfers Certified channel ownership', () => {
+    const bootSource = nativeViteBootModuleSource({
+      reactPrepareUrl: 'http://127.0.0.1/react-prepare',
+      entryUrl: 'http://127.0.0.1/entry',
+    })
+    const entrySource = nativeViteEntryModuleSource({
+      hostImport: '/renderer/runtime.ts',
+      helperImport: '/renderer/vite-development-client.ts',
+      pluginsSource: '[]',
+      metadataSource: '{}',
+      pluginImports: [],
+      pluginUrls: [],
+    })
+
+    expect(bootSource).toContain("import.meta.hot.on('cordisx:restart-host'")
+    expect(bootSource).toContain('"http://127.0.0.1/entry" + \'?t=\' + Date.now()')
+    expect(entrySource).toContain('previous?.releaseCertifiedPermissionChannel()')
+    expect(entrySource).toContain('await previous.dispose(true)')
+    expect(entrySource).toContain('stagePluginGeneration, certifiedPermissionChannel)')
+    expect(entrySource).toContain('catch (error) { certifiedPermissionChannel?.dispose(); throw error; }')
+    expect(entrySource.indexOf('previous?.releaseCertifiedPermissionChannel()')).toBeLessThan(
+      entrySource.indexOf('await previous.dispose(true)'),
+    )
   })
 
   it('ignores launcher-owned package staging without suppressing source updates', () => {
@@ -636,6 +711,8 @@ describe('native Vite development transport', () => {
       expect(composition.source).not.toContain('version-one')
       const bootSource = await get('@id/__x00__virtual:cordisx-native-boot')
       expect(bootSource).toContain('virtual:cordisx-native-react-prepare')
+      expect(bootSource).toContain("import.meta.hot.on('cordisx:restart-host'")
+      expect(bootSource).toContain("virtual:cordisx-native-entry') + '?t=' + Date.now()")
       expect(bootSource.indexOf('virtual:cordisx-native-react-prepare')).toBeLessThan(
         bootSource.indexOf('virtual:cordisx-native-entry'),
       )
@@ -643,6 +720,12 @@ describe('native Vite development transport', () => {
       expect(entrySource).toContain('/renderer/runtime.ts')
       expect(entrySource).toContain('import.meta.hot.accept')
       expect(entrySource).toContain('modules.find(item => item.plugin.id === plugin.id)')
+      expect(entrySource).toContain('previous?.releaseCertifiedPermissionChannel()')
+      expect(entrySource).toContain('await previous.dispose(true)')
+      expect(entrySource).toContain('stagePluginGeneration, certifiedPermissionChannel)')
+      expect(entrySource.indexOf('previous?.releaseCertifiedPermissionChannel()')).toBeLessThan(
+        entrySource.indexOf('await previous.dispose(true)'),
+      )
       expect(entrySource).not.toContain('modules.map(module => module.default)')
       expect(entrySource).toContain('Plugin documentation survives Vite composition')
       expect(entrySource).toContain('id: "disabled"')

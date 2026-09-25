@@ -106,7 +106,7 @@ export async function createNativeViteManagedServiceProjection(input: {
         get nativeProviderIds() {
           return input.activation.nativeProviderIds
         },
-        subscribeNativeProviders: listener => input.activation.subscribeNativeProviders(listener),
+        subscribeNativeProviders: (listener: () => void) => input.activation.subscribeNativeProviders(listener),
         prepareNativeConnection: (providerId: string) => input.activation.prepareNativeConnection(providerId),
         async dispose() {},
       }),
