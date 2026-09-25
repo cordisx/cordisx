@@ -174,7 +174,10 @@ test('CI shares preparation and preserves independent full delivery checks', () 
   assert.match(workflow, /args=\(run --project/)
   assert.match(workflow, /--changed "\$BASE_SHA"/)
   assert.match(workflow, /installed:\n[\s\S]*needs: \[scope, prepare, package\]/)
-  assert.match(workflow, /needs: \[scope, changed-quality, prepare, typecheck, tests, package, installed\]/)
+  assert.match(
+    workflow,
+    /needs: \[scope, changed-quality, prepare, native-helpers, typecheck, tests, package, installed\]/,
+  )
   assert.ok(workflow.includes('.result == "success" or .result == "skipped"'))
 })
 

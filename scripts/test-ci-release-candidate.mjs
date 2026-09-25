@@ -164,7 +164,10 @@ test('workflow finalizes canonical candidates and persists publication recovery'
   assert.match(check, /name: release-packages-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/)
   assert.match(check, /path: \.release-cache\/release-packages/)
   assert.match(check, /installed:\n[\s\S]*needs: \[scope, prepare, package\]/)
-  assert.match(check, /needs: \[scope, changed-quality, prepare, typecheck, tests, package, installed\]/)
+  assert.match(
+    check,
+    /needs: \[scope, changed-quality, prepare, native-helpers, typecheck, tests, package, installed\]/,
+  )
   assert.ok(check.includes('.result == "success" or .result == "skipped"'))
   assert.match(check, /name: release-candidate-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/)
   assert.match(check, /path: \.release-cache\n[\s\S]*include-hidden-files: true/)

@@ -38,7 +38,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash scripts/ci-scope.sh
-      - run: node --test scripts/test-ci-scope.mjs
+      - run: node --test scripts/test-ci-scope.mjs scripts/test-native-helper-artifact.mjs
       - name: Check release entry points before preparation
         run: npm run check:release:entry
       - id: matrix
@@ -116,6 +116,33 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  native-helpers:
+    if: github.event_name == 'push' || needs.scope.outputs.full == 'true' || needs.scope.outputs.package_checks == 'true' || needs.scope.outputs.skill_changed == 'true'
+    needs: scope
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build and verify universal native helpers from the exact candidate
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          node packages/cli/scripts/native-helper-artifact.mjs build --source-commit "$HEAD_SHA"
+          node packages/cli/scripts/native-helper-artifact.mjs verify --source-commit "$HEAD_SHA"
+          tar -czf "$RUNNER_TEMP/native-helpers.tgz" -C packages/cli dist/native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-helpers-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/native-helpers.tgz
+          overwrite: true
+          compression-level: 0
+          retention-days: 1
+
   typecheck:
     if: github.event_name == 'push' || needs.scope.outputs.docs_only != 'true'
     needs: [scope, prepare]
@@ -179,7 +206,7 @@ jobs:
 
   package:
     if: github.event_name == 'push' || needs.scope.outputs.full == 'true' || needs.scope.outputs.package_checks == 'true' || needs.scope.outputs.skill_changed == 'true'
-    needs: [scope, prepare]
+    needs: [scope, prepare, native-helpers]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -190,6 +217,16 @@ jobs:
         with:
           node-version: 24
       - uses: ./.github/actions/restore-prepared-host
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-helpers-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/native-helpers
+      - name: Bind native helpers to the exact package candidate
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          tar -xzf "$RUNNER_TEMP/native-helpers/native-helpers.tgz" -C packages/cli
+          node packages/cli/scripts/native-helper-artifact.mjs verify --source-commit "$HEAD_SHA"
       - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
       - run: npm run check:release
       - run: npm run check:package
@@ -236,7 +273,7 @@ jobs:
   full:
     # Stable aggregate status: a failed/cancelled prerequisite cannot appear green.
     if: ${{ !cancelled() && always() }}
-    needs: [scope, changed-quality, prepare, typecheck, tests, package, installed]
+    needs: [scope, changed-quality, prepare, native-helpers, typecheck, tests, package, installed]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

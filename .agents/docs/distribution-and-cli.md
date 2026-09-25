@@ -872,6 +872,10 @@ not enable the main inspector.
 
 This first implementation guarantees the running icon for the Host process
 opened by the entry. Dock pin management and behavior after that Host exits are
-separate scope. The helper is built only on macOS for the build machine's
-architecture; multi-architecture native release artifacts require a separate
-packaging gate before publication.
+separate scope. The Check workflow builds the native helpers on macOS for both
+`arm64` and `x64`, binds their source inputs and manifest to the exact candidate
+SHA, and transfers the mode-preserving artifact into the Linux package job. The
+package check rejects missing, changed, non-executable, or non-universal helpers
+and verifies the related `.cjs`, `.css`, and `.html` resources in the npm
+tarball. Final validation still requires the exact candidate's macOS runtime
+evidence before publication.

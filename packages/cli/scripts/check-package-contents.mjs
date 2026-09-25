@@ -6,6 +6,12 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { extract as extractTar } from 'tar'
 import { npmPackItem } from '../../../scripts/npm-pack-report.mjs'
+import {
+  NATIVE_HELPER_MANIFEST,
+  NATIVE_HELPERS,
+  NATIVE_RESOURCES,
+  verifyNativeHelperArtifact,
+} from './native-helper-artifact.mjs'
 
 const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url))
 const packRoot = mkdtempSync(path.join(os.tmpdir(), 'cordisx-package-contents-'))
@@ -53,6 +59,13 @@ try {
   mkdirSync(extractedRoot)
   if (typeof packItem.filename !== 'string') throw new Error('npm pack did not report a tarball filename')
   await extractTar({ cwd: extractedRoot, file: path.join(packRoot, packItem.filename) })
+  const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' }).trim()
+  const packagedNativeRoot = path.join(extractedRoot, 'package/dist/native')
+  verifyNativeHelperArtifact(path.join(repositoryRoot, 'packages/cli'), packagedNativeRoot, sourceCommit)
+  for (const name of [...Object.keys(NATIVE_HELPERS), ...NATIVE_RESOURCES, NATIVE_HELPER_MANIFEST]) {
+    const nativePath = path.posix.join('dist/native', name)
+    if (!files.includes(nativePath)) throw new Error(`cordisx package is missing ${nativePath}`)
+  }
   const packagedSkillModule = await import(
     pathToFileURL(
       path.join(extractedRoot, 'package/dist/src/launcher/builtin-skill.js'),
