@@ -234,10 +234,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     const confirmed = new Set(provider.models.map(model => model.id))
     const projected = projectManagementOverlay(
       this.sourceModels(provider).map(model => {
+        const wireApi = this.#projection.providerWireApis.get(provider.providerId)
         const eligibility = resolveNativeModelEligibility({
-          wireApi: this.#projection.providerWireApis.get(provider.providerId),
+          ...(wireApi === undefined ? {} : { wireApi }),
           exactConfiguredMembership: confirmed.has(model.id),
-          protocolCapabilities: model.protocolCapabilities,
+          ...(model.protocolCapabilities === undefined ? {} : { protocolCapabilities: model.protocolCapabilities }),
           routeAvailable: available,
           userDisabled: false,
         })

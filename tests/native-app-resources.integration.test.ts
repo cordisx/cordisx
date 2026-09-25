@@ -100,7 +100,10 @@ it.skipIf(process.platform !== 'darwin')(
           models: {
             generation: `models-${pluginModelId}`,
             defaultAlias: pluginModelId,
-            aliases: [{ alias: pluginModelId, gatewayModelId: pluginModelId }],
+            aliases: [
+              { alias: pluginModelId, gatewayModelId: pluginModelId },
+              { alias: `${pluginModelId}-alias`, gatewayModelId: pluginModelId },
+            ],
           },
           cleanup: { authorityId: 'same-generation' },
         },
@@ -186,7 +189,7 @@ it.skipIf(process.platform !== 'darwin')(
             models: [{
               id: 'plugin-first',
               label: 'plugin-first',
-              aliases: ['plugin-first'],
+              aliases: ['plugin-first', 'plugin-first-alias'],
               selectorBrand: 'generic',
             }],
             defaultModelId: 'plugin-first',

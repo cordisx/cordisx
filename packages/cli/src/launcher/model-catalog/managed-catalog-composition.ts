@@ -299,10 +299,10 @@ export class ManagedCatalogComposition {
     const route = this.options.responsesAvailable && !this.#persistError
       && !denied
     const source = this.members(view).map(model => {
-      const userDeclared = model.provenance?.includes('manual')
-        || model.notListed === true && model.provenance?.includes('manual-supplement')
-        || model.provenance?.includes('script')
-        || model.provenance?.includes('script-supplement')
+      const userDeclared = model.provenance?.includes('manual') === true
+        || model.notListed === true && model.provenance?.includes('manual-supplement') === true
+        || model.provenance?.includes('script') === true
+        || model.provenance?.includes('script-supplement') === true
       const responses = model.protocolCapabilities?.responses
         ?? (userDeclared && view.settings.protocol === 'responses' ? true : undefined)
       const eligibility = resolveNativeModelEligibility({
@@ -325,8 +325,10 @@ export class ManagedCatalogComposition {
       ...projected.active.map(row => {
         const eligibility = resolveNativeModelEligibility({
           wireApi: view.settings.protocol,
-          exactConfiguredMembership: row.exactConfiguredMembership,
-          protocolCapabilities: row.protocolCapabilities,
+          ...(row.exactConfiguredMembership === undefined
+            ? {}
+            : { exactConfiguredMembership: row.exactConfiguredMembership }),
+          ...(row.protocolCapabilities === undefined ? {} : { protocolCapabilities: row.protocolCapabilities }),
           routeAvailable: route,
           userDisabled: row.blocked,
         })

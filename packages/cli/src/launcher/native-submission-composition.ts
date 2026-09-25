@@ -374,7 +374,7 @@ export async function prepareNativeSubmissionBootstrap(
     closePromise ??= (async () => {
       dynamic?.dispose()
       nativeDiscovery?.dispose()
-      management?.close()
+      management?.close?.()
       try {
         await controller?.dispose()
       } finally {
@@ -425,8 +425,6 @@ export async function prepareNativeSubmissionBootstrap(
           try {
             managed = await ManagedCatalogComposition.open({
               ...completeOptions.managedCatalog,
-              keychainAuthenticationUI: false,
-              keychainTimeoutMs: 10_000,
               responsesAvailable: true,
               ...(legacyNativePreferenceFile === undefined ? {} : { legacyNativePreferenceFile }),
             })
@@ -584,7 +582,19 @@ export async function prepareNativeSubmissionBootstrap(
           })
           pluginManagement = new PluginPreferenceManagementAdapter(baseManagement, pluginPreferences)
           management = pluginManagement
-          pluginCatalog = async () => await pluginManagement!.catalog() as readonly NativeModelProviderCatalogEntry[]
+          pluginCatalog = async () =>
+            Object.freeze((await pluginManagement!.catalog()).map(provider =>
+              Object.freeze({
+                ...provider,
+                models: Object.freeze(provider.models.map(model => {
+                  const aliases = Reflect.get(model, 'aliases')
+                  if (!Array.isArray(aliases) || !aliases.every(alias => typeof alias === 'string')) {
+                    throw new Error('plugin model catalog aliases are unavailable')
+                  }
+                  return Object.freeze({ ...model, aliases: Object.freeze([...aliases]) })
+                })),
+              })
+            ))
         }
         if (pluginManagement === undefined) {
           pluginCatalog = nativeModelProviderCatalog(activation, completeOptions.selectorIcons)
