@@ -1,5 +1,5 @@
-import { randomBytes } from 'node:crypto'
-import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureHomeConfig, type HomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../../config/home-config.js'
 import { CatalogError, type DiscoveryConnection, type DiscoveryRequest } from './contracts.js'
@@ -14,9 +14,13 @@ import {
   managedProviderView,
   parseManagedProviderRecord,
 } from './managed-provider-schema.js'
+import { acquireKernelOperationLock, KernelOperationBusyError } from '../kernel-operation-lock.js'
+import { liveProcessStartedAt, recordedProcessStatus } from '../process-identity.js'
 
 const nonce = () => randomBytes(32).toString('base64url')
 const failure = () => new CatalogError('credential-unavailable')
+const lockBusy = () => new CatalogError('temporary')
+const lockInvalid = () => new CatalogError('source-invalid')
 const recordsSource = (records: readonly ManagedProviderRecord[]) => JSON.stringify(records)
 
 interface OwnerOptions {
@@ -24,6 +28,137 @@ interface OwnerOptions {
   readonly profileId: string
   readonly appId?: string
   readonly fetcher?: DiscoveryFetch
+  /** One-shot recovery for an exact pre-metadata lock after its known launcher exited. */
+  readonly recoverLegacyLock?: { readonly exitedPid: number; readonly inode: number }
+}
+
+interface OwnerLockRecord {
+  readonly version: 1
+  readonly pid: number
+  readonly processStartedAt: string
+  readonly token: string
+}
+
+interface OwnerLockLease {
+  readonly identity: { readonly dev: number; readonly ino: number }
+  readonly token: string
+  readonly release: () => Promise<void>
+}
+
+function parseOwnerLockRecord(source: string): OwnerLockRecord | undefined {
+  try {
+    const value = JSON.parse(source) as Partial<OwnerLockRecord>
+    if (
+      value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid! <= 0
+      || typeof value.processStartedAt !== 'string' || value.processStartedAt === ''
+      || typeof value.token !== 'string' || value.token === ''
+    ) return undefined
+    return value as OwnerLockRecord
+  } catch {
+    return undefined
+  }
+}
+
+async function readOwnerLockRecord(lock: string): Promise<OwnerLockRecord | undefined> {
+  const file = path.join(lock, 'owner.json')
+  const metadata = await lstat(file).catch(() => undefined)
+  if (
+    !metadata?.isFile() || metadata.isSymbolicLink() || metadata.size > 4096 || (metadata.mode & 0o077) !== 0
+    || process.getuid && metadata.uid !== process.getuid()
+  ) return undefined
+  return parseOwnerLockRecord(await readFile(file, 'utf8').catch(() => ''))
+}
+
+function legacyOwnerExited(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
+}
+
+async function reclaimOwnerLock(
+  lock: string,
+  expected: { readonly token?: string; readonly inode: number },
+): Promise<void> {
+  const quarantine = `${lock}.stale-${randomUUID()}`
+  try {
+    await rename(lock, quarantine)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  const metadata = await lstat(quarantine).catch(() => undefined)
+  const record = await readOwnerLockRecord(quarantine)
+  const matches = metadata?.isDirectory() === true && metadata.ino === expected.inode
+    && (expected.token === undefined ? (await readdir(quarantine)).length === 0 : record?.token === expected.token)
+  if (matches) {
+    await rm(quarantine, { recursive: true, force: true })
+    return
+  }
+  try {
+    await rename(quarantine, lock)
+  } catch (error) {
+    throw new Error(`managed Provider lock changed during recovery; restore it from ${quarantine}`, { cause: error })
+  }
+  throw lockInvalid()
+}
+
+async function acquireOwnerLock(lock: string, recovery?: OwnerOptions['recoverLegacyLock']): Promise<OwnerLockLease> {
+  let unlock: () => Promise<void>
+  try {
+    unlock = await acquireKernelOperationLock(`${lock}.mutex`)
+  } catch (error) {
+    if (error instanceof KernelOperationBusyError) throw lockBusy()
+    throw lockInvalid()
+  }
+  try {
+    const processStartedAt = liveProcessStartedAt(process.pid)
+    if (processStartedAt === undefined) throw lockInvalid()
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let created = false
+      try {
+        await mkdir(lock, { mode: 0o700 })
+        created = true
+        const record: OwnerLockRecord = { version: 1, pid: process.pid, processStartedAt, token: randomUUID() }
+        await writeFile(path.join(lock, 'owner.json'), `${JSON.stringify(record)}\n`, {
+          encoding: 'utf8',
+          flag: 'wx',
+          mode: 0o600,
+        })
+        const identity = await lstat(lock)
+        return { identity, token: record.token, release: unlock }
+      } catch (error) {
+        if (created) await rm(lock, { recursive: true, force: true })
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || created) throw lockInvalid()
+        const metadata = await lstat(lock).catch(() => undefined)
+        if (
+          !metadata?.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0
+          || process.getuid && metadata.uid !== process.getuid()
+        ) throw lockInvalid()
+        const record = await readOwnerLockRecord(lock)
+        if (record !== undefined) {
+          if (recordedProcessStatus(record.pid, record.processStartedAt) !== 'dead') throw lockBusy()
+          if (attempt > 0) throw lockBusy()
+          await reclaimOwnerLock(lock, { token: record.token, inode: metadata.ino })
+          continue
+        }
+        const entries = await readdir(lock)
+        if (entries.length !== 0) throw lockInvalid()
+        if (
+          attempt > 0 || recovery === undefined || !Number.isSafeInteger(recovery.exitedPid)
+          || recovery.exitedPid <= 0 || !Number.isSafeInteger(recovery.inode) || recovery.inode !== metadata.ino
+          || !legacyOwnerExited(recovery.exitedPid)
+        ) throw lockBusy()
+        await reclaimOwnerLock(lock, { inode: recovery.inode })
+      }
+    }
+    throw lockBusy()
+  } catch (error) {
+    await unlock()
+    throw error
+  }
 }
 
 /** Host composition only. Never register this object as a plugin context service or renderer global. */
@@ -33,6 +168,8 @@ export class ManagedProviderOwner {
   readonly #profileId: string
   readonly #lock: string
   readonly #lockIdentity: { dev: number; ino: number }
+  readonly #lockToken: string
+  readonly #releaseLock: () => Promise<void>
   readonly #fetcher: DiscoveryFetch | undefined
   #records = new Map<string, ManagedProviderRecord>()
   #source = ''
@@ -48,14 +185,16 @@ export class ManagedProviderOwner {
     appId: string,
     profileId: string,
     lock: string,
-    identity: { dev: number; ino: number },
+    lease: OwnerLockLease,
     fetcher?: DiscoveryFetch,
   ) {
     this.#configPath = configPath
     this.#appId = appId
     this.#profileId = profileId
     this.#lock = lock
-    this.#lockIdentity = identity
+    this.#lockIdentity = lease.identity
+    this.#lockToken = lease.token
+    this.#releaseLock = lease.release
     this.#fetcher = fetcher
     this.#state = new ManagedCatalogState(`${lock}.state.v2.json`, () => this.#assertCurrent())
   }
@@ -74,19 +213,13 @@ export class ManagedProviderOwner {
       throw failure()
     }
     const lock = path.join(directory, `${options.profileId}.lock`)
-    // A crashed owner needs explicit lock recovery. Never steal a possibly healthy owner's lease.
-    try {
-      await mkdir(lock, { mode: 0o700 })
-    } catch {
-      throw failure()
-    }
-    const identity = await lstat(lock)
+    const lease = await acquireOwnerLock(lock, options.recoverLegacyLock)
     const owner = new ManagedProviderOwner(
       configPath,
       options.appId ?? 'codex',
       options.profileId,
       lock,
-      identity,
+      lease,
       options.fetcher,
     )
     try {
@@ -273,8 +406,10 @@ export class ManagedProviderOwner {
   async #assertCurrent(): Promise<void> {
     if (this.#closed) throw failure()
     const metadata = await lstat(this.#lock).catch(() => undefined)
+    const record = await readOwnerLockRecord(this.#lock)
     if (
       !metadata?.isDirectory() || metadata.dev !== this.#lockIdentity.dev || metadata.ino !== this.#lockIdentity.ino
+      || record?.token !== this.#lockToken
     ) {
       this.#closed = true
       this.#revoke()
@@ -349,8 +484,16 @@ export class ManagedProviderOwner {
       this.#listeners.clear()
       await this.#tail
       this.#records.clear()
-      const metadata = await lstat(this.#lock).catch(() => undefined)
-      if (metadata?.dev === this.#lockIdentity.dev && metadata.ino === this.#lockIdentity.ino) await rmdir(this.#lock)
+      try {
+        const metadata = await lstat(this.#lock).catch(() => undefined)
+        const record = await readOwnerLockRecord(this.#lock)
+        if (
+          metadata?.dev === this.#lockIdentity.dev && metadata.ino === this.#lockIdentity.ino
+          && record?.token === this.#lockToken
+        ) await rm(this.#lock, { recursive: true })
+      } finally {
+        await this.#releaseLock()
+      }
     })()
     return this.#closePromise
   }

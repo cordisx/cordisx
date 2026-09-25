@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ManagedProviderOwner } from '../packages/cli/src/launcher/model-catalog/managed-provider-owner.js'
@@ -8,6 +8,7 @@ import { builtinDiscoveryRegistry } from '../packages/cli/src/launcher/model-cat
 import { type LauncherKeychainBackend, LauncherKeychainError } from '../packages/cli/src/launcher/secret-store.js'
 import { resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
 import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import { liveProcessStartedAt } from '../packages/cli/src/launcher/process-identity.js'
 
 class Keychain implements LauncherKeychainBackend {
   values = new Map<string, string>()
@@ -73,6 +74,17 @@ describe('Host-owned managed Provider credentials', () => {
     owners.push(owner)
     return { owner, options, keychain, fetcher }
   }
+  const lockPath = (homeDir: string) => path.join(homeDir, 'state/host-provider-owners/test.lock')
+  const ownerLock = async (homeDir: string, pid: number, processStartedAt: string, token = 'fixture-lock') => {
+    const lock = lockPath(homeDir)
+    await mkdir(lock, { recursive: true, mode: 0o700 })
+    await writeFile(
+      path.join(lock, 'owner.json'),
+      `${JSON.stringify({ version: 1, pid, processStartedAt, token })}\n`,
+      { mode: 0o600 },
+    )
+    return lock
+  }
 
   it('persists in private profile config, restarts with stable scope, and exposes no raw credential', async () => {
     const { owner, options, keychain, fetcher } = await setup()
@@ -92,7 +104,10 @@ describe('Host-owned managed Provider credentials', () => {
       }),
     )
     expect((await stat(path.join(options.homeDir, 'state/host-provider-owners/test.lock'))).mode & 0o777).toBe(0o700)
-    expect(await readdir(path.join(options.homeDir, 'state/host-provider-owners'))).toEqual(['test.lock'])
+    expect(await readdir(path.join(options.homeDir, 'state/host-provider-owners'))).toEqual([
+      'test.lock',
+      'test.lock.mutex',
+    ])
     const configPath = path.join(options.homeDir, 'config.json')
     expect((await stat(configPath)).mode & 0o777).toBe(0o600)
     expect(await readFile(configPath, 'utf8')).toContain('fixture-secret')
@@ -124,9 +139,9 @@ describe('Host-owned managed Provider credentials', () => {
     expect(keychain.calls).toBe(0)
   })
 
-  it('fences exact operation, explicit opt-in, owner lock and foreign managed-record edits', async () => {
+  it('fences exact operation, explicit opt-in, live owner lock and foreign managed-record edits', async () => {
     const { owner, options, keychain, fetcher } = await setup()
-    await expect(ManagedProviderOwner.open(options)).rejects.toThrow('credential-unavailable')
+    await expect(ManagedProviderOwner.open(options)).rejects.toMatchObject({ code: 'temporary' })
     const first = await owner.save({ settings }, async () => 'fixture-secret')
     const connection = owner.connection(first.id)!
     await expect(connection.request({ ...operation, origin: 'https://other.invalid' }, signal())).rejects.toThrow(
@@ -157,6 +172,90 @@ describe('Host-owned managed Provider credentials', () => {
     )
     expect(owner.snapshot()).toEqual([])
     expect(keychain.calls).toBe(0)
+  })
+
+  it('reclaims only a dead exact process identity and keeps the replacement owner exclusive', async () => {
+    const { owner, options } = await setup()
+    await owner.close()
+    owners.splice(owners.indexOf(owner), 1)
+    const lock = await ownerLock(options.homeDir, 2_147_483_647, 'exited', 'stale-owner')
+    const reopened = await ManagedProviderOwner.open(options)
+    owners.push(reopened)
+    expect(JSON.parse(await readFile(path.join(lock, 'owner.json'), 'utf8'))).toMatchObject({
+      version: 1,
+      pid: process.pid,
+    })
+    await expect(ManagedProviderOwner.open(options)).rejects.toMatchObject({ code: 'temporary' })
+  })
+
+  it('admits exactly one concurrent reclaimer for a stale owner lock', async () => {
+    const { owner, options } = await setup()
+    await owner.close()
+    owners.splice(owners.indexOf(owner), 1)
+    await ownerLock(options.homeDir, 2_147_483_647, 'exited', 'stale-owner')
+    const attempts = await Promise.allSettled([
+      ManagedProviderOwner.open(options),
+      ManagedProviderOwner.open(options),
+    ])
+    const fulfilled = attempts.filter(
+      (result): result is PromiseFulfilledResult<ManagedProviderOwner> => result.status === 'fulfilled',
+    )
+    expect(fulfilled).toHaveLength(1)
+    owners.push(fulfilled[0]!.value)
+    expect(attempts.filter(result => result.status === 'rejected')).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ code: 'temporary' }) }),
+    ])
+  })
+
+  it('preserves live and reused-pid locks instead of stealing them', async () => {
+    const { owner, options } = await setup()
+    await owner.close()
+    owners.splice(owners.indexOf(owner), 1)
+    const startedAt = liveProcessStartedAt(process.pid)
+    expect(startedAt).toBeDefined()
+    const lock = await ownerLock(options.homeDir, process.pid, startedAt!)
+    await expect(ManagedProviderOwner.open(options)).rejects.toMatchObject({ code: 'temporary' })
+    expect(await readFile(path.join(lock, 'owner.json'), 'utf8')).toContain(startedAt!)
+
+    await rm(lock, { recursive: true })
+    await ownerLock(options.homeDir, process.pid, 'different-process-start')
+    const recovered = await ManagedProviderOwner.open(options)
+    owners.push(recovered)
+    expect(JSON.parse(await readFile(path.join(lock, 'owner.json'), 'utf8')).pid).toBe(process.pid)
+  })
+
+  it('requires exact exited-PID and inode evidence to recover a legacy empty lock', async () => {
+    const { owner, options } = await setup()
+    await owner.close()
+    owners.splice(owners.indexOf(owner), 1)
+    const lock = lockPath(options.homeDir)
+    await mkdir(lock, { mode: 0o700 })
+    const inode = (await stat(lock)).ino
+    await expect(ManagedProviderOwner.open(options)).rejects.toMatchObject({ code: 'temporary' })
+    await expect(ManagedProviderOwner.open({
+      ...options,
+      recoverLegacyLock: { exitedPid: process.pid, inode },
+    })).rejects.toMatchObject({ code: 'temporary' })
+    await expect(ManagedProviderOwner.open({
+      ...options,
+      recoverLegacyLock: { exitedPid: 2_147_483_647, inode: inode + 1 },
+    })).rejects.toMatchObject({ code: 'temporary' })
+    const recovered = await ManagedProviderOwner.open({
+      ...options,
+      recoverLegacyLock: { exitedPid: 2_147_483_647, inode },
+    })
+    owners.push(recovered)
+    expect(JSON.parse(await readFile(path.join(lock, 'owner.json'), 'utf8'))).toMatchObject({ pid: process.pid })
+  })
+
+  it('distinguishes malformed lock metadata from a live-owner conflict', async () => {
+    const { owner, options } = await setup()
+    await owner.close()
+    owners.splice(owners.indexOf(owner), 1)
+    const lock = lockPath(options.homeDir)
+    await mkdir(lock, { mode: 0o700 })
+    await writeFile(path.join(lock, 'owner.json'), '{invalid', { mode: 0o600 })
+    await expect(ManagedProviderOwner.open(options)).rejects.toMatchObject({ code: 'source-invalid' })
   })
 
   it('derives the models request capability from each saved official connection', async () => {
