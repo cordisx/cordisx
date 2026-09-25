@@ -12,6 +12,7 @@ import {
 } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
+import { applyCatalogManagementPreferences } from '../packages/cli/src/renderer/model-provider-preferences.js'
 import { resources } from './fixtures/native-submission-structure.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
@@ -63,6 +64,63 @@ async function writeManagedProfile(homeDir: string, profileId: string): Promise<
     }),
     { mode: 0o600 },
   )
+}
+
+function pluginActivation(providers: Readonly<Record<string, { pluginId: string; modelId: string }>>) {
+  return {
+    nativeProviderIds: Object.keys(providers),
+    prepareNativeConnection(providerId: string) {
+      const provider = providers[providerId]
+      if (provider === undefined) throw new Error('unknown fixture provider')
+      return {
+        value: {
+          service: { pluginId: provider.pluginId, serviceId: 'gateway', generation: 'fixture-generation' },
+          endpoint: {
+            origin: `https://${providerId}.example.test`,
+            apiPath: '/v1' as const,
+            auth: { scheme: 'none' as const },
+          },
+          models: {
+            generation: 'fixture-models',
+            defaultAlias: provider.modelId,
+            aliases: [{ alias: provider.modelId, gatewayModelId: provider.modelId }],
+          },
+          cleanup: { authorityId: 'fixture-generation' },
+        },
+        dispose() {},
+      }
+    },
+    subscribeNativeProviders() {
+      return () => {}
+    },
+  }
+}
+
+async function installNativeChannel(composition: Awaited<ReturnType<typeof createNativeSubmissionComposition>>) {
+  const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
+  let receive: (params: Record<string, unknown>) => void
+  const session = {
+    isClosed: () => false,
+    onEvent: (_event: string, handler: typeof receive) => {
+      receive = handler
+      return () => undefined
+    },
+    send: vi.fn(async (method: string, params: Record<string, any>) => {
+      if (method === 'Runtime.addBinding') {
+        world[params.name] = (payload: string) => receive({ name: params.name, payload })
+      }
+      if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' }
+      if (method === 'Runtime.evaluate') vm.runInNewContext(params.expression, world)
+      return {}
+    }),
+  }
+  const installed = await composition.installation.authority.install(session as unknown as CdpSession, {
+    id: `target-${crypto.randomUUID()}`,
+    url: 'app://-/index.html',
+    type: 'page',
+    title: '',
+  })
+  return { channel: world.__cordisxNativeProviderCommandChannel, dispose: () => installed.dispose() }
 }
 
 it('reads the actual ASAR resource layout without relying on asset hash names', async () => {
@@ -386,6 +444,136 @@ it.skipIf(process.platform !== 'darwin')(
       expect(warn).toHaveBeenCalledWith('[cordisx] managed Provider catalog is unavailable')
     } finally {
       await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'keeps live plugin catalogs paired with management when managed catalog options are absent',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'plugin-only-codex-home')
+    await mkdir(codexHome)
+    const composition = await createNativeSubmissionComposition(
+      pluginActivation({
+        aiden: { pluginId: 'fixture-aiden', modelId: 'aiden-model' },
+        traex: { pluginId: 'fixture-traex', modelId: 'traex-model' },
+      }),
+      f.executable,
+      codexHome,
+      { nativeModelDiscovery: false },
+    )
+    const installed = await installNativeChannel(composition)
+    try {
+      const catalog = await installed.channel.catalogRead()
+      const management = await installed.channel.catalogManagementRead()
+      expect(catalog.map((provider: { providerId: string }) => provider.providerId).sort()).toEqual(['aiden', 'traex'])
+      for (const provider of catalog) {
+        expect(provider.models).not.toHaveLength(0)
+        expect(
+          management.views.filter((view: { bindingRef: string }) => view.bindingRef === provider.managementBindingRef),
+        ).toHaveLength(1)
+      }
+      expect(
+        applyCatalogManagementPreferences(catalog, { views: management.views, connected: true })
+          .every(provider => provider.models.length > 0),
+      ).toBe(true)
+      const view = management.views.find((candidate: { providerId: string }) => candidate.providerId === 'aiden')
+      expect(
+        (await installed.channel.catalogManagementCommand({
+          operation: 'setProviderFavorite',
+          bindingRef: view.bindingRef,
+          scopeRevision: view.scopeRevision,
+          expectedRevision: view.revision,
+          favorite: true,
+        })).status,
+      ).toBe('applied')
+      expect(
+        (await installed.channel.catalogManagementRead()).views.find(
+          (candidate: { providerId: string }) => candidate.providerId === 'aiden',
+        ).providerFavorite,
+      ).toBe(true)
+    } finally {
+      await installed.dispose()
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'persists live plugin preferences when managed catalog composition cannot open',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'plugin-fallback-codex-home')
+    await mkdir(codexHome)
+    await writeManagedProfile(codexHome, 'plugin-fallback')
+    await mkdir(path.join(codexHome, 'state', 'host-provider-owners', 'plugin-fallback.lock'), {
+      recursive: true,
+      mode: 0o700,
+    })
+    const options = {
+      managedCatalog: {
+        homeDir: codexHome,
+        profileId: 'plugin-fallback',
+      },
+      nativeModelDiscovery: false,
+    }
+    const activation = pluginActivation({
+      aiden: { pluginId: 'fixture-aiden', modelId: 'aiden-model' },
+      traex: { pluginId: 'fixture-traex', modelId: 'traex-model' },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const first = await createNativeSubmissionComposition(activation, f.executable, codexHome, options)
+    const firstInstalled = await installNativeChannel(first)
+    try {
+      expect(warn).toHaveBeenCalledWith('[cordisx] managed Provider catalog is unavailable')
+      const catalog = await firstInstalled.channel.catalogRead()
+      const management = await firstInstalled.channel.catalogManagementRead()
+      for (const provider of catalog) {
+        expect(provider.models).not.toHaveLength(0)
+        expect(
+          management.views.filter((view: { bindingRef: string }) => view.bindingRef === provider.managementBindingRef),
+        ).toHaveLength(1)
+      }
+      expect(
+        applyCatalogManagementPreferences(catalog, { views: management.views, connected: true })
+          .every(provider => provider.models.length > 0),
+      ).toBe(true)
+      const view = management.views.find((candidate: { providerId: string }) => candidate.providerId === 'traex')
+      expect(
+        (await firstInstalled.channel.catalogManagementCommand({
+          operation: 'setOverlay',
+          bindingRef: view.bindingRef,
+          scopeRevision: view.scopeRevision,
+          expectedRevision: view.revision,
+          modelId: 'traex-model',
+          pinned: true,
+        })).status,
+      ).toBe('applied')
+    } finally {
+      await firstInstalled.dispose()
+      await first.close()
+    }
+
+    const second = await createNativeSubmissionComposition(activation, f.executable, codexHome, options)
+    const secondInstalled = await installNativeChannel(second)
+    try {
+      const view = (await secondInstalled.channel.catalogManagementRead()).views.find(
+        (candidate: { providerId: string }) => candidate.providerId === 'traex',
+      )
+      expect(view.rows.find((row: { id: string }) => row.id === 'traex-model')).toMatchObject({
+        present: true,
+        pinned: true,
+        selectable: true,
+      })
+      expect(
+        (await secondInstalled.channel.catalogRead()).find(
+          (provider: { providerId: string }) => provider.providerId === 'traex',
+        ).models,
+      ).toEqual([expect.objectContaining({ id: 'traex-model' })])
+    } finally {
+      await secondInstalled.dispose()
+      await second.close()
     }
   },
 )

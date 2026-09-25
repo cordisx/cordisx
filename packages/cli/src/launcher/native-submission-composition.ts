@@ -572,13 +572,13 @@ export async function prepareNativeSubmissionBootstrap(
         reportStage('native-submission-native-catalog-ready')
         const baseManagement = new CompositeCatalogManagement(nativeManagement, managed)
         management = baseManagement
-        if (managed && activation.subscribeNativeProviders) {
+        if (activation.subscribeNativeProviders) {
           const pluginPreferences = await PluginPreferenceAuthority.open({
             ...pluginPreferenceSource(
               activation as ManagedServiceNativeActivation,
               completeOptions.selectorIcons,
             ),
-            overlayStore: managed.preferenceStore,
+            overlayStore: nativeManagement.preferenceStore,
           })
           pluginManagement = new PluginPreferenceManagementAdapter(baseManagement, pluginPreferences)
           management = pluginManagement

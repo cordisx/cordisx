@@ -94,6 +94,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   #tail: Promise<unknown> = Promise.resolve()
   #unsubscribeSource: (() => void) | undefined
 
+  /** Host-private shared preference store for other catalog authorities in this composition. */
+  get preferenceStore(): ManagementOverlayStore {
+    return this.#overlay
+  }
+
   private constructor(
     projection: CodexConfigModelProviderProjection,
     initialOverlay: unknown,
