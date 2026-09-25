@@ -933,6 +933,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const confirmation: NativeProviderSubmitConfirmation | undefined = this.selectionClient.confirmation()
     const nativeModelSource = this.nativeModelSource.project(
       next.nativeModelsScope,
+      next.modelProvider,
       control && control.model === next.model ? control.models : [],
     )
     if (this.suspendedAvailability !== undefined) this.suspendedAvailability = next.available

@@ -112,13 +112,20 @@ export class NativeModelSource {
 
   project(
     scope: 'active-provider' | 'global' | undefined,
-    globalModels: readonly NativeModelOption[],
+    providerId: string | undefined,
+    controlModels: readonly NativeModelOption[],
   ): NativeModelSourceProjection {
     if (scope !== 'active-provider') {
-      return Object.freeze({ nativeModels: globalModels })
+      return Object.freeze({ nativeModels: controlModels })
     }
+    const disabledById = this.current?.providerId === providerId
+      ? new Map(controlModels.map(model => [model.id, model.disabled]))
+      : undefined
     return Object.freeze({
-      nativeModels: this.current?.models ?? [],
+      nativeModels: this.current?.models.map(model => {
+        const disabled = disabledById?.get(model.id)
+        return disabled === undefined || disabled === model.disabled ? model : Object.freeze({ ...model, disabled })
+      }) ?? [],
       ...(this.current === undefined ? {} : { nativeModelsProviderId: this.current.providerId }),
     })
   }

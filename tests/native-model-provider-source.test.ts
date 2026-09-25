@@ -61,7 +61,7 @@ async function harness(options: {
         ? { config: options.config() }
         : request.method === 'model/list'
         ? {
-          data: [{ id: 'protocol-gpt', model: 'gpt-official', displayName: 'GPT Official', hidden: false }],
+          data: [{ id: 'protocol-gpt', model: 'model-a', displayName: 'GPT Official', hidden: false }],
           nextCursor: null,
         }
         : {}
@@ -136,6 +136,15 @@ describe('native model provider source', () => {
     })
     expect(source()).not.toHaveProperty('nativeModelsProviderId')
     expect(modelListRequests).toEqual([])
+    props.modelOptions[0].disabledReason = 'Login required'
+    dom.window.document.body.append(dom.window.document.createElement('aside'))
+    await settle()
+    expect(source().nativeModels).toEqual([{
+      id: 'model-a',
+      label: 'Friendly',
+      disabled: true,
+      supportsFastMode: false,
+    }])
     transport.dispose()
     dom.window.close()
   })
@@ -166,17 +175,34 @@ describe('native model provider source', () => {
       config: () => ({ model: 'model-a', model_reasoning_effort: 'high' }),
       threadProvider: 'deepseek',
     })
+    const trigger = dom.window.document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
+    const props = (trigger as any).__reactFiber$test.return.memoizedProps
+    props.models[0].displayName = 'Native Model A'
+    props.modelOptions = [{ model: props.models[0], disabledReason: 'Login required' }]
+    dom.window.document.body.append(dom.window.document.createElement('aside'))
+    await settle()
     expect(source()).toMatchObject({
       modelProvider: 'deepseek',
       nativeModelsScope: 'active-provider',
       nativeModelsProviderId: 'openai',
-      nativeModels: [{ id: 'gpt-official', label: 'GPT Official', disabled: false, supportsFastMode: false }],
+      nativeModels: [{ id: 'model-a', label: 'GPT Official', disabled: false, supportsFastMode: false }],
     })
     expect(modelListRequests).toHaveLength(1)
-    for (const providerId of ['openai', 'deepseek', 'openai']) {
+    for (
+      const [providerId, disabled] of [
+        ['openai', true],
+        ['deepseek', false],
+        ['openai', true],
+      ] as const
+    ) {
       expect(await transport.select({ providerId, model: 'model-a' })).toBe('accepted')
       expect(source()).toMatchObject({ modelProvider: providerId, nativeModelsProviderId: 'openai' })
-      expect(source().nativeModels?.map(model => model.id)).toEqual(['gpt-official'])
+      expect(source().nativeModels).toEqual([{
+        id: 'model-a',
+        label: 'GPT Official',
+        disabled,
+        supportsFastMode: false,
+      }])
     }
     expect(channel.selectionSelect).toHaveBeenCalledTimes(3)
     expect(modelListRequests).toHaveLength(1)
