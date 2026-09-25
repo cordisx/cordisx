@@ -7,8 +7,29 @@ import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
 import { catalogFixture, catalogView } from '../helpers/catalog-management-fixture.js'
 
+const supportedCompatibility = { compatibility: 'supported' as const }
+
+const longRows = Array.from({ length: 180 }, (_, index) => ({
+  id: index === 179 ? 'openrouter/final-search-target' : `openrouter/model-${String(index + 1).padStart(3, '0')}`,
+  label: index === 179 ? 'Final search target' : `OpenRouter model ${index + 1}`,
+  provenance: ['auto' as const],
+  notListed: false,
+  present: true,
+  selectable: true,
+  blocked: false,
+  pinned: index === 0,
+  ...supportedCompatibility,
+}))
+
 const host = catalogFixture([
-  catalogView(),
+  catalogView({
+    providerId: 'openrouter',
+    title: 'OpenRouter',
+    scopeLabel: 'OpenRouter connection',
+    rows: longRows,
+    sourceCount: longRows.length,
+    selectableCount: longRows.length,
+  }),
   catalogView({
     bindingRef: 'binding-b',
     providerId: 'provider-b',
@@ -25,6 +46,7 @@ const host = catalogFixture([
       selectable: true,
       blocked: false,
       pinned: false,
+      ...supportedCompatibility,
     }],
     sourceCount: 1,
     selectableCount: 1,
@@ -134,4 +156,12 @@ export async function settle() {
 }
 export function commands() {
   return host.commands
+}
+
+export async function search(value: string) {
+  const input = document.querySelector<HTMLInputElement>('[aria-label="Search services or models"]')!
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  setter.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
 }

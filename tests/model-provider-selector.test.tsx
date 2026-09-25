@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ModelProviderSelector,
+  providerMenuLabel,
   type ProviderSelectionSnapshot,
 } from '../packages/cli/src/renderer/model-provider-selector.js'
 import { canReplaceNativeModelProviderTrigger } from '../packages/cli/src/renderer/install-model-provider-selector.js'
@@ -40,6 +41,15 @@ async function setup(model = 'shared', busy = false, options?: {
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
   readonly liveCatalog?: boolean
+  readonly firstProviderId?: string
+  readonly firstProviderTitle?: string
+  readonly secondProviderId?: string
+  readonly secondProviderTitle?: string
+  readonly additionalProviders?: readonly {
+    readonly providerId: string
+    readonly title: string
+    readonly models: readonly { readonly id: string; readonly label: string }[]
+  }[]
 }) {
   dom = new JSDOM('<html><body><div id="root"></div></body></html>', { url: 'https://example.test' })
   Object.assign(
@@ -58,8 +68,9 @@ async function setup(model = 'shared', busy = false, options?: {
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} })
   const registry = new ModelProviderRegistry(async () => [
     {
-      providerId: 'first',
+      providerId: options?.firstProviderId ?? 'first',
       pluginId: 'p',
+      ...(options?.firstProviderTitle === undefined ? {} : { title: options.firstProviderTitle }),
       ...(options?.branded ? { selectorBrand: { brand: 'openrouter' as const, source: 'override' as const } } : {}),
       models: options?.firstModels ?? [{
         id: model,
@@ -68,13 +79,18 @@ async function setup(model = 'shared', busy = false, options?: {
       }],
     },
     {
-      providerId: 'second',
+      providerId: options?.secondProviderId ?? 'second',
       pluginId: 'q',
+      ...(options?.secondProviderTitle === undefined ? {} : { title: options.secondProviderTitle }),
       ...(options?.branded ? { selectorBrand: { brand: 'moonshot' as const, source: 'inferred' as const } } : {}),
       models: options?.secondModels
         ?? [{ id: 'shared', label: 'Equivalent' }, { id: 'other', label: 'Other', group: 'Alternative' }],
       ...(options?.secondDefaultModelId === undefined ? {} : { defaultModelId: options.secondDefaultModelId }),
     },
+    ...(options?.additionalProviders ?? []).map(provider => ({
+      ...provider,
+      pluginId: `plugin:${provider.providerId}`,
+    })),
   ])
   if (options?.liveCatalog) registry.connectSource(() => () => {})
   await registry.refresh()
@@ -150,6 +166,15 @@ async function setup(model = 'shared', busy = false, options?: {
     },
   }
 }
+
+describe('providerMenuLabel', () => {
+  it('shortens only the two generated native labels and preserves custom parentheses', () => {
+    expect(providerMenuLabel({ providerId: 'modelhub', title: 'ModelHub (Native Direct)' })).toBe('ModelHub')
+    expect(providerMenuLabel({ providerId: 'openrouter', title: 'OpenRouter (Native Responses)' })).toBe('OpenRouter')
+    expect(providerMenuLabel({ providerId: 'custom', title: 'Custom (Team)' })).toBe('Custom (Team)')
+    expect(providerMenuLabel({ providerId: 'modelhub', title: 'ModelHub (Team)' })).toBe('ModelHub (Team)')
+  })
+})
 
 async function click(selector: string) {
   const button = document.querySelector<HTMLButtonElement>(`${selector}:not(:disabled)`)
@@ -241,7 +266,6 @@ describe('provider selection interaction', () => {
       { source: 'preference', expectedRevision: 4 },
     )
   })
-
   it('shows the built-in Codex choice and theme-inheriting icon without a configured provider', async () => {
     const { update, select } = await setup()
     await update({
@@ -259,7 +283,6 @@ describe('provider selection interaction', () => {
     await act(async () => official.click())
     expect(select).toHaveBeenLastCalledWith({ providerId: 'openai', model: 'gpt-6-astra' })
   })
-
   it('can return from a plugin to the matching native model', async () => {
     const { update, select } = await setup('shared')
     await update({ nativeModels: [{ id: 'shared', label: 'Current', disabled: false }] })
@@ -269,7 +292,6 @@ describe('provider selection interaction', () => {
     await act(async () => official.click())
     expect(select).toHaveBeenLastCalledWith({ providerId: 'openai', model: 'shared' })
   })
-
   it('updates the visible provider and model immediately after selection', async () => {
     const { select } = await setup()
     await click(providerTrigger)
@@ -369,6 +391,20 @@ describe('provider selection interaction', () => {
     expect(selected?.textContent).toBe('GPT 5.6')
     expect(selected?.querySelector('[data-selector-brand="openai"]')).not.toBeNull()
     expect(selected?.querySelector('[data-selector-brand="openrouter"]')).toBeNull()
+  })
+
+  it('shortens generated provider titles in the menu without changing identities or custom labels', async () => {
+    await setup('shared', false, {
+      firstProviderId: 'modelhub',
+      firstProviderTitle: 'ModelHub (Native Direct)',
+      secondProviderId: 'openrouter',
+      secondProviderTitle: 'OpenRouter (Native Responses)',
+    })
+    await click(providerTrigger)
+    expect(document.querySelector('[data-provider-id="modelhub"] .cxmp-provider-label')?.textContent).toBe('ModelHub')
+    expect(document.querySelector('[data-provider-id="openrouter"] .cxmp-provider-label')?.textContent)
+      .toBe('OpenRouter')
+    expect(document.querySelector('[data-provider-id="modelhub"]')?.getAttribute('aria-checked')).toBe('false')
   })
 
   it('blocks model routing while busy and keeps plugin setup entries usable', async () => {
@@ -566,29 +602,28 @@ describe('provider selection interaction', () => {
   })
 
   it('keeps a reasoning slider inside the model menu and shows two independent triggers', async () => {
-    const { select, selectReasoningEffort } = await setup()
+    const { selectReasoningEffort } = await setup()
     expect(document.querySelectorAll('.cxmp-trigger')).toHaveLength(2)
     expect(document.querySelector(modelTrigger)?.textContent).toContain('Current')
-    expect(document.querySelector(modelTrigger)?.textContent).not.toContain('first')
     await click(modelTrigger)
-    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Reasoning effort')
+    expect(document.querySelector('.cxmp-reasoning-value')).toBeNull()
+    expect(document.querySelectorAll('.cxmp-reasoning-marks > span')).toHaveLength(2)
     const slider = document.querySelector<HTMLInputElement>('input[type="range"]')!
-    expect(slider.getAttribute('aria-valuetext')).toBe('High')
     await act(async () => {
-      slider.dispatchEvent(new dom!.window.Event('pointerdown', { bubbles: true }))
       Object.getOwnPropertyDescriptor(dom!.window.HTMLInputElement.prototype, 'value')!.set!.call(slider, '0')
       slider.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
-      slider.dispatchEvent(new dom!.window.Event('change', { bubbles: true }))
+      slider.dispatchEvent(new dom!.window.KeyboardEvent('keyup', { bubbles: true, key: 'Home' }))
     })
-    await act(async () => slider.dispatchEvent(new dom!.window.Event('pointerup', { bubbles: true })))
     expect(selectReasoningEffort).toHaveBeenCalledWith('low')
-    expect(select).not.toHaveBeenCalled()
+    expect(selectReasoningEffort).toHaveBeenCalledTimes(1)
+    expect(slider.closest('.cxmp-reasoning')?.hasAttribute('data-dragging')).toBe(false)
   })
 
   it('shows Fast availability in the menu and the active state beside the model trigger', async () => {
     const { selectFastMode, update } = await setup()
     await update({
       nativeModels: [{ id: 'shared', label: 'Current', disabled: false, supportsFastMode: true }],
+      reasoningEffort: 'low',
       serviceTier: null,
     })
     expect(document.querySelector('.cxmp-fast-trigger')).toBeNull()
@@ -596,14 +631,16 @@ describe('provider selection interaction', () => {
     const fast = document.querySelector<HTMLButtonElement>('.cxmp-fast-toggle')!
     expect(fast.disabled).toBe(false)
     expect(fast.getAttribute('aria-pressed')).toBe('false')
+    expect(document.querySelector('.cxmp-reasoning')?.hasAttribute('data-hot')).toBe(false)
     await click('.cxmp-fast-toggle')
     expect(selectFastMode).toHaveBeenCalledWith(true)
     expect(document.querySelector('.cxmp-fast-trigger')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('.cxmp-reasoning')?.getAttribute('data-hot')).toBe('true')
     // An unregistered surface token silently renders the neutral minus placeholder instead of the bolt.
     expect(document.querySelector('.cxmp-fast-trigger svg')?.getAttribute('data-host-icon-provider'))
       .toBe('builtin:reicon')
     expect(document.querySelector(`${modelTrigger} .cxmp-model-separator`)).not.toBeNull()
-    expect(document.querySelector(`${modelTrigger} .cxmp-effort-label`)?.textContent).toBe('High')
+    expect(document.querySelector(`${modelTrigger} .cxmp-effort-label`)?.textContent).toBe('Light')
     expect(document.querySelector(`${modelTrigger} .cordisx-host-icon`)).toBeNull()
   })
 
@@ -687,6 +724,7 @@ describe('provider selection interaction', () => {
       nativeModels: [{ id: 'shared', label: 'Global shared', disabled: false }],
     })
     await click(modelTrigger)
+    await click('.cxmp-model-disclosure')
     const stale = document.querySelector<HTMLButtonElement>('.cxmp-model-choice')!
     const current = registry.snapshot()
     vi.spyOn(registry, 'snapshot').mockReturnValue({ ...current, providers: [] })
@@ -698,11 +736,39 @@ describe('provider selection interaction', () => {
   it('disables reasoning while busy and reflects authoritative readback', async () => {
     const { update } = await setup('shared', true)
     await click(modelTrigger)
+    const menu = document.querySelector('.cxmp-menu')!
+    expect(menu.querySelector('.cxmp-menu-heading')).toBeNull()
+    expect(menu.textContent).not.toContain('Wait for the current response before switching')
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true)
     await update({ busy: false, reasoningEffort: 'low' })
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('0')
     expect(document.querySelector('input[type="range"]')?.getAttribute('aria-valuetext')).toBe('Light')
     expect(document.querySelector('.cxmp-selector > [role="status"]:not(.cxmp-announcement)')).toBeNull()
+  })
+
+  it('keeps switching and success feedback out of the model list while announcing it accessibly', async () => {
+    const { selectReasoningEffort, update } = await setup()
+    let finish!: () => void
+    selectReasoningEffort.mockImplementationOnce(() =>
+      new Promise(resolve => {
+        finish = () => resolve('accepted')
+      })
+    )
+    await click(modelTrigger)
+    const slider = document.querySelector<HTMLInputElement>('input[type="range"]')!
+    await act(async () => {
+      slider.value = '0'
+      slider.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
+      slider.dispatchEvent(new dom!.window.KeyboardEvent('keyup', { key: 'ArrowLeft', bubbles: true }))
+    })
+    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Switching model service')
+    expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Switching model service')
+    expect(document.querySelector('.cxmp-menu')?.querySelector('.cxmp-menu-heading')).toBeNull()
+    await update({ reasoningEffort: 'low' })
+    await act(async () => finish())
+    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Reasoning effort updated')
+    expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Reasoning effort updated')
+    expect(document.querySelector('.cxmp-menu')?.querySelector('.cxmp-menu-heading')).toBeNull()
   })
 
   it('keeps the focused slider mounted and focusable during its own pending commit', async () => {
@@ -801,32 +867,53 @@ describe('provider selection interaction', () => {
     expect(menu?.textContent).toContain('second')
   })
 
-  it('moves from model choices to the slider with Tab without losing menu focus', async () => {
-    await setup()
+  it('keeps reasoning ahead of the collapsed model list in keyboard order', async () => {
+    await setup('model-0', false, {
+      firstModels: Array.from({ length: 9 }, (_, index) => ({ id: `model-${index}`, label: `Model ${index}` })),
+    })
     await click(modelTrigger)
-    const choice = document.querySelector<HTMLButtonElement>('.cxmp-model-choice')!
+    const disclosure = document.querySelector<HTMLButtonElement>('.cxmp-model-disclosure')!
+    const slider = document.querySelector<HTMLInputElement>('input[type="range"]')!
+    expect(document.activeElement).toBe(slider)
+    await act(async () =>
+      slider.dispatchEvent(
+        new dom!.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+      )
+    )
+    expect(document.activeElement).toBe(disclosure)
+    await click('.cxmp-model-disclosure')
+    const choice = [...document.querySelectorAll<HTMLButtonElement>('.cxmp-model-choice')].at(-1)!
+    expect(choice.disabled).toBe(false)
     choice.focus()
     await act(async () =>
       choice.dispatchEvent(new dom!.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     )
-    expect(document.activeElement).toBe(document.querySelector('input[type="range"]'))
+    expect(document.activeElement).toBe(document.querySelector('input[type="search"]'))
   })
 
-  it('filters friendly names from the fixed search header and keeps the reasoning footer available', async () => {
+  it('shows model search above eight models and keeps it while filtering', async () => {
     const { update } = await setup()
+    const nativeModels = Array.from({ length: 9 }, (_, index) => ({
+      id: index === 0 ? 'sol' : `model-${index}`,
+      label: index === 0 ? 'GPT-5.6-Sol[Responses][Miniapp]' : `Model ${index}`,
+      disabled: false,
+    }))
     await update({
       modelProvider: 'openai',
       model: 'sol',
       modelLabel: 'GPT-5.6-Sol',
-      nativeModels: [
-        { id: 'sol', label: 'GPT-5.6-Sol[Responses][Miniapp]', disabled: false },
-        { id: 'astra', label: 'GPT-6-Astra', disabled: false },
-      ],
+      nativeModels: nativeModels.slice(0, 8),
     })
     await click(modelTrigger)
+    const disclosure = document.querySelector<HTMLButtonElement>('.cxmp-model-disclosure')!
+    expect(disclosure.textContent).toContain('GPT-5.6-Sol')
+    await click('.cxmp-model-disclosure')
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Search models"]')).toBeNull()
+    await update({ nativeModels })
     const search = document.querySelector<HTMLInputElement>('input[type="search"]')!
-    expect(document.activeElement).toBe(search)
     expect(search.closest('.cxmp-menu-scroll')).toBeNull()
+    expect(search.closest('.cxmp-model-options-inner')?.lastElementChild).toBe(search.closest('.cxmp-search'))
+    search.focus()
     const input = async (value: string) =>
       act(async () => {
         search.value = value
@@ -835,13 +922,13 @@ describe('provider selection interaction', () => {
     await input('gpt SOL')
     expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(1)
     expect(document.querySelector('.cxmp-model-choice')?.textContent).toBe('GPT-5.6-Sol')
+    expect(document.querySelector('[aria-label="Search models"]')).toBe(search)
     expect(document.activeElement).toBe(search)
     await input('Miniapp')
     expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(0)
     expect(document.querySelector('.cxmp-menu')?.textContent).toContain('No matching models')
-    expect(document.querySelector('input[type="range"]')).not.toBeNull()
     await click('[aria-label="Clear search"]')
-    expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(2)
+    expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(9)
     expect(document.activeElement).toBe(search)
     await act(async () =>
       search.dispatchEvent(
@@ -849,10 +936,46 @@ describe('provider selection interaction', () => {
       )
     )
     expect(document.activeElement).toBe(document.querySelector('.cxmp-model-choice'))
+    await update({ nativeModels: nativeModels.slice(0, 8) })
+    expect(document.querySelector('[aria-label="Search models"]')).toBeNull()
+    expect(document.querySelectorAll('.cxmp-model-choice')).toHaveLength(8)
+    await update({ nativeModels })
+    expect(document.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('')
     await click(providerTrigger)
     expect(document.querySelector('input[type="search"]')).toBeNull()
     await click(modelTrigger)
-    expect(document.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('')
+  })
+
+  it('adds bottom provider search only above five displayed rows and filters labels and IDs', async () => {
+    await setup('shared', false, {
+      nativeModels: [{ id: 'native', label: 'Native', disabled: false }],
+      additionalProviders: [
+        { providerId: 'third', title: 'Third', models: [{ id: 'third', label: 'Third model' }] },
+        { providerId: 'fourth', title: 'Fourth', models: [{ id: 'fourth', label: 'Fourth model' }] },
+        { providerId: 'fifth', title: 'Fifth', models: [{ id: 'fifth', label: 'Fifth model' }] },
+      ],
+    })
+    await click(providerTrigger)
+    const search = document.querySelector<HTMLInputElement>('[aria-label="Search model services"]')!
+    expect(search).not.toBeNull()
+    expect(search.closest('.cxmp-menu')?.lastElementChild).toBe(search.closest('.cxmp-search'))
+    search.focus()
+    await act(async () => {
+      search.value = 'FOUR'
+      search.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
+    })
+    expect([...document.querySelectorAll('[role="menuitemradio"]')].map(row => row.textContent)).toEqual(['Fourth'])
+    await act(async () => {
+      search.value = 'third'
+      search.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
+    })
+    expect([...document.querySelectorAll('[role="menuitemradio"]')].map(row => row.textContent)).toEqual(['Third'])
+    await act(async () => {
+      search.value = 'missing'
+      search.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
+    })
+    expect(document.querySelector('.cxmp-menu')?.textContent).toContain('No matching model services')
+    expect(document.querySelector('[aria-label="Search model services"]')).not.toBeNull()
   })
 
   it('keeps login actions operable while model routing is unavailable', async () => {

@@ -5,8 +5,6 @@ import { pathToFileURL } from 'node:url'
 import os from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
-import type { ChildProcess } from 'node:child_process'
-import type { Readable, Writable } from 'node:stream'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
@@ -15,9 +13,7 @@ import {
   type HomeConfigPathOptions,
   resolveHomeConfigPath,
 } from '../config/home-config.js'
-import type { buildRendererBundle } from '../launcher/bundle.js'
 export { assertProductionGraphLaunchOwnership } from '../launcher/host-generation-graph.js'
-import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
 import { localDevelopmentPluginIdentity } from '../launcher/development.js'
 import {
   createNativeSubmissionComposition,
@@ -43,37 +39,20 @@ import {
   resolveCordisXProjectConfig,
 } from '../launcher/config.js'
 import {
-  acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
-  confirmHiddenCodexOwnership,
   findFreeLoopbackPort,
-  type IsolatedCodexProfile,
-  launchCodex,
-  launchCodexHidden,
   prepareIsolatedCodexProfile,
   resolveCodexExecutable,
-  retainProfileLeaseAfterHiddenHostFailure,
-  terminateIsolatedCodex,
 } from '../launcher/process.js'
-import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
-import {
-  logHostLifecycle,
-  observeHostExit,
-  waitForAbort,
-  waitForExit,
-  waitForHostExitAfterReadiness,
-} from './host-lifecycle.js'
 export { waitForAbort, waitForExit, waitForHostExitAfterReadiness } from './host-lifecycle.js'
-import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
-import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
+import { type CordisXDevInvocation, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
-import type { openNativeStartupGate } from './startup-gate.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { WorkUsageProfileHost, type WorkUsageProfileLocation } from '../launcher/work-usage-profile.js'
-import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
+import { createConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import {
   type HostSecretState,
@@ -81,12 +60,9 @@ import {
   type HostServiceConfigPersistence,
 } from '../launcher/service-config.js'
 import type { PlatformProviderServiceReconfigureRuntime } from '../launcher/platform-provider-service-batch.js'
-import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
-import {
-  type ChannelCredentialBridgeHandler,
-  createChannelCredentialBridgeHandler,
-} from '../launcher/channel-credential-rpc.js'
-import { type ChannelActionsBridgeHandler, createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
+import { createServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
+import { createChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+import { createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { readServiceConfigState } from '../config/service-config.js'
 import {
@@ -110,12 +86,10 @@ import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { type PermissionPersistenceContext, PluginPermissionIdentityRegistry } from '../launcher/permission-rpc.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
-import type { IconThemePreferencePersistenceContext } from '../launcher/icon-theme-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
-import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
+import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
-import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
 import type { PluginManagementBridgeHandler } from '../launcher/management-rpc.js'
 import { openPluginManagementService, type PluginManagementService } from '../management/service.js'
 import {
@@ -133,15 +107,13 @@ import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
-import { loadStagedPluginPackage, stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
 import {
   type PluginGenerationArtifactServer,
   startPluginGenerationArtifactServer,
 } from '../launcher/plugin-generation-loader.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
-import { managedBackendRuntimeServiceAccess } from '../launcher/packages/managed-backend-service-access.js'
-import { ManagedServiceRuntime } from '../launcher/managed-service-runtime.js'
-import { type ManagedServiceNodeActivation, ManagedServiceNodeHost } from '../launcher/managed-service-node-host.js'
+import type { ManagedServiceNodeActivation } from '../launcher/managed-service-node-host.js'
 import {
   CordisXSkillConflictError,
   type CordisXSkillDeploymentResult,
@@ -156,75 +128,12 @@ import {
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
-import type { OpenManagementCommandService } from './management-command.js'
+import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { runInjectedHost } from './run-injected-host.js'
+import { type CordisXCliRuntime, createDevelopmentManagedServiceActivation } from './run-runtime.js'
+export { captureMainInspectorUrl, completeHostReadiness, runInjectedHost } from './run-injected-host.js'
+export type { CordisXCliRuntime } from './run-runtime.js'
 export { HELP } from './help.js'
-
-export interface CordisXCliRuntime {
-  /** Test-only app installation destination. */
-  readonly internalAppOutput?: import('../app-launcher/runtime-install.js').AppCommandOutputOptions
-  /** Test-only exact-path replacement for `/usr/bin/open`. */
-  readonly internalOpenApp?: (path: string) => void | Promise<void>
-  /** Isolated native verification output; never read from user CLI/env. */
-  readonly internalShortcutOutput?: import('../shortcuts/model.js').ShortcutOutputOptions
-  /** The persistent app launcher may reuse one verified entry for the same live Host generation. */
-  readonly internalReuseShortcut?: boolean
-  /** Only the signed native shortcut entry supplies this internal path. */
-  readonly internalShortcutDockRecordPath?: string
-  /** GUI children start outside protected project folders; cwd still records launch intent. */
-  readonly internalShortcutSpawnCwd?: string
-  readonly cwd?: string
-  readonly env?: NodeJS.ProcessEnv
-  /** Test/integration seam for the canonical default `~/.cordisx` root. */
-  readonly homedir?: string
-  readonly stdout?: (line: string) => void
-  readonly stdin?: Readable & { readonly isTTY?: boolean }
-  readonly stderr?: Writable
-  /** Repository-only seam until the shared management service is composed. */
-  readonly internalOpenPluginManagementService?: OpenManagementCommandService
-  /** Test-only confirmation seam. It confirms a mutation, never plugin permissions. */
-  readonly internalManagementConfirm?: (prompt: string) => boolean | Promise<boolean>
-  /** Test-only cancellation seam for long-lived `cordisx logs --follow`. */
-  readonly internalSignal?: AbortSignal
-  /** Repository-only detached-supervisor seam; production always spawns the packaged CLI. */
-  readonly internalSpawnSupervisor?: (input: {
-    readonly args: readonly string[]
-    readonly env: NodeJS.ProcessEnv
-    readonly logFd: number
-  }) => Readonly<{ pid: number; unref(): void }>
-  /** Repository-only seam for bounded supervisor failure-path integration tests. */
-  readonly internalSupervisorReadinessTimeoutMs?: number
-  /** Repository-only startup-gate seam; false keeps command tests headless. */
-  readonly internalOpenStartupGate?: false | typeof openNativeStartupGate
-  readonly internalScheduleShortcutPresentation?: import('./shortcut-presentation-worker.js').PresentationScheduler
-  /**
-   * Internal-only renderer bundle closure for repository-controlled production
-   * integration tests. It has no CLI/configuration/environment input and is
-   * undefined for every product launch.
-   */
-  readonly internalBuildRendererBundle?: typeof buildRendererBundle
-  /** Repository-only proof that the production composition and authority agree. */
-  readonly internalObserveOwnerDocuments?: (input: {
-    readonly bootstrapSource: string
-    readonly source: string
-    readonly handler: OwnerDocumentBridgeHandler
-  }) => void | Promise<void>
-  /** Repository-only source seam for built-in Skill deployment tests. */
-  readonly internalBuiltinSkillSourceDir?: string
-  /** Repository-only source-root seam for bundled Skills deployment tests. */
-  readonly internalBuiltinSkillsSourceRootDir?: string
-  /** Repository-only HOME seam that prevents launch tests from touching the user's real HOME. */
-  readonly internalSharedHomeDir?: string
-  /** Repository-only launch seam for proving CLI assembly without starting a native Host. */
-  readonly internalRunInjectedHost?: typeof runInjectedHost
-  /** Repository-only native composition seam for launcher assembly tests. */
-  readonly internalCreateNativeSubmissionComposition?: typeof createNativeSubmissionComposition
-  /** Repository-only installed managed-service activation seam for launcher assembly tests. */
-  readonly internalCreateDevelopmentManagedServiceActivation?: typeof createDevelopmentManagedServiceActivation
-  /** Repository-only platform seam for launcher assembly tests. */
-  readonly internalNativeSubmissionPlatform?: NodeJS.Platform
-  /** Repository-only factory seam for proving pre-handoff launch assembly failures. */
-  readonly internalAgentHistoryHost?: typeof agentHistoryHost
-}
 
 export async function deployBuiltinSkillWithoutOverwritingUserChanges(
   deployment: Promise<CordisXSkillDeploymentResult>,
@@ -258,28 +167,6 @@ export async function deployBuiltinSkillsWithoutOverwritingUserChanges(
 
 export function shouldSkipBuiltinSkillDeployment(environment: NodeJS.ProcessEnv): boolean {
   return environment.CORDISX_SKIP_BUILTIN_SKILL_DEPLOYMENT === '1'
-}
-
-/** Capture only the ephemeral loopback inspector address from our own Host stderr. */
-export function captureMainInspectorUrl(child: ChildProcess): Promise<string> {
-  const stream = child.stderr
-  if (!stream) return Promise.reject(new Error('Owned Host inspector stderr unavailable'))
-  const operation = new Promise<string>((resolve, reject) => {
-    let buffer = ''
-    const timer = setTimeout(() => reject(new Error('Owned Host inspector did not start')), 8_000)
-    stream.on('data', chunk => {
-      buffer = (buffer + String(chunk)).slice(-8_192)
-      const match = /Debugger listening on (ws:\/\/127\.0\.0\.1:\d+\/[a-f0-9-]+)/u.exec(buffer)
-      if (match?.[1]) {
-        clearTimeout(timer)
-        resolve(match[1])
-      }
-    })
-    stream.once('error', reject)
-    stream.once('end', () => reject(new Error('Owned Host main inspector exited')))
-  })
-  void operation.catch(() => undefined)
-  return operation
 }
 
 export function rootFromConfigPath(configPath: string): string {
@@ -341,58 +228,6 @@ export function pluginIdentities(config: CordisXConfig): readonly CordisXPluginI
   return config.plugins.map(plugin => ({ source: plugin.source ?? pathToFileURL(plugin.entry).href, id: plugin.id }))
 }
 
-async function createDevelopmentManagedServiceActivation(input: {
-  readonly homeConfigPath: string
-  readonly homeDir: string
-  readonly environment: NodeJS.ProcessEnv
-}): Promise<ManagedServiceNodeActivation> {
-  const homeConfig = await ensureHomeConfig({ configPath: input.homeConfigPath })
-  const codex = ownValue(homeConfig.apps, 'codex')
-  if (codex === undefined) throw new Error('host app is not configured: codex')
-  const runtimeGeneration = randomBytes(16).toString('hex')
-  const store = new PluginActivationStore(input.homeDir, codex.defaultProfile, runtimeGeneration)
-  const active = await store.loadActive()
-  const nestedAccesses = await Promise.all(active.plugins.flatMap(item =>
-    item.enabled
-      ? [(async () => {
-        const staged = await loadStagedPluginPackage(input.homeDir, item.digest)
-        if (
-          staged.manifest.id !== item.id || staged.manifest.version !== item.version
-          || JSON.stringify(staged.manifest.dependencies) !== JSON.stringify(item.dependencies)
-        ) throw new Error(`active plugin package metadata failed readback for ${item.id}`)
-        const manifest = staged.manifest.runtimeManifest
-        if (manifest.schemaVersion !== 14) return []
-        return await Promise.all(manifest.services.flatMap(service =>
-          service.kind === 'managed-backend'
-            ? [managedBackendRuntimeServiceAccess(
-              input.homeDir,
-              {
-                id: item.id,
-                version: item.version,
-                digest: item.digest,
-                moduleGeneration: item.moduleGeneration,
-              },
-              service.id,
-              runtimeGeneration,
-            )]
-            : []
-        ))
-      })()]
-      : []
-  ))
-  const host = new ManagedServiceNodeHost(
-    new ManagedServiceRuntime({ homeDir: input.homeDir, environment: input.environment }),
-    'development',
-    runtimeGeneration,
-  )
-  try {
-    return await host.replace(nestedAccesses.flat())
-  } catch (error) {
-    await host.dispose().catch(() => undefined)
-    throw error
-  }
-}
-
 export { cliProxyServiceConfigApis } from './provider-config-apis.js'
 
 export function recoveredActivation(plan: RollbackPlan, runtimeGeneration: string): CordisXPluginActivationRecordV1 {
@@ -414,256 +249,6 @@ export function printPlan(
   status: 'ready' | 'launching' = 'ready',
 ): void {
   stdout(JSON.stringify({ status, plan }, null, 2))
-}
-
-/** A rejected startup UI callback is terminal, including the user's Close action. */
-export async function completeHostReadiness(
-  controller: AbortController,
-  ready?: (signal?: AbortSignal) => void | Promise<void>,
-): Promise<void> {
-  try {
-    await ready?.(controller.signal)
-  } catch (error) {
-    controller.abort()
-    throw error
-  }
-}
-
-export async function runInjectedHost(input: {
-  readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
-  readonly source: string | (() => string)
-  readonly newDocumentSource?: string | (() => string)
-  readonly providerFleet?: ProviderFleet
-  readonly providerBridgeToken?: string
-  readonly agentHistoryHost: CodexAgentHistoryHost
-  readonly agentHistoryBridgeToken: string
-  readonly configBridge?: ConfigBridgeHandler
-  readonly ownerDocuments?: OwnerDocumentBridgeHandler
-  readonly serviceConfigBridge?: ServiceConfigBridgeHandler
-  readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
-  readonly channelActionsBridge?: ChannelActionsBridgeHandler
-  readonly permissionPersistence?: PermissionPersistenceContext
-  readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
-  readonly pluginLifecycle?: {
-    readonly handler: PluginLifecycleBridgeHandler
-    readonly runtime: CdpPluginLifecycleRuntime
-  }
-  readonly pluginManagement?: PluginManagementBridgeHandler
-  readonly developmentRuntime?: CdpPluginLifecycleRuntime
-  readonly viteDevelopment?: boolean
-  readonly hasLoopbackGraph: boolean
-  readonly pluginArtifactOrigin?: string
-  readonly productionGraphBootstrap?: WatchInjectionOptions['productionGraphBootstrap']
-  readonly publisherGrant?: PublisherGrantBridgeHandler
-  readonly certifiedPermission?: Readonly<{
-    authority: LauncherMarketplaceCertifiedAuthority
-    token: string
-    profileId: string
-    runtimeGeneration: string
-  }>
-  readonly managedServiceUI?: WatchInjectionOptions['managedServiceUI']
-  readonly executable?: string
-  readonly prelaunchedHost?: Readonly<{
-    child: ChildProcess
-    hostPid?: number
-    inspectorUrl?: Promise<string>
-  }>
-  readonly debugPort: number
-  readonly hostArgs: readonly string[]
-  readonly launcher: CordisXLauncherOptions
-  readonly profile?: IsolatedCodexProfile
-  /** Product launch may acquire before profile preparation and hand ownership to this lifecycle. */
-  readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
-  readonly environment?: Readonly<Record<string, string>>
-  readonly stdout: (line: string) => void
-  readonly onReady?: (signal?: AbortSignal) => void | Promise<void>
-  readonly onHostLaunched?: import('../launcher/process.js').HostLaunchIdentityObserver
-  /** Internal, owned-entry bootstrap only. Never a user Host argument. */
-  readonly mainInspector?: boolean
-  readonly hiddenUntilReady?: boolean
-}): Promise<void> {
-  const controller = new AbortController()
-  let rendererIsReady = false
-  let launched = input.prelaunchedHost?.child
-  let removeHostObserver = launched === undefined
-    ? undefined
-    : observeHostExit(launched, input.stdout, () => rendererIsReady)
-  const hostPid = (): number | undefined => input.prelaunchedHost?.hostPid ?? launched?.pid
-  const lifecycle = (event: Parameters<typeof logHostLifecycle>[1]): void =>
-    logHostLifecycle(input.stdout, event, { hostPid: hostPid(), ready: rendererIsReady })
-  const stop = (signal: 'SIGINT' | 'SIGTERM'): void => {
-    lifecycle({ event: 'launcher-signal', signal })
-    controller.abort()
-  }
-  const interrupt = (): void => stop('SIGINT')
-  const terminate = (): void => stop('SIGTERM')
-  process.once('SIGINT', interrupt)
-  process.once('SIGTERM', terminate)
-  let markReady!: () => void
-  const rendererReady = new Promise<void>(resolve => {
-    markReady = resolve
-  })
-  let reportedReady = false
-  const watcher = watchAndInject({
-    ...(input.nativeSubmission === undefined ? {} : { nativeSubmission: input.nativeSubmission }),
-    port: input.debugPort,
-    source: input.source,
-    ...(input.newDocumentSource === undefined ? {} : { newDocumentSource: input.newDocumentSource }),
-    signal: controller.signal,
-    ...(input.providerFleet === undefined || input.providerBridgeToken === undefined ? {} : {
-      providerFleet: input.providerFleet,
-      providerBridgeToken: input.providerBridgeToken,
-    }),
-    agentHistoryHost: input.agentHistoryHost,
-    agentHistoryBridgeToken: input.agentHistoryBridgeToken,
-    ...(input.configBridge === undefined ? {} : { configBridge: input.configBridge }),
-    ...(input.ownerDocuments === undefined ? {} : { ownerDocuments: input.ownerDocuments }),
-    ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
-    ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
-    ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
-    ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
-    ...(input.iconThemePreferencePersistence === undefined
-      ? {}
-      : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
-    ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
-    ...(input.pluginManagement === undefined ? {} : { pluginManagement: input.pluginManagement }),
-    ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
-    ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
-    hasLoopbackGraph: input.hasLoopbackGraph,
-    launcherOwnedNativeTarget: !input.launcher.attach,
-    ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
-    ...(input.productionGraphBootstrap === undefined
-      ? {}
-      : { productionGraphBootstrap: input.productionGraphBootstrap }),
-    ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
-    ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
-    ...(input.managedServiceUI === undefined ? {} : { managedServiceUI: input.managedServiceUI }),
-    onReady: async () => {
-      if (reportedReady) return
-      reportedReady = true
-      await completeHostReadiness(controller, async signal => {
-        try {
-          await input.onReady?.(signal)
-        } catch (error) {
-          lifecycle({ event: 'readiness-failed' })
-          throw error
-        }
-      })
-      rendererIsReady = true
-      markReady()
-      input.stdout('[cordisx] CDP renderer ready')
-    },
-    onStatus: message => input.stdout(`[cordisx] ${message}`),
-  })
-  let profileLease = input.profileLease
-  let primaryError: unknown
-  let retainProfileLease = false
-  try {
-    if (input.launcher.attach) {
-      await Promise.race([waitForAbort(controller.signal), watcher])
-      return
-    }
-    if (input.executable === undefined) throw new Error('host executable was not resolved')
-    if (input.profile !== undefined && profileLease === undefined) {
-      profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir, { stdout: input.stdout })
-    }
-    if (input.prelaunchedHost === undefined) {
-      const hidden = input.hiddenUntilReady === true
-      const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
-      if (hidden && !mainInspector) throw new Error('Hidden Host launch requires an owned main inspector')
-      input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
-      const hiddenLaunch = hidden
-        ? await launchCodexHidden(
-          input.executable,
-          input.debugPort,
-          input.hostArgs,
-          input.profile,
-          input.launcher.onlineDevtools,
-          input.environment,
-          mainInspector ? await findFreeLoopbackPort() : undefined,
-        )
-        : undefined
-      launched = hiddenLaunch?.child ?? launchCodex(
-        input.executable,
-        input.debugPort,
-        input.hostArgs,
-        input.profile,
-        input.launcher.onlineDevtools,
-        input.environment,
-        mainInspector,
-      )
-      if (launched.pid === undefined) throw new Error('launched Host exposed no PID')
-      removeHostObserver = observeHostExit(launched, input.stdout, () => rendererIsReady)
-      const inspectorUrl = hiddenLaunch?.inspectorUrl ?? (mainInspector ? captureMainInspectorUrl(launched) : undefined)
-      const ownershipVerified = await input.onHostLaunched?.(hiddenLaunch?.hostPid ?? launched.pid, inspectorUrl)
-      if (hiddenLaunch) {
-        if (ownershipVerified !== true) throw new Error('Hidden Host inspector identity was not confirmed')
-        confirmHiddenCodexOwnership(hiddenLaunch)
-      }
-    } else {
-      launched = input.prelaunchedHost.child
-      if (launched.pid === undefined) throw new Error('prelaunched Host exposed no PID')
-    }
-    await Promise.race([
-      waitForHostExitAfterReadiness({
-        childExit: waitForExit(launched),
-        ready: rendererReady,
-        signal: controller.signal,
-      }),
-      watcher,
-    ])
-  } catch (error) {
-    lifecycle({ event: 'lifecycle-failed' })
-    primaryError = error
-    retainProfileLease = retainProfileLeaseAfterHiddenHostFailure(error)
-    if (retainProfileLease) {
-      input.stdout('[cordisx] hidden Host identity is unresolved; profile launch lease retained to block unsafe retry')
-    }
-    throw error
-  } finally {
-    lifecycle({ event: 'cleanup-started' })
-    controller.abort()
-    const launchedHost = launched
-    const cleanup = await settleInjectedHostCleanup({
-      beforeHostTermination: [
-        watcher,
-        ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
-        Promise.resolve(input.agentHistoryHost.dispose()),
-      ],
-      ...(launchedHost === undefined
-        ? {}
-        : {
-          terminateHost: async () => {
-            lifecycle({
-              event: 'host-termination-requested',
-              alreadyExited: launchedHost.exitCode !== null || launchedHost.signalCode !== null,
-            })
-            await terminateIsolatedCodex(launchedHost, input.profile)
-          },
-        }),
-    })
-    const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
-    const leaseCleanup = hostTermination?.status === 'rejected' || retainProfileLease
-      ? []
-      : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])
-    process.removeListener('SIGINT', interrupt)
-    process.removeListener('SIGTERM', terminate)
-    removeHostObserver?.()
-    if (primaryError !== undefined) {
-      for (const result of [...cleanup, ...leaseCleanup]) {
-        if (result.status === 'rejected') {
-          input.stdout(`[cordisx] cleanup failed: ${String((result as PromiseRejectedResult).reason)}`)
-        }
-      }
-    }
-    if (primaryError === undefined) {
-      const rejected = cleanup.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (rejected !== undefined) throw rejected.reason
-      for (const result of leaseCleanup) {
-        if (result.status === 'rejected') throw result.reason
-      }
-    }
-  }
 }
 
 export async function runDevelopment(
@@ -734,14 +319,56 @@ export async function runDevelopment(
   let managedServiceProjection: Awaited<ReturnType<typeof createNativeViteManagedServiceProjection>> | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
   let pluginManagementService: PluginManagementService | undefined
+  let certifiedPermissionAuthority: LauncherMarketplaceCertifiedAuthority | undefined
   try {
-    vite = await startNativeViteServer(config, {
+    const developmentHome = invocation.options.dryRun
+      ? undefined
+      : await (async () => {
+        const homeConfig = await ensureHomeConfig(homeConfigOptions)
+        const nativeApp = ownValue(homeConfig.apps, 'codex')
+        if (nativeApp === undefined) throw new Error('host app is not configured: codex')
+        const nativeProfileId = nativeApp.defaultProfile
+        const nativeProfile = ownValue(nativeApp.profiles, nativeProfileId)
+        if (nativeProfile === undefined) {
+          throw new Error(`default profile is not configured for codex: ${nativeProfileId}`)
+        }
+        const managementAppId = homeConfig.defaultApp
+        const managementApp = ownValue(homeConfig.apps, managementAppId)
+        if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)
+        const managementProfileId = managementApp.defaultProfile
+        const managementProfile = ownValue(managementApp.profiles, managementProfileId)
+        if (managementProfile === undefined) {
+          throw new Error(`default profile is not configured for ${managementAppId}: ${managementProfileId}`)
+        }
+        const runtimeGeneration = randomBytes(16).toString('hex')
+        const store = new PluginActivationStore(cordisxHomeDir, nativeProfileId, runtimeGeneration)
+        const activation = await store.loadActive()
+        return {
+          homeConfig,
+          nativeProfileId,
+          nativeProfile,
+          managementAppId,
+          managementProfileId,
+          runtimeGeneration,
+          store,
+          activation,
+          plugins: await loadPluginComposition(store, activation),
+        }
+      })()
+    const configuredIds = new Set(config.plugins.map(plugin => plugin.id))
+    const collision = developmentHome?.plugins.find(plugin => configuredIds.has(plugin.id))
+    if (collision !== undefined) throw new Error(`development plugin already owns package id ${collision.id}`)
+    const rendererConfig: CordisXConfig = {
+      ...config,
+      plugins: [...config.plugins, ...developmentHome?.plugins ?? []],
+    }
+    vite = await startNativeViteServer(rendererConfig, {
       cacheRoot: dryRunCacheRoot ?? path.join(cordisxHomeDir, 'cache', 'native-vite'),
       prebundleHostDependencies: !invocation.options.dryRun,
     })
     const activeVite = vite
     if (invocation.options.dryRun) {
-      const composition = await buildRendererComposition(config, stdout, {
+      const composition = await buildRendererComposition(rendererConfig, stdout, {
         profileId: 'development',
         writable: invocation.options.writeConfig === true,
         serviceConfigWritable: false,
@@ -772,7 +399,30 @@ export async function runDevelopment(
       ))
       return
     }
-    const homeConfig = await ensureHomeConfig(homeConfigOptions)
+    if (developmentHome === undefined) throw new Error('development home composition is unavailable')
+    const {
+      homeConfig,
+      nativeProfileId,
+      nativeProfile,
+      managementAppId,
+      managementProfileId,
+      runtimeGeneration: developmentRuntimeGeneration,
+      store: developmentStore,
+      activation: activeLifecycleActivation,
+    } = developmentHome
+    const permissionPolicies = homeConfig.permissions.filter(policy => policy.key.profileId === nativeProfileId)
+    const permissionIdentities = new PluginPermissionIdentityRegistry(pluginIdentities(rendererConfig))
+    certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
+      homeDir: cordisxHomeDir,
+      configPath: homeConfigPath,
+      profileId: nativeProfileId,
+    }).catch(error => {
+      stdout(`[cordisx] Certified permission authority unavailable; explicit review remains required: ${String(error)}`)
+      return undefined
+    })
+    const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
+      ? undefined
+      : randomBytes(32).toString('hex')
     if (shouldSkipBuiltinSkillDeployment(environment)) {
       stdout('[cordisx] built-in Skill deployment skipped by the local acceptance runner')
     } else if (invocation.options.attach) {
@@ -823,14 +473,29 @@ export async function runDevelopment(
           homeConfigPath,
           homeDir: cordisxHomeDir,
           environment,
+          profileId: nativeProfileId,
+          runtimeGeneration: developmentRuntimeGeneration,
         })
         const createNativeSubmission = runtime.internalCreateNativeSubmissionComposition
           ?? createNativeSubmissionComposition
-        nativeSubmission = await createNativeSubmission(managedServiceActivation, executable, codexHome(environment))
+        nativeSubmission = await createNativeSubmission(
+          managedServiceActivation,
+          executable,
+          codexHome(environment),
+          nativeSubmissionCatalogOptions(
+            cordisxHomeDir,
+            nativeProfileId,
+            nativeProfile,
+            environment,
+            undefined,
+            runtime.internalNativeSubmissionLegacyLockRecovery,
+          ),
+        )
         managedServiceProjection = await createNativeViteManagedServiceProjection({
           activation: managedServiceActivation,
-          profileId: 'development',
+          profileId: nativeProfileId,
           runtimeGeneration: managedServiceActivation.hostGeneration,
+          initialActivation: activeLifecycleActivation,
         })
       } catch (error) {
         await nativeSubmission?.close().catch(() => undefined)
@@ -842,15 +507,11 @@ export async function runDevelopment(
         stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
     }
-    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, nativeProfileId)
     await activeVite.synchronizePluginGenerations(composeNativeVitePluginGenerationHandlers([
-      createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
+      createNativeViteEntityGenerationHandler(entityAuthority, nativeProfileId),
       ...(managedServiceProjection === undefined ? [] : [managedServiceProjection.handler]),
     ]))
-    const managementAppId = homeConfig.defaultApp
-    const managementApp = ownValue(homeConfig.apps, managementAppId)
-    if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)
-    const managementProfileId = managementApp.defaultProfile
     pluginManagementService = await openPluginManagementService({
       configPath: homeConfigPath,
       homeDir: cordisxHomeDir,
@@ -858,12 +519,13 @@ export async function runDevelopment(
       profileId: managementProfileId,
     })
     const pluginManagementToken = randomBytes(32).toString('hex')
-    const composition = await buildRendererComposition(config, stdout, {
-      profileId: 'development',
+    const composition = await buildRendererComposition(rendererConfig, stdout, {
+      profileId: nativeProfileId,
       writable: invocation.options.writeConfig === true,
       serviceConfigWritable: false,
-      permission: { profileId: 'development', policies: [], persistent: false },
+      permission: { profileId: nativeProfileId, policies: permissionPolicies, persistent: true },
       ...(managedServiceActivation === undefined ? {} : { generation: managedServiceActivation.hostGeneration }),
+      ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
       ...(managedServiceProjection === undefined
         ? {}
         : { managedServiceUICapabilities: managedServiceProjection.capabilities() }),
@@ -876,11 +538,18 @@ export async function runDevelopment(
       generation: composition.generation,
       service: pluginManagementService,
     }
+    const permissionPersistence = composition.permissionBridgeToken === undefined ? undefined : {
+      configPath: homeConfigPath,
+      profileId: nativeProfileId,
+      token: composition.permissionBridgeToken,
+      identities: pluginIdentities(rendererConfig),
+      identityAllowed: (identity: CordisXPluginIdentity) => permissionIdentities.allowed(identity),
+    }
     const configBridge = composition.configBridgeToken === undefined
       ? undefined
       : createLauncherConfigBridgeHandler({
         token: composition.configBridgeToken,
-        profileId: 'development',
+        profileId: nativeProfileId,
         generation: composition.generation,
         configPath: location!.configPath,
         composition: config,
@@ -892,19 +561,19 @@ export async function runDevelopment(
         cordisxHomeDir,
         ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
       })
-    const identities = pluginIdentities(config)
+    const identities = pluginIdentities(rendererConfig)
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
     })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
       localWalletHomeDir: cordisxHomeDir,
-      managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, 'development'),
+      managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, nativeProfileId),
       managedSources: async () =>
-        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, 'development'),
-      plugins: config.plugins,
+        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, nativeProfileId),
+      plugins: rendererConfig.plugins,
       secret: composition.ownerDocumentSecret,
-      profileId: 'development',
+      profileId: nativeProfileId,
       generation: composition.generation,
       store: new OwnerDocumentStore(cordisxHomeDir),
       principalAllowed: principal => documentLeases.allowed(principal),
@@ -912,7 +581,7 @@ export async function runDevelopment(
     const ownerDocuments = Object.assign(ownerDocumentHandler, {
       entities: createEntityBridgeHandler({
         secret: composition.ownerDocumentSecret,
-        profileId: 'development',
+        profileId: nativeProfileId,
         generation: composition.generation,
         authority: entityAuthority,
         principalAllowed: principal => documentLeases.allowed(principal),
@@ -933,9 +602,9 @@ export async function runDevelopment(
       historyHost = agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`, workProfile)
       providerFleet = composition.providerBridgeToken === undefined
         ? undefined
-        : await ProviderFleet.create(providerConfigs(config, environment), {
+        : await ProviderFleet.create(providerConfigs(rendererConfig, environment), {
           appServer: { environment },
-          agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, 'development'),
+          agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, nativeProfileId),
         })
       resourcesHandedOff = true
       const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
@@ -945,6 +614,9 @@ export async function runDevelopment(
           ? {}
           : { managedServiceUI: managedServiceProjection.managedServiceUI }),
         source: composition.source,
+        ...(composition.newDocumentSource === undefined ? {} : {
+          newDocumentSource: composition.newDocumentSource,
+        }),
         viteDevelopment: true,
         ...(configBridge === undefined ? {} : { configBridge }),
         hasLoopbackGraph: false,
@@ -952,6 +624,15 @@ export async function runDevelopment(
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         ownerDocuments,
         pluginManagement,
+        ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
+        ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
+          certifiedPermission: {
+            authority: certifiedPermissionAuthority,
+            token: certifiedPermissionChannelToken,
+            profileId: nativeProfileId,
+            runtimeGeneration: composition.generation,
+          },
+        }),
         ...(providerFleet === undefined || composition.providerBridgeToken === undefined ? {} : {
           providerFleet,
           providerBridgeToken: composition.providerBridgeToken,
@@ -991,6 +672,7 @@ export async function runDevelopment(
       await nativeSubmission?.close().catch(() => undefined)
       await managedServiceProjection?.dispose().catch(() => undefined)
       await managedServiceActivation?.dispose().catch(() => undefined)
+      await certifiedPermissionAuthority?.dispose().catch(() => undefined)
       pluginManagementService?.close()
       await vite?.close()
     } finally {

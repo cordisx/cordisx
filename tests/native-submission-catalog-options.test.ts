@@ -19,4 +19,12 @@ describe('native submission catalog options', () => {
     expect(nativeSubmissionCatalogOptions('/home', 'default', { nativeModelDiscovery: false }, base))
       .toMatchObject({ nativeModelDiscovery: false })
   })
+
+  it('forwards one-shot legacy owner recovery only when explicitly supplied by the Host', () => {
+    const recovery = { exitedPid: 1234, inode: 5678 }
+    expect(nativeSubmissionCatalogOptions('/home', 'default', {}, {}, undefined, recovery).managedCatalog)
+      .toEqual({ homeDir: '/home', profileId: 'default', recoverLegacyLock: recovery })
+    expect(nativeSubmissionCatalogOptions('/home', 'default', {}, {}).managedCatalog)
+      .toEqual({ homeDir: '/home', profileId: 'default' })
+  })
 })

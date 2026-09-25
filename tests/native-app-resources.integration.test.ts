@@ -6,10 +6,15 @@ import vm from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
-import { createNativeSubmissionComposition } from '../packages/cli/src/launcher/native-submission-composition.js'
+import {
+  createNativeSubmissionComposition,
+  prepareNativeSubmissionBootstrap,
+} from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
+import { applyCatalogManagementPreferences } from '../packages/cli/src/renderer/model-provider-preferences.js'
 import { resources } from './fixtures/native-submission-structure.js'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -43,6 +48,81 @@ async function bundle(incompatible = false) {
   return { contents, executable }
 }
 
+async function writeManagedProfile(homeDir: string, profileId: string): Promise<void> {
+  await chmod(homeDir, 0o700)
+  const config = createDefaultHomeConfig()
+  await writeFile(
+    path.join(homeDir, 'config.json'),
+    JSON.stringify({
+      ...config,
+      apps: {
+        codex: {
+          defaultProfile: profileId,
+          profiles: { [profileId]: { displayName: 'Fixture', dataMode: 'shared' } },
+        },
+      },
+    }),
+    { mode: 0o600 },
+  )
+}
+
+function pluginActivation(providers: Readonly<Record<string, { pluginId: string; modelId: string }>>) {
+  return {
+    nativeProviderIds: Object.keys(providers),
+    prepareNativeConnection(providerId: string) {
+      const provider = providers[providerId]
+      if (provider === undefined) throw new Error('unknown fixture provider')
+      return {
+        value: {
+          service: { pluginId: provider.pluginId, serviceId: 'gateway', generation: 'fixture-generation' },
+          endpoint: {
+            origin: `https://${providerId}.example.test`,
+            apiPath: '/v1' as const,
+            auth: { scheme: 'none' as const },
+          },
+          models: {
+            generation: 'fixture-models',
+            defaultAlias: provider.modelId,
+            aliases: [{ alias: provider.modelId, gatewayModelId: provider.modelId }],
+          },
+          cleanup: { authorityId: 'fixture-generation' },
+        },
+        dispose() {},
+      }
+    },
+    subscribeNativeProviders() {
+      return () => {}
+    },
+  }
+}
+
+async function installNativeChannel(composition: Awaited<ReturnType<typeof createNativeSubmissionComposition>>) {
+  const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
+  let receive: (params: Record<string, unknown>) => void
+  const session = {
+    isClosed: () => false,
+    onEvent: (_event: string, handler: typeof receive) => {
+      receive = handler
+      return () => undefined
+    },
+    send: vi.fn(async (method: string, params: Record<string, any>) => {
+      if (method === 'Runtime.addBinding') {
+        world[params.name] = (payload: string) => receive({ name: params.name, payload })
+      }
+      if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' }
+      if (method === 'Runtime.evaluate') vm.runInNewContext(params.expression, world)
+      return {}
+    }),
+  }
+  const installed = await composition.installation.authority.install(session as unknown as CdpSession, {
+    id: `target-${crypto.randomUUID()}`,
+    url: 'app://-/index.html',
+    type: 'page',
+    title: '',
+  })
+  return { channel: world.__cordisxNativeProviderCommandChannel, dispose: () => installed.dispose() }
+}
+
 it('reads the actual ASAR resource layout without relying on asset hash names', async () => {
   const f = await bundle()
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
@@ -65,27 +145,39 @@ it.skipIf(process.platform !== 'darwin')(
         'env_key = "DEEPSEEK_API_KEY"',
       ].join('\n'),
     )
-    const prepareNativeConnection = vi.fn()
-    const values = new Map<string, string>()
-    const keychain = {
-      async read(service: string, account: string) {
-        const value = values.get(`${service}/${account}`)
-        if (!value) throw Error()
-        return value
-      },
-      async status(service: string, account: string): Promise<'set' | 'unset'> {
-        return values.has(`${service}/${account}`) ? 'set' : 'unset'
-      },
-      async upsert(service: string, account: string, value: string) {
-        values.set(`${service}/${account}`, value)
-      },
-      async remove(service: string, account: string) {
-        values.delete(`${service}/${account}`)
-      },
-    }
+    const nativeConfigBefore = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
+    await writeManagedProfile(codexHome, 'fixture')
+    let pluginModelId = 'plugin-first'
+    let notifyNativeProviders!: () => void
+    const prepareNativeConnection = vi.fn((providerId: string) => {
+      if (providerId !== 'plugin-provider') throw new Error('unknown fixture provider')
+      return {
+        value: {
+          service: { pluginId: 'fixture-plugin', serviceId: 'gateway', generation: 'same-generation' },
+          endpoint: { origin: 'https://plugin.example.test', apiPath: '/v1', auth: { scheme: 'none' as const } },
+          models: {
+            generation: `models-${pluginModelId}`,
+            defaultAlias: pluginModelId,
+            aliases: [
+              { alias: pluginModelId, gatewayModelId: pluginModelId },
+              { alias: `${pluginModelId}-alias`, gatewayModelId: pluginModelId },
+            ],
+          },
+          cleanup: { authorityId: 'same-generation' },
+        },
+        dispose() {},
+      }
+    })
     await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'deepseek-chat' }] }))
     const composition = await createNativeSubmissionComposition(
-      { nativeProviderIds: [], prepareNativeConnection },
+      {
+        nativeProviderIds: ['plugin-provider'],
+        prepareNativeConnection,
+        subscribeNativeProviders: listener => {
+          notifyNativeProviders = listener
+          return () => {}
+        },
+      },
       f.executable,
       codexHome,
       {
@@ -93,7 +185,6 @@ it.skipIf(process.platform !== 'darwin')(
         managedCatalog: {
           homeDir: codexHome,
           profileId: 'fixture',
-          keychain,
           capture: async () => 'fixture-managed-secret',
           fetcher: async () =>
             Response.json({
@@ -104,6 +195,10 @@ it.skipIf(process.platform !== 'darwin')(
               ],
             }),
         },
+        selectorIcons: {
+          providers: { 'plugin-provider': 'generic' },
+          models: { 'plugin-provider': { 'plugin-first': 'generic', 'plugin-second': 'generic' } },
+        },
       },
     )
     try {
@@ -111,7 +206,7 @@ it.skipIf(process.platform !== 'darwin')(
       expect(composition.environment.CORDISX_NATIVE_REAL_CODEX_PATH).toBe(
         await realpath(path.join(f.contents, 'Resources/codex')),
       )
-      expect(prepareNativeConnection).not.toHaveBeenCalled()
+      expect(prepareNativeConnection).toHaveBeenCalledWith('plugin-provider')
       const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
       const liveScope = () => ({ ...world.__cordisxNativeProviderOwner, navigationGeneration: 1 })
       let receive: (params: Record<string, unknown>) => void
@@ -143,18 +238,56 @@ it.skipIf(process.platform !== 'darwin')(
       })
       try {
         const catalog = await world.__cordisxNativeProviderCommandChannel.catalogRead()
-        expect(catalog).toEqual([{
-          providerId: 'deepseek',
-          pluginId: 'cordisx.codex-config',
-          title: 'DeepSeek',
-          selectorBrand: { brand: 'deepseek', source: 'inferred' },
-          models: [{ id: 'deepseek-chat', label: 'deepseek-chat', aliases: [] }],
-        }])
+        expect(catalog).toEqual([
+          {
+            providerId: 'plugin-provider',
+            pluginId: 'fixture-plugin',
+            selectorBrand: { brand: 'generic', source: 'override' },
+            managementBindingRef: 'plugin:fixture-plugin:plugin-provider',
+            models: [{
+              id: 'plugin-first',
+              label: 'plugin-first',
+              aliases: ['plugin-first', 'plugin-first-alias'],
+              selectorBrand: 'generic',
+            }],
+            defaultModelId: 'plugin-first',
+          },
+          {
+            providerId: 'deepseek',
+            pluginId: 'cordisx.codex-config',
+            title: 'DeepSeek',
+            selectorBrand: { brand: 'deepseek', source: 'inferred' },
+            models: [{
+              id: 'deepseek-chat',
+              label: 'deepseek-chat',
+              aliases: [],
+              notListed: false,
+              provenance: ['native'],
+            }],
+          },
+        ])
         expect(JSON.stringify(catalog)).not.toMatch(/base_url|env_key|api\.deepseek/u)
-        await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'shared' }] }))
-        expect((await world.__cordisxNativeProviderCommandChannel.catalogRead())[0].models)
-          .toEqual([{ id: 'shared', label: 'shared', aliases: [] }])
         const channel = world.__cordisxNativeProviderCommandChannel
+        const catalogEvents = vi.fn()
+        const unsubscribeCatalog = channel.catalogSubscribe(catalogEvents)
+        pluginModelId = 'plugin-second'
+        expect(
+          (await channel.catalogRead()).find((provider: { providerId: string }) =>
+            provider.providerId === 'plugin-provider'
+          )?.models,
+        ).toEqual([expect.objectContaining({ id: 'plugin-second', selectorBrand: 'generic' })])
+        await vi.waitFor(() => expect(catalogEvents).toHaveBeenCalledOnce())
+        await channel.catalogRead()
+        expect(catalogEvents).toHaveBeenCalledOnce()
+        notifyNativeProviders()
+        await vi.waitFor(() => expect(catalogEvents).toHaveBeenCalledTimes(3))
+        unsubscribeCatalog()
+        await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'shared' }] }))
+        expect(
+          (await channel.catalogRead()).find((provider: { providerId: string }) => provider.providerId === 'deepseek')
+            .models,
+        )
+          .toEqual([{ id: 'shared', label: 'shared', aliases: [], notListed: false, provenance: ['native'] }])
         const scope = liveScope()
         await channel.selectionRead({ scope, effective: { providerId: 'openai', model: 'native-default' } })
         const action = { operationId: 'fixture-send', operationGeneration: 1, intent: 'ordinary-send' }
@@ -163,7 +296,7 @@ it.skipIf(process.platform !== 'darwin')(
         expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'allow-original' })
         await writeFile(path.join(codexHome, 'scoped.json'), JSON.stringify({ models: [{ slug: 'replacement' }] }))
         expect(await channel.submissionPrepare({ scope, action })).toMatchObject({ status: 'reject' })
-        expect(prepareNativeConnection).not.toHaveBeenCalled()
+        expect(prepareNativeConnection).toHaveBeenCalled()
         const settings = {
           title: 'Managed fixture',
           endpoint: 'https://fixture.invalid/v1',
@@ -200,7 +333,7 @@ it.skipIf(process.platform !== 'darwin')(
             settings: {
               title: 'Official protocol fixture',
               endpoint: 'https://api.deepseek.com',
-              protocol: 'chat-completions',
+              protocol: 'responses',
               discoveryEnabled: true,
               strategy: { kind: 'auto', adapter: 'detect', mode: 'only', ttlMs: 60000 },
             },
@@ -218,6 +351,229 @@ it.skipIf(process.platform !== 'darwin')(
       }
     } finally {
       await composition.close()
+    }
+    expect(await readFile(path.join(codexHome, 'config.toml'), 'utf8')).toBe(nativeConfigBefore)
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'reports fixed completion stages without letting the observer alter startup',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'stage-codex-home')
+    await mkdir(codexHome)
+    await writeManagedProfile(codexHome, 'stage-fixture')
+    const stages: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const values = new Map<string, string>()
+    const keychain = {
+      async read(service: string, account: string) {
+        const value = values.get(`${service}/${account}`)
+        if (value === undefined) throw new Error('missing fixture value')
+        return value
+      },
+      async status(service: string, account: string): Promise<'set' | 'unset'> {
+        return values.has(`${service}/${account}`) ? 'set' : 'unset'
+      },
+      async upsert(service: string, account: string, value: string) {
+        values.set(`${service}/${account}`, value)
+      },
+      async remove(service: string, account: string) {
+        values.delete(`${service}/${account}`)
+      },
+    }
+    const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+      cacheDirectory: path.join(f.contents, 'stage-cache'),
+    })
+    const composition = await bootstrap.complete(
+      { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
+      codexHome,
+      {
+        managedCatalog: { homeDir: codexHome, profileId: 'stage-fixture', keychain },
+        nativeModelDiscovery: false,
+        onStage: stage => {
+          stages.push(stage)
+          throw new Error('fixture observer failure')
+        },
+      },
+    )
+    try {
+      expect(stages).toEqual([
+        'native-submission-completion-start',
+        'native-submission-resource-analysis-ready',
+        'native-submission-managed-catalog-ready',
+        'native-submission-native-catalog-ready',
+        'native-submission-controller-bound',
+      ])
+      expect(warn).not.toHaveBeenCalledWith('[cordisx] managed Provider catalog is unavailable')
+    } finally {
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'continues native startup when managed Keychain ownership is unavailable',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'unavailable-owner-codex-home')
+    await mkdir(codexHome)
+    const stages: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const unavailable = async (): Promise<never> => {
+      throw new Error('fixture unavailable')
+    }
+    const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+      cacheDirectory: path.join(f.contents, 'unavailable-owner-cache'),
+    })
+    const composition = await bootstrap.complete(
+      { nativeProviderIds: [], prepareNativeConnection: vi.fn() },
+      codexHome,
+      {
+        managedCatalog: {
+          homeDir: codexHome,
+          profileId: 'unavailable-owner',
+          keychain: { read: unavailable, status: unavailable, upsert: unavailable, remove: unavailable },
+        },
+        nativeModelDiscovery: false,
+        onStage: stage => stages.push(stage),
+      },
+    )
+    try {
+      expect(stages.at(-1)).toBe('native-submission-controller-bound')
+      expect(warn).toHaveBeenCalledWith('[cordisx] managed Provider catalog is unavailable')
+    } finally {
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'keeps live plugin catalogs paired with management when managed catalog options are absent',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'plugin-only-codex-home')
+    await mkdir(codexHome)
+    const composition = await createNativeSubmissionComposition(
+      pluginActivation({
+        aiden: { pluginId: 'fixture-aiden', modelId: 'aiden-model' },
+        traex: { pluginId: 'fixture-traex', modelId: 'traex-model' },
+      }),
+      f.executable,
+      codexHome,
+      { nativeModelDiscovery: false },
+    )
+    const installed = await installNativeChannel(composition)
+    try {
+      const catalog = await installed.channel.catalogRead()
+      const management = await installed.channel.catalogManagementRead()
+      expect(catalog.map((provider: { providerId: string }) => provider.providerId).sort()).toEqual(['aiden', 'traex'])
+      for (const provider of catalog) {
+        expect(provider.models).not.toHaveLength(0)
+        expect(
+          management.views.filter((view: { bindingRef: string }) => view.bindingRef === provider.managementBindingRef),
+        ).toHaveLength(1)
+      }
+      expect(
+        applyCatalogManagementPreferences(catalog, { views: management.views, connected: true })
+          .every(provider => provider.models.length > 0),
+      ).toBe(true)
+      const view = management.views.find((candidate: { providerId: string }) => candidate.providerId === 'aiden')
+      expect(
+        (await installed.channel.catalogManagementCommand({
+          operation: 'setProviderFavorite',
+          bindingRef: view.bindingRef,
+          scopeRevision: view.scopeRevision,
+          expectedRevision: view.revision,
+          favorite: true,
+        })).status,
+      ).toBe('applied')
+      expect(
+        (await installed.channel.catalogManagementRead()).views.find(
+          (candidate: { providerId: string }) => candidate.providerId === 'aiden',
+        ).providerFavorite,
+      ).toBe(true)
+    } finally {
+      await installed.dispose()
+      await composition.close()
+    }
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'persists live plugin preferences when managed catalog composition cannot open',
+  async () => {
+    const f = await bundle()
+    const codexHome = path.join(f.contents, 'plugin-fallback-codex-home')
+    await mkdir(codexHome)
+    await writeManagedProfile(codexHome, 'plugin-fallback')
+    await mkdir(path.join(codexHome, 'state', 'host-provider-owners', 'plugin-fallback.lock'), {
+      recursive: true,
+      mode: 0o700,
+    })
+    const options = {
+      managedCatalog: {
+        homeDir: codexHome,
+        profileId: 'plugin-fallback',
+      },
+      nativeModelDiscovery: false,
+    }
+    const activation = pluginActivation({
+      aiden: { pluginId: 'fixture-aiden', modelId: 'aiden-model' },
+      traex: { pluginId: 'fixture-traex', modelId: 'traex-model' },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const first = await createNativeSubmissionComposition(activation, f.executable, codexHome, options)
+    const firstInstalled = await installNativeChannel(first)
+    try {
+      expect(warn).toHaveBeenCalledWith('[cordisx] managed Provider catalog is unavailable')
+      const catalog = await firstInstalled.channel.catalogRead()
+      const management = await firstInstalled.channel.catalogManagementRead()
+      for (const provider of catalog) {
+        expect(provider.models).not.toHaveLength(0)
+        expect(
+          management.views.filter((view: { bindingRef: string }) => view.bindingRef === provider.managementBindingRef),
+        ).toHaveLength(1)
+      }
+      expect(
+        applyCatalogManagementPreferences(catalog, { views: management.views, connected: true })
+          .every(provider => provider.models.length > 0),
+      ).toBe(true)
+      const view = management.views.find((candidate: { providerId: string }) => candidate.providerId === 'traex')
+      expect(
+        (await firstInstalled.channel.catalogManagementCommand({
+          operation: 'setOverlay',
+          bindingRef: view.bindingRef,
+          scopeRevision: view.scopeRevision,
+          expectedRevision: view.revision,
+          modelId: 'traex-model',
+          pinned: true,
+        })).status,
+      ).toBe('applied')
+    } finally {
+      await firstInstalled.dispose()
+      await first.close()
+    }
+
+    const second = await createNativeSubmissionComposition(activation, f.executable, codexHome, options)
+    const secondInstalled = await installNativeChannel(second)
+    try {
+      const view = (await secondInstalled.channel.catalogManagementRead()).views.find(
+        (candidate: { providerId: string }) => candidate.providerId === 'traex',
+      )
+      expect(view.rows.find((row: { id: string }) => row.id === 'traex-model')).toMatchObject({
+        present: true,
+        pinned: true,
+        selectable: true,
+      })
+      expect(
+        (await secondInstalled.channel.catalogRead()).find(
+          (provider: { providerId: string }) => provider.providerId === 'traex',
+        ).models,
+      ).toEqual([expect.objectContaining({ id: 'traex-model' })])
+    } finally {
+      await secondInstalled.dispose()
+      await second.close()
     }
   },
 )
@@ -240,29 +596,12 @@ it.skipIf(process.platform !== 'darwin')(
         '',
       ].join('\n'),
     )
-    const values = new Map<string, string>()
-    const keychain = {
-      async read(service: string, account: string) {
-        const value = values.get(`${service}/${account}`)
-        if (!value) throw Error()
-        return value
-      },
-      async status(service: string, account: string): Promise<'set' | 'unset'> {
-        return values.has(`${service}/${account}`) ? 'set' : 'unset'
-      },
-      async upsert(service: string, account: string, value: string) {
-        values.set(`${service}/${account}`, value)
-      },
-      async remove(service: string, account: string) {
-        values.delete(`${service}/${account}`)
-      },
-    }
+    await writeManagedProfile(codexHome, 'fixture-sync')
     const secrets = ['committed-secret', 'conflicted-secret']
     let secretIndex = 0
     const owner = await ManagedCatalogComposition.open({
       homeDir: codexHome,
       profileId: 'fixture-sync',
-      keychain,
       responsesAvailable: true,
       capture: async () => secrets[secretIndex++]!,
     })
@@ -300,7 +639,6 @@ it.skipIf(process.platform !== 'darwin')(
         managedCatalog: {
           homeDir: codexHome,
           profileId: 'fixture-sync',
-          keychain,
           capture: async () => {
             throw new Error('fixture must reuse the stored credential')
           },

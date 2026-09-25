@@ -47,6 +47,12 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly createToken?: () => string
 }
 
+export interface ManagedServiceNativeActivation
+  extends Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
+{
+  subscribeNativeProviders(listener: () => void): () => void
+}
+
 function ownerKey(owner: ManagedServiceUIOwner): string {
   return `${owner.pluginId}\u0000${owner.pluginGeneration}`
 }
@@ -61,6 +67,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private readonly createToken: () => string
   private readonly routesByToken = new Map<string, ManagedServiceOwnerRoute>()
   private readonly transactions = new Map<string, ManagedServiceTransaction>()
+  private readonly nativeProviderListeners = new Set<() => void>()
   private active: ManagedServiceFleet | undefined
 
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
@@ -88,7 +95,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     handleBindingValue: async (value: string): Promise<Record<string, unknown>> => await this.handleBindingValue(value),
   }
 
-  nativeActivation(): Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'> {
+  nativeActivation(): ManagedServiceNativeActivation {
     const owner = this
     return Object.freeze({
       get nativeProviderIds(): readonly string[] {
@@ -98,6 +105,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         const activation = owner.requireActive().activation
         if (activation === undefined) throw new Error('native managed provider activation is unavailable')
         return activation.prepareNativeConnection(providerId)
+      },
+      subscribeNativeProviders(listener: () => void) {
+        owner.nativeProviderListeners.add(listener)
+        return () => owner.nativeProviderListeners.delete(listener)
       },
     })
   }
@@ -157,6 +168,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     const transaction = this.transaction(transactionId)
     for (const route of transaction.candidate.routes.values()) this.routesByToken.set(route.token, route)
     this.active = transaction.candidate
+    this.changedNativeProviders()
     transaction.published = true
     if (this.runtime.publish === undefined) throw new Error('plugin lifecycle publication is unavailable')
     return await this.runtime.publish(transactionId)
@@ -200,6 +212,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     const transaction = this.transaction(transactionId)
     for (const route of transaction.candidate.routes.values()) this.routesByToken.set(route.token, route)
     this.active = transaction.candidate
+    this.changedNativeProviders()
     transaction.published = true
     await this.runtime.commit(transactionId)
     await this.disposeFleet(transaction.previous)
@@ -231,6 +244,8 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.routesByToken.clear()
     await Promise.allSettled([...fleets].map(async fleet => await this.disposeFleet(fleet)))
     this.active = undefined
+    this.changedNativeProviders()
+    this.nativeProviderListeners.clear()
   }
 
   private async createFleet(
@@ -315,7 +330,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         this.routesByToken.delete(route.token)
       }
     }
-    if (transaction.published) this.active = transaction.previous
+    if (transaction.published) {
+      this.active = transaction.previous
+      this.changedNativeProviders()
+    }
     await this.disposeFleet(transaction.candidate)
     this.transactions.delete(transactionId)
   }
@@ -328,6 +346,14 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private requireActive(): ManagedServiceFleet {
     if (this.active === undefined) throw new Error('managed service lifecycle is not initialized')
     return this.active
+  }
+
+  private changedNativeProviders(): void {
+    for (const listener of this.nativeProviderListeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
   }
 
   private transaction(transactionId: string): ManagedServiceTransaction {

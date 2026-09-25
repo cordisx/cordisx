@@ -525,6 +525,10 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
+  /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */
+  releaseCertifiedPermissionChannel():
+    | import('./certified-permission-channel.js').CertifiedPermissionDocumentChannel
+    | undefined
   /** Host-private bounded evidence for cross-registry batch notification assertions. */
   generationNotificationTrace(): readonly {
     readonly source: string
@@ -795,6 +799,7 @@ export interface CordisXStartOptions {
   readonly signal?: AbortSignal | undefined
   readonly previousRuntimeDisposed?: boolean
   readonly disposePreparedSharedReactRuntime?: () => void
+  readonly certifiedPermissionChannel?: import('./certified-permission-channel.js').CertifiedPermissionDocumentChannel
 }
 
 export function createRuntimeClosureScope(accessors: any): any {

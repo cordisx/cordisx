@@ -758,6 +758,11 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  releaseCertifiedPermissionChannel: () => {
+    const channel = runtimeScope.certifiedPermissionChannel
+    runtimeScope.certifiedPermissionChannel = undefined
+    return channel
+  },
   generationNotificationTrace: () => runtimeScope.generationNotificationTrace()!.map(item => ({ ...item })),
   settleRegistryProjection: runtimeScope.settleRegistryProjection()!,
   requestPluginLifecycle: (

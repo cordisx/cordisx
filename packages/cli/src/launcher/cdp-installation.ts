@@ -48,6 +48,7 @@ export async function install(
     readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
   },
   nativeSubmission?: NativeSubmissionInstallation,
+  activateDocument?: (identifier: string) => Promise<void>,
 ): Promise<support.InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
@@ -795,6 +796,7 @@ export async function install(
         loopbackModules,
         ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
         ...(signal === undefined ? {} : { signal }),
+        ...(activateDocument === undefined ? {} : { activateDocument }),
       },
       documentInstallation,
     )

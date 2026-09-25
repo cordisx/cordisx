@@ -11,6 +11,7 @@ import {
   prepareOptionalDockImage,
   refreshDockAgent,
 } from '../shortcuts/dock.js'
+import type { StartupNavigationHandoff } from '../shortcuts/startup-cover.js'
 import { shortcutKey } from '../shortcuts/model.js'
 import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
 import { logHostLifecycle } from './host-lifecycle.js'
@@ -87,7 +88,12 @@ async function acquirePublishedSupervisor(input: {
 /** Binds a detached supervisor child to the normal foreground Host lifecycle. */
 export async function createSupervisorRuntime(
   environment: NodeJS.ProcessEnv,
-  options: { readonly publicationTimeoutMs?: number } = {},
+  options: {
+    readonly publicationTimeoutMs?: number
+    /** Host-private seams for deterministic supervisor runtime tests. */
+    readonly platform?: NodeJS.Platform
+    readonly installMainAgents?: typeof installHostMainAgents
+  } = {},
 ): Promise<{
   readonly markReady: (
     debugPort: number,
@@ -99,6 +105,7 @@ export async function createSupervisorRuntime(
   readonly markFailed: (failure: string) => Promise<void>
   readonly close: () => Promise<void>
   readonly mainInspector: boolean
+  readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
 }> {
   const home = environment.CORDISX_SUPERVISOR_HOME
   const app = environment.CORDISX_SUPERVISOR_APP
@@ -109,7 +116,7 @@ export async function createSupervisorRuntime(
   }
   const fingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
   const tokenFile = environment.CORDISX_SUPERVISOR_TOKEN_FILE
-  const selectedHome = home && app === 'codex' && profile && process.platform === 'darwin'
+  const selectedHome = home && app === 'codex' && profile && (options.platform ?? process.platform) === 'darwin'
     ? await realpath(home)
     : undefined
   const selectedEntry = selectedHome && profile && dataMode
@@ -134,6 +141,25 @@ export async function createSupervisorRuntime(
   let releaseStartupOperation: (() => Promise<void>) | undefined
   let inspectorUrl: Promise<string> | undefined
   let mainAgents: HostMainAgentController | undefined
+  let resolveStartupNavigation: ((handoff: StartupNavigationHandoff | undefined) => void) | undefined
+  let rejectStartupNavigation: ((error: unknown) => void) | undefined
+  const startupNavigation = selectedHome === undefined
+    ? undefined
+    : new Promise<StartupNavigationHandoff | undefined>((resolve, reject) => {
+      resolveStartupNavigation = resolve
+      rejectStartupNavigation = reject
+    })
+  void startupNavigation?.catch(() => undefined)
+  const publishStartupNavigation = (
+    handoff: StartupNavigationHandoff | undefined,
+    hostPid: number,
+  ): void => {
+    if (resolveStartupNavigation === undefined) return
+    resolveStartupNavigation(handoff)
+    logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'startup-handoff-resolved' }, { hostPid })
+    resolveStartupNavigation = undefined
+    rejectStartupNavigation = undefined
+  }
   let dockAgentInstalled = false
   let recoveryAttempt = 0
   const onStartupRecovery = async (waitingForUser: boolean): Promise<void> => {
@@ -243,6 +269,7 @@ export async function createSupervisorRuntime(
   }
   return {
     mainInspector: selectedHome !== undefined,
+    ...(startupNavigation === undefined ? {} : { startupNavigation }),
     async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return false
@@ -265,7 +292,7 @@ export async function createSupervisorRuntime(
         if (debugPort === undefined) throw new Error('Owned Host debug port missing')
         if (!supervisorToken) throw new Error('Owned Host main bootstrap missing')
         if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        mainAgents = await installHostMainAgents({
+        mainAgents = await (options.installMainAgents ?? installHostMainAgents)({
           inspectorUrl: await inspectorUrl,
           hostPid: pid,
           hostCwd: process.cwd(),
@@ -276,7 +303,10 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        publishStartupNavigation(mainAgents.startupNavigation, pid)
         dockAgentInstalled = dock !== undefined
+      } else {
+        publishStartupNavigation(undefined, pid)
       }
       return mainAgents !== undefined
     },
@@ -295,7 +325,7 @@ export async function createSupervisorRuntime(
           throw new Error('Owned Host main bootstrap missing')
         }
         if (dock) await prepareOptionalDockImage(dock, { home: selectedHome!, app, profile })
-        mainAgents = await installHostMainAgents({
+        mainAgents = await (options.installMainAgents ?? installHostMainAgents)({
           inspectorUrl: await inspectorUrl,
           hostPid: current.hostPid,
           hostCwd: process.cwd(),
@@ -306,6 +336,7 @@ export async function createSupervisorRuntime(
           onStartupRecovery,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        publishStartupNavigation(mainAgents.startupNavigation, current.hostPid)
         dockAgentInstalled = dock !== undefined
       }
       let startupSurface: 'workspace-ready' | 'authenticated-ready' | 'auth-required' | undefined
@@ -349,6 +380,9 @@ export async function createSupervisorRuntime(
       })
     },
     async close(): Promise<void> {
+      rejectStartupNavigation?.(new Error('Owned startup navigation closed before handoff'))
+      resolveStartupNavigation = undefined
+      rejectStartupNavigation = undefined
       await mainAgents?.close().catch(() => undefined)
       await control?.close().catch(() => undefined)
       await releaseStartupOperation?.().catch(() => undefined)

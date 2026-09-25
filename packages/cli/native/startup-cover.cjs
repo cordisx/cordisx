@@ -220,6 +220,9 @@ function installCover(options, animateMark) {
       modal: dialog.open && modal,
       presentationReleasedAt,
     }),
+    ownsDialog(candidate, value) {
+      return !disposed && candidate === dialog && matches(value)
+    },
     // The caller must supply observations from this final document. This is a
     // release fence, not an implementation of native/application readiness.
     release(value, observations) {

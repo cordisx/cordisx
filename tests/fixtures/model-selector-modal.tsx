@@ -12,16 +12,54 @@ let modelCount = 1
 let catalogReads = 0
 let focusReturns = 0
 let snapshotReads = 0
-const state = Object.freeze({
+let labelPreview = false
+const snapshotListeners = new Set<() => void>()
+let state = Object.freeze({
   available: true,
   busy: false,
   modelProvider: 'fixture',
   model: 'model',
   modelLabel: 'Fixture Model',
   reasoningEffort: 'high',
+  reasoningEfforts: ['low', 'high'],
 })
 const registry = new ModelProviderRegistry(async () => {
   catalogReads++
+  if (labelPreview) {
+    return [
+      {
+        providerId: 'modelhub',
+        title: 'ModelHub (Native Direct)',
+        pluginId: 'fixture',
+        models: [{ id: 'modelhub-model', label: 'ModelHub Model' }],
+      },
+      {
+        providerId: 'openrouter',
+        title: 'OpenRouter (Native Responses)',
+        pluginId: 'fixture',
+        selectorBrand: { brand: 'openrouter', source: 'override' },
+        models: [{ id: 'openrouter-model', label: 'OpenRouter Model' }],
+      },
+      {
+        providerId: 'custom',
+        title: 'Custom Provider (Team-owned configuration with a deliberately long label)',
+        pluginId: 'fixture',
+        models: [{ id: 'custom-model', label: 'Custom Model' }],
+      },
+      {
+        providerId: 'empty-adapter',
+        title: 'Empty adapter',
+        pluginId: 'fixture',
+        models: [],
+      },
+      {
+        providerId: 'gateway',
+        title: 'Gateway',
+        pluginId: 'fixture',
+        models: [{ id: 'gateway-model', label: 'Gateway Model' }],
+      },
+    ]
+  }
   return [{
     providerId: 'fixture',
     title: 'Fixture',
@@ -102,12 +140,21 @@ export async function start() {
         snapshotReads++
         return state
       },
-      subscribe: () => () => {},
+      subscribe: listener => {
+        snapshotListeners.add(listener)
+        return () => snapshotListeners.delete(listener)
+      },
       hasActiveSubmission: () => false,
       select: async () => {
         calls++
         return 'accepted'
       },
+      selectReasoningEffort: async (reasoningEffort: string) => {
+        state = Object.freeze({ ...state, reasoningEffort })
+        for (const listener of snapshotListeners) listener()
+        return 'accepted'
+      },
+      selectFastMode: async () => 'accepted',
       dispose: () => {},
     }) as unknown as CodexDesktopNativeModelProviderTransport
   const native = createRoot(document.getElementById('app')!)
@@ -165,7 +212,18 @@ export async function refresh() {
   await settle()
 }
 export async function catalog(count: number) {
+  labelPreview = false
   modelCount = count
   await registry.refresh()
+  await settle()
+}
+export async function labels() {
+  labelPreview = true
+  await registry.refresh()
+  await settle()
+}
+export async function busy(value: boolean) {
+  state = Object.freeze({ ...state, busy: value })
+  for (const listener of snapshotListeners) listener()
   await settle()
 }

@@ -76,7 +76,7 @@ export interface ManagedProviderView {
   readonly settings: ManagedProviderSettings
 }
 
-/** Stored only in the dedicated Host Keychain namespace; never a renderer/plugin descriptor. */
+/** Stored only in the Host-private profile configuration; never a renderer/plugin descriptor. */
 export interface ManagedProviderRecord extends Omit<ManagedProviderView, 'credentialState'> {
   readonly credentialRef: string
   readonly secret: string

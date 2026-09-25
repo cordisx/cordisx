@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
+import type { CdpTarget } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
 import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
 import { NATIVE_STARTUP_MARK_SELECTOR, NATIVE_STARTUP_SURFACE } from '../renderer/adapter/startup-presentation.js'
@@ -25,8 +26,13 @@ interface Held extends Owner {
   loadingShownAt?: number
 }
 export interface StartupCoverController {
+  readonly startupNavigation: StartupNavigationHandoff
   reveal(account: NativeAccountCapabilityDescriptor | undefined, signal?: AbortSignal): Promise<StartupSurface>
   close(): Promise<void>
+}
+export interface StartupNavigationHandoff {
+  readonly target: CdpTarget
+  activate(identifier: string): Promise<void>
 }
 async function evaluate<Value>(session: CdpSession, expression: string, timeout = 5000): Promise<Value> {
   const result = await session.send(
@@ -137,6 +143,43 @@ export async function connectStartupCover(
       ).catch(() => undefined)
       page.close()
     })()
+  let activated = false
+  const startupNavigation: StartupNavigationHandoff = {
+    target: {
+      id: held.targetId,
+      type: 'page',
+      title: 'CordisX startup',
+      url: 'app://-/index.html',
+      webSocketDebuggerUrl: socket.href,
+    },
+    async activate(bootstrapIdentifier) {
+      if (activated) throw new Error('Owned startup navigation was already activated')
+      if (typeof bootstrapIdentifier !== 'string' || bootstrapIdentifier.length === 0) {
+        throw new Error('Missing startup bootstrap registration')
+      }
+      const current = await call('snapshot')
+      for (const key of ['pid', 'generation', 'windowId', 'webContentsId', 'targetId', 'phase'] as const) {
+        if (current[key] !== held[key]) throw new Error('Owned startup target changed before activation')
+      }
+      activated = true
+      try {
+        await call('releaseNavigation', {
+          targetId: held.targetId,
+          windowId: held.windowId,
+          webContentsId: held.webContentsId,
+          sessionId: socket.href,
+          identifier: bootstrapIdentifier,
+        })
+      } catch (error) {
+        activated = false
+        throw error
+      }
+      console.error(
+        '[cordisx-startup]',
+        JSON.stringify({ event: 'app-navigation', at: Date.now(), hostPid: owner.pid }),
+      )
+    },
+  }
   try {
     await page.send('Page.enable')
     await page.send('Runtime.enable')
@@ -155,23 +198,12 @@ export async function connectStartupCover(
     })
     if (typeof added.identifier !== 'string') throw new Error('Missing startup document registration')
     identifier = added.identifier
-    const current = await call('snapshot')
-    for (const key of ['pid', 'generation', 'windowId', 'webContentsId', 'targetId', 'phase'] as const) {
-      if (current[key] !== held[key]) throw new Error('Owned startup target changed during registration')
-    }
-    await call('releaseNavigation', {
-      targetId: held.targetId,
-      windowId: held.windowId,
-      webContentsId: held.webContentsId,
-      sessionId: `direct:${held.targetId}`,
-      identifier,
-    })
-    console.error('[cordisx-startup]', JSON.stringify({ event: 'app-navigation', at: Date.now(), hostPid: owner.pid }))
   } catch (error) {
     await dispose()
     throw error
   }
   return {
+    startupNavigation,
     async reveal(account, externalSignal) {
       const signal = externalSignal ? AbortSignal.any([lifetime.signal, externalSignal]) : lifetime.signal
       const check = (): void => {

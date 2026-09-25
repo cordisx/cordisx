@@ -7,6 +7,7 @@ import path from 'node:path'
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const CONNECTION_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const CAPTURE_ID = /^[A-Za-z0-9_-]{32,128}$/
+const KEYCHAIN_HELPER_BUILD_TIMEOUT_MS = 30_000
 
 export type LauncherSecretStoreState = 'set' | 'unset' | 'unavailable'
 
@@ -159,6 +160,9 @@ guard let object = try? JSONSerialization.jsonObject(with: input) as? [String: A
 var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                             kSecAttrService as String: service,
                             kSecAttrAccount as String: account]
+if object["allowAuthenticationUI"] as? Bool == false {
+  query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+}
 switch operation {
 case "set":
   guard let value = object["value"] as? String, let data = value.data(using: .utf8) else { fail() }
@@ -191,16 +195,94 @@ let helperDirectory = path.join(os.tmpdir(), 'cordisx-keychain-helper-v1')
 let helperPath = path.join(helperDirectory, helperSourceHash)
 let helperBuild = new Map<string, Promise<string>>()
 
-async function run(command: string, args: readonly string[], input?: Buffer): Promise<Buffer> {
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw error
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) return false
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  return true
+}
+
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+async function terminateOwnedProcessGroup(
+  child: ReturnType<typeof spawn>,
+  timeouts: { readonly gracefulMs: number; readonly forceMs: number },
+): Promise<void> {
+  if (child.pid === undefined) return
+  const target = process.platform === 'win32' ? child.pid : -child.pid
+  if (!processExists(target)) return
+  signalProcess(target, 'SIGTERM')
+  if (await waitForProcessExit(target, timeouts.gracefulMs)) return
+  signalProcess(target, 'SIGKILL')
+  if (!await waitForProcessExit(target, timeouts.forceMs)) throw new LauncherKeychainError('UNAVAILABLE')
+}
+
+export async function runKeychainHelperProcess(
+  command: string,
+  args: readonly string[],
+  input?: Buffer,
+  options: {
+    readonly timeoutMs?: number
+    readonly terminationTimeouts?: { readonly gracefulMs: number; readonly forceMs: number }
+    readonly onSpawn?: (pid: number) => void
+  } = {},
+): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+    const child = spawn(command, args, {
+      detached: process.platform !== 'win32',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    if (child.pid !== undefined) options.onSpawn?.(child.pid)
     const output: Buffer[] = []
+    let settled = false
+    const cleanup = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      child.removeListener('error', fail)
+      child.removeListener('exit', exit)
+    }
+    const finish = (error?: LauncherKeychainError): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      error === undefined ? resolve(Buffer.concat(output)) : reject(error)
+    }
+    const fail = (): void => finish(new LauncherKeychainError('UNAVAILABLE'))
+    const exit = (code: number | null): void => code === 0 ? finish() : fail()
     child.stdout.on('data', value => output.push(Buffer.from(value)))
-    child.once('error', () => reject(new LauncherKeychainError('UNAVAILABLE')))
-    child.once(
-      'exit',
-      code => code === 0 ? resolve(Buffer.concat(output)) : reject(new LauncherKeychainError('UNAVAILABLE')),
-    )
+    child.once('error', fail)
+    child.once('exit', exit)
+    const timer = options.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+        if (settled) return
+        settled = true
+        cleanup()
+        void terminateOwnedProcessGroup(
+          child,
+          options.terminationTimeouts ?? { gracefulMs: 1_000, forceMs: 1_000 },
+        ).then(
+          () => reject(new LauncherKeychainError('UNAVAILABLE')),
+          error => reject(error),
+        )
+      }, options.timeoutMs)
     child.stdin.end(input)
   })
 }
@@ -219,7 +301,12 @@ async function macOSHelper(): Promise<string> {
       const output = `${helperPath}-${nonce}`
       try {
         await writeFile(source, HELPER_SOURCE, { mode: 0o600 })
-        await run('xcrun', ['--sdk', 'macosx', 'swiftc', source, '-framework', 'Security', '-o', output])
+        await runKeychainHelperProcess(
+          'xcrun',
+          ['--sdk', 'macosx', 'swiftc', source, '-framework', 'Security', '-o', output],
+          undefined,
+          { timeoutMs: KEYCHAIN_HELPER_BUILD_TIMEOUT_MS },
+        )
         await chmod(output, 0o700)
         await rename(output, helperPath)
       } finally {
@@ -245,20 +332,34 @@ async function invokeMacOSHelper(
   service: string,
   account: string,
   value?: string,
+  allowAuthenticationUI = true,
+  timeoutMs?: number,
 ): Promise<Buffer> {
   const helper = await macOSHelper()
   const request = Buffer.from(
-    JSON.stringify({ operation, service, account, ...(value === undefined ? {} : { value }) }),
+    JSON.stringify({ operation, service, account, allowAuthenticationUI, ...(value === undefined ? {} : { value }) }),
   )
-  return await run(helper, [], request)
+  return await runKeychainHelperProcess(helper, [], request, timeoutMs === undefined ? {} : { timeoutMs })
 }
 
 /** Native Security.framework backend; secret input is written only to helper stdin. */
-export function createMacOSKeychainBackend(): LauncherKeychainBackend {
+export function createMacOSKeychainBackend(
+  options: {
+    readonly allowAuthenticationUI?: boolean
+    readonly timeoutMs?: number
+    /** Host-private seam for deterministic tests; never receives data outside this backend call. */
+    readonly invoke?: typeof invokeMacOSHelper
+  } = {},
+): LauncherKeychainBackend {
+  const invoke = options.invoke ?? invokeMacOSHelper
+  const allowAuthenticationUI = options.allowAuthenticationUI !== false
+  const timeoutMs = options.timeoutMs
   return {
     read: async (service, account) => {
       try {
-        const value = (await invokeMacOSHelper('read', service, account)).toString('utf8')
+        const value = (await invoke('read', service, account, undefined, allowAuthenticationUI, timeoutMs)).toString(
+          'utf8',
+        )
         if (!validSecret(value)) throw new LauncherKeychainError('MISSING')
         return value
       } catch (error) {
@@ -268,14 +369,16 @@ export function createMacOSKeychainBackend(): LauncherKeychainBackend {
     },
     upsert: async (service, account, value) => {
       if (!validSecret(value)) throw new LauncherKeychainError('UNAVAILABLE')
-      await invokeMacOSHelper('set', service, account, value)
+      await invoke('set', service, account, value, allowAuthenticationUI, timeoutMs)
     },
     remove: async (service, account) => {
-      await invokeMacOSHelper('remove', service, account)
+      await invoke('remove', service, account, undefined, allowAuthenticationUI, timeoutMs)
     },
     status: async (service, account) => {
       try {
-        const result = (await invokeMacOSHelper('status', service, account)).toString('utf8')
+        const result = (await invoke('status', service, account, undefined, allowAuthenticationUI, timeoutMs)).toString(
+          'utf8',
+        )
         if (result === 'set' || result === 'unset') return result
         throw new LauncherKeychainError('UNAVAILABLE')
       } catch (error) {

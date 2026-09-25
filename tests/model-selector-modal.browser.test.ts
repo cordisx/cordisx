@@ -198,7 +198,7 @@ it.skipIf(!executable)(
           model: { elapsed: number; timer: boolean; reads: number; nodes: number; models: number }
         }[]
       ) {
-        expect(measurement.provider).toMatchObject({ timer: true, reads: 0, nodes: 13, models: 0 })
+        expect(measurement.provider).toMatchObject({ timer: true, reads: 0, nodes: 14, models: 0 })
         expect(measurement.model.timer).toBe(true)
         expect(measurement.model.reads).toBe(0)
         expect(measurement.model.models).toBe(measurement.count)
@@ -206,14 +206,84 @@ it.skipIf(!executable)(
         expect(measurement.model.elapsed).toBeLessThan(1000)
       }
       if (process.env.MODEL_SELECTOR_MEASUREMENTS) console.info(JSON.stringify(catalogMeasurements))
-      expect(catalogMeasurements.map(measurement => measurement.provider.nodes)).toEqual([13, 13, 13, 13])
+      expect(catalogMeasurements.map(measurement => measurement.provider.nodes)).toEqual([14, 14, 14, 14])
       await run(`await Fixture.catalog(500);
       document.querySelector('.cxmp-model-trigger').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
-      await Fixture.settle()`)
+      await Fixture.settle();document.querySelector('.cxmp-model-disclosure').click();await Fixture.settle()`)
       expect(await evaluate('document.querySelectorAll(".cxmp-model-choice").length')).toBe(500)
       await run(`const search=document.querySelector('input[type=search]');search.value='Model 499';
       search.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:'9'}));await Fixture.settle()`)
       expect(await evaluate('document.querySelectorAll(".cxmp-model-choice").length')).toBe(1)
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 390,
+        height: 420,
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+      await run(
+        `document.querySelector('.cxmp-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      await Fixture.catalog(96);document.querySelector('.cxmp-model-trigger').click();await Fixture.settle();
+      window.menuGeometry=()=>{const menu=document.querySelector('.cxmp-menu').getBoundingClientRect();
+        const anchor=document.querySelector('.cxmp-selector').getBoundingClientRect();
+        return {top:menu.top,bottom:menu.bottom,height:menu.height,gap:anchor.top-menu.bottom,viewport:innerHeight}};
+      document.querySelector('.cxmp-model-disclosure').click();await new Promise(resolve=>setTimeout(resolve,80));`,
+      )
+      expect(await evaluate('window.menuGeometry().viewport')).toBe(420)
+      expect(await evaluate('Math.abs(window.menuGeometry().gap-6)<=1')).toBe(true)
+      expect(await evaluate('window.menuGeometry().top>=7&&window.menuGeometry().bottom<=413')).toBe(true)
+      expect(
+        await evaluate(`(() => {const fast=document.querySelector('.cxmp-fast-toggle');
+        const model=document.querySelector('.cxmp-model-disclosure > :first-child');
+        const f=fast.getBoundingClientRect(),m=model.getBoundingClientRect(),s=getComputedStyle(fast);
+        return {aligned:Math.abs((f.left+f.width/2)-(m.left+m.width/2))<=.5,width:f.width,height:f.height,
+          background:s.backgroundColor,border:s.borderTopWidth,pressed:fast.getAttribute('aria-pressed'),
+          label:fast.getAttribute('aria-label'),disabled:fast.disabled}})()`),
+      ).toEqual({
+        aligned: true,
+        width: 28,
+        height: 28,
+        background: 'rgba(0, 0, 0, 0)',
+        border: '0px',
+        pressed: 'false',
+        label: 'Enable Fast mode',
+        disabled: true,
+      })
+      await run('await new Promise(resolve=>setTimeout(resolve,160))')
+      expect(
+        await evaluate(`(() => {const menu=document.querySelector('.cxmp-menu').getBoundingClientRect();
+        const disclosure=document.querySelector('.cxmp-model-disclosure').getBoundingClientRect();
+        const reasoning=document.querySelector('.cxmp-model-controls').getBoundingClientRect();
+        const search=document.querySelector('[aria-label="Search models"]').closest('.cxmp-search').getBoundingClientRect();
+        const list=document.querySelector('.cxmp-model-options .cxmp-menu-scroll');
+        return {searchVisible:search.top>=menu.top&&search.bottom<=menu.bottom,
+          headerVisible:disclosure.top>=menu.top&&reasoning.bottom<=menu.bottom,
+          listScrollable:list.scrollHeight>list.clientHeight}})()`),
+      ).toEqual({ searchVisible: true, headerVisible: true, listScrollable: true })
+      const manyHeight = await evaluate('window.menuGeometry().height') as number
+      await run(`const search=document.querySelector('[aria-label="Search models"]');search.value='Model 95';
+      search.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:'5'}));
+      await new Promise(resolve=>setTimeout(resolve,40))`)
+      expect(await evaluate('document.querySelectorAll(".cxmp-model-choice").length')).toBe(1)
+      expect(await evaluate('window.menuGeometry().height')).toBeLessThan(manyHeight)
+      expect(await evaluate('Math.abs(window.menuGeometry().gap-6)<=1')).toBe(true)
+      await run(
+        `document.querySelector('[aria-label="Clear search"]').click();await new Promise(resolve=>setTimeout(resolve,40))`,
+      )
+      expect(await evaluate('window.menuGeometry().height')).toBeGreaterThan(manyHeight - 2)
+      expect(await evaluate('Math.abs(window.menuGeometry().gap-6)<=1')).toBe(true)
+      await run(
+        `document.querySelector('.cxmp-model-disclosure').click();await new Promise(resolve=>setTimeout(resolve,60));
+      document.querySelector('.cxmp-model-disclosure').click();await new Promise(resolve=>setTimeout(resolve,60))`,
+      )
+      expect(await evaluate('Math.abs(window.menuGeometry().gap-6)<=1')).toBe(true)
+      expect(await evaluate('window.menuGeometry().top>=7&&window.menuGeometry().bottom<=413')).toBe(true)
+      await run(`const search=document.querySelector('[aria-label="Search models"]');search.focus();
+      search.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}));await Fixture.settle()`)
+      expect(
+        await evaluate(`(() => {const active=document.activeElement;const list=active.closest('.cxmp-menu-scroll');
+        const row=active.getBoundingClientRect();const viewport=list.getBoundingClientRect();
+        return {label:active.textContent,visible:row.top>=viewport.top-1&&row.bottom<=viewport.bottom+1}})()`),
+      ).toEqual({ label: 'OpenRouter Model 95', visible: true })
       await run(
         `document.querySelector('.cxmp-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
       await Fixture.settle()`,
@@ -254,15 +324,169 @@ it.skipIf(!executable)(
       await run('await Fixture.modal(false)')
       expect(await evaluate('document.querySelector(".cxmp-model-trigger").disabled')).toBe(false)
       if (process.env.MODEL_SELECTOR_SCREENSHOT) {
+        const screenshotPath = process.env.MODEL_SELECTOR_SCREENSHOT
+        const capture = async (suffix: string) => {
+          const rect = await evaluate(
+            `(() => {const r=document.querySelector('.cxmp-menu').getBoundingClientRect();
+          return {x:Math.max(0,r.x-12),y:Math.max(0,r.y-12),width:r.width+24,height:r.height+24}})()`,
+          ) as { x: number; y: number; width: number; height: number }
+          const screenshot = await cdp!.send('Page.captureScreenshot', {
+            format: 'png',
+            clip: { ...rect, scale: 2 },
+          })
+          await writeFile(`${screenshotPath}-${suffix}.png`, Buffer.from(screenshot.data as string, 'base64'))
+        }
         await cdp.send('Emulation.setDeviceMetricsOverride', {
           width: 1000,
           height: 800,
           deviceScaleFactor: 1,
           mobile: false,
         })
-        await run('await Fixture.modal(true)')
-        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
-        await writeFile(process.env.MODEL_SELECTOR_SCREENSHOT, Buffer.from(screenshot.data as string, 'base64'))
+        await run(
+          `document.documentElement.dataset.theme='light';document.body.style.background='#f7f7f7';document.body.style.color='#20242b';
+        document.documentElement.style.cssText='--cx-surface:#fff;--cx-surface-raised:#fff;--cx-text:#20242b;--cx-muted:#667085;--cx-border:#d8dde6;--cx-hover:#f0f2f5;--cx-pressed:#e7eaf0;--cx-primary:#344054;--cx-focus:#667085;--cx-disabled:.5;--cx-danger:#b42318;--color-surface-elevated-secondary:#fff;--color-text-primary:#20242b;--color-text-tertiary:#667085;--color-border:#d8dde6;--color-background-primary-ghost-hover:#f0f2f5;--color-background-primary-soft-active:#e7eaf0';
+        await Fixture.labels();document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle()`,
+        )
+        expect(
+          await evaluate(`[...document.querySelectorAll('.cxmp-provider-label')].map(label=>({
+          text:label.textContent,singleLine:label.getBoundingClientRect().height<=label.closest('button').getBoundingClientRect().height,
+          rowHeight:label.closest('button').getBoundingClientRect().height
+        }))`),
+        ).toEqual([
+          { text: 'Empty adapter', singleLine: true, rowHeight: 30 },
+          { text: 'ModelHub', singleLine: true, rowHeight: 30 },
+          { text: 'OpenRouter', singleLine: true, rowHeight: 30 },
+          {
+            text: 'Custom Provider (Team-owned configuration with a deliberately long label)',
+            singleLine: true,
+            rowHeight: 30,
+          },
+          { text: 'Gateway', singleLine: true, rowHeight: 30 },
+        ])
+        expect(await evaluate(`document.querySelector('[aria-label="Search model services"]')!==null`)).toBe(true)
+        expect(
+          await evaluate(
+            `document.querySelector('[aria-label="Search model services"]').closest('.cxmp-menu').lastElementChild
+            ===document.querySelector('[aria-label="Search model services"]').closest('.cxmp-search')`,
+          ),
+        ).toBe(true)
+        await capture('provider-light')
+        const longLabelRect = await evaluate(
+          `(() => {const r=document.querySelector('[data-provider-id="custom"] .cxmp-provider-label').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+        ) as { x: number; y: number }
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: longLabelRect.x, y: longLabelRect.y })
+        await run('await new Promise(resolve=>setTimeout(resolve,500))')
+        expect(
+          await evaluate(`document.querySelector('[data-provider-id="custom"] .cxmp-provider-label').dataset.overflow`),
+        )
+          .toBe('true')
+        expect(
+          await evaluate(
+            `getComputedStyle(document.querySelector('[data-provider-id="custom"] .cxmp-provider-label-text')).transform`,
+          ),
+        )
+          .not.toBe('none')
+        await capture('provider-hover-light')
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+        await run('await new Promise(resolve=>setTimeout(resolve,500))')
+        expect(
+          await evaluate(
+            `getComputedStyle(document.querySelector('[data-provider-id="custom"] .cxmp-provider-label-text')).transform`,
+          ),
+        )
+          .toBe('none')
+        await cdp.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+        })
+        expect(
+          await evaluate(`getComputedStyle(document.querySelector('.cxmp-provider-label-text')).transitionDuration`),
+        )
+          .toBe('0s')
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: longLabelRect.x, y: longLabelRect.y })
+        expect(
+          await evaluate(
+            `getComputedStyle(document.querySelector('[data-provider-id="custom"] .cxmp-provider-label-text')).transform`,
+          ),
+        )
+          .toBe('none')
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+        await cdp.send('Emulation.setEmulatedMedia', { features: [] })
+        await run('await new Promise(resolve=>setTimeout(resolve,500))')
+
+        await run(
+          `document.querySelector('.cxmp-provider-trigger').click();await Fixture.catalog(9);await Fixture.busy(false);
+        document.querySelector('.cxmp-model-trigger').click();await Fixture.settle();window.modelMenuHeight=document.querySelector('.cxmp-menu').getBoundingClientRect().height;
+        await Fixture.busy(true)`,
+        )
+        expect(await evaluate(`document.querySelector('.cxmp-menu').getBoundingClientRect().height`))
+          .toBe(await evaluate('window.modelMenuHeight'))
+        expect(
+          await evaluate(`document.querySelector('.cxmp-menu').textContent.includes('Wait for the current response')`),
+        )
+          .toBe(false)
+        expect(await evaluate(`document.querySelector('.cxmp-menu').querySelector('.cxmp-menu-heading')===null`)).toBe(
+          true,
+        )
+        expect(await evaluate(`document.querySelector('.cxmp-model-choice').disabled`)).toBe(true)
+        expect(await evaluate(`document.querySelector('input[type="search"]')!==null`)).toBe(true)
+        expect(await evaluate(`document.querySelector('.cxmp-model-disclosure').getAttribute('aria-expanded')`))
+          .toBe('false')
+        await capture('model-compact-busy-light')
+        await run(
+          `document.querySelector('.cxmp-model-disclosure').click();await new Promise(resolve=>setTimeout(resolve,220));`,
+        )
+        expect(await evaluate(`document.querySelector('.cxmp-model-disclosure').getAttribute('aria-expanded')`))
+          .toBe('true')
+        expect(
+          await evaluate(
+            `(() => {const disclosure=document.querySelector('.cxmp-model-disclosure').getBoundingClientRect();
+          const reasoning=document.querySelector('.cxmp-model-controls').getBoundingClientRect();
+          const choice=document.querySelector('.cxmp-model-choice').getBoundingClientRect();
+          const search=document.querySelector('[aria-label="Search models"]').closest('.cxmp-search').getBoundingClientRect();
+          return reasoning.bottom<=disclosure.top&&disclosure.bottom<=choice.top&&choice.bottom<=search.top})()`,
+          ),
+        ).toBe(true)
+        await capture('model-expanded-busy-light')
+        await cdp.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+        })
+        expect(await evaluate(`getComputedStyle(document.querySelector('.cxmp-model-options')).transitionDuration`))
+          .toBe('0s')
+        expect(
+          await evaluate(
+            `getComputedStyle(document.querySelector('.cxmp-model-disclosure-chevron')).transitionDuration`,
+          ),
+        ).toBe('0s')
+        await cdp.send('Emulation.setEmulatedMedia', { features: [] })
+
+        await run(
+          `document.querySelector('.cxmp-model-trigger').click();await Fixture.busy(false);document.documentElement.dataset.theme='dark';document.body.style.background='#111318';document.body.style.color='#edf0f4';
+        document.documentElement.style.cssText='--cx-surface:#17191d;--cx-surface-raised:#20242b;--cx-text:#edf0f4;--cx-muted:#9ca5b5;--cx-border:#353a42;--cx-hover:#292e36;--cx-pressed:#323842;--cx-primary:#8aa4ff;--cx-focus:#8aa4ff;--cx-disabled:.5;--cx-danger:#ff8d85;--color-surface-elevated-secondary:#20242b;--color-text-primary:#edf0f4;--color-text-tertiary:#9ca5b5;--color-border:#353a42;--color-background-primary-ghost-hover:#292e36;--color-background-primary-soft-active:#323842';
+        await Fixture.labels();document.querySelector('.cxmp-provider-trigger').click();await Fixture.settle()`,
+        )
+        await capture('provider-dark')
+
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width: 390,
+          height: 844,
+          deviceScaleFactor: 1,
+          mobile: false,
+        })
+        await run(
+          `document.querySelector('.cxmp-provider-trigger').click();await Fixture.catalog(9);await Fixture.busy(true);
+        document.querySelector('.cxmp-model-trigger').click();await Fixture.settle();
+        document.querySelector('.cxmp-model-disclosure').click();await new Promise(resolve=>setTimeout(resolve,220));`,
+        )
+        expect(
+          await evaluate(
+            `(() => {const r=document.querySelector('.cxmp-menu').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth})()`,
+          ),
+        )
+          .toBe(true)
+        expect(await evaluate(`document.querySelector('.cxmp-menu').querySelector('.cxmp-menu-heading')===null`)).toBe(
+          true,
+        )
+        await capture('model-busy-narrow-dark')
       }
       await evaluate('disposeFixture()')
       expect(await evaluate('document.querySelectorAll(".cxmp-menu,[data-cordisx-model-provider-selector]").length'))

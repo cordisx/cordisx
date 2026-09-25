@@ -11,10 +11,14 @@ import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } f
 import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
+import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
+  /** Exact Host-private management identity for plugin-owned catalog sources. */
+  readonly managementBindingRef?: string
+  readonly providerFavorite?: boolean
   readonly title?: string
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly HostModelProviderModel[]
@@ -30,6 +34,7 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
   readonly models: readonly HostModelProviderModel[]
   readonly selectorBrand?: ProviderBrandChoice
+  readonly providerFavorite?: boolean
 }
 
 export interface ModelProviderSnapshot {
@@ -102,12 +107,23 @@ function label(value: string, maximum = 256): string {
 }
 
 export class ModelProviderRegistry {
-  management?: ModelCatalogClient
+  private _management: ModelCatalogClient | undefined
+  private disconnectManagement: (() => void) | undefined
   private disconnectSource?: () => void
   private sourceReconcile?: ReturnType<typeof setInterval>
 
   hasLiveSource(): boolean {
     return this.disconnectSource !== undefined
+  }
+
+  get management(): ModelCatalogClient | undefined {
+    return this._management
+  }
+  set management(client: ModelCatalogClient | undefined) {
+    this.disconnectManagement?.()
+    this._management = client
+    this.disconnectManagement = client?.subscribe(() => this.emit())
+    this.emit()
   }
 
   connectSource(subscribe: (listener: () => void) => () => void): void {
@@ -174,6 +190,9 @@ export class ModelProviderRegistry {
         Object.freeze({
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
+          ...(provider.managementBindingRef === undefined
+            ? {}
+            : { managementBindingRef: label(provider.managementBindingRef, 512) }),
           ...(provider.title === undefined ? {} : { title: label(provider.title) }),
           ...(isProviderBrandChoice(provider.selectorBrand?.brand)
               && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
@@ -332,7 +351,8 @@ export class ModelProviderRegistry {
   }
 
   dispose(): void {
-    this.management?.dispose()
+    this.disconnectManagement?.()
+    this._management?.dispose()
     this.disconnectSource?.()
     if (this.sourceReconcile) clearInterval(this.sourceReconcile)
     this.disposed = true
@@ -348,32 +368,38 @@ export class ModelProviderRegistry {
   private emit(loading = this.state.loading, error?: string): void {
     if (this.disposed) return
     this.state = Object.freeze({
-      providers: Object.freeze(this.projections.map(provider => {
-        const key = JSON.stringify([provider.pluginId, provider.providerId])
-        const presentation = [...this.presentations.values()].find(item =>
-          item.key === key && (this.visibility?.visible(item.generation) ?? true)
-        )?.value
-        const projectedBrand = isProviderBrandChoice(provider.selectorBrand?.brand)
-            && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
-          ? provider.selectorBrand
-          : undefined
-        const selectorBrand = projectedBrand?.source === 'override'
-          ? projectedBrand.brand
-          : presentation === undefined
-          ? projectedBrand?.brand
-          : undefined
-        return Object.freeze({
-          providerId: provider.providerId,
-          title: presentation?.title ?? provider.title ?? provider.providerId,
-          icon: presentation?.icon ?? 'host:settings',
-          ...(selectorBrand === undefined ? {} : { selectorBrand }),
-          models: Object.freeze(provider.models.map(model => {
-            const metadata = presentation?.models?.find(item => item.id === model.id)
-            return metadata ? Object.freeze({ ...model, ...metadata }) : model
-          })),
-          ...(provider.defaultModelId === undefined ? {} : { defaultModelId: provider.defaultModelId }),
-        })
-      })),
+      providers: Object.freeze(
+        applyCatalogManagementPreferences<NativeProviderProjection>(
+          this.projections,
+          this._management?.snapshot(),
+        ).map(provider => {
+          const key = JSON.stringify([provider.pluginId, provider.providerId])
+          const presentation = [...this.presentations.values()].find(item =>
+            item.key === key && (this.visibility?.visible(item.generation) ?? true)
+          )?.value
+          const projectedBrand = isProviderBrandChoice(provider.selectorBrand?.brand)
+              && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
+            ? provider.selectorBrand
+            : undefined
+          const selectorBrand = projectedBrand?.source === 'override'
+            ? projectedBrand.brand
+            : presentation === undefined
+            ? projectedBrand?.brand
+            : undefined
+          return Object.freeze({
+            providerId: provider.providerId,
+            title: presentation?.title ?? provider.title ?? provider.providerId,
+            icon: presentation?.icon ?? 'host:settings',
+            providerFavorite: provider.providerFavorite === true,
+            ...(selectorBrand === undefined ? {} : { selectorBrand }),
+            models: Object.freeze(provider.models.map(model => {
+              const metadata = presentation?.models?.find(item => item.id === model.id)
+              return metadata ? Object.freeze({ ...model, ...metadata }) : model
+            })),
+            ...(provider.defaultModelId === undefined ? {} : { defaultModelId: provider.defaultModelId }),
+          })
+        }),
+      ),
       entries: Object.freeze(
         [...this.entries.values()]
           .filter(item => this.visibility?.visible(item.generation) ?? true)

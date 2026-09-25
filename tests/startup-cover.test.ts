@@ -121,6 +121,8 @@ function fixture(
 it('registers the production cover before navigation and removes it only after final readiness release', async () => {
   const f = fixture()
   const controller = await f.connect()
+  expect(f.events).not.toContain('releaseNavigation')
+  await controller.startupNavigation.activate('production-bootstrap')
   expect(f.events.indexOf('Page.addScriptToEvaluateOnNewDocument')).toBeLessThan(f.events.indexOf('releaseNavigation'))
   expect(f.events).not.toContain('Page.removeScriptToEvaluateOnNewDocument')
   await controller.reveal({ module: 'app://-/assets/fixture.js', exportName: 'account' })
@@ -131,6 +133,7 @@ it('registers the production cover before navigation and removes it only after f
 it('returns workspace-ready without requiring an account descriptor or claiming authentication', async () => {
   const f = fixture({ surface: 'workspace-ready' })
   const cover = await f.connect()
+  await cover.startupNavigation.activate('production-bootstrap')
   await expect(cover.reveal(undefined)).resolves.toBe('workspace-ready')
   expect(f.events).toContain('release-final')
   expect(f.events.at(-1)).toBe('close-page')
@@ -139,6 +142,7 @@ it('returns workspace-ready without requiring an account descriptor or claiming 
 it('returns auth-required distinctly while retiring the cover so the native login can be used', async () => {
   const f = fixture({ surface: 'auth-required' })
   const cover = await f.connect()
+  await cover.startupNavigation.activate('production-bootstrap')
   await expect(cover.reveal({ module: 'app://-/assets/fixture.js', exportName: 'account' })).resolves.toBe(
     'auth-required',
   )
@@ -147,19 +151,26 @@ it('returns auth-required distinctly while retiring the cover so the native logi
   expect(f.events.at(-1)).toBe('close-page')
 })
 
-it.each([{ registration: false }, { changed: true }])(
-  'fails closed when script receipt or native target changes: %j',
-  async options => {
-    const f = fixture(options)
-    await expect(f.connect()).rejects.toThrow()
-    expect(f.events).not.toContain('releaseNavigation')
-    expect(f.events.at(-1)).toBe('close-page')
-  },
-)
+it('fails closed when the startup cover registration has no receipt', async () => {
+  const f = fixture({ registration: false })
+  await expect(f.connect()).rejects.toThrow()
+  expect(f.events).not.toContain('releaseNavigation')
+  expect(f.events.at(-1)).toBe('close-page')
+})
+
+it('fails closed when the native target changes before activation', async () => {
+  const f = fixture({ changed: true })
+  const cover = await f.connect()
+  await expect(cover.startupNavigation.activate('production-bootstrap')).rejects.toThrow()
+  expect(f.events).not.toContain('releaseNavigation')
+  await cover.close()
+  expect(f.events.at(-1)).toBe('close-page')
+})
 
 it.each(['stop', 'close'] as const)('retires recovery and reaches owned Host cleanup on %s', async action => {
   const f = fixture({ ready: false, ...(action === 'close' ? { action } : {}) })
   const cover = await f.connect()
+  await cover.startupNavigation.activate('production-bootstrap')
   vi.useFakeTimers()
   const lifetime = new AbortController()
   const readiness = completeHostReadiness(lifetime, async signal => {
@@ -182,6 +193,7 @@ it.each(['stop', 'close'] as const)('retires recovery and reaches owned Host cle
 it('accepts actionable nonmodal recovery after the native surface has been presented', async () => {
   const f = fixture({ ready: false, nonmodalRecovery: true, action: 'close' })
   const cover = await f.connect()
+  await cover.startupNavigation.activate('production-bootstrap')
   vi.useFakeTimers()
   const result = expect(cover.reveal(undefined)).rejects.toThrow('Startup cancelled in the owning window')
   await vi.advanceTimersByTimeAsync(30100)
@@ -193,6 +205,7 @@ it('accepts actionable nonmodal recovery after the native surface has been prese
 it('aborts an unresolved account/boot evaluation and cleans the script without waiting for its result', async () => {
   const f = fixture({ pending: true })
   const cover = await f.connect()
+  await cover.startupNavigation.activate('production-bootstrap')
   const lifetime = new AbortController()
   const readiness = cover.reveal({ module: 'app://-/assets/fixture.js', exportName: 'account' }, lifetime.signal)
   const rejected = expect(readiness).rejects.toThrow('aborted')

@@ -1,5 +1,10 @@
 import { resolveHostAdapter } from '../adapters/registry.js'
-import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
+import {
+  ensureHomeConfig,
+  type HomeConfigPathOptions,
+  redactedHomeConfig,
+  resolveHomeConfigPath,
+} from '../config/home-config.js'
 import { type CordisXCliInvocation, parseCordisXCli } from './parse.js'
 import { runFeedbackCommand } from './feedback-command.js'
 import { runManagementCommand } from './management-command.js'
@@ -38,7 +43,7 @@ export async function prepareRunCommand(
   if (invocation.action === 'setup' || invocation.action === 'config') {
     const config = await ensureHomeConfig(homeConfigOptions)
     stdout(`[cordisx] configuration${invocation.action === 'setup' ? ' ready' : ''}: ${configPath}`)
-    stdout(JSON.stringify(config, null, 2))
+    stdout(JSON.stringify(redactedHomeConfig(config), null, 2))
     return
   }
   if (invocation.action === 'dev') {

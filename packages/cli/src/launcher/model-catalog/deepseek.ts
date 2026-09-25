@@ -37,12 +37,17 @@ export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
           }
           return model.id
         })
-        // Official Codex integration documents these exact IDs. Unknown and legacy IDs stay unconfirmed.
+        // Official Codex integration and compatibility notices document these exact accepted IDs.
         return Object.freeze(
           catalogModels(ids).map(model =>
             Object.freeze({
               ...model,
-              ...(['deepseek-flash', 'deepseek-v4-pro'].includes(model.id)
+              ...([
+                  'deepseek-flash',
+                  'deepseek-v4-pro',
+                  'deepseek-v4-flash',
+                  'deepseek-v4-flash-vision-exp',
+                ].includes(model.id)
                 ? { protocolCapabilities: Object.freeze({ responses: true }) }
                 : {}),
             })

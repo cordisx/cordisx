@@ -19,7 +19,7 @@ describe('model script Manager configuration', () => {
     const { CatalogBinding } = await import(
       '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
     )
-    const props = { client: host.client, locale: 'en', query: '', filter: 'all' as const, connected: true }
+    const props = { client: host.client, locale: 'en', query: '', filters: new Set(), connected: true }
     const scriptState = {
       authorityRevision: 'authority',
       runGeneration: 1,
@@ -31,7 +31,12 @@ describe('model script Manager configuration', () => {
       await fixture.render(
         <CatalogBinding
           {...props}
-          view={catalogView({ activity: 'loading', scriptState, capabilities: ['runScript', 'refresh'] })}
+          view={catalogView({
+            activity: 'loading',
+            scriptState,
+            sourceCapabilities: ['runScript', 'refresh'],
+            capabilities: ['runScript', 'refresh'],
+          })}
         />,
       )
       expect((fixture.element('[aria-label="Run script"]') as HTMLButtonElement).disabled).toBe(false)
@@ -39,7 +44,12 @@ describe('model script Manager configuration', () => {
       await fixture.render(
         <CatalogBinding
           {...props}
-          view={catalogView({ activity: 'idle', scriptState, capabilities: ['cancelScript', 'refresh'] })}
+          view={catalogView({
+            activity: 'idle',
+            scriptState,
+            sourceCapabilities: ['cancelScript', 'refresh'],
+            capabilities: ['cancelScript', 'refresh'],
+          })}
         />,
       )
       expect((fixture.element('[aria-label="Cancel script"]') as HTMLButtonElement).disabled).toBe(false)

@@ -5,6 +5,7 @@ import type {
   CatalogManagementResult,
   CatalogManagementSnapshot,
 } from '../model-catalog-management.js'
+import { catalogOperationAvailable } from '../model-catalog-management.js'
 import { parseManagementSnapshot, safeManagementCode } from './model-catalog-projection.js'
 
 export interface CatalogClientState extends CatalogManagementSnapshot {
@@ -87,7 +88,7 @@ export class ModelCatalogClient {
       const view = this.state.views.find(item => item.bindingRef === command.bindingRef)
       if (!view || view.scopeRevision !== command.scopeRevision) return { status: 'conflict', code: 'scope-changed' }
       if (view.revision !== command.expectedRevision) return { status: 'conflict', code: 'conflict' }
-      if (!view.capabilities.includes(command.operation)) return { status: 'unavailable', code: 'unsupported' }
+      if (!catalogOperationAvailable(view, command.operation)) return { status: 'unavailable', code: 'unsupported' }
     }
     try {
       const result = await this.channel.catalogManagementCommand(command)

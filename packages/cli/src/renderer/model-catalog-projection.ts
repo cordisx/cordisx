@@ -6,7 +6,9 @@ import type {
   CatalogManagementRow,
   CatalogManagementSnapshot,
   CatalogManagementView,
+  CatalogPreferenceOperation,
   CatalogSafeDiagnostics,
+  CatalogSourceOperation,
 } from '../model-catalog-management.js'
 
 const codes = [
@@ -39,6 +41,7 @@ export const safeManagementCode = (value: unknown): value is CatalogManagementCo
 const operations = [
   'refresh',
   'setAutoPaused',
+  'setProviderFavorite',
   'setOverlay',
   'resetOrder',
   'restoreBlocked',
@@ -53,6 +56,8 @@ const operations = [
   'cancelScript',
   'updateConnection',
 ]
+const preferenceOperations = ['setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'] as const
+const sourceOperations = operations.filter(value => !preferenceOperations.includes(value as never))
 const fail = (): never => {
   throw new Error('Invalid catalog projection')
 }
@@ -95,6 +100,9 @@ function row(value: unknown): CatalogManagementRow {
     ),
     notListed: bool(item.notListed),
     present: bool(item.present),
+    compatibility: item.compatibility === undefined
+      ? 'unknown'
+      : choice(item.compatibility, ['supported', 'unsupported', 'unknown']),
     selectable: bool(item.selectable),
     blocked: bool(item.blocked),
     pinned: bool(item.pinned),
@@ -145,6 +153,8 @@ function view(value: unknown): CatalogManagementView {
   const item = record(value)
   const rows = list(item.rows, row)
   if (new Set(rows.map(row => row.id)).size !== rows.length) fail()
+  count(item.sourceCount)
+  count(item.selectableCount)
   return Object.freeze({
     bindingRef: text(item.bindingRef),
     providerId: text(item.providerId),
@@ -152,16 +162,35 @@ function view(value: unknown): CatalogManagementView {
     ...(item.scopeLabel === undefined ? {} : { scopeLabel: text(item.scopeLabel, 256) }),
     scopeRevision: text(item.scopeRevision),
     revision: text(item.revision),
-    sourceKind: choice(item.sourceKind, ['native', 'auto', 'manual', 'script']),
+    sourceKind: choice(item.sourceKind, ['native', 'plugin', 'auto', 'manual', 'script']),
     mode: choice(item.mode, ['only', 'augment', 'replace', 'supplement']),
     freshness: choice(item.freshness, ['unknown', 'fresh', 'stale']),
     activity: choice(item.activity, ['idle', 'scheduled', 'loading', 'applying']),
     outcome: choice(item.outcome, ['none', 'ok', 'empty', 'error', 'unsupported', 'cancelled']),
     autoPaused: bool(item.autoPaused),
-    sourceCount: count(item.sourceCount),
-    selectableCount: count(item.selectableCount),
+    providerFavorite: bool(item.providerFavorite),
+    sourceCount: rows.filter(row => row.present && row.compatibility === 'supported').length,
+    selectableCount: rows.filter(row => row.present && row.compatibility === 'supported' && row.selectable).length,
     rows,
     supplement: list(item.supplement, editable),
+    ...(item.sourceCapabilities === undefined
+      ? {}
+      : {
+        sourceCapabilities: list(
+          item.sourceCapabilities,
+          value => choice(value, sourceOperations) as CatalogSourceOperation,
+          32,
+        ),
+      }),
+    ...(item.preferenceCapabilities === undefined
+      ? {}
+      : {
+        preferenceCapabilities: list(
+          item.preferenceCapabilities,
+          value => choice(value, preferenceOperations) as CatalogPreferenceOperation,
+          4,
+        ),
+      }),
     capabilities: list(item.capabilities, value => choice(value, operations) as CatalogManagementOperation, 32),
     diagnostics: diagnostics(item.diagnostics),
     ...(item.connection === undefined ? {} : { connection: connection(item.connection) }),

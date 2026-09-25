@@ -29,12 +29,46 @@ describe('Manager model services catalog', () => {
     try {
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
       const provider = fixture.element('.cxms-provider')
+      const toggle = fixture.element('.cxms-provider-toggle') as HTMLButtonElement
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      await act(async () => toggle.click())
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
       expect(provider.querySelector('.cxms-provider-identity')?.textContent).toContain('Provider Aprovider-a')
       expect(provider.querySelector('.cxms-model-count')?.textContent).toBe('Models: 2')
       const models = [...provider.querySelectorAll('.cxms-model-identity')]
       expect(models[0]?.querySelector('code')).toBeNull()
       expect(models[1]?.querySelector('code')?.textContent).toBe('model-b')
       expect(provider.querySelector('ul')?.getAttribute('aria-label')).toBe('Provider A · Models')
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('temporarily reveals a complete search match and restores manual disclosure state', async () => {
+    const models = Array.from({ length: 140 }, (_, index) => ({
+      id: `model-${index}`,
+      label: index === 139 ? 'Needle model' : `Model ${index}`,
+    }))
+    const state: ModelProviderSnapshot = {
+      loading: false,
+      entries: [],
+      providers: [{ providerId: 'large-provider', title: 'Large Provider', icon: 'host:settings', models }],
+    }
+    const registry = {
+      snapshot: () => state,
+      subscribe: () => () => {},
+      refresh: async () => {},
+    } as unknown as ModelProviderRegistry
+    const fixture = reactManagerFixture()
+    try {
+      await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+      const toggle = fixture.element('.cxms-provider-toggle') as HTMLButtonElement
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      await fixture.type('[aria-label="Search services or models"]', 'Needle')
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(fixture.element('.cxms-model-identity').textContent).toContain('Needle model')
+      await fixture.type('[aria-label="Search services or models"]', '')
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
     } finally {
       await fixture.dispose()
     }

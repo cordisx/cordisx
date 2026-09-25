@@ -384,7 +384,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       nativeSubmissionCompletion = nativeSubmissionBootstrap.complete(
         managedServiceActivation,
         codexHome({ ...environment, ...plan.environment }),
-        nativeCatalogOptions,
+        {
+          ...nativeCatalogOptions,
+          onStage: event => stdout('[cordisx-startup] ' + JSON.stringify({ event, at: Date.now() })),
+        },
       ).then(composition => {
         nativeSubmission = composition
       })
@@ -800,7 +803,11 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     }
     if (debugPort === undefined) throw new Error('loopback CDP port was not resolved')
     const resolvedDebugPort = debugPort
-    await nativeSubmissionCompletion
+    if (nativeSubmissionCompletion !== undefined) {
+      stdout('[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-wait', at: Date.now() }))
+      await nativeSubmissionCompletion
+      stdout('[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-resolved', at: Date.now() }))
+    }
     if (profile !== undefined && profileLease === undefined && runHost === runInjectedHost) {
       profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir, { stdout })
     }
@@ -913,6 +920,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         onHostLaunched: async (pid, inspectorUrl) =>
           await supervisorRuntime.markHostLaunched(pid, inspectorUrl, resolvedDebugPort),
         mainInspector: supervisorRuntime.mainInspector,
+        ...(supervisorRuntime.startupNavigation === undefined
+          ? {}
+          : { startupNavigation: supervisorRuntime.startupNavigation }),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)

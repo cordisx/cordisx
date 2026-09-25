@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   channelKeychainReference,
+  createMacOSKeychainBackend,
   type LauncherKeychainBackend,
   LauncherKeychainError,
   LauncherSecretStore,
+  runKeychainHelperProcess,
 } from '../packages/cli/src/launcher/secret-store.js'
 import { resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
 
@@ -29,6 +31,44 @@ class MemoryKeychain implements LauncherKeychainBackend {
 }
 
 describe('launcher Host-private channel secret store', () => {
+  it('can deny Keychain authentication UI for hidden startup access', async () => {
+    const invoke = vi.fn(async operation => Buffer.from(operation === 'status' ? 'unset' : 'fixture-secret'))
+    const backend = createMacOSKeychainBackend({ allowAuthenticationUI: false, timeoutMs: 10_000, invoke })
+    await expect(backend.status('fixture-service', 'fixture-account')).resolves.toBe('unset')
+    await expect(backend.read('fixture-service', 'fixture-account')).resolves.toBe('fixture-secret')
+    await backend.upsert('fixture-service', 'fixture-account', 'new-fixture-secret')
+    await backend.remove('fixture-service', 'fixture-account')
+    expect(invoke.mock.calls.map(call => [call[0], call[4], call[5]])).toEqual([
+      ['status', false, 10_000],
+      ['read', false, 10_000],
+      ['set', false, 10_000],
+      ['remove', false, 10_000],
+    ])
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'terminates a timed-out Keychain helper process group before rejecting',
+    async () => {
+      let processGroup = 0
+      await expect(runKeychainHelperProcess(
+        process.execPath,
+        [
+          '-e',
+          "require('node:child_process').spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"],{stdio:'ignore'});process.on('SIGTERM',()=>{});setInterval(()=>{},1000)",
+        ],
+        undefined,
+        {
+          timeoutMs: 100,
+          terminationTimeouts: { gracefulMs: 100, forceMs: 500 },
+          onSpawn: pid => processGroup = pid,
+        },
+      )).rejects.toMatchObject({ code: 'UNAVAILABLE' })
+      expect(processGroup).toBeGreaterThan(0)
+      expect(() => process.kill(-processGroup, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+    },
+    5_000,
+  )
+
   it('writes, resolves, replaces and deletes with no secret/ref in renderer-safe results', async () => {
     const backend = new MemoryKeychain()
     const store = new LauncherSecretStore({ platform: 'darwin', backend })

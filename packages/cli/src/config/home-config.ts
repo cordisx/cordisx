@@ -16,6 +16,10 @@ import {
   migrateMarketplaceConfigDocument,
   parseHomeConfigMarketplaceSources,
 } from './home-config-marketplace.js'
+import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-provider-schema.js'
+import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
+
+export { redactedHomeConfig } from './home-config-profile-private.js'
 
 export {
   DEFAULT_MARKETPLACE_TRUST_SOURCE,
@@ -112,6 +116,8 @@ export interface HomeConfigProfile {
   readonly nativeModelDiscovery?: boolean
   readonly selectorIcons?: import('../model-selector-branding.js').ModelSelectorIconOverrides
   readonly providerBindings?: readonly import('./home-config-model-catalogs.js').HomeConfigProviderBinding[]
+  /** Host-private managed Provider records, including credentials. */
+  readonly managedProviders?: readonly ManagedProviderRecord[]
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
 }
@@ -162,12 +168,6 @@ export interface HomeConfigWriteOptions extends HomeConfigPathOptions {
 
 const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const ICON_PROVIDER_ID =
-  /^(?:builtin:[a-z0-9][a-z0-9._-]{0,63}|plugin:[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63})$/
-const ICON_NAMESPACE = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const ICON_GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const SEMVER =
-  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
@@ -432,34 +432,13 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   }
 }
 
-function parseIconThemePreference(value: unknown): HomeConfigIconThemePreference | undefined {
-  // A corrupted optional preference must not make the whole Host profile
-  // unavailable. Discard it atomically and let the pinned Reicon default win.
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const preference = value as Record<string, unknown>
-  if (
-    Object.keys(preference).sort().join(',') !== 'namespace,providerGeneration,providerId,providerVersion,revision'
-    || !Number.isSafeInteger(preference.revision) || (preference.revision as number) < 1
-    || typeof preference.providerId !== 'string' || !ICON_PROVIDER_ID.test(preference.providerId)
-    || typeof preference.namespace !== 'string' || !ICON_NAMESPACE.test(preference.namespace)
-    || typeof preference.providerVersion !== 'string' || !SEMVER.test(preference.providerVersion)
-    || typeof preference.providerGeneration !== 'string' || !ICON_GENERATION.test(preference.providerGeneration)
-  ) return undefined
-  return {
-    revision: preference.revision as number,
-    providerId: preference.providerId as HomeConfigIconThemePreference['providerId'],
-    namespace: preference.namespace,
-    providerVersion: preference.providerVersion,
-    providerGeneration: preference.providerGeneration,
-  }
-}
-
 function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
   rejectUnknownKeys(profile, [
     'displayName',
     'dataMode',
     ...PROFILE_MODEL_OPTION_KEYS,
+    'managedProviders',
     'iconTheme',
     'management',
   ], label)
@@ -470,6 +449,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
   // `isolated` was the v1 spelling for an opt-in private Host root. Reading it
   // does not rewrite the file; later writes use the explicit current spelling.
   const modelOptions = parseProfileModelOptions(profile, label)
+  const managedProviders = parseManagedProviders(profile.managedProviders, `${label}.managedProviders`)
   const iconTheme = parseIconThemePreference(profile.iconTheme)
   const management = profile.management === undefined
     ? undefined
@@ -478,6 +458,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     displayName,
     dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
     ...modelOptions,
+    ...(managedProviders.length === 0 ? {} : { managedProviders }),
     ...(iconTheme === undefined ? {} : { iconTheme }),
     ...(management === undefined ? {} : { management }),
   }

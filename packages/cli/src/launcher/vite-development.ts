@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { createServer, type ModuleNode, normalizePath, type Plugin, type ViteDevServer } from 'vite'
@@ -149,6 +149,139 @@ function owningNodeModulesRoot(packageRoot: string): string | undefined {
     const parent = path.dirname(directory)
     if (parent === directory) return undefined
   }
+}
+
+export function nativeViteBootModuleSource(input: {
+  reactPrepareUrl: string
+  entryUrl: string
+}): string {
+  return `
+let queue = Promise.resolve();
+export function start() {
+  const task = queue.catch(() => {}).then(async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await import(/* @vite-ignore */ ${JSON.stringify(input.reactPrepareUrl)} + '?t=' + Date.now());
+        const entry = await import(/* @vite-ignore */ ${JSON.stringify(input.entryUrl)} + '?t=' + Date.now());
+        return await entry.ready;
+      } catch (error) {
+        if (attempt >= 4) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+  });
+  queue = task;
+  return task;
+}
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.on('cordisx:restart-host', () => { void start().catch(error => console.error('[cordisx] Vite Host reload failed', error)); });
+}
+`
+}
+
+export function nativeViteEntryModuleSource(input: {
+  hostImport: string
+  helperImport: string
+  pluginsSource: string
+  metadataSource: string
+  pluginImports: readonly string[]
+  pluginUrls: readonly string[]
+}): string {
+  return `
+import { installCordisX, prepareCordisXViteReactRuntime } from ${JSON.stringify(input.hostImport)};
+import { NativeViteDevelopmentClient } from ${JSON.stringify(input.helperImport)};
+const previous = globalThis.__cordisxViteClient;
+let certifiedPermissionChannel = previous?.releaseCertifiedPermissionChannel();
+if (previous) {
+  try { await previous.dispose(true); }
+  catch (error) { certifiedPermissionChannel?.dispose(); throw error; }
+}
+const disposeSharedReactRuntime = prepareCordisXViteReactRuntime(document);
+const descriptors = ${input.pluginsSource};
+const pluginUrls = ${JSON.stringify(input.pluginUrls)};
+const withDescriptor = artifact => ({ ...artifact, plugin: { ...descriptors.find(item => item.id === artifact.plugin.id), ...artifact.plugin } });
+const replacePlugin = (pluginId, timestamp) => {
+  const index = descriptors.findIndex(plugin => plugin.id === pluginId);
+  const pluginUrl = pluginUrls[index];
+  if (!pluginUrl) return Promise.reject(new Error('Unknown Vite development plugin: ' + pluginId));
+  return import(/* @vite-ignore */ pluginUrl + '?t=' + timestamp)
+    .then(module => module.load())
+    .then(withDescriptor)
+    .then(artifact => client.update(artifact));
+};
+let client;
+const reloadWaiters = new Map();
+const generationWaiters = new Map();
+const developmentReloadPlugin = pluginId => new Promise((resolve, reject) => {
+  if (!import.meta.hot) { reject(new Error('Vite HMR is unavailable')); return; }
+  const requestId = crypto.randomUUID();
+  const timeout = setTimeout(() => { reloadWaiters.delete(requestId); reject(new Error('Vite plugin reload timed out')); }, 10000);
+  reloadWaiters.set(requestId, { pluginId, resolve, reject, timeout });
+  import.meta.hot.send('cordisx:reload-plugin', { pluginId, requestId });
+});
+const requestPluginGeneration = (action, pluginId, moduleGeneration, transactionId) => new Promise((resolve, reject) => {
+  if (!import.meta.hot) { reject(new Error('Vite HMR is unavailable')); return; }
+  const requestId = crypto.randomUUID();
+  const timeout = setTimeout(() => { generationWaiters.delete(requestId); reject(new Error('Vite plugin generation transaction timed out')); }, 10000);
+  generationWaiters.set(requestId, { resolve, reject, timeout });
+  import.meta.hot.send('cordisx:plugin-generation-transaction', { action, pluginId, moduleGeneration, transactionId, requestId });
+});
+const stagePluginGeneration = async (pluginId, moduleGeneration) => {
+  const transactionId = crypto.randomUUID();
+  const managedServiceUICapabilities = await requestPluginGeneration('stage', pluginId, moduleGeneration, transactionId);
+  return {
+    managedServiceUICapabilities,
+    commit: () => requestPluginGeneration('commit', pluginId, moduleGeneration, transactionId),
+    rollback: () => requestPluginGeneration('rollback', pluginId, moduleGeneration, transactionId),
+  };
+};
+try {
+  // Plugins can import cordisx/react. Load them only after the Host has
+  // published the shared React runtime; static ESM imports would evaluate
+  // before prepareCordisXViteReactRuntime() on a cold renderer.
+  const modules = await Promise.all(pluginUrls.map(url => import(/* @vite-ignore */ url).then(module => module.load())));
+  const initial = descriptors.map(plugin => {
+    const artifact = modules.find(item => item.plugin.id === plugin.id);
+    return artifact ? withDescriptor(artifact) : { plugin, ownerDocumentBindings: [] };
+  });
+  client = new NativeViteDevelopmentClient({ ...${input.metadataSource}, developmentReloadPlugin }, initial, disposeSharedReactRuntime, stagePluginGeneration, certifiedPermissionChannel);
+  certifiedPermissionChannel = undefined;
+  globalThis.__cordisxViteClient = client;
+} catch (error) {
+  certifiedPermissionChannel?.dispose();
+  disposeSharedReactRuntime();
+  throw error;
+}
+export const ready = client.restart(installCordisX);
+if (import.meta.hot) {
+  ${
+    input.pluginImports.length === 0
+      ? ''
+      : `import.meta.hot.accept(${
+        JSON.stringify(input.pluginImports)
+      }, modules => { for (const module of modules) if (module) void module.load().then(withDescriptor).then(artifact => client.update(artifact)).catch(() => {}); });`
+  }
+  import.meta.hot.on('cordisx:reload-plugin-result', data => {
+    const waiter = reloadWaiters.get(data.requestId);
+    if (!waiter) return;
+    reloadWaiters.delete(data.requestId);
+    clearTimeout(waiter.timeout);
+    if (data.error) { waiter.reject(new Error(data.error)); return; }
+    replacePlugin(waiter.pluginId, data.timestamp).then(waiter.resolve, waiter.reject);
+  });
+  import.meta.hot.on('cordisx:plugin-generation-transaction-result', data => {
+    const waiter = generationWaiters.get(data.requestId);
+    if (!waiter) return;
+    generationWaiters.delete(data.requestId);
+    clearTimeout(waiter.timeout);
+    if (data.error) waiter.reject(new Error(data.error)); else waiter.resolve(data.managedServiceUICapabilities);
+  });
+  import.meta.hot.on('cordisx:replace-plugin', data => {
+    void replacePlugin(data.pluginId, data.timestamp).catch(error => console.error('[cordisx] Vite plugin replacement failed', error));
+  });
+}
+`
 }
 
 /** Vite owns source transformation, HTTP module delivery, and the HMR WebSocket. */
@@ -300,15 +433,20 @@ export async function startNativeViteServer(
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
     const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
     await rememberPluginMetadata(realEntry, realRoot, packageFiles)
-    const identitySource = await resolveDevelopmentIdentitySource(plugin)
+    const durablePackage = plugin.package !== undefined && plugin.development === undefined
+    const identitySource = durablePackage
+      ? plugin.source ?? pathToFileURL(plugin.entry).href
+      : await resolveDevelopmentIdentitySource(plugin)
     const created: DevelopmentGeneration = {
       root: info.root,
       realRoot,
       realEntry,
-      version: info.version,
+      version: durablePackage ? plugin.package!.version : info.version,
       source: identitySource,
       revision: 0,
-      ...generationValues(plugin.id, 0),
+      ...(durablePackage
+        ? { digest: plugin.package!.digest, moduleGeneration: plugin.package!.moduleGeneration }
+        : generationValues(plugin.id, 0)),
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
@@ -320,6 +458,9 @@ export async function startNativeViteServer(
     return created
   }
   const bumpGeneration = async (plugin: CordisXConfigPlugin): Promise<DevelopmentGeneration> => {
+    if (plugin.package !== undefined && plugin.development === undefined) {
+      throw new Error(`installed package plugin is not a Vite development generation: ${plugin.id}`)
+    }
     const previous = await ensureGeneration(plugin)
     const info = await localDevelopmentPackageInfo(plugin.entry)
     const isolatedBuild = info.manifest?.schemaVersion === 7
@@ -352,6 +493,15 @@ export async function startNativeViteServer(
   }
   const packageConfig = async (plugin: CordisXConfigPlugin): Promise<CordisXConfigPlugin> => {
     const generation = await ensureGeneration(plugin)
+    if (plugin.package !== undefined && plugin.development === undefined) {
+      return {
+        ...plugin,
+        source: generation.source,
+        ...(plugin.manifest === undefined && generation.manifest !== undefined
+          ? { manifest: generation.manifest }
+          : {}),
+      }
+    }
     return {
       ...plugin,
       source: generation.source,
@@ -427,94 +577,14 @@ export async function startNativeViteServer(
     const helperImport = `/@fs/${normalizePath(clientPath)}`
     const pluginImports = plugins.map(plugin => PLUGIN_PREFIX + plugin.id)
     const pluginUrls = plugins.map(plugin => url(PLUGIN_PREFIX + plugin.id))
-    return `
-import { installCordisX, prepareCordisXViteReactRuntime } from ${JSON.stringify(hostImport)};
-import { NativeViteDevelopmentClient } from ${JSON.stringify(helperImport)};
-const previous = globalThis.__cordisxViteClient;
-if (previous) await previous.dispose(true);
-const disposeSharedReactRuntime = prepareCordisXViteReactRuntime(document);
-const descriptors = ${composition.pluginsSource};
-const pluginUrls = ${JSON.stringify(pluginUrls)};
-const withDescriptor = artifact => ({ ...artifact, plugin: { ...descriptors.find(item => item.id === artifact.plugin.id), ...artifact.plugin } });
-const replacePlugin = (pluginId, timestamp) => {
-  const index = descriptors.findIndex(plugin => plugin.id === pluginId);
-  const pluginUrl = pluginUrls[index];
-  if (!pluginUrl) return Promise.reject(new Error('Unknown Vite development plugin: ' + pluginId));
-  return import(/* @vite-ignore */ pluginUrl + '?t=' + timestamp)
-    .then(module => module.load())
-    .then(withDescriptor)
-    .then(artifact => client.update(artifact));
-};
-let client;
-const reloadWaiters = new Map();
-const generationWaiters = new Map();
-const developmentReloadPlugin = pluginId => new Promise((resolve, reject) => {
-  if (!import.meta.hot) { reject(new Error('Vite HMR is unavailable')); return; }
-  const requestId = crypto.randomUUID();
-  const timeout = setTimeout(() => { reloadWaiters.delete(requestId); reject(new Error('Vite plugin reload timed out')); }, 10000);
-  reloadWaiters.set(requestId, { pluginId, resolve, reject, timeout });
-  import.meta.hot.send('cordisx:reload-plugin', { pluginId, requestId });
-});
-const requestPluginGeneration = (action, pluginId, moduleGeneration, transactionId) => new Promise((resolve, reject) => {
-  if (!import.meta.hot) { reject(new Error('Vite HMR is unavailable')); return; }
-  const requestId = crypto.randomUUID();
-  const timeout = setTimeout(() => { generationWaiters.delete(requestId); reject(new Error('Vite plugin generation transaction timed out')); }, 10000);
-  generationWaiters.set(requestId, { resolve, reject, timeout });
-  import.meta.hot.send('cordisx:plugin-generation-transaction', { action, pluginId, moduleGeneration, transactionId, requestId });
-});
-const stagePluginGeneration = async (pluginId, moduleGeneration) => {
-  const transactionId = crypto.randomUUID();
-  const managedServiceUICapabilities = await requestPluginGeneration('stage', pluginId, moduleGeneration, transactionId);
-  return {
-    managedServiceUICapabilities,
-    commit: () => requestPluginGeneration('commit', pluginId, moduleGeneration, transactionId),
-    rollback: () => requestPluginGeneration('rollback', pluginId, moduleGeneration, transactionId),
-  };
-};
-try {
-  // Plugins can import cordisx/react. Load them only after the Host has
-  // published the shared React runtime; static ESM imports would evaluate
-  // before prepareCordisXViteReactRuntime() on a cold renderer.
-  const modules = await Promise.all(pluginUrls.map(url => import(/* @vite-ignore */ url).then(module => module.load())));
-  const initial = descriptors.map(plugin => {
-    const artifact = modules.find(item => item.plugin.id === plugin.id);
-    return artifact ? withDescriptor(artifact) : { plugin, ownerDocumentBindings: [] };
-  });
-  client = new NativeViteDevelopmentClient({ ...${composition.metadataSource}, developmentReloadPlugin }, initial, disposeSharedReactRuntime, stagePluginGeneration);
-  globalThis.__cordisxViteClient = client;
-} catch (error) {
-  disposeSharedReactRuntime();
-  throw error;
-}
-export const ready = client.restart(installCordisX);
-if (import.meta.hot) {
-  ${
-      pluginImports.length === 0
-        ? ''
-        : `import.meta.hot.accept(${
-          JSON.stringify(pluginImports)
-        }, modules => { for (const module of modules) if (module) void module.load().then(withDescriptor).then(artifact => client.update(artifact)).catch(() => {}); });`
-    }
-  import.meta.hot.on('cordisx:reload-plugin-result', data => {
-    const waiter = reloadWaiters.get(data.requestId);
-    if (!waiter) return;
-    reloadWaiters.delete(data.requestId);
-    clearTimeout(waiter.timeout);
-    if (data.error) { waiter.reject(new Error(data.error)); return; }
-    replacePlugin(waiter.pluginId, data.timestamp).then(waiter.resolve, waiter.reject);
-  });
-  import.meta.hot.on('cordisx:plugin-generation-transaction-result', data => {
-    const waiter = generationWaiters.get(data.requestId);
-    if (!waiter) return;
-    generationWaiters.delete(data.requestId);
-    clearTimeout(waiter.timeout);
-    if (data.error) waiter.reject(new Error(data.error)); else waiter.resolve(data.managedServiceUICapabilities);
-  });
-  import.meta.hot.on('cordisx:replace-plugin', data => {
-    void replacePlugin(data.pluginId, data.timestamp).catch(error => console.error('[cordisx] Vite plugin replacement failed', error));
-  });
-}
-`
+    return nativeViteEntryModuleSource({
+      hostImport,
+      helperImport,
+      pluginsSource: composition.pluginsSource,
+      metadataSource: composition.metadataSource,
+      pluginImports,
+      pluginUrls,
+    })
   }
   const pluginIdFromModule = (module: ModuleNode): string | undefined => {
     const id = module.id ?? ''
@@ -619,29 +689,7 @@ if (import.meta.hot) {
     },
     async load(id) {
       if (id === '\0' + BOOT) {
-        return `
-let queue = Promise.resolve();
-export function start() {
-  const task = queue.catch(() => {}).then(async () => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await import(/* @vite-ignore */ ${JSON.stringify(url(REACT_PREPARE))} + '?t=' + Date.now());
-        const entry = await import(/* @vite-ignore */ ${JSON.stringify(url(ENTRY))} + '?t=' + Date.now());
-        return await entry.ready;
-      } catch (error) {
-        if (attempt >= 4) throw error;
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
-  });
-  queue = task;
-  return task;
-}
-if (import.meta.hot) {
-  import.meta.hot.accept();
-  import.meta.hot.on('cordisx:restart-host', () => { void start().catch(error => console.error('[cordisx] Vite Host reload failed', error)); });
-}
-`
+        return nativeViteBootModuleSource({ reactPrepareUrl: url(REACT_PREPARE), entryUrl: url(ENTRY) })
       }
       if (id === '\0' + PREAMBLE) {
         return `import RefreshRuntime from '/@react-refresh';\nRefreshRuntime.injectIntoGlobalHook(window);\nwindow.$RefreshReg$ = () => {};\nwindow.$RefreshSig$ = () => type => type;\nwindow.__vite_plugin_react_preamble_installed__ = true;\n`
@@ -757,8 +805,9 @@ if (import.meta.hot) {
     },
   }
   try {
+    const initialPlugins = initialConfig.plugins.filter(plugin => plugin.enabled)
     const initialGenerations = await Promise.all(
-      initialConfig.plugins.filter(plugin => plugin.enabled).map(ensureGeneration),
+      initialPlugins.map(ensureGeneration),
     )
     const roots = [...new Set(initialGenerations.map(item => item.root))]
     server = await createServer({
@@ -825,7 +874,14 @@ if (import.meta.hot) {
       },
       clearScreen: false,
     })
-    await listenNativeViteServer(server, initialGenerations.flatMap(generation => generation.watchFiles))
+    await listenNativeViteServer(
+      server,
+      initialPlugins.flatMap((plugin, index) =>
+        plugin.package !== undefined && plugin.development === undefined
+          ? []
+          : initialGenerations[index]!.watchFiles
+      ),
+    )
     await waitForDependencyOptimization()
   } catch (error) {
     await server!?.close()
@@ -854,7 +910,11 @@ if (import.meta.hot) {
     },
     async synchronizePluginGenerations(handler) {
       generationHandler = handler
-      for (const plugin of config.plugins.filter(plugin => plugin.enabled)) {
+      for (
+        const plugin of config.plugins.filter(plugin =>
+          plugin.enabled && (plugin.package === undefined || plugin.development !== undefined)
+        )
+      ) {
         const generation = await ensureGeneration(plugin)
         const transaction = await handler(generationSnapshot(plugin.id, generation))
         await transaction.commit()

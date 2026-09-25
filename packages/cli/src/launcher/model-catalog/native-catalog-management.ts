@@ -7,6 +7,7 @@ import type {
   CatalogManagementSnapshot,
   CatalogManagementView,
 } from '../../model-catalog-management.js'
+import { favoriteCatalogManagementViews } from '../../model-catalog-management.js'
 import {
   ManagementOverlayError,
   ManagementOverlayStore,
@@ -14,6 +15,7 @@ import {
 } from '../../model-catalog/management-overlay.js'
 import type { CodexConfigModelProviderProjection } from '../codex-config-model-providers.js'
 import type { NativeModelProviderCatalogEntry } from '../native-model-provider-catalog.js'
+import { resolveNativeModelEligibility } from '../../renderer/native-provider-submission-policy.js'
 import type { CatalogSnapshot } from './contracts.js'
 
 type CatalogManagementAuthority = {
@@ -91,7 +93,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   #persistError = false
   #tail: Promise<unknown> = Promise.resolve()
   #unsubscribeSource: (() => void) | undefined
-  #writeAllowed: () => boolean = () => true
+
+  /** Host-private shared preference store for other catalog authorities in this composition. */
+  get preferenceStore(): ManagementOverlayStore {
+    return this.#overlay
+  }
 
   private constructor(
     projection: CodexConfigModelProviderProjection,
@@ -99,6 +105,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     private readonly options: {
       load(): Promise<CodexConfigModelProviderProjection>
       stateFile?: string
+      overlayStore?: ManagementOverlayStore
       refreshBeforeRead?: boolean
       shadowed?(providerId: string): boolean
       discovery?: NativeCatalogDiscovery
@@ -106,17 +113,27 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   ) {
     this.#projection = projection
     this.recordGood(projection)
-    try {
-      this.#overlay = new ManagementOverlayStore(data => this.persist(data), initialOverlay)
-    } catch {
-      this.#persistError = true
-      this.#overlay = new ManagementOverlayStore(data => this.persist(data))
+    if (options.overlayStore) {
+      this.#overlay = options.overlayStore
+    } else {
+      try {
+        this.#overlay = new ManagementOverlayStore(
+          (data, _expectedRevision, authorized) => this.persist(data, authorized),
+          initialOverlay,
+        )
+      } catch {
+        this.#persistError = true
+        this.#overlay = new ManagementOverlayStore(
+          (data, _expectedRevision, authorized) => this.persist(data, authorized),
+        )
+      }
     }
   }
 
   static async open(options: {
     load(): Promise<CodexConfigModelProviderProjection>
     stateFile?: string
+    overlayStore?: ManagementOverlayStore
     refreshBeforeRead?: boolean
     shadowed?(providerId: string): boolean
     discovery?: NativeCatalogDiscovery
@@ -124,7 +141,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }): Promise<NativeCatalogManagement> {
     const [projection, initialOverlay] = await Promise.all([
       options.load(),
-      options.stateFile === undefined ? undefined : readOverlayState(options.stateFile).catch(() => undefined),
+      options.overlayStore !== undefined || options.stateFile === undefined
+        ? undefined
+        : readOverlayState(options.stateFile).catch(() => undefined),
     ])
     const authority = new NativeCatalogManagement(projection, initialOverlay, options)
     const unsubscribes = [
@@ -135,10 +154,13 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     return authority
   }
 
-  private async persist(data: ReturnType<ManagementOverlayStore['snapshot']>): Promise<void> {
+  private async persist(
+    data: ReturnType<ManagementOverlayStore['snapshot']>,
+    authorized: () => boolean,
+  ): Promise<void> {
     if (this.options.stateFile === undefined) return
     try {
-      await writeOverlayState(this.options.stateFile, data, this.#writeAllowed)
+      await writeOverlayState(this.options.stateFile, data, () => !this.#closed && authorized())
       this.#persistError = false
     } catch (error) {
       this.#persistError = true
@@ -157,7 +179,11 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   private replace(projection: CodexConfigModelProviderProjection, force = false): void {
-    const changed = safeRevision(this.#projection) !== safeRevision(projection)
+    const comparable = (value: CodexConfigModelProviderProjection) => ({
+      ...value,
+      providerWireApis: [...value.providerWireApis],
+    })
+    const changed = safeRevision(comparable(this.#projection)) !== safeRevision(comparable(projection))
     this.#projection = projection
     this.recordGood(projection)
     if (changed || force) this.changed()
@@ -212,10 +238,21 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       && !denied
     const confirmed = new Set(provider.models.map(model => model.id))
     const projected = projectManagementOverlay(
-      this.sourceModels(provider).map(model => ({
-        ...model,
-        selectable: available && (confirmed.has(model.id) || model.protocolCapabilities?.responses === true),
-      })),
+      this.sourceModels(provider).map(model => {
+        const wireApi = this.#projection.providerWireApis.get(provider.providerId)
+        const eligibility = resolveNativeModelEligibility({
+          ...(wireApi === undefined ? {} : { wireApi }),
+          exactConfiguredMembership: confirmed.has(model.id),
+          ...(model.protocolCapabilities === undefined ? {} : { protocolCapabilities: model.protocolCapabilities }),
+          routeAvailable: available,
+          userDisabled: false,
+        })
+        return {
+          ...model,
+          compatibility: eligibility.compatibility,
+          selectable: eligibility.selectable,
+        }
+      }),
       this.#overlay.read(bindingRef(provider.providerId), this.scope(provider.providerId)),
     )
     return [
@@ -244,6 +281,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
       provider,
       discovery: this.options.discovery?.snapshot(provider.providerId),
       overlay: overlay.revision,
+      wireApi: this.#projection.providerWireApis.get(provider.providerId),
       sourceAvailable: this.#projection.sourceAvailable,
       diagnostics: this.#projection.diagnostics.filter(item => item.providerId === provider.providerId),
       persistError: this.#persistError,
@@ -253,7 +291,17 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   snapshot(): CatalogManagementSnapshot {
     if (this.#closed) return { epoch: this.#epoch, sequence: this.#sequence, views: [], canCreateConnection: false }
     const views = this.providersForManagement().map((provider): CatalogManagementView => {
+      const overlay = this.#overlay.read(bindingRef(provider.providerId), this.scope(provider.providerId))
       const rows = this.rows(provider)
+      const favoriteWritable = this.hasProvider(provider.providerId)
+        && diagnosticCode(this.#projection, provider.providerId) === undefined
+        && !this.#persistError
+      const preferences = [
+        ...(favoriteWritable ? ['setProviderFavorite' as const] : []),
+        'setOverlay' as const,
+        'resetOrder' as const,
+        'restoreBlocked' as const,
+      ]
       const unavailable = diagnosticCode(this.#projection, provider.providerId) !== undefined || this.#persistError
       const discovery = this.options.discovery?.snapshot(provider.providerId)
       const sourceCount = this.sourceModels(provider).length
@@ -280,11 +328,13 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
           ? 'empty'
           : 'ok',
         autoPaused: false,
+        providerFavorite: overlay.providerFavorite,
         sourceCount,
         selectableCount: rows.filter(row => row.selectable).length,
         rows,
         supplement: [],
-        capabilities: ['refresh', 'setOverlay', 'resetOrder', 'restoreBlocked'],
+        preferenceCapabilities: preferences,
+        capabilities: ['refresh', ...preferences],
         diagnostics: {
           scopeConfirmed: true,
           targetState: unavailable ? 'unavailable' : 'applied',
@@ -296,7 +346,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     return Object.freeze({
       epoch: this.#epoch,
       sequence: this.#sequence,
-      views: Object.freeze(views),
+      views: favoriteCatalogManagementViews(views),
       canCreateConnection: false,
     })
   }
@@ -354,10 +404,13 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
   }
 
   command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult> {
+    const admitted = () => !this.#closed && authorized()
     const execute = async (): Promise<CatalogManagementResult> => {
-      if (this.#closed || !authorized()) return { status: 'rejected', code: 'permission' }
+      if (!admitted()) return { status: 'rejected', code: 'permission' }
       if (command.operation === 'createConnection') return { status: 'rejected', code: 'unsupported' }
-      if (!['refresh', 'setOverlay', 'resetOrder', 'restoreBlocked'].includes(command.operation)) {
+      if (
+        !['refresh', 'setProviderFavorite', 'setOverlay', 'resetOrder', 'restoreBlocked'].includes(command.operation)
+      ) {
         return { status: 'rejected', code: 'unsupported' }
       }
       const provider = this.providersForManagement().find(candidate =>
@@ -367,6 +420,16 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
         return { status: 'conflict', code: 'scope-changed' }
       }
       if (command.expectedRevision !== this.revision(provider)) return { status: 'conflict', code: 'conflict' }
+      if (
+        command.operation === 'setProviderFavorite'
+        && (
+          !this.hasProvider(provider.providerId)
+          || diagnosticCode(this.#projection, provider.providerId) !== undefined
+          || this.#persistError
+        )
+      ) {
+        return { status: 'rejected', code: 'unavailable' }
+      }
       try {
         if (command.operation === 'refresh') {
           await this.refresh(true)
@@ -379,26 +442,33 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
             scopeRevision: command.scopeRevision,
             expectedRevision: this.#overlay.read(command.bindingRef, command.scopeRevision).revision,
           }
-          this.#writeAllowed = () => !this.#closed && authorized()
-          try {
-            if (command.operation === 'setOverlay') {
-              await this.#overlay.mutate({ ...command, ...scope }, this.sourceModels(provider).map(model => model.id))
-            } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
-              await this.#overlay.mutate(
-                { ...scope, operation: command.operation },
-                this.sourceModels(provider).map(model => model.id),
-              )
-            } else {
-              return { status: 'rejected', code: 'unsupported' }
-            }
-          } finally {
-            this.#writeAllowed = () => true
+          if (command.operation === 'setProviderFavorite') {
+            await this.#overlay.mutate(
+              { ...scope, operation: 'setProviderFavorite', favorite: command.favorite },
+              this.sourceModels(provider).map(model => model.id),
+              admitted,
+            )
+          } else if (command.operation === 'setOverlay') {
+            await this.#overlay.mutate(
+              { ...command, ...scope },
+              this.sourceModels(provider).map(model => model.id),
+              admitted,
+            )
+          } else if (command.operation === 'resetOrder' || command.operation === 'restoreBlocked') {
+            await this.#overlay.mutate(
+              { ...scope, operation: command.operation },
+              this.sourceModels(provider).map(model => model.id),
+              admitted,
+            )
+          } else {
+            return { status: 'rejected', code: 'unsupported' }
           }
           this.changed()
         }
-        if (!authorized()) return { status: 'rejected', code: 'permission' }
+        if (!admitted()) return { status: 'rejected', code: 'permission' }
         return { status: 'applied', snapshot: this.snapshot() }
       } catch (error) {
+        if (!admitted()) return { status: 'rejected', code: 'permission' }
         return {
           status: 'rejected',
           code: error instanceof ManagementOverlayError ? error.code : 'unavailable',
@@ -437,7 +507,7 @@ export class CompositeCatalogManagement implements CatalogManagementAuthority {
     return Object.freeze({
       epoch: this.#epoch,
       sequence: this.#sequence,
-      views: Object.freeze([...(managed?.views ?? []), ...this.native.snapshot().views]),
+      views: favoriteCatalogManagementViews([...(managed?.views ?? []), ...this.native.snapshot().views]),
       canCreateConnection: managed?.canCreateConnection ?? false,
     })
   }

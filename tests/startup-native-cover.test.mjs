@@ -40,6 +40,9 @@ test('production workspace proof removes the modal and restores input without re
     w.__cordisxProductionInstallId = 'production-install'
     w.__cordisxProductionBootstrapState = { installId: 'production-install', status: 'evaluated' }
     const api = w.__cordisxStartupDocument
+    const dialog = w.document.querySelector('dialog')
+    assert.equal(api.ownsDialog(dialog, api.snapshot().receipt), true)
+    assert.equal(api.ownsDialog(w.document.createElement('dialog'), api.snapshot().receipt), false)
     let clicks = 0
     w.document.querySelector('button').addEventListener('click', () => clicks++)
     w.document.querySelector('button').click()

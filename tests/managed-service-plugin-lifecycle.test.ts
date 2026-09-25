@@ -166,6 +166,8 @@ describe('managed service plugin lifecycle participant', () => {
     })
     const first = activation(1, 'aiden-old')
     await runtime.initialize(first)
+    const nativeChanges = vi.fn()
+    const unsubscribeNativeChanges = runtime.nativeActivation().subscribeNativeProviders(nativeChanges)
     const oldCapability = runtime.capabilities()[0]!
     expect(oldCapability.pluginGeneration).toBe('aiden-old')
 
@@ -191,6 +193,7 @@ describe('managed service plugin lifecycle participant', () => {
     ).toMatchObject({ ok: true, value: { projection: { auth: { state: 'authenticated' } } } })
 
     await runtime.publish(second.transactionId!)
+    expect(nativeChanges).toHaveBeenCalledTimes(1)
     expect(runtime.nativeActivation().nativeProviderIds).toEqual(['provider-aiden-new'])
     await runtime.complete(second.transactionId!)
     await runtime.finalize(second.transactionId!)
@@ -211,6 +214,7 @@ describe('managed service plugin lifecycle participant', () => {
     })
     const rollbackCapability = base.mutations.get(third.transactionId!)!.managedServiceUICapabilities?.[0]!
     await runtime.publish(third.transactionId!)
+    expect(nativeChanges).toHaveBeenCalledTimes(2)
     expect(runtime.nativeActivation().nativeProviderIds).toEqual(['provider-aiden-failing'])
     const rollbackSource = activations.get('aiden-failing')!.value.sources[0]!.source
     expect(
@@ -219,6 +223,7 @@ describe('managed service plugin lifecycle participant', () => {
       ),
     ).toMatchObject({ ok: true, value: { projection: { auth: { state: 'missing' } } } })
     await runtime.rollback(third.transactionId!)
+    expect(nativeChanges).toHaveBeenCalledTimes(3)
     expect(runtime.nativeActivation().nativeProviderIds).toEqual(['provider-aiden-new'])
     expect(activations.get('aiden-failing')!.dispose).toHaveBeenCalledOnce()
     expect(
@@ -241,6 +246,7 @@ describe('managed service plugin lifecycle participant', () => {
     expect(base.mutations.has(fourth.transactionId!)).toBe(true)
     await runtime.rollback(fourth.transactionId!)
     expect(runtime.nativeActivation().nativeProviderIds).toEqual(['provider-aiden-new'])
+    unsubscribeNativeChanges()
     await runtime.dispose()
   })
 })

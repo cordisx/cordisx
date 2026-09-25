@@ -36,6 +36,7 @@ describe('Codex config model providers', () => {
         'model_catalog_json = "models.json"',
         '[model_providers.deepseek]',
         'name = "DeepSeek"',
+        'wire_api = "responses"',
         'base_url = "https://api.deepseek.example/v1"',
         'env_key = "DEEPSEEK_API_KEY"',
         'experimental_bearer_token = "never-project-this-token"',
@@ -55,6 +56,7 @@ describe('Codex config model providers', () => {
       ],
     }])
     expect([...projection.providerIds]).toEqual(['deepseek'])
+    expect([...projection.providerWireApis]).toEqual([['deepseek', 'responses']])
     expect(JSON.stringify(projection)).not.toMatch(/base_url|env_key|bearer|token|instruction|api\.deepseek/u)
   })
 
@@ -120,6 +122,29 @@ describe('Codex config model providers', () => {
     await expect(codexConfigModelProviders(codexHome)).resolves.toMatchObject({ providers: [] })
     await writeFile(path.join(codexHome, 'config.toml'), '[model_providers.openai]\nname = "Shadow"\n')
     await expect(codexConfigModelProviders(codexHome)).resolves.toMatchObject({ providers: [] })
+  })
+
+  it('retains only recognized provider wire APIs in the Host-private projection', async () => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '[model_providers.responses]',
+        'wire_api = "responses"',
+        '[model_providers.chat]',
+        'wire_api = "chat-completions"',
+        '[model_providers.unknown]',
+        'wire_api = "future"',
+        '[model_providers.defaulted]',
+      ].join('\n'),
+    )
+    const projection = await codexConfigModelProviders(codexHome)
+    expect([...projection.providerWireApis]).toEqual([
+      ['responses', 'responses'],
+      ['chat', 'chat-completions'],
+      ['defaulted', 'responses'],
+    ])
+    expect(JSON.stringify(projection)).not.toContain('wire_api')
   })
 
   it('does not infer ownership from a single provider when model_provider is omitted', async () => {

@@ -26,6 +26,23 @@ describe('catalog management Host consumer', () => {
       })
     ).toThrow()
   })
+
+  it('projects missing compatibility as unknown and recomputes supported counts', () => {
+    const legacy = catalogView({
+      sourceCount: 3,
+      selectableCount: 3,
+      rows: [
+        { ...catalogView().rows[0]!, compatibility: undefined },
+        { ...catalogView().rows[1]!, compatibility: 'unsupported' },
+        { ...catalogView().rows[0]!, id: 'supported', label: 'Supported', compatibility: 'supported' },
+      ],
+    })
+    const parsed = parseManagementSnapshot({ epoch: 'a', sequence: 0, views: [legacy] }).views[0]!
+    expect(parsed.rows.map(row => row.compatibility)).toEqual(['unknown', 'unsupported', 'supported'])
+    expect(parsed.sourceCount).toBe(1)
+    expect(parsed.selectableCount).toBe(1)
+  })
+
   it('projects only bounded safe fields and never carries raw diagnostics or credentials', () => {
     const source = {
       epoch: 'a',

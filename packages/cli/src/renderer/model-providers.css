@@ -228,10 +228,11 @@
   background: var(--color-background-primary-soft-active, var(--cx-pressed));
 }
 .cxmp-menu {
+  box-sizing: border-box;
   position: fixed;
   z-index: 2147483591;
   width: min(268px, calc(100vw - 16px));
-  max-height: min(380px, calc(100vh - 16px));
+  max-height: min(380px, var(--cxhm-available-height, calc(100vh - 16px)));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -252,6 +253,13 @@
   overflow: auto;
   flex: 1 1 auto;
 }
+.cxmp-model-menu-body {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
 .cxmp-search {
   position: relative;
   display: grid;
@@ -263,6 +271,12 @@
   padding: 0 4px 4px 8px;
   margin-bottom: 4px;
 }
+.cxmp-search-bottom {
+  padding-top: 4px;
+  padding-bottom: 0;
+  margin-top: 4px;
+  margin-bottom: 0;
+}
 .cxmp-search::after {
   position: absolute;
   right: 8px;
@@ -271,6 +285,10 @@
   height: 1px;
   background: var(--color-border, var(--cx-border));
   content: "";
+}
+.cxmp-search-bottom::after {
+  top: 0;
+  bottom: auto;
 }
 .cxmp-search input {
   min-width: 0;
@@ -333,6 +351,32 @@
 .cxmp-menu button.cxmp-model-choice {
   grid-template-columns: 20px minmax(0, 1fr) 16px;
 }
+.cxmp-menu button.cxmp-model-choice > :first-child {
+  justify-self: center;
+}
+.cxmp-provider-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.cxmp-provider-label-text {
+  display: inline-block;
+  min-width: 100%;
+  white-space: nowrap;
+  transition: transform 0.45s ease;
+}
+.cxmp-provider-label[data-overflow="true"]:hover .cxmp-provider-label-text {
+  transform: translateX(calc(-1 * var(--cxmp-label-overflow)));
+}
+@media (prefers-reduced-motion: reduce) {
+  .cxmp-provider-label-text {
+    transition: none;
+  }
+  .cxmp-provider-label[data-overflow="true"]:hover .cxmp-provider-label-text {
+    transform: none;
+  }
+}
 .cxmp-brand-icon {
   display: inline-grid;
   width: 18px;
@@ -346,82 +390,287 @@
   height: 100%;
   object-fit: contain;
 }
+.cxmp-model-disclosure {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: 20px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.cxmp-model-disclosure > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cxmp-model-disclosure > :first-child {
+  justify-self: center;
+}
+.cxmp-model-disclosure > .cxmp-model-disclosure-chevron {
+  transition: transform 160ms ease;
+}
+.cxmp-model-disclosure[aria-expanded="true"] > .cxmp-model-disclosure-chevron {
+  transform: rotate(180deg);
+}
+.cxmp-model-disclosure:hover, .cxmp-model-disclosure:focus-visible {
+  background: var(--color-background-primary-ghost-hover, var(--cx-hover));
+}
+.cxmp-model-controls + .cxmp-model-disclosure {
+  margin-top: 8px;
+}
+.cxmp-model-options {
+  min-height: 0;
+  display: grid;
+  flex: 0 1 auto;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  overflow: hidden;
+  transition: grid-template-rows 180ms ease, opacity 140ms ease;
+}
+.cxmp-model-options[data-expanded="true"] {
+  grid-template-rows: 1fr;
+  margin-top: 8px;
+  opacity: 1;
+}
+.cxmp-model-options-inner {
+  width: 100%;
+  min-height: 0;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cxmp-model-choice + .cxmp-model-choice {
+  margin-top: 4px;
+}
 .cxmp-model-controls {
   position: relative;
-  display: flex;
+  display: grid;
   flex: 0 0 auto;
+  grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
-  padding: 10px 8px 6px;
-  margin-top: 4px;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
 }
 .cxmp-model-controls::before {
   position: absolute;
-  top: 0;
   right: 8px;
+  bottom: 0;
   left: 8px;
   height: 1px;
   background: var(--color-border, var(--cx-border));
   content: "";
 }
 .cxmp-fast-toggle {
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  justify-self: center;
+  border-radius: 5px;
+  background: transparent;
+}
+.cxmp-fast-toggle .cordisx-host-icon {
+  width: 18px;
+  height: 18px;
+}
+.cxmp-fast-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--cx-text);
+}
+.cxmp-fast-toggle[aria-pressed="true"]:not(:disabled),
+.cxmp-fast-toggle[aria-pressed="true"]:hover:not(:disabled) {
+  background: transparent;
+  color: var(--cx-primary);
 }
 .cxmp-reasoning {
-  display: grid;
+  position: relative;
+  display: flex;
+  align-items: center;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 8px;
-  font-size: 12px;
+  height: 44px;
+  cursor: pointer;
+  touch-action: none;
 }
-.cxmp-reasoning > span {
+.cxmp-reasoning-rail {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 24px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--cx-text) 10%, transparent);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.cxmp-reasoning-fill, .cxmp-reasoning-flow {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--cxmp-reasoning-fill-x);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--cx-primary) 38%, var(--cx-surface));
+}
+.cxmp-reasoning-flow {
+  width: var(--cxmp-reasoning-thumb-x);
+  overflow: hidden;
+  background: transparent;
+}
+.cxmp-reasoning-flow::after {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: -50px;
+  width: 50px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(
+      in srgb,
+      color-mix(in srgb, var(--cx-primary) 22%, white) 42%,
+      transparent
+    ),
+    transparent
+  );
+  content: "";
+  opacity: 0;
+}
+.cxmp-reasoning-particle {
+  position: absolute;
+  z-index: 2;
+  left: -18px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--cx-primary) 22%, white);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--cx-primary) 48%, transparent);
+  pointer-events: none;
+}
+.cxmp-reasoning-marks {
+  position: absolute;
+  z-index: 2;
+  inset: 0 12px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  pointer-events: none;
 }
-.cxmp-reasoning output {
-  color: var(--cx-muted);
+.cxmp-reasoning-marks > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cx-text) 46%, var(--cx-surface));
+}
+.cxmp-reasoning-marks > span[data-active="true"] {
+  background: var(--cx-surface-raised, var(--cx-surface));
+}
+.cxmp-reasoning[data-hot="true"]
+  .cxmp-reasoning-marks
+  > span[data-active="true"] {
+  background: color-mix(
+    in srgb,
+    var(--cx-primary) 32%,
+    var(--cx-surface-raised, var(--cx-surface))
+  );
 }
 .cxmp-reasoning input {
+  position: relative;
+  z-index: 3;
   appearance: none;
   width: 100%;
-  height: 18px;
+  height: 44px;
   margin: 0;
   border: 0;
   outline: none;
   background: transparent;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
 }
 .cxmp-reasoning input::-webkit-slider-runnable-track {
-  height: 8px;
-  border: 1px solid color-mix(in srgb, var(--cx-text) 28%, transparent);
-  border-radius: 9999px;
-  background: linear-gradient(
-    to right,
-    var(--cx-primary) 0 var(--cxmp-reasoning-progress),
-    color-mix(in srgb, var(--cx-text) 7%, transparent) var(
-      --cxmp-reasoning-progress
-    ) 100%
-  );
-  box-shadow: inset 0 1px 1px rgb(0 0 0 / 8%);
+  height: 44px;
+  border: 0;
+  background: transparent;
 }
 .cxmp-reasoning input::-webkit-slider-thumb {
   appearance: none;
+  width: 1px;
+  height: 1px;
+  margin-top: 21px;
+  border: 0;
+}
+.cxmp-reasoning-thumb {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: var(--cxmp-reasoning-thumb-x);
   width: 16px;
   height: 16px;
-  margin-top: -5px;
-  border: 1px solid color-mix(in srgb, var(--cx-text) 14%, transparent);
   border-radius: 50%;
   background: var(--cx-primary);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
-.cxmp-reasoning input:focus-visible::-webkit-slider-thumb {
-  outline: 2px solid var(--cx-focus);
-  outline-offset: 2px;
+.cxmp-reasoning[data-dragging="true"] .cxmp-reasoning-thumb {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+.cxmp-reasoning:has(input:focus-visible) .cxmp-reasoning-thumb {
+  box-shadow: inset 0 0 0 2px var(--cx-surface-raised, var(--cx-surface));
+}
+.cxmp-reasoning[data-hot="true"] .cxmp-reasoning-fill {
+  background: color-mix(in srgb, var(--cx-primary) 62%, var(--cx-surface));
+}
+.cxmp-reasoning[data-flowing="true"] .cxmp-reasoning-flow::after {
+  opacity: 1;
 }
 .cxmp-reasoning input:disabled {
   cursor: default;
+}
+.cxmp-reasoning[data-disabled="true"] .cxmp-reasoning-rail,
+.cxmp-reasoning[data-disabled="true"] .cxmp-reasoning-marks,
+.cxmp-reasoning[data-disabled="true"] .cxmp-reasoning-thumb {
   opacity: var(--cx-disabled);
+}
+.cxmp-reasoning[data-disabled="true"] {
+  cursor: default;
+}
+@keyframes cxmp-reasoning-sweep {
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cxmp-reasoning-thumb {
+    transition:
+      left 260ms cubic-bezier(0.19, 0.82, 0.22, 1),
+      transform 120ms ease,
+      background-color 160ms ease;
+  }
+  .cxmp-reasoning-fill {
+    transition: width 150ms ease-out, background-color 160ms ease;
+  }
+  .cxmp-reasoning-flow {
+    transition:
+      width 260ms cubic-bezier(0.19, 0.82, 0.22, 1),
+      background-color 160ms ease;
+  }
+  .cxmp-reasoning[data-dragging="true"] .cxmp-reasoning-thumb,
+  .cxmp-reasoning[data-dragging="true"] .cxmp-reasoning-fill,
+  .cxmp-reasoning[data-dragging="true"] .cxmp-reasoning-flow {
+    transition: none;
+  }
+  .cxmp-reasoning[data-flowing="true"] .cxmp-reasoning-flow::after {
+    animation: cxmp-reasoning-sweep 2100ms ease-in-out infinite;
+  }
 }
 .cxmp-retry {
   border: 0;
@@ -436,6 +685,11 @@
 }
 .cxmp-menu .cxmp-choice span {
   overflow-wrap: anywhere;
+}
+.cxmp-menu .cxmp-choice .cxmp-provider-label,
+.cxmp-menu .cxmp-choice .cxmp-provider-label-text {
+  min-width: 0;
+  overflow-wrap: normal;
 }
 .cxmp-menu .cxmp-choice[aria-checked="true"] {
   background: var(
@@ -471,5 +725,11 @@
   }
   .cxmp-model-trigger {
     max-width: 148px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cxmp-model-disclosure > .cxmp-model-disclosure-chevron,
+  .cxmp-model-options {
+    transition: none;
   }
 }

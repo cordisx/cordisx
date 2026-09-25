@@ -67,13 +67,19 @@ async function harness(handler?: (request: Record<string, unknown>, view: Window
   install('electronBridge', {
     sendMessageFromView: async (envelope: { request?: Record<string, unknown> }) => {
       if (envelope.request === undefined) return
-      requests.push(structuredClone(envelope.request))
+      const request = structuredClone(envelope.request)
+      if (request.method !== 'model/list') requests.push(request)
       if (handler?.(envelope.request, dom.window)) return
       const params = envelope.request.params as Record<string, unknown>
       const result = envelope.request.method === 'thread/read'
         ? { thread: { id: params.threadId, status: { type: 'idle' }, modelProvider: 'provider-a' } }
         : envelope.request.method === 'config/read'
         ? { config: { model_provider: 'provider-a', model: 'model-a', model_reasoning_effort: 'high' } }
+        : envelope.request.method === 'model/list'
+        ? {
+          data: [{ id: 'protocol-model-a', model: 'model-a', displayName: 'Model A', hidden: false }],
+          nextCursor: null,
+        }
         : {}
       queueMicrotask(() =>
         message(dom.window, {
@@ -771,34 +777,6 @@ describe('native model provider transport', () => {
       model: 'model-b',
     })
     expect(transport.getSnapshot().pendingProviderId).toBeUndefined()
-    transport.dispose()
-    dom.window.close()
-  })
-
-  it('refreshes native labels and disabled catalog entries without changing the selected model', async () => {
-    const { dom, transport } = await harness()
-    const trigger = dom.window.document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
-    const props = (trigger as any).__reactFiber$test.return.memoizedProps
-    props.models[0].displayName = 'Friendly[Miniapp]'
-    props.modelOptions = [{ model: props.models[0], disabledReason: null }]
-    dom.window.document.body.append(dom.window.document.createElement('aside'))
-    await settle()
-    expect(transport.getSnapshot().modelLabel).toBe('Friendly')
-    expect(transport.getSnapshot().nativeModels).toEqual([{
-      id: 'model-a',
-      label: 'Friendly',
-      disabled: false,
-      supportsFastMode: false,
-    }])
-    props.modelOptions[0].disabledReason = 'Login required'
-    dom.window.document.body.append(dom.window.document.createElement('aside'))
-    await settle()
-    expect(transport.getSnapshot().nativeModels).toEqual([{
-      id: 'model-a',
-      label: 'Friendly',
-      disabled: true,
-      supportsFastMode: false,
-    }])
     transport.dispose()
     dom.window.close()
   })
