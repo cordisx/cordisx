@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { createServer, type ModuleNode, normalizePath, type Plugin, type ViteDevServer } from 'vite'
@@ -300,15 +300,20 @@ export async function startNativeViteServer(
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
     const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
     await rememberPluginMetadata(realEntry, realRoot, packageFiles)
-    const identitySource = await resolveDevelopmentIdentitySource(plugin)
+    const durablePackage = plugin.package !== undefined && plugin.development === undefined
+    const identitySource = durablePackage
+      ? plugin.source ?? pathToFileURL(plugin.entry).href
+      : await resolveDevelopmentIdentitySource(plugin)
     const created: DevelopmentGeneration = {
       root: info.root,
       realRoot,
       realEntry,
-      version: info.version,
+      version: durablePackage ? plugin.package!.version : info.version,
       source: identitySource,
       revision: 0,
-      ...generationValues(plugin.id, 0),
+      ...(durablePackage
+        ? { digest: plugin.package!.digest, moduleGeneration: plugin.package!.moduleGeneration }
+        : generationValues(plugin.id, 0)),
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
@@ -320,6 +325,9 @@ export async function startNativeViteServer(
     return created
   }
   const bumpGeneration = async (plugin: CordisXConfigPlugin): Promise<DevelopmentGeneration> => {
+    if (plugin.package !== undefined && plugin.development === undefined) {
+      throw new Error(`installed package plugin is not a Vite development generation: ${plugin.id}`)
+    }
     const previous = await ensureGeneration(plugin)
     const info = await localDevelopmentPackageInfo(plugin.entry)
     const isolatedBuild = info.manifest?.schemaVersion === 7
@@ -352,6 +360,15 @@ export async function startNativeViteServer(
   }
   const packageConfig = async (plugin: CordisXConfigPlugin): Promise<CordisXConfigPlugin> => {
     const generation = await ensureGeneration(plugin)
+    if (plugin.package !== undefined && plugin.development === undefined) {
+      return {
+        ...plugin,
+        source: generation.source,
+        ...(plugin.manifest === undefined && generation.manifest !== undefined
+          ? { manifest: generation.manifest }
+          : {}),
+      }
+    }
     return {
       ...plugin,
       source: generation.source,
@@ -825,7 +842,14 @@ if (import.meta.hot) {
       },
       clearScreen: false,
     })
-    await listenNativeViteServer(server, initialGenerations.flatMap(generation => generation.watchFiles))
+    await listenNativeViteServer(
+      server,
+      initialConfig.plugins.flatMap((plugin, index) =>
+        plugin.package !== undefined && plugin.development === undefined
+          ? []
+          : initialGenerations[index]!.watchFiles
+      ),
+    )
     await waitForDependencyOptimization()
   } catch (error) {
     await server!?.close()
@@ -854,7 +878,11 @@ if (import.meta.hot) {
     },
     async synchronizePluginGenerations(handler) {
       generationHandler = handler
-      for (const plugin of config.plugins.filter(plugin => plugin.enabled)) {
+      for (
+        const plugin of config.plugins.filter(plugin =>
+          plugin.enabled && (plugin.package === undefined || plugin.development !== undefined)
+        )
+      ) {
         const generation = await ensureGeneration(plugin)
         const transaction = await handler(generationSnapshot(plugin.id, generation))
         await transaction.commit()

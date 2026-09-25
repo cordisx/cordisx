@@ -219,6 +219,10 @@ export class ManagedServiceRuntime {
     return this.nativePublications.listProviderIds()
   }
 
+  subscribeNativeProviders(listener: () => void): () => void {
+    return this.nativePublications.subscribe(listener)
+  }
+
   preparePublishedNativeConnection(providerId: string): NativeManagedGatewayConnectionSession {
     const published = this.nativePublications.resolve(providerId)
     if (published === undefined) throw new Error('native managed gateway provider is unavailable')

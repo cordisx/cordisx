@@ -31,10 +31,11 @@ interface CertifiedPermissionDeliveryEnvelopeV1 {
 export interface CertifiedPermissionDocumentChannel {
   readonly documentEpoch: string
   readonly ready: Promise<void>
+  replaceSink(sink: CertifiedPermissionSnapshotSink): void
   dispose(): void
 }
 
-interface CertifiedPermissionSnapshotSink {
+export interface CertifiedPermissionSnapshotSink {
   replaceCertifiedPermissionSnapshot(snapshot: CertifiedPermissionSnapshotV1): void
   clearCertifiedPermissionSnapshot(): void
 }
@@ -181,7 +182,9 @@ export function createCertifiedPermissionDocumentChannel(
   const ready = new Promise<void>(resolve => {
     resolveReady = resolve
   })
-  const clear = (): void => options.sink.clearCertifiedPermissionSnapshot()
+  let sink = options.sink
+  let lastSnapshot: CertifiedPermissionSnapshotV1 | undefined
+  const clear = (): void => sink.clearCertifiedPermissionSnapshot()
   const clearHeartbeat = (): void => {
     if (heartbeatTimer !== undefined) clearTimeout(heartbeatTimer)
     heartbeatTimer = undefined
@@ -197,6 +200,7 @@ export function createCertifiedPermissionDocumentChannel(
   }
   const failClosed = (): void => {
     clearHeartbeat()
+    lastSnapshot = undefined
     clear()
   }
   const endpoint = Object.freeze({
@@ -242,7 +246,8 @@ export function createCertifiedPermissionDocumentChannel(
         ) {
           throw new Error('Certified permission delivery equivocated at one authority revision')
         }
-        options.sink.replaceCertifiedPermissionSnapshot(parsed.snapshot)
+        sink.replaceCertifiedPermissionSnapshot(parsed.snapshot)
+        lastSnapshot = parsed.snapshot
         lastSequence = parsed.deliverySequence
         lastAuthorityRevision = parsed.authorityRevision
         lastSnapshotDigest = digest
@@ -294,6 +299,11 @@ export function createCertifiedPermissionDocumentChannel(
   return Object.freeze({
     documentEpoch,
     ready,
+    replaceSink: (nextSink: CertifiedPermissionSnapshotSink) => {
+      if (disposed) throw new Error('Certified permission document channel is closed')
+      sink = nextSink
+      if (lastSnapshot !== undefined) sink.replaceCertifiedPermissionSnapshot(lastSnapshot)
+    },
     dispose: () => {
       endpoint.close()
     },

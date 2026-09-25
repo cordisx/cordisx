@@ -61,18 +61,25 @@ export async function createNativeViteManagedServiceProjection(input: {
   readonly activation: ManagedServiceNodeActivation
   readonly profileId: string
   readonly runtimeGeneration: string
+  readonly initialActivation?: CordisXPluginActivationRecordV1
 }): Promise<NativeViteManagedServiceProjection> {
   const staged = new Map<string, PluginRuntimeMutation>()
-  let active: CordisXPluginActivationRecordV1 = {
-    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
-    schemaVersion: 1,
-    recordKind: 'active',
-    profileId: input.profileId,
-    revision: 0,
-    lastGoodRevision: 0,
-    runtimeGeneration: input.runtimeGeneration,
-    plugins: [],
-  }
+  let active: CordisXPluginActivationRecordV1 = input.initialActivation === undefined
+    ? {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'active',
+      profileId: input.profileId,
+      revision: 0,
+      lastGoodRevision: 0,
+      runtimeGeneration: input.runtimeGeneration,
+      plugins: [],
+    }
+    : {
+      ...input.initialActivation,
+      profileId: input.profileId,
+      runtimeGeneration: input.runtimeGeneration,
+    }
   const lifecycle = new ManagedServicePluginLifecycleRuntime({
     profileId: input.profileId,
     runtimeGeneration: input.runtimeGeneration,
@@ -99,6 +106,7 @@ export async function createNativeViteManagedServiceProjection(input: {
         get nativeProviderIds() {
           return input.activation.nativeProviderIds
         },
+        subscribeNativeProviders: listener => input.activation.subscribeNativeProviders(listener),
         prepareNativeConnection: (providerId: string) => input.activation.prepareNativeConnection(providerId),
         async dispose() {},
       }),

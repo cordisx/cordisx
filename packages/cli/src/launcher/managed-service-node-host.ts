@@ -45,6 +45,7 @@ export interface ManagedServiceNodeActivation {
   readonly sources: readonly ManagedServiceNodeSourceBinding[]
   /** Available native managed gateway provider IDs. */
   readonly nativeProviderIds: readonly string[]
+  subscribeNativeProviders(listener: () => void): () => void
   prepareNativeConnection(providerId: string): NativeManagedGatewayConnectionSession
   dispose(): Promise<void>
 }
@@ -280,6 +281,7 @@ export class ManagedServiceNodeHost {
         get nativeProviderIds() {
           return runtime.listNativeProviderIds()
         },
+        subscribeNativeProviders: listener => runtime.subscribeNativeProviders(listener),
         prepareNativeConnection: (providerId: string) => {
           if (!PROVIDER_ID.test(providerId) || cleanupPromise !== undefined) {
             throw new Error('native managed gateway provider is unavailable')

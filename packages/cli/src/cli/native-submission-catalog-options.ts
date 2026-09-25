@@ -22,9 +22,14 @@ export function nativeSubmissionCatalogOptions(
   >,
   environment: Readonly<Record<string, string | undefined>>,
   planEnvironment?: Readonly<Record<string, string>>,
+  recoverLegacyLock?: Readonly<{ exitedPid: number; inode: number }>,
 ) {
   return {
-    managedCatalog: { homeDir, profileId },
+    managedCatalog: {
+      homeDir,
+      profileId,
+      ...(recoverLegacyLock === undefined ? {} : { recoverLegacyLock }),
+    },
     nativeDiscoveryEnvironment: nativeDiscoveryEnvironment(environment, planEnvironment),
     ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
     ...(profile.nativeModelDiscovery === undefined ? {} : { nativeModelDiscovery: profile.nativeModelDiscovery }),

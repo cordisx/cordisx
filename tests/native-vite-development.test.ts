@@ -18,6 +18,11 @@ import { EntityDirectoryAuthority, entityTreeDigest } from '../packages/cli/src/
 import { entityInstallationId, entityPluginGeneration } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { NativeViteDevelopmentClient } from '../packages/cli/src/renderer/vite-development-client.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
+  certifiedPermissionEndpointTakeKey,
+  createCertifiedPermissionDocumentChannel,
+} from '../packages/cli/src/renderer/certified-permission-channel.js'
 
 const PACKAGE_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
@@ -45,6 +50,86 @@ afterEach(async () => {
 })
 
 describe('native Vite development transport', () => {
+  it('retains one Certified document channel across a same-document Host restart', async () => {
+    const activation = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      recordKind: 'active' as const,
+      profileId: 'default',
+      runtimeGeneration: 'runtime-generation',
+      revision: 0,
+      lastGoodRevision: 0,
+      plugins: [],
+    }
+    const firstSink = {
+      replaceCertifiedPermissionSnapshot: vi.fn(),
+      clearCertifiedPermissionSnapshot: vi.fn(),
+    }
+    const secondSink = {
+      replaceCertifiedPermissionSnapshot: vi.fn(),
+      clearCertifiedPermissionSnapshot: vi.fn(),
+    }
+    const token = 'a'.repeat(64)
+    const channel = createCertifiedPermissionDocumentChannel({
+      token,
+      profileId: 'default',
+      runtimeGeneration: 'runtime-generation',
+      sink: firstSink,
+    })
+    const globals = globalThis as typeof globalThis & Record<string, unknown>
+    const endpoint = (globals[certifiedPermissionEndpointTakeKey(token)] as (() => {
+      deliver(payload: string): unknown
+    }))()
+    endpoint.deliver(JSON.stringify({
+      contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
+      profileId: 'default',
+      runtimeGeneration: 'runtime-generation',
+      documentEpoch: channel.documentEpoch,
+      deliverySequence: 1,
+      authorityRevision: 1,
+      snapshot: { revision: 1, projections: [] },
+    }))
+    const runtimes = [firstSink, secondSink].map((sink, index) => ({
+      activePluginGeneration: () => activation,
+      releaseCertifiedPermissionChannel: vi.fn(() => index === 0 ? channel : undefined),
+      dispose: vi.fn(async () => undefined),
+      sink,
+    }))
+    const install = vi.fn(async (
+      _plugins: readonly unknown[],
+      _metadata: unknown,
+      _bootstrap?: unknown,
+      _signal?: AbortSignal,
+      options?: { certifiedPermissionChannel?: typeof channel },
+    ) => {
+      const runtime = runtimes[install.mock.calls.length - 1]!
+      options?.certifiedPermissionChannel?.replaceSink(runtime.sink)
+      return runtime as never
+    })
+    const client = new NativeViteDevelopmentClient(
+      { profileId: 'default', generation: 'runtime-generation' } as never,
+      [],
+      () => undefined,
+    )
+
+    await client.restart(install as never)
+    await client.restart(install as never)
+    endpoint.deliver(JSON.stringify({
+      contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
+      profileId: 'default',
+      runtimeGeneration: 'runtime-generation',
+      documentEpoch: channel.documentEpoch,
+      deliverySequence: 2,
+      authorityRevision: 2,
+      snapshot: { revision: 2, projections: [] },
+    }))
+
+    expect(runtimes[0]!.releaseCertifiedPermissionChannel).toHaveBeenCalledOnce()
+    expect(secondSink.replaceCertifiedPermissionSnapshot).toHaveBeenCalledWith({ revision: 1, projections: [] })
+    expect(secondSink.replaceCertifiedPermissionSnapshot).toHaveBeenCalledWith({ revision: 2, projections: [] })
+    channel.dispose()
+  })
+
   it('ignores launcher-owned package staging without suppressing source updates', () => {
     const options = nativeViteWatchOptions('/repo/packages/cli/dist/', ['/home/packages/.source-staging'])
 

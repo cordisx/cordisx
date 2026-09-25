@@ -6,9 +6,12 @@ import {
 } from '../packages/cli/src/renderer/platform.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../packages/cli/src/usage-permissions.js'
 import {
+  CORDISX_PERMISSION_POLICY_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   type CordisXPluginManifestV5,
 } from '../packages/cli/src/permission-contracts.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capability-risk-catalog.js'
+import { domPermissionAuthorizationKeyV3 } from '../packages/cli/src/permission-model-v3.js'
 
 const identity = { id: 'development', source: 'file:///cordisx-local-dev/project/development.js' }
 const session = { providerId: 'codex', remoteSessionId: 'task-1' }
@@ -112,6 +115,45 @@ describe('one generation-bound local development permission default', () => {
     broker.register(other, manifest(), { pluginId: identity.id, moduleGeneration: 'other' })
     expect(broker.domAccess(other, 'main').authorized).toBe(false)
     expect(requestV2).not.toHaveBeenCalled()
+    broker.dispose()
+  })
+  it('keeps an exact persisted render deny authoritative over local-development authorization', async () => {
+    const pointId = 'manager.content'
+    const store = new MemoryPermissionPolicyStore([], [], [{
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+      schemaVersion: 3,
+      key: domPermissionAuthorizationKeyV3({
+        profileId: 'profile',
+        identity: { source: identity.source, pluginId: identity.id },
+        pointId,
+        catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+      }),
+      policy: 'deny-persistent',
+    }])
+    const broker = new PermissionBroker(
+      store,
+      { request: async () => 'deny' },
+      () => new Date(),
+      50,
+      'profile',
+      'runtime',
+    )
+    const remove = broker.register(
+      identity,
+      manifest([pointId]),
+      { pluginId: identity.id, moduleGeneration: 'render-deny' },
+      undefined,
+      undefined,
+      true,
+    )
+
+    expect(broker.domAccess(identity, pointId)).toMatchObject({
+      authorized: false,
+      policy: 'deny',
+      reason: 'permission.denied-persistent',
+    })
+
+    remove()
     broker.dispose()
   })
   it('grants Host DOM only within the declared roots and operations, with revocable generation leases', async () => {

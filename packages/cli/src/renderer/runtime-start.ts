@@ -245,7 +245,7 @@ export async function start(
   } else {
     sharedReactRuntime = globalThis.__cordisxSharedReactRuntime
   }
-  let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
+  let certifiedPermissionChannel = options.certifiedPermissionChannel
   try {
     disposeNotifications = installNotificationHost(document, metadata.profileId)
     disposeDialogs = installDialogHost(document)
@@ -518,7 +518,9 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
-    if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
+    if (certifiedPermissionChannel !== undefined) {
+      certifiedPermissionChannel.replaceSink(broker)
+    } else if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
       certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
         token: metadata.certifiedPermissionChannelToken,
         profileId: metadata.profileId,

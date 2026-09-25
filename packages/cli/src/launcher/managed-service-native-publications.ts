@@ -114,6 +114,7 @@ function publicationInput(value: unknown): ValidatedPublicationInput | undefined
 export class ManagedNativeProviderPublications {
   private readonly providers = new Map<string, PublicationState>()
   private readonly records = new WeakMap<ManagedServiceRecord, Set<PublicationState>>()
+  private readonly listeners = new Set<() => void>()
 
   publish(
     record: ManagedServiceRecord,
@@ -154,6 +155,7 @@ export class ManagedNativeProviderPublications {
     const owned = this.records.get(record) ?? new Set<PublicationState>()
     owned.add(state)
     this.records.set(record, owned)
+    this.changed()
     return {
       status: 'accepted',
       publication: Object.freeze({
@@ -165,6 +167,11 @@ export class ManagedNativeProviderPublications {
 
   listProviderIds(): readonly string[] {
     return Object.freeze([...this.providers.keys()].sort())
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
   }
 
   resolve(providerId: string): {
@@ -196,7 +203,17 @@ export class ManagedNativeProviderPublications {
 
   private revokeState(state: PublicationState, lifecycle: 'disposed' | 'retired' = 'retired'): void {
     state.lifecycle = lifecycle
-    if (this.providers.get(state.projection.providerId) === state) this.providers.delete(state.projection.providerId)
+    const removed = this.providers.get(state.projection.providerId) === state
+    if (removed) this.providers.delete(state.projection.providerId)
     this.records.get(state.record)?.delete(state)
+    if (removed) this.changed()
+  }
+
+  private changed(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
   }
 }

@@ -112,7 +112,7 @@ import { type PermissionPersistenceContext, PluginPermissionIdentityRegistry } f
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { IconThemePreferencePersistenceContext } from '../launcher/icon-theme-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
-import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
+import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
@@ -156,6 +156,7 @@ import {
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
+import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
 import type { OpenManagementCommandService } from './management-command.js'
 export { HELP } from './help.js'
 
@@ -222,6 +223,8 @@ export interface CordisXCliRuntime {
   readonly internalCreateDevelopmentManagedServiceActivation?: typeof createDevelopmentManagedServiceActivation
   /** Repository-only platform seam for launcher assembly tests. */
   readonly internalNativeSubmissionPlatform?: NodeJS.Platform
+  /** Repository-only one-shot recovery input for an already-diagnosed legacy owner lock. */
+  readonly internalNativeSubmissionLegacyLockRecovery?: Readonly<{ exitedPid: number; inode: number }>
   /** Repository-only factory seam for proving pre-handoff launch assembly failures. */
   readonly internalAgentHistoryHost?: typeof agentHistoryHost
 }
@@ -345,12 +348,14 @@ async function createDevelopmentManagedServiceActivation(input: {
   readonly homeConfigPath: string
   readonly homeDir: string
   readonly environment: NodeJS.ProcessEnv
+  readonly profileId?: string
+  readonly runtimeGeneration?: string
 }): Promise<ManagedServiceNodeActivation> {
   const homeConfig = await ensureHomeConfig({ configPath: input.homeConfigPath })
   const codex = ownValue(homeConfig.apps, 'codex')
   if (codex === undefined) throw new Error('host app is not configured: codex')
-  const runtimeGeneration = randomBytes(16).toString('hex')
-  const store = new PluginActivationStore(input.homeDir, codex.defaultProfile, runtimeGeneration)
+  const runtimeGeneration = input.runtimeGeneration ?? randomBytes(16).toString('hex')
+  const store = new PluginActivationStore(input.homeDir, input.profileId ?? codex.defaultProfile, runtimeGeneration)
   const active = await store.loadActive()
   const nestedAccesses = await Promise.all(active.plugins.flatMap(item =>
     item.enabled
@@ -382,7 +387,7 @@ async function createDevelopmentManagedServiceActivation(input: {
   ))
   const host = new ManagedServiceNodeHost(
     new ManagedServiceRuntime({ homeDir: input.homeDir, environment: input.environment }),
-    'development',
+    input.profileId ?? codex.defaultProfile,
     runtimeGeneration,
   )
   try {
@@ -734,14 +739,56 @@ export async function runDevelopment(
   let managedServiceProjection: Awaited<ReturnType<typeof createNativeViteManagedServiceProjection>> | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
   let pluginManagementService: PluginManagementService | undefined
+  let certifiedPermissionAuthority: LauncherMarketplaceCertifiedAuthority | undefined
   try {
-    vite = await startNativeViteServer(config, {
+    const developmentHome = invocation.options.dryRun
+      ? undefined
+      : await (async () => {
+        const homeConfig = await ensureHomeConfig(homeConfigOptions)
+        const nativeApp = ownValue(homeConfig.apps, 'codex')
+        if (nativeApp === undefined) throw new Error('host app is not configured: codex')
+        const nativeProfileId = nativeApp.defaultProfile
+        const nativeProfile = ownValue(nativeApp.profiles, nativeProfileId)
+        if (nativeProfile === undefined) {
+          throw new Error(`default profile is not configured for codex: ${nativeProfileId}`)
+        }
+        const managementAppId = homeConfig.defaultApp
+        const managementApp = ownValue(homeConfig.apps, managementAppId)
+        if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)
+        const managementProfileId = managementApp.defaultProfile
+        const managementProfile = ownValue(managementApp.profiles, managementProfileId)
+        if (managementProfile === undefined) {
+          throw new Error(`default profile is not configured for ${managementAppId}: ${managementProfileId}`)
+        }
+        const runtimeGeneration = randomBytes(16).toString('hex')
+        const store = new PluginActivationStore(cordisxHomeDir, nativeProfileId, runtimeGeneration)
+        const activation = await store.loadActive()
+        return {
+          homeConfig,
+          nativeProfileId,
+          nativeProfile,
+          managementAppId,
+          managementProfileId,
+          runtimeGeneration,
+          store,
+          activation,
+          plugins: await loadPluginComposition(store, activation),
+        }
+      })()
+    const configuredIds = new Set(config.plugins.map(plugin => plugin.id))
+    const collision = developmentHome?.plugins.find(plugin => configuredIds.has(plugin.id))
+    if (collision !== undefined) throw new Error(`development plugin already owns package id ${collision.id}`)
+    const rendererConfig: CordisXConfig = {
+      ...config,
+      plugins: [...config.plugins, ...developmentHome?.plugins ?? []],
+    }
+    vite = await startNativeViteServer(rendererConfig, {
       cacheRoot: dryRunCacheRoot ?? path.join(cordisxHomeDir, 'cache', 'native-vite'),
       prebundleHostDependencies: !invocation.options.dryRun,
     })
     const activeVite = vite
     if (invocation.options.dryRun) {
-      const composition = await buildRendererComposition(config, stdout, {
+      const composition = await buildRendererComposition(rendererConfig, stdout, {
         profileId: 'development',
         writable: invocation.options.writeConfig === true,
         serviceConfigWritable: false,
@@ -772,7 +819,30 @@ export async function runDevelopment(
       ))
       return
     }
-    const homeConfig = await ensureHomeConfig(homeConfigOptions)
+    if (developmentHome === undefined) throw new Error('development home composition is unavailable')
+    const {
+      homeConfig,
+      nativeProfileId,
+      nativeProfile,
+      managementAppId,
+      managementProfileId,
+      runtimeGeneration: developmentRuntimeGeneration,
+      store: developmentStore,
+      activation: activeLifecycleActivation,
+    } = developmentHome
+    const permissionPolicies = homeConfig.permissions.filter(policy => policy.key.profileId === nativeProfileId)
+    const permissionIdentities = new PluginPermissionIdentityRegistry(pluginIdentities(rendererConfig))
+    certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
+      homeDir: cordisxHomeDir,
+      configPath: homeConfigPath,
+      profileId: nativeProfileId,
+    }).catch(error => {
+      stdout(`[cordisx] Certified permission authority unavailable; explicit review remains required: ${String(error)}`)
+      return undefined
+    })
+    const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
+      ? undefined
+      : randomBytes(32).toString('hex')
     if (shouldSkipBuiltinSkillDeployment(environment)) {
       stdout('[cordisx] built-in Skill deployment skipped by the local acceptance runner')
     } else if (invocation.options.attach) {
@@ -823,14 +893,29 @@ export async function runDevelopment(
           homeConfigPath,
           homeDir: cordisxHomeDir,
           environment,
+          profileId: nativeProfileId,
+          runtimeGeneration: developmentRuntimeGeneration,
         })
         const createNativeSubmission = runtime.internalCreateNativeSubmissionComposition
           ?? createNativeSubmissionComposition
-        nativeSubmission = await createNativeSubmission(managedServiceActivation, executable, codexHome(environment))
+        nativeSubmission = await createNativeSubmission(
+          managedServiceActivation,
+          executable,
+          codexHome(environment),
+          nativeSubmissionCatalogOptions(
+            cordisxHomeDir,
+            nativeProfileId,
+            nativeProfile,
+            environment,
+            undefined,
+            runtime.internalNativeSubmissionLegacyLockRecovery,
+          ),
+        )
         managedServiceProjection = await createNativeViteManagedServiceProjection({
           activation: managedServiceActivation,
-          profileId: 'development',
+          profileId: nativeProfileId,
           runtimeGeneration: managedServiceActivation.hostGeneration,
+          initialActivation: activeLifecycleActivation,
         })
       } catch (error) {
         await nativeSubmission?.close().catch(() => undefined)
@@ -842,15 +927,11 @@ export async function runDevelopment(
         stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
     }
-    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, nativeProfileId)
     await activeVite.synchronizePluginGenerations(composeNativeVitePluginGenerationHandlers([
-      createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
+      createNativeViteEntityGenerationHandler(entityAuthority, nativeProfileId),
       ...(managedServiceProjection === undefined ? [] : [managedServiceProjection.handler]),
     ]))
-    const managementAppId = homeConfig.defaultApp
-    const managementApp = ownValue(homeConfig.apps, managementAppId)
-    if (managementApp === undefined) throw new Error(`host app is not configured: ${managementAppId}`)
-    const managementProfileId = managementApp.defaultProfile
     pluginManagementService = await openPluginManagementService({
       configPath: homeConfigPath,
       homeDir: cordisxHomeDir,
@@ -858,12 +939,13 @@ export async function runDevelopment(
       profileId: managementProfileId,
     })
     const pluginManagementToken = randomBytes(32).toString('hex')
-    const composition = await buildRendererComposition(config, stdout, {
-      profileId: 'development',
+    const composition = await buildRendererComposition(rendererConfig, stdout, {
+      profileId: nativeProfileId,
       writable: invocation.options.writeConfig === true,
       serviceConfigWritable: false,
-      permission: { profileId: 'development', policies: [], persistent: false },
+      permission: { profileId: nativeProfileId, policies: permissionPolicies, persistent: true },
       ...(managedServiceActivation === undefined ? {} : { generation: managedServiceActivation.hostGeneration }),
+      ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
       ...(managedServiceProjection === undefined
         ? {}
         : { managedServiceUICapabilities: managedServiceProjection.capabilities() }),
@@ -876,11 +958,18 @@ export async function runDevelopment(
       generation: composition.generation,
       service: pluginManagementService,
     }
+    const permissionPersistence = composition.permissionBridgeToken === undefined ? undefined : {
+      configPath: homeConfigPath,
+      profileId: nativeProfileId,
+      token: composition.permissionBridgeToken,
+      identities: pluginIdentities(rendererConfig),
+      identityAllowed: (identity: CordisXPluginIdentity) => permissionIdentities.allowed(identity),
+    }
     const configBridge = composition.configBridgeToken === undefined
       ? undefined
       : createLauncherConfigBridgeHandler({
         token: composition.configBridgeToken,
-        profileId: 'development',
+        profileId: nativeProfileId,
         generation: composition.generation,
         configPath: location!.configPath,
         composition: config,
@@ -892,19 +981,19 @@ export async function runDevelopment(
         cordisxHomeDir,
         ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
       })
-    const identities = pluginIdentities(config)
+    const identities = pluginIdentities(rendererConfig)
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
     })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
       localWalletHomeDir: cordisxHomeDir,
-      managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, 'development'),
+      managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, nativeProfileId),
       managedSources: async () =>
-        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, 'development'),
-      plugins: config.plugins,
+        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, nativeProfileId),
+      plugins: rendererConfig.plugins,
       secret: composition.ownerDocumentSecret,
-      profileId: 'development',
+      profileId: nativeProfileId,
       generation: composition.generation,
       store: new OwnerDocumentStore(cordisxHomeDir),
       principalAllowed: principal => documentLeases.allowed(principal),
@@ -912,7 +1001,7 @@ export async function runDevelopment(
     const ownerDocuments = Object.assign(ownerDocumentHandler, {
       entities: createEntityBridgeHandler({
         secret: composition.ownerDocumentSecret,
-        profileId: 'development',
+        profileId: nativeProfileId,
         generation: composition.generation,
         authority: entityAuthority,
         principalAllowed: principal => documentLeases.allowed(principal),
@@ -933,9 +1022,9 @@ export async function runDevelopment(
       historyHost = agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`, workProfile)
       providerFleet = composition.providerBridgeToken === undefined
         ? undefined
-        : await ProviderFleet.create(providerConfigs(config, environment), {
+        : await ProviderFleet.create(providerConfigs(rendererConfig, environment), {
           appServer: { environment },
-          agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, 'development'),
+          agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, nativeProfileId),
         })
       resourcesHandedOff = true
       const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
@@ -945,6 +1034,9 @@ export async function runDevelopment(
           ? {}
           : { managedServiceUI: managedServiceProjection.managedServiceUI }),
         source: composition.source,
+        ...(composition.newDocumentSource === undefined ? {} : {
+          newDocumentSource: composition.newDocumentSource,
+        }),
         viteDevelopment: true,
         ...(configBridge === undefined ? {} : { configBridge }),
         hasLoopbackGraph: false,
@@ -952,6 +1044,15 @@ export async function runDevelopment(
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         ownerDocuments,
         pluginManagement,
+        ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
+        ...(certifiedPermissionAuthority === undefined || certifiedPermissionChannelToken === undefined ? {} : {
+          certifiedPermission: {
+            authority: certifiedPermissionAuthority,
+            token: certifiedPermissionChannelToken,
+            profileId: nativeProfileId,
+            runtimeGeneration: composition.generation,
+          },
+        }),
         ...(providerFleet === undefined || composition.providerBridgeToken === undefined ? {} : {
           providerFleet,
           providerBridgeToken: composition.providerBridgeToken,
@@ -991,6 +1092,7 @@ export async function runDevelopment(
       await nativeSubmission?.close().catch(() => undefined)
       await managedServiceProjection?.dispose().catch(() => undefined)
       await managedServiceActivation?.dispose().catch(() => undefined)
+      await certifiedPermissionAuthority?.dispose().catch(() => undefined)
       pluginManagementService?.close()
       await vite?.close()
     } finally {

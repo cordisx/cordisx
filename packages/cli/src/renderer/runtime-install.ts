@@ -3,6 +3,7 @@ import {
   CordisXInternalRendererBootstrap,
   CordisXRuntimeHandle,
   CordisXRuntimeMetadata,
+  CordisXStartOptions,
   RuntimeBrowserPlugin,
 } from './runtime-shared.js'
 import { start } from './runtime-start.js'
@@ -99,10 +100,17 @@ export function installCordisX(
   metadata: CordisXRuntimeMetadata,
   internalBootstrap?: CordisXInternalRendererBootstrap,
   signal?: AbortSignal,
+  options: Readonly<{ certifiedPermissionChannel?: CordisXStartOptions['certifiedPermissionChannel'] }> = {},
 ): Promise<CordisXRuntimeHandle> {
   return serializeCordisXBoot(
     metadata,
-    async () => await start(plugins, metadata, internalBootstrap, { signal }),
+    async () =>
+      await start(plugins, metadata, internalBootstrap, {
+        signal,
+        ...(options.certifiedPermissionChannel === undefined
+          ? {}
+          : { certifiedPermissionChannel: options.certifiedPermissionChannel }),
+      }),
     signal,
   )
 }

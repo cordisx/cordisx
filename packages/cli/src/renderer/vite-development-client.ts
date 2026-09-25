@@ -68,15 +68,27 @@ export class NativeViteDevelopmentClient {
           enabled: true,
         })),
       }
+      const certifiedPermissionChannel = this.runtime?.releaseCertifiedPermissionChannel()
       await this.runtime?.dispose()
       // The native document and launcher authority remain the same; only the
       // CordisX renderer is recreated. Clear the initial-injection deduplicator.
       globalThis.__cordisxBootGeneration = undefined
-      this.runtime = await install(this.plugins.map(item => item.plugin), {
-        ...this.metadata,
-        pluginActivation: activation,
-        ownerDocumentBindings: this.plugins.flatMap(item => item.ownerDocumentBindings),
-      })
+      try {
+        this.runtime = await install(
+          this.plugins.map(item => item.plugin),
+          {
+            ...this.metadata,
+            pluginActivation: activation,
+            ownerDocumentBindings: this.plugins.flatMap(item => item.ownerDocumentBindings),
+          },
+          undefined,
+          undefined,
+          { certifiedPermissionChannel },
+        )
+      } catch (error) {
+        certifiedPermissionChannel?.dispose()
+        throw error
+      }
       return this.runtime
     })
   }
