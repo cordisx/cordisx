@@ -174,9 +174,12 @@ describe('shared modal chrome and JSX', () => {
       })
     })
     expect(dom.window.document.querySelector('.cxf-form-grid')).not.toBeNull()
+    expect(dom.window.document.querySelector('[aria-invalid=true]')).toBeNull()
+    expect(dom.window.document.querySelector('.cxf-error')?.hasAttribute('hidden')).toBe(true)
     await click('[data-action=submit]')
     expect(submit).not.toHaveBeenCalled()
     expect(dom.window.document.querySelector('[aria-invalid=true]')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxf-error')?.hasAttribute('hidden')).toBe(false)
   })
   it('removes the shell and settles results even if a plugin cleanup throws', async () => {
     binding.api.register('broken-cleanup', () => () => {
