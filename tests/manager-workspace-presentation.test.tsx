@@ -32,7 +32,22 @@ describe('Host Manager workspace presentation', () => {
     nativeNewTab.textContent = '+'
     const nativeNewTabAction = vi.fn()
     nativeNewTab.addEventListener('click', nativeNewTabAction)
-    document.body.append(triggerSeat, navigationSeat, titlebarSeat, nativeFrame, nativeNewTab)
+    const nativeRail = document.createElement('nav')
+    nativeRail.dataset.appNavigationRail = 'true'
+    nativeRail.innerHTML = `<div>
+      <div><button data-sidebar-destination="builtin:home">Home</button></div>
+      <div><button data-sidebar-destination="builtin:automations" aria-current="page">Automations</button></div>
+    </div>`
+    const nativeHome = nativeRail.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!
+    const nativeAutomation = nativeRail.querySelector<HTMLButtonElement>(
+      '[data-sidebar-destination="builtin:automations"]',
+    )!
+    for (const element of [nativeRail, nativeHome, nativeAutomation]) {
+      element.getClientRects = () => ({ length: 1 }) as DOMRectList
+    }
+    const nativeAutomationAction = vi.fn()
+    nativeAutomation.addEventListener('click', nativeAutomationAction)
+    document.body.append(triggerSeat, navigationSeat, titlebarSeat, nativeFrame, nativeNewTab, nativeRail)
     const model = managerModel(managerSnapshot({
       plugins: [{
         id: 'gateway',
@@ -65,9 +80,9 @@ describe('Host Manager workspace presentation', () => {
     const routeListeners = new Set<() => void>()
     let route: NativeRouteSnapshot = {
       available: true,
-      key: 'native-home',
+      key: 'native-automations',
       index: 0,
-      nativeLocation: { pathname: '/', search: '', hash: '' },
+      nativeLocation: { pathname: '/native/automations', search: '', hash: '' },
     }
     const activatePane = vi.fn(() => {
       nativeFrame.inert = true
@@ -117,6 +132,21 @@ describe('Host Manager workspace presentation', () => {
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
       expect(nativeFrame.inert).toBe(true)
 
+      await act(async () => nativeAutomation.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true })))
+      expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
+      await act(async () => {
+        nativeAutomation.click()
+        await new Promise(resolve => dom.window.setTimeout(resolve, 0))
+      })
+      expect(nativeAutomationAction).toHaveBeenCalledOnce()
+      expect(route.key).toBe('native-automations')
+      expect(document.querySelector('[data-cordisx-manager-pane]')).toBeNull()
+      expect(nativeFrame.inert).toBe(false)
+      expect(fixture.element('[aria-label="Draft configuration"]')).toBe(draft)
+      await fixture.click('[data-cordisx-manager-trigger]')
+      expect(fixture.element('[aria-label="Draft configuration"]')).toBe(draft)
+      expect(draft.value).toBe('unsaved value')
+
       await act(async () => {
         route = {
           available: true,
@@ -137,7 +167,7 @@ describe('Host Manager workspace presentation', () => {
       expect(nativeNewTabAction).toHaveBeenCalledOnce()
 
       await fixture.click('[data-cordisx-manager-trigger]')
-      expect(activatePane).toHaveBeenCalledTimes(2)
+      expect(activatePane).toHaveBeenCalledTimes(3)
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
       expect(fixture.element('[aria-label="Draft configuration"]')).toBe(draft)
       expect(draft.value).toBe('unsaved value')

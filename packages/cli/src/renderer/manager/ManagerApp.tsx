@@ -11,6 +11,7 @@ import { createBrandMarkElement } from '../host-ui/BrandMark.js'
 import { HostBrandIcon } from '../host-ui/HostBrandIcon.js'
 import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
+import { observeNativeRailActivation } from '../adapter/native-rail-activation.js'
 import { notificationCenterForDocument } from '../notifications/host.js'
 import type { NotificationCenter } from '../notifications/model.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
@@ -572,13 +573,17 @@ export function ManagerApp(
     const disposeRouteObserver = surface === 'pane' && nativeRouteHistory !== undefined
       ? observeNativeRouteTransition(nativeRouteHistory, () => flushSync(() => closeManager(false)))
       : () => {}
+    const disposeRailObserver = surface === 'pane'
+      ? observeNativeRailActivation(triggerSeat.ownerDocument, () => flushSync(() => closeManager(false)))
+      : () => {}
     window.addEventListener('keydown', onKey)
     queueMicrotask(() => managerMain.current?.focus({ preventScroll: true }))
     return () => {
       window.removeEventListener('keydown', onKey)
       disposeRouteObserver()
+      disposeRailObserver()
     }
-  }, [nativeRouteHistory, open, surface, workspaceMode])
+  }, [nativeRouteHistory, open, surface, triggerSeat, workspaceMode])
   useLayoutEffect(() => {
     if (!open) deactivatePane?.()
   }, [deactivatePane, open])
