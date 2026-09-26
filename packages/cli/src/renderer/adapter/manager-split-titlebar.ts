@@ -72,7 +72,10 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   )]
   if (controllers.length === 0) return undefined
   const ids = controllers.map(controller => controller.getAttribute('data-tab-id'))
-  if (ids.some(id => !id) || new Set(ids).size !== ids.length) return undefined
+  if (
+    ids.some(id => !id) || new Set(ids).size !== ids.length
+    || controllers.some(controller => controller.querySelector('[role="tab"]') === null)
+  ) return undefined
   const active = controllers.filter(controller =>
     controller.querySelector('[role="tab"][aria-selected="true"]') !== null
   )
@@ -84,8 +87,12 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   if (panels.length !== 1 || box(panels[0]!) === undefined) return undefined
   if (
     controllers.some(controller => {
-      const rect = box(controller)
-      return rect === undefined || rect.left < endRect.left - 2 || rect.right > endRect.right + 2
+      const rect = controller.getBoundingClientRect()
+      // Codex may collapse a selected tab header to zero width while its
+      // matching right panel remains visible; that header occupies no left seat.
+      return !Number.isFinite(rect.left) || !Number.isFinite(rect.right)
+        || rect.width < 0 || rect.height <= 0
+        || rect.left < endRect.left - 2 || rect.right > endRect.right + 2
     })
   ) return undefined
 

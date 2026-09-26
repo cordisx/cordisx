@@ -102,4 +102,35 @@ describe('26.924 split-tab Manager titlebar seat', () => {
     f.setRect('[data-app-shell-header-slot="end"]', f.rect(838, 0, 881, 44))
     expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
   })
+
+  it('accepts a collapsed selected tab header only while its matching right panel is visible', () => {
+    const f = fixture()
+    f.setRect('[data-app-shell-tab-controller="right"]', f.rect(1095, 6, 0, 32))
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeDefined()
+    f.setRect('[role="tabpanel"]', f.rect(847, 44, 0, 937))
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
+  })
+
+  it('leases a two-tab titlebar with a noninteractive close button outside the Host seat', () => {
+    const f = fixture()
+    const first = f.element('[data-app-shell-tab-controller="right"]')
+    f.element('[role="tab"]').setAttribute('aria-selected', 'false')
+    const inactiveClose = f.document.createElement('button')
+    inactiveClose.id = 'inactive-close'
+    inactiveClose.style.pointerEvents = 'none'
+    first.append(inactiveClose)
+    const second = f.document.createElement('div')
+    second.id = 'second-controller'
+    second.dataset.appShellTabController = 'right'
+    second.dataset.tabId = 'second-tab'
+    second.innerHTML =
+      '<button id="second-tab" role="tab" aria-selected="true" style="pointer-events:auto">New tab</button>'
+    f.element('[data-app-shell-header-slot="end"]').append(second)
+    f.element('[role="tabpanel"]').setAttribute('data-tab-id', 'second-tab')
+    f.setRect('#inactive-close', f.rect(1065, 8, 20, 28))
+    f.setRect('#second-controller', f.rect(1095, 6, 0, 32))
+    f.setRect('#second-tab', f.rect(1095, 6, 17, 32))
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeDefined()
+    expect(captureManagerTitlebarLease(f.document, 'split', f.pane)?.seat.provenance).toBe('split')
+  })
 })
