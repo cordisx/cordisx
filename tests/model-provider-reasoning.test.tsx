@@ -143,24 +143,34 @@ describe('ProviderReasoningSlider', () => {
     expect(commit).toHaveBeenCalledWith('xhigh')
   })
 
-  it('limits animated flow to Fast or the highest effort and stops for reduced motion', async () => {
+  it('uses Fast only for animated flow and retains the static particle layer', async () => {
     const { reasoning } = renderSlider({ efforts: ['low', 'high'], value: 'low', fast: false })
     expect(reasoning.hasAttribute('data-hot')).toBe(false)
+    expect(reasoning.hasAttribute('data-peak')).toBe(false)
     expect(reasoning.hasAttribute('data-flowing')).toBe(false)
+    expect(reasoning.querySelectorAll('.cxmp-reasoning-still-particles > span')).toHaveLength(8)
 
     renderSlider({ efforts: ['low', 'high'], value: 'low', fast: true })
     expect(reasoning.dataset.hot).toBe('true')
     expect(reasoning.dataset.flowing).toBe('true')
-    expect(reasoning.querySelector('.cxmp-reasoning-flow')).not.toBeNull()
+    expect(reasoning.hasAttribute('data-peak')).toBe(false)
+    expect(reasoning.querySelector('.cxmp-reasoning-particles')).not.toBeNull()
+
+    renderSlider({ efforts: ['low', 'high'], value: 'high', fast: false })
+    expect(reasoning.hasAttribute('data-hot')).toBe(false)
+    expect(reasoning.dataset.peak).toBe('true')
+    expect(reasoning.hasAttribute('data-flowing')).toBe(false)
 
     await act(async () => root?.unmount())
     root = undefined
     reducedMotion = true
-    renderSlider({ efforts: ['low', 'high'], value: 'high', fast: false })
+    renderSlider({ efforts: ['low', 'high'], value: 'high', fast: true })
     const reduced = document.querySelector<HTMLLabelElement>('.cxmp-reasoning')!
     expect(reduced.dataset.hot).toBe('true')
+    expect(reduced.dataset.peak).toBe('true')
     expect(reduced.hasAttribute('data-flowing')).toBe(false)
     expect(reduced.querySelectorAll('.cxmp-reasoning-particle')).toHaveLength(0)
+    expect(reduced.querySelectorAll('.cxmp-reasoning-still-particles > span')).toHaveLength(8)
   })
 
   it('stops the particle flow while the page is hidden', async () => {
