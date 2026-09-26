@@ -270,7 +270,7 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
     dom.window.document.body,
   )
   expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'main')?.placement).toBe('portal')
-  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('0px')
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.top).toBe('44px')
   expect(
     dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue(
       '--cordisx-page-chrome-safe-left',
@@ -547,5 +547,6 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
   expect(native.isConnected).toBe(true)
   await expect(runtime!.navigate('slot-showcase', { id: 'main.analytics' })).rejects.toThrow(/denied/)
   await runtime!.setExtensionPointPolicy(pluginSource, 'slot-showcase', 'main', 'allow')
+  setMainRect(rect(290, 44, 910, 856))
   return { sessionId, config, plugin, bundle, dom, native, nativeParent, runtime, snapshot, help }
 }

@@ -86,11 +86,100 @@ async function boot(): Promise<{
   const bundle = await buildRendererBundle(config, { profileId: 'work', configBridgeToken: token })
   const dom = new JSDOM(
     `<!doctype html><html lang="en"><head></head><body>
-    <div class="sidebar-header"><button id="workspace" aria-haspopup="menu">Codex</button></div>
+    <div id="root"></div>
+    <aside data-app-shell-left-panel-appearance="default">
+    <nav data-app-navigation-rail="true"><div>
+      <div><button data-sidebar-destination="builtin:home" aria-current="page">Home</button></div>
+      <div><button data-sidebar-destination="builtin:automations">Automations</button></div>
+    </div></nav>
+    <nav role="navigation" aria-label="Home"><div class="sidebar-header">Native sidebar</div></nav>
+    <div id="native-resizer"><div role="separator" aria-orientation="vertical"></div></div>
+    </aside>
+    <header data-app-shell-titlebar="true" style="position:fixed;pointer-events:none">
+      <div data-app-shell-header-slot="start"><button id="native-back" style="pointer-events:auto">Back</button><button id="native-forward" style="pointer-events:auto">Forward</button></div>
+      <div data-app-shell-main-titlebar="true" data-testid="app-shell-header-context-menu-surface" style="pointer-events:none">
+        <div data-app-shell-titlebar-slot="main" data-app-shell-focus-area="main">Native title</div>
+      </div>
+      <div data-app-shell-header-slot="end"><button id="native-window-action" style="pointer-events:auto">Window</button></div>
+    </header>
+    <div data-app-shell-main-content-layout="default"><div data-app-shell-thread-edge-divider="false">
+      <div data-app-shell-main-content-top-fade="true"></div>
+      <div data-app-shell-focus-area="main">Native content</div>
+    </div></div>
   </body></html>`,
     { runScripts: 'dangerously', url: 'https://codex.local/native' },
   )
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+  const document = dom.window.document
+  // Desktop 26.924 keeps native route identity in a Data Router Context. The
+  // production Manager requires this read-only seam before opening a pane.
+  const nativeRouter = {
+    state: { location: { pathname: '/', search: '', hash: '', key: 'native-home' }, historyAction: 'POP' },
+    subscribe: (_listener: () => void) => () => {},
+  }
+  Object.defineProperty(document.getElementById('root')!, '__reactContainer$fixture', {
+    enumerable: true,
+    value: { child: { memoizedProps: { value: { router: nativeRouter } } } },
+  })
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, right: left + width, bottom: top + height, width, height }) as DOMRect
+  document.querySelector<HTMLElement>('nav[data-app-navigation-rail]')!.getBoundingClientRect = () =>
+    rect(0, 44, 52, 800)
+  document.querySelector<HTMLElement>('nav[role="navigation"]')!.getBoundingClientRect = () => rect(52, 44, 238, 800)
+  document.getElementById('native-resizer')!.getBoundingClientRect = () => rect(282, 44, 16, 800)
+  document.querySelector<HTMLElement>('[data-app-shell-main-content-layout]')!.getBoundingClientRect = () =>
+    rect(290, 44, 1000, 800)
+  document.querySelector<HTMLElement>('[data-app-shell-thread-edge-divider]')!.getBoundingClientRect = () =>
+    rect(290, 44, 1000, 800)
+  document.querySelector<HTMLElement>('header[data-app-shell-titlebar]')!.getBoundingClientRect = () =>
+    rect(0, 0, 1290, 44)
+  const nativeHeaderTitle = document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+  nativeHeaderTitle.getBoundingClientRect = () => rect(290, 0, 1000, 44)
+  document.querySelector<HTMLElement>('[data-app-shell-header-slot="start"]')!.getBoundingClientRect = () =>
+    rect(0, 0, 290, 44)
+  document.querySelector<HTMLElement>('[data-app-shell-titlebar-slot="main"]')!.getBoundingClientRect = () =>
+    rect(290, 0, 964, 44)
+  document.querySelector<HTMLElement>('[data-app-shell-header-slot="end"]')!.getBoundingClientRect = () =>
+    rect(1254, 0, 36, 44)
+  const nativeBack = document.getElementById('native-back')!
+  const nativeForward = document.getElementById('native-forward')!
+  const nativeWindowAction = document.getElementById('native-window-action')!
+  nativeBack.getBoundingClientRect = () => rect(88, 8, 28, 28)
+  nativeForward.getBoundingClientRect = () => rect(122, 8, 28, 28)
+  nativeWindowAction.getBoundingClientRect = () => rect(1260, 8, 28, 28)
+  const header = document.querySelector<HTMLElement>('header[data-app-shell-titlebar]')!
+  const nativeGetComputedStyle = dom.window.getComputedStyle.bind(dom.window)
+  const regions = new Map<Element, string>([
+    [header, 'drag'],
+    [nativeHeaderTitle, 'none'],
+    [nativeBack, 'no-drag'],
+    [nativeForward, 'no-drag'],
+    [nativeWindowAction, 'no-drag'],
+  ])
+  Object.defineProperty(dom.window, 'getComputedStyle', {
+    value: (element: Element) => {
+      const style = nativeGetComputedStyle(element)
+      Object.defineProperty(style, 'webkitAppRegion', { value: regions.get(element) ?? '' })
+      return style
+    },
+  })
+  Object.defineProperty(document, 'elementFromPoint', { value: () => document.body })
+  const nativeGetBoundingClientRect = dom.window.HTMLElement.prototype.getBoundingClientRect
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function() {
+    if (this.hasAttribute('data-cordisx-manager-titlebar-seat')) {
+      const parentLeft = this.style.position === 'absolute'
+        ? this.parentElement?.getBoundingClientRect().left ?? 0
+        : 0
+      return rect(
+        parentLeft + (Number.parseFloat(this.style.left) || 0),
+        0,
+        Number.parseFloat(this.style.width) || 0,
+        44,
+      )
+    }
+    if (this.hasAttribute('data-cordisx-manager-sidebar-resizer')) return rect(285, 44, 10, 800)
+    return nativeGetBoundingClientRect.call(this)
+  }
   Object.defineProperty(dom.window, 'fetch', {
     value: async () => ({
       ok: false,
