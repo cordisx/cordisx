@@ -61,6 +61,7 @@ export interface RendererComposition {
 
 export interface BuildRendererCompositionOptions {
   readonly profileId?: string
+  readonly managerPresentationMode?: 'workspace'
   readonly appId?: string
   readonly iconThemePreference?: HomeConfigIconThemePreference
   readonly writable?: boolean
@@ -123,6 +124,7 @@ export async function buildRendererComposition(
   const generation = options.generation ?? randomBytes(16).toString('hex')
   const profileId = options.permission?.profileId ?? options.profileId ?? 'development'
   const bundleOptions: BuildRendererBundleOptions = {
+    ...(options.managerPresentationMode === 'workspace' ? { managerPresentationMode: 'workspace' as const } : {}),
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),

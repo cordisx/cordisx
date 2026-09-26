@@ -1,15 +1,16 @@
 import { resolveManagerTitlebarSeat } from '../host-probes.js'
+import { resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
 export interface ManagerTitlebarLease {
-  readonly kind: 'native' | 'settings'
+  readonly kind: 'native' | 'split' | 'settings'
   readonly seat: {
     readonly slot: HTMLElement
     readonly native: readonly HTMLElement[]
     readonly bounds: Bounds
-    readonly provenance: 'native' | 'settings'
+    readonly provenance: 'native' | 'split' | 'settings'
   }
 }
 
@@ -103,6 +104,23 @@ function nativeControls(header: HTMLElement, native: readonly HTMLElement[]): Na
     .sort((left, right) => left.bounds.left - right.bounds.left)
 }
 
+function nativeControlStyleAllowed(
+  element: HTMLElement,
+  bounds: DOMRect,
+  style: CSSStyleDeclaration,
+  kind: ManagerTitlebarLease['kind'],
+  seatRight: number,
+): boolean {
+  if (region(style) !== 'no-drag') return false
+  if (style.pointerEvents === 'auto') return true
+  // In the split tab strip, an inactive tab's close button can be hidden from
+  // pointer input. It remains wholly outside the Host's left title seat.
+  return kind === 'split' && style.pointerEvents === 'none'
+    && element.matches('button:not([role="tab"])')
+    && element.closest('[data-app-shell-tab-controller="right"][data-tab-id]') !== null
+    && bounds.left >= seatRight - 2
+}
+
 /** Capture exact native identities before the Host changes sidebar width. */
 export function captureManagerTitlebarLease(
   document: Document,
@@ -113,10 +131,12 @@ export function captureManagerTitlebarLease(
   if (view === null) return undefined
   const strict = kind === 'native'
     ? resolveManagerTitlebarSeat(document)
+    : kind === 'split'
+    ? resolveManagerSplitTitlebarSeat(document)
     : resolveManagerSettingsTitlebarSeat(document)
   if (strict === undefined) return undefined
-  const seat = kind === 'native'
-    ? { ...strict as NonNullable<ReturnType<typeof resolveManagerTitlebarSeat>>, provenance: 'native' as const }
+  const seat = kind === 'native' || kind === 'split'
+    ? { ...strict as NonNullable<ReturnType<typeof resolveManagerTitlebarSeat>>, provenance: kind }
     : {
       slot: (strict as NonNullable<ReturnType<typeof resolveManagerSettingsTitlebarSeat>>).anchor,
       native: [(strict as NonNullable<ReturnType<typeof resolveManagerSettingsTitlebarSeat>>).nativeTitle],
@@ -162,10 +182,15 @@ export function captureManagerTitlebarLease(
     || controls[1]!.bounds.right > headerRect.left + 170
   ) return undefined
   if (
-    controls.some(({ element }) => {
-      const style = view.getComputedStyle(element)
-      return style.pointerEvents !== 'auto' || region(style) !== 'no-drag'
-    })
+    controls.some(({ element, bounds }) =>
+      !nativeControlStyleAllowed(
+        element,
+        bounds,
+        view.getComputedStyle(element),
+        kind,
+        seat.bounds.left + seat.bounds.width,
+      )
+    )
   ) return undefined
   const lease: ManagerTitlebarLease = { kind, seat }
   issued.set(lease, {
@@ -298,7 +323,13 @@ export function resolveManagerTitlebarContinuation(
       const expected = baseline.controls[index]
       const style = view.getComputedStyle(element)
       return expected?.element !== element || !sameRect(bounds, expected.bounds)
-        || style.pointerEvents !== 'auto' || region(style) !== 'no-drag'
+        || !nativeControlStyleAllowed(
+          element,
+          bounds,
+          style,
+          baseline.kind,
+          baseline.bounds.left + baseline.bounds.width,
+        )
     })
   ) return undefined
   const right = baseline.bounds.left + baseline.bounds.width

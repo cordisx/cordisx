@@ -71,10 +71,16 @@ describe('Host generation graph', () => {
     })
     const changedConfig = await buildRendererCompositionSource(configured('stable-b', 'artifact-a'))
     const changedArtifact = await buildRendererCompositionSource(configured('stable-a', 'artifact-b'))
+    const workspacePreview = await buildRendererCompositionSource(configured('stable-a', 'artifact-a'), {
+      managerPresentationMode: 'workspace',
+    })
 
     expect(newLaunch.hostGraphStableIdentity).toBe(first.hostGraphStableIdentity)
     expect(changedConfig.hostGraphStableIdentity).not.toBe(first.hostGraphStableIdentity)
     expect(changedArtifact.hostGraphStableIdentity).not.toBe(first.hostGraphStableIdentity)
+    expect(workspacePreview.hostGraphStableIdentity).not.toBe(first.hostGraphStableIdentity)
+    expect(first.metadataSource).not.toContain('managerPresentationMode')
+    expect(workspacePreview.metadataSource).toContain('managerPresentationMode: "workspace"')
     expect(first.hostGraphStableIdentity).not.toContain('launch-token-a')
     expect(first.hostGraphLaunchSource).toContain('launch-token-a')
     expect(newLaunch.hostGraphLaunchSource).toContain('future-document-token')
