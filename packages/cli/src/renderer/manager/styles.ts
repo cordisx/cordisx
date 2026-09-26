@@ -11,7 +11,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
 )
 
 export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${searchCss}\n${String.raw`
-  .cxr-root { --cx-page-inset: 22px; position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
+  .cxr-root { --cx-page-inset: 22px; --cx-control-icon-size: 16px; --cx-control-gap: 8px; --cx-search-padding: 8px; --cx-control-border: 1px; --cx-control-text-inset: calc(var(--cx-control-border) + var(--cx-search-padding) + var(--cx-control-icon-size) + var(--cx-control-gap)); position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
@@ -41,7 +41,11 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-nav-item-copy > small { color: var(--cx-warning,#e7b75b); font-size: 10px; line-height: 1.2; }
   .cxr-nav button[data-permission-review="pending"] { color: var(--cx-text,#edf0f4); }
   .cxr-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
-  .cxr-header { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; align-items: center; gap: 8px; padding: 10px var(--cx-page-inset); border-bottom: 1px solid var(--cx-border, #353a42); }
+  .cxr-header { display: grid; grid-template-columns: 32px calc(var(--cx-control-text-inset) - 32px) minmax(0,1fr) var(--cx-control-gap) 32px; align-items: center; padding: 10px var(--cx-page-inset); border-bottom: 1px solid var(--cx-border, #353a42); }
+  /* Keep the 32px icon/back hit target; the shared text inset owns the title origin. */
+  .cxr-header > .cxr-header-seat { grid-column: 1; }
+  .cxr-header > .cxr-heading { grid-column: 3; }
+  .cxr-header > .t-button { grid-column: 5; }
   .cxr-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
   .cxr-header > .t-button, .cxr-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
   .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-header > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }

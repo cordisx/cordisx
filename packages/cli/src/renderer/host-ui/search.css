@@ -6,15 +6,15 @@
   height: 36px;
   flex: none;
   align-items: center;
-  border: 1px solid var(--cx-border, #353a42);
+  border: var(--cx-control-border, 1px) solid var(--cx-border, #353a42);
   border-radius: 9px;
   background: var(--cx-surface-raised, #20242b);
   color: var(--cx-text, #edf0f4);
   font: 14px/1.45 system-ui, sans-serif;
 }
 .cxh-search-field {
-  gap: 8px;
-  padding: 0 8px;
+  gap: var(--cx-control-gap, 8px);
+  padding: 0 var(--cx-search-padding, 8px);
 }
 .cxh-search-field[data-embedded="true"] {
   height: 34px;
@@ -31,8 +31,8 @@
 }
 .cxh-search-icon {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: var(--cx-control-icon-size, 16px);
+  height: var(--cx-control-icon-size, 16px);
   flex: none;
   place-items: center;
   color: var(--cx-muted, #9ca5b5);
@@ -40,8 +40,8 @@
 .cxh-search-icon svg,
 .cxh-search-clear svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--cx-control-icon-size, 16px);
+  height: var(--cx-control-icon-size, 16px);
 }
 .cxh-search-field input {
   width: 100%;
