@@ -4,6 +4,7 @@ export function nativeViteManifestLoaderSource(url: string): string {
     const controller = new AbortController(), signal = controller.signal;
     const check = () => signal.throwIfAborted();
     const owner = {
+      signal,
       abort: () => controller.abort(Error('CordisX Vite startup canceled')),
       check,
       read: async () => {
