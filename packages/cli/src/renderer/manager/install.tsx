@@ -101,7 +101,7 @@ export function installReactCordisXManager(
     titlebarNative: readonly HTMLElement[]
     titlebarPosition: string
     provenance: string
-    titlebarProvenance: 'native' | 'rail-only' | 'settings'
+    titlebarProvenance: 'native' | 'split' | 'rail-only' | 'settings'
     titlebarLease: ManagerTitlebarLease | undefined
     titlebarSafeLeft: number
     titlebarSafeRight: number
@@ -340,6 +340,7 @@ export function installReactCordisXManager(
       return continued === undefined ? undefined : { ...continued, lease }
     }
     const lease = captureManagerTitlebarLease(document, 'native', seat)
+      ?? captureManagerTitlebarLease(document, 'split', seat)
       ?? captureManagerTitlebarLease(document, 'settings', seat)
     return lease === undefined ? undefined : { ...lease.seat, lease }
   }

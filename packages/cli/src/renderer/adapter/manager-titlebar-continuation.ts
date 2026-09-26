@@ -1,15 +1,16 @@
 import { resolveManagerTitlebarSeat } from '../host-probes.js'
+import { resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
 export interface ManagerTitlebarLease {
-  readonly kind: 'native' | 'settings'
+  readonly kind: 'native' | 'split' | 'settings'
   readonly seat: {
     readonly slot: HTMLElement
     readonly native: readonly HTMLElement[]
     readonly bounds: Bounds
-    readonly provenance: 'native' | 'settings'
+    readonly provenance: 'native' | 'split' | 'settings'
   }
 }
 
@@ -113,10 +114,12 @@ export function captureManagerTitlebarLease(
   if (view === null) return undefined
   const strict = kind === 'native'
     ? resolveManagerTitlebarSeat(document)
+    : kind === 'split'
+    ? resolveManagerSplitTitlebarSeat(document)
     : resolveManagerSettingsTitlebarSeat(document)
   if (strict === undefined) return undefined
-  const seat = kind === 'native'
-    ? { ...strict as NonNullable<ReturnType<typeof resolveManagerTitlebarSeat>>, provenance: 'native' as const }
+  const seat = kind === 'native' || kind === 'split'
+    ? { ...strict as NonNullable<ReturnType<typeof resolveManagerTitlebarSeat>>, provenance: kind }
     : {
       slot: (strict as NonNullable<ReturnType<typeof resolveManagerSettingsTitlebarSeat>>).anchor,
       native: [(strict as NonNullable<ReturnType<typeof resolveManagerSettingsTitlebarSeat>>).nativeTitle],
