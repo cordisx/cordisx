@@ -2,6 +2,7 @@
 
 - Read [maintenance rules](.agents/rules/README.md) before changing this repository.
 - Read the organization [CSS ownership and maintenance rule](https://github.com/cordisx/cordisxmono/blob/main/.agents/rules/css.md) before changing CSS, stylesheet-generating code, or a style-bearing DOM contract.
+- Before changing Manager editors or form dialogs, read [Manager forms](.agents/rules/manager-forms.md).
 - This repository owns the CordisX Host, launcher, adapters, and their implementation documentation.
 - Find public explanations and guides in the [documentation index](.agents/docs/README.md).
 - Follow [documentation maintenance](.agents/rules/documentation-maintenance.md) when adding or moving documentation.
