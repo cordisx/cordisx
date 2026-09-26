@@ -155,11 +155,13 @@ permission decisions, locale changes, theme ownership, and teardown.
 Production bundle checks prove that the runtime installs the React Manager.
 Source gates inspect executable import/render paths rather than comments.
 
-Run focused tests, typecheck/build, dprint, ESLint, shared configuration coverage,
-and complete `npm run check`, including release, package contents, and installed
-tarball checks. PR CI and independent review apply to the exact final head.
-Real-App and user acceptance remain separately recorded evidence; automated
-DOM tests do not substitute for them.
+Select affected tests, compile, formatting and lint through [Host testing](testing.md).
+Complete `npm run check`, release/package/installed evidence belongs to formal
+release and Mono integration gates; reuse matching CI evidence. During active
+pure-style feedback, follow [functional delivery](../rules/functional-delivery.md)
+and run the combined affected checks when that window closes. PR evidence
+applies to the exact final head. Real-App and user acceptance remain separately
+recorded evidence; automated DOM tests do not substitute for them.
 
 ## Explicitly not implemented
 
