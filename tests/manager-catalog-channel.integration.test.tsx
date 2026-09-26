@@ -10,8 +10,16 @@ import { createNativeSubmissionCdpAuthority } from '../packages/cli/src/launcher
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
 import { nativeModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import { HostManagerNavigationController } from '../packages/cli/src/renderer/manager/navigation-controller.js'
+import type { MarketplaceModel } from '../packages/cli/src/renderer/marketplace.js'
+import { managerModel } from './helpers/react-manager.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+
+vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
+  BrandMark: () => <span />,
+  createBrandMarkElement: (document: Document) => document.createElement('span'),
+}))
 
 it('connects the production Host channel to Manager, selector membership and write-only script commands', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'catalog-manager-composition-'))
@@ -30,7 +38,8 @@ it('connects the production Host channel to Manager, selector membership and wri
     { mode: 0o600 },
   )
   const fixture = reactManagerFixture()
-  const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+  const { ManagerApp } = await import('../packages/cli/src/renderer/manager/ManagerApp.js')
+  const navigation = new HostManagerNavigationController()
   const fetcher = vi.fn(async () => {
     throw new Error('Fixture forbids network')
   })
@@ -86,12 +95,28 @@ it('connects the production Host channel to Manager, selector membership and wri
   const registry = nativeModelProviderRegistry()
   try {
     await registry.management!.refresh()
-    await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
+    await fixture.render(
+      <ManagerApp
+        model={managerModel(undefined, { modelProviders: registry })}
+        marketplace={{} as MarketplaceModel}
+        triggerSeat={fixture.document.createElement('span')}
+        navigationController={navigation}
+      />,
+    )
+    await act(async () => navigation.openRoute({ kind: 'primary', page: 'model-services' }))
     expect((fixture.element('[aria-label="Add model connection"]') as HTMLButtonElement).disabled).toBe(false)
     expect(fixture.document.querySelectorAll('[data-binding-ref]')).toHaveLength(0)
     await fixture.click('[aria-label="Add model connection"]')
-    await fixture.type('[aria-label="Name"]', 'Fixture connection')
-    await fixture.type('[aria-label="Endpoint"]', 'https://fixture.invalid/v1')
+    expect(fixture.document.querySelector('.cxmp-toolbar')).toBeNull()
+    expect(fixture.document.querySelector('[data-schema-form]')).not.toBeNull()
+    await fixture.click('.cxr-header [aria-label="Back"]')
+    expect(fixture.document.querySelector('.cxmp-toolbar')).not.toBeNull()
+    await fixture.click('[aria-label="Add model connection"]')
+    await fixture.click('.cxmc-editor-actions button:first-child')
+    expect(fixture.document.querySelector('.cxmp-toolbar')).not.toBeNull()
+    await fixture.click('[aria-label="Add model connection"]')
+    await fixture.type('[data-config-path="title"] input', 'Fixture connection')
+    await fixture.type('[data-config-path="endpoint"] input', 'https://fixture.invalid/v1')
     await act(async () => {
       const textarea = fixture.element('textarea') as HTMLTextAreaElement
       textarea.focus()

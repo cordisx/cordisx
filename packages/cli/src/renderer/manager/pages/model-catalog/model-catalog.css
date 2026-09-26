@@ -393,16 +393,10 @@
   justify-self: start;
 }
 
-.cxmc-connection-fields {
+.cxmc-connection-page {
   display: grid;
-  gap: 10px;
-}
-
-.cxmc-connection-fields > label {
-  display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr);
-  align-items: center;
-  gap: 8px;
+  min-width: 0;
+  gap: 16px;
 }
 
 .cxmc-conflict ul,
@@ -457,10 +451,6 @@
   .cxmc-editor-row > :last-child {
     grid-column: 2;
     grid-row: 1 / 3;
-  }
-
-  .cxmc-connection-fields > label {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .cxmc-environment {

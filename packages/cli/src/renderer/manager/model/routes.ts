@@ -27,6 +27,7 @@ export type ManagerRoute =
   | { readonly kind: 'page'; readonly qualifiedId: string }
   | { readonly kind: 'marketplace-plugin'; readonly identity: string }
   | { readonly kind: 'marketplace-sources' }
+  | { readonly kind: 'model-connection-create' }
   | { readonly kind: 'about-acknowledgements' }
   | { readonly kind: 'notification-rules' }
   | { readonly kind: 'manager-content'; readonly id: string; readonly reference: CordisXRouteReference }
@@ -62,6 +63,7 @@ export function primaryFor(route: ManagerRoute): ManagerPrimaryPage {
   if (route.kind === 'primary') {
     return route.page === 'plugin-bundles' ? 'plugins' : route.page
   }
+  if (route.kind === 'model-connection-create') return 'model-services'
   if (route.kind === 'extension-point') return 'extension-points'
   if (route.kind === 'route' || route.kind === 'page') return 'routes'
   if (route.kind === 'about-acknowledgements') return 'about'
