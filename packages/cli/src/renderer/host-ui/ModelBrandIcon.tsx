@@ -59,8 +59,9 @@ const assets: Readonly<Partial<Record<BrandChoice, BrandAsset>>> = Object.freeze
   zai: { light: zaiLight, dark: zaiDark },
 })
 
-function dataUrl(source: string): string {
-  return source.startsWith('<svg') ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}` : source
+export function modelBrandAssetUrl(source: string): string {
+  const markup = source.replace(/^[\s\uFEFF]*(?:<\?xml[^>]*>[\s\uFEFF]*)?/u, '')
+  return markup.startsWith('<svg') ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}` : source
 }
 
 export function ModelBrandIcon({ brand, kind }: {
@@ -80,7 +81,7 @@ export function ModelBrandIcon({ brand, kind }: {
         : resolveHostTheme(icon.ownerDocument).theme
       const source = typeof asset === 'string' ? asset : asset[theme]
       const image = icon.querySelector('img')
-      if (image !== null) image.src = dataUrl(source)
+      if (image !== null) image.src = modelBrandAssetUrl(source)
     }
     select()
     const root = icon.closest<HTMLElement>('[data-cordisx-app-theme]') ?? icon.ownerDocument.documentElement
@@ -96,7 +97,12 @@ export function ModelBrandIcon({ brand, kind }: {
   if (asset === undefined) return <HostIcon token={kind === 'provider' ? 'action.settings' : 'agent.reasoning'} />
   return (
     <span ref={ref} className="cordisx-host-icon cxmp-brand-icon" data-selector-brand={brand} aria-hidden="true">
-      <img src={dataUrl(typeof asset === 'string' ? asset : asset.light)} alt="" aria-hidden="true" draggable={false} />
+      <img
+        src={modelBrandAssetUrl(typeof asset === 'string' ? asset : asset.light)}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
     </span>
   )
 }
