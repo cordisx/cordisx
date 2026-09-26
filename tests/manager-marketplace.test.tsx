@@ -242,14 +242,14 @@ describe('React Manager Marketplace', () => {
       await fixture.click('[aria-label="Official only"]')
       expect(titles()).toEqual(['Trusted Booster', 'Community Certified'])
       await fixture.click('[aria-label="Certified only"]')
-      await fixture.type('.cxr-marketplace-search input', 'exact-match')
+      await fixture.type('.cxh-search-toolbar input[type="search"]', 'exact-match')
       expect(titles()[0]).toBe('Exact Match')
       await fixture.click('.cxr-marketplace-primary')
       expect(router.navigate).toHaveBeenCalledWith({
         kind: 'marketplace-plugin',
         identity: marketplace.snapshot().plugins.find(plugin => plugin.id === 'exact-match')!.identity,
       })
-      await fixture.type('.cxr-marketplace-search input', 'nothing-matches')
+      await fixture.type('.cxh-search-toolbar input[type="search"]', 'nothing-matches')
       expect(titles()).toHaveLength(0)
       expect(fixture.document.querySelector('[role="search"] input')).not.toBeNull()
       await fixture.click('[aria-label="Manage sources"]')
