@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
 
@@ -34,15 +35,11 @@ function rootBypasses(source: string): string[] {
 }
 
 it('rejects explicit form/modal roots in Manager business pages while preserving Host primitive ownership', () => {
-  // Vite records raw-source imports as dependencies, including newly added business pages.
-  const sources = import.meta.glob<string>('../packages/cli/src/renderer/manager/{pages,components}/**/*.tsx', {
-    eager: true,
-    query: '?raw',
-    import: 'default',
-  })
+  // Vite records lazy module imports as dependencies, including newly added business pages.
+  const modules = import.meta.glob('../packages/cli/src/renderer/manager/{pages,components}/**/*.tsx')
   const failures: string[] = []
-  for (const [file, source] of Object.entries(sources)) {
-    const issues = rootBypasses(source)
+  for (const file of Object.keys(modules)) {
+    const issues = rootBypasses(readFileSync(new URL(file, import.meta.url), 'utf8'))
     if (issues.length) failures.push(`${file}: ${issues.join(', ')}`)
   }
   expect(

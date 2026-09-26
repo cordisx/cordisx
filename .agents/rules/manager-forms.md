@@ -56,7 +56,7 @@ approval process or a per-feedback blocking gate.
 `tests/manager-form-admission.test.ts` parses Manager business page/component
 ASTs to reject raw HTML `form`/`dialog` roots and direct TDesign `Form`, `Dialog`
 or `DialogPlugin` imports. It excludes Host primitives by ownership, not by a
-blanket Form/Input ban. Vite raw imports make the scanned production files real test dependencies,
+blanket Form/Input ban. Vite lazy module imports make the scanned production files real test dependencies,
 including new business pages, so the existing affected renderer gate selects
 the check. It catches an identifiable bypass, not every handmade
 editor: hand-assembled divs, private wrapper imports and imperative overlays
