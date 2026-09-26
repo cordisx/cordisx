@@ -369,6 +369,9 @@ export async function runDevelopment(
     const activeVite = vite
     if (invocation.options.dryRun) {
       const composition = await buildRendererComposition(rendererConfig, stdout, {
+        ...(environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
+          ? { managerPresentationMode: 'workspace' as const }
+          : {}),
         profileId: 'development',
         writable: invocation.options.writeConfig === true,
         serviceConfigWritable: false,
@@ -520,6 +523,9 @@ export async function runDevelopment(
     })
     const pluginManagementToken = randomBytes(32).toString('hex')
     const composition = await buildRendererComposition(rendererConfig, stdout, {
+      ...(environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
+        ? { managerPresentationMode: 'workspace' as const }
+        : {}),
       profileId: nativeProfileId,
       writable: invocation.options.writeConfig === true,
       serviceConfigWritable: false,

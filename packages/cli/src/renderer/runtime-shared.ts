@@ -292,6 +292,8 @@ export interface CordisXRuntimeMetadata {
   readonly channelManager?: ChannelManagerProjectionV1
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
+  /** Host-only presentation preview; never exposed through plugin Contexts. */
+  readonly managerPresentationMode?: 'workspace'
   readonly executionPlatform: 'posix' | 'win32'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
   readonly agentLoopBackend?: 'mock'
