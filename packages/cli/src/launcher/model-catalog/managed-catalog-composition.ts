@@ -92,7 +92,10 @@ async function importLegacyNativePreferences(
 }
 const providerId = (id: string) => `cordisx-${id}`
 const scriptStrategy = (view: ManagedProviderView) =>
-  view.settings.strategy.kind === 'auto' ? 'auto' : JSON.stringify(view.settings.strategy)
+  view.settings.strategy.kind === 'auto' ? 'auto' : JSON.stringify({
+    ...view.settings.strategy,
+    ...(view.settings.models === undefined ? {} : { models: view.settings.models }),
+  })
 const authority = (view: ManagedProviderView) =>
   createHash('sha256')
     .update(JSON.stringify([view.scopeRevision, view.settings.strategy])).digest('hex')
