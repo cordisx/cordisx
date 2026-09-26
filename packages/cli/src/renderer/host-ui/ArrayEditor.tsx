@@ -87,6 +87,7 @@ function childField(
     namespace: parent.namespace,
     path: [...parent.path, rowId, child.key],
     type: schema.type,
+    ...(schema.icon === undefined ? {} : { icon: schema.icon }),
     ...(schema.role === undefined ? {} : { role: schema.role }),
     ...(schema.label === undefined ? {} : { label: schema.label }),
     ...(schema.description === undefined ? {} : { description: schema.description }),

@@ -112,6 +112,8 @@ export interface CordisXConfigFormPresenter {
 
 export interface CordisXConfigFormSchemaNode {
   readonly type: string
+  /** Existing closed Host field-icon metadata, preserved for nested rows. */
+  readonly icon?: CordisXConfigFormIcon
   readonly role?: string
   readonly label?: string
   readonly description?: string

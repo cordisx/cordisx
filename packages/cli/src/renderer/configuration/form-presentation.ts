@@ -324,8 +324,10 @@ function formSchemaNode(schema: SchemaNode, locale: string): CordisXConfigFormSc
     : undefined
   const item = schema.type === 'array' && schema.inner !== undefined ? formSchemaNode(schema.inner, locale) : undefined
   const presenter = formPresenter(schema)
+  const icon = formIcon(schema.meta?.extra?.cordisxForm?.icon)
   return {
     type: schema.type ?? 'unknown',
+    ...(icon === undefined ? {} : { icon }),
     ...(role === undefined ? {} : { role }),
     ...(label === undefined ? {} : { label }),
     ...(description === undefined ? {} : { description }),
