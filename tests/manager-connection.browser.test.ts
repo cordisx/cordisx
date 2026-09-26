@@ -115,8 +115,14 @@ it.skipIf(!executable)(
       for (const [width, height] of [[1440, 1000], [800, 800], [390, 844]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
         for (const theme of ['light', 'dark']) {
-          await run(`document.documentElement.dataset.theme='${theme}';await Fixture.settle()`)
+          await run(
+            `document.documentElement.dataset.theme='${theme}';await Fixture.settle();await new Promise(resolve=>setTimeout(resolve,350))`,
+          )
           expect(await evaluate('document.documentElement.scrollWidth<=innerWidth')).toBe(true)
+          expect(await evaluate('document.querySelector(".cxmc-editor-actions button:first-child").disabled')).toBe(
+            false,
+          )
+          expect(await disabled()).toBe(false)
           if (process.env.CATALOG_SCREENSHOT_DIR) {
             const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })
             await writeFile(

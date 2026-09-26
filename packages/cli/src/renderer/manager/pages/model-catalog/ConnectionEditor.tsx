@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SchemaForm, schemaFormSnapshot } from '../../../host-ui/SchemaForm.js'
 import { type ConnectionDraft, connectionSchema } from './connection-schema.js'
 import { Button } from 'tdesign-react'
@@ -36,6 +36,13 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
   const [scope] = useState(view?.scopeRevision)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const scopeChanged = view?.scopeRevision !== scope
   const changed = view?.revision !== revision
   const modelIds = ids === '' ? [] : ids.split('\n')
@@ -71,12 +78,13 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
             mode: source === 'augment' ? 'augment' : 'only',
           },
       }, revision)
+      if (!mounted.current) return
       if (result.status === 'applied') close()
       else setFailed(true)
     } catch {
-      setFailed(true)
+      if (mounted.current) setFailed(true)
     } finally {
-      setBusy(false)
+      if (mounted.current) setBusy(false)
     }
   }
   return (
