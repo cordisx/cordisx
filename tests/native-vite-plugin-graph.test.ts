@@ -6,6 +6,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildRendererComposition } from '../packages/cli/src/cli/run.js'
+import { nativeViteManifestLoaderSource } from '../packages/cli/src/launcher/vite-manifest-loader.js'
 import { startNativeViteServer } from '../packages/cli/src/launcher/vite-development.js'
 
 const PACKAGE_SCHEMA_V8 =
@@ -61,8 +62,54 @@ describe('native Vite plugin graph development', () => {
       const composition = await buildRendererComposition(config, () => {}, {
         developmentBuild: (config, options) => vite.buildBootstrap(config, options ?? {}),
       })
-      expect(Buffer.byteLength(composition.source)).toBeLessThan(1024)
-      expect(composition.source).not.toContain('version-one')
+      // Inline retry/cancellation must exist before the first network request.
+      // Keep its bounded primitive separate from the original thin-envelope budget.
+      const manifestFactory = nativeViteManifestLoaderSource(vite.url + 'host-manifest.json')
+      const parts = composition.source.split(manifestFactory)
+      expect(parts).toHaveLength(2)
+      expect(Buffer.byteLength(manifestFactory)).toBeLessThanOrEqual(2048)
+      expect(Buffer.byteLength(parts.join(''))).toBeLessThan(1024)
+      expect(Buffer.byteLength(composition.source)).toBeLessThanOrEqual(3072)
+      console.info(
+        '[bootstrap-bytes]',
+        JSON.stringify({
+          factory: Buffer.byteLength(manifestFactory),
+          envelope: Buffer.byteLength(parts.join('')),
+          total: Buffer.byteLength(composition.source),
+        }),
+      )
+      for (
+        const forbidden of [
+          'version-one',
+          'business-root',
+          'sourceMappingURL',
+          'descriptors',
+          'installCordisX',
+          'ownerDocumentBindings',
+          root,
+          entry,
+        ]
+      ) {
+        expect(composition.source).not.toContain(forbidden)
+      }
+      // Business descriptors and secret-bearing metadata stay in the served graph,
+      // even when that graph is substantially larger than the startup envelope.
+      const privateMarker = 'private-bootstrap-fixture-data'
+      const privateToken = 'b'.repeat(64)
+      const largeConfig = {
+        ...config,
+        plugins: config.plugins.map(plugin => ({
+          ...plugin,
+          config: { privateFixture: privateMarker.repeat(4096) },
+        })),
+      }
+      const expanded = await buildRendererComposition(largeConfig, () => {}, {
+        developmentBuild: (next, options) => vite.buildBootstrap(next, { ...options, configBridgeToken: privateToken }),
+      })
+      expect(expanded.source).toBe(composition.source)
+      expect(expanded.source).not.toContain(privateMarker)
+      expect(expanded.source).not.toContain(privateToken)
+      expect(expanded.source).not.toContain('managedServiceCapabilities')
       const bootSource = await get('@id/__x00__virtual:cordisx-native-boot')
       expect(bootSource).toContain('virtual:cordisx-native-react-prepare')
       expect(bootSource).toContain("import.meta.hot.on('cordisx:restart-host'")
@@ -72,6 +119,8 @@ describe('native Vite plugin graph development', () => {
       )
       const entrySource = await get('@id/__x00__virtual:cordisx-native-entry')
       expect(entrySource).toContain('/renderer/runtime.ts')
+      expect(entrySource).toContain(privateMarker)
+      expect(entrySource).toContain(privateToken)
       expect(entrySource).toContain('import.meta.hot.accept')
       expect(entrySource).toContain('modules.find(item => item.plugin.id === plugin.id)')
       expect(entrySource).toContain('previous?.releaseCertifiedPermissionChannel()')
