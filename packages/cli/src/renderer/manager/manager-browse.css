@@ -3,7 +3,6 @@
    accepted search negative margin and focus ring are not clipped. */
 .cxr-content:has(> .cxr-browse-page) {
   overflow: hidden;
-  scrollbar-gutter: auto;
 }
 
 .cxr-browse-page {

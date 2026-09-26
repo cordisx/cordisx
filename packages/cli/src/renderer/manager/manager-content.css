@@ -212,6 +212,10 @@
   scrollbar-gutter: stable;
   padding: 16px var(--cx-content-inset) 22px;
 }
+/* Native pane gutters follow the titlebar; browse results own any scrollbar. */
+.cxr-root[data-manager-surface="pane"] .cxr-content {
+  scrollbar-gutter: auto;
+}
 .cxr-content[data-content-layout="form"] {
   display: flex;
   flex-direction: column;
