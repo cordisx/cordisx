@@ -308,6 +308,7 @@ function Content(
         registry={model.modelProviders}
         locale={snapshot.localization.locale}
         close={route.back}
+        responsesOnly={snapshot.platform.hostId === 'codex-desktop'}
       />
     )
   }

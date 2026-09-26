@@ -81,6 +81,7 @@ it.skipIf(!executable)(
       expect(await exists('[data-model-connection-create]')).toBe(true)
       expect(await exists('.cxmp-toolbar')).toBe(false)
       expect(await exists('[data-schema-form]')).toBe(true)
+      expect(await exists('[data-config-path="protocol"]')).toBe(false)
       expect(await evaluate('document.querySelector(".cxr-heading").textContent')).toContain('添加模型连接')
       await click('.cxr-header [aria-label="返回"]')
       expect(await exists('.cxmp-toolbar')).toBe(true)
@@ -99,18 +100,18 @@ it.skipIf(!executable)(
       expect(await disabled()).toBe(true)
       await click('[data-config-path="emptyConfirmed"] input')
       expect(await disabled()).toBe(false)
-      await run(`await Fixture.type('ids','Model-A\\nModel-A')`)
+      await run(`await Fixture.addModel('Model-A','Alpha');await Fixture.addModel('Model-A','Duplicate')`)
       expect(await disabled()).toBe(true)
-      await run(`await Fixture.type('ids','Model-A\\nmodel-a')`)
+      await run(`await Fixture.deleteLastModel();await Fixture.addModel('model-a','Beta')`)
       expect(await disabled()).toBe(false)
-      await run(`await Fixture.choose('protocol','Chat Completions');await Fixture.choose('source','仅自动结果')`)
-      expect(await exists('[data-config-path="ids"]')).toBe(false)
+      await run(`await Fixture.choose('source','仅自动结果')`)
+      expect(await exists('[data-config-path="models"]')).toBe(false)
       expect(await exists('[data-config-path="discoveryEnabled"]')).toBe(true)
       await click('[data-config-path="discoveryEnabled"] [role=switch]')
       await run(`await Fixture.choose('source','自动结果与用户补充')`)
       expect(await exists('[data-config-path="discoveryEnabled"]')).toBe(true)
       await run(`await Fixture.choose('source','手动接管')`)
-      expect(await exists('[data-config-path="ids"]')).toBe(true)
+      expect(await exists('[data-config-path="models"]')).toBe(true)
       expect(await exists('[data-config-path="discoveryEnabled"]')).toBe(false)
       for (const [width, height] of [[1440, 1000], [800, 800], [390, 844]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
@@ -135,11 +136,20 @@ it.skipIf(!executable)(
       await click('.cxmc-editor-actions button:last-child')
       expect(await exists('.cxmp-toolbar')).toBe(true)
       const commands = await evaluate('Fixture.commands()') as {
-        settings: { protocol: string; strategy: { ids: string[] }; discoveryEnabled: boolean }
+        settings: {
+          protocol: string
+          strategy: { ids: string[] }
+          models: { id: string; label: string }[]
+          discoveryEnabled: boolean
+        }
       }[]
       expect(commands).toHaveLength(1)
-      expect(commands[0]!.settings.protocol).toBe('chat-completions')
+      expect(commands[0]!.settings.protocol).toBe('responses')
       expect(commands[0]!.settings.strategy.ids).toEqual(['Model-A', 'model-a'])
+      expect(commands[0]!.settings.models).toEqual([{ id: 'Model-A', label: 'Alpha' }, {
+        id: 'model-a',
+        label: 'Beta',
+      }])
       expect(commands[0]!.settings.discoveryEnabled).toBe(true)
       await run('await Fixture.showReadback()')
       expect(await evaluate('document.querySelector(".cxmp-results").textContent')).toContain(

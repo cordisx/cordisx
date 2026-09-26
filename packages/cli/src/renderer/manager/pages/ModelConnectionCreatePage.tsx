@@ -8,7 +8,8 @@ import css from './model-catalog/model-catalog.css?inline'
 const empty: CatalogClientState = { epoch: '', sequence: 0, views: [], connected: false, loading: false }
 const noop = () => () => {}
 
-export function ModelConnectionCreatePage({ registry, locale, close }: {
+export function ModelConnectionCreatePage({ registry, locale, close, responsesOnly = false }: {
+  readonly responsesOnly?: boolean
   readonly registry: ModelProviderRegistry | undefined
   readonly locale: string
   readonly close: () => void
@@ -22,6 +23,7 @@ export function ModelConnectionCreatePage({ registry, locale, close }: {
       {!available ? <p role="status">{managerCopy(locale, 'catalog.managementUnavailable')}</p> : null}
       <ConnectionEditor
         standalone
+        responsesOnly={responsesOnly}
         locale={locale}
         disabled={!available}
         close={close}

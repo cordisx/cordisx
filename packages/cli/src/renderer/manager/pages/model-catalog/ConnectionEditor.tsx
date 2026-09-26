@@ -10,27 +10,48 @@ import type {
 import { managerCopy } from '../../../ui-copy.js'
 import { validModels } from './ModelEditor.js'
 
-export function ConnectionEditor({ view, locale, save, close, standalone = false, disabled = false }: {
-  readonly standalone?: boolean
-  readonly disabled?: boolean
-  readonly view?: CatalogManagementView | undefined
-  readonly locale: string
-  readonly save: (settings: CatalogConnectionSettings, revision?: string) => Promise<CatalogManagementResult>
-  readonly close: () => void
-}) {
+export function ConnectionEditor(
+  { view, locale, save, close, standalone = false, disabled = false, responsesOnly = false }: {
+    readonly responsesOnly?: boolean
+    readonly standalone?: boolean
+    readonly disabled?: boolean
+    readonly view?: CatalogManagementView | undefined
+    readonly locale: string
+    readonly save: (settings: CatalogConnectionSettings, revision?: string) => Promise<CatalogManagementResult>
+    readonly close: () => void
+  },
+) {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const initial = view?.connection
+  // Existing connection edits keep their declared protocol, including legacy values.
+  const fixedResponses = responsesOnly && view === undefined
   const [draft, setDraft] = useState<ConnectionDraft>(() => ({
     title: initial?.title ?? '',
     endpoint: initial?.endpoint ?? '',
     protocol: initial?.protocol ?? 'responses',
     source: initial?.strategy.kind === 'auto' ? initial.strategy.mode : 'manual',
     discoveryEnabled: initial?.discoveryEnabled ?? false,
-    ids: initial?.strategy.kind === 'manual' ? initial.strategy.ids.join('\n') : '',
+    models: initial?.strategy.kind === 'manual'
+      ? [
+        ...(initial.models ?? initial.strategy.ids.map(id => {
+          const row = view?.rows.find(model => model.id === id)
+          return {
+            id,
+            label: row?.label === id ? '' : row?.label ?? '',
+            ...(row?.protocolCapabilities ? { protocolCapabilities: row.protocolCapabilities } : {}),
+          }
+        })),
+      ]
+      : [],
     emptyConfirmed: false,
   }))
-  const { title, endpoint, protocol, source, discoveryEnabled, ids, emptyConfirmed } = draft
-  const schema = useMemo(() => connectionSchema(locale, draft), [locale, source, ids])
+  const { title, endpoint, protocol, source, discoveryEnabled, models, emptyConfirmed } = draft
+  const schema = useMemo(() => connectionSchema(locale, draft, fixedResponses), [
+    locale,
+    source,
+    models.length === 0,
+    fixedResponses,
+  ])
   const schemaValid = schemaFormSnapshot(schema, draft, locale).valid
   const [revision, setRevision] = useState(view?.revision)
   const [scope] = useState(view?.scopeRevision)
@@ -45,7 +66,12 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
   }, [])
   const scopeChanged = view?.scopeRevision !== scope
   const changed = view?.revision !== revision
-  const modelIds = ids === '' ? [] : ids.split('\n')
+  const editableModels = models.map(model => ({
+    id: model.id,
+    ...(model.label ? { label: model.label } : {}),
+    ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+  }))
+  const modelIds = models.map(model => model.id)
   let validEndpoint = false
   try {
     const url = new URL(endpoint)
@@ -53,7 +79,7 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
       && !/[\\?#\u0000-\u0020\u007f]/u.test(endpoint)
   } catch { /* An incomplete URL is ordinary form state. */ }
   const valid = schemaValid && title.trim().length > 0 && title.length <= 128 && !/[\u0000-\u001f\u007f]/u.test(title)
-    && endpoint.length <= 2048 && validEndpoint && (source !== 'manual' || validModels(modelIds.map(id => ({ id }))))
+    && endpoint.length <= 2048 && validEndpoint && (source !== 'manual' || validModels(editableModels))
   const submit = async () => {
     if (
       disabled || busy || !valid || changed || scopeChanged
@@ -67,8 +93,9 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
       const result = await save({
         title,
         endpoint,
-        protocol,
+        protocol: fixedResponses ? 'responses' : protocol,
         discoveryEnabled,
+        ...(source === 'manual' ? { models: editableModels } : {}),
         strategy: source === 'manual'
           ? { kind: 'manual', ids: modelIds }
           : {
@@ -101,7 +128,10 @@ export function ConnectionEditor({ view, locale, save, close, standalone = false
         disabled={busy || disabled}
         onChange={({ value }) => {
           const next = value as ConnectionDraft
-          setDraft({ ...next, emptyConfirmed: next.ids !== ids ? false : next.emptyConfirmed })
+          setDraft({
+            ...next,
+            emptyConfirmed: JSON.stringify(next.models) !== JSON.stringify(models) ? false : next.emptyConfirmed,
+          })
         }}
       />
       {!valid && (title !== '' || endpoint !== '') ? <p role="status">{t('catalog.connectionInvalid')}</p> : null}

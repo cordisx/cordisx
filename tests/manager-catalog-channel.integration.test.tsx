@@ -12,7 +12,7 @@ import type { NativeSubmissionController } from '../packages/cli/src/launcher/na
 import { nativeModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
 import { HostManagerNavigationController } from '../packages/cli/src/renderer/manager/navigation-controller.js'
 import type { MarketplaceModel } from '../packages/cli/src/renderer/marketplace.js'
-import { managerModel } from './helpers/react-manager.js'
+import { managerModel, managerSnapshot } from './helpers/react-manager.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
@@ -97,7 +97,9 @@ it('connects the production Host channel to Manager, selector membership and wri
     await registry.management!.refresh()
     await fixture.render(
       <ManagerApp
-        model={managerModel(undefined, { modelProviders: registry })}
+        model={managerModel(managerSnapshot({ platform: { ...managerSnapshot().platform, hostId: 'codex-desktop' } }), {
+          modelProviders: registry,
+        })}
         marketplace={{} as MarketplaceModel}
         triggerSeat={fixture.document.createElement('span')}
         navigationController={navigation}
@@ -109,6 +111,7 @@ it('connects the production Host channel to Manager, selector membership and wri
     await fixture.click('[aria-label="Add model connection"]')
     expect(fixture.document.querySelector('.cxmp-toolbar')).toBeNull()
     expect(fixture.document.querySelector('[data-schema-form]')).not.toBeNull()
+    expect(fixture.document.querySelector('[data-config-path="protocol"]')).toBeNull()
     await fixture.click('.cxr-header [aria-label="Back"]')
     expect(fixture.document.querySelector('.cxmp-toolbar')).not.toBeNull()
     await fixture.click('[aria-label="Add model connection"]')
@@ -117,17 +120,13 @@ it('connects the production Host channel to Manager, selector membership and wri
     await fixture.click('[aria-label="Add model connection"]')
     await fixture.type('[data-config-path="title"] input', 'Fixture connection')
     await fixture.type('[data-config-path="endpoint"] input', 'https://fixture.invalid/v1')
-    await act(async () => {
-      const textarea = fixture.element('textarea') as HTMLTextAreaElement
-      textarea.focus()
-      Object.getOwnPropertyDescriptor(fixture.dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        textarea,
-        'Model-A\nmodel-a',
-      )
-      textarea.dispatchEvent(new fixture.dom.window.Event('input', { bubbles: true }))
-      textarea.dispatchEvent(new fixture.dom.window.Event('change', { bubbles: true }))
-      textarea.dispatchEvent(new fixture.dom.window.KeyboardEvent('keyup', { key: 'a', bubbles: true }))
-    })
+    for (const [id, label] of [['Model-A', 'First fixture model'], ['model-a', 'Second fixture model']]) {
+      await fixture.click('[data-config-path="models"] [aria-label="Add item"]')
+      expect(fixture.document.querySelector('.cxf-form-subpage')).not.toBeNull()
+      await fixture.type('.cxf-form-subpage [data-config-path$=".id"] input', id!)
+      await fixture.type('.cxf-form-subpage [data-config-path$=".label"] input', label!)
+      await fixture.click('.cxf-form-subpage .cxf-form-action-buttons button:last-child')
+    }
     expect((fixture.element('.cxmc-editor-actions button:last-child') as HTMLButtonElement).disabled).toBe(false)
     await fixture.click('.cxmc-editor-actions button:last-child')
     await act(async () => {
@@ -136,6 +135,14 @@ it('connects the production Host channel to Manager, selector membership and wri
       await registry.management!.refresh()
       await registry.refresh()
     })
+    expect(command.mock.calls[0]?.[0]).toMatchObject({
+      operation: 'createConnection',
+      settings: { protocol: 'responses' },
+    })
+    expect(composition.snapshot().views[0]?.rows.map(row => [row.id, row.label])).toEqual([
+      ['Model-A', 'First fixture model'],
+      ['model-a', 'Second fixture model'],
+    ])
     expect(capture).toHaveBeenCalledOnce()
     expect(fixture.document.querySelectorAll('[data-binding-ref]')).toHaveLength(1)
     expect(registry.snapshot().providers[0]?.models.map(model => model.id)).toEqual(['Model-A', 'model-a'])

@@ -19,7 +19,7 @@ import type { NativeModelProviderCatalogEntry } from '../native-model-provider-c
 import { builtinDiscoveryRegistry } from './builtin-registry.js'
 import { type CatalogBinding, CatalogError, type CatalogSnapshot, object } from './contracts.js'
 import { ManagedProviderOwner } from './managed-provider-owner.js'
-import { managedProviderSettings, type ManagedProviderView } from './managed-provider-schema.js'
+import { managedManualModels, managedProviderSettings, type ManagedProviderView } from './managed-provider-schema.js'
 import { captureManagedProviderCredential } from './managed-provider-capture.js'
 import { ModelCatalogService } from './service.js'
 import { ScriptSourceRuntime } from './script-runtime.js'
@@ -274,7 +274,11 @@ export class ManagedCatalogComposition {
   }
 
   private members(view: ManagedProviderView) {
-    const base = this.#service.snapshot(view.id)?.models ?? []
+    const metadata = new Map(managedManualModels(view.settings).map(model => [model.id, model]))
+    const base = (this.#service.snapshot(view.id)?.models ?? []).map(model => {
+      const declared = metadata.get(model.id)
+      return declared ? { ...model, ...declared, label: declared.label ?? model.label } : model
+    })
     const script = this.#scripts.readStatus(view.id)
     const strategy = view.settings.strategy
     return composeScriptMembers({
@@ -432,6 +436,7 @@ export class ManagedCatalogComposition {
           endpoint: view.settings.endpoint,
           protocol: view.settings.protocol,
           discoveryEnabled: view.settings.discoveryEnabled,
+          ...(strategy.kind === 'manual' ? { models: managedManualModels(view.settings) } : {}),
           strategy: strategy.kind === 'auto'
             ? { ...strategy, mode: strategy.mode ?? 'only' }
             : { kind: 'manual', ids: strategy.kind === 'manual' && 'ids' in strategy ? strategy.ids : [] },
@@ -585,7 +590,7 @@ export class ManagedCatalogComposition {
             throw new CatalogError('source-invalid')
           }
           await this.#owner.save(
-            { settings: { ...command.settings, supplement: [] } },
+            { settings: managedProviderSettings({ ...command.settings, supplement: [] }) },
             signal => this.capture(signal),
             admitted,
           )
@@ -716,20 +721,33 @@ export class ManagedCatalogComposition {
     }
     let settings = view.settings
     if (operation === 'updateConnection') {
-      settings = managedProviderSettings({ ...command.settings, supplement: settings.supplement })
+      settings = managedProviderSettings({
+        ...command.settings,
+        ...(command.settings.strategy.kind === 'manual' && command.settings.models === undefined && settings.models
+          ? {
+            models: command.settings.strategy.ids.map(id => settings.models!.find(model => model.id === id) ?? { id }),
+          }
+          : {}),
+        supplement: settings.supplement,
+      })
     } else if (operation === 'setAutoPaused') settings = { ...settings, discoveryEnabled: !command.paused }
     else if (operation === 'editSupplement') {
       settings = managedProviderSettings({ ...settings, supplement: command.models })
     } else if (operation === 'editManual' || operation === 'convertToManual') {
-      settings = {
-        ...settings,
-        strategy: {
-          kind: 'manual',
-          ids: operation === 'editManual'
-            ? command.models.map(model => model.id)
-            : this.members(view).map(model => model.id),
-        },
-      }
+      const models = operation === 'editManual' ? command.models : this.members(view).map(model => ({
+        id: model.id,
+        label: model.label,
+        ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+      }))
+      settings = managedProviderSettings({
+        title: settings.title,
+        endpoint: settings.endpoint,
+        protocol: settings.protocol,
+        discoveryEnabled: settings.discoveryEnabled,
+        strategy: { kind: 'manual', ids: models.map(model => model.id) },
+        models,
+        supplement: settings.supplement,
+      })
     } else if (operation === 'setMode' && settings.strategy.kind === 'auto') {
       settings = { ...settings, strategy: { ...settings.strategy, mode: command.mode } }
     } else if (operation !== 'requestCredentialReplacement') throw new CatalogError('unsupported')

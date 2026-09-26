@@ -24,7 +24,7 @@ const snapshot: ManagerSnapshot = {
   localizationDiagnostics: [],
   permissions: [],
   platform: {
-    hostId: 'fixture',
+    hostId: 'codex-desktop',
     hostName: 'fixture',
     mode: 'unavailable',
     supportedCapabilities: [],
@@ -111,4 +111,22 @@ export async function showReadback() {
 }
 export function commands() {
   return host.commands
+}
+
+export async function addModel(id: string, label: string) {
+  document.querySelector<HTMLElement>('[data-config-path="models"] [aria-label="添加条目"]')!.click()
+  await settle()
+  for (const [key, value] of [['id', id], ['label', label]]) {
+    const input = document.querySelector<HTMLInputElement>(`.cxf-form-subpage [data-config-path$=".${key}"] input`)!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await settle()
+  }
+  document.querySelector<HTMLElement>('.cxf-form-subpage .cxf-form-action-buttons button:last-child')!.click()
+  await settle()
+}
+export async function deleteLastModel() {
+  const buttons = document.querySelectorAll<HTMLElement>('[data-config-path="models"] .cxf-array-delete')
+  buttons[buttons.length - 1]!.click()
+  await settle()
 }
