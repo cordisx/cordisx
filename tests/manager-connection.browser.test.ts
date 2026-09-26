@@ -266,6 +266,137 @@ it.skipIf(!executable)(
           )
         }
       }
+      await run('await Fixture.showPluginForm()')
+      const measureControls = () =>
+        run(`
+        await document.fonts.ready;
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const root=document.querySelector('[data-plugin-config-form]');
+        const center=r=>r.top+r.height/2;
+        return [
+          ['geometryCheckbox','.t-checkbox__input'],['geometrySwitch','.t-switch'],
+          ['geometryInput','.t-input'],['geometrySelect','.t-input'],['items','[data-array-action="add"]']
+        ].map(([path,selector])=>{
+          const row=root.querySelector('[data-config-path="'+path+'"]');
+          const label=row.querySelector('.cxf-label-row').getBoundingClientRect();
+          const control=row.querySelector(selector).getBoundingClientRect();
+          const help=row.querySelector('.cxf-help')?.getBoundingClientRect();
+          return {path,delta:Math.abs(center(label)-center(control)),top:control.top,labelBottom:label.bottom,
+            helpTop:help?.top,helpBottom:help?.bottom,left:control.left,right:control.right,width:control.width,
+            full:row.dataset.fullWidth==='true'};
+        });
+      `) as Promise<
+          {
+            path: string
+            delta: number
+            top: number
+            labelBottom: number
+            helpTop?: number
+            helpBottom?: number
+            left: number
+            right: number
+            width: number
+            full: boolean
+          }[]
+        >
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1440,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+      // Inject the previous layout only into this disposable fixture to prove the regression is detectable.
+      await run(`window.oldGeometryStyle=document.createElement('style');oldGeometryStyle.textContent=
+        '[data-plugin-config-form] :is(.cxf-control-seat,.cxf-control-fallback){display:block!important}'+
+        '[data-plugin-config-form] .cxf-array-editor-toolbar{top:10px!important;height:auto!important}'+
+        '[data-plugin-config-form] .cxf-item[data-has-description="true"]:not([data-full-width="true"]){grid-template-areas:"label control" "help control" "error error"!important}';
+        document.head.append(oldGeometryStyle)`)
+      try {
+        const old = await measureControls()
+        expect(old.find(control => control.path === 'items')!.delta).toBeGreaterThan(1)
+        expect(old.find(control => control.path === 'geometryInput')!.delta).toBeGreaterThan(1)
+      } finally {
+        await run('oldGeometryStyle.remove()')
+      }
+      for (const width of [1440, 800, 390]) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width,
+          height: 844,
+          deviceScaleFactor: 1,
+          mobile: false,
+        })
+        await run(
+          `const root=document.querySelector('[data-plugin-config-form]');while(root.querySelector('[data-config-path="items"] .cxf-array-delete')){root.querySelector('[data-config-path="items"] .cxf-array-delete').click();await Fixture.settle()}`,
+        )
+        for (const populated of [false, true]) {
+          if (populated) {
+            await run(
+              'await Fixture.openFormItem();await Fixture.typeItemName("Geometry model");await Fixture.finishFormItem(true)',
+            )
+          }
+          if (width === 1440 && !populated) {
+            await run(
+              `const root=document.querySelector('[data-plugin-config-form] .cxf-react-form');root.style.setProperty('--cxf-field-padding-block','18px');root.style.setProperty('--cxf-field-title-line-height','28px')`,
+            )
+            try {
+              expect(
+                await evaluate(
+                  `getComputedStyle(document.querySelector('[data-config-path="geometryCheckbox"]')).paddingTop`,
+                ),
+              ).toBe('18px')
+              expect(
+                await evaluate(
+                  `getComputedStyle(document.querySelector('[data-config-path="geometryCheckbox"] .cxf-field-label')).lineHeight`,
+                ),
+              ).toBe('28px')
+              for (const control of await measureControls()) {
+                expect(control.delta, control.path + ' resized tokens').toBeLessThanOrEqual(1)
+              }
+            } finally {
+              await run(
+                `const root=document.querySelector('[data-plugin-config-form] .cxf-react-form');root.style.removeProperty('--cxf-field-padding-block');root.style.removeProperty('--cxf-field-title-line-height')`,
+              )
+            }
+          }
+          expect(
+            await evaluate(
+              `getComputedStyle(document.querySelector('[data-config-path="geometryCheckbox"]')).paddingTop`,
+            ),
+          ).toBe('14px')
+          expect(
+            await evaluate(
+              `getComputedStyle(document.querySelector('[data-config-path="geometryCheckbox"] .cxf-field-label')).lineHeight`,
+            ),
+          ).toBe('24px')
+          expect(
+            await evaluate(
+              `document.querySelector('[data-plugin-config-form] [data-config-path="items"] .cxf-array-row')!==null`,
+            ),
+          ).toBe(populated)
+          expect(
+            await evaluate(
+              `document.querySelector('[data-plugin-config-form] [data-config-path="items"] .cxf-array-editor').dataset.empty`,
+            ),
+          ).toBe(String(!populated))
+          const controls = await measureControls()
+          for (const control of controls) {
+            expect(control.width, control.path).toBeGreaterThan(0)
+            expect(control.left, control.path).toBeGreaterThanOrEqual(0)
+            expect(control.right, control.path).toBeLessThanOrEqual(width)
+            if (control.path === 'items' || width > 760 && !control.full) {
+              expect(control.delta, control.path).toBeLessThanOrEqual(1)
+            } else {
+              expect(control.top, control.path).toBeGreaterThanOrEqual(control.labelBottom - 1)
+              if (control.helpBottom !== undefined) {
+                expect(control.top, control.path).toBeGreaterThanOrEqual(control.helpBottom - 1)
+              }
+            }
+            if (control.helpTop !== undefined) {
+              expect(control.helpTop, control.path).toBeGreaterThanOrEqual(control.labelBottom - 1)
+            }
+          }
+        }
+      }
       await run(
         'disposeFixture();window.disposeStandalone=await Fixture.startStandalone();await Fixture.openFormItem()',
       )

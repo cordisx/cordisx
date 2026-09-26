@@ -314,7 +314,7 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
     commit(next, nextIds)
   }
   return (
-    <div className="cxf-array-editor" data-host-form-primitive="object-array">
+    <div className="cxf-array-editor" data-host-form-primitive="object-array" data-empty={String(value.length === 0)}>
       <div className="cxf-array-editor-toolbar">
         <Button
           tag="button"
@@ -326,7 +326,8 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           data-array-action="add"
           icon={<HostIcon token="add" />}
           disabled={field.disabled || value.length >= limit}
-          onClick={event => openCreate(event.currentTarget)}
+          onClick={event =>
+            openCreate(event.currentTarget)}
         />
       </div>
       {rows.map(({ id, item }, index) => (
@@ -337,7 +338,9 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           draggable={canReorder && !field.disabled}
           onDragStart={event => event.dataTransfer.setData('text/x-cordisx-array-index', String(index))}
           onDragOver={event => {
-            if (canReorder) event.preventDefault()
+            if (canReorder) {
+              event.preventDefault()
+            }
           }}
           onDrop={event => {
             event.preventDefault()
@@ -368,7 +371,8 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
               title={managerCopy(locale, 'form.edit-item')}
               icon={<HostIcon token="edit" />}
               disabled={field.disabled}
-              onClick={event => openEdit(index, event.currentTarget)}
+              onClick={event =>
+                openEdit(index, event.currentTarget)}
             />
             <Button
               tag="button"
@@ -398,7 +402,9 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
               disabled={field.disabled || value.length <= (field.min ?? 0)}
               onClick={() =>
                 commit(
-                  value.filter((_, itemIndex) => itemIndex !== index),
+                  value.filter((_, itemIndex) =>
+                    itemIndex !== index
+                  ),
                   resolvedIds.filter((_, itemIndex) => itemIndex !== index),
                 )}
             />

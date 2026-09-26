@@ -52,7 +52,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-breadcrumbs button:hover { color: var(--cx-text, #edf0f4); }
   .cxr-breadcrumbs [aria-current="page"] { min-width: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-weight: 650; text-overflow: ellipsis; }
   .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px var(--cx-page-inset) 22px; }
-  .cxr-content[data-content-layout="form"] { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; padding-bottom: 0; }
+  .cxr-content[data-content-layout="form"] { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; padding-top: 8px; padding-bottom: 0; }
   .cxr-content[data-content-layout="form"] > .cxr-page { display: flex; min-height: 0; flex: 1; flex-direction: column; }
   .cxr-content:has(.cxr-plugin-config-panel) { overflow: hidden; padding-bottom: 0; }
   .cxr-content:has(.cxm-console-panel) { display: flex; overflow: hidden; }

@@ -33,26 +33,28 @@ export { hostFormValidationIssueText } from './HostFormValidation.js'
 import { HOST_FORM_PAGE_STYLES } from './HostFormPages.styles.js'
 
 export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
-  .cxf-react-form { --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
+  .cxf-react-form { --cxf-field-padding-block: 14px; --cxf-field-title-line-height: 24px; --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
   .cxf-section-heading p { margin: 3px 0 0; color: var(--cx-muted,#9ca5b5); font-size: 11px; line-height: 1.5; }
   .cxf-form-grid { display: grid; min-width: 0; overflow: clip; border: 1px solid var(--cx-border,#353a42); border-radius: 12px; background: color-mix(in srgb,var(--cx-surface-raised,#20242b) 86%,var(--cx-surface,#17191d)); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .cxf-item { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) minmax(13rem,min(44%,25rem)); grid-template-areas: "label control" "help control" "error error"; align-items: center; gap: 4px 20px; padding: 14px 16px; }
+  .cxf-item { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) minmax(13rem,min(44%,25rem)); grid-template-areas: "label control" "help ." "error error"; align-items: center; gap: 4px 20px; padding: var(--cxf-field-padding-block,14px) 16px; }
   .cxf-item[data-has-description="false"]:not([data-full-width="true"]) { grid-template-areas: "label control" "error error"; }
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border,#353a42); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; min-width: 0; align-items: center; gap: 4px; }
-  .cxf-field-label { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--cx-text,#edf0f4); font-weight: 600; line-height: 24px; }
+  .cxf-field-label { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--cx-text,#edf0f4); font-weight: 600; line-height: var(--cxf-field-title-line-height,24px); }
   .cxf-field-label-text { min-width: 0; overflow-wrap: anywhere; }
-  .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: 24px; }
-  .cxf-field-menu-trigger.t-button { width: 24px; height: 24px; flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
+  .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: var(--cxf-field-title-line-height,24px); }
+  .cxf-field-menu-trigger.t-button { width: var(--cxf-field-title-line-height,24px); height: var(--cxf-field-title-line-height,24px); flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
   .cxf-field-menu-trigger.t-button:hover, .cxf-field-menu-trigger.t-button[aria-expanded="true"] { background: transparent; color: var(--cx-text,#edf0f4); }
-  .cxf-field-icon { display: inline-grid; width: 24px; height: 24px; flex: none; margin-left: -4px; place-items: center; color: var(--cx-muted,#9ca5b5); }
+  .cxf-field-icon { display: inline-grid; width: var(--cxf-field-title-line-height,24px); height: var(--cxf-field-title-line-height,24px); flex: none; margin-left: -4px; place-items: center; color: var(--cx-muted,#9ca5b5); }
   :is(.cxf-field-menu-trigger,.cxf-field-icon) :is(.t-icon,.cordisx-host-icon) { display: block; width: 15px; height: 15px; font-size: 15px; }
-  .cxf-control-seat { grid-area: control; min-width: 0; justify-self: stretch; }
+  .cxf-control-seat { grid-area: control; display: flex; min-width: 0; align-items: center; justify-self: stretch; }
+  .cxf-control-fallback { display: flex; min-width: 0; align-items: center; }
+  .cxf-item[data-control-layout="fill"] .cxf-control-fallback > * { width: 100%; }
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; justify-self: end; }
   .cxf-item[data-control-layout="fill"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
   .cxf-item[data-primitive="date-picker"] .cxf-control-seat .t-date-picker,
@@ -75,7 +77,9 @@ export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
   .cxf-array-editor { display: grid; gap: 7px; width: 100%; }
   .cxf-item[data-primitive="object-array"] { position: relative; }
   .cxf-item[data-primitive="object-array"] > .cxf-label-row { padding-right: 34px; }
-  .cxf-array-editor-toolbar { position: absolute; z-index: 1; top: 10px; right: 12px; display: flex; justify-content: flex-end; }
+  .cxf-item[data-presenter="array.object-page"]:has(> .cxf-control-seat > .cxf-array-editor[data-empty="true"]) { row-gap: 0; }
+  .cxf-item[data-presenter="array.object-page"]:has(> .cxf-control-seat > .cxf-array-editor[data-empty="true"]) > :is(.cxf-help,.cxf-error):not([hidden]) { margin-top: 4px; }
+  .cxf-array-editor-toolbar { position: absolute; z-index: 1; top: var(--cxf-field-padding-block,14px); right: 12px; display: flex; height: var(--cxf-field-title-line-height,24px); align-items: center; justify-content: flex-end; }
   .cxf-array-editor-toolbar .t-button { width: 28px; height: 28px; padding: 0; }
   .cxf-array-row { display: flex; min-width: 0; min-height: 40px; align-items: center; gap: 8px; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; padding: 4px 6px; background: var(--cx-surface,#17191d); }
   .cxf-array-row-drag-handle { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: grab; }
@@ -414,7 +418,7 @@ function ConfigControl({ model, pluginId, field, blocked, value, resolved, onCha
   return (
     <>
       {customMounted ? null : (
-        <div>
+        <div className="cxf-control-fallback">
           <Control
             field={blocked && !field.disabled ? { ...field, disabled: true } : field}
             resolved={resolved}

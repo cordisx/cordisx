@@ -17,6 +17,12 @@ function item(depth: number): Schema<any> {
 
 export const formPageSchema = Schema.object({
   name: Schema.string().default('initial'),
+  geometryCheckbox: Schema.boolean().default(false),
+  geometrySwitch: Schema.boolean().role('switch').default(false),
+  geometryInput: Schema.string().default('').description('First description line\nSecond description line'),
+  geometrySelect: Schema.union(['one', 'two']).default('one').description(
+    'First description line\nSecond description line',
+  ),
   ...Object.fromEntries(Array.from({ length: 18 }, (_, index) => [`detail${index}`, Schema.string().default('')])),
   items: Schema.array(item(2)).default([]).extra('extra', {
     cordisxForm: { presenter: { version: 1, kind: 'array.object-page' } },
