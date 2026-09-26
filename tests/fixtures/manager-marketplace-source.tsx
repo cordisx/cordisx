@@ -5,11 +5,9 @@ import { createRoot } from 'react-dom/client'
 import { ManagerApp } from '../../packages/cli/src/renderer/manager/ManagerApp.js'
 import type { ManagerModel, ManagerSnapshot } from '../../packages/cli/src/renderer/manager.js'
 import { BrowserMarketplaceModel } from '../../packages/cli/src/renderer/marketplace.js'
-import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import { HostManagerNavigationController } from '../../packages/cli/src/renderer/manager/navigation-controller.js'
 import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.js'
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
-import { catalogFixture } from '../helpers/catalog-management-fixture.js'
 import { formPageFields } from './form-page-schema.js'
 
 const writes: unknown[] = []
@@ -49,6 +47,7 @@ const binding: ManagerPluginManagementBinding = {
       }],
     }
     listeners.forEach(listener => listener(state))
+    await settle()
     return { status: 'applied', snapshot: state, pendingActivation: false }
   },
 }
@@ -63,9 +62,6 @@ const marketplace = new BrowserMarketplaceModel(
     text: async () => JSON.stringify({ schemaVersion: 2, name: 'Fixture', plugins: [] }),
   }),
 )
-const host = catalogFixture([])
-const registry = new ModelProviderRegistry(async () => [])
-registry.management = host.client
 const navigation = new HostManagerNavigationController()
 const snapshot: ManagerSnapshot = {
   version: 'connection-browser-fixture',
@@ -97,8 +93,22 @@ const snapshot: ManagerSnapshot = {
     rawBridgeExposed: false,
   },
 }
-const model = { snapshot: () => snapshot, subscribe: () => () => {}, modelProviders: registry } as ManagerModel
-export async function start() {
+const model = { snapshot: () => snapshot, subscribe: () => () => {} } as ManagerModel
+let releaseQuery: (() => void) | undefined
+export async function receiveSnapshot() {
+  releaseQuery?.()
+  await settle()
+}
+export async function refreshSource() {
+  state = {
+    ...state,
+    revision: state.revision + 1,
+    sources: state.sources.map(source => ({ ...source, local: { name: 'Server refreshed name' } })),
+  }
+  listeners.forEach(listener => listener(state))
+  await settle()
+}
+export async function start(delayed = false) {
   const seat = document.createElement('span')
   document.body.append(seat)
   const theme = new HostThemeProjection(document)
@@ -112,20 +122,29 @@ export async function start() {
       <ManagerApp
         model={model}
         marketplace={marketplace}
-        pluginManagement={binding}
+        pluginManagement={delayed
+          ? {
+            ...binding,
+            query: () =>
+              new Promise(resolve => {
+                releaseQuery = () => resolve(state)
+              }),
+          }
+          : binding}
         triggerSeat={seat}
         navigationController={navigation}
       />
     </>,
   )
-  await host.client.refresh()
   await settle()
-  navigation.openRoute({ kind: 'primary', page: 'marketplace' })
+  navigation.openRoute(
+    delayed
+      ? { kind: 'marketplace-source-edit', url: state.sources[0]!.url }
+      : { kind: 'primary', page: 'marketplace' },
+  )
   await settle()
   return () => {
     root.unmount()
-    marketplace.dispose()
-    registry.dispose()
     theme.dispose()
     seat.remove()
   }

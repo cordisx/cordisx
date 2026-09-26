@@ -165,6 +165,20 @@ it.skipIf(!executable)(
       expect(await evaluate('document.querySelector("[data-config-path=url] input").value')).toBe('')
       await click('.cxr-header [aria-label="返回"]')
       expect(await exists('[data-marketplace-source-list]')).toBe(true)
+      await run('window.disposeFixture();window.disposeFixture=await Fixture.start(true)')
+      expect(await exists('[data-marketplace-source-editor]')).toBe(false)
+      await run('await Fixture.receiveSnapshot()')
+      expect(await evaluate('document.querySelector("[data-config-path=url] input").value')).toBe(
+        'http://fixture.example/feed.json?q=1',
+      )
+      expect(await evaluate('document.querySelector("[data-config-path=name] input").value')).toBe('Edited source')
+      expect(
+        await evaluate(
+          'document.querySelector("[data-config-path=trusted] .t-switch").classList.contains("t-is-checked")',
+        ),
+      ).toBe(false)
+      await run("await Fixture.type('name','Dirty local draft');await Fixture.refreshSource()")
+      expect(await evaluate('document.querySelector("[data-config-path=name] input").value')).toBe('Dirty local draft')
     } finally {
       cdp?.close()
       if (chrome && chrome.exitCode === null && chrome.signalCode === null) {

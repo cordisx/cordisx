@@ -9,13 +9,37 @@ import { MARKETPLACE_SOURCE_COPY } from '../components/MarketplaceSourceManager.
 import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
 import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
 
-export function MarketplaceSourceEditPage({ locale, currentUrl, pluginManagement, managementSnapshot, close }: {
+type SourceEditorProps = {
   readonly locale: string
   readonly currentUrl?: string | undefined
   readonly pluginManagement?: ManagerPluginManagementBinding | undefined
   readonly managementSnapshot?: PluginManagementSnapshot | undefined
   readonly close: () => void
-}) {
+}
+
+export function MarketplaceSourceEditPage(props: SourceEditorProps) {
+  const readiness = useRef({ url: props.currentUrl, ready: false })
+  if (readiness.current.url !== props.currentUrl) readiness.current = { url: props.currentUrl, ready: false }
+  if (!props.currentUrl || props.managementSnapshot?.sources.some(source => source.url === props.currentUrl)) {
+    readiness.current.ready = true
+  }
+  // A successful atomic URL edit publishes the new URL before navigation closes the page.
+  // Keep the initialized editor mounted through that readback; revisions never reset its draft.
+  if (!readiness.current.ready) {
+    return (
+      <section className="cxr-page" role="status">
+        {props.locale.toLowerCase().startsWith('zh')
+          ? (props.managementSnapshot ? '插件来源不可用' : '正在读取插件来源…')
+          : (props.managementSnapshot ? 'Marketplace source unavailable' : 'Loading Marketplace source…')}
+      </section>
+    )
+  }
+  return <MarketplaceSourceEditor key={props.currentUrl ?? 'new-marketplace-source'} {...props} />
+}
+
+function MarketplaceSourceEditor(
+  { locale, currentUrl, pluginManagement, managementSnapshot, close }: SourceEditorProps,
+) {
   const copy = MARKETPLACE_SOURCE_COPY[locale.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en']
   const source = managementSnapshot?.sources.find(source => source.url === currentUrl)
   const actions = usePluginManagementActions(pluginManagement, managementSnapshot, locale)
@@ -99,17 +123,20 @@ export function MarketplaceSourceEditPage({ locale, currentUrl, pluginManagement
           onChange: ({ value }) => setDraft(value),
         }}
         footer={
-          <div className="cxf-form-action-buttons">
-            <Button tag="button" variant="outline" disabled={busy} onClick={close}>{copy.cancel}</Button>
-            <Button
-              tag="button"
-              theme="primary"
-              disabled={!available || !valid}
-              loading={busy}
-              onClick={() => void save()}
-            >
-              {copy.save}
-            </Button>
+          <div className="cxf-form-actions">
+            <span className="cxf-status" />
+            <div className="cxf-form-action-buttons">
+              <Button tag="button" variant="outline" disabled={busy} onClick={close}>{copy.cancel}</Button>
+              <Button
+                tag="button"
+                theme="primary"
+                disabled={!available || !valid}
+                loading={busy}
+                onClick={() => void save()}
+              >
+                {copy.save}
+              </Button>
+            </div>
           </div>
         }
       >
