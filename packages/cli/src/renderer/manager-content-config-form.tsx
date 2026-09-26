@@ -141,7 +141,7 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
   useEffect(() => subscribeLocale(refresh), [refresh, subscribeLocale])
 
   return (
-    <div data-manager-content-config-host="true">
+    <div className="cxf-form-surface" data-manager-content-config-host="true">
       {error === undefined ? null : <div className="cxr-notice cxf-alert" data-tone="error" role="alert">{error}</div>}
       <HostForm model={model} plugin={plugin} />
     </div>

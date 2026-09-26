@@ -2,6 +2,7 @@ import {
   createContext,
   type ReactElement,
   type ReactNode,
+  type SyntheticEvent,
   useCallback,
   useContext,
   useEffect,
@@ -33,6 +34,13 @@ export interface HostFormPageNavigation {
 }
 
 const HostFormPageContext = createContext<HostFormPageNavigation | undefined>(undefined)
+const HostFormPageLayoutContext = createContext<'embedded' | 'fill'>('embedded')
+
+function guardPageAction(event: SyntheticEvent, active: boolean): void {
+  if (active) return
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 export function useHostFormPageNavigation(): HostFormPageNavigation | undefined {
   return useContext(HostFormPageContext)
@@ -51,9 +59,10 @@ function restoreFocus(element: HTMLElement | undefined, stack: HTMLElement | nul
 }
 
 /** Keeps the root form and every nested draft page mounted while exposing one page at a time. */
-export function HostFormPageStack({ children, resetKey }: {
+export function HostFormPageStack({ children, resetKey, layout = 'embedded' }: {
   readonly children: ReactNode
   readonly resetKey: string | number
+  readonly layout?: 'embedded' | 'fill'
 }) {
   const [pages, setPages] = useState<readonly HostFormPageDescriptor[]>([])
   const stack = useRef<HTMLDivElement>(null)
@@ -89,20 +98,43 @@ export function HostFormPageStack({ children, resetKey }: {
   )
   return (
     <HostFormPageContext.Provider value={navigation}>
-      <div ref={stack} className="cxf-form-page-stack">
-        <div className="cxf-form-page-root" tabIndex={-1} hidden={pages.length > 0}>{children}</div>
-        {pages.map((page, index) => (
+      <HostFormPageLayoutContext.Provider value={layout}>
+        <div ref={stack} className="cxf-form-page-stack" data-form-layout={layout}>
           <div
-            key={page.id}
-            className="cxf-form-page-layer"
-            data-host-form-page={page.id}
-            hidden={index !== pages.length - 1}
+            className="cxf-form-page-root"
+            tabIndex={-1}
+            hidden={pages.length > 0}
+            onClickCapture={event => guardPageAction(event, pages.length === 0)}
+            onSubmitCapture={event => guardPageAction(event, pages.length === 0)}
           >
-            {page.content}
+            {children}
           </div>
-        ))}
-      </div>
+          {pages.map((page, index) => (
+            <div
+              key={page.id}
+              className="cxf-form-page-layer"
+              data-host-form-page={page.id}
+              hidden={index !== pages.length - 1}
+              onClickCapture={event => guardPageAction(event, index === pages.length - 1)}
+              onSubmitCapture={event => guardPageAction(event, index === pages.length - 1)}
+            >
+              {page.content}
+            </div>
+          ))}
+        </div>
+      </HostFormPageLayoutContext.Provider>
     </HostFormPageContext.Provider>
+  )
+}
+
+/** A page owns its scroll boundary and footer; inactive layers stay mounted in the stack. */
+export function HostFormPage({ children, footer }: { readonly children: ReactNode; readonly footer?: ReactNode }) {
+  const layout = useContext(HostFormPageLayoutContext)
+  return (
+    <div className="cxf-form-page" data-form-page-layout={layout}>
+      <div className="cxf-form-page-scroll">{children}</div>
+      {footer === undefined ? null : <footer className="cxf-form-page-footer">{footer}</footer>}
+    </div>
   )
 }
 
@@ -147,8 +179,9 @@ export function HostFormSubpage({ pageId, children, actions, breadcrumbLabel, ba
         </span>
         <HostBreadcrumbs segments={segments} label={breadcrumbLabel} />
       </header>
-      <div className="cxf-form-subpage-body">{children}</div>
-      <div className="cxf-form-actions cxf-form-subpage-actions">{actions}</div>
+      <HostFormPage footer={<div className="cxf-form-actions cxf-form-subpage-actions">{actions}</div>}>
+        <div className="cxf-form-subpage-body">{children}</div>
+      </HostFormPage>
     </section>
   )
 }

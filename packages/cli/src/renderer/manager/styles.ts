@@ -10,7 +10,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
 )
 
 export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${String.raw`
-  .cxr-root { position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
+  .cxr-root { --cx-page-inset: 22px; position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
@@ -40,7 +40,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-nav-item-copy > small { color: var(--cx-warning,#e7b75b); font-size: 10px; line-height: 1.2; }
   .cxr-nav button[data-permission-review="pending"] { color: var(--cx-text,#edf0f4); }
   .cxr-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
-  .cxr-header { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--cx-border, #353a42); }
+  .cxr-header { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; align-items: center; gap: 8px; padding: 10px var(--cx-page-inset); border-bottom: 1px solid var(--cx-border, #353a42); }
   .cxr-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
   .cxr-header > .t-button, .cxr-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
   .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-header > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }
@@ -51,7 +51,9 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-breadcrumbs button { min-width: 0; overflow: hidden; border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-breadcrumbs button:hover { color: var(--cx-text, #edf0f4); }
   .cxr-breadcrumbs [aria-current="page"] { min-width: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-weight: 650; text-overflow: ellipsis; }
-  .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px 22px 22px; }
+  .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px var(--cx-page-inset) 22px; }
+  .cxr-content[data-content-layout="form"] { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; padding-top: 8px; padding-bottom: 0; }
+  .cxr-content[data-content-layout="form"] > .cxr-page { display: flex; min-height: 0; flex: 1; flex-direction: column; }
   .cxr-content:has(.cxr-plugin-config-panel) { overflow: hidden; padding-bottom: 0; }
   .cxr-content:has(.cxm-console-panel) { display: flex; overflow: hidden; }
   .cxr-content:has(> .cxmp-management) { overflow: hidden; }
@@ -244,10 +246,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-marketplace-source-link > :is(.t-icon,.cordisx-host-icon) { flex: none; color: var(--cx-muted,#9ca5b5); }
   .cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel) { display: flex; height: 100%; min-height: 0; flex-direction: column; }
   .cxr-plugin-config-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-  .cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
   .cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }
-  .cxr-plugin-config-panel .cxf-form-body { min-height: 0; flex: 1; overflow: auto; }
-  .cxr-plugin-config-panel .cxf-form-actions { flex: none; margin: 0 -22px; border-top: 1px solid var(--cx-border,#353a42); padding: 12px 22px; background: var(--cx-surface,#17191d); }
   .cxr-metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 8px; }
   .cxr-metric { display: grid; gap: 4px; border: 1px solid var(--cx-border,#353a42); border-radius: 10px; padding: 11px; background: var(--cx-surface-raised,#20242b); }
   .cxr-metric span { color: var(--cx-muted,#9ca5b5); font-size: 10px; }
@@ -356,6 +355,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
     .cxr-nav button { grid-template-columns: 1fr; justify-items: center; padding: 5px; }
     .cxr-nav button span:last-child { display: none; }
     .cxr-nav-group-label { overflow: hidden; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); white-space: nowrap; }
+    .cxr-root { --cx-page-inset: 12px; }
     .cxr-content { padding: 12px; }
     .cxr-grid { grid-template-columns: 1fr; }
     .cxr-marketplace-tool-actions .t-button { width: 28px; height: 28px; }

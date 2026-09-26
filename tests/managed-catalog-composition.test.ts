@@ -99,6 +99,56 @@ describe('managed catalog production owner', () => {
   }
   const statePath = (homeDir: string) => path.join(homeDir, 'state/host-provider-owners/fixture.lock.state.v2.json')
 
+  it('atomically retains manual model names through restart, label-only edits and connection scope changes', async () => {
+    const { owner, options } = await setup()
+    const models = [{ id: 'b', label: 'Beta' }, { id: 'a', label: 'Alpha', protocolCapabilities: { responses: true } }]
+    await create(owner, { ...settings, models })
+    expect(owner.snapshot().views[0]?.rows.map(row => [row.id, row.label])).toEqual([['a', 'Alpha'], ['b', 'Beta']])
+    await owner.close()
+    const reopened = await ManagedCatalogComposition.open(options)
+    owners.push(reopened)
+    await vi.waitFor(() => expect(reopened.snapshot().views[0]?.rows).toHaveLength(2))
+    expect(reopened.snapshot().views[0]?.connection?.models).toEqual(
+      [...models].sort((a, b) => a.id.localeCompare(b.id)),
+    )
+    const initialRevision = reopened.snapshot().views[0]!.revision
+    const renamed = [{ id: 'b', label: 'Beta renamed' }, models[1]!]
+    expect(await reopened.command({ ...scope(reopened), operation: 'editManual', models: renamed }, () => true))
+      .toMatchObject({ status: 'applied' })
+    expect(reopened.snapshot().views[0]!.revision).not.toBe(initialRevision)
+    await vi.waitFor(() =>
+      expect(reopened.snapshot().views[0]?.rows.find(row => row.id === 'b')?.label).toBe('Beta renamed')
+    )
+    expect(
+      await reopened.command({
+        ...scope(reopened),
+        operation: 'updateConnection',
+        settings: { ...settings, endpoint: 'https://other.invalid/v1' },
+      }, () => true),
+    ).toMatchObject({ status: 'applied' })
+    expect(reopened.snapshot().views[0]?.connection?.models).toEqual(
+      [...renamed].sort((a, b) => a.id.localeCompare(b.id)),
+    )
+    expect(await reopened.command({ ...scope(reopened), operation: 'requestCredentialReplacement' }, () => true))
+      .toMatchObject({ status: 'applied' })
+    expect(reopened.snapshot().views[0]?.connection?.models).toEqual(
+      [...renamed].sort((a, b) => a.id.localeCompare(b.id)),
+    )
+    const configBefore = await readFile(path.join(options.homeDir, 'config.json'), 'utf8')
+    expect(
+      await reopened.command({
+        operation: 'createConnection',
+        settings: { ...settings, models: [{ id: 'outside', label: 'Invalid' }] },
+      }, () => true),
+    ).toMatchObject({ status: 'rejected' })
+    expect(await readFile(path.join(options.homeDir, 'config.json'), 'utf8')).toBe(configBefore)
+    await reopened.close()
+    const again = await ManagedCatalogComposition.open(options)
+    owners.push(again)
+    await vi.waitFor(() => expect(again.snapshot().views[0]?.rows).toHaveLength(2))
+    expect(again.snapshot().views[0]?.rows.find(row => row.id === 'b')?.label).toBe('Beta renamed')
+  })
+
   it('routes only Responses, keeps credentials private, and applies block/pin without membership elevation', async () => {
     const { owner, options, keychain } = await setup()
     const view = await create(owner)

@@ -38,6 +38,7 @@ import { PluginBundleDetailPage } from './pages/PluginBundleDetailPage.js'
 import { PluginsPage } from './pages/PluginsPage.js'
 import { RoutesPage } from './pages/RoutesPage.js'
 
+import { ModelConnectionCreatePage } from './pages/ModelConnectionCreatePage.js'
 import { ModelServicesPage } from './pages/ModelServicesPage.js'
 
 export function reconcileManagerContentRoute(
@@ -75,6 +76,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
       : 'Marketplace sources'
   }
   if (route.kind === 'about-acknowledgements') return productLocale(locale) === 'zh-CN' ? '致谢' : 'Acknowledgements'
+  if (route.kind === 'model-connection-create') return managerCopy(locale, 'catalog.addConnection')
   if (route.kind === 'notification-rules') {
     return productLocale(locale) === 'zh-CN' ? '通知规则' : 'Notification rules'
   }
@@ -226,6 +228,11 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
     }
     : route.kind === 'route' || route.kind === 'page'
     ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.routes'), page: 'routes' as const }
+    : route.kind === 'model-connection-create'
+    ? {
+      label: managerCopy(snapshot.localization.locale, 'manager.nav.model-services'),
+      page: 'model-services' as const,
+    }
     : route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources'
     ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.marketplace'), page: 'marketplace' as const }
     : { label: managerCopy(snapshot.localization.locale, 'manager.nav.plugins'), page: 'plugins' as const }
@@ -295,6 +302,16 @@ function Content(
       />
     )
   }
+  if (current.kind === 'model-connection-create') {
+    return (
+      <ModelConnectionCreatePage
+        registry={model.modelProviders}
+        locale={snapshot.localization.locale}
+        close={route.back}
+        responsesOnly={snapshot.platform.hostId === 'codex-desktop'}
+      />
+    )
+  }
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
   if (current.kind === 'notification-rules') {
     return notificationCenter === undefined
@@ -331,7 +348,13 @@ function Content(
     )
   }
   if (current.page === 'model-services') {
-    return <ModelServicesPage registry={model.modelProviders} locale={snapshot.localization.locale} />
+    return (
+      <ModelServicesPage
+        registry={model.modelProviders}
+        locale={snapshot.localization.locale}
+        onCreate={() => route.navigate({ kind: 'model-connection-create' })}
+      />
+    )
   }
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
@@ -565,7 +588,10 @@ export function ManagerApp(
                     onClick={() => setOpen(false)}
                   />
                 </header>
-                <div className="cxr-content">
+                <div
+                  className="cxr-content"
+                  data-content-layout={router.route.kind === 'model-connection-create' ? 'form' : 'document'}
+                >
                   <MarketplaceInstallerProvider installer={installer}>
                     <Content
                       model={model}

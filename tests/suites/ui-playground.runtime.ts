@@ -197,7 +197,7 @@ export function registerRuntimeTests() {
         const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
         expect(managerStyles).toContain('.t-input {')
         expect(managerStyles).toContain('.t-textarea__inner {')
-        expect(managerStyles).toContain('.cxr-root { position: relative; z-index: 2147483500;')
+        expect(managerStyles).toMatch(/\.cxr-root \{[^}]*\bposition: relative;[^}]*\bz-index: 2147483500;/u)
         expect(managerStyles).toContain('.cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }')
         expect(managerStyles).toContain('.cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500;')
         expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
@@ -218,13 +218,16 @@ export function registerRuntimeTests() {
         )
         expect(managerStyles).toContain('.cxf-form-subpage-header { display: grid;')
         expect(managerStyles).toContain(
-          '.cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
+          '.cxf-form-page[data-form-page-layout="fill"] > .cxf-form-page-scroll { flex: 1; overflow: auto; }',
         )
         expect(managerStyles).toContain('.cxf-array-item-fields { gap: 0; }')
         expect(managerStyles).not.toContain('.cxf-array-dialog-control')
         expect(managerStyles).toContain('.cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel)')
         expect(managerStyles).toContain(
-          '.cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }',
+          '.cxf-form-surface, .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }',
+        )
+        expect(managerStyles).toContain(
+          '.cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }',
         )
         expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
         expect(trigger.closest('.cxr-trigger-seat')?.previousElementSibling).toBe(

@@ -95,6 +95,42 @@ it('persists write-only script config, runs explicitly, publishes exact results,
     owner = await ManagedCatalogComposition.open(options)
     expect(owner.snapshot().views[0]?.sourceKind).toBe('manual')
     await vi.waitFor(() => expect(owner.snapshot().views[0]?.freshness).toBe('fresh'))
+    await owner.command(
+      { ...scope(), operation: 'configureScript', mode: 'replace', config: fixture.config },
+      () => true,
+    )
+    expect(owner.snapshot().views[0]?.sourceKind).toBe('script')
+    expect(
+      (await owner.command({
+        ...scope(),
+        operation: 'editManual',
+        models: [{ id: 'manual', label: 'Named manual model' }],
+      }, () => true)).status,
+    ).toBe('applied')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.sourceKind).toBe('manual'))
+    expect(owner.snapshot().views[0]?.connection?.models).toEqual([{ id: 'manual', label: 'Named manual model' }])
+    expect(owner.snapshot().views[0]?.capabilities).not.toContain('runScript')
+    await owner.close()
+    owner = await ManagedCatalogComposition.open(options)
+    expect(owner.snapshot().views[0]?.sourceKind).toBe('manual')
+    expect(owner.snapshot().views[0]?.connection?.models).toEqual([{ id: 'manual', label: 'Named manual model' }])
+    await owner.command(
+      { ...scope(), operation: 'configureScript', mode: 'replace', config: fixture.config },
+      () => true,
+    )
+    await owner.close()
+    owner = await ManagedCatalogComposition.open(options)
+    expect(owner.snapshot().views[0]?.sourceKind).toBe('script')
+    await writeFile(fixture.file, output([{ id: 'converted', label: 'Converted model' }]))
+    await owner.command({ ...scope(), operation: 'runScript' }, () => true)
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows[0]?.id).toBe('converted'))
+    expect((await owner.command({ ...scope(), operation: 'convertToManual' }, () => true)).status).toBe('applied')
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.sourceKind).toBe('manual'))
+    expect(owner.snapshot().views[0]?.connection?.models).toEqual([{ id: 'converted', label: 'Converted model' }])
+    await owner.close()
+    owner = await ManagedCatalogComposition.open(options)
+    expect(owner.snapshot().views[0]?.sourceKind).toBe('manual')
+    expect(owner.snapshot().views[0]?.connection?.models).toEqual([{ id: 'converted', label: 'Converted model' }])
     await owner.command({
       ...scope(),
       operation: 'updateConnection',

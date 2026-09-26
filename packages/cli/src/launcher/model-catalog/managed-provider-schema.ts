@@ -16,6 +16,8 @@ export interface ManagedProviderSettings {
   readonly discoveryEnabled: boolean
   readonly strategy: CatalogStrategy
   readonly supplement: CatalogSupplement['models']
+  /** Metadata for the exact manual membership; independent of automatic supplements. */
+  readonly models?: CatalogSupplement['models']
 }
 
 export function managedProviderSettings(value: unknown): ManagedProviderSettings {
@@ -23,7 +25,7 @@ export function managedProviderSettings(value: unknown): ManagedProviderSettings
   if (
     !input
     || Object.keys(input).some(key =>
-      !['title', 'endpoint', 'protocol', 'discoveryEnabled', 'strategy', 'supplement'].includes(key)
+      !['title', 'endpoint', 'protocol', 'discoveryEnabled', 'strategy', 'supplement', 'models'].includes(key)
     ) || !boundedString(input.title, 128) || !boundedString(input.endpoint, 2048)
     || !['responses', 'chat-completions'].includes(String(input.protocol))
     || typeof input.discoveryEnabled !== 'boolean'
@@ -54,6 +56,16 @@ export function managedProviderSettings(value: unknown): ManagedProviderSettings
     authorityRevision: 'validation',
     models: input.supplement,
   })
+  const models = input.models === undefined ? undefined : parseSupplement({
+    scopeRevision: 'validation',
+    authorityRevision: 'validation',
+    models: input.models,
+  }).models
+  if (
+    models !== undefined && (strategy.kind !== 'manual' || !('ids' in strategy)
+      || !Array.isArray(input.models) || input.models.length !== models.length || models.length !== strategy.ids.length
+      || models.some(model => !strategy.ids.includes(model.id)))
+  ) throw new CatalogError('source-invalid')
   return Object.freeze({
     title: input.title,
     endpoint: input.endpoint,
@@ -61,6 +73,7 @@ export function managedProviderSettings(value: unknown): ManagedProviderSettings
     discoveryEnabled: input.discoveryEnabled,
     strategy,
     supplement: supplement.models,
+    ...(models === undefined ? {} : { models }),
   })
 }
 
@@ -115,4 +128,11 @@ export function managedProviderView(record: Omit<ManagedProviderRecord, 'secret'
     credentialState: 'set',
     settings: record.settings,
   })
+}
+
+/** Metadata cannot grant membership to IDs outside the manual source. */
+export function managedManualModels(settings: ManagedProviderSettings) {
+  if (settings.strategy.kind !== 'manual' || !('ids' in settings.strategy)) return []
+  const metadata = new Map((settings.models ?? []).map(model => [model.id, model]))
+  return settings.strategy.ids.map(id => ({ id, ...metadata.get(id) }))
 }

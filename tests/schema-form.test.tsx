@@ -90,3 +90,25 @@ it('emits a controlled draft through the shared boolean presenter', async () => 
   await act(async () => control.click())
   expect(received).toMatchObject({ value: { enabled: true }, valid: true, issues: [] })
 })
+
+it('preserves allowed field icons into canonical object-array subpages without accepting unknown tokens', async () => {
+  const schema = Schema.object({
+    models: Schema.array(Schema.object({
+      id: Schema.string().required().extra('extra', { label: 'Exact ID', cordisxForm: { icon: 'host:key' } }),
+      label: Schema.string().extra('extra', { label: 'Name', cordisxForm: { icon: 'host:tags' } }),
+      unsupported: Schema.string().extra('extra', { label: 'Unsupported', cordisxForm: { icon: 'host:open' } }),
+    })).default([]).extra('extra', { cordisxForm: { presenter: { version: 1, kind: 'array.object-page' } } }),
+  })
+  await act(async () =>
+    root.render(<SchemaForm identity="nested-icons" schema={schema} value={{ models: [] }} onChange={() => {}} />)
+  )
+  await act(async () =>
+    dom.window.document.querySelector<HTMLButtonElement>('.cxf-array-editor-toolbar button')!.click()
+  )
+  const page = dom.window.document.querySelector('.cxf-form-subpage')!
+  expect(page).not.toBeNull()
+  expect(page.querySelector('[data-config-path$=".id"] .cxf-field-icon [data-host-icon="host:key"] svg')).not.toBeNull()
+  expect(page.querySelector('[data-config-path$=".label"] .cxf-field-icon [data-host-icon="host:tags"] svg')).not
+    .toBeNull()
+  expect(page.querySelector('[data-config-path$=".unsupported"] .cxf-field-icon')).toBeNull()
+})

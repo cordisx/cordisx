@@ -24,40 +24,37 @@ import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
 import type { ConfigMutationOperation } from '../configuration.js'
 import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps } from './ArrayEditor.js'
-import { HostFormPageStack } from './HostFormPages.js'
+import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
 export { hostFormValidationIssueText } from './HostFormValidation.js'
 
-export const HOST_FORM_REACT_STYLES = String.raw`
-  .cxf-react-form { --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
-  .cxf-form-page-stack, .cxf-form-page-root, .cxf-form-page-layer, .cxf-form-subpage { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
-  :is(.cxf-form-page-root,.cxf-form-page-layer)[hidden] { display: none; }
+import { HOST_FORM_PAGE_STYLES } from './HostFormPages.styles.js'
+
+export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
+  .cxf-react-form { --cxf-field-padding-block: 14px; --cxf-field-title-line-height: 24px; --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
-  .cxf-form-subpage-header { display: grid; min-width: 0; grid-template-columns: 32px minmax(0,1fr); flex: none; align-items: center; gap: 8px; border-bottom: 1px solid var(--cx-border,#353a42); padding: 4px 0 12px; }
-  .cxf-form-subpage-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
-  .cxf-form-subpage-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
-  .cxf-form-subpage-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted,#9ca5b5); font-size: 16px !important; }
-  .cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 16px 0; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
   .cxf-section-heading p { margin: 3px 0 0; color: var(--cx-muted,#9ca5b5); font-size: 11px; line-height: 1.5; }
   .cxf-form-grid { display: grid; min-width: 0; overflow: clip; border: 1px solid var(--cx-border,#353a42); border-radius: 12px; background: color-mix(in srgb,var(--cx-surface-raised,#20242b) 86%,var(--cx-surface,#17191d)); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
-  .cxf-item { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) minmax(13rem,min(44%,25rem)); grid-template-areas: "label control" "help control" "error error"; align-items: center; gap: 4px 20px; padding: 14px 16px; }
+  .cxf-item { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) minmax(13rem,min(44%,25rem)); grid-template-areas: "label control" "help ." "error error"; align-items: center; gap: 4px 20px; padding: var(--cxf-field-padding-block,14px) 16px; }
   .cxf-item[data-has-description="false"]:not([data-full-width="true"]) { grid-template-areas: "label control" "error error"; }
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border,#353a42); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; min-width: 0; align-items: center; gap: 4px; }
-  .cxf-field-label { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--cx-text,#edf0f4); font-weight: 600; line-height: 24px; }
+  .cxf-field-label { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--cx-text,#edf0f4); font-weight: 600; line-height: var(--cxf-field-title-line-height,24px); }
   .cxf-field-label-text { min-width: 0; overflow-wrap: anywhere; }
-  .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: 24px; }
-  .cxf-field-menu-trigger.t-button { width: 24px; height: 24px; flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
+  .cxf-required { order: 2; color: var(--td-error-color,var(--cx-danger,#e34d59)); font-weight: 700; line-height: var(--cxf-field-title-line-height,24px); }
+  .cxf-field-menu-trigger.t-button { width: var(--cxf-field-title-line-height,24px); height: var(--cxf-field-title-line-height,24px); flex: none; margin-left: -4px; padding: 0; color: var(--cx-muted,#9ca5b5); vertical-align: middle; }
   .cxf-field-menu-trigger.t-button:hover, .cxf-field-menu-trigger.t-button[aria-expanded="true"] { background: transparent; color: var(--cx-text,#edf0f4); }
-  .cxf-field-icon { display: inline-grid; width: 24px; height: 24px; flex: none; margin-left: -4px; place-items: center; color: var(--cx-muted,#9ca5b5); }
+  .cxf-field-icon { display: inline-grid; width: var(--cxf-field-title-line-height,24px); height: var(--cxf-field-title-line-height,24px); flex: none; margin-left: -4px; place-items: center; color: var(--cx-muted,#9ca5b5); }
   :is(.cxf-field-menu-trigger,.cxf-field-icon) :is(.t-icon,.cordisx-host-icon) { display: block; width: 15px; height: 15px; font-size: 15px; }
-  .cxf-control-seat { grid-area: control; min-width: 0; justify-self: stretch; }
+  .cxf-control-seat { grid-area: control; display: flex; min-width: 0; align-items: center; justify-self: stretch; }
+  .cxf-control-fallback { display: flex; min-width: 0; align-items: center; }
+  .cxf-item[data-control-layout="fill"] .cxf-control-fallback > * { width: 100%; }
   .cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; justify-self: end; }
   .cxf-item[data-control-layout="fill"] .cxf-control-seat > :not(.cxf-custom-seat) { width: 100%; }
   .cxf-item[data-primitive="date-picker"] .cxf-control-seat .t-date-picker,
@@ -80,7 +77,9 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-array-editor { display: grid; gap: 7px; width: 100%; }
   .cxf-item[data-primitive="object-array"] { position: relative; }
   .cxf-item[data-primitive="object-array"] > .cxf-label-row { padding-right: 34px; }
-  .cxf-array-editor-toolbar { position: absolute; z-index: 1; top: 10px; right: 12px; display: flex; justify-content: flex-end; }
+  .cxf-item[data-presenter="array.object-page"]:has(> .cxf-control-seat > .cxf-array-editor[data-empty="true"]) { row-gap: 0; }
+  .cxf-item[data-presenter="array.object-page"]:has(> .cxf-control-seat > .cxf-array-editor[data-empty="true"]) > :is(.cxf-help,.cxf-error):not([hidden]) { margin-top: 4px; }
+  .cxf-array-editor-toolbar { position: absolute; z-index: 1; top: var(--cxf-field-padding-block,14px); right: 12px; display: flex; height: var(--cxf-field-title-line-height,24px); align-items: center; justify-content: flex-end; }
   .cxf-array-editor-toolbar .t-button { width: 28px; height: 28px; padding: 0; }
   .cxf-array-row { display: flex; min-width: 0; min-height: 40px; align-items: center; gap: 8px; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; padding: 4px 6px; background: var(--cx-surface,#17191d); }
   .cxf-array-row-drag-handle { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: grab; }
@@ -419,7 +418,7 @@ function ConfigControl({ model, pluginId, field, blocked, value, resolved, onCha
   return (
     <>
       {customMounted ? null : (
-        <div>
+        <div className="cxf-control-fallback">
           <Control
             field={blocked && !field.disabled ? { ...field, disabled: true } : field}
             resolved={resolved}
@@ -731,161 +730,169 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     })
   return (
     <div ref={shell} className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
-      <Form
-        className="cxf-react-form"
-        onSubmit={event => {
-          event.e?.preventDefault()
-          if (
-            model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
-            || submitting.current || formState === 'saved'
-          ) return
-          const invalid = fields.find(field =>
-            !field.disabled && primitive(field) !== 'sensitive-unavailable'
-            && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale) !== undefined
-          )
-          if (invalid !== undefined) {
-            setFormState('error')
-            setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
-            shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
-            return
-          }
-          const currentSubmission = ++submission.current
-          submitting.current = true
-          setSaving(true)
-          setFormState('saving')
-          setMessage(undefined)
-          void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
-            .then(() => {
-              if (submission.current !== currentSubmission) return
-              setCommittedValues(
-                new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
-              )
-              setDraftOperations(new Map())
-              setFormState('saved')
-              setMessage(managerCopy(locale, 'form.configuration-saved'))
-            })
-            .catch(error => {
-              if (submission.current !== currentSubmission) return
-              const text = error instanceof Error ? error.message : String(error)
-              const conflict = /conflict|revision/iu.test(text)
-              setFormState(conflict ? 'conflict' : 'error')
-              setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
-            })
-            .finally(() => {
-              if (submission.current !== currentSubmission) return
-              submitting.current = false
-              setSaving(false)
-            })
-        }}
+      <HostFormPageStack
+        key={`${plugin.id}:${plugin.configuration.revision}`}
+        resetKey={plugin.configuration.revision}
+        layout="fill"
       >
-        <HostFormPageStack
-          key={`${plugin.id}:${plugin.configuration.revision}`}
-          resetKey={plugin.configuration.revision}
+        <Form
+          className="cxf-react-form"
+          onSubmit={event => {
+            event.e?.preventDefault()
+            if (
+              model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
+              || submitting.current || formState === 'saved'
+            ) return
+            const invalid = fields.find(field =>
+              !field.disabled && primitive(field) !== 'sensitive-unavailable'
+              && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale)
+                !== undefined
+            )
+            if (invalid !== undefined) {
+              setFormState('error')
+              setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
+              shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+              return
+            }
+            const currentSubmission = ++submission.current
+            submitting.current = true
+            setSaving(true)
+            setFormState('saving')
+            setMessage(undefined)
+            void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
+              .then(() => {
+                if (submission.current !== currentSubmission) return
+                setCommittedValues(
+                  new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
+                )
+                setDraftOperations(new Map())
+                setFormState('saved')
+                setMessage(managerCopy(locale, 'form.configuration-saved'))
+              })
+              .catch(error => {
+                if (submission.current !== currentSubmission) return
+                const text = error instanceof Error ? error.message : String(error)
+                const conflict = /conflict|revision/iu.test(text)
+                setFormState(conflict ? 'conflict' : 'error')
+                setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
+              })
+              .finally(() => {
+                if (submission.current !== currentSubmission) return
+                submitting.current = false
+                setSaving(false)
+              })
+          }}
         >
-          <div className="cxf-form-body">
-            {groups.map(([id, group]) => (
-              <section key={id} className="cxf-section">
-                {group.title === undefined && group.description === undefined
-                  ? null
-                  : (
-                    <header className="cxf-section-heading">
-                      {group.title === undefined ? null : <h3>{group.title}</h3>}
-                      {group.description === undefined ? null : <p>{group.description}</p>}
-                    </header>
-                  )}
-                <div className="cxf-form-grid">
-                  {group.fields.map(field => {
-                    const value = formDraft.value(field.path, field.defaultValue)
-                    const changed = formDraft.isDirty(field.path)
-                    const issueText = hostFormValidationIssueText(field, value, locale)
-                    return (
-                      <HostFieldRow
-                        key={pathKey(field)}
-                        field={field}
-                        disabled={saving}
-                        value={value}
-                        changed={changed}
-                        locale={locale}
-                        idPrefix={plugin.id}
-                        controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
-                        customControl={{ model, pluginId: plugin.id }}
-                        {...(issueText === undefined ? {} : { issueText })}
-                        onUseDefault={() => {
-                          if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
-                        }}
-                        onRollback={() => rollback(field)}
-                        onCopyPath={() => {
-                          const clipboard = window.navigator.clipboard
-                          if (typeof clipboard?.writeText !== 'function') {
-                            setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
-                            return
-                          }
-                          void clipboard.writeText(field.path.join('.')).then(() =>
-                            setMessage(managerCopy(locale, 'form.path-copied'))
-                          ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
-                        }}
-                        onChange={next =>
-                          change(
-                            field,
-                            next === undefined
-                              ? { op: 'unset', path: field.path }
-                              : { op: 'set', path: field.path, value: next as CordisXJsonValue },
-                          )}
-                      />
-                    )
-                  })}
+          <HostFormPage
+            footer={
+              <div className="cxf-form-actions">
+                <div className="cxf-status" data-state={formState} role="status">
+                  {operations.length === 0 || formState === 'saved'
+                    ? ''
+                    : formState === 'saving'
+                    ? managerCopy(locale, 'form.saving')
+                    : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
                 </div>
-              </section>
-            ))}
-            {message === undefined
-              ? null
-              : (
-                <div
-                  className="cxr-notice cxf-alert"
-                  data-tone={formState === 'saved' ? 'info' : 'error'}
-                  role="status"
-                >
-                  {message}
+                <div className="cxf-form-action-buttons">
+                  <Button
+                    tag="button"
+                    type="reset"
+                    variant="outline"
+                    icon={<HostSurfaceIcon token="host:reset" />}
+                    disabled={saving || operations.length === 0 || formState === 'saved'}
+                    onClick={() => {
+                      setDraftOperations(new Map())
+                      setFormState('pristine')
+                      setMessage(undefined)
+                    }}
+                  >
+                    {managerCopy(locale, 'form.undo-changes')}
+                  </Button>
+                  <Button
+                    tag="button"
+                    type="submit"
+                    theme="primary"
+                    icon={<HostSurfaceIcon token="host:save" />}
+                    loading={saving}
+                    disabled={saving || !plugin.configuration.writable || operations.length === 0
+                      || formState === 'saved'}
+                  >
+                    {managerCopy(locale, 'form.save-configuration')}
+                  </Button>
                 </div>
-              )}
-          </div>
-          <div className="cxf-form-actions">
-            <div className="cxf-status" data-state={formState} role="status">
-              {operations.length === 0 || formState === 'saved'
-                ? ''
-                : formState === 'saving'
-                ? managerCopy(locale, 'form.saving')
-                : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
+              </div>
+            }
+          >
+            <div className="cxf-form-body">
+              {groups.map(([id, group]) => (
+                <section key={id} className="cxf-section">
+                  {group.title === undefined && group.description === undefined
+                    ? null
+                    : (
+                      <header className="cxf-section-heading">
+                        {group.title === undefined ? null : <h3>{group.title}</h3>}
+                        {group.description === undefined ? null : <p>{group.description}</p>}
+                      </header>
+                    )}
+                  <div className="cxf-form-grid">
+                    {group.fields.map(field => {
+                      const value = formDraft.value(field.path, field.defaultValue)
+                      const changed = formDraft.isDirty(field.path)
+                      const issueText = hostFormValidationIssueText(field, value, locale)
+                      return (
+                        <HostFieldRow
+                          key={pathKey(field)}
+                          field={field}
+                          disabled={saving}
+                          value={value}
+                          changed={changed}
+                          locale={locale}
+                          idPrefix={plugin.id}
+                          controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
+                          customControl={{ model, pluginId: plugin.id }}
+                          {...(issueText === undefined ? {} : { issueText })}
+                          onUseDefault={() => {
+                            if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
+                          }}
+                          onRollback={() => rollback(field)}
+                          onCopyPath={() => {
+                            const clipboard = window.navigator.clipboard
+                            if (typeof clipboard?.writeText !== 'function') {
+                              setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
+                              return
+                            }
+                            void clipboard.writeText(field.path.join('.')).then(() =>
+                              setMessage(managerCopy(locale, 'form.path-copied'))
+                            ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
+                          }}
+                          onChange={next =>
+                            change(
+                              field,
+                              next === undefined
+                                ? { op: 'unset', path: field.path }
+                                : { op: 'set', path: field.path, value: next as CordisXJsonValue },
+                            )}
+                        />
+                      )
+                    })}
+                  </div>
+                </section>
+              ))}
+              {message === undefined
+                ? null
+                : (
+                  <div
+                    className="cxr-notice cxf-alert"
+                    data-tone={formState === 'saved' ? 'info' : 'error'}
+                    role="status"
+                  >
+                    {message}
+                  </div>
+                )}
             </div>
-            <div className="cxf-form-action-buttons">
-              <Button
-                tag="button"
-                type="reset"
-                variant="outline"
-                icon={<HostSurfaceIcon token="host:reset" />}
-                disabled={saving || operations.length === 0 || formState === 'saved'}
-                onClick={() => {
-                  setDraftOperations(new Map())
-                  setFormState('pristine')
-                  setMessage(undefined)
-                }}
-              >
-                {managerCopy(locale, 'form.undo-changes')}
-              </Button>
-              <Button
-                tag="button"
-                type="submit"
-                theme="primary"
-                icon={<HostSurfaceIcon token="host:save" />}
-                loading={saving}
-                disabled={saving || !plugin.configuration.writable || operations.length === 0 || formState === 'saved'}
-              >
-                {managerCopy(locale, 'form.save-configuration')}
-              </Button>
-            </div>
-          </div>
-        </HostFormPageStack>
-      </Form>
+          </HostFormPage>
+        </Form>
+      </HostFormPageStack>
     </div>
   )
 }

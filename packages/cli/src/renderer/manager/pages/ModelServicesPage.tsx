@@ -12,7 +12,6 @@ import css from '../../model-providers.css?inline'
 import pageCss from './model-services.css?inline'
 import catalogCss from './model-catalog/model-catalog.css?inline'
 import { CatalogBinding, type CatalogFilter, catalogQuery } from './model-catalog/CatalogBinding.js'
-import { ConnectionEditor } from './model-catalog/ConnectionEditor.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
 import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
@@ -21,16 +20,16 @@ const empty: ModelProviderSnapshot = { providers: [], entries: [], loading: fals
 const noop = () => () => {}
 const emptyCatalog: CatalogClientState = { epoch: '', sequence: 0, views: [], connected: false, loading: false }
 
-export function ModelServicesPage({ registry, locale }: {
+export function ModelServicesPage({ registry, locale, onCreate }: {
   readonly registry: ModelProviderRegistry | undefined
   readonly locale: string
+  readonly onCreate?: (() => void) | undefined
 }) {
   const state = useSyncExternalStore(registry?.subscribe ?? noop, registry?.snapshot ?? (() => empty))
   const client = registry?.management
   const catalog = useSyncExternalStore(client?.subscribe ?? noop, client?.snapshot ?? (() => emptyCatalog))
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<ReadonlySet<CatalogFilter>>(() => new Set(['selectable']))
-  const [creating, setCreating] = useState(false)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const copy = modelProviderCopy(locale)
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
@@ -88,7 +87,7 @@ export function ModelServicesPage({ registry, locale }: {
               icon="add"
               label={t('catalog.addConnection')}
               disabled={!catalog.connected}
-              onClick={() => setCreating(true)}
+              onClick={() => onCreate?.()}
             />
           )
           : null}
@@ -104,15 +103,6 @@ export function ModelServicesPage({ registry, locale }: {
         />
       </div>
       <div className="cxmp-results" aria-busy={state.loading}>
-        {creating && client
-          ? (
-            <ConnectionEditor
-              locale={locale}
-              close={() => setCreating(false)}
-              save={settings => client.command({ operation: 'createConnection', settings })}
-            />
-          )
-          : null}
         {state.entries.length === 0 ? null : (
           <section className="cxms-actions" aria-label={copy.providers}>
             {state.entries.map(({ key, entry }) => (

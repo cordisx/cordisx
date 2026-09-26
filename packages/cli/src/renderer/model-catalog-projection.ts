@@ -138,6 +138,7 @@ function connection(value: unknown): CatalogConnectionSettings {
     endpoint,
     protocol: choice(item.protocol, ['responses', 'chat-completions']),
     discoveryEnabled: bool(item.discoveryEnabled),
+    ...(item.models === undefined ? {} : { models: list(item.models, editable) }),
     strategy: strategy.kind === 'manual'
       ? Object.freeze({ kind: 'manual', ids: list(strategy.ids, value => text(value)) })
       : Object.freeze({

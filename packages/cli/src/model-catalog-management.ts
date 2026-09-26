@@ -30,6 +30,8 @@ export interface CatalogEditableModel {
 }
 
 export interface CatalogConnectionSettings {
+  /** Optional manual-model metadata, saved atomically with the connection. */
+  readonly models?: readonly CatalogEditableModel[]
   readonly title: string
   readonly endpoint: string
   readonly protocol: 'responses' | 'chat-completions'
