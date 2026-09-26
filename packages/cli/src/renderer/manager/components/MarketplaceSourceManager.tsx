@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Input, Switch, Textarea } from 'tdesign-react'
+import { Input, Switch } from 'tdesign-react'
 import { HostEditorDialog } from '../../dialogs/internal.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
@@ -29,13 +29,13 @@ export interface MarketplaceSourceManagerProps {
   readonly locale: string
   readonly sources: readonly MarketplaceSourceView[]
   readonly busyUrl?: string | undefined
-  readonly onSave: (currentUrl: string | undefined, source: MarketplaceSourceInput) => Promise<void>
+  readonly onEdit: (source?: MarketplaceSourceView) => void
   readonly onSetEnabled: (url: string, enabled: boolean) => Promise<void>
   readonly onRemove: (url: string) => Promise<void>
   readonly onRefresh: (url: string) => Promise<void>
 }
 
-const COPY = {
+export const MARKETPLACE_SOURCE_COPY = {
   'zh-CN': {
     add: '添加来源',
     search: '搜索插件来源',
@@ -91,70 +91,23 @@ const COPY = {
   },
 } as const
 
-function localeKey(locale: string): keyof typeof COPY {
+function localeKey(locale: string): keyof typeof MARKETPLACE_SOURCE_COPY {
   return locale.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
-}
-
-function optionalText(value: string): string | undefined {
-  const normalized = value.trim()
-  return normalized === '' ? undefined : normalized
 }
 
 export function MarketplaceSourceManager({
   locale,
   sources,
   busyUrl,
-  onSave,
+  onEdit,
   onSetEnabled,
   onRemove,
   onRefresh,
 }: MarketplaceSourceManagerProps) {
-  const copy = COPY[localeKey(locale)]
+  const copy = MARKETPLACE_SOURCE_COPY[localeKey(locale)]
   const [query, setQuery] = useState('')
-  const [editing, setEditing] = useState<MarketplaceSourceView | 'new'>()
   const [removingUrl, setRemovingUrl] = useState<string>()
   const [sourceError, setSourceError] = useState<{ readonly url: string; readonly message: string }>()
-  const [url, setUrl] = useState('')
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [trusted, setTrusted] = useState(true)
-  const [error, setError] = useState<string>()
-  const open = (source?: MarketplaceSourceView) => {
-    setEditing(source ?? 'new')
-    setUrl(source?.url ?? '')
-    setName(source?.local?.name ?? '')
-    setDescription(source?.local?.description ?? '')
-    setTrusted(source?.trusted ?? true)
-    setError(undefined)
-  }
-  const close = () => {
-    setEditing(undefined)
-    setError(undefined)
-  }
-  const save = async () => {
-    if (editing === undefined) return
-    const currentUrl = editing === 'new' ? undefined : editing.url
-    const localName = optionalText(name)
-    const localDescription = optionalText(description)
-    try {
-      await onSave(currentUrl, {
-        url: url.trim(),
-        enabled: editing === 'new' ? true : editing.enabled,
-        trusted,
-        ...(localName === undefined && localDescription === undefined
-          ? {}
-          : {
-            local: {
-              ...(localName === undefined ? {} : { name: localName }),
-              ...(localDescription === undefined ? {} : { description: localDescription }),
-            },
-          }),
-      })
-      close()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleSources = normalizedQuery === ''
     ? sources
@@ -198,7 +151,7 @@ export function MarketplaceSourceManager({
           onChange={setQuery}
         />
         <span className="cxr-marketplace-tool-actions">
-          <IconButton icon="marketplace-source-add" label={copy.add} onClick={() => open()} />
+          <IconButton icon="marketplace-source-add" label={copy.add} onClick={() => onEdit()} />
         </span>
       </div>
       <div className="cxr-list" data-marketplace-source-list="true">
@@ -237,7 +190,7 @@ export function MarketplaceSourceManager({
                     label: copy.edit,
                     icon: 'marketplace-source-edit',
                     disabled: busy,
-                    onSelect: () => open(source),
+                    onSelect: () => onEdit(source),
                   }, {
                     id: 'copy',
                     label: copy.copy,
@@ -261,36 +214,6 @@ export function MarketplaceSourceManager({
           ? <div className="cxr-empty">{sources.length === 0 ? copy.empty : copy.noMatches}</div>
           : null}
       </div>
-      <HostEditorDialog
-        visible={editing !== undefined}
-        header={editing === 'new' ? copy.add : copy.edit}
-        confirmBtn={copy.save}
-        cancelBtn={copy.cancel}
-        showOwner={false}
-        onClose={close}
-        onConfirm={save}
-      >
-        <div className="cxr-dialog-form">
-          <label>
-            <span>{copy.url}</span>
-            <Input value={url} placeholder={copy.urlPlaceholder} onChange={setUrl} />
-          </label>
-          <label>
-            <span>{copy.name}</span>
-            <Input value={name} onChange={setName} />
-          </label>
-          <label>
-            <span>{copy.description}</span>
-            <Textarea value={description} autosize={{ minRows: 2, maxRows: 5 }} onChange={setDescription} />
-          </label>
-          <label>
-            <span>{copy.trusted}</span>
-            <Switch value={trusted} aria-label={copy.trusted} onChange={setTrusted} />
-            <small>{copy.trustedDescription}</small>
-          </label>
-          {error === undefined ? null : <div className="cxr-danger" role="alert">{error}</div>}
-        </div>
-      </HostEditorDialog>
       <HostEditorDialog
         visible={removing !== undefined}
         header={copy.remove}

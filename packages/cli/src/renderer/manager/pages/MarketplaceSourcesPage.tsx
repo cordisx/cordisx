@@ -1,6 +1,6 @@
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
-import { type MarketplaceModel, normalizeMarketplaceSource, projectMarketplaceSource } from '../../marketplace.js'
-import { type MarketplaceSourceInput, MarketplaceSourceManager } from '../components/MarketplaceSourceManager.js'
+import { type MarketplaceModel, projectMarketplaceSource } from '../../marketplace.js'
+import { MarketplaceSourceManager } from '../components/MarketplaceSourceManager.js'
 import type { ManagerPluginManagementBinding } from '../model/plugin-management.js'
 import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
 import { usePluginManagementActions } from '../model/use-plugin-management-actions.js'
@@ -11,7 +11,9 @@ export function MarketplaceSourcesPage({
   pluginManagement,
   managementSnapshot,
   managementError,
+  onEdit,
 }: {
+  readonly onEdit: (source?: import('../components/MarketplaceSourceManager.js').MarketplaceSourceView) => void
   readonly marketplace: MarketplaceModel
   readonly locale: string
   readonly pluginManagement?: ManagerPluginManagementBinding | undefined
@@ -62,16 +64,6 @@ export function MarketplaceSourcesPage({
       ...(source.local === undefined ? {} : { local: source.local }),
     }
   })
-  const save = async (currentUrl: string | undefined, source: MarketplaceSourceInput) => {
-    const normalized = { ...source, url: normalizeMarketplaceSource(source.url) }
-    await actions.mutate(
-      currentUrl ?? normalized.url,
-      currentUrl === undefined
-        ? { kind: 'source-add', source: normalized }
-        : { kind: 'source-edit', url: currentUrl, source: normalized },
-      false,
-    )
-  }
   const settle = async (promise: Promise<unknown>) => {
     try {
       await promise
@@ -91,7 +83,7 @@ export function MarketplaceSourcesPage({
         locale={locale}
         sources={sources}
         busyUrl={actions.busyKey}
-        onSave={save}
+        onEdit={onEdit}
         onSetEnabled={(url, enabled) => settle(actions.mutate(url, { kind: 'source-set-enabled', url, enabled }))}
         onRemove={url => settle(actions.mutate(url, { kind: 'source-remove', url }))}
         onRefresh={refresh}

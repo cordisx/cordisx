@@ -27,6 +27,7 @@ export type ManagerRoute =
   | { readonly kind: 'page'; readonly qualifiedId: string }
   | { readonly kind: 'marketplace-plugin'; readonly identity: string }
   | { readonly kind: 'marketplace-sources' }
+  | { readonly kind: 'marketplace-source-edit'; readonly url?: string }
   | { readonly kind: 'model-connection-create' }
   | { readonly kind: 'about-acknowledgements' }
   | { readonly kind: 'notification-rules' }
@@ -67,6 +68,9 @@ export function primaryFor(route: ManagerRoute): ManagerPrimaryPage {
   if (route.kind === 'extension-point') return 'extension-points'
   if (route.kind === 'route' || route.kind === 'page') return 'routes'
   if (route.kind === 'about-acknowledgements') return 'about'
-  if (route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources') return 'marketplace'
+  if (
+    route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources'
+    || route.kind === 'marketplace-source-edit'
+  ) return 'marketplace'
   return 'plugins'
 }
