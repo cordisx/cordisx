@@ -1,5 +1,5 @@
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { useMemo, useState } from 'react'
-import { Input } from 'tdesign-react'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import type { MarketplaceModel } from '../../marketplace.js'
 import { searchMarketplaceCatalog } from '../../marketplace.js'
@@ -9,7 +9,6 @@ import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import type { MoreMenuItem } from '../../host-ui/MoreMenu.js'
-import { HostIcon } from '../../host-ui/HostIcon.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 import { useManagerMarketplaceInstaller } from '../model/use-marketplace-installer.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
@@ -156,40 +155,40 @@ export function MarketplacePage(
   }
   return (
     <section className="cxr-page cxr-marketplace" data-marketplace-discovery-page="true">
-      <div className="cxr-marketplace-tools" role="search" aria-label={copy.tools}>
-        <Input
-          className="cxr-marketplace-search"
-          value={query}
-          placeholder={copy.search}
-          clearable
-          prefixIcon={<HostIcon token="search" />}
-          onChange={setQuery}
-        />
-        <span className="cxr-marketplace-tool-actions">
-          <IconButton
-            className="cxr-marketplace-filter"
-            icon="marketplace-official"
-            label={copy.officialOnly}
-            description={officialOnly ? copy.officialOn : copy.officialOff}
-            aria-pressed={officialOnly}
-            onClick={() => setOfficialOnly(value => !value)}
-          />
-          <IconButton
-            className="cxr-marketplace-filter"
-            icon="marketplace-certified"
-            label={copy.certifiedOnly}
-            description={certifiedOnly ? copy.certifiedOn : copy.certifiedOff}
-            aria-pressed={certifiedOnly}
-            onClick={() => setCertifiedOnly(value => !value)}
-          />
-          <IconButton
-            icon="marketplace-source-edit"
-            label={copy.sources}
-            description={copy.sourcesDescription}
-            onClick={() => router.navigate({ kind: 'marketplace-sources' })}
-          />
-        </span>
-      </div>
+      <SearchToolbar
+        toolbarLabel={copy.tools}
+        aria-label={copy.search}
+        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        value={query}
+        placeholder={copy.search}
+        onChange={setQuery}
+        actions={
+          <>
+            <IconButton
+              className="cxr-marketplace-filter"
+              icon="marketplace-official"
+              label={copy.officialOnly}
+              description={officialOnly ? copy.officialOn : copy.officialOff}
+              aria-pressed={officialOnly}
+              onClick={() => setOfficialOnly(value => !value)}
+            />
+            <IconButton
+              className="cxr-marketplace-filter"
+              icon="marketplace-certified"
+              label={copy.certifiedOnly}
+              description={certifiedOnly ? copy.certifiedOn : copy.certifiedOff}
+              aria-pressed={certifiedOnly}
+              onClick={() => setCertifiedOnly(value => !value)}
+            />
+            <IconButton
+              icon="marketplace-source-edit"
+              label={copy.sources}
+              description={copy.sourcesDescription}
+              onClick={() => router.navigate({ kind: 'marketplace-sources' })}
+            />
+          </>
+        }
+      />
       <div className="cxr-marketplace-grid" role="list">
         {results.map(result => {
           const href = result.plugin.homepage ?? result.plugin.source

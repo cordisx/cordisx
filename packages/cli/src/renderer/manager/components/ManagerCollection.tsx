@@ -1,3 +1,4 @@
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import type { ManagerCollectionAction, ManagerCollectionItem } from '@cordisx/protocol/manager-collection/v1'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
@@ -465,33 +466,13 @@ function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCol
       {!multipleViews
         ? null
         : <ViewSelector registry={registry} views={registration.views} active={snapshot.view!} panelId={panelId} />}
-      <div className="cxr-manager-collection-search" role="search">
-        <HostIcon token="search" />
-        <input
-          type="search"
-          value={snapshot.search}
-          aria-label={registry.localized(registration.search.label, 'search:label')}
-          placeholder={registry.localized(registration.search.placeholder, 'search:placeholder')}
-          onChange={event => registry.setSearch(event.currentTarget.value)}
-          onKeyDown={event => {
-            if (event.key === 'Escape' && snapshot.search !== '') {
-              event.preventDefault()
-              registry.setSearch('')
-            }
-          }}
-        />
-        {snapshot.search === ''
-          ? null
-          : (
-            <button
-              type="button"
-              aria-label={registry.options.hostCopy('clear-search')}
-              onClick={() => registry.setSearch('')}
-            >
-              <HostIcon token="close" />
-            </button>
-          )}
-      </div>
+      <SearchToolbar
+        value={snapshot.search}
+        aria-label={registry.localized(registration.search.label, 'search:label')}
+        placeholder={registry.localized(registration.search.placeholder, 'search:placeholder')}
+        clearLabel={registry.options.hostCopy('clear-search')}
+        onChange={value => registry.setSearch(value)}
+      />
       <div
         className="cxr-manager-collection-panel"
         id={panelId}

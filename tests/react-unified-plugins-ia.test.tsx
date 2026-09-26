@@ -448,7 +448,7 @@ describe('unified Plugins information architecture', () => {
       expect(page?.querySelector('[data-unified-local-install]')).toBeNull()
       expect(page?.textContent).not.toContain('not-installed')
       expect(page?.textContent).not.toContain('/plugins/not-installed.ts')
-      expect(page?.querySelector('.cxr-plugins-toolbar .cxr-search')).not.toBeNull()
+      expect(page?.querySelector('.cxh-search-toolbar .cxh-search-field')).not.toBeNull()
       expect(page?.querySelector('.cxr-plugins-results')).not.toBeNull()
 
       await fixture.type('input[type="search"]', 'nothing-matches')

@@ -119,14 +119,14 @@ describe('Marketplace source manager', () => {
       expect(removeOfficial.classList.contains('t-dropdown__item--disabled')).toBe(true)
       expect(remove).not.toHaveBeenCalled()
 
-      await fixture.type('.cxr-marketplace-search input', 'third-PARTY')
+      await fixture.type('.cxh-search-toolbar input[type="search"]', 'third-PARTY')
       expect(fixture.document.querySelector('[data-marketplace-source="https://official.example/marketplace.json"]'))
         .toBeNull()
       expect(fixture.document.querySelector('[data-marketplace-source="https://community.example/feed.json"]'))
         .not.toBeNull()
-      await fixture.type('.cxr-marketplace-search input', 'missing')
+      await fixture.type('.cxh-search-toolbar input[type="search"]', 'missing')
       expect(fixture.document.body.textContent).toContain('No Marketplace sources match your search')
-      await fixture.type('.cxr-marketplace-search input', '')
+      await fixture.type('.cxh-search-toolbar input[type="search"]', '')
       expect(fixture.document.querySelectorAll('[data-marketplace-source]')).toHaveLength(2)
 
       const menus = fixture.document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"]')

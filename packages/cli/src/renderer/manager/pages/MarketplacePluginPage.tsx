@@ -5,7 +5,7 @@ import { type MarketplaceModel, projectMarketplacePlugin } from '../../marketpla
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { productLocale } from '../../ui-copy.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { MarkdownDocument } from '../components/MarkdownDocument.js'
@@ -422,8 +422,8 @@ export function MarketplacePluginPage({
       )}
       {tab === 'permissions' && (
         <div role="tabpanel" aria-label={copy.tabs.permissions}>
-          <SearchField
-            className="cxr-search"
+          <SearchToolbar
+            clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
             value={permissionQuery}
             aria-label={copy.searchPermissionsLabel}
             placeholder={copy.searchPermissions}

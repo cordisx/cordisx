@@ -1,27 +1,8 @@
-.cxmp-management .cxmp-toolbar {
-  min-width: 0;
-  min-height: 38px;
-  gap: 0;
-  border: 1px solid var(--cx-border);
-  border-radius: 8px;
-  background: var(--cx-surface-raised);
-  overflow: hidden;
-}
-
-.cxmp-management .cxmp-toolbar .cxr-search {
-  flex: 1 1 180px;
-  min-width: 120px;
-  height: 36px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
 .cxmp-management .cxmp-filter-menu-anchor {
   position: relative;
   display: flex;
-  width: 36px;
-  flex: 0 0 36px;
+  width: 30px;
+  flex: 0 0 30px;
 }
 
 .cxmp-filter-indicator {
@@ -35,35 +16,6 @@
   border-radius: 50%;
   background: var(--cx-primary);
   pointer-events: none;
-}
-
-.cxmp-management .cxmp-filter-trigger {
-  width: 36px;
-  height: 36px;
-  border-left: 1px solid var(--cx-border);
-  border-radius: 0;
-}
-
-.cxmp-management .cxmp-toolbar > .t-button {
-  width: 36px;
-  height: 36px;
-  border-left: 1px solid var(--cx-border);
-  border-radius: 0;
-}
-
-.cxmp-management .cxmp-toolbar > .t-button:hover,
-.cxmp-management .cxmp-toolbar > .t-button:active,
-.cxmp-management .cxmp-filter-trigger:hover,
-.cxmp-management .cxmp-filter-trigger:active,
-.cxmp-management .cxmp-filter-trigger[aria-expanded="true"] {
-  background: var(--cx-hover);
-}
-
-.cxmp-management .cxmp-toolbar > .t-button:focus-visible,
-.cxmp-management .cxmp-filter-trigger:focus-visible {
-  z-index: 1;
-  outline: 2px solid var(--cx-focus);
-  outline-offset: -2px;
 }
 
 .cxmp-filter-menu {
@@ -400,15 +352,6 @@
 }
 
 @media (max-width: 600px) {
-  .cxmp-management .cxmp-toolbar {
-    flex-wrap: wrap;
-    overflow: visible;
-  }
-
-  .cxmp-management .cxmp-toolbar .cxr-search {
-    flex-basis: calc(100% - 108px);
-  }
-
   .cxmc-binding-toggle {
     grid-template-columns: 10px 20px minmax(0, 1fr);
   }

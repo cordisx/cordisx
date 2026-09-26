@@ -125,6 +125,8 @@ describe('Host Manager collection visual accessibility', () => {
     const { container, dom, mounted } = mountCollection()
     try {
       await vi.waitFor(() => expect(container.querySelector('[data-manager-collection-item="room-1"]')).not.toBeNull())
+      expect(container.querySelector('.cxh-search-toolbar[role=search] .cxh-search-field input[type=search]')).not
+        .toBeNull()
       const row = container.querySelector<HTMLElement>('[data-manager-collection-item="room-1"]')!
       const actions = row.querySelector<HTMLElement>('.cxr-manager-collection-actions')!
       const direct = actions.querySelector<HTMLButtonElement>('[aria-label="Pin"]')!
@@ -174,9 +176,6 @@ describe('Host Manager collection visual accessibility', () => {
       '.cxr-manager-collection-list { display: grid; width: 100%; min-width: 0; gap: 0; margin: 0; border: 1px solid',
     )
     expect(REACT_MANAGER_STYLES).toContain('border: 0; border-bottom: 1px solid')
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-collection-search { display: grid; width: 100%; min-width: 0;',
-    )
     expect(REACT_MANAGER_STYLES).toContain(
       '.cxr-manager-collection-panel { width: 100%; min-width: 0; margin: 0; }',
     )

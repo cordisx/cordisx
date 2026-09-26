@@ -1,0 +1,105 @@
+.cxh-search-toolbar,
+.cxh-search-field {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  border: var(--cx-control-border, 1px) solid var(--cx-border, #353a42);
+  border-radius: 9px;
+  background: var(--cx-surface-raised, #20242b);
+  color: var(--cx-text, #edf0f4);
+  font: 14px/1.45 system-ui, sans-serif;
+}
+.cxh-search-field {
+  gap: var(--cx-control-gap, 8px);
+  padding: 0 var(--cx-search-padding, 8px);
+}
+.cxh-search-field[data-embedded="true"] {
+  height: 34px;
+  flex: 1;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  background: transparent;
+}
+.cxh-search-toolbar:focus-within,
+.cxh-search-field:not([data-embedded="true"]):focus-within {
+  border-color: var(--cx-primary, #2f7cff);
+  outline: 2px solid var(--cx-focus, rgba(47, 124, 255, 0.26));
+  outline-offset: 1px;
+}
+.cxh-search-icon {
+  display: grid;
+  width: var(--cx-control-icon-size, 16px);
+  height: var(--cx-control-icon-size, 16px);
+  flex: none;
+  place-items: center;
+  color: var(--cx-muted, #9ca5b5);
+}
+.cxh-search-icon svg,
+.cxh-search-clear svg {
+  display: block;
+  width: var(--cx-control-icon-size, 16px);
+  height: var(--cx-control-icon-size, 16px);
+}
+.cxh-search-field input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  appearance: none;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.cxh-search-field input::placeholder {
+  color: var(--cx-muted, #9ca5b5);
+}
+.cxh-search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+.cxh-search-field[data-disabled="true"] {
+  opacity: 0.5;
+}
+.cxh-search-clear {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  background: transparent;
+  color: var(--cx-muted, #9ca5b5);
+  cursor: pointer;
+}
+.cxh-search-clear:hover:not(:disabled) {
+  background: var(--cx-hover);
+  color: var(--cx-text);
+}
+.cxh-search-clear:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: -2px;
+}
+.cxh-search-clear:disabled {
+  cursor: default;
+}
+.cxh-search-toolbar-actions {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  border-left: 1px solid var(--cx-border, #353a42);
+  padding: 2px;
+}
+.cxh-search-toolbar-actions .t-button {
+  width: 30px;
+  height: 30px;
+  flex: none;
+}

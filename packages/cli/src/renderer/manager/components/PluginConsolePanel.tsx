@@ -12,9 +12,6 @@ import { createPluginConsoleStore } from '../model/console-store.js'
 export const PLUGIN_CONSOLE_REACT_STYLES = String.raw`
   .cxm-console-panel { display: grid; min-height: 0; flex: 1; grid-template-rows: auto minmax(0,1fr); gap: 0; overflow: hidden; }
   .cxm-console-controls { display: grid; min-width: 0; grid-template-columns: minmax(12rem,1fr) auto auto; align-items: center; gap: 6px; margin: 0; padding: 0; }
-  .cxm-console-controls .cxm-console-search { min-width: 0; height: 30px; gap: 6px; box-sizing: border-box; border: 1px solid var(--cx-border,#353a42); border-radius: 7px; padding: 0 9px; background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#d8dce3); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .cxm-console-controls .cxm-console-search:focus-within { border-color: var(--cx-primary, #2f7cff); outline: 2px solid var(--cx-focus, rgba(47,124,255,.26)); outline-offset: 1px; }
-  .cxm-console-controls .cxm-console-search input { width: 100%; height: 28px; }
   .cxm-console-filters { display: flex; min-width: 0; align-items: center; gap: 5px; }
   .cxr-ui-filter-control { --cx-filter-control-height: 30px; --cx-filter-control-gap: 6px; --cx-filter-control-radius: 7px; }
   .cxh-select-field { display: block; width: 6.75rem; min-width: 0; height: var(--cx-filter-control-height); color: var(--cx-muted,#aeb5c3); }
@@ -140,7 +137,7 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
     >
       <div className="cxm-console-controls">
         <SearchField
-          className="cxm-console-search"
+          clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
           value={query}
           placeholder={managerCopy(locale, 'console.search-placeholder')}
           aria-label={managerCopy(locale, 'console.search-placeholder')}

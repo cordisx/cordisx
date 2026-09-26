@@ -78,8 +78,9 @@ it.skipIf(!executable)(
         for (const theme of ['light', 'dark']) {
           await run(`await Fixture.setTheme('${theme}')`)
           const geometry = await evaluate(
-            `(() => {const nodes=[...document.querySelectorAll('.cxmp-toolbar,.cxmc-binding-header,.cxmc-models,.cxmc-row-actions')].filter(n=>n.getClientRects().length>0);return nodes.map(n=>{const r=n.getBoundingClientRect();return {width:r.width,left:r.left,right:r.right}})})()`,
+            `(() => {const nodes=[...document.querySelectorAll('.cxmp-management > [role=search],.cxmc-binding-header,.cxmc-models,.cxmc-row-actions')].filter(n=>n.getClientRects().length>0);return nodes.map(n=>{const r=n.getBoundingClientRect();return {width:r.width,left:r.left,right:r.right}})})()`,
           )
+          expect(await evaluate('document.querySelectorAll(".cxmp-management > [role=search]").length')).toBe(1)
           for (const box of geometry as { width: number; left: number; right: number }[]) {
             expect(box.width).toBeGreaterThan(0)
             expect(box.left).toBeGreaterThanOrEqual(0)
@@ -208,7 +209,7 @@ it.skipIf(!executable)(
       }
       await run(`document.querySelector('.cxmc-editor-actions button').click();await Fixture.settle()`)
       await run(`await Fixture.refreshState('empty')`)
-      expect(await evaluate('!!document.querySelector(".cxmp-toolbar input")')).toBe(true)
+      expect(await evaluate('!!document.querySelector(".cxmp-management > [role=search] input")')).toBe(true)
       expect(await evaluate('document.querySelectorAll("[data-present=false]").length')).toBe(0)
       expect(await evaluate('document.querySelector("[data-binding-ref=binding-a] .cxmc-binding-toggle").disabled'))
         .toBe(true)

@@ -1,3 +1,4 @@
+import { mountManagerCollectionHost } from '../../packages/cli/src/renderer/manager/components/ManagerCollection.js'
 import React from 'react'
 import type { PluginManagementSnapshot } from '../../packages/cli/src/management/contracts.js'
 import type { ManagerPluginManagementBinding } from '../../packages/cli/src/renderer/manager/model/plugin-management.js'
@@ -54,12 +55,38 @@ const binding: ManagerPluginManagementBinding = {
 export function mutations() {
   return writes
 }
+let withSearchRecords = false
 const marketplace = new BrowserMarketplaceModel(
   undefined,
   async () => ({
     ok: true,
     status: 200,
-    text: async () => JSON.stringify({ schemaVersion: 2, name: 'Fixture', plugins: [] }),
+    text: async () =>
+      JSON.stringify({
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
+        homepage: 'https://plugins.example/',
+        schemaVersion: 2,
+        name: 'Fixture',
+        fallbackLocale: 'en',
+        plugins: withSearchRecords
+          ? [{
+            $schema:
+              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
+            compatibility: { cordisx: '^0.1.0' },
+            schemaVersion: 2,
+            id: 'search-permissions',
+            fallbackLocale: 'en',
+            name: 'Search permissions',
+            description: 'Permission search fixture',
+            version: '1.0.0',
+            license: 'MIT',
+            source: 'https://plugins.example/search',
+            authors: [{ name: 'Fixture' }],
+            keywords: [],
+          }]
+          : [],
+      }),
   }),
 )
 const navigation = new HostManagerNavigationController()
@@ -160,4 +187,123 @@ export async function type(path: string, value: string) {
   Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value)
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await settle()
+}
+
+/** Exercise the same production router from focused Manager regression suites. */
+export async function openSearchRoute(
+  route: import('../../packages/cli/src/renderer/manager/model/routes.js').ManagerRoute,
+) {
+  navigation.openRoute(route)
+  await settle()
+}
+export async function search(value: string) {
+  const input = document.querySelector<HTMLInputElement>('.cxr-content input[type="search"],.cxr-content input')!
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+}
+
+export function prepareSearchRecords() {
+  withSearchRecords = true
+  snapshot.pluginBundles = {
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-bundle-manager-snapshot.v1.schema.json',
+    schemaVersion: 1,
+    profileId: 'fixture',
+    revision: 1,
+    pluginRevision: 1,
+    runtimeGeneration: 'fixture',
+    operationsAvailable: false,
+    bundles: [{
+      id: 'search-bundle',
+      name: 'Search bundle',
+      description: 'Search fixture',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+      authors: [],
+      sourceLabel: 'fixture',
+      installedAt: '2026-09-26T00:00:00Z',
+      updatedAt: '2026-09-26T00:00:00Z',
+      status: 'active',
+      enabled: true,
+      availableOperations: [],
+      members: [],
+      permissions: [],
+      claims: [],
+      dependencies: [],
+      records: [],
+    }],
+  }
+}
+
+export async function openMarketplacePermissionSearch() {
+  await marketplace.setSources(['https://plugins.example/fixture.json'])
+  await marketplace.reload()
+  const plugin = marketplace.snapshot().plugins[0]!
+  navigation.openRoute({ kind: 'marketplace-plugin', identity: plugin.identity })
+  await settle()
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(item =>
+    item.textContent?.includes('权限')
+  )!
+  tab.click()
+  await settle()
+}
+
+export async function openCollectionSearch() {
+  await openSearchRoute({ kind: 'primary', page: 'about' })
+  const container = document.createElement('div')
+  document.querySelector('.cxr-content')!.append(container)
+  const host = mountManagerCollectionHost(container, {
+    document,
+    owner: 'fixture',
+    routeId: 'fixture:list',
+    pageId: 'fixture:list',
+    resolveText: value => value.fallback ?? value.key,
+    clearTextSite() {},
+    navigate: async () => {},
+    deepLink: () => 'https://plugins.example/fixture',
+    executeCommand: async () => {},
+    writeClipboard: async () => {},
+    hostCopy: key => key,
+  })
+  const text = (label: string) => ({ key: label.toLowerCase().replaceAll(' ', '-'), fallback: label })
+  host.registry.register({
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-collection-registration.v1.schema.json',
+    contract: 'cordisx.manager-collection-registration/v1',
+    schemaVersion: 1,
+    id: 'list',
+    label: text('List'),
+    description: text('Fixture list'),
+    views: [{ id: 'all', label: text('All'), emptyTitle: text('Empty'), emptyDescription: text('No records') }],
+    defaultView: 'all',
+    search: {
+      fields: ['title', 'summary'],
+      normalization: 'nfkc-casefold',
+      label: text('Search collection'),
+      placeholder: text('Search'),
+      noMatchTitle: text('No matches'),
+      noMatchDescription: text('Try again'),
+    },
+  }, {
+    snapshot: query => ({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-collection-snapshot.v1.schema.json',
+      contract: 'cordisx.manager-collection-snapshot/v1',
+      schemaVersion: 1,
+      collectionId: 'list',
+      queryRevision: query.queryRevision,
+      view: query.view,
+      normalizedSearch: query.search.normalized,
+      revision: 1,
+      items: [],
+    }),
+    subscribe: () => () => {},
+    dispose() {},
+  })
+  await settle()
+  return () => {
+    host.dispose()
+    container.remove()
+  }
 }

@@ -1,7 +1,7 @@
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { useEffect, useState } from 'react'
-import { Input, Switch } from 'tdesign-react'
+import { Switch } from 'tdesign-react'
 import { HostEditorDialog } from '../../dialogs/internal.js'
-import { HostIcon } from '../../host-ui/HostIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 
@@ -140,20 +140,18 @@ export function MarketplaceSourceManager({
   }
   return (
     <>
-      <div className="cxr-marketplace-tools" role="search" aria-label={copy.search}>
-        <Input
-          className="cxr-marketplace-search"
-          value={query}
-          aria-label={copy.search}
-          placeholder={copy.searchPlaceholder}
-          clearable
-          prefixIcon={<HostIcon token="search" />}
-          onChange={setQuery}
-        />
-        <span className="cxr-marketplace-tool-actions">
-          <IconButton icon="marketplace-source-add" label={copy.add} onClick={() => onEdit()} />
-        </span>
-      </div>
+      <SearchToolbar
+        aria-label={copy.search}
+        clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        value={query}
+        placeholder={copy.searchPlaceholder}
+        onChange={setQuery}
+        actions={
+          <>
+            <IconButton icon="marketplace-source-add" label={copy.add} onClick={() => onEdit()} />
+          </>
+        }
+      />
       <div className="cxr-list" data-marketplace-source-list="true">
         {visibleSources.map(source => {
           const busy = busyUrl === source.url

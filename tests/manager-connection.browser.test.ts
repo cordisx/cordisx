@@ -79,15 +79,15 @@ it.skipIf(!executable)(
       const exists = (selector: string) => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`)
       await click('[aria-label="添加模型连接"]')
       expect(await exists('[data-model-connection-create]')).toBe(true)
-      expect(await exists('.cxmp-toolbar')).toBe(false)
+      expect(await exists('.cxmp-management > [role=search]')).toBe(false)
       expect(await exists('[data-schema-form]')).toBe(true)
       expect(await exists('[data-config-path="protocol"]')).toBe(false)
       expect(await evaluate('document.querySelector(".cxr-heading").textContent')).toContain('添加模型连接')
       await click('.cxr-header [aria-label="返回"]')
-      expect(await exists('.cxmp-toolbar')).toBe(true)
+      expect(await exists('.cxmp-management > [role=search]')).toBe(true)
       await click('[aria-label="添加模型连接"]')
       await click('.cxmc-editor-actions button:first-child')
-      expect(await exists('.cxmp-toolbar')).toBe(true)
+      expect(await exists('.cxmp-management > [role=search]')).toBe(true)
       await click('[aria-label="添加模型连接"]')
       const disabled = () => evaluate('document.querySelector(".cxmc-editor-actions button:last-child").disabled')
       expect(await disabled()).toBe(true)
@@ -154,7 +154,7 @@ it.skipIf(!executable)(
         }
       }
       await click('.cxmc-editor-actions button:last-child')
-      expect(await exists('.cxmp-toolbar')).toBe(true)
+      expect(await exists('.cxmp-management > [role=search]')).toBe(true)
       const commands = await evaluate('Fixture.commands()') as {
         settings: {
           protocol: string
