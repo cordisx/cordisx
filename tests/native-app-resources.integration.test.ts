@@ -9,6 +9,7 @@ import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-ca
 import {
   createNativeSubmissionComposition,
   prepareNativeSubmissionBootstrap,
+  resolveBundledCodexCliPath,
 } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
@@ -127,6 +128,22 @@ it('reads the actual ASAR resource layout without relying on asset hash names', 
   const f = await bundle()
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
     .toEqual(resources().map(resource => resource.url).sort())
+})
+
+it('resolves the bundled CLI in both Desktop app layouts', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cli-layout-'))
+  roots.push(root)
+  const contents = path.join(root, 'Fixture.app/Contents')
+  const legacy = path.join(contents, 'Resources/codex')
+  const current = path.join(contents, 'Resources/codex-cli/bin/codex')
+  await mkdir(path.dirname(current), { recursive: true })
+  for (const file of [legacy, current]) {
+    await writeFile(file, '#!/bin/sh\nexit 99\n')
+    await chmod(file, 0o755)
+  }
+  expect(await resolveBundledCodexCliPath(contents)).toBe(await realpath(legacy))
+  await rm(legacy)
+  expect(await resolveBundledCodexCliPath(contents)).toBe(await realpath(current))
 })
 
 it.skipIf(process.platform !== 'darwin')(

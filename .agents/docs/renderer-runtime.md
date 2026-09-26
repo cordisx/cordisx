@@ -592,6 +592,19 @@ sides of the virtual settings seam. They are independent plugin pages rather
 than fixed Host views. Host core order and bottom-anchored About cannot be
 overridden.
 
+The native pane observes the Host-private Codex React Router transition seam.
+Desktop 26.924 exposes a Data Router with a subscribable `state.location`;
+older MemoryHistory builds use the existing Host history adapter. It records
+the native location and available history key/index when opened, and
+closes only after a committed native route transition changes that identity.
+Menu, popover, pointer, drag, and focus events do not establish navigation.
+Manager-local pages remain in Manager-owned history and do not alter this
+outer route. If the native router identity cannot be read, the Host does not
+open the pane; losing the pane's verified DOM seat still closes it. This is a
+version-sensitive adapter seam, not a public Codex route API. The 26.924 Data
+Router does not expose the older History `index`/`location` navigator, so its
+read-only observer must not be treated as proof that plugin route writes work.
+
 Manager-owned content follows one semantic context at a time: a title,
 breadcrumb, or selected tab is not restated by body headings or redundant
 cards. The reusable hierarchy, flat-list/card, exceptional-state,

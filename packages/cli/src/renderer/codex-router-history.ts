@@ -32,6 +32,8 @@ export interface CodexRouteHistorySnapshot {
   readonly available: boolean
   readonly key?: string
   readonly index?: number
+  /** Host-private native location; plugin routes remain in `entry`. */
+  readonly nativeLocation?: Readonly<Pick<CodexRouterLocation, 'pathname' | 'search' | 'hash'>>
   readonly canGoBack?: boolean
   readonly canGoForward?: boolean
   readonly entry?: CodexRouteHistoryEntry
@@ -351,6 +353,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       available: true,
       key: location.key,
       index: this.navigator.index,
+      nativeLocation: routerTarget(location),
       ...(entry === undefined ? {} : { entry }),
     })
   }

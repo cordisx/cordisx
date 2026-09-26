@@ -342,6 +342,23 @@ export async function createNativeSubmissionComposition(
   }
 }
 
+/** Resolve only CLI binaries bundled inside the selected Desktop app. */
+export async function resolveBundledCodexCliPath(contents: string): Promise<string> {
+  for (const relative of ['Resources/codex', 'Resources/codex-cli/bin/codex']) {
+    const candidate = path.join(contents, relative)
+    let resolved: string
+    try {
+      resolved = await realpath(candidate)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    await access(resolved, constants.X_OK)
+    return resolved
+  }
+  throw new Error('The selected Desktop app does not contain a supported bundled Codex CLI')
+}
+
 /** Start only the fail-closed native transport; compatibility discovery continues off the Host launch path. */
 export async function prepareNativeSubmissionBootstrap(
   desktopExecutable: string,
@@ -354,8 +371,7 @@ export async function prepareNativeSubmissionBootstrap(
     throw new Error('Native routing requires an app-bundle executable')
   }
   const contents = path.dirname(macos)
-  const cli = await realpath(path.join(contents, 'Resources', 'codex'))
-  await access(cli, constants.X_OK)
+  const cli = await resolveBundledCodexCliPath(contents)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   let capabilities: ReturnType<typeof nativeSubmissionTransforms> | undefined
   const control = await startNativeSubmissionControlServer()

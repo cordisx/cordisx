@@ -62,22 +62,31 @@ export async function bootSurfaces() {
         .codex-toolbar-button { width: 28px; height: 28px; }
         .codex-footer-button, .codex-composer-button { width: 32px; height: 32px; }
       </style></head><body>
-        <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
+        <nav data-app-navigation-rail="true"><div>
+          <div><button data-sidebar-destination="builtin:home" aria-current="page" data-selected="">Home</button></div>
+          <div class="contents"><button data-sidebar-destination="builtin:automations">Automations</button></div>
+        </div></nav>
+        <nav role="navigation" aria-label="Home">
+          <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button>
+            <div id="native-navigation" style="display:flex;flex-direction:column">
+              <button>New conversation</button><button>Pull requests</button>
+            </div>
+          </div>
+          <div data-app-action-sidebar-scroll style="position:relative">
+            <div data-app-action-sidebar-project-list-id="project-one">
+              <button data-app-action-sidebar-thread-selected="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-id="local:${sessionId}"></button>
+            </div>
+            <div id="native-footer-controls" style="display:flex"><button id="native-account" aria-label="Open profile menu" aria-haspopup="menu" aria-expanded="false">Profile</button><button id="native-help" class="codex-footer-button" aria-label="Help" aria-haspopup="menu" aria-expanded="false">Help</button></div>
+          </div>
+        </nav>
         <header data-app-shell-application-menu-bar style="position:relative">
           <div data-test-id="header-shell-slot"><div><div><button id="native-sidebar-toggle" aria-label="Show sidebar">left native</button></div></div></div>
           <div data-test-id="header-shell-slot" style="width:0px;min-width:70px"><div><div id="native-toolbar-controls" style="display:flex">
             <span id="native-toolbar-tooltip-trigger" style="display:contents"><button id="native-toolbar-primary" class="codex-toolbar-button">native primary</button></span><button class="codex-toolbar-button">native secondary</button>
           </div></div></div>
         </header>
-        <aside><div data-app-action-sidebar-scroll style="position:relative">
-          <div id="native-navigation" style="display:flex;flex-direction:column">
-            <button>New conversation</button><button>Pull requests</button>
-          </div>
-          <div data-app-action-sidebar-project-list-id="project-one">
-            <button data-app-action-sidebar-thread-selected="true" data-app-action-sidebar-thread-host-id="local" data-app-action-sidebar-thread-id="local:${sessionId}"></button>
-          </div>
-        </div><div id="native-footer-controls" style="display:flex"><button id="native-account" aria-label="Open profile menu" aria-haspopup="menu" aria-expanded="false">Profile</button><button id="native-help" class="codex-footer-button" aria-label="Help" aria-haspopup="menu" aria-expanded="false">Help</button></div></aside>
         <main data-app-shell-main-content-layout="thread-edge-scroll" style="position:relative">
+          <div data-app-shell-thread-edge-divider="false"><div data-app-shell-main-content-top-fade="visible"><div data-app-shell-focus-area="main">
           <header data-testid="app-shell-header-context-menu-surface" style="display:flex">
             <div id="native-session-title">Current session</div>
             <div id="native-session-actions" style="display:flex"><span id="native-session-tooltip-trigger" style="display:contents"><button id="native-session-menu" class="codex-toolbar-button" title="Toggle pinned summary">Session menu</button></span></div>
@@ -95,6 +104,7 @@ export async function bootSurfaces() {
               <div id="unmatched-session-content" data-pip-anchor-host="codex-main-thread" data-app-action-timeline-scroll></div>
             </div>
           </section>
+          </div></div></div>
         </main>
         <aside id="native-summary-frame" style="position:relative">
           <div
@@ -242,11 +252,34 @@ export async function bootSurfaces() {
     value: () => nativeBackgroundProcessesRect,
   })
   Object.defineProperty(dom.window.document.body, 'getBoundingClientRect', { value: () => rect(0, 0, 1200, 900) })
-  let mainRect = rect(240, 0, 960, 900)
+  let mainRect = rect(290, 44, 910, 856)
   Object.defineProperty(
     dom.window.document.querySelector('[data-app-shell-main-content-layout]'),
     'getBoundingClientRect',
     { value: () => mainRect },
+  )
+  Object.defineProperty(dom.window.document.querySelector('[data-app-navigation-rail]'), 'getBoundingClientRect', {
+    value: () => rect(0, 0, 52, 900),
+  })
+  Object.defineProperty(dom.window.document.querySelector('nav[role="navigation"]'), 'getBoundingClientRect', {
+    value: () => rect(52, 44, 238, 856),
+  })
+  Object.defineProperty(dom.window.document.querySelector('.sidebar-header'), 'getBoundingClientRect', {
+    value: () => rect(52, 44, 238, 90),
+  })
+  Object.defineProperty(
+    dom.window.document.querySelector('[data-app-action-sidebar-scroll]'),
+    'getBoundingClientRect',
+    {
+      value: () => rect(52, 134, 238, 766),
+    },
+  )
+  Object.defineProperty(
+    dom.window.document.querySelector('[data-app-shell-thread-edge-divider]'),
+    'getBoundingClientRect',
+    {
+      value: () => mainRect,
+    },
   )
   dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
   dom.window.eval(bundle)

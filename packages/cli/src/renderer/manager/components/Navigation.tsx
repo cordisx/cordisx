@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
@@ -10,7 +10,7 @@ import {
   type ManagerNavigationVisualGroup,
   sortManagerSettingsNavigationItems,
 } from '../../manager-settings-navigation.js'
-import { type ManagerPrimaryPage, type ManagerRouter, primaryFor } from '../model/routes.js'
+import { type ManagerPrimaryPage, type ManagerRoute, type ManagerRouter, primaryFor } from '../model/routes.js'
 
 const core: readonly {
   readonly page: ManagerPrimaryPage
@@ -28,9 +28,15 @@ const core: readonly {
 export interface NavigationProps {
   readonly snapshot: ManagerSnapshot
   readonly router: ManagerRouter
+  readonly onSelect?: (route: ManagerRoute) => void
 }
 
-function contributed(item: ManagerSettingsNavigationItemSnapshot, router: ManagerRouter, locale: string) {
+function contributed(
+  item: ManagerSettingsNavigationItemSnapshot,
+  router: ManagerRouter,
+  locale: string,
+  select: (route: ManagerRoute) => void,
+) {
   const review = item.permissionReview
   const active = (router.route.kind === 'manager-content' && router.route.id === item.id)
     || (review !== undefined && router.route.kind === 'permission'
@@ -38,6 +44,7 @@ function contributed(item: ManagerSettingsNavigationItemSnapshot, router: Manage
   return (
     <button
       key={item.id}
+      className="cxr-nav-destination"
       type="button"
       disabled={item.disabled}
       title={review === undefined ? item.disabledReason : `${managerCopy(locale, 'permission.review')} · ${item.title}`}
@@ -46,7 +53,7 @@ function contributed(item: ManagerSettingsNavigationItemSnapshot, router: Manage
       {...(active ? { 'aria-current': 'page' as const } : {})}
       onClick={() => {
         if (review !== undefined) {
-          router.navigate({
+          select({
             kind: 'permission',
             pluginId: item.owner,
             capability: review.capability,
@@ -54,7 +61,7 @@ function contributed(item: ManagerSettingsNavigationItemSnapshot, router: Manage
           })
           return
         }
-        router.navigate({ kind: 'manager-content', id: item.id, reference: item.route })
+        select({ kind: 'manager-content', id: item.id, reference: item.route })
       }}
     >
       <HostBrandIcon icon={item.icon} state={active ? 'active' : 'default'} />
@@ -70,10 +77,15 @@ function groupLabel(locale: string, group: ManagerNavigationVisualGroup): string
   return managerCopy(locale, `manager.nav.group.${group}`)
 }
 
-export function Navigation({ snapshot, router }: NavigationProps) {
+export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
   const navigation = useRef<HTMLElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const [query, setQuery] = useState('')
+  const select = onSelect ?? router.navigate
   const locale = snapshot.localization.locale
   const contributions = sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
+  const needle = query.trim().toLocaleLowerCase(locale)
+  const matches = (label: string) => label.toLocaleLowerCase(locale).includes(needle)
   const permissionRoute = router.route.kind === 'permission' ? router.route : undefined
   const reviewingContribution = permissionRoute !== undefined
     && contributions.some(item =>
@@ -84,10 +96,15 @@ export function Navigation({ snapshot, router }: NavigationProps) {
     ? undefined
     : primaryFor(router.route)
   const groups = CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG.groups.flatMap(group => {
-    const coreItems = core.filter(item => item.group === group.id)
-    const contributedItems = contributions.filter(item => (item.navigationGroup ?? 'other') === group.id)
+    const coreItems = core.filter(item => item.group === group.id && matches(managerCopy(locale, item.copy)))
+    const contributedItems = contributions.filter(item =>
+      (item.navigationGroup ?? 'other') === group.id && matches(item.title)
+    )
     return coreItems.length === 0 && contributedItems.length === 0 ? [] : [{ group, coreItems, contributedItems }]
   })
+  const showNotifications = matches(locale.startsWith('zh') ? '通知规则' : 'Notification rules')
+  const showAbout = matches(managerCopy(locale, 'manager.nav.about'))
+  const hasResults = groups.length > 0 || showNotifications || showAbout
   return (
     <nav
       ref={navigation}
@@ -95,7 +112,9 @@ export function Navigation({ snapshot, router }: NavigationProps) {
       aria-label={managerCopy(locale, 'manager.navigation')}
       onKeyDown={event => {
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
-        const buttons = [...(navigation.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+        const buttons = [
+          ...(navigation.current?.querySelectorAll<HTMLButtonElement>('.cxr-nav-destination:not(:disabled)') ?? []),
+        ]
         const current = buttons.indexOf(event.target as HTMLButtonElement)
         if (current < 0 || buttons.length === 0) return
         event.preventDefault()
@@ -109,6 +128,51 @@ export function Navigation({ snapshot, router }: NavigationProps) {
         buttons[next]?.focus()
       }}
     >
+      <div className="cxr-nav-header">
+        <h1 className="cxr-nav-title">CordisX</h1>
+        <div className="cxr-nav-search" role="search">
+          <HostIcon token="search" />
+          <input
+            ref={searchInput}
+            type="text"
+            value={query}
+            aria-label={managerCopy(locale, 'manager.nav.search')}
+            placeholder={managerCopy(locale, 'manager.nav.search-placeholder')}
+            onChange={event => setQuery(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Escape' && query !== '') {
+                event.stopPropagation()
+                setQuery('')
+              } else if (event.key === 'ArrowDown') {
+                const first = navigation.current?.querySelector<HTMLButtonElement>(
+                  '.cxr-nav-destination:not(:disabled)',
+                )
+                if (first !== null && first !== undefined) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  first.focus()
+                }
+              }
+            }}
+          />
+          {query === '' ? null : (
+            <button
+              type="button"
+              className="cxr-nav-search-clear"
+              aria-label={managerCopy(locale, 'manager.nav.search-clear')}
+              onClick={() => {
+                setQuery('')
+                searchInput.current?.focus()
+              }}
+            >
+              <HostIcon token="close" />
+            </button>
+          )}
+        </div>
+      </div>
+      {!hasResults && (
+        <p className="cxr-nav-search-empty" role="status">{managerCopy(locale, 'manager.nav.search-empty')}</p>
+      )}
       {groups.map(({ group, coreItems, contributedItems }) => {
         const before = contributedItems.filter(item => item.group === 'before-settings')
         const after = contributedItems.filter(item => item.group === 'after-settings')
@@ -123,42 +187,49 @@ export function Navigation({ snapshot, router }: NavigationProps) {
             key={group.id}
           >
             <span id={headingId} className="cxr-nav-group-label" role="heading" aria-level={2}>{label}</span>
-            {before.map(item => contributed(item, router, locale))}
+            {before.map(item => contributed(item, router, locale, select))}
             {coreItems.map(item => (
               <button
                 key={item.page}
+                className="cxr-nav-destination"
                 type="button"
                 data-tab={item.page}
                 {...(primary === item.page ? { 'aria-current': 'page' as const } : {})}
-                onClick={() => router.navigate({ kind: 'primary', page: item.page })}
+                onClick={() => select({ kind: 'primary', page: item.page })}
               >
                 <HostIcon token={item.icon} state={primary === item.page ? 'active' : 'default'} />
                 <span>{managerCopy(locale, item.copy)}</span>
               </button>
             ))}
-            {after.map(item => contributed(item, router, locale))}
+            {after.map(item => contributed(item, router, locale, select))}
           </section>
         )
       })}
       <span className="cxr-nav-spacer" />
-      <button
-        type="button"
-        data-tab="notifications"
-        {...(router.route.kind === 'notification-rules' ? { 'aria-current': 'page' as const } : {})}
-        onClick={() => router.navigate({ kind: 'notification-rules' })}
-      >
-        <HostIcon token="configuration" />
-        <span>{locale.startsWith('zh') ? '通知规则' : 'Notification rules'}</span>
-      </button>
-      <button
-        type="button"
-        data-tab="about"
-        {...(primary === 'about' ? { 'aria-current': 'page' as const } : {})}
-        onClick={() => router.navigate({ kind: 'primary', page: 'about' })}
-      >
-        <BrandMark />
-        <span>{managerCopy(locale, 'manager.nav.about')}</span>
-      </button>
+      {showNotifications && (
+        <button
+          className="cxr-nav-destination"
+          type="button"
+          data-tab="notifications"
+          {...(router.route.kind === 'notification-rules' ? { 'aria-current': 'page' as const } : {})}
+          onClick={() => select({ kind: 'notification-rules' })}
+        >
+          <HostIcon token="configuration" />
+          <span>{locale.startsWith('zh') ? '通知规则' : 'Notification rules'}</span>
+        </button>
+      )}
+      {showAbout && (
+        <button
+          className="cxr-nav-destination"
+          type="button"
+          data-tab="about"
+          {...(primary === 'about' ? { 'aria-current': 'page' as const } : {})}
+          onClick={() => select({ kind: 'primary', page: 'about' })}
+        >
+          <BrandMark />
+          <span>{managerCopy(locale, 'manager.nav.about')}</span>
+        </button>
+      )}
     </nav>
   )
 }

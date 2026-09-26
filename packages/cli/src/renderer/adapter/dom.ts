@@ -149,6 +149,26 @@ function nativeControlInsertionAnchor(document: Document, control: HTMLElement):
 }
 
 function resolveSidebarNavigationParent(document: Document, sidebar: HTMLElement): HTMLElement | undefined {
+  // Codex 26.924 moved the action stack out of the scroll region. Its sibling
+  // header also contains window controls, so only its unique vertical action
+  // stack is a navigation seat. Do not fall back into native section groups.
+  const navigation = sidebar.parentElement
+  if (navigation?.matches('nav[role="navigation"]')) {
+    const header = sidebar.previousElementSibling
+    if (header === null || header.closest(CORDISX_SURFACE_HOST_SELECTOR) !== null) return undefined
+    const stacks = [...header.children]
+      .filter((element): element is HTMLElement => visible(element))
+      .filter(element => element.closest(CORDISX_SURFACE_HOST_SELECTOR) === null)
+      .filter((element) => {
+        const style = document.defaultView?.getComputedStyle(element)
+        return (style?.display === 'flex' || style?.display === 'grid')
+          && style.flexDirection === 'column'
+          && nativeButtons(element).length > 0
+          && element.querySelector('[data-app-action-sidebar-section], [data-app-action-sidebar-project-list-id]')
+            === null
+      })
+    return stacks.length === 1 ? stacks[0] : undefined
+  }
   const candidates = nativeButtons(sidebar).filter(button => (
     button.closest('[data-app-action-sidebar-section]') === null
     && button.closest('[data-app-action-sidebar-project-list-id]') === null

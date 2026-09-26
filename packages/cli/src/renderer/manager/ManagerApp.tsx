@@ -15,6 +15,7 @@ import { notificationCenterForDocument } from '../notifications/host.js'
 import type { NotificationCenter } from '../notifications/model.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
+import { managerHeaderBackRoute } from './model/header-navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
 import { useManagerSnapshot } from './model/store.js'
@@ -22,6 +23,7 @@ import { MarketplaceInstallerProvider, useMarketplaceInstaller } from './model/u
 import { type ManagerPluginManagementBinding, usePluginManagementSnapshot } from './model/plugin-management.js'
 import type { ManagerRoute } from './model/routes.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
+import { nativeRouteIdentity, type NativeRouteSource, observeNativeRouteTransition } from './native-route-transition.js'
 import { AboutPage } from './pages/AboutPage.js'
 import { AcknowledgementsPage } from './pages/AcknowledgementsPage.js'
 import { ExtensionPointDetailPage } from './pages/ExtensionPointDetailPage.js'
@@ -402,8 +404,14 @@ export interface ManagerAppProps {
   readonly model: ManagerModel
   readonly marketplace: MarketplaceModel
   readonly triggerSeat: HTMLElement
+  readonly navigationSeat?: HTMLElement
+  readonly titlebarSeat?: HTMLElement
   readonly navigationController?: HostManagerNavigationController
   readonly pluginManagement?: ManagerPluginManagementBinding
+  readonly activatePane?: () => boolean
+  readonly deactivatePane?: () => void
+  readonly registerPaneLoss?: (handler: () => void) => void
+  readonly nativeRouteHistory?: NativeRouteSource
 }
 
 function PlaygroundManagerTrigger({ seat, open, onToggle, locale }: {
@@ -445,11 +453,31 @@ function PlaygroundManagerTrigger({ seat, open, onToggle, locale }: {
 }
 
 export function ManagerApp(
-  { model, marketplace, triggerSeat, navigationController, pluginManagement }: ManagerAppProps,
+  {
+    model,
+    marketplace,
+    triggerSeat,
+    navigationSeat,
+    titlebarSeat,
+    navigationController,
+    pluginManagement,
+    activatePane,
+    deactivatePane,
+    registerPaneLoss,
+    nativeRouteHistory,
+  }: ManagerAppProps,
 ) {
   const snapshot = useManagerSnapshot(model)
   const management = usePluginManagementSnapshot(pluginManagement)
   const notificationCenter = notificationCenterForDocument(triggerSeat.ownerDocument)
+  const unavailableFeedback = useMemo(() =>
+    notificationCenter?.bind({
+      key: 'host/manager-seat',
+      pluginId: 'cordisx',
+      active: () => true,
+      presentation: () => ({ name: 'CordisX' }),
+    }), [notificationCenter])
+  useEffect(() => () => unavailableFeedback?.dispose(), [unavailableFeedback])
   const playgroundStorage = useMemo(
     () =>
       triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null
@@ -459,6 +487,40 @@ export function ManagerApp(
   )
   const router = useManagerRouter(playgroundStorage)
   const [open, setOpen] = useState(() => playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true')
+  const [surface, setSurface] = useState<'pane' | 'modal'>('modal')
+  const [seatUnavailable, setSeatUnavailable] = useState(false)
+  const restoreTriggerFocus = useRef(true)
+  const openManager = () => {
+    restoreTriggerFocus.current = true
+    if (playgroundStorage !== undefined || activatePane === undefined) {
+      setSurface('modal')
+      setOpen(true)
+      return
+    }
+    if (
+      (nativeRouteHistory === undefined || nativeRouteIdentity(nativeRouteHistory.snapshot()) !== undefined)
+      && activatePane() && titlebarSeat !== undefined
+    ) {
+      setSeatUnavailable(false)
+      setSurface('pane')
+      setOpen(true)
+    } else {
+      deactivatePane?.()
+      setOpen(false)
+      setSeatUnavailable(true)
+      unavailableFeedback?.api.show({
+        kind: 'manager.seat-unavailable',
+        type: 'warning',
+        message: productLocale(snapshot.localization.locale) === 'zh-CN'
+          ? '当前页面暂时无法打开 CordisX'
+          : 'CordisX is unavailable on this page',
+      })
+    }
+  }
+  const closeManager = (restoreFocus = true) => {
+    restoreTriggerFocus.current = restoreFocus
+    setOpen(false)
+  }
   const installer = useMarketplaceInstaller(model, snapshot, {
     failed: productLocale(snapshot.localization.locale) === 'zh-CN' ? '插件安装失败' : 'Plugin installation failed',
     succeeded: productLocale(snapshot.localization.locale) === 'zh-CN'
@@ -466,7 +528,7 @@ export function ManagerApp(
       : 'Plugin installation complete',
   }, { document: triggerSeat.ownerDocument, feedbackActive: open })
   const previousOpen = useRef(open)
-  const dialog = useRef<HTMLElement>(null)
+  const managerMain = useRef<HTMLElement>(null)
   const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
   useLayoutEffect(() =>
     navigationController?.bind(request => {
@@ -478,36 +540,51 @@ export function ManagerApp(
       } else {
         router.navigate(request)
       }
-      setOpen(true)
+      openManager()
     }), [navigationController, router.navigate, router.openDetail])
   useLayoutEffect(() =>
     navigationController?.bindReturnPort({
       capture: () => open ? router.capture() : [],
       restore: captured => {
         router.restore(captured)
-        setOpen(true)
+        openManager()
       },
     }), [navigationController, open, router.capture, router.restore])
   useLayoutEffect(() =>
     notificationCenter?.bindManager(() => {
       router.navigate({ kind: 'notification-rules' })
-      setOpen(true)
+      openManager()
     }), [notificationCenter, router.navigate])
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) setOpen(false)
+      if (event.key === 'Escape' && !event.defaultPrevented) closeManager()
     }
+    const disposeRouteObserver = surface === 'pane' && nativeRouteHistory !== undefined
+      ? observeNativeRouteTransition(nativeRouteHistory, () => flushSync(() => closeManager(false)))
+      : () => {}
     window.addEventListener('keydown', onKey)
-    queueMicrotask(() => dialog.current?.focus())
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+    queueMicrotask(() => managerMain.current?.focus({ preventScroll: true }))
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      disposeRouteObserver()
+    }
+  }, [nativeRouteHistory, open, surface])
+  useLayoutEffect(() => {
+    if (!open) deactivatePane?.()
+  }, [deactivatePane, open])
+  useLayoutEffect(() => {
+    registerPaneLoss?.(() => flushSync(() => closeManager(false)))
+    return () => registerPaneLoss?.(() => {})
+  }, [registerPaneLoss])
   useEffect(() => {
     playgroundStorage?.setItem('cordisx.playground.manager.open.v1', String(open))
   }, [open, playgroundStorage])
   useEffect(() => {
     if (previousOpen.current && !open) {
-      triggerSeat.querySelector<HTMLElement>('[data-cordisx-manager-trigger]')?.focus({ preventScroll: true })
+      if (restoreTriggerFocus.current) {
+        triggerSeat.querySelector<HTMLElement>('[data-cordisx-manager-trigger]')?.focus({ preventScroll: true })
+      }
     }
     previousOpen.current = open
   }, [open, triggerSeat])
@@ -529,9 +606,56 @@ export function ManagerApp(
   const managerContentParent = router.route.kind === 'manager-content'
     ? model.managerContentPresentation?.(router.route.id, router.route.reference)?.parent
     : undefined
-  const managerContentBackRoute = router.route.kind === 'manager-content' && managerContentParent !== undefined
-    ? { kind: 'manager-content' as const, id: router.route.id, reference: managerContentParent }
-    : undefined
+  const backRoute = managerHeaderBackRoute(router.route, managerContentParent, router.capture().at(-2))
+  const onBack = () => {
+    if (backRoute === undefined) return
+    const previous = router.capture().at(-2)
+    if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(backRoute)) router.back()
+    else router.replace(backRoute)
+  }
+  const header = (
+    <header className="cxr-header" data-manager-surface={surface}>
+      <span className="cxr-header-seat">
+        {backRoute !== undefined
+          ? (
+            <Button
+              className="cxr-header-back"
+              shape="square"
+              variant="text"
+              aria-label={managerCopy(snapshot.localization.locale, 'manager.back')}
+              icon={<HostIcon token="back" />}
+              onClick={onBack}
+            />
+          )
+          : router.route.kind === 'primary'
+          ? router.route.page === 'about'
+            ? <BrandMark />
+            : <HostIcon token={primaryIcon(router.route)!} />
+          : contributionIcon !== undefined
+          ? <HostBrandIcon icon={contributionIcon} />
+          : <BrandMark />}
+      </span>
+      <div className="cxr-heading">
+        <ManagerBreadcrumbs
+          route={router.route}
+          navigate={router.navigate}
+          heading={heading}
+          model={model}
+          snapshot={snapshot}
+        />
+      </div>
+      <div className="cxr-titlebar-actions">
+        <Button
+          className="cxr-titlebar-action"
+          shape="square"
+          variant="text"
+          aria-label={managerCopy(snapshot.localization.locale, 'manager.close')}
+          icon={<HostIcon token="close" />}
+          onClick={() => closeManager()}
+        />
+      </div>
+    </header>
+  )
   return (
     <ConfigProvider globalConfig={{ attach }}>
       {playgroundStorage === undefined
@@ -543,11 +667,16 @@ export function ManagerApp(
             variant="text"
             data-cordisx-manager-trigger="true"
             aria-label={managerCopy(snapshot.localization.locale, 'manager.trigger.manage')}
-            aria-haspopup="dialog"
+            aria-description={seatUnavailable
+              ? productLocale(snapshot.localization.locale) === 'zh-CN'
+                ? '当前页面暂时无法打开 CordisX'
+                : 'CordisX is unavailable on this page'
+              : undefined}
             aria-expanded={open}
+            aria-current={open && surface === 'pane' ? 'page' : undefined}
             title={managerCopy(snapshot.localization.locale, 'manager.trigger.manage')}
             icon={<BrandMark className="cxr-trigger-mark" />}
-            onClick={() => flushSync(() => setOpen(true))}
+            onClick={() => flushSync(() => open ? closeManager() : openManager())}
           />,
           triggerSeat,
         )
@@ -556,75 +685,48 @@ export function ManagerApp(
             seat={triggerSeat}
             open={open}
             locale={snapshot.localization.locale}
-            onToggle={() => flushSync(() => setOpen(value => !value))}
+            onToggle={() => flushSync(() => open ? closeManager() : openManager())}
           />
         )}
+      {open && surface === 'pane' && navigationSeat !== undefined
+        ? createPortal(
+          <aside
+            className="cxr-sidebar cxr-native-navigation"
+            aria-label={managerCopy(snapshot.localization.locale, 'manager.dialog')}
+          >
+            <Navigation snapshot={snapshot} router={router} onSelect={route => router.restore([route])} />
+          </aside>,
+          navigationSeat,
+        )
+        : null}
+      {open && surface === 'pane' && titlebarSeat !== undefined
+        ? createPortal(header, titlebarSeat)
+        : null}
       {open
         ? (
           <div
-            className="cxr-backdrop"
-            data-cordisx-manager-modal="true"
+            className={surface === 'pane' ? 'cxr-pane-layer' : 'cxr-backdrop'}
+            data-cordisx-manager-pane={surface === 'pane' ? 'true' : undefined}
+            data-cordisx-manager-modal={surface === 'modal' ? 'true' : undefined}
             onMouseDown={event => {
-              if (event.target === event.currentTarget) setOpen(false)
+              if (surface === 'modal' && event.target === event.currentTarget) closeManager()
             }}
           >
             <section
-              ref={dialog}
-              className="cxr-dialog"
-              role="dialog"
-              aria-modal="true"
+              className={surface === 'pane' ? 'cxr-pane-shell' : 'cxr-dialog'}
+              role={surface === 'modal' ? 'dialog' : undefined}
+              aria-modal={surface === 'modal' ? 'true' : undefined}
               aria-label={managerCopy(snapshot.localization.locale, 'manager.dialog')}
-              tabIndex={-1}
             >
-              <aside className="cxr-sidebar">
-                <Navigation snapshot={snapshot} router={router} />
-              </aside>
-              <main className="cxr-main">
-                <header className="cxr-header">
-                  <span className="cxr-header-seat">
-                    {router.route.kind === 'primary'
-                      ? router.route.page === 'about'
-                        ? <BrandMark />
-                        : <HostIcon token={primaryIcon(router.route)!} />
-                      : managerContentBackRoute !== undefined
-                      ? (
-                        <Button
-                          shape="square"
-                          variant="text"
-                          aria-label={managerCopy(snapshot.localization.locale, 'manager.back')}
-                          icon={<HostIcon token="back" />}
-                          onClick={() => router.navigate(managerContentBackRoute)}
-                        />
-                      )
-                      : contributionIcon !== undefined
-                      ? <HostBrandIcon icon={contributionIcon} />
-                      : (
-                        <Button
-                          shape="square"
-                          variant="text"
-                          aria-label={managerCopy(snapshot.localization.locale, 'manager.back')}
-                          icon={<HostIcon token="back" />}
-                          onClick={router.back}
-                        />
-                      )}
-                  </span>
-                  <div className="cxr-heading">
-                    <ManagerBreadcrumbs
-                      route={router.route}
-                      navigate={router.navigate}
-                      heading={heading}
-                      model={model}
-                      snapshot={snapshot}
-                    />
-                  </div>
-                  <Button
-                    shape="square"
-                    variant="text"
-                    aria-label={managerCopy(snapshot.localization.locale, 'manager.close')}
-                    icon={<HostIcon token="close" />}
-                    onClick={() => setOpen(false)}
-                  />
-                </header>
+              {surface === 'modal'
+                ? (
+                  <aside className="cxr-sidebar">
+                    <Navigation snapshot={snapshot} router={router} />
+                  </aside>
+                )
+                : null}
+              <main ref={managerMain} className="cxr-main" tabIndex={-1}>
+                {surface === 'modal' ? header : null}
                 <div
                   className="cxr-content"
                   data-content-layout={(router.route.kind === 'model-connection-create'

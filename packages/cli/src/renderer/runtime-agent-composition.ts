@@ -116,6 +116,7 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
+import { CodexNativeRouteObserver } from './adapter/native-route-observer.js'
 import {
   createHostManagerSelfConfigurationNavigationOptions,
   HostManagerNavigationController,
@@ -857,6 +858,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     const pluginManagement = runtimeScope.pluginManagementBinding()
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
+      nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
       ...(pluginManagement === undefined ? {} : { pluginManagement }),
       ...(runtimeScope.metadata()!.hostKind === 'playground'
         ? {

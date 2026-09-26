@@ -178,7 +178,7 @@ async function fixture(sessionId: string, options: {
       .codex-toolbar-button { width: 28px; height: 28px; border-radius: 6px; }
       .native-summary-pressed { color: rgb(26, 28, 31); background-color: rgba(26, 28, 31, .05); }
     </style></head><body>
-      <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
+      <div class="sidebar-header" data-cordisx-playground-manager-trigger="true"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       <header data-app-shell-application-menu-bar>
         <div data-test-id="header-shell-slot"><button id="native-header-action">Native action</button></div>
       </header>

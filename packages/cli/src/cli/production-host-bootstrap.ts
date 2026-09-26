@@ -118,7 +118,9 @@ export async function prepareProductionHostBootstrap(
       }
     }
     const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
-    if (input.mainInspector && !mainInspector) throw new Error('Same-window startup requires an owned main inspector')
+    if (input.mainInspector && !mainInspector) {
+      stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
+    }
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
     const hostEnvironment = { ...plan.environment, ...nativeSubmissionBootstrap?.environment }
     const hiddenLaunch = mainInspector
