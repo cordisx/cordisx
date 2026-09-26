@@ -112,7 +112,7 @@ describe('ProviderReasoningSlider', () => {
     expect(Number(reasoning.dataset.progress)).toBeCloseTo(0.4375, 4)
     expect(slider.getAttribute('aria-valuetext')).toBe('medium')
     expect(reasoning.dataset.dragging).toBe('true')
-    expect(reasoning.querySelectorAll('.cxmp-reasoning-marks > [data-active="true"]')).toHaveLength(2)
+    expect(reasoning.querySelectorAll('.cxmp-reasoning-marks > [data-active="true"]')).toHaveLength(3)
 
     await act(async () => {
       reasoning.dispatchEvent(pointerEvent('pointerup', { bubbles: true, clientX: 260 }))

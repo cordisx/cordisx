@@ -176,6 +176,14 @@
 .cxmp-selector *, .cxmp-menu * {
   box-sizing: border-box;
 }
+[data-cordisx-model-provider-selector][data-cordisx-app-theme="light"],
+.cxmp-menu[data-cordisx-app-theme="light"] {
+  color-scheme: light;
+}
+[data-cordisx-model-provider-selector][data-cordisx-app-theme="dark"],
+.cxmp-menu[data-cordisx-app-theme="dark"] {
+  color-scheme: dark;
+}
 .cxmp-trigger {
   display: inline-flex;
   align-items: center;
@@ -639,7 +647,7 @@
 .cxmp-reasoning-marks {
   position: absolute;
   z-index: 2;
-  inset: 0 12px;
+  inset: 0 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -763,7 +771,10 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cxmp-reasoning-gradient, .cxmp-reasoning-particles {
+  .cxmp-reasoning[data-hot="true"][data-peak="true"] .cxmp-reasoning-gradient,
+  .cxmp-reasoning[data-flowing="true"] .cxmp-reasoning-particles,
+  .cxmp-reasoning-gradient,
+  .cxmp-reasoning-particles {
     opacity: 0;
   }
   .cxmp-reasoning-still-particles,
