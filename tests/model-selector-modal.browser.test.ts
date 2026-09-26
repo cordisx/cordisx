@@ -488,6 +488,136 @@ it.skipIf(!executable)(
         )
         await capture('model-busy-narrow-dark')
       }
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1000,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+      await run(`document.documentElement.dataset.theme='light';
+      document.documentElement.style.cssText='color-scheme:light;--cx-surface:#fff;--cx-surface-raised:#fff;--cx-text:#20242b;--cx-muted:#667085;--cx-border:#d8dde6;--color-surface-elevated-secondary:#fff;--color-border:#d8dde6';
+      document.body.style.background='#f7f7f7';document.body.style.color='#20242b';
+      document.querySelector('footer').style.justifyContent='flex-end';await Fixture.catalog(1);
+      await Fixture.busy(false);document.querySelector('.cxmp-menu')?.dispatchEvent(
+        new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await Fixture.settle();
+      document.querySelector('.cxmp-model-trigger').click();await Fixture.settle();
+      window.feedbackGeometry=()=>{const menu=document.querySelector('.cxmp-menu').getBoundingClientRect();
+        const trigger=document.querySelector('.cxmp-model-trigger').getBoundingClientRect();
+        return {menuRight:menu.right,triggerRight:trigger.right,height:menu.height}}`)
+      const baseline = await evaluate('feedbackGeometry()') as {
+        menuRight: number
+        triggerRight: number
+        height: number
+      }
+      expect(Math.abs(baseline.menuRight - baseline.triggerRight)).toBeLessThan(1)
+      await run(`document.querySelector('.cxmp-model-label').textContent='A much longer model name';
+      document.querySelector('.cxmp-effort-label').textContent='Extra high reasoning';
+      await new Promise(resolve=>setTimeout(resolve,80))`)
+      const longLabel = await evaluate('feedbackGeometry()') as typeof baseline
+      expect(Math.abs(longLabel.menuRight - baseline.menuRight)).toBeLessThan(1)
+      expect(Math.abs(longLabel.menuRight - longLabel.triggerRight)).toBeLessThan(1)
+      await run(`document.querySelector('.cxmp-model-disclosure').click();
+      await new Promise(resolve=>setTimeout(resolve,240))`)
+      const expanded = await evaluate('feedbackGeometry()') as typeof baseline
+      expect(expanded.height).toBeGreaterThan(baseline.height)
+      expect(Math.abs(expanded.menuRight - baseline.menuRight)).toBeLessThan(1)
+      await run(`const provider=document.querySelector('.cxmp-provider-trigger');
+      provider.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));provider.click();await Fixture.settle()`)
+      expect(await evaluate('document.querySelector(".cxmp-menu .cxmp-choice[data-provider-id]")!==null')).toBe(true)
+      await run(`const model=document.querySelector('.cxmp-model-trigger');
+      model.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));model.click();await Fixture.settle()`)
+      expect(await evaluate('document.querySelector(".cxmp-menu .cxmp-model-controls")!==null')).toBe(true)
+      await run(`await Fixture.reasoning('minimal',['minimal','low','medium','high','xhigh']);
+      window.particleState=()=>{const slider=document.querySelector('.cxmp-reasoning');
+        return {enabled:slider.dataset.particles==='true',flowing:slider.dataset.flowing==='true',
+          moving:getComputedStyle(slider.querySelector('.cxmp-reasoning-particles')).opacity,
+          still:getComputedStyle(slider.querySelector('.cxmp-reasoning-still-particles')).opacity,
+          marks:slider.querySelectorAll('.cxmp-reasoning-marks>span').length}};
+      await new Promise(resolve=>setTimeout(resolve,350))`)
+      expect(await evaluate('particleState()'))
+        .toEqual({ enabled: false, flowing: false, moving: '0', still: '0', marks: 5 })
+      await run(`await Fixture.reasoning('medium',['minimal','low','medium','high','xhigh']);
+      await new Promise(resolve=>setTimeout(resolve,350))`)
+      expect(await evaluate('particleState()'))
+        .toEqual({ enabled: false, flowing: false, moving: '0', still: '0', marks: 5 })
+      await run(`await Fixture.reasoning('high',['minimal','low','medium','high','xhigh']);
+      await new Promise(resolve=>setTimeout(resolve,350))`)
+      expect(await evaluate('particleState()'))
+        .toEqual({ enabled: true, flowing: true, moving: '1', still: '0', marks: 5 })
+      if (process.env.MODEL_SELECTOR_SCREENSHOT) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+        await writeFile(
+          `${process.env.MODEL_SELECTOR_SCREENSHOT}-particles-high.png`,
+          Buffer.from(screenshot.data as string, 'base64'),
+        )
+      }
+      await run(`await Fixture.reasoning('minimal',['minimal','low','medium','high','xhigh']);
+      await Fixture.fastAvailable();document.querySelector('.cxmp-fast-toggle').click();
+      await new Promise(resolve=>setTimeout(resolve,350))`)
+      expect(await evaluate('particleState()'))
+        .toEqual({ enabled: true, flowing: true, moving: '1', still: '0', marks: 5 })
+      expect(
+        await evaluate(`(() => {const button=document.querySelector('.cxmp-fast-trigger');
+        const style=getComputedStyle(button),rect=button.getBoundingClientRect();
+        return {pressed:button.getAttribute('aria-pressed'),radius:style.borderRadius,
+          width:rect.width,height:rect.height,color:style.color}})()`),
+      )
+        .toEqual({ pressed: 'true', radius: '50%', width: 28, height: 28, color: 'rgb(170, 150, 232)' })
+      if (process.env.MODEL_SELECTOR_SCREENSHOT) {
+        const screenshot = await cdp.send('Page.captureScreenshot', { format: 'png' })
+        await writeFile(
+          `${process.env.MODEL_SELECTOR_SCREENSHOT}-feedback.png`,
+          Buffer.from(screenshot.data as string, 'base64'),
+        )
+      }
+      await run(`document.documentElement.dataset.theme='dark';
+      document.documentElement.style.colorScheme='dark';await Fixture.settle()`)
+      expect(await evaluate('getComputedStyle(document.querySelector(".cxmp-fast-trigger")).color'))
+        .toBe('rgb(155, 135, 220)')
+      await run(`document.documentElement.dataset.theme='light';
+      document.documentElement.style.colorScheme='light';await Fixture.settle()`)
+      await run(`const fast=document.querySelector('.cxmp-fast-trigger');
+      fast.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));fast.click();await Fixture.settle()`)
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger")===null')).toBe(true)
+      expect(await evaluate('document.querySelector(".cxmp-menu")!==null')).toBe(true)
+      await run(`Fixture.delayReasoning(350);
+      const slider=document.querySelector('.cxmp-reasoning input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'4');
+      slider.dispatchEvent(new Event('input',{bubbles:true}));
+      slider.dispatchEvent(new KeyboardEvent('keyup',{key:'End',bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,30))`)
+      expect(await evaluate('document.querySelector(".cxmp-fast-toggle").disabled')).toBe(false)
+      await run(`document.querySelector('.cxmp-fast-toggle').click();
+      await new Promise(resolve=>setTimeout(resolve,30))`)
+      expect(await evaluate('document.querySelector(".cxmp-fast-toggle").getAttribute("aria-busy")'))
+        .toBe('true')
+      await run('await new Promise(resolve=>setTimeout(resolve,450))')
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger")?.getAttribute("aria-pressed")'))
+        .toBe('true')
+      expect(await evaluate('Fixture.fastCallsWhileBusy()')).toBe(0)
+      expect(await evaluate('Fixture.fastCallCount()')).toBe(3)
+      await run(`Fixture.delayReasoning(350);
+      const slider=document.querySelector('.cxmp-reasoning input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(slider,'3');
+      slider.dispatchEvent(new Event('input',{bubbles:true}));
+      slider.dispatchEvent(new KeyboardEvent('keyup',{key:'Home',bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,30));
+      document.querySelector('.cxmp-fast-trigger').click();await Fixture.switchThread('other-thread')`)
+      expect(await evaluate('Fixture.fastCallCount()')).toBe(3)
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger")?.getAttribute("aria-busy")'))
+        .toBe('false')
+      await run(`await Fixture.busy(true)`)
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger").disabled')).toBe(true)
+      await run(`await Fixture.busy(false);Fixture.delayFast(700);
+      document.querySelector('.cxmp-fast-trigger').click();await new Promise(resolve=>setTimeout(resolve,400))`)
+      expect(await evaluate('Fixture.fastCallCount()')).toBe(4)
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger")?.getAttribute("aria-busy")'))
+        .toBe('true')
+      await run('await new Promise(resolve=>setTimeout(resolve,350))')
+      expect(await evaluate('document.querySelector(".cxmp-fast-trigger")===null')).toBe(true)
+      await run(`const outside=document.getElementById('voice');
+      outside.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));outside.click();await Fixture.settle()`)
+      expect(await evaluate('document.querySelector(".cxmp-menu")===null')).toBe(true)
       await evaluate('disposeFixture()')
       expect(await evaluate('document.querySelectorAll(".cxmp-menu,[data-cordisx-model-provider-selector]").length'))
         .toBe(0)

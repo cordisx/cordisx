@@ -179,34 +179,39 @@ describe('ProviderReasoningSlider', () => {
     expect(commit).toHaveBeenCalledWith('xhigh')
   })
 
-  it('uses Fast only for animated flow and retains the static particle layer', async () => {
-    const { reasoning } = renderSlider({ efforts: ['low', 'high'], value: 'low', fast: false })
-    expect(reasoning.hasAttribute('data-hot')).toBe(false)
-    expect(reasoning.hasAttribute('data-peak')).toBe(false)
-    expect(reasoning.hasAttribute('data-flowing')).toBe(false)
-    expect(reasoning.querySelectorAll('.cxmp-reasoning-still-particles > span')).toHaveLength(8)
-
-    renderSlider({ efforts: ['low', 'high'], value: 'low', fast: true })
-    expect(reasoning.dataset.hot).toBe('true')
+  it('shows decorative particles only for the last two supported efforts or Fast', async () => {
+    const efforts = ['minimal', 'low', 'medium', 'high', 'xhigh']
+    const { reasoning } = renderSlider({ efforts, value: 'minimal' })
+    const marks = reasoning.querySelectorAll('.cxmp-reasoning-marks > span')
+    expect(marks).toHaveLength(5)
+    for (const value of ['minimal', 'low', 'medium']) {
+      renderSlider({ efforts, value })
+      expect(reasoning.hasAttribute('data-particles')).toBe(false)
+      expect(reasoning.hasAttribute('data-flowing')).toBe(false)
+    }
+    for (const value of ['high', 'xhigh']) {
+      renderSlider({ efforts, value })
+      expect(reasoning.dataset.particles).toBe('true')
+      expect(reasoning.dataset.flowing).toBe('true')
+    }
+    renderSlider({ efforts, value: 'minimal', fast: true })
+    expect(reasoning.dataset.particles).toBe('true')
     expect(reasoning.dataset.flowing).toBe('true')
-    expect(reasoning.hasAttribute('data-peak')).toBe(false)
-    expect(reasoning.querySelector('.cxmp-reasoning-particles')).not.toBeNull()
-
-    renderSlider({ efforts: ['low', 'high'], value: 'high', fast: false })
-    expect(reasoning.hasAttribute('data-hot')).toBe(false)
-    expect(reasoning.dataset.peak).toBe('true')
-    expect(reasoning.hasAttribute('data-flowing')).toBe(false)
+    expect(reasoning.querySelectorAll('.cxmp-reasoning-marks > span')).toHaveLength(5)
+    renderSlider({ efforts, value: 'xhigh', pending: true })
+    expect(reasoning.hasAttribute('data-particles')).toBe(false)
+    renderSlider({ efforts, value: 'unknown' })
+    expect(reasoning.hasAttribute('data-particles')).toBe(false)
 
     await act(async () => root?.unmount())
     root = undefined
     reducedMotion = true
-    renderSlider({ efforts: ['low', 'high'], value: 'high', fast: true })
-    const reduced = document.querySelector<HTMLLabelElement>('.cxmp-reasoning')!
-    expect(reduced.dataset.hot).toBe('true')
-    expect(reduced.dataset.peak).toBe('true')
+    renderSlider({ efforts, value: 'xhigh', fast: true })
+    const reduced = document.querySelector<HTMLElement>('.cxmp-reasoning')!
+    expect(reduced.dataset.particles).toBe('true')
     expect(reduced.hasAttribute('data-flowing')).toBe(false)
     expect(reduced.querySelectorAll('.cxmp-reasoning-particle')).toHaveLength(0)
-    expect(reduced.querySelectorAll('.cxmp-reasoning-still-particles > span')).toHaveLength(8)
+    expect(reduced.querySelectorAll('.cxmp-reasoning-marks > span')).toHaveLength(5)
   })
 
   it('stops the particle flow while the page is hidden', async () => {

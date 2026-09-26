@@ -13,6 +13,9 @@ let catalogReads = 0
 let focusReturns = 0
 let snapshotReads = 0
 let labelPreview = false
+let reasoningDelay = 0
+let fastDelay = 0
+const fastBusyHistory: boolean[] = []
 const snapshotListeners = new Set<() => void>()
 let state = Object.freeze({
   available: true,
@@ -150,11 +153,29 @@ export async function start() {
         return 'accepted'
       },
       selectReasoningEffort: async (reasoningEffort: string) => {
-        state = Object.freeze({ ...state, reasoningEffort })
+        if (reasoningDelay > 0) {
+          const delay = reasoningDelay
+          reasoningDelay = 0
+          state = Object.freeze({ ...state, busy: true })
+          for (const listener of snapshotListeners) listener()
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+        state = Object.freeze({ ...state, busy: false, reasoningEffort })
         for (const listener of snapshotListeners) listener()
         return 'accepted'
       },
-      selectFastMode: async () => 'accepted',
+      selectFastMode: async (enabled: boolean) => {
+        fastBusyHistory.push(state.busy)
+        if (state.busy) return 'busy'
+        if (fastDelay > 0) {
+          const delay = fastDelay
+          fastDelay = 0
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+        state = Object.freeze({ ...state, serviceTier: enabled ? 'priority' as const : null })
+        for (const listener of snapshotListeners) listener()
+        return 'accepted'
+      },
       dispose: () => {},
     }) as unknown as CodexDesktopNativeModelProviderTransport
   const native = createRoot(document.getElementById('app')!)
@@ -226,4 +247,39 @@ export async function busy(value: boolean) {
   state = Object.freeze({ ...state, busy: value })
   for (const listener of snapshotListeners) listener()
   await settle()
+}
+
+export async function fastAvailable() {
+  state = Object.freeze({
+    ...state,
+    nativeModels: [{ id: 'model', label: 'Fixture Model', disabled: false, supportsFastMode: true }],
+  })
+  for (const listener of snapshotListeners) listener()
+  await settle()
+}
+
+export async function reasoning(value: string, efforts: readonly string[]) {
+  state = Object.freeze({ ...state, reasoningEffort: value, reasoningEfforts: [...efforts] })
+  for (const listener of snapshotListeners) listener()
+  await settle()
+}
+
+export function delayReasoning(ms: number) {
+  reasoningDelay = ms
+}
+export function fastCallsWhileBusy() {
+  return fastBusyHistory.filter(Boolean).length
+}
+
+export function fastCallCount() {
+  return fastBusyHistory.length
+}
+export async function switchThread(threadId: string) {
+  state = Object.freeze({ ...state, threadId, busy: false })
+  for (const listener of snapshotListeners) listener()
+  await settle()
+}
+
+export function delayFast(ms: number) {
+  fastDelay = ms
 }
