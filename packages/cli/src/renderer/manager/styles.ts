@@ -1,3 +1,4 @@
+import searchCss from '../host-ui/search.css'
 import { PLUGIN_CONSOLE_REACT_STYLES } from './components/PluginConsolePanel.js'
 import { HOST_FORM_REACT_STYLES } from '../host-ui/HostForm.js'
 import { HOST_COLLECTION_STYLES } from '../host-collection.js'
@@ -9,7 +10,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
   ".cxr-root[data-cordisx-app-theme='dark']",
 )
 
-export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${String.raw`
+export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${searchCss}\n${String.raw`
   .cxr-root { --cx-page-inset: 22px; position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
@@ -78,13 +79,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
   .cxr-page-head h3 { margin: 0; font-size: 16px; }
   .cxr-page-head p { margin: 4px 0 0; color: var(--cx-muted, #9ca5b5); font-size: 11px; }
-  .cxh-search-field { display: flex; min-width: 0; align-items: center; }
-  .cxh-search-icon { display: grid; width: 18px; height: 18px; flex: none; place-items: center; color: var(--cx-muted, #9ca5b5); }
-  .cxh-search-icon svg { display: block; width: 16px; height: 16px; }
-  .cxh-search-field input { min-width: 0; border: 0; outline: 0; padding: 0; background: transparent; color: inherit; font: inherit; }
-  .cxr-search { width: 100%; height: 34px; gap: 8px; box-sizing: border-box; border: 1px solid var(--cx-border, #353a42); border-radius: 8px; padding: 0 10px; background: var(--cx-surface-raised,#20242b); color: inherit; }
-  .cxr-search:focus-within { border-color: var(--cx-primary, #2f7cff); outline: 2px solid var(--cx-focus, rgba(47,124,255,.26)); outline-offset: 1px; }
-  .cxr-search input { width: 100%; height: 32px; }
   .cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); align-items: stretch; gap: 7px; margin-top: 12px; }
   .cxr-card { display: flex; min-width: 0; align-items: center; gap: 11px; width: 100%; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; padding: 11px 12px; background: var(--cx-surface-raised,#20242b); color: inherit; text-align: left; font: inherit; }
   button.cxr-card { cursor: pointer; }
@@ -152,15 +146,8 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   @media (hover: none), (pointer: coarse) {
     .cxr-source-actions, .cxr-marketplace-actions { opacity: 1; pointer-events: auto; }
   }
-  .cxr-marketplace-tools { display: flex; min-width: 0; align-items: center; overflow: hidden; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; background: var(--cx-surface-raised,#20242b); }
-  .cxr-plugins-toolbar { display: flex; width: 100%; min-width: 0; align-items: center; }
-  .cxr-plugins-toolbar .cxr-search { min-width: 180px; flex: 1; }
   .cxr-plugins-results { grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); }
   .cxr-plugins-results .cxr-plugin-primary { min-width: 0; }
-  .cxr-marketplace-search { min-width: 0; flex: 1; }
-  .cxr-marketplace-search .t-input { border: 0; border-radius: 0; box-shadow: none; }
-  .cxr-marketplace-tool-actions { display: flex; flex: none; align-items: center; gap: 1px; border-left: 1px solid var(--cx-border,#353a42); padding: 2px; }
-  .cxr-marketplace-tool-actions .t-button { width: 30px; height: 30px; }
   .cxr-marketplace-filter[aria-pressed="true"] { background: var(--cx-pressed,rgba(255,255,255,.12)); color: var(--cx-primary,#7da2ff); }
   .cxr-marketplace-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,280px),1fr)); gap: 9px; margin-top: 12px; }
   .cxr-marketplace-card { position: relative; display: flex; min-width: 0; min-height: 96px; align-items: center; border: 1px solid var(--cx-border); border-radius: 11px; background: var(--cx-surface-raised); color: inherit; }
@@ -295,12 +282,9 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-manager-collection-views button { border: 0; border-radius: 7px; padding: 5px 10px; background: transparent; color: var(--cx-muted,#9ca5b5); font: inherit; cursor: pointer; }
   .cxr-manager-collection-views button[aria-selected="true"] { background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#edf0f4); box-shadow: 0 1px 4px rgb(0 0 0 / 18%); }
   .cxr-manager-collection-views button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 1px; }
-  .cxr-manager-collection-search { display: grid; width: 100%; min-width: 0; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 7px; margin: 0; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; padding: 7px 9px; background: var(--cx-surface-raised,#20242b); color: var(--cx-muted,#9ca5b5); }
-  .cxr-manager-collection-search:focus-within { border-color: var(--cx-focus,#8aa8ff); box-shadow: 0 0 0 1px var(--cx-focus,#8aa8ff); }
-  .cxr-manager-collection-search input { min-width: 0; border: 0; outline: 0; padding: 0; background: transparent; color: var(--cx-text,#edf0f4); font: inherit; }
-  .cxr-manager-collection-search button, .cxr-manager-collection-action, .cxr-manager-collection-feedback button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 7px; padding: 0; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: pointer; }
-  .cxr-manager-collection-search button:hover, .cxr-manager-collection-action:hover:not(:disabled), .cxr-manager-collection-feedback button:hover { background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-text,#edf0f4); }
-  .cxr-manager-collection-search button:focus-visible, .cxr-manager-collection-action:focus-visible, .cxr-manager-collection-feedback button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 1px; }
+  .cxr-manager-collection-action, .cxr-manager-collection-feedback button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 7px; padding: 0; background: transparent; color: var(--cx-muted,#9ca5b5); cursor: pointer; }
+  .cxr-manager-collection-action:hover:not(:disabled), .cxr-manager-collection-feedback button:hover { background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-text,#edf0f4); }
+  .cxr-manager-collection-action:focus-visible, .cxr-manager-collection-feedback button:focus-visible { outline: 2px solid var(--cx-focus,#8aa8ff); outline-offset: 1px; }
   .cxr-manager-collection-panel { width: 100%; min-width: 0; margin: 0; }
   .cxr-manager-collection-list { display: grid; width: 100%; min-width: 0; gap: 0; margin: 0; border: 1px solid var(--cx-border,#353a42); border-radius: 11px; padding: 0; background: var(--cx-surface-raised,#20242b); }
   .cxr-manager-collection-row { position: relative; display: grid; min-width: 0; grid-template-columns: minmax(0,1fr); align-items: center; border: 0; border-bottom: 1px solid var(--cx-border,#353a42); border-radius: 0; background: transparent; }
@@ -358,7 +342,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
     .cxr-root { --cx-page-inset: 12px; }
     .cxr-content { padding: 12px; }
     .cxr-grid { grid-template-columns: 1fr; }
-    .cxr-marketplace-tool-actions .t-button { width: 28px; height: 28px; }
   }
   ${PLUGIN_CONSOLE_REACT_STYLES}
   ${HOST_FORM_REACT_STYLES}

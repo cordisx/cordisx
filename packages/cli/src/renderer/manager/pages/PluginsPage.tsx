@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy, productLocale } from '../../ui-copy.js'
 import { PluginIdentityIcon } from '../components/PluginIdentityIcon.js'
@@ -52,19 +52,13 @@ export function PluginsPage(
       aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-label')}
       data-unified-plugins-page="true"
     >
-      <div
-        className="cxr-plugins-toolbar"
-        role="search"
-        aria-label={zh ? '搜索已安装插件' : 'Search installed plugins'}
-      >
-        <SearchField
-          className="cxr-search"
-          value={query}
-          aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-search-label')}
-          placeholder={managerCopy(snapshot.localization.locale, 'plugins.collection-search-placeholder')}
-          onChange={setQuery}
-        />
-      </div>
+      <SearchToolbar
+        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        value={query}
+        aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-search-label')}
+        placeholder={managerCopy(snapshot.localization.locale, 'plugins.collection-search-placeholder')}
+        onChange={setQuery}
+      />
 
       <div className="cxr-list cxr-plugins-results" role="list" data-installed-plugin-results="true">
         {plugins.map(plugin => {

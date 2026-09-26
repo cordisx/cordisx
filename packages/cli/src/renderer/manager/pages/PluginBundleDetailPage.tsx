@@ -6,7 +6,7 @@ import type {
 } from '../../../plugin-bundle-contracts.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { productLocale } from '../../ui-copy.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import { MarkdownDocument } from '../components/MarkdownDocument.js'
@@ -239,8 +239,8 @@ export function PluginBundleDetailPage(
       )}
       {route.page === 'members' && (
         <div role="tabpanel" aria-label={zh ? '成员' : 'Members'}>
-          <SearchField
-            className="cxr-search"
+          <SearchToolbar
+            clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
             value={query}
             aria-label={zh ? '搜索成员' : 'Search members'}
             placeholder={zh ? '搜索成员' : 'Search members'}

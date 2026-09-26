@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 
 export function RoutesPage(
   { snapshot, router }: { readonly snapshot: ManagerSnapshot; readonly router: ManagerRouter },
@@ -21,8 +21,8 @@ export function RoutesPage(
   )
   return (
     <section className="cxr-page">
-      <SearchField
-        className="cxr-search"
+      <SearchToolbar
+        clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
         value={query}
         aria-label={managerCopy(snapshot.localization.locale, 'routes.search-label')}
         placeholder={managerCopy(snapshot.localization.locale, 'routes.search-placeholder')}

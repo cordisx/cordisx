@@ -5,7 +5,7 @@ import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../..
 import { managerCopy } from '../../ui-copy.js'
 import { HostForm } from '../../host-ui/HostForm.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { PluginConsolePanel } from '../components/PluginConsolePanel.js'
 import { MarkdownDocument } from '../components/MarkdownDocument.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
@@ -340,8 +340,8 @@ export function PluginDetailPage(
       )}
       {route.page === 'extension-points' && (
         <>
-          <SearchField
-            className="cxr-search"
+          <SearchToolbar
+            clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
             value={query}
             aria-label={managerCopy(snapshot.localization.locale, 'plugins.search-extension-points')}
             placeholder={managerCopy(snapshot.localization.locale, 'plugins.search-extension-points-placeholder')}
@@ -377,8 +377,8 @@ export function PluginDetailPage(
       )}
       {route.page === 'routes' && (
         <>
-          <SearchField
-            className="cxr-search"
+          <SearchToolbar
+            clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
             value={query}
             aria-label={managerCopy(snapshot.localization.locale, 'plugins.search-routes')}
             placeholder={managerCopy(snapshot.localization.locale, 'plugins.search-routes-placeholder')}

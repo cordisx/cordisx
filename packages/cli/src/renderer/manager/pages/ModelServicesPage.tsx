@@ -5,7 +5,7 @@ import { ModelBrandIcon } from '../../host-ui/ModelBrandIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { HostMenuSurface } from '../../host-ui/HostMenu.js'
-import { SearchField } from '../../host-ui/SearchField.js'
+import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { ProviderAction } from '../../model-provider-actions.js'
 import { modelProviderCopy } from '../../model-provider-copy.js'
 import css from '../../model-providers.css?inline'
@@ -65,43 +65,46 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
   return (
     <section className="cxr-page cxmp-management" data-catalog-management={managementState}>
       <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
-      <div className="cxmp-toolbar" role="search" aria-label={t('catalog.tools')}>
-        <SearchField
-          className="cxr-search"
-          value={query}
-          onChange={setQuery}
-          aria-label={copy.search}
-          placeholder={copy.search}
-        />
-        <CatalogFilterMenu
-          label={t('catalog.filter')}
-          filters={filters}
-          disabled={!client}
-          copy={value => t(`catalog.${value}`)}
-          onChange={setFilters}
-        />
-        {catalog.canCreateConnection && client
-          ? (
+      <SearchToolbar
+        toolbarLabel={t('catalog.tools')}
+        clearLabel={locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
+        value={query}
+        onChange={setQuery}
+        aria-label={copy.search}
+        placeholder={copy.search}
+        actions={
+          <>
+            <CatalogFilterMenu
+              label={t('catalog.filter')}
+              filters={filters}
+              disabled={!client}
+              copy={value => t(`catalog.${value}`)}
+              onChange={setFilters}
+            />
+            {catalog.canCreateConnection && client
+              ? (
+                <IconButton
+                  tag="button"
+                  icon="add"
+                  label={t('catalog.addConnection')}
+                  disabled={!catalog.connected}
+                  onClick={() => onCreate?.()}
+                />
+              )
+              : null}
             <IconButton
               tag="button"
-              icon="add"
-              label={t('catalog.addConnection')}
-              disabled={!catalog.connected}
-              onClick={() => onCreate?.()}
+              icon="reload-plugin"
+              label={copy.refresh}
+              disabled={!registry || state.loading}
+              onClick={() => {
+                void registry?.refresh()
+                void client?.refresh()
+              }}
             />
-          )
-          : null}
-        <IconButton
-          tag="button"
-          icon="reload-plugin"
-          label={copy.refresh}
-          disabled={!registry || state.loading}
-          onClick={() => {
-            void registry?.refresh()
-            void client?.refresh()
-          }}
-        />
-      </div>
+          </>
+        }
+      />
       <div className="cxmp-results" aria-busy={state.loading}>
         {state.entries.length === 0 ? null : (
           <section className="cxms-actions" aria-label={copy.providers}>
