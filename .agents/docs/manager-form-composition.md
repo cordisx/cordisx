@@ -71,12 +71,11 @@ validity including initial/external values. Supply footer actions through the
 owning public surface; disable save when invalid/busy and invoke the actual
 business writer, then reload authoritative state.
 
-### Host page integration availability
+### Host page integration
 
-The shared `HostFormPage`/`HostSchemaFormPage` fill-layout integration and model
-connection child route are proposed in [Host PR #481](https://github.com/cordisx/cordisx/pull/481).
-Until that owner change is formally merged, this is a candidate code map, not a
-formal dependency. Verify canonical main before reuse. The candidate contains:
+Host business editors use the shared `HostFormPage`/`HostSchemaFormPage`
+fill-layout integration. The model connection child route is a production
+composition example. Read these sources at the checkout's formal baseline:
 
 - `packages/cli/src/renderer/host-ui/HostFormPages.tsx`: page scroll/footer shell;
 - `packages/cli/src/renderer/host-ui/SchemaForm.tsx`: internal `HostSchemaFormPage`;
@@ -86,7 +85,7 @@ formal dependency. Verify canonical main before reuse. The candidate contains:
   and `tests/manager-connection.browser.test.ts`: nested drafts, hidden action
   isolation and real visible-control geometry.
 
-Once available on canonical main, Host business pages use this internal shape:
+Host business pages use this internal shape:
 
 ```tsx
 <HostSchemaFormPage
