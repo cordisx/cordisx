@@ -4,6 +4,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
@@ -118,17 +119,18 @@ describe('Agent Trace built README projection', () => {
       value: () => rect(0, 0, 1280, 900),
     })
     Object.defineProperty(dom.window.document.querySelector('main'), 'getBoundingClientRect', {
-      value: () => rect(248, 46, 1032, 854),
+      value: () => rect(290, 44, 1000, 800),
     })
     Object.defineProperty(dom.window.document.getElementById('native-thread'), 'getBoundingClientRect', {
-      value: () => rect(248, 92, 1032, 808),
+      value: () => rect(290, 92, 1000, 752),
     })
     Object.defineProperty(
       dom.window.document.querySelector('[data-testid="app-shell-header-context-menu-surface"]'),
       'getBoundingClientRect',
-      { value: () => rect(248, 46, 1032, 46) },
+      { value: () => rect(290, 44, 1000, 46) },
     )
 
+    installNativeManagerShell(dom)
     dom.window.eval(bundle)
     for (
       let attempt = 0;

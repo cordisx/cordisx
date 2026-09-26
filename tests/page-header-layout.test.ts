@@ -7,6 +7,29 @@ function rect(x: number, width: number, height = 46): DOMRect {
   return { x, y: 0, left: x, top: 0, width, height, right: x + width, bottom: height, toJSON: () => ({}) } as DOMRect
 }
 describe('native page header layout projection', () => {
+  it('prefers the session header when the 26.924 titlebar shares its test id', () => {
+    const dom = new JSDOM(`<body>
+      <header data-app-shell-main-titlebar data-testid="app-shell-header-context-menu-surface" style="padding-left:8px"></header>
+      <header data-testid="app-shell-header-context-menu-surface" style="padding-left:20px"></header>
+      <main><section></section></main>
+    </body>`)
+    const document = dom.window.document
+    const main = document.querySelector('main')!
+    const layer = document.querySelector('section')!
+    main.getBoundingClientRect = () => rect(290, 1000)
+    for (const header of document.querySelectorAll<HTMLElement>('[data-testid]')) {
+      header.getBoundingClientRect = () => rect(290, 1000)
+    }
+
+    projectNativePageHeaderLayout(document, main, layer)
+    expect(layer.style.getPropertyValue('--cordisx-page-chrome-leading-inset')).toBe('20px')
+
+    document.querySelector('[data-testid]:not([data-app-shell-main-titlebar])')?.remove()
+    projectNativePageHeaderLayout(document, main, layer)
+    expect(layer.style.getPropertyValue('--cordisx-page-chrome-leading-inset')).toBe('8px')
+    dom.window.close()
+  })
+
   it('aligns against fractional main origin and native typography while the title group is empty', () => {
     const dom = new JSDOM(`<body>
       <header data-app-shell-application-menu-bar><button data-app-shell-sidebar-trigger><svg></svg></button></header>

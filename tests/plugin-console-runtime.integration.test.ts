@@ -6,6 +6,7 @@ import type { CordisXPluginConsolePageV1 } from '../packages/cli/src/contracts.j
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 
 interface TestRuntime {
   pluginConsole(id: string): CordisXPluginConsolePageV1
@@ -107,6 +108,7 @@ describe('plugin DevTools Console runtime', () => {
       configurable: true,
       get: () => dom.window.document.body,
     })
+    installNativeManagerShell(dom)
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', { configurable: true, value: () => {} })
     dom.window.eval(bundle)
     await waitForState(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'renderer readiness')

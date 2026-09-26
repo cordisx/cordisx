@@ -9,6 +9,7 @@ import WebSocket from 'ws'
 import { expect, it, vi } from 'vitest'
 import { startNativeViteServer } from '../packages/cli/src/launcher/vite-development.js'
 import { buildRendererComposition } from '../packages/cli/src/cli/run.js'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 
 it(
   'connects the generated Vite callback to the normal Manager reload control and replaces its owning fiber',
@@ -69,6 +70,7 @@ it(
       let disposals = 0
       const window = dom.window as any
       Object.defineProperty(window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+      installNativeManagerShell(dom)
       window.structuredClone = structuredClone
       window.TextEncoder = TextEncoder
       window.TextDecoder = TextDecoder

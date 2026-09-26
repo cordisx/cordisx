@@ -6,8 +6,9 @@ export function projectNativePageHeaderLayout(document: Document, anchor: HTMLEl
     ...document.querySelectorAll<HTMLElement>('[data-testid="app-shell-header-context-menu-surface"]'),
   ]
     .filter(element => element.getBoundingClientRect().width > 0 && !element.closest('[data-cordisx-page-outlet]'))
-  if (candidates.length !== 1) return
-  const header = candidates[0]!
+  const pageHeaders = candidates.filter(element => !element.hasAttribute('data-app-shell-main-titlebar'))
+  const header = pageHeaders.length === 1 ? pageHeaders[0] : candidates.length === 1 ? candidates[0] : undefined
+  if (header === undefined) return
   const box = header.getBoundingClientRect()
   const style = view.getComputedStyle(header)
   // The native title group persists while a plugin route has no selected thread.

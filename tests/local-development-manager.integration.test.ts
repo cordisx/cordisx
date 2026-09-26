@@ -9,6 +9,7 @@ import type { CordisXLocalDevelopmentSnapshot } from '../packages/cli/src/local-
 import type { CordisXPluginModule } from '../packages/cli/src/contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 
 interface DevelopmentRuntimeHandle {
   snapshot(): {
@@ -55,6 +56,7 @@ describe('local development Manager projection', () => {
       },
     )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    installNativeManagerShell(dom)
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: false, status: 503, text: async () => '' }),
     })

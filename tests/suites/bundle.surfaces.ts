@@ -6,6 +6,7 @@ import { expect } from 'vitest'
 import { buildRendererBundle } from '../../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from '../helpers/dom-permission.js'
+import { installNativeManagerShell } from '../fixtures/native-manager-shell.js'
 import { RuntimeHandle, settle } from './bundle.fixtures.js'
 
 export async function bootSurfaces() {
@@ -194,6 +195,7 @@ export async function bootSurfaces() {
     }) as DOMRect
   const getBoundingClientRect = dom.window.HTMLElement.prototype.getBoundingClientRect
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+    configurable: true,
     value(this: HTMLElement) {
       if (
         this.dataset.cordisxSurfaceHost === 'toolbar.before' || this.dataset.cordisxSurfaceHost === 'toolbar.after'
@@ -282,6 +284,7 @@ export async function bootSurfaces() {
     },
   )
   dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
+  installNativeManagerShell(dom)
   dom.window.eval(bundle)
   for (
     let attempt = 0;
