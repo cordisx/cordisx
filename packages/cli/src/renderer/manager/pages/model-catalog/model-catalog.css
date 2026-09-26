@@ -393,12 +393,6 @@
   justify-self: start;
 }
 
-.cxmc-connection-page {
-  display: grid;
-  min-width: 0;
-  gap: 16px;
-}
-
 .cxmc-conflict ul,
 .cxmc-confirm ul {
   max-height: 160px;

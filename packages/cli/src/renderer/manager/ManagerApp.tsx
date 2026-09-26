@@ -588,7 +588,10 @@ export function ManagerApp(
                     onClick={() => setOpen(false)}
                   />
                 </header>
-                <div className="cxr-content">
+                <div
+                  className="cxr-content"
+                  data-content-layout={router.route.kind === 'model-connection-create' ? 'form' : 'document'}
+                >
                   <MarketplaceInstallerProvider installer={installer}>
                     <Content
                       model={model}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { SchemaForm, schemaFormSnapshot } from '../../../host-ui/SchemaForm.js'
+import { HostSchemaFormPage, schemaFormSnapshot } from '../../../host-ui/SchemaForm.js'
 import { type ConnectionDraft, connectionSchema } from './connection-schema.js'
 import { Button } from 'tdesign-react'
 import type {
@@ -116,58 +116,63 @@ export function ConnectionEditor(
   }
   return (
     <section
-      className={standalone ? 'cxmc-connection-page' : 'cxmc-editor'}
+      className={standalone ? 'cxf-form-surface' : 'cxmc-editor'}
       aria-label={t(view ? 'catalog.editConnection' : 'catalog.addConnection')}
     >
       {standalone ? null : <h3>{t(view ? 'catalog.editConnection' : 'catalog.addConnection')}</h3>}
-      <SchemaForm
-        identity={view?.bindingRef ?? 'new-model-connection'}
-        schema={schema}
-        value={draft}
-        locale={locale}
-        disabled={busy || disabled}
-        onChange={({ value }) => {
-          const next = value as ConnectionDraft
-          setDraft({
-            ...next,
-            emptyConfirmed: JSON.stringify(next.models) !== JSON.stringify(models) ? false : next.emptyConfirmed,
-          })
+      <HostSchemaFormPage
+        form={{
+          identity: view?.bindingRef ?? 'new-model-connection',
+          schema,
+          value: draft,
+          locale,
+          disabled: busy || disabled,
+          onChange: ({ value }) => {
+            const next = value as ConnectionDraft
+            setDraft({
+              ...next,
+              emptyConfirmed: JSON.stringify(next.models) !== JSON.stringify(models) ? false : next.emptyConfirmed,
+            })
+          },
         }}
-      />
-      {!valid && (title !== '' || endpoint !== '') ? <p role="status">{t('catalog.connectionInvalid')}</p> : null}
-      {scopeChanged ? <p role="status">{t('catalog.scopeChanged')}</p> : changed
-        ? (
-          <div role="status">
-            <p>{t('catalog.conflict')}</p>
-            <code>{view?.connection?.endpoint}</code>
+        footer={
+          <div className="cxf-form-action-buttons cxmc-editor-actions">
+            <Button tag="button" variant="outline" disabled={busy} onClick={close}>{t('catalog.cancel')}</Button>
             <Button
               tag="button"
-              variant="outline"
-              onClick={() => {
-                setRevision(view?.revision)
-                setFailed(false)
-              }}
+              theme="primary"
+              loading={busy}
+              disabled={disabled || !valid || changed || scopeChanged
+                || source === 'manual' && modelIds.length === 0 && !emptyConfirmed}
+              onClick={() => void submit()}
             >
-              {t('catalog.reviewed')}
+              {t('catalog.save')}
             </Button>
           </div>
-        )
-        : failed
-        ? <p role="status">{t('catalog.failed')}</p>
-        : null}
-      <footer className="cxmc-editor-actions">
-        <Button tag="button" variant="outline" disabled={busy} onClick={close}>{t('catalog.cancel')}</Button>
-        <Button
-          tag="button"
-          theme="primary"
-          loading={busy}
-          disabled={disabled || !valid || changed || scopeChanged
-            || source === 'manual' && modelIds.length === 0 && !emptyConfirmed}
-          onClick={() => void submit()}
-        >
-          {t('catalog.save')}
-        </Button>
-      </footer>
+        }
+      >
+        {!valid && (title !== '' || endpoint !== '') ? <p role="status">{t('catalog.connectionInvalid')}</p> : null}
+        {scopeChanged ? <p role="status">{t('catalog.scopeChanged')}</p> : changed
+          ? (
+            <div role="status">
+              <p>{t('catalog.conflict')}</p>
+              <code>{view?.connection?.endpoint}</code>
+              <Button
+                tag="button"
+                variant="outline"
+                onClick={() => {
+                  setRevision(view?.revision)
+                  setFailed(false)
+                }}
+              >
+                {t('catalog.reviewed')}
+              </Button>
+            </div>
+          )
+          : failed
+          ? <p role="status">{t('catalog.failed')}</p>
+          : null}
+      </HostSchemaFormPage>
     </section>
   )
 }

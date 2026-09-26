@@ -8,6 +8,10 @@ import { HostManagerNavigationController } from '../../packages/cli/src/renderer
 import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.js'
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
 import { catalogFixture, catalogView } from '../helpers/catalog-management-fixture.js'
+import { formPageFields } from './form-page-schema.js'
+import { formPageSchema, formPageValue } from './form-page-schema.js'
+import { HostSchemaFormPage, SchemaForm } from '../../packages/cli/src/renderer/host-ui/SchemaForm.js'
+export { startConfigBinding } from './form-page-config-binding.js'
 
 const host = catalogFixture([])
 const registry = new ModelProviderRegistry(async () => [])
@@ -15,7 +19,17 @@ registry.management = host.client
 const navigation = new HostManagerNavigationController()
 const snapshot: ManagerSnapshot = {
   version: 'connection-browser-fixture',
-  plugins: [],
+  plugins: [
+    {
+      id: 'form-page-fixture',
+      source: 'fixture:form-pages',
+      name: 'Form pages fixture',
+      status: 'active',
+      inject: [],
+      config: {},
+      configuration: { fields: formPageFields(), revision: 1, writable: true },
+    } as ManagerSnapshot['plugins'][number],
+  ],
   registrations: [],
   commands: [],
   navigation: { routes: [], pages: [], outlets: [] },
@@ -33,7 +47,76 @@ const snapshot: ManagerSnapshot = {
     rawBridgeExposed: false,
   },
 }
-const model = { snapshot: () => snapshot, subscribe: () => () => {}, modelProviders: registry } as ManagerModel
+const pluginUpdates: unknown[] = []
+const model = {
+  snapshot: () => snapshot,
+  subscribe: () => () => {},
+  modelProviders: registry,
+  updatePluginConfig: async (...args: unknown[]) => {
+    pluginUpdates.push(args)
+  },
+} as ManagerModel
+export async function showPluginForm() {
+  navigation.openRoute({ kind: 'plugin', pluginId: 'form-page-fixture', page: 'config' })
+  await settle()
+}
+export function pluginWrites() {
+  return pluginUpdates
+}
+export async function openFormItem() {
+  const layer = document.querySelector('.cxf-form-page-layer:not([hidden])')
+    ?? document.querySelector('.cxf-form-page-root:not([hidden])')!
+  layer.querySelector<HTMLElement>(
+    '[data-config-path="items"] [data-array-action="add"],[data-config-path$=".children"] [data-array-action="add"]',
+  )!.click()
+  await settle()
+}
+export async function typeItemName(value: string) {
+  const input = document.querySelector<HTMLInputElement>(
+    '.cxf-form-page-layer:not([hidden]) [data-config-path$=".name"] input',
+  )!
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+}
+export async function finishFormItem(confirm: boolean) {
+  document.querySelector<HTMLElement>(
+    `.cxf-form-page-layer:not([hidden]) .cxf-form-action-buttons button:${confirm ? 'last' : 'first'}-child`,
+  )!.click()
+  await settle()
+}
+export async function startStandalone() {
+  const container = document.createElement('div')
+  container.style.cssText = 'display:flex;height:400px;width:min(500px,100vw);flex-direction:column'
+  document.body.append(container)
+  const standalone = createRoot(container)
+  function Surface() {
+    const [value, setValue] = React.useState<Record<string, unknown>>(formPageValue)
+    return (
+      <HostSchemaFormPage
+        form={{ identity: 'standalone', schema: formPageSchema, value, onChange: next => setValue(next.value) }}
+        footer={<button>Root action</button>}
+      />
+    )
+  }
+  standalone.render(<Surface />)
+  await settle()
+  return () => {
+    standalone.unmount()
+    container.remove()
+  }
+}
+export async function startEmbedded() {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const embedded = createRoot(container)
+  embedded.render(<SchemaForm identity="embedded" schema={formPageSchema} value={formPageValue} onChange={() => {}} />)
+  await settle()
+  return () => {
+    embedded.unmount()
+    container.remove()
+  }
+}
 export async function start() {
   const seat = document.createElement('span')
   document.body.append(seat)

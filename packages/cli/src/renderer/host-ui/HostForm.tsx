@@ -24,22 +24,17 @@ import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
 import type { ConfigMutationOperation } from '../configuration.js'
 import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps } from './ArrayEditor.js'
-import { HostFormPageStack } from './HostFormPages.js'
+import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
 export { hostFormValidationIssueText } from './HostFormValidation.js'
 
-export const HOST_FORM_REACT_STYLES = String.raw`
+import { HOST_FORM_PAGE_STYLES } from './HostFormPages.styles.js'
+
+export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
   .cxf-react-form { --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
-  .cxf-form-page-stack, .cxf-form-page-root, .cxf-form-page-layer, .cxf-form-subpage { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
-  :is(.cxf-form-page-root,.cxf-form-page-layer)[hidden] { display: none; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
-  .cxf-form-subpage-header { display: grid; min-width: 0; grid-template-columns: 32px minmax(0,1fr); flex: none; align-items: center; gap: 8px; border-bottom: 1px solid var(--cx-border,#353a42); padding: 4px 0 12px; }
-  .cxf-form-subpage-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
-  .cxf-form-subpage-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
-  .cxf-form-subpage-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted,#9ca5b5); font-size: 16px !important; }
-  .cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 16px 0; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
   .cxf-section-heading { padding: 0 4px; }
   .cxf-section-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 650; }
@@ -731,161 +726,169 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     })
   return (
     <div ref={shell} className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
-      <Form
-        className="cxf-react-form"
-        onSubmit={event => {
-          event.e?.preventDefault()
-          if (
-            model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
-            || submitting.current || formState === 'saved'
-          ) return
-          const invalid = fields.find(field =>
-            !field.disabled && primitive(field) !== 'sensitive-unavailable'
-            && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale) !== undefined
-          )
-          if (invalid !== undefined) {
-            setFormState('error')
-            setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
-            shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
-            return
-          }
-          const currentSubmission = ++submission.current
-          submitting.current = true
-          setSaving(true)
-          setFormState('saving')
-          setMessage(undefined)
-          void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
-            .then(() => {
-              if (submission.current !== currentSubmission) return
-              setCommittedValues(
-                new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
-              )
-              setDraftOperations(new Map())
-              setFormState('saved')
-              setMessage(managerCopy(locale, 'form.configuration-saved'))
-            })
-            .catch(error => {
-              if (submission.current !== currentSubmission) return
-              const text = error instanceof Error ? error.message : String(error)
-              const conflict = /conflict|revision/iu.test(text)
-              setFormState(conflict ? 'conflict' : 'error')
-              setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
-            })
-            .finally(() => {
-              if (submission.current !== currentSubmission) return
-              submitting.current = false
-              setSaving(false)
-            })
-        }}
+      <HostFormPageStack
+        key={`${plugin.id}:${plugin.configuration.revision}`}
+        resetKey={plugin.configuration.revision}
+        layout="fill"
       >
-        <HostFormPageStack
-          key={`${plugin.id}:${plugin.configuration.revision}`}
-          resetKey={plugin.configuration.revision}
+        <Form
+          className="cxf-react-form"
+          onSubmit={event => {
+            event.e?.preventDefault()
+            if (
+              model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
+              || submitting.current || formState === 'saved'
+            ) return
+            const invalid = fields.find(field =>
+              !field.disabled && primitive(field) !== 'sensitive-unavailable'
+              && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale)
+                !== undefined
+            )
+            if (invalid !== undefined) {
+              setFormState('error')
+              setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
+              shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+              return
+            }
+            const currentSubmission = ++submission.current
+            submitting.current = true
+            setSaving(true)
+            setFormState('saving')
+            setMessage(undefined)
+            void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
+              .then(() => {
+                if (submission.current !== currentSubmission) return
+                setCommittedValues(
+                  new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
+                )
+                setDraftOperations(new Map())
+                setFormState('saved')
+                setMessage(managerCopy(locale, 'form.configuration-saved'))
+              })
+              .catch(error => {
+                if (submission.current !== currentSubmission) return
+                const text = error instanceof Error ? error.message : String(error)
+                const conflict = /conflict|revision/iu.test(text)
+                setFormState(conflict ? 'conflict' : 'error')
+                setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
+              })
+              .finally(() => {
+                if (submission.current !== currentSubmission) return
+                submitting.current = false
+                setSaving(false)
+              })
+          }}
         >
-          <div className="cxf-form-body">
-            {groups.map(([id, group]) => (
-              <section key={id} className="cxf-section">
-                {group.title === undefined && group.description === undefined
-                  ? null
-                  : (
-                    <header className="cxf-section-heading">
-                      {group.title === undefined ? null : <h3>{group.title}</h3>}
-                      {group.description === undefined ? null : <p>{group.description}</p>}
-                    </header>
-                  )}
-                <div className="cxf-form-grid">
-                  {group.fields.map(field => {
-                    const value = formDraft.value(field.path, field.defaultValue)
-                    const changed = formDraft.isDirty(field.path)
-                    const issueText = hostFormValidationIssueText(field, value, locale)
-                    return (
-                      <HostFieldRow
-                        key={pathKey(field)}
-                        field={field}
-                        disabled={saving}
-                        value={value}
-                        changed={changed}
-                        locale={locale}
-                        idPrefix={plugin.id}
-                        controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
-                        customControl={{ model, pluginId: plugin.id }}
-                        {...(issueText === undefined ? {} : { issueText })}
-                        onUseDefault={() => {
-                          if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
-                        }}
-                        onRollback={() => rollback(field)}
-                        onCopyPath={() => {
-                          const clipboard = window.navigator.clipboard
-                          if (typeof clipboard?.writeText !== 'function') {
-                            setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
-                            return
-                          }
-                          void clipboard.writeText(field.path.join('.')).then(() =>
-                            setMessage(managerCopy(locale, 'form.path-copied'))
-                          ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
-                        }}
-                        onChange={next =>
-                          change(
-                            field,
-                            next === undefined
-                              ? { op: 'unset', path: field.path }
-                              : { op: 'set', path: field.path, value: next as CordisXJsonValue },
-                          )}
-                      />
-                    )
-                  })}
+          <HostFormPage
+            footer={
+              <div className="cxf-form-actions">
+                <div className="cxf-status" data-state={formState} role="status">
+                  {operations.length === 0 || formState === 'saved'
+                    ? ''
+                    : formState === 'saving'
+                    ? managerCopy(locale, 'form.saving')
+                    : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
                 </div>
-              </section>
-            ))}
-            {message === undefined
-              ? null
-              : (
-                <div
-                  className="cxr-notice cxf-alert"
-                  data-tone={formState === 'saved' ? 'info' : 'error'}
-                  role="status"
-                >
-                  {message}
+                <div className="cxf-form-action-buttons">
+                  <Button
+                    tag="button"
+                    type="reset"
+                    variant="outline"
+                    icon={<HostSurfaceIcon token="host:reset" />}
+                    disabled={saving || operations.length === 0 || formState === 'saved'}
+                    onClick={() => {
+                      setDraftOperations(new Map())
+                      setFormState('pristine')
+                      setMessage(undefined)
+                    }}
+                  >
+                    {managerCopy(locale, 'form.undo-changes')}
+                  </Button>
+                  <Button
+                    tag="button"
+                    type="submit"
+                    theme="primary"
+                    icon={<HostSurfaceIcon token="host:save" />}
+                    loading={saving}
+                    disabled={saving || !plugin.configuration.writable || operations.length === 0
+                      || formState === 'saved'}
+                  >
+                    {managerCopy(locale, 'form.save-configuration')}
+                  </Button>
                 </div>
-              )}
-          </div>
-          <div className="cxf-form-actions">
-            <div className="cxf-status" data-state={formState} role="status">
-              {operations.length === 0 || formState === 'saved'
-                ? ''
-                : formState === 'saving'
-                ? managerCopy(locale, 'form.saving')
-                : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
+              </div>
+            }
+          >
+            <div className="cxf-form-body">
+              {groups.map(([id, group]) => (
+                <section key={id} className="cxf-section">
+                  {group.title === undefined && group.description === undefined
+                    ? null
+                    : (
+                      <header className="cxf-section-heading">
+                        {group.title === undefined ? null : <h3>{group.title}</h3>}
+                        {group.description === undefined ? null : <p>{group.description}</p>}
+                      </header>
+                    )}
+                  <div className="cxf-form-grid">
+                    {group.fields.map(field => {
+                      const value = formDraft.value(field.path, field.defaultValue)
+                      const changed = formDraft.isDirty(field.path)
+                      const issueText = hostFormValidationIssueText(field, value, locale)
+                      return (
+                        <HostFieldRow
+                          key={pathKey(field)}
+                          field={field}
+                          disabled={saving}
+                          value={value}
+                          changed={changed}
+                          locale={locale}
+                          idPrefix={plugin.id}
+                          controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
+                          customControl={{ model, pluginId: plugin.id }}
+                          {...(issueText === undefined ? {} : { issueText })}
+                          onUseDefault={() => {
+                            if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
+                          }}
+                          onRollback={() => rollback(field)}
+                          onCopyPath={() => {
+                            const clipboard = window.navigator.clipboard
+                            if (typeof clipboard?.writeText !== 'function') {
+                              setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
+                              return
+                            }
+                            void clipboard.writeText(field.path.join('.')).then(() =>
+                              setMessage(managerCopy(locale, 'form.path-copied'))
+                            ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
+                          }}
+                          onChange={next =>
+                            change(
+                              field,
+                              next === undefined
+                                ? { op: 'unset', path: field.path }
+                                : { op: 'set', path: field.path, value: next as CordisXJsonValue },
+                            )}
+                        />
+                      )
+                    })}
+                  </div>
+                </section>
+              ))}
+              {message === undefined
+                ? null
+                : (
+                  <div
+                    className="cxr-notice cxf-alert"
+                    data-tone={formState === 'saved' ? 'info' : 'error'}
+                    role="status"
+                  >
+                    {message}
+                  </div>
+                )}
             </div>
-            <div className="cxf-form-action-buttons">
-              <Button
-                tag="button"
-                type="reset"
-                variant="outline"
-                icon={<HostSurfaceIcon token="host:reset" />}
-                disabled={saving || operations.length === 0 || formState === 'saved'}
-                onClick={() => {
-                  setDraftOperations(new Map())
-                  setFormState('pristine')
-                  setMessage(undefined)
-                }}
-              >
-                {managerCopy(locale, 'form.undo-changes')}
-              </Button>
-              <Button
-                tag="button"
-                type="submit"
-                theme="primary"
-                icon={<HostSurfaceIcon token="host:save" />}
-                loading={saving}
-                disabled={saving || !plugin.configuration.writable || operations.length === 0 || formState === 'saved'}
-              >
-                {managerCopy(locale, 'form.save-configuration')}
-              </Button>
-            </div>
-          </div>
-        </HostFormPageStack>
-      </Form>
+          </HostFormPage>
+        </Form>
+      </HostFormPageStack>
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { HostThemeProjection } from '../host-theme.js'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
+import { createContext, type ReactNode, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import { ConfigProvider } from 'tdesign-react'
 import type { SchemaFormOptionsV1, SchemaFormSnapshotV1 } from '@cordisx/protocol/schema-form/v1'
 import type { SchemaNode } from '../configuration/model.js'
@@ -7,7 +7,7 @@ import { fields } from '../configuration/form-presentation.js'
 import { assertPath, ownValue, setAtPath } from '../configuration/values.js'
 import { HOST_FORM_REACT_STYLES, HostFieldRow } from './HostForm.js'
 import { hostFormValidationIssueText } from './HostFormValidation.js'
-import { HostFormPageStack } from './HostFormPages.js'
+import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HOST_TDESIGN_REACT_STYLES } from './tdesign-styles.js'
 
 export function schemaFormSnapshot(
@@ -49,10 +49,61 @@ export function schemaFormSnapshot(
   return { value, valid: issues.length === 0, issues }
 }
 
+function SchemaFormTheme({ identity, fill = false, children }: {
+  readonly identity: string
+  readonly fill?: boolean
+  readonly children: ReactNode
+}) {
+  const container = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const theme = new HostThemeProjection(document)
+    const detach = container.current ? theme.attach(container.current) : () => {}
+    return () => {
+      detach()
+      theme.dispose()
+    }
+  }, [])
+  return (
+    <ConfigProvider notSet globalConfig={{ attach: () => container.current ?? document.body }}>
+      <div
+        ref={container}
+        className={`cxh-tdesign-root cxf-react-form${fill ? ' cxf-form-surface' : ''}`}
+        data-schema-form={identity}
+      >
+        <style>{HOST_TDESIGN_REACT_STYLES + HOST_FORM_REACT_STYLES}</style>
+        {children}
+      </div>
+    </ConfigProvider>
+  )
+}
+
+const HostSchemaFormSurfaceContext = createContext<string | undefined>(undefined)
+
+/** Host shell integration only; the public embedded SchemaForm contract remains unchanged. */
+export function HostSchemaFormPage({ form, footer, children }: {
+  readonly form: SchemaFormOptionsV1
+  readonly footer: ReactNode
+  readonly children?: ReactNode
+}) {
+  return (
+    <SchemaFormTheme identity={form.identity} fill>
+      <HostFormPageStack resetKey={form.identity} layout="fill">
+        <HostFormPage footer={footer}>
+          <HostSchemaFormSurfaceContext.Provider value={form.identity}>
+            <SchemaForm {...form} />
+          </HostSchemaFormSurfaceContext.Provider>
+          {children}
+        </HostFormPage>
+      </HostFormPageStack>
+    </SchemaFormTheme>
+  )
+}
+
 /** Public embedded body; field projection, presenters, validation and nested editors are Host-owned. */
 export function SchemaForm(
   { identity, schema, value, locale = 'en-US', disabled = false, onChange, onValidationChange }: SchemaFormOptionsV1,
 ) {
+  const surfaceIdentity = useContext(HostSchemaFormSurfaceContext)
   const initial = useRef({ identity, value: structuredClone(value) })
   if (initial.current.identity !== identity) initial.current = { identity, value: structuredClone(value) }
   const baseline = initial.current.value
@@ -63,15 +114,6 @@ export function SchemaForm(
     onChange(schemaFormSnapshot(schema, draft, locale))
   }
   const id = useId()
-  const container = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const theme = new HostThemeProjection(document)
-    const detach = container.current ? theme.attach(container.current) : () => {}
-    return () => {
-      detach()
-      theme.dispose()
-    }
-  }, [])
   const projected = useMemo(() =>
     fields(schema as SchemaNode, value, value, identity, locale).map(field => {
       let node: SchemaNode | undefined = schema as SchemaNode
@@ -92,52 +134,51 @@ export function SchemaForm(
   useEffect(() => {
     validationCallback.current?.(snapshot)
   }, [snapshot])
-  return (
-    <ConfigProvider notSet globalConfig={{ attach: () => container.current ?? document.body }}>
-      <div ref={container} className="cxh-tdesign-root cxf-react-form" data-schema-form={identity}>
-        <style>{HOST_TDESIGN_REACT_STYLES + HOST_FORM_REACT_STYLES}</style>
-        <HostFormPageStack resetKey={identity}>
-          <div className="cxf-form-body">
-            <div className="cxf-form-grid">
-              {projected.map(field => (
-                <HostFieldRow
-                  key={`${identity}/${JSON.stringify(field.path)}`}
-                  field={field}
-                  value={field.value}
-                  locale={locale}
-                  changed={JSON.stringify(field.value) !== JSON.stringify(ownValue(baseline, field.path))}
-                  disabled={disabled}
-                  fieldActions="menu"
-                  onUseDefault={() => {
-                    if (field.hasDefault === true) changeField(field.path, structuredClone(field.defaultValue))
-                  }}
-                  onRollback={() => changeField(field.path, structuredClone(ownValue(baseline, field.path)))}
-                  onCopyPath={() => {
-                    const clipboard = window.navigator.clipboard
-                    if (typeof clipboard?.writeText === 'function') {
-                      void clipboard.writeText(field.path.join('.')).catch(() => undefined)
-                    }
-                  }}
-                  idPrefix={`${id}-${identity}`}
-                  {...(snapshot.issues.find(issue => JSON.stringify(issue.path) === JSON.stringify(field.path))?.message
-                    ? {
-                      issueText:
-                        snapshot.issues.find(issue => JSON.stringify(issue.path) === JSON.stringify(field.path))!
-                          .message,
-                    }
-                    : {})}
-                  onChange={next => {
-                    changeField(field.path, next)
-                  }}
-                />
-              ))}
-            </div>
-            {snapshot.issues.filter(issue => issue.path.length === 0).map((issue, index) => (
-              <p key={index} role="alert" className="cxf-error">{issue.message}</p>
-            ))}
-          </div>
-        </HostFormPageStack>
+  const body = (
+    <div className="cxf-form-body">
+      <div className="cxf-form-grid">
+        {projected.map(field => (
+          <HostFieldRow
+            key={`${identity}/${JSON.stringify(field.path)}`}
+            field={field}
+            value={field.value}
+            locale={locale}
+            changed={JSON.stringify(field.value) !== JSON.stringify(ownValue(baseline, field.path))}
+            disabled={disabled}
+            fieldActions="menu"
+            onUseDefault={() => {
+              if (field.hasDefault === true) changeField(field.path, structuredClone(field.defaultValue))
+            }}
+            onRollback={() => changeField(field.path, structuredClone(ownValue(baseline, field.path)))}
+            onCopyPath={() => {
+              const clipboard = window.navigator.clipboard
+              if (typeof clipboard?.writeText === 'function') {
+                void clipboard.writeText(field.path.join('.')).catch(() => undefined)
+              }
+            }}
+            idPrefix={`${id}-${identity}`}
+            {...(snapshot.issues.find(issue => JSON.stringify(issue.path) === JSON.stringify(field.path))?.message
+              ? {
+                issueText: snapshot.issues.find(issue => JSON.stringify(issue.path) === JSON.stringify(field.path))!
+                  .message,
+              }
+              : {})}
+            onChange={next => {
+              changeField(field.path, next)
+            }}
+          />
+        ))}
       </div>
-    </ConfigProvider>
+      {snapshot.issues.filter(issue => issue.path.length === 0).map((issue, index) => (
+        <p key={index} role="alert" className="cxf-error">{issue.message}</p>
+      ))}
+    </div>
+  )
+  return surfaceIdentity === identity ? body : (
+    <SchemaFormTheme identity={identity}>
+      <HostFormPageStack resetKey={identity}>
+        <HostFormPage>{body}</HostFormPage>
+      </HostFormPageStack>
+    </SchemaFormTheme>
   )
 }
