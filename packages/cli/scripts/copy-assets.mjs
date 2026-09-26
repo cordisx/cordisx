@@ -12,6 +12,7 @@ const cordisxSkillsDestination = fileURLToPath(new URL('../dist/skills', import.
 const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development', 'cordisx-feedback']
 const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
+  'renderer/host-ui/search.css',
   'renderer/model-providers.css',
   'renderer/manager/pages/model-services.css',
   'renderer/manager/pages/model-catalog/model-catalog.css',
