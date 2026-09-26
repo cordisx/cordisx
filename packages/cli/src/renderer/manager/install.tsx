@@ -29,6 +29,8 @@ export interface ReactManagerInstallOptions {
   readonly navigationController?: HostManagerNavigationController
   readonly pluginManagement?: PluginManagementBinding
   readonly nativeRouteHistory?: NativeRouteSource
+  /** Opt-in Host workspace presentation; Codex still owns its native tabs and routes. */
+  readonly presentationMode?: 'overlay' | 'workspace'
   /** Explicit compatibility for legacy Host fixtures; 26.924 production uses native two-pane seats. */
   readonly legacyModal?: boolean
 }
@@ -39,6 +41,7 @@ export function installReactCordisXManager(
   model: ManagerModel,
   options: ReactManagerInstallOptions = {},
 ): () => void {
+  const presentationMode = options.legacyModal === true ? 'overlay' : options.presentationMode ?? 'overlay'
   const view = document.defaultView
   const installedAnimationFrameFallback = view !== null && typeof view.requestAnimationFrame !== 'function'
   if (installedAnimationFrameFallback) {
@@ -53,6 +56,7 @@ export function installReactCordisXManager(
   rootSeat.className = 'cxr-root'
   rootSeat.dataset.cordisxReactManager = 'true'
   rootSeat.dataset.managerSurface = 'modal'
+  rootSeat.hidden = presentationMode === 'workspace'
   const navigationSeat = document.createElement('div')
   navigationSeat.className = 'cxr-root cxr-native-navigation-seat'
   navigationSeat.dataset.cordisxManagerNavigationSeat = 'true'
@@ -499,6 +503,10 @@ export function installReactCordisXManager(
         marketplace={marketplace.model}
         {...(options.pluginManagement === undefined ? {} : { pluginManagement: options.pluginManagement })}
         {...(options.nativeRouteHistory === undefined ? {} : { nativeRouteHistory: options.nativeRouteHistory })}
+        presentationMode={presentationMode}
+        setWorkspaceVisible={visible => {
+          rootSeat.hidden = !visible
+        }}
         triggerSeat={triggerSeat}
         navigationSeat={navigationSeat}
         titlebarSeat={titlebarSeat}
