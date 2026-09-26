@@ -322,7 +322,10 @@ function resolveEnvironmentSeat(document: Document): NativeSurfaceSeat | undefin
 
 function resolveSessionHeaderSeat(document: Document, sessionId: string | undefined): NativeActionSeat | undefined {
   if (sessionId === undefined) return undefined
-  const surface = uniqueStrictlyVisible(document, '[data-testid="app-shell-header-context-menu-surface"]')
+  const surface = uniqueStrictlyVisible(
+    document,
+    '[data-testid="app-shell-header-context-menu-surface"]:not([data-app-shell-main-titlebar])',
+  )
   if (surface === undefined) return undefined
   const template = nativeButtons(surface).at(-1)
   if (template === undefined) return undefined

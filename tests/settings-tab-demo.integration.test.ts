@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 
 interface RuntimeSnapshot {
   plugins: readonly { id: string; source: string; status: string; configuration: { applies: string } }[]
@@ -95,6 +96,7 @@ describe('settings navigation demo bundle', () => {
     )
     Object.defineProperty(dom.window, 'structuredClone', { value: structuredClone })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+    installNativeManagerShell(dom)
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: false, status: 503, text: async () => '' }),
     })

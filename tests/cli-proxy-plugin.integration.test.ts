@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
+import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
@@ -249,6 +250,7 @@ describe('CLIProxy provider plugin renderer', () => {
       },
     })
     dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
+    installNativeManagerShell(dom)
     dom.window.eval(bundle)
     for (
       let attempt = 0;
