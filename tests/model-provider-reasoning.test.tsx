@@ -130,7 +130,15 @@ describe('ProviderReasoningSlider', () => {
       value: 'medium',
     })
     await act(async () => {
-      reasoning.dispatchEvent(pointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 141, clientY: 20 }))
+      const pointerDown = pointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 141,
+        clientY: 20,
+      })
+      reasoning.dispatchEvent(pointerDown)
+      expect(pointerDown.defaultPrevented).toBe(true)
     })
     expect(document.activeElement).toBe(slider)
     expect(reasoning.hasAttribute('data-dragging')).toBe(false)

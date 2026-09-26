@@ -185,6 +185,7 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
       } as CSSProperties}
       onPointerDown={event => {
         if (unavailable || pending || event.button !== 0 || pointerId.current !== undefined) return
+        event.preventDefault()
         pointerId.current = event.pointerId
         pointerStart.current = { x: event.clientX, y: event.clientY }
         pointerDragging.current = false
