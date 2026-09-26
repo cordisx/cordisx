@@ -67,6 +67,12 @@ function renderSlider(props: Partial<React.ComponentProps<typeof ProviderReasoni
   return { commit, reasoning, slider }
 }
 
+function pointerEvent(type: string, init: MouseEventInit & { pointerId?: number } = {}) {
+  const event = new dom!.window.MouseEvent(type, init)
+  Object.defineProperty(event, 'pointerId', { value: init.pointerId ?? 1 })
+  return event
+}
+
 describe('ProviderReasoningSlider', () => {
   it('clears an uncommitted draft when the effort set changes', async () => {
     const { slider } = renderSlider()
@@ -100,14 +106,8 @@ describe('ProviderReasoningSlider', () => {
       value: 'medium',
     })
     await act(async () => {
-      reasoning.dispatchEvent(
-        new dom!.window.MouseEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          clientX: 141,
-        }),
-      )
-      reasoning.dispatchEvent(new dom!.window.MouseEvent('pointermove', { bubbles: true, clientX: 189 }))
+      reasoning.dispatchEvent(pointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 141 }))
+      reasoning.dispatchEvent(pointerEvent('pointermove', { bubbles: true, clientX: 189 }))
     })
     expect(Number(reasoning.dataset.progress)).toBeCloseTo(0.4375, 4)
     expect(slider.getAttribute('aria-valuetext')).toBe('medium')
@@ -115,9 +115,37 @@ describe('ProviderReasoningSlider', () => {
     expect(reasoning.querySelectorAll('.cxmp-reasoning-marks > [data-active="true"]')).toHaveLength(2)
 
     await act(async () => {
-      reasoning.dispatchEvent(new dom!.window.MouseEvent('pointerup', { bubbles: true, clientX: 260 }))
+      reasoning.dispatchEvent(pointerEvent('pointerup', { bubbles: true, clientX: 260 }))
     })
     expect(commit).toHaveBeenCalledWith('high')
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(reasoning.hasAttribute('data-dragging')).toBe(false)
+  })
+
+  it('focuses on pointer down and keeps a click on the animated discrete path', async () => {
+    const commit = vi.fn(async () => undefined)
+    const { reasoning, slider } = renderSlider({
+      commit,
+      efforts: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      value: 'medium',
+    })
+    await act(async () => {
+      reasoning.dispatchEvent(pointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 141, clientY: 20 }))
+    })
+    expect(document.activeElement).toBe(slider)
+    expect(reasoning.hasAttribute('data-dragging')).toBe(false)
+    expect(Number(reasoning.dataset.progress)).toBe(0.5)
+
+    await act(async () => {
+      reasoning.dispatchEvent(pointerEvent('pointermove', { bubbles: true, clientX: 144, clientY: 20 }))
+    })
+    expect(reasoning.hasAttribute('data-dragging')).toBe(false)
+    expect(Number(reasoning.dataset.progress)).toBe(0.5)
+
+    await act(async () => {
+      reasoning.dispatchEvent(pointerEvent('pointerup', { bubbles: true, clientX: 276, clientY: 20 }))
+    })
+    expect(commit).toHaveBeenCalledWith('xhigh')
     expect(commit).toHaveBeenCalledTimes(1)
     expect(reasoning.hasAttribute('data-dragging')).toBe(false)
   })

@@ -18,6 +18,8 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
   const input = useRef<HTMLInputElement>(null)
   const particlesLayer = useRef<HTMLSpanElement>(null)
   const pointerId = useRef<number | undefined>(undefined)
+  const pointerStart = useRef<{ x: number; y: number } | undefined>(undefined)
+  const pointerDragging = useRef(false)
   const draftRef = useRef<string | undefined>(undefined)
   const committing = useRef(false)
   const particleFlowEnabled = useRef(false)
@@ -156,6 +158,8 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
   }
   const submit = (next = draftRef.current) => {
     pointerId.current = undefined
+    pointerStart.current = undefined
+    pointerDragging.current = false
     setDragProgress(undefined)
     draftRef.current = undefined
     if (!disabled && !pending && !committing.current && next !== undefined && next !== value) {
@@ -182,12 +186,21 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
       onPointerDown={event => {
         if (unavailable || pending || event.button !== 0 || pointerId.current !== undefined) return
         pointerId.current = event.pointerId
+        pointerStart.current = { x: event.clientX, y: event.clientY }
+        pointerDragging.current = false
         event.currentTarget.setPointerCapture?.(event.pointerId)
         input.current?.focus({ preventScroll: true })
-        updatePointer(event.currentTarget, event.clientX)
       }}
       onPointerMove={event => {
-        if (event.pointerId === pointerId.current) updatePointer(event.currentTarget, event.clientX)
+        if (event.pointerId !== pointerId.current) return
+        const start = pointerStart.current
+        if (
+          !pointerDragging.current
+          && start !== undefined
+          && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 4
+        ) return
+        pointerDragging.current = true
+        updatePointer(event.currentTarget, event.clientX)
       }}
       onPointerUp={event => {
         if (event.pointerId !== pointerId.current) return
@@ -203,6 +216,8 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
       onPointerCancel={event => {
         if (event.pointerId !== pointerId.current) return
         pointerId.current = undefined
+        pointerStart.current = undefined
+        pointerDragging.current = false
         setDragProgress(undefined)
         draftRef.current = undefined
         setDraft(undefined)

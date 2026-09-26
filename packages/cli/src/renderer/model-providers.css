@@ -520,7 +520,7 @@
   width: var(--cxmp-reasoning-fill-x);
   overflow: hidden;
   border-radius: inherit;
-  background: #5aa9e5;
+  background: light-dark(#68b8ee, #5aa9e5);
 }
 .cxmp-reasoning-base-gradient,
 .cxmp-reasoning-gradient,
@@ -532,18 +532,22 @@
 }
 .cxmp-reasoning-base-gradient {
   border-radius: inherit;
-  background: linear-gradient(90deg, #5aa9e5, #9b87dc);
+  background: linear-gradient(
+    90deg,
+    light-dark(#68b8ee, #5aa9e5),
+    light-dark(#aa96e8, #9b87dc)
+  );
   opacity: 0;
 }
 .cxmp-reasoning-gradient {
   width: 200%;
   background: linear-gradient(
     90deg,
-    #5aa9e5 0%,
-    #9b87dc 25%,
-    #5aa9e5 50%,
-    #9b87dc 75%,
-    #5aa9e5 100%
+    light-dark(#68b8ee, #5aa9e5) 0%,
+    light-dark(#aa96e8, #9b87dc) 25%,
+    light-dark(#68b8ee, #5aa9e5) 50%,
+    light-dark(#aa96e8, #9b87dc) 75%,
+    light-dark(#68b8ee, #5aa9e5) 100%
   );
   opacity: 0;
   transform: translateX(-50%);
@@ -694,7 +698,7 @@
 }
 .cxmp-reasoning:has(input:focus-visible) .cxmp-reasoning-thumb {
   box-shadow:
-    inset 0 0 0 2px #9b87dc,
+    inset 0 0 0 2px light-dark(#aa96e8, #9b87dc),
     0 1px 3px color-mix(in srgb, var(--cx-text) 24%, transparent);
 }
 .cxmp-reasoning[data-peak="true"] .cxmp-reasoning-base-gradient {
