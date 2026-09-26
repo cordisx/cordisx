@@ -144,9 +144,13 @@ describe('Host UI catalog and production React composition', () => {
       '../../host-ui/IconButton.js',
       'IconButton',
     )
-    for (const control of ['Input', 'Switch']) {
-      expectRenderedImport('manager/components/MarketplaceSourceManager.tsx', 'tdesign-react', control)
-    }
+    expectRenderedImport('manager/components/MarketplaceSourceManager.tsx', 'tdesign-react', 'Switch')
+    expectRenderedImport(
+      'manager/components/MarketplaceSourceManager.tsx',
+      '../../host-ui/SearchToolbar.js',
+      'SearchToolbar',
+    )
+    expectRenderedImport('host-ui/SearchToolbar.tsx', './SearchField.js', 'SearchField')
     expectRenderedImport(
       'manager/pages/MarketplaceSourceEditPage.tsx',
       '../../host-ui/SchemaForm.js',
