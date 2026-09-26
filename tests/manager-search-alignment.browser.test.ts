@@ -122,6 +122,21 @@ it.skipIf(!executable)(
                   `${JSON.stringify(route)} ${theme}/${width}/${query}: ${key}`,
                 ).toBeLessThanOrEqual(1)
               }
+              if (route.kind === 'primary') {
+                const starts = await evaluate(`(() => {
+                  const title=document.querySelector('.cxr-heading h2');
+                  const range=document.createRange();
+                  range.selectNodeContents(title);
+                  const input=document.querySelector('.cxr-content input[type="search"]');
+                  const style=getComputedStyle(input);
+                  return {title:range.getBoundingClientRect().left,
+                    search:input.getBoundingClientRect().left+parseFloat(style.borderLeftWidth)+parseFloat(style.paddingLeft)};
+                })()`) as { title: number; search: number }
+                expect(
+                  Math.abs(starts.title - starts.search),
+                  `${route.page} title/search text ${theme}/${width}/${query}: ${JSON.stringify(starts)}`,
+                ).toBeLessThanOrEqual(1)
+              }
               expect(actual.left).toBeGreaterThanOrEqual(0)
               expect(actual.right).toBeLessThanOrEqual(width)
               expect(await evaluate('document.querySelector(".cxr-content input").getAttribute("aria-label")'))
