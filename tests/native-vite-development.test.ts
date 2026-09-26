@@ -9,6 +9,7 @@ import {
   nativeViteBootModuleSource,
   nativeViteEntryModuleSource,
   nativeViteHotPayload,
+  nativeViteRoot,
   startNativeViteServer,
 } from '../packages/cli/src/launcher/vite-development.js'
 import { NativeViteSourceMapStore } from '../packages/cli/src/launcher/vite-development-source-maps.js'
@@ -206,6 +207,34 @@ describe('native Vite development transport', () => {
     expect(options.ignored).toContain('/repo/packages/cli/dist/**')
     expect(options.ignored).toContain('/home/packages/.source-staging/**')
     expect(options.ignored).not.toContain('/repo/packages/cli/src/**')
+  })
+
+  it('does not root immutable installed compositions at the user config directory', () => {
+    const installed = {
+      id: 'installed',
+      entry: '/home/.cordisx/packages/sha256/abc/browser/module.js',
+      enabled: true,
+      config: {},
+      package: {
+        version: '1.0.0',
+        digest: `sha256:${'a'.repeat(64)}` as const,
+        moduleGeneration: 'installed-generation',
+        dependencies: [],
+      },
+    }
+
+    expect(nativeViteRoot('/home/.cordisx', '/repo/packages/cli', [installed])).toBe('/repo/packages/cli')
+    expect(nativeViteRoot('/project', '/repo/packages/cli', [{ ...installed, package: undefined }])).toBe('/project')
+    expect(nativeViteRoot('/project', '/repo/packages/cli', [{
+      ...installed,
+      development: {
+        origin: 'local-dev',
+        pluginId: 'installed',
+        sourcePath: '/project/index.ts',
+        state: 'ready',
+        lastSuccessfulAt: '2026-09-26T00:00:00.000Z',
+      },
+    }])).toBe('/project')
   })
 
   it('converts full reloads into Host restarts without rebuilding the whole module graph', () => {
