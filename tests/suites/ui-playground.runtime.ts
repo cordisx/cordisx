@@ -343,15 +343,17 @@ export function registerRuntimeTests() {
             button.textContent?.trim() === '创建'
           )?.disabled,
         ).toBe(true)
-        expect(createPage?.textContent).toContain('此项为必填项')
+        expect(createPage?.textContent).not.toContain('此项为必填项')
         const invalidDestinationInput = createPage?.querySelector<HTMLInputElement>(
           '.cxf-array-item-fields input[type="text"]',
         )
+        invalidDestinationInput?.focus()
         Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(
           invalidDestinationInput,
           'x',
         )
         invalidDestinationInput?.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+        invalidDestinationInput?.blur()
         await new Promise(resolve => setTimeout(resolve, 0))
         expect(createPage?.textContent).toContain('请输入符合长度要求的文本')
         expect(
