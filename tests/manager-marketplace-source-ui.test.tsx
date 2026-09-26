@@ -61,6 +61,7 @@ describe('React Marketplace source controls', () => {
     try {
       await fixture.render(
         <MarketplaceSourcesPage
+          onEdit={vi.fn()}
           marketplace={marketplace}
           locale="en"
           pluginManagement={binding}
@@ -99,7 +100,7 @@ describe('React Marketplace source controls', () => {
     }))
     try {
       await fixture.render(
-        <MarketplaceSourcesPage marketplace={marketplace} locale="en" />,
+        <MarketplaceSourcesPage onEdit={vi.fn()} marketplace={marketplace} locale="en" />,
       )
       expect(fixture.document.body.textContent).toContain('Plugin management is unavailable')
     } finally {
@@ -121,6 +122,7 @@ describe('React Marketplace source controls', () => {
     try {
       await fixture.render(
         <MarketplaceSourcesPage
+          onEdit={vi.fn()}
           marketplace={marketplace}
           locale="en"
           pluginManagement={{} as ManagerPluginManagementBinding}
@@ -181,6 +183,7 @@ describe('React Marketplace source controls', () => {
     try {
       await fixture.render(
         <MarketplaceSourcesPage
+          onEdit={vi.fn()}
           marketplace={marketplace}
           locale="en"
           pluginManagement={binding}

@@ -29,6 +29,7 @@ import { ExtensionPointsPage } from './pages/ExtensionPointsPage.js'
 import { ManagerContentPage } from './pages/ManagerContentPage.js'
 import { MarketplacePluginPage } from './pages/MarketplacePluginPage.js'
 import { MarketplacePage } from './pages/MarketplacePage.js'
+import { MarketplaceSourceEditPage } from './pages/MarketplaceSourceEditPage.js'
 import { MarketplaceSourcesPage } from './pages/MarketplaceSourcesPage.js'
 import { NavigationDetailPage } from './pages/NavigationDetailPage.js'
 import { NotificationRulesPage } from './pages/NotificationRulesPage.js'
@@ -70,6 +71,11 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   }
   if (route.kind === 'route' || route.kind === 'page') return route.qualifiedId
   if (route.kind === 'marketplace-plugin') return productLocale(locale) === 'zh-CN' ? '插件详情' : 'Plugin details'
+  if (route.kind === 'marketplace-source-edit') {
+    return productLocale(locale) === 'zh-CN'
+      ? (route.url ? '编辑来源' : '添加来源')
+      : (route.url ? 'Edit source' : 'Add source')
+  }
   if (route.kind === 'marketplace-sources') {
     return productLocale(locale) === 'zh-CN'
       ? '插件来源'
@@ -221,6 +227,25 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
     )
   }
   if (route.kind === 'notification-rules') return <h2>{heading}</h2>
+  if (route.kind === 'marketplace-source-edit') {
+    return (
+      <HostBreadcrumbs
+        segments={[
+          {
+            key: 'marketplace',
+            label: managerCopy(snapshot.localization.locale, 'manager.nav.marketplace'),
+            onActivate: () => navigate({ kind: 'primary', page: 'marketplace' }),
+          },
+          {
+            key: 'sources',
+            label: productLocale(snapshot.localization.locale) === 'zh-CN' ? '插件来源' : 'Marketplace sources',
+            onActivate: () => navigate({ kind: 'marketplace-sources' }),
+          },
+          { key: 'edit', label: heading },
+        ]}
+      />
+    )
+  }
   const parent = route.kind === 'extension-point'
     ? {
       label: managerCopy(snapshot.localization.locale, 'manager.nav.extension-points'),
@@ -291,6 +316,17 @@ function Content(
       />
     )
   }
+  if (current.kind === 'marketplace-source-edit') {
+    return (
+      <MarketplaceSourceEditPage
+        locale={snapshot.localization.locale}
+        currentUrl={current.url}
+        pluginManagement={pluginManagement}
+        managementSnapshot={pluginManagementSnapshot}
+        close={route.back}
+      />
+    )
+  }
   if (current.kind === 'marketplace-sources') {
     return (
       <MarketplaceSourcesPage
@@ -299,6 +335,7 @@ function Content(
         pluginManagement={pluginManagement}
         managementSnapshot={pluginManagementSnapshot}
         managementError={pluginManagementError}
+        onEdit={source => route.navigate({ kind: 'marketplace-source-edit', ...(source ? { url: source.url } : {}) })}
       />
     )
   }
@@ -590,7 +627,10 @@ export function ManagerApp(
                 </header>
                 <div
                   className="cxr-content"
-                  data-content-layout={router.route.kind === 'model-connection-create' ? 'form' : 'document'}
+                  data-content-layout={(router.route.kind === 'model-connection-create'
+                      || router.route.kind === 'marketplace-source-edit')
+                    ? 'form'
+                    : 'document'}
                 >
                   <MarketplaceInstallerProvider installer={installer}>
                     <Content
