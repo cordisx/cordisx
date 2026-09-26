@@ -12,6 +12,7 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
 
 export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${searchCss}\n${String.raw`
   .cxr-root { --cx-page-inset: 22px; --cx-control-icon-size: 16px; --cx-control-gap: 8px; --cx-search-padding: 8px; --cx-control-border: 1px; --cx-control-text-inset: calc(var(--cx-control-border) + var(--cx-search-padding) + var(--cx-control-icon-size) + var(--cx-control-gap)); position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
+  .cxr-root[data-manager-surface="pane"], .cxr-titlebar-root { --cx-page-inset: 12px; }
   .cxr-root[data-manager-surface="pane"] { position: absolute; inset: 0; width: 100%; height: 100%; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
@@ -84,12 +85,13 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-header > .t-button, .cxr-header-seat > .t-button { width: 32px; height: 32px; padding: 0; }
   .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-header > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }
   .cxr-titlebar-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; }
-  .cxr-titlebar-root { pointer-events: none; }
-  .cxr-titlebar-root .cxr-header { width: 100%; min-width: 0; min-height: 44px; grid-template-columns: 28px minmax(0,1fr) auto; gap: 6px; border-bottom: 0; padding: 8px 12px; background: transparent; }
+  /* The portaled titlebar shares the native pane gutter and search geometry. */
+  .cxr-titlebar-root { --cx-titlebar-control-size: 28px; --cx-titlebar-icon-inset: calc((var(--cx-titlebar-control-size) - var(--cx-control-icon-size)) / 2); pointer-events: none; }
+  .cxr-titlebar-root .cxr-header { width: 100%; min-width: 0; min-height: 44px; grid-template-columns: var(--cx-titlebar-control-size) minmax(0,1fr) auto; gap: calc(var(--cx-control-gap) - var(--cx-titlebar-icon-inset)); border-bottom: 0; padding: 8px var(--cx-page-inset); padding-inline-start: calc(var(--cx-page-inset) + var(--cx-control-border) + var(--cx-search-padding) - var(--cx-titlebar-icon-inset)); background: transparent; }
   .cxr-titlebar-root .cxr-header > .cxr-heading { grid-column: 2; }
   .cxr-titlebar-root .cxr-header > .cxr-titlebar-actions { grid-column: 3; }
-  .cxr-titlebar-root .cxr-header-seat { width: 28px; height: 28px; }
-  .cxr-titlebar-root .cxr-header-seat > .t-button, .cxr-titlebar-root .cxr-titlebar-action { display: grid; width: 28px; min-width: 28px; height: 28px; place-items: center; border: 0; padding: 0; background: transparent; color: var(--color-text-tertiary, var(--cx-muted, #aab2c0)); cursor: pointer; font: 13px/1 -apple-system, system-ui, "Segoe UI", sans-serif; transition: background-color 150ms ease, color 150ms ease; }
+  .cxr-titlebar-root .cxr-header-seat { width: var(--cx-titlebar-control-size); height: var(--cx-titlebar-control-size); }
+  .cxr-titlebar-root .cxr-header-seat > .t-button, .cxr-titlebar-root .cxr-titlebar-action { display: grid; width: var(--cx-titlebar-control-size); min-width: var(--cx-titlebar-control-size); height: var(--cx-titlebar-control-size); place-items: center; border: 0; padding: 0; background: transparent; color: var(--color-text-tertiary, var(--cx-muted, #aab2c0)); cursor: pointer; font: 13px/1 -apple-system, system-ui, "Segoe UI", sans-serif; transition: background-color 150ms ease, color 150ms ease; }
   .cxr-titlebar-root .cxr-header-seat > .t-button { border-radius: 9.375px; }
   .cxr-titlebar-root .cxr-titlebar-action { border-radius: 12.5px; }
   .cxr-titlebar-root .cxr-header-seat > .t-button:hover:not(:disabled), .cxr-titlebar-root .cxr-titlebar-action:hover:not(:disabled) { background: var(--color-background-primary-soft-hover, var(--cx-hover, rgba(255,255,255,.08))); color: var(--color-text-primary-surface, var(--cx-text, #edf0f4)); }
@@ -99,7 +101,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-titlebar-root .cxr-header button { pointer-events: auto; -webkit-app-region: no-drag; }
   .cxr-titlebar-root .cxr-heading { overflow: hidden; }
   .cxr-titlebar-root .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-titlebar-root .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-titlebar-root .cxr-titlebar-action :is(.t-icon,.cordisx-host-icon,svg) { width: 16px; height: 16px; color: currentColor; font-size: 16px !important; }
-  @media (max-width: 600px) { .cxr-titlebar-root .cxr-header { gap: 4px; padding-inline: 6px; } }
   @media (prefers-reduced-motion: reduce) { .cxr-titlebar-root .cxr-header-seat > .t-button, .cxr-titlebar-root .cxr-titlebar-action { transition: none; } }
   .cxr-header-seat > .cxr-brand-mark { width: 18px; height: 18px; }
   .cxr-heading { min-width: 0; }

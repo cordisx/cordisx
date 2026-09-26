@@ -135,12 +135,31 @@ export async function refreshSource() {
   listeners.forEach(listener => listener(state))
   await settle()
 }
-export async function start(delayed = false) {
+export async function start(delayed = false, nativePane = false) {
   const seat = document.createElement('span')
   document.body.append(seat)
   const theme = new HostThemeProjection(document)
   const themeRoot = document.getElementById('manager')!
   themeRoot.className = 'cxr-root'
+  const navigationSeat = document.createElement('div')
+  const titlebarSeat = document.createElement('div')
+  if (nativePane) {
+    themeRoot.dataset.managerSurface = 'pane'
+    Object.assign(themeRoot.style, {
+      left: '200px',
+      top: '44px',
+      width: 'calc(100% - 200px)',
+      height: 'calc(100% - 44px)',
+    })
+    navigationSeat.className = 'cxr-root cxr-native-navigation-seat'
+    Object.assign(navigationSeat.style, { top: '44px', width: '200px', height: 'calc(100% - 44px)' })
+    titlebarSeat.className = 'cxr-root cxr-titlebar-root'
+    titlebarSeat.dataset.managerSurface = 'pane'
+    Object.assign(titlebarSeat.style, { left: '200px', top: '0px', width: 'calc(100% - 200px)', height: '44px' })
+    document.body.append(navigationSeat, titlebarSeat)
+    theme.attach(navigationSeat)
+    theme.attach(titlebarSeat)
+  }
   const root = createRoot(themeRoot)
   theme.attach(themeRoot)
   root.render(
@@ -159,6 +178,9 @@ export async function start(delayed = false) {
           }
           : binding}
         triggerSeat={seat}
+        navigationSeat={nativePane ? navigationSeat : undefined}
+        titlebarSeat={nativePane ? titlebarSeat : undefined}
+        activatePane={nativePane ? () => true : undefined}
         navigationController={navigation}
       />
     </>,
@@ -174,6 +196,10 @@ export async function start(delayed = false) {
     root.unmount()
     theme.dispose()
     seat.remove()
+    navigationSeat.remove()
+    titlebarSeat.remove()
+    delete themeRoot.dataset.managerSurface
+    themeRoot.removeAttribute('style')
   }
 }
 export async function settle() {

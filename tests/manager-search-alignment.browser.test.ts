@@ -211,6 +211,62 @@ it.skipIf(!executable)(
       await run(`await Fixture.search('Form pages')`)
       expect(await evaluate('document.querySelector(".cxr-content").textContent')).toContain('Form pages fixture')
       await run('disposeFixture()')
+      await run('window.disposeFixture=await Fixture.start(false,true)')
+      const nativeGeometry = () =>
+        evaluate(`(() => {
+        const header=document.querySelector('.cxr-titlebar-root .cxr-header');
+        const title=header.querySelector('.cxr-heading h2,.cxr-heading button');
+        const range=document.createRange();range.selectNodeContents(title);
+        const input=document.querySelector('.cxr-content input[type="search"]');
+        const inputStyle=getComputedStyle(input);
+        const toolbar=input.closest('.cxh-search-toolbar');
+        const content=document.querySelector('.cxr-content');
+        const icon=header.querySelector('.cxr-header-seat svg');
+        return {titleIcon:icon.getBoundingClientRect().left,titleText:range.getBoundingClientRect().left,
+          searchIcon:toolbar.querySelector('.cxh-search-icon svg').getBoundingClientRect().left,
+          searchText:input.getBoundingClientRect().left+parseFloat(inputStyle.borderLeftWidth)+parseFloat(inputStyle.paddingLeft),
+          leftGutter:toolbar.getBoundingClientRect().left-content.getBoundingClientRect().left,
+          rightGutter:content.clientWidth-(toolbar.getBoundingClientRect().right-content.getBoundingClientRect().left),
+          titleRightGutter:parseFloat(getComputedStyle(header).paddingRight),
+          seatWidth:header.querySelector('.cxr-header-seat').getBoundingClientRect().width,
+          back:header.querySelector('.cxr-header-back')!==null};
+      })()`) as Promise<Record<string, number | boolean>>
+      const nativeRoutes = [...routes.filter(route => route.kind === 'primary'), routes[6]!]
+      for (const width of [1200, 700, 580]) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width,
+          height: 650,
+          deviceScaleFactor: 1,
+          mobile: false,
+        })
+        for (const theme of ['light', 'dark']) {
+          await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)};await Fixture.settle()`)
+          for (const route of nativeRoutes) {
+            await run(`await Fixture.openSearchRoute(${JSON.stringify(route)})`)
+            const actual = await nativeGeometry()
+            const label = `${JSON.stringify(route)} native ${theme}/${width}`
+            expect(Math.abs(Number(actual.titleIcon) - Number(actual.searchIcon)), `${label} icon`).toBeLessThanOrEqual(
+              1,
+            )
+            expect(Math.abs(Number(actual.titleText) - Number(actual.searchText)), `${label} text`).toBeLessThanOrEqual(
+              1,
+            )
+            expect(actual.leftGutter, `${label} left gutter`).toBe(12)
+            expect(actual.rightGutter, `${label} right gutter`).toBe(12)
+            expect(actual.titleRightGutter, `${label} title right gutter`).toBe(12)
+            expect(actual.seatWidth, `${label} native click seat`).toBe(28)
+            if (route.kind === 'plugin') expect(actual.back, `${label} back control`).toBe(true)
+          }
+          // The former native override must fail the absolute icon-coordinate gate.
+          await run(`await Fixture.openSearchRoute(${JSON.stringify(routes[0])});
+            const header=document.querySelector('.cxr-titlebar-root .cxr-header');
+            header.style.paddingLeft='12px';header.style.columnGap='6px'`)
+          const displaced = await nativeGeometry()
+          expect(Math.abs(Number(displaced.titleIcon) - Number(displaced.searchIcon))).toBeGreaterThan(1)
+          await run(`document.querySelector('.cxr-titlebar-root .cxr-header').removeAttribute('style')`)
+        }
+      }
+      await run('disposeFixture()')
     } finally {
       cdp?.close()
       if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
