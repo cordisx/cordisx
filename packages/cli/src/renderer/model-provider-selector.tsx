@@ -166,6 +166,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const [modelQuery, setModelQuery] = useState('')
   const [modelExpanded, setModelExpanded] = useState(false)
   const [switching, setSwitching] = useState(false)
+  const [fastActionPending, setFastActionPending] = useState(false)
   const [error, setError] = useState<string>()
   const [status, setStatus] = useState<string>()
   const anchor = useRef<HTMLDivElement>(null)
@@ -176,6 +177,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const modelSearch = useRef<HTMLInputElement>(null)
   const modelOptionsId = `cxmp-model-options-${useId().replace(/:/g, '')}`
   const operation = useRef(0)
+  const reasoningInFlight = useRef<Promise<void> | undefined>(undefined)
+  const fastActionInFlight = useRef<number | undefined>(undefined)
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
   const canInteract = () => !suspended && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
@@ -230,6 +233,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     ?.find(model => model.id === displayedModelId)
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
   const fastMode = supportsFastMode && native.serviceTier === 'priority'
+  const canQueueFast = reasoningInFlight.current !== undefined
+  const fastDisabled = !native.available || !supportsFastMode || fastActionPending
+    || ((native.busy || switching) && !canQueueFast)
   const showInitialLoading = catalog.loading
     && catalog.providers.length === 0
     && catalog.entries.length === 0
@@ -241,12 +247,17 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
 
   useEffect(() => {
     operation.current++
+    reasoningInFlight.current = undefined
+    fastActionInFlight.current = undefined
     setSwitching(false)
+    setFastActionPending(false)
     setOpen(undefined)
     setError(undefined)
     setStatus(undefined)
     return () => {
       operation.current++
+      reasoningInFlight.current = undefined
+      fastActionInFlight.current = undefined
     }
   }, [native.threadId])
 
@@ -271,7 +282,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     }
   }, [native.submissionError, copy.unsupportedIntent, copy.submitRejected])
 
-  const selectReasoningEffort = async (effort: string) => {
+  const runReasoningEffort = async (effort: string) => {
     if (!canInteract()) return
     const generation = ++operation.current
     setSwitching(true)
@@ -294,19 +305,38 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     }
   }
 
+  const selectReasoningEffort = (effort: string): Promise<void> => {
+    const pending = runReasoningEffort(effort)
+    reasoningInFlight.current = pending
+    const clear = () => {
+      if (reasoningInFlight.current === pending) reasoningInFlight.current = undefined
+    }
+    void pending.then(clear, clear)
+    return pending
+  }
+
   const selectFastMode = async (enabled: boolean) => {
-    if (!canInteract()) return
+    if (!canInteract() || fastActionInFlight.current !== undefined) return
+    const pendingReasoning = reasoningInFlight.current
     const generation = ++operation.current
+    fastActionInFlight.current = generation
+    setFastActionPending(true)
     setSwitching(true)
     setError(undefined)
     setStatus(undefined)
     try {
+      if (pendingReasoning !== undefined) await pendingReasoning
+      if (generation !== operation.current || !canInteract()) return
       const result = await transport.selectFastMode(enabled)
       if (generation !== operation.current) return
       if (result !== 'accepted') setError(result === 'busy' ? copy.busy : copy.failed)
     } catch {
       if (generation === operation.current) setError(copy.failed)
     } finally {
+      if (fastActionInFlight.current === generation) {
+        fastActionInFlight.current = undefined
+        setFastActionPending(false)
+      }
       if (generation === operation.current) setSwitching(false)
     }
   }
@@ -501,7 +531,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
             aria-label={copy.disableFastMode}
             title={copy.disableFastMode}
             aria-pressed="true"
-            disabled={suspended || !native.available || native.busy || switching}
+            disabled={suspended || fastDisabled}
+            aria-busy={fastActionPending}
             onClick={() => void selectFastMode(false)}
           >
             <HostIcon surfaceToken="host:bolt" token="status.info" state="active" />
@@ -538,6 +569,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         label={open === 'provider' ? copy.providers : copy.models}
         anchorRef={anchor}
         returnFocusRef={returnFocus}
+        align="end"
         className="cxmp-menu"
         onClose={close}
         onKeyDown={event => {
@@ -641,7 +673,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                         aria-label={fastMode ? copy.disableFastMode : copy.enableFastMode}
                         title={fastMode ? copy.disableFastMode : copy.enableFastMode}
                         aria-pressed={fastMode}
-                        disabled={!native.available || native.busy || switching || !supportsFastMode}
+                        disabled={fastDisabled}
+                        aria-busy={fastActionPending}
                         onClick={() => void selectFastMode(!fastMode)}
                       >
                         <HostIcon

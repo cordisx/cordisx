@@ -253,8 +253,10 @@ describe('HostMenuSurface behavior', () => {
     Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 800 })
     Object.defineProperty(dom.window, 'innerHeight', { configurable: true, value: 600 })
     let menuHeight = 120
+    let menuWidth = 200
+    let anchorLeft = 600
     vi.spyOn(dom.window.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function() {
-      return this === anchor ? rect(600, 400, 80, 28) : rect(0, 0, 200, menuHeight)
+      return this === anchor ? rect(anchorLeft, 400, 680 - anchorLeft, 28) : rect(0, 0, menuWidth, menuHeight)
     })
     let resize!: () => void
     const disconnectObserver = vi.fn()
@@ -287,10 +289,13 @@ describe('HostMenuSurface behavior', () => {
     expect(focus).toHaveBeenCalledOnce()
 
     menuHeight = 180
+    menuWidth = 240
+    anchorLeft = 540
     resize()
     resize()
     expect(frame).toBeDefined()
     frame?.(0)
+    expect(menu.style.left).toBe('440px')
     expect(menu.style.top).toBe('394px')
     expect(focus).toHaveBeenCalledOnce()
 

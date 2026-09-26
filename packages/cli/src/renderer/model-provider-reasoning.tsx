@@ -35,9 +35,10 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
   const activeMark = maximum === 0 ? 0 : Math.round(visualProgress * maximum)
   const unavailable = disabled || efforts.length < 2 || !efforts.includes(value ?? '')
   const hot = !unavailable && !pending && fast
+  const particlesEnabled = !unavailable && !pending && (fast || activeMark >= efforts.length - 2)
   const peak = visualProgress === 1
   const effortsKey = efforts.join('\0')
-  particleFlowEnabled.current = hot
+  particleFlowEnabled.current = particlesEnabled
 
   useEffect(() => {
     setDraft(undefined)
@@ -139,7 +140,7 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
     }
   }, [])
 
-  useEffect(() => refreshParticleFlow.current(), [hot])
+  useEffect(() => refreshParticleFlow.current(), [particlesEnabled])
 
   const updateDraft = (nextIndex: number) => {
     const next = efforts[Math.max(0, Math.min(maximum, nextIndex))]
@@ -177,6 +178,7 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
       data-disabled={unavailable || undefined}
       data-hot={hot || undefined}
       data-peak={peak || undefined}
+      data-particles={particlesEnabled || undefined}
       data-flowing={flowing || undefined}
       data-progress={visualProgress.toFixed(4)}
       style={{
