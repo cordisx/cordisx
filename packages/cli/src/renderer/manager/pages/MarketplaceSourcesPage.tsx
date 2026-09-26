@@ -86,7 +86,7 @@ export function MarketplaceSourcesPage({
     }
   }
   return (
-    <section className="cxr-page cxr-source-management-page">
+    <section className="cxr-page cxr-browse-page cxr-source-management-page">
       <MarketplaceSourceManager
         locale={locale}
         sources={sources}

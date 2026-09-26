@@ -55,6 +55,7 @@ try {
     'renderer/host-ui/action-group.css',
     'renderer/host-ui/empty-state.css',
     'renderer/model-providers.css',
+    'renderer/manager/manager-browse.css',
     'renderer/manager/manager-navigation.css',
     'renderer/manager/manager-content.css',
     'renderer/manager/manager-catalog.css',

@@ -1,3 +1,4 @@
+import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
@@ -21,7 +22,7 @@ export function RoutesPage(
     )
   )
   return (
-    <section className="cxr-page">
+    <section className="cxr-page cxr-browse-page">
       <SearchToolbar
         clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
         value={query}
@@ -29,7 +30,7 @@ export function RoutesPage(
         placeholder={managerCopy(snapshot.localization.locale, 'routes.search-placeholder')}
         onChange={setQuery}
       />
-      <div className="cxr-list">
+      <ManagerBrowseResults className="cxr-list">
         {routes.map(route => (
           <button
             key={`route:${route.qualifiedId}`}
@@ -78,7 +79,7 @@ export function RoutesPage(
             />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
     </section>
   )
 }

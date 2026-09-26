@@ -1,3 +1,4 @@
+import { ManagerBrowseResults } from './ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { managerCopy } from '../../ui-copy.js'
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
@@ -154,7 +155,7 @@ export function MarketplaceSourceManager({
           </>
         }
       />
-      <div className="cxr-list" data-marketplace-source-list="true">
+      <ManagerBrowseResults className="cxr-list" data-marketplace-source-list="true">
         {visibleSources.map(source => {
           const busy = busyUrl === source.url
           return (
@@ -223,7 +224,7 @@ export function MarketplaceSourceManager({
             />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
       <HostEditorDialog
         visible={removing !== undefined}
         header={copy.remove}

@@ -7,6 +7,7 @@ import managerMarkdownCss from './manager-markdown.css'
 import managerPluginDetailsCss from './manager-plugin-details.css'
 import managerAboutCss from './manager-about.css'
 import managerCollectionCss from './manager-collection.css'
+import managerBrowseCss from './manager-browse.css'
 import managerCompactShellCss from './manager-compact-shell.css'
 import searchCss from '../host-ui/search.css'
 import actionGroupCss from '../host-ui/action-group.css'
@@ -38,6 +39,7 @@ export const REACT_MANAGER_STYLES = [
   managerAboutCss,
   managerCollectionCss,
   managerCompactShellCss,
+  managerBrowseCss,
   PLUGIN_CONSOLE_REACT_STYLES,
   HOST_FORM_REACT_STYLES,
   HOST_COLLECTION_STYLES,

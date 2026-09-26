@@ -26,6 +26,7 @@ const preservedRendererStyles = [
   'renderer/manager/manager-about.css',
   'renderer/manager/manager-collection.css',
   'renderer/manager/manager-compact-shell.css',
+  'renderer/manager/manager-browse.css',
   'renderer/manager/pages/model-services.css',
   'renderer/manager/pages/model-catalog/model-catalog.css',
 ]

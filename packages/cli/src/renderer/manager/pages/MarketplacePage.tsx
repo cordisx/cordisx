@@ -1,3 +1,4 @@
+import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { managerCopy } from '../../ui-copy.js'
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
@@ -159,7 +160,7 @@ export function MarketplacePage(
     else await navigator.clipboard.writeText(href)
   }
   return (
-    <section className="cxr-page cxr-marketplace" data-marketplace-discovery-page="true">
+    <section className="cxr-page cxr-browse-page cxr-marketplace" data-marketplace-discovery-page="true">
       <SearchToolbar
         toolbarLabel={copy.tools}
         aria-label={copy.search}
@@ -194,7 +195,7 @@ export function MarketplacePage(
           </>
         }
       />
-      <div className="cxr-marketplace-grid" role="list">
+      <ManagerBrowseResults className="cxr-marketplace-grid" role="list">
         {results.map(result => {
           const href = result.plugin.homepage ?? result.plugin.source
           const favorite = favorites.has(result.plugin.identity)
@@ -380,7 +381,7 @@ export function MarketplacePage(
             />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
     </section>
   )
 }

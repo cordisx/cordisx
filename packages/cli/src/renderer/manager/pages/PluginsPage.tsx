@@ -1,3 +1,4 @@
+import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useMemo, useState } from 'react'
 import { IconButton } from '../../host-ui/IconButton.js'
@@ -49,7 +50,7 @@ export function PluginsPage(
 
   return (
     <section
-      className="cxr-page"
+      className="cxr-page cxr-browse-page"
       aria-label={managerCopy(snapshot.localization.locale, 'plugins.collection-label')}
       data-unified-plugins-page="true"
     >
@@ -61,7 +62,7 @@ export function PluginsPage(
         onChange={setQuery}
       />
 
-      <div className="cxr-list cxr-plugins-results" role="list" data-installed-plugin-results="true">
+      <ManagerBrowseResults className="cxr-list cxr-plugins-results" role="list" data-installed-plugin-results="true">
         {plugins.map(plugin => {
           const bundleNames = provenance.get(plugin.id) ?? []
           return (
@@ -181,7 +182,7 @@ export function PluginsPage(
             />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
     </section>
   )
 }

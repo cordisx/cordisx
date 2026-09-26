@@ -1,3 +1,4 @@
+import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
@@ -16,7 +17,7 @@ export function ExtensionPointsPage(
     )
   )
   return (
-    <section className="cxr-page">
+    <section className="cxr-page cxr-browse-page">
       <SearchToolbar
         clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
         value={query}
@@ -24,7 +25,7 @@ export function ExtensionPointsPage(
         placeholder={managerCopy(snapshot.localization.locale, 'extension.search-placeholder')}
         onChange={setQuery}
       />
-      <div className="cxr-list">
+      <ManagerBrowseResults className="cxr-list">
         {points.map(point => (
           <button
             key={point.id}
@@ -57,7 +58,7 @@ export function ExtensionPointsPage(
             />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
     </section>
   )
 }

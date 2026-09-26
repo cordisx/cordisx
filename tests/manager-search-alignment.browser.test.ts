@@ -386,6 +386,120 @@ it.skipIf(!executable)(
         }
       }
 
+      // Real wheel input on production browse pages in the native-pane composition.
+      // This catches the former outer-content scroll owner; assigning scrollTop
+      // alone could pass even when a user's wheel still moves the search away.
+      await run('await Fixture.prepareBrowseRecords()')
+      const browseRoutes = [...routes.slice(0, 4), { kind: 'marketplace-sources' }]
+      const scrollGeometry = () =>
+        evaluate(`(() => {
+        const results=document.querySelector('.cxr-browse-results');
+        const toolbar=document.querySelector('.cxr-content .cxh-search-toolbar');
+        const content=document.querySelector('.cxr-content'),root=document.querySelector('#manager');
+        const r=results.getBoundingClientRect(),t=toolbar.getBoundingClientRect();
+        return {top:t.top,bottom:t.bottom,resultTop:r.top,resultBottom:r.bottom,x:r.left+r.width/2,
+          y:r.top+Math.min(r.height/2,40),list:results.scrollTop,content:content.scrollTop,
+          root:root.scrollTop,window:window.scrollY,height:results.clientHeight,
+          overflow:results.scrollHeight-results.clientHeight,rows:[...results.children].filter(e=>e.tagName!=='STYLE').length,
+          actions:[...toolbar.querySelectorAll('button')].map(e=>e.getBoundingClientRect().top)};
+      })()`) as Promise<{
+          top: number
+          bottom: number
+          resultTop: number
+          resultBottom: number
+          x: number
+          y: number
+          list: number
+          content: number
+          root: number
+          window: number
+          height: number
+          overflow: number
+          rows: number
+          actions: number[]
+        }>
+      const scrollEvidence: unknown[] = []
+      for (const width of [1200, 580]) {
+        for (const height of [650, 280]) {
+          await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+          for (const theme of ['light', 'dark']) {
+            await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+            for (const route of browseRoutes) {
+              await run(`await Fixture.openSearchRoute(${JSON.stringify(route)});await Fixture.search('')`)
+              await expect.poll(async () => (await scrollGeometry()).rows, {
+                timeout: 5000,
+                message: JSON.stringify(route),
+              }).toBe(81)
+              const before = await scrollGeometry()
+              expect(before.rows, JSON.stringify(route)).toBe(81)
+              expect(before.height).toBeGreaterThan(30)
+              expect(before.overflow).toBeGreaterThan(120)
+              expect(before.top).toBeGreaterThanOrEqual(44)
+              expect(before.bottom).toBeLessThanOrEqual(before.resultTop)
+              await cdp.send('Input.dispatchMouseEvent', {
+                type: 'mouseWheel',
+                x: before.x,
+                y: before.y,
+                deltaX: 0,
+                deltaY: 240,
+              })
+              await expect.poll(async () => (await scrollGeometry()).list).toBeGreaterThan(0)
+              const down = await scrollGeometry()
+              expect(down.top).toBe(before.top)
+              expect(down.actions).toEqual(before.actions)
+              expect([down.content, down.root, down.window]).toEqual([0, 0, 0])
+              await cdp.send('Input.dispatchMouseEvent', {
+                type: 'mouseWheel',
+                x: before.x,
+                y: before.y,
+                deltaX: 0,
+                deltaY: -240,
+              })
+              await expect.poll(async () => (await scrollGeometry()).list).toBeLessThan(down.list)
+              const up = await scrollGeometry()
+              expect(up.top).toBe(before.top)
+              expect([up.content, up.root, up.window]).toEqual([0, 0, 0])
+              const singleQuery = route.kind === 'marketplace-sources'
+                ? 'Scroll source 80'
+                : route.page === 'marketplace'
+                ? 'search-permissions-80'
+                : route.page === 'plugins'
+                ? 'Scroll plugin 80'
+                : route.page === 'routes'
+                ? 'Scroll route 80'
+                : 'Scroll point 80'
+              await run(`await Fixture.search(${JSON.stringify(singleQuery)})`)
+              const single = await scrollGeometry()
+              expect(single.rows).toBe(1)
+              expect(single.height).toBe(before.height)
+              expect(single.top).toBe(before.top)
+              await run(`await Fixture.search('missing-scroll-regression')`)
+              const empty = await scrollGeometry()
+              expect(empty.top).toBe(before.top)
+              expect(empty.height).toBe(before.height)
+              expect(empty.resultBottom).toBe(before.resultBottom)
+              expect(empty.rows).toBe(1)
+              scrollEvidence.push({ route, width, height, theme, before, down, up, single, empty })
+            }
+          }
+        }
+      }
+      await run('window.restoreBrowseLoading=await Fixture.openBrowseLoading()')
+      const loading = await scrollGeometry()
+      expect(loading.height).toBeGreaterThan(30)
+      expect(loading.top).toBeGreaterThanOrEqual(44)
+      expect([loading.content, loading.root, loading.window]).toEqual([0, 0, 0])
+      expect(await evaluate('document.querySelector(".cxr-browse-results [data-empty-state]").dataset.emptyState'))
+        .toBe('loading')
+      await run('await window.restoreBrowseLoading()')
+      scrollEvidence.push({ loading })
+      if (process.env.CORDISX_BROWSE_SCROLL_ARTIFACTS) {
+        await writeFile(
+          join(process.env.CORDISX_BROWSE_SCROLL_ARTIFACTS, 'wheel-geometry.json'),
+          JSON.stringify(scrollEvidence, null, 2),
+        )
+      }
+
       // Approved model-service hero uses the production page and the same native-pane fixture.
       await run('Fixture.prepareModelEmptyState()')
       for (const width of [1200, 580]) {
