@@ -1,3 +1,4 @@
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -180,11 +181,20 @@ describe('Host Manager entity record summary', () => {
         new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
       )
       expect(replace).toHaveBeenCalledWith({ kind: 'manager-content', id: 'chatroom:team', reference: prompts })
-      expect(REACT_MANAGER_STYLES).toContain('.cxr-manager-record-summary { display: grid; min-width: 0;')
-      expect(REACT_MANAGER_STYLES).toContain('background: var(--cx-hover')
-      expect(REACT_MANAGER_STYLES).toContain(
-        '.cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
+      expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-record-summary')).toMatchObject({
+        display: 'grid',
+        'min-width': '0',
+      })
+      expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-record-avatar')).toHaveProperty(
+        'background',
+        'var(--cx-hover,rgba(255,255,255,0.08))',
       )
+      expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-content-panel')).toMatchObject({
+        'min-width': '0',
+        'min-height': '0',
+        flex: '1',
+        overflow: 'auto',
+      })
     } finally {
       await act(async () => root.unmount())
       dom.window.close()

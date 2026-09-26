@@ -1,4 +1,4 @@
-import sidebarCss from '../../../assets/host-sidebar.css'
+import sidebarCss from '../../../assets/host-sidebar.css?inline'
 
 interface StructuredStyleOwnership {
   readonly element: HTMLStyleElement

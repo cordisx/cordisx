@@ -1,3 +1,4 @@
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mountManagerCollectionHost } from '../packages/cli/src/renderer/manager/components/ManagerCollection.js'
@@ -162,22 +163,37 @@ describe('Host Manager collection visual accessibility', () => {
   })
 
   it('uses overlay actions, no-hover fallback, compact dividers, and aligned content edges', () => {
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-collection-actions { position: absolute; top: 50%; right: 8px;',
-    )
-    expect(REACT_MANAGER_STYLES).toContain('opacity: 0; pointer-events: none;')
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-collection-row:hover .cxr-manager-collection-actions, .cxr-manager-collection-row:focus-within .cxr-manager-collection-actions, .cxr-manager-collection-row[data-actions-open="true"] .cxr-manager-collection-actions { opacity: 1; pointer-events: auto;',
-    )
-    expect(REACT_MANAGER_STYLES).toContain(
-      '@media (hover: none), (pointer: coarse) { .cxr-manager-collection-actions { opacity: 1; pointer-events: auto;',
-    )
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-collection-list { display: grid; width: 100%; min-width: 0; gap: 0; margin: 0; border: 1px solid',
-    )
-    expect(REACT_MANAGER_STYLES).toContain('border: 0; border-bottom: 1px solid')
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-collection-panel { width: 100%; min-width: 0; margin: 0; }',
-    )
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-actions')).toMatchObject({
+      position: 'absolute',
+      top: '50%',
+      right: '8px',
+      opacity: '0',
+      'pointer-events': 'none',
+    })
+    expect(
+      cssDeclarations(
+        REACT_MANAGER_STYLES,
+        '.cxr-manager-collection-row:hover .cxr-manager-collection-actions, .cxr-manager-collection-row:focus-within .cxr-manager-collection-actions, .cxr-manager-collection-row[data-actions-open="true"] .cxr-manager-collection-actions',
+      ),
+    ).toMatchObject({ opacity: '1', 'pointer-events': 'auto' })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-actions', '(hover: none), (pointer: coarse)'))
+      .toMatchObject({ opacity: '1', 'pointer-events': 'auto' })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-list')).toMatchObject({
+      display: 'grid',
+      width: '100%',
+      'min-width': '0',
+      gap: '0',
+      margin: '0',
+      border: '1px solid var(--cx-border,#353a42)',
+    })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-row')).toMatchObject({
+      border: '0',
+      'border-bottom': '1px solid var(--cx-border,#353a42)',
+    })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-panel')).toMatchObject({
+      width: '100%',
+      'min-width': '0',
+      margin: '0',
+    })
   })
 })

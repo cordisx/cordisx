@@ -1,12 +1,10 @@
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { readFile } from 'node:fs/promises'
 import { expect, it } from 'vitest'
 import { REACT_MANAGER_STYLES } from '../packages/cli/src/renderer/manager/styles.js'
 
 function zIndex(styles: string, selector: string): number {
-  const start = styles.indexOf(`${selector} {`)
-  const end = start === -1 ? -1 : styles.indexOf('}', start)
-  const block = start === -1 || end === -1 ? undefined : styles.slice(start, end)
-  const value = block?.match(/z-index:\s*(\d+)/u)?.[1]
+  const value = cssDeclarations(styles, selector)['z-index']
   if (value === undefined) throw new Error(`Missing z-index for ${selector}`)
   return Number(value)
 }

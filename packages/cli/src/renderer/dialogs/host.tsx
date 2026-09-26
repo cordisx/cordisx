@@ -4,7 +4,7 @@ import { DialogCenter, type DialogEntry } from './model.js'
 import { DialogShell } from './view.js'
 import { HostThemeProjection } from '../host-theme.js'
 import { mountDialogForm } from './form.js'
-import styles from './styles.css'
+import styles from './styles.css?inline'
 
 const centers = new WeakMap<Document, DialogCenter>()
 export const dialogCenterForDocument = (document: Document) => centers.get(document)

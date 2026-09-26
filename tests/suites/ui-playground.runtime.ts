@@ -1,3 +1,4 @@
+import { cssDeclarations, findCssDeclarations } from '../helpers/css-declarations.js'
 import { JSDOM } from 'jsdom'
 import { createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -197,15 +198,32 @@ export function registerRuntimeTests() {
         const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
         expect(managerStyles).toContain('.t-input {')
         expect(managerStyles).toContain('.t-textarea__inner {')
-        expect(managerStyles).toMatch(/\.cxr-root \{[^}]*\bposition: relative;[^}]*\bz-index: 2147483500;/u)
-        expect(managerStyles).toContain('.cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }')
-        expect(managerStyles).toContain('.cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500;')
-        expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
-        expect(managerStyles).toContain(
-          '.cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));',
-        )
-        expect(managerStyles).toContain('.cxr-plugin-actions { position: absolute; top: 50%;')
-        expect(managerStyles).toContain('transform: translateY(-50%);')
+        expect(cssDeclarations(managerStyles, '.cxr-root')).toMatchObject({
+          position: 'relative',
+          'z-index': '2147483500',
+        })
+        expect(cssDeclarations(managerStyles, '.cxr-root :is(.t-popup,.t-dialog__ctx)')).toMatchObject({
+          'z-index': '2147483600 !important',
+        })
+        expect(cssDeclarations(managerStyles, '.cxr-backdrop')).toMatchObject({
+          position: 'fixed',
+          inset: '0',
+          'z-index': '2147483500',
+        })
+        expect(cssDeclarations(managerStyles, '.cxr-tabs')).toMatchObject({
+          display: 'flex',
+          'min-height': '38px',
+          flex: 'none',
+        })
+        expect(cssDeclarations(managerStyles, '.cxr-list')).toMatchObject({
+          display: 'grid',
+          'grid-template-columns': 'repeat(auto-fill,minmax(min(260px,100%),1fr))',
+        })
+        expect(cssDeclarations(managerStyles, '.cxr-plugin-actions')).toMatchObject({
+          position: 'absolute',
+          top: '50%',
+          transform: 'translateY(-50%)',
+        })
         expect(managerStyles).toContain(
           '.cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content;',
         )
@@ -226,10 +244,12 @@ export function registerRuntimeTests() {
         expect(managerStyles).toContain(
           '.cxf-form-surface, .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }',
         )
-        expect(managerStyles).toContain(
-          '.cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }',
-        )
-        expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
+        expect(cssDeclarations(managerStyles, '.cxr-plugin-config-panel .cxf-react-form')).toMatchObject({
+          'min-height': '0',
+          flex: '1',
+          overflow: 'hidden',
+        })
+        expect(findCssDeclarations(managerStyles, '.cxr-page[data-plugin-detail]')?.display).not.toBe('flex')
         expect(trigger.closest('.cxr-trigger-seat')?.previousElementSibling).toBe(
           dom.window.document.querySelector('[data-cordisx-playground-manager-trigger]'),
         )

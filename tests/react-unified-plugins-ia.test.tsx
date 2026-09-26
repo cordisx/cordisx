@@ -452,7 +452,12 @@ describe('unified Plugins information architecture', () => {
       expect(page?.querySelector('.cxr-plugins-results')).not.toBeNull()
 
       await fixture.type('input[type="search"]', 'nothing-matches')
-      expect(page?.querySelectorAll('.cxr-empty')).toHaveLength(1)
+      expect(page?.querySelectorAll('[data-empty-state]')).toHaveLength(1)
+      const empty = page?.querySelector('[data-empty-state="search"][role="status"]')
+      expect(empty?.getAttribute('aria-busy')).toBe('false')
+      expect(empty?.querySelector('p')?.textContent).toBe('No matching plugins')
+      expect(empty?.querySelector('button')?.textContent).toBe('Clear search')
+      expect(page?.querySelector('.cxh-search-toolbar input[type="search"]')).not.toBeNull()
       expect(page?.textContent).toContain('No matching plugins')
     } finally {
       await fixture.dispose()

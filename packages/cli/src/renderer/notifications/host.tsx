@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { NotificationCenter } from './model.js'
 import { NotificationViewport } from './view.js'
-import styles from './styles.css'
+import styles from './styles.css?inline'
 import { HostThemeProjection } from '../host-theme.js'
 
 const centers = new WeakMap<Document, NotificationCenter>()
