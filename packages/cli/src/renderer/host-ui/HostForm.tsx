@@ -93,6 +93,9 @@ export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
   .cxf-array-item-dialog .t-dialog__footer { padding: 0; }
   .cxf-array-item-fields { gap: 0; }
   .cxf-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  @media (min-width: 761px) {
+    .cxf-item[data-has-description="true"]:not([data-full-width="true"]) { grid-template-areas: "label control" "help control" "error error"; }
+  }
   .cxf-status { min-width: 0; flex: 1; color: var(--cx-muted,#9ca5b5); font-size: 11px; }
   .cxf-form-action-buttons { display: flex; flex: none; gap: 8px; }
   @media (max-width: 760px) {
@@ -531,6 +534,7 @@ interface HostFieldRowBaseProps {
   readonly locale: string
   readonly idPrefix: string
   readonly issueText?: string
+  readonly revealIssue?: boolean
   readonly forceFullWidth?: boolean
   readonly controlId?: string
   readonly transientSecret?: boolean
@@ -572,6 +576,17 @@ export function HostFieldRow(props: HostFieldRowProps) {
   const resolution = resolveFormPresenter(descriptor(field))
   const labelId = `cxf-label-${encodeURIComponent(idPrefix)}-${field.path.map(encodeURIComponent).join('-')}`
   const resolvedControlId = controlId ?? `cxm-config-${idPrefix}-${field.path.join('-')}`
+  const [validation, setValidation] = useState({ identity: labelId, touched: false })
+  if (validation.identity !== labelId || (props.revealIssue === true && !validation.touched)) {
+    setValidation({ identity: labelId, touched: props.revealIssue === true })
+  }
+  const visibleIssueText = validation.identity === labelId && validation.touched || props.revealIssue === true
+    ? issueText
+    : undefined
+  const revealIssue = () =>
+    setValidation(current =>
+      current.identity === labelId && current.touched ? current : { identity: labelId, touched: true }
+    )
   useLayoutEffect(() => {
     const controls = controlSeat.current?.querySelectorAll<HTMLElement>(
       'input,textarea,[role="switch"],[role="slider"]',
@@ -584,9 +599,9 @@ export function HostFieldRow(props: HostFieldRowProps) {
         `${field.description === undefined ? '' : `${resolvedControlId}-help `}${resolvedControlId}-error`,
       )
       control.setAttribute('aria-required', String(field.required))
-      control.setAttribute('aria-invalid', String(issueText !== undefined))
+      control.setAttribute('aria-invalid', String(visibleIssueText !== undefined))
     })
-  }, [field.description, field.required, issueText, labelId, resolvedControlId, resolved, value])
+  }, [field.description, field.required, visibleIssueText, labelId, resolvedControlId, resolved, value])
   return (
     <div
       className="cxf-item"
@@ -596,7 +611,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
       data-control-layout={resolution.layout}
       data-primitive={resolved}
       data-presenter={field.presenter?.kind ?? 'auto'}
-      data-invalid={String(issueText !== undefined)}
+      data-invalid={String(visibleIssueText !== undefined)}
       data-has-description={String(field.description !== undefined)}
     >
       <div className="cxf-label-row" id={labelId}>
@@ -610,10 +625,16 @@ export function HostFieldRow(props: HostFieldRowProps) {
               changed={changed}
               locale={locale}
               onUseDefault={() => {
-                if (!disabled) props.onUseDefault()
+                if (!disabled) {
+                  revealIssue()
+                  props.onUseDefault()
+                }
               }}
               onRollback={() => {
-                if (!disabled) props.onRollback()
+                if (!disabled) {
+                  revealIssue()
+                  props.onRollback()
+                }
               }}
               onCopyPath={props.onCopyPath}
             />
@@ -622,7 +643,15 @@ export function HostFieldRow(props: HostFieldRowProps) {
           ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span>
           : null}
       </div>
-      <div ref={controlSeat} className="cxf-control-seat" role="group" aria-labelledby={labelId}>
+      <div
+        ref={controlSeat}
+        className="cxf-control-seat"
+        role="group"
+        aria-labelledby={labelId}
+        onBlur={event => {
+          if (!disabled && !event.currentTarget.contains(event.relatedTarget)) revealIssue()
+        }}
+      >
         {customControl === undefined || resolved === 'sensitive-unavailable'
           ? (
             <Control
@@ -651,9 +680,9 @@ export function HostFieldRow(props: HostFieldRowProps) {
       {field.description === undefined
         ? null
         : <p id={`${resolvedControlId}-help`} className="cxf-help">{field.description}</p>}
-      {issueText === undefined
+      {visibleIssueText === undefined
         ? <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert" hidden />
-        : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{issueText}</p>}
+        : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{visibleIssueText}</p>}
     </div>
   )
 }
@@ -749,7 +778,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                 !== undefined
             )
             if (invalid !== undefined) {
-              setFormState('error')
+              flushSync(() => setFormState('error'))
               setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
               shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
               return
@@ -851,6 +880,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                           controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
                           customControl={{ model, pluginId: plugin.id }}
                           {...(issueText === undefined ? {} : { issueText })}
+                          revealIssue={formState === 'error'}
                           onUseDefault={() => {
                             if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
                           }}
