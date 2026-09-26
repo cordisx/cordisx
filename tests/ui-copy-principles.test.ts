@@ -98,6 +98,7 @@ describe('Host UI catalog and production React composition', () => {
         'PermissionDetailPage',
         'PluginsPage',
         'MarketplacePage',
+        'MarketplaceSourceEditPage',
         'MarketplaceSourcesPage',
         'RoutesPage',
         'ExtensionPointsPage',
@@ -143,8 +144,13 @@ describe('Host UI catalog and production React composition', () => {
       '../../host-ui/IconButton.js',
       'IconButton',
     )
-    for (const control of ['Input', 'Switch', 'Textarea']) {
+    for (const control of ['Input', 'Switch']) {
       expectRenderedImport('manager/components/MarketplaceSourceManager.tsx', 'tdesign-react', control)
     }
+    expectRenderedImport(
+      'manager/pages/MarketplaceSourceEditPage.tsx',
+      '../../host-ui/SchemaForm.js',
+      'HostSchemaFormPage',
+    )
   })
 })

@@ -53,6 +53,9 @@ function DraftField({ definition, error, resetVersion, locale, onClearError }: {
       locale={locale}
       idPrefix={`draft-${definition.id}`}
       {...(error === undefined ? {} : { issueText: error })}
+      // Draft errors are explicit Host feedback from submission or an operation,
+      // rather than the eagerly calculated validity of a schema field.
+      revealIssue={error !== undefined}
       {...(definition.forceFullWidth === undefined ? {} : { forceFullWidth: definition.forceFullWidth })}
       {...(definition.controlId === undefined ? {} : { controlId: definition.controlId })}
       {...(definition.transientSecret === undefined ? {} : { transientSecret: definition.transientSecret })}

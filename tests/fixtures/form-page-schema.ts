@@ -18,7 +18,7 @@ function item(depth: number): Schema<any> {
 export const formPageSchema = Schema.object({
   name: Schema.string().default('initial'),
   geometryCheckbox: Schema.boolean().default(false),
-  geometrySwitch: Schema.boolean().role('switch').default(false),
+  geometrySwitch: Schema.boolean().role('switch').default(false).description('Switch description'),
   geometryInput: Schema.string().default('').description('First description line\nSecond description line'),
   geometrySelect: Schema.union(['one', 'two']).default('one').description(
     'First description line\nSecond description line',
