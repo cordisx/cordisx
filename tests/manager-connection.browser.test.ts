@@ -281,9 +281,11 @@ it.skipIf(!executable)(
           const label=row.querySelector('.cxf-label-row').getBoundingClientRect();
           const control=row.querySelector(selector).getBoundingClientRect();
           const help=row.querySelector('.cxf-help')?.getBoundingClientRect();
-          return {path,delta:Math.abs(center(label)-center(control)),top:control.top,labelBottom:label.bottom,
+          const full=row.dataset.fullWidth==='true';
+          const labelCenter=innerWidth>760&&!full&&help?(label.top+help.bottom)/2:center(label);
+          return {path,delta:Math.abs(labelCenter-center(control)),top:control.top,labelBottom:label.bottom,
             helpTop:help?.top,helpBottom:help?.bottom,left:control.left,right:control.right,width:control.width,
-            full:row.dataset.fullWidth==='true'};
+            full};
         });
       `) as Promise<
           {
@@ -309,11 +311,12 @@ it.skipIf(!executable)(
       await run(`window.oldGeometryStyle=document.createElement('style');oldGeometryStyle.textContent=
         '[data-plugin-config-form] :is(.cxf-control-seat,.cxf-control-fallback){display:block!important}'+
         '[data-plugin-config-form] .cxf-array-editor-toolbar{top:10px!important;height:auto!important}'+
-        '[data-plugin-config-form] .cxf-item[data-has-description="true"]:not([data-full-width="true"]){grid-template-areas:"label control" "help control" "error error"!important}';
+        '[data-plugin-config-form] .cxf-item[data-has-description="true"]:not([data-full-width="true"]){grid-template-areas:"label control" "help ." "error error"!important}';
         document.head.append(oldGeometryStyle)`)
       try {
         const old = await measureControls()
         expect(old.find(control => control.path === 'items')!.delta).toBeGreaterThan(1)
+        expect(old.find(control => control.path === 'geometrySwitch')!.delta).toBeGreaterThan(1)
         expect(old.find(control => control.path === 'geometryInput')!.delta).toBeGreaterThan(1)
       } finally {
         await run('oldGeometryStyle.remove()')
