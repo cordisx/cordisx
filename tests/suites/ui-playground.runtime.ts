@@ -224,7 +224,10 @@ export function registerRuntimeTests() {
         expect(managerStyles).not.toContain('.cxf-array-dialog-control')
         expect(managerStyles).toContain('.cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel)')
         expect(managerStyles).toContain(
-          '.cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }',
+          '.cxf-form-surface, .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }',
+        )
+        expect(managerStyles).toContain(
+          '.cxr-plugin-config-panel .cxf-react-form { min-height: 0; flex: 1; overflow: hidden; }',
         )
         expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
         expect(trigger.closest('.cxr-trigger-seat')?.previousElementSibling).toBe(
