@@ -6,6 +6,8 @@ theme scope, and Manager integration. The Host renders the official
 localized copy, roles, and application semantics through existing contracts.
 The Host owns DOM, layout, validation, draft state, actions, focus, and cleanup.
 
+For editor/page/dialog selection and outer layout, use [Manager form composition](manager-form-composition.md).
+
 ## Outcome
 
 The production Manager enters through `manager/install.tsx` and `ManagerApp`.
