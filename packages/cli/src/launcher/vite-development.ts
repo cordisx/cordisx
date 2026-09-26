@@ -126,6 +126,16 @@ export interface NativeViteServerOptions {
   readonly prebundleHostDependencies?: boolean
 }
 
+export function nativeViteRoot(
+  workspaceRoot: string,
+  cliRoot: string,
+  plugins: readonly CordisXConfigPlugin[],
+): string {
+  return plugins.some(plugin => plugin.package === undefined || plugin.development !== undefined)
+    ? workspaceRoot
+    : cliRoot
+}
+
 async function ensurePrivateCacheDirectory(directory: string): Promise<void> {
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const metadata = await lstat(directory)
@@ -809,10 +819,12 @@ export async function startNativeViteServer(
     const initialGenerations = await Promise.all(
       initialPlugins.map(ensureGeneration),
     )
+    // Installed package graphs are immutable; do not recursively watch the user's CordisX home.
+    const viteRoot = nativeViteRoot(workspaceRoot, cliRoot, initialPlugins)
     const roots = [...new Set(initialGenerations.map(item => item.root))]
     server = await createServer({
       configFile: false,
-      root: workspaceRoot,
+      root: viteRoot,
       cacheDir,
       base,
       publicDir: false,
