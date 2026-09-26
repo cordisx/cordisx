@@ -511,10 +511,11 @@ it.skipIf(!executable)(
                 JSON.stringify(theme)
               };await Fixture.openSearchRoute({kind:'primary',page:'model-services'})`,
             )
+            // The visible client viewport excludes a classic scrollbar and borders.
             const hero = await evaluate(`(() => {
               const e=document.querySelector('[data-empty-presentation="hero"]'),r=document.querySelector('.cxmp-results'),svg=e.querySelector('svg');
               const a=e.getBoundingClientRect(),b=r.getBoundingClientRect(),scene=svg.getBoundingClientRect();
-              return {width:scene.width,height:scene.height,centerX:(a.left+a.right-b.left-b.right)/2,
+              return {width:scene.width,height:scene.height,centerX:(a.left+a.right)/2-(b.left+r.clientLeft+r.clientWidth/2),
                 centerY:(a.top+a.bottom-b.top-b.bottom)/2,overflow:e.scrollWidth-e.clientWidth,
                 scroll:r.scrollHeight>r.clientHeight,toolbar:document.querySelector('.cxh-search-toolbar').getBoundingClientRect().top};
             })()`) as Record<string, number | boolean>
