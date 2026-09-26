@@ -158,6 +158,71 @@ describe('catalog management Host consumer', () => {
     expect(fixture.client.snapshot().views).toHaveLength(1)
   })
 
+  it.each([{ views: [] }, { views: [catalogView()] }])(
+    'preserves a successful snapshot through slow polling/manual reads, invalidates replacement epochs',
+    async ({ views }) => {
+      vi.useFakeTimers()
+      let notify!: (cursor: CatalogManagementCursor) => void
+      const initial: CatalogManagementSnapshot = { epoch: 'old', sequence: 1, views, canCreateConnection: true }
+      const read = vi.fn(async () => initial)
+      const client = new ModelCatalogClient({
+        catalogManagementRead: read,
+        catalogManagementSubscribe: listener => {
+          notify = listener
+          return () => {}
+        },
+        catalogManagementCommand: async () => ({ status: 'applied' }),
+      })
+      try {
+        await client.refresh()
+        let resolve!: (snapshot: CatalogManagementSnapshot) => void
+        read.mockImplementation(() =>
+          new Promise(done => {
+            resolve = done
+          })
+        )
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(client.snapshot()).toMatchObject({ loading: false, refreshing: true, connected: true, views })
+        await vi.advanceTimersByTimeAsync(10_000)
+        expect(client.snapshot()).toMatchObject({ loading: false, refreshing: true, connected: true })
+        resolve(initial)
+        await Promise.resolve()
+        await Promise.resolve()
+        const manual = client.refresh()
+        expect(client.snapshot()).toMatchObject({ loading: false, refreshing: true, views })
+        resolve(initial)
+        await manual
+        notify({ epoch: 'new', sequence: 0 })
+        expect(client.snapshot()).toMatchObject({ connected: false, loading: true, refreshing: true })
+        expect(
+          await client.command(
+            { operation: 'createConnection', scopeRevision: 'x', expectedRevision: 'x', connection: {} } as never,
+          ),
+        ).toMatchObject({ status: 'unavailable' })
+        resolve(initial)
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(client.snapshot().connected).toBe(false)
+        const recovery = client.refresh()
+        resolve({ ...initial, epoch: 'new', sequence: 0, views: [] })
+        await recovery
+        expect(client.snapshot()).toMatchObject({
+          connected: true,
+          loading: false,
+          refreshing: false,
+          epoch: 'new',
+          views: [],
+        })
+        read.mockRejectedValueOnce(new Error('transport'))
+        await client.refresh()
+        expect(client.snapshot()).toMatchObject({ connected: false, loading: false, refreshing: false })
+      } finally {
+        client.dispose()
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it('uses exact model IDs and CAS, updates only after Host readback and never changes selection', async () => {
     const fixture = catalogFixture()
     clients.push(fixture.client)

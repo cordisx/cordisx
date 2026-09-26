@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { productLocale } from '../../ui-copy.js'
 import { ACKNOWLEDGEMENT_CONTRIBUTORS } from '../data/contributors.generated.js'
@@ -154,7 +155,7 @@ export function AcknowledgementsPage({ locale: localeSource }: { readonly locale
           <h3 id="cxr-ack-contributors-title">{copy.contributors}</h3>
         </header>
         {CONTRIBUTORS.length === 0
-          ? <div className="cxr-empty cxr-ack-empty">{copy.empty}</div>
+          ? <EmptyState icon="acknowledgements" title={copy.empty} />
           : (
             <ul className="cxr-ack-grid cxr-contributor-grid">
               {CONTRIBUTORS.map(contributor => {

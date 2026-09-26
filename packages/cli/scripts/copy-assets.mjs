@@ -13,6 +13,8 @@ const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plu
 const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
   'renderer/host-ui/search.css',
+  'renderer/host-ui/empty-state.css',
+  'renderer/host-ui/action-group.css',
   'renderer/model-providers.css',
   'renderer/manager/pages/model-services.css',
   'renderer/manager/pages/model-catalog/model-catalog.css',

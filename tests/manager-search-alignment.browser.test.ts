@@ -1,7 +1,7 @@
 import { build } from 'esbuild'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -137,6 +137,31 @@ it.skipIf(!executable)(
                   `${route.page} title/search text ${theme}/${width}/${query}: ${JSON.stringify(starts)}`,
                 ).toBeLessThanOrEqual(1)
               }
+              // Shared statuses must inherit the list's left baseline and wrap on narrow pages.
+              const emptyStates = await evaluate(`(() => [...document.querySelectorAll('.cxh-empty-state')].map(e=>{
+                const style=getComputedStyle(e),icon=e.querySelector('.cordisx-host-icon'),body=e.parentElement;
+                return {left:e.getBoundingClientRect().left,owner:body.getBoundingClientRect().left,
+                  icon:icon.getBoundingClientRect().left,overflow:e.scrollWidth-e.clientWidth,
+                  border:style.borderTopWidth,color:style.color,muted:getComputedStyle(icon).color,
+                  align:style.textAlign};
+              }))()`) as {
+                left: number
+                owner: number
+                icon: number
+                overflow: number
+                border: string
+                color: string
+                muted: string
+                align: string
+              }[]
+              for (const state of emptyStates) {
+                expect(Math.abs(state.left - state.owner)).toBeLessThanOrEqual(1)
+                expect(Math.abs(state.icon - state.left)).toBeLessThanOrEqual(1)
+                expect(state.overflow).toBeLessThanOrEqual(1)
+                expect(state.border).toBe('0px')
+                expect(state.align).toBe('start')
+                expect(state.color).not.toBe(state.muted)
+              }
               expect(actual.left).toBeGreaterThanOrEqual(0)
               expect(actual.right).toBeLessThanOrEqual(width)
               expect(await evaluate('document.querySelector(".cxr-content input").getAttribute("aria-label")'))
@@ -149,8 +174,29 @@ it.skipIf(!executable)(
             expect(await evaluate('document.querySelector(".cxr-content input").value')).toBe('')
             expect(await evaluate('document.activeElement===document.querySelector(".cxr-content input")')).toBe(true)
             await run(`await Fixture.search('escape-target');document.querySelector('.cxr-content input').focus()`)
-            expect(await evaluate('getComputedStyle(document.querySelector(".cxh-search-toolbar")).outlineStyle')).not
-              .toBe('none')
+            const focusChrome = await evaluate(`(() => {
+              const toolbar=document.querySelector('.cxh-search-toolbar'),field=toolbar.querySelector('.cxh-search-field');
+              const t=getComputedStyle(toolbar),f=getComputedStyle(field);
+              return {outline:t.outlineStyle,background:t.backgroundColor,border:t.borderTopWidth,
+                fieldOutline:f.outlineStyle,fieldBorder:f.borderTopColor,fieldBackground:f.backgroundColor};
+            })()`) as Record<string, string>
+            expect(focusChrome.outline).toBe('none')
+            expect(focusChrome.border).toBe('0px')
+            expect(focusChrome.background).toBe('rgba(0, 0, 0, 0)')
+            expect(focusChrome.fieldOutline).toBe('none')
+            expect(focusChrome.fieldBorder).not.toBe('rgba(0, 0, 0, 0)')
+            expect(focusChrome.fieldBackground).not.toBe('rgba(0, 0, 0, 0)')
+            const action = await evaluate(
+              `!!document.querySelector('.cxh-search-toolbar-actions button:not(:disabled)')`,
+            )
+            if (action) {
+              await run(
+                `document.querySelector('.cxh-search-toolbar-actions button:not(:disabled)').focus();await Fixture.settle()`,
+              )
+              expect(await evaluate(`getComputedStyle(document.querySelector('.cxh-search-field')).backgroundColor`))
+                .toBe('rgba(0, 0, 0, 0)')
+              await run(`document.querySelector('.cxr-content input').focus()`)
+            }
             await cdp.send('Input.dispatchKeyEvent', {
               type: 'keyDown',
               key: 'Escape',
@@ -219,19 +265,24 @@ it.skipIf(!executable)(
         const range=document.createRange();range.selectNodeContents(title);
         const input=document.querySelector('.cxr-content input[type="search"]');
         const inputStyle=getComputedStyle(input);
-        const toolbar=input.closest('.cxh-search-toolbar');
+        const toolbar=input.closest('.cxh-search-toolbar') ?? input.closest('.cxh-search-field');
+        const chrome=toolbar.closest('.cxm-console-controls') ?? toolbar;
         const content=document.querySelector('.cxr-content');
         const icon=header.querySelector('.cxr-header-seat svg');
-        return {titleIcon:icon.getBoundingClientRect().left,titleText:range.getBoundingClientRect().left,
+        return {titleIcon:icon?.getBoundingClientRect().left,titleText:range.getBoundingClientRect().left,
           searchIcon:toolbar.querySelector('.cxh-search-icon svg').getBoundingClientRect().left,
           searchText:input.getBoundingClientRect().left+parseFloat(inputStyle.borderLeftWidth)+parseFloat(inputStyle.paddingLeft),
-          leftGutter:toolbar.getBoundingClientRect().left-content.getBoundingClientRect().left,
-          rightGutter:content.clientWidth-(toolbar.getBoundingClientRect().right-content.getBoundingClientRect().left),
+          bodyStart:content.getBoundingClientRect().left+parseFloat(getComputedStyle(content).paddingLeft),
+          bodyInset:parseFloat(getComputedStyle(content).paddingLeft),
+          bodyBlocks:[...content.querySelectorAll('.cxr-page > .cxr-list,.cxr-page > .cxr-marketplace-grid,.cxmp-results,.cxm-console-workspace,.cxc-grid')].filter(el=>el.getClientRects().length).map(el=>el.getBoundingClientRect().left),
+          leftGutter:chrome.getBoundingClientRect().left-content.getBoundingClientRect().left,
+          rightGutter:content.clientWidth-(chrome.getBoundingClientRect().right-content.getBoundingClientRect().left),
+          overflow:content.scrollWidth-content.clientWidth,
           titleRightGutter:parseFloat(getComputedStyle(header).paddingRight),
           seatWidth:header.querySelector('.cxr-header-seat').getBoundingClientRect().width,
           back:header.querySelector('.cxr-header-back')!==null};
-      })()`) as Promise<Record<string, number | boolean>>
-      const nativeRoutes = [...routes.filter(route => route.kind === 'primary'), routes[6]!]
+      })()`) as Promise<Record<string, number | boolean | number[]>>
+      const nativeRoutes = [...routes, { kind: 'plugin', pluginId: 'form-page-fixture', page: 'logs' }]
       for (const width of [1200, 700, 580]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', {
           width,
@@ -251,11 +302,79 @@ it.skipIf(!executable)(
             expect(Math.abs(Number(actual.titleText) - Number(actual.searchText)), `${label} text`).toBeLessThanOrEqual(
               1,
             )
+            expect(Math.abs(Number(actual.bodyStart) - Number(actual.titleIcon)), `${label} body origin`)
+              .toBeLessThanOrEqual(1)
+            for (const left of actual.bodyBlocks as number[]) {
+              expect(Math.abs(left - Number(actual.titleIcon)), `${label} list/body left`).toBeLessThanOrEqual(1)
+            }
+            expect(actual.overflow, `${label} horizontal overflow`).toBe(0)
             expect(actual.leftGutter, `${label} left gutter`).toBe(12)
             expect(actual.rightGutter, `${label} right gutter`).toBe(12)
             expect(actual.titleRightGutter, `${label} title right gutter`).toBe(12)
             expect(actual.seatWidth, `${label} native click seat`).toBe(28)
             if (route.kind === 'plugin') expect(actual.back, `${label} back control`).toBe(true)
+            await run(`document.querySelector('.cxr-content input[type="search"]').focus()`)
+            const fieldChrome = await evaluate(`(() => {
+              const f=getComputedStyle(document.querySelector('.cxr-content input[type="search"]').closest('.cxh-search-field'));
+              return {outline:f.outlineStyle,border:f.borderTopColor,background:f.backgroundColor};
+            })()`) as Record<string, string>
+            expect(fieldChrome.outline, `${label} field outline`).toBe('none')
+            expect(fieldChrome.border, `${label} field border`).not.toBe('rgba(0, 0, 0, 0)')
+            expect(fieldChrome.background, `${label} field background`).not.toBe('rgba(0, 0, 0, 0)')
+            const sharedStates = await evaluate(`(() => [...document.querySelectorAll('.cxh-empty-state')].map(e=>({
+              left:e.getBoundingClientRect().left,icon:e.querySelector('.cordisx-host-icon').getBoundingClientRect().left,
+              overflow:e.scrollWidth-e.clientWidth,border:getComputedStyle(e).borderTopWidth,
+            })))()`) as { left: number; icon: number; overflow: number; border: string }[]
+            for (const state of sharedStates) {
+              expect(Math.abs(state.left - Number(actual.bodyStart)), `${label} status baseline`).toBeLessThanOrEqual(1)
+              expect(Math.abs(state.icon - state.left), `${label} status icon`).toBeLessThanOrEqual(1)
+              expect(state.overflow, `${label} status overflow`).toBeLessThanOrEqual(1)
+              expect(state.border).toBe('0px')
+            }
+            if (process.env.CORDISX_EMPTY_STATE_ARTIFACTS && route.page === 'model-services' && width === 580) {
+              const shot = await cdp!.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
+              await writeFile(
+                join(process.env.CORDISX_EMPTY_STATE_ARTIFACTS, `empty-browser-${theme}-narrow.png`),
+                Buffer.from(shot.data as string, 'base64'),
+              )
+            }
+            if (route.page === 'logs') {
+              const gap = await evaluate(`(() => {
+                const controls=document.querySelector('.cxm-console-controls');
+                const search=controls.querySelector('.cxh-search-field').getBoundingClientRect();
+                return Math.min(...[...controls.children].slice(1).map(el=>el.getBoundingClientRect()).filter(box=>box.top<search.bottom && box.bottom>search.top).map(box=>box.left-search.right));
+              })()`) as number
+              expect(gap, `${label} search/button separation`).toBeGreaterThanOrEqual(6)
+            }
+          }
+          for (const extra of ['openMarketplacePermissionSearch', 'openCollectionSearch']) {
+            await run(`window.disposeExtra=await Fixture[${JSON.stringify(extra)}]()`)
+            const actual = await nativeGeometry()
+            expect(actual.bodyInset, `${extra} native body inset ${theme}/${width}`).toBe(21)
+            expect(
+              Math.abs(Number(actual.searchIcon) - Number(actual.bodyStart)),
+              `${extra} native icon ${theme}/${width}`,
+            ).toBeLessThanOrEqual(1)
+            expect(
+              Math.abs(Number(actual.searchText) - Number(actual.titleText)),
+              `${extra} native text ${theme}/${width}`,
+            ).toBeLessThanOrEqual(1)
+            expect(actual.leftGutter, `${extra} native left gutter`).toBe(12)
+            expect(actual.rightGutter, `${extra} native right gutter`).toBe(12)
+            expect(actual.overflow, `${extra} native overflow`).toBe(0)
+            const clipped = await evaluate(`(() => {
+              const toolbar=document.querySelector('.cxr-content input[type="search"]').closest('.cxh-search-toolbar');
+              const box=toolbar.getBoundingClientRect();
+              for(let parent=toolbar.parentElement;parent;parent=parent.parentElement) {
+                if(['auto','scroll','hidden','clip'].includes(getComputedStyle(parent).overflowX)) {
+                  const clip=parent.getBoundingClientRect();
+                  if(box.left<clip.left || box.right>clip.right) return true;
+                }
+              }
+              return false;
+            })()`)
+            expect(clipped, `${extra} native search chrome clipped`).toBe(false)
+            await run('window.disposeExtra?.()')
           }
           // The former native override must fail the absolute icon-coordinate gate.
           await run(`await Fixture.openSearchRoute(${JSON.stringify(routes[0])});
@@ -264,6 +383,68 @@ it.skipIf(!executable)(
           const displaced = await nativeGeometry()
           expect(Math.abs(Number(displaced.titleIcon) - Number(displaced.searchIcon))).toBeGreaterThan(1)
           await run(`document.querySelector('.cxr-titlebar-root .cxr-header').removeAttribute('style')`)
+        }
+      }
+
+      // Approved model-service hero uses the production page and the same native-pane fixture.
+      await run('Fixture.prepareModelEmptyState()')
+      for (const width of [1200, 580]) {
+        for (const height of [650, 280]) {
+          await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+          for (const theme of ['light', 'dark']) {
+            await run(
+              `document.documentElement.dataset.theme=${
+                JSON.stringify(theme)
+              };await Fixture.openSearchRoute({kind:'primary',page:'model-services'})`,
+            )
+            const hero = await evaluate(`(() => {
+              const e=document.querySelector('[data-empty-presentation="hero"]'),r=document.querySelector('.cxmp-results'),svg=e.querySelector('svg');
+              const a=e.getBoundingClientRect(),b=r.getBoundingClientRect(),scene=svg.getBoundingClientRect();
+              return {width:scene.width,height:scene.height,centerX:(a.left+a.right-b.left-b.right)/2,
+                centerY:(a.top+a.bottom-b.top-b.bottom)/2,overflow:e.scrollWidth-e.clientWidth,
+                scroll:r.scrollHeight>r.clientHeight,toolbar:document.querySelector('.cxh-search-toolbar').getBoundingClientRect().top};
+            })()`) as Record<string, number | boolean>
+            expect(hero.width).toBeLessThanOrEqual(310)
+            expect(Math.abs(Number(hero.height) - Number(hero.width) * 9 / 16)).toBeLessThan(1)
+            expect(Math.abs(Number(hero.centerX))).toBeLessThan(1)
+            expect(hero.overflow).toBe(0)
+            if (height === 650) expect(Math.abs(Number(hero.centerY))).toBeLessThan(1)
+            else {
+              expect(hero.scroll).toBe(true)
+              await run(`document.querySelector('.cxmp-results').scrollTop=100;await Fixture.settle()`)
+              expect(await evaluate(`document.querySelector('.cxh-search-toolbar').getBoundingClientRect().top`)).toBe(
+                hero.toolbar,
+              )
+            }
+            const endpoints = await evaluate(`(() => {
+              const scene=document.querySelector('.cxms-illustration svg');
+              return [0,3000,7000,11000].flatMap(time=>{
+                scene.getAnimations({subtree:true}).forEach(a=>{a.pause();a.currentTime=time});
+                return ['one','two','three'].map(name=>{
+                  const o=scene.querySelector('[data-output="'+name+'"]'),i=scene.querySelector('[data-input="'+name+'"]');
+                  const p=o.getPointAtLength(o.getTotalLength()).matrixTransform(o.getCTM()),box=i.getBBox();
+                  const q=new DOMPoint(box.x,box.y+box.height/2).matrixTransform(i.getCTM());
+                  return Math.hypot(p.x-q.x,p.y-q.y);
+                });
+              });
+            })()`) as number[]
+            expect(Math.max(...endpoints)).toBeLessThan(0.01)
+            await cdp.send('Emulation.setEmulatedMedia', {
+              features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+            })
+            await run('await Fixture.settle()')
+            expect(
+              await evaluate(`document.querySelector('.cxms-illustration svg').getAnimations({subtree:true}).length`),
+            ).toBe(0)
+            await cdp.send('Emulation.setEmulatedMedia', { features: [] })
+            if (process.env.CORDISX_EMPTY_STATE_ARTIFACTS && width === 580 && height === 280) {
+              const shot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
+              await writeFile(
+                join(process.env.CORDISX_EMPTY_STATE_ARTIFACTS, `hero-${theme}-narrow-short.png`),
+                Buffer.from(shot.data as string, 'base64'),
+              )
+            }
+          }
         }
       }
       await run('disposeFixture()')

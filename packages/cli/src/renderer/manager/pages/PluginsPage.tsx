@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useMemo, useState } from 'react'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
@@ -161,7 +162,24 @@ export function PluginsPage(
           )
         })}
         {empty
-          ? <div className="cxr-empty">{managerCopy(snapshot.localization.locale, 'plugins.no-matches')}</div>
+          ? (
+            <EmptyState
+              icon="plugins"
+              state={normalized ? 'search' : 'empty'}
+              title={managerCopy(snapshot.localization.locale, normalized ? 'plugins.no-matches' : 'empty.plugins')}
+              description={managerCopy(
+                snapshot.localization.locale,
+                normalized ? 'empty.searchHelp' : 'empty.pluginsHelp',
+              )}
+              action={{
+                label: managerCopy(
+                  snapshot.localization.locale,
+                  normalized ? 'empty.clearSearch' : 'empty.browsePlugins',
+                ),
+                onClick: () => normalized ? setQuery('') : router.navigate({ kind: 'primary', page: 'marketplace' }),
+              }}
+            />
+          )
           : null}
       </div>
     </section>

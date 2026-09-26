@@ -19,7 +19,9 @@ if (values.app) {
   resources = readNativeSubmissionResources(contents)
 } else {
   const root = values['resources-dir']
-  const files = (await readdir(root)).filter(file => /^app-(?:initial|primary)-(?!transformed)[^.]+\.js$/u.test(file))
+  const files = (await readdir(root)).filter(file =>
+    /^app-(?:initial|primary|shared)-(?!transformed)[^.]+\.js$/u.test(file)
+  )
   resources = await Promise.all(
     files.map(async file => ({ url: `app://-/assets/${file}`, source: await readFile(path.join(root, file), 'utf8') })),
   )

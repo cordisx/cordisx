@@ -6,28 +6,33 @@
   height: 36px;
   flex: none;
   align-items: center;
-  border: var(--cx-control-border, 1px) solid var(--cx-border, #353a42);
-  border-radius: 9px;
-  background: var(--cx-surface-raised, #20242b);
   color: var(--cx-text, #edf0f4);
   font: 14px/1.45 system-ui, sans-serif;
 }
+/* Native body content starts at the title icon; search chrome extends into its gutter. */
+.cxh-search-toolbar {
+  width: calc(100% + 2 * var(--cx-search-outset, 0px));
+  margin-inline: calc(-1 * var(--cx-search-outset, 0px));
+  gap: 6px;
+  padding-inline-end: var(--cx-control-border, 1px);
+}
+.cxh-search-toolbar:not(:has(.cxh-action-group button:not([hidden]))) {
+  padding-inline-end: 0;
+}
 .cxh-search-field {
+  border: var(--cx-control-border, 1px) solid transparent;
+  border-radius: 9px;
+  background: transparent;
   gap: var(--cx-control-gap, 8px);
   padding: 0 var(--cx-search-padding, 8px);
 }
 .cxh-search-field[data-embedded="true"] {
-  height: 34px;
+  width: 0;
   flex: 1;
-  border: 0;
-  border-radius: 8px 0 0 8px;
-  background: transparent;
 }
-.cxh-search-toolbar:focus-within,
-.cxh-search-field:not([data-embedded="true"]):focus-within {
+.cxh-search-field:focus-within {
   border-color: var(--cx-primary, #2f7cff);
-  outline: 2px solid var(--cx-focus, rgba(47, 124, 255, 0.26));
-  outline-offset: 1px;
+  background: var(--cx-surface-raised, #20242b);
 }
 .cxh-search-icon {
   display: grid;
@@ -90,16 +95,5 @@
   cursor: default;
 }
 .cxh-search-toolbar-actions {
-  display: flex;
-  min-width: 0;
-  flex: none;
-  align-items: center;
-  gap: 1px;
-  border-left: 1px solid var(--cx-border, #353a42);
-  padding: 2px;
-}
-.cxh-search-toolbar-actions .t-button {
-  width: 30px;
-  height: 30px;
-  flex: none;
+  padding: 3px;
 }

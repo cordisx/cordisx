@@ -1,4 +1,5 @@
 import searchCss from '../host-ui/search.css'
+import actionGroupCss from '../host-ui/action-group.css'
 import { PLUGIN_CONSOLE_REACT_STYLES } from './components/PluginConsolePanel.js'
 import { HOST_FORM_REACT_STYLES } from '../host-ui/HostForm.js'
 import { HOST_COLLECTION_STYLES } from '../host-collection.js'
@@ -10,10 +11,11 @@ const scopedTDesignReactCss = tdesignReactCss.replace(
   ".cxr-root[data-cordisx-app-theme='dark']",
 )
 
-export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${searchCss}\n${String.raw`
-  .cxr-root { --cx-page-inset: 22px; --cx-control-icon-size: 16px; --cx-control-gap: 8px; --cx-search-padding: 8px; --cx-control-border: 1px; --cx-control-text-inset: calc(var(--cx-control-border) + var(--cx-search-padding) + var(--cx-control-icon-size) + var(--cx-control-gap)); position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
+export const REACT_MANAGER_STYLES =
+  `${scopedTDesignReactCss}\n${HOST_ICON_16PX_CSS}\n${searchCss}\n${actionGroupCss}\n${String.raw`
+  .cxr-root { --cx-page-inset: 22px; --cx-content-inset: var(--cx-page-inset); --cx-search-outset: 0px; --cx-control-icon-size: 16px; --cx-control-gap: 8px; --cx-search-padding: 8px; --cx-control-border: 1px; --cx-control-text-inset: calc(var(--cx-control-border) + var(--cx-search-padding) + var(--cx-control-icon-size) + var(--cx-control-gap)); position: relative; z-index: 2147483500; color: var(--cx-text, #edf0f4); font: 13px/1.45 system-ui, sans-serif; }
   .cxr-root[data-manager-surface="pane"], .cxr-titlebar-root { --cx-page-inset: 12px; }
-  .cxr-root[data-manager-surface="pane"] { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .cxr-root[data-manager-surface="pane"] { --cx-search-outset: calc(var(--cx-control-border) + var(--cx-search-padding)); --cx-content-inset: calc(var(--cx-page-inset) + var(--cx-search-outset)); position: absolute; inset: 0; width: 100%; height: 100%; }
   .cxr-root *, .cxr-root *::before, .cxr-root *::after { box-sizing: border-box; }
   .cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }
   .cxr-brand-mark { display: inline-grid; width: 18px; height: 18px; flex: none; place-items: center; }
@@ -76,6 +78,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
     .cxr-nav .cxr-nav-destination, .cxr-nav-search { transition: none; }
   }
   .cxr-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
+  .cxr-root[data-manager-surface="pane"] .cxr-main { grid-template-rows: minmax(0,1fr); }
   .cxr-header { display: grid; grid-template-columns: 32px calc(var(--cx-control-text-inset) - 32px) minmax(0,1fr) var(--cx-control-gap) 32px; align-items: center; padding: 10px var(--cx-page-inset); border-bottom: 1px solid var(--cx-border, #353a42); }
   /* Keep the 32px icon/back hit target; the shared text inset owns the title origin. */
   .cxr-header > .cxr-header-seat { grid-column: 1; }
@@ -109,7 +112,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-breadcrumbs button { min-width: 0; overflow: hidden; border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
   .cxr-breadcrumbs button:hover { color: var(--cx-text, #edf0f4); }
   .cxr-breadcrumbs [aria-current="page"] { min-width: 0; overflow: hidden; color: var(--cx-text, #edf0f4); font-weight: 650; text-overflow: ellipsis; }
-  .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px var(--cx-page-inset) 22px; }
+  .cxr-content { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 16px var(--cx-content-inset) 22px; }
   .cxr-content[data-content-layout="form"] { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; padding-top: 8px; padding-bottom: 0; }
   .cxr-content[data-content-layout="form"] > .cxr-page { display: flex; min-height: 0; flex: 1; flex-direction: column; }
   .cxr-content:has(.cxr-plugin-config-panel) { overflow: hidden; padding-bottom: 0; }
@@ -127,6 +130,8 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-manager-record-copy > span { display: -webkit-box; overflow: hidden; color: var(--cx-muted,#9ca5b5); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .cxr-manager-content-page > .cxr-tabs { margin-top: 0; }
   .cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 1px 1px 12px; }
+  /* Preserve the search gutter inside the content scroll owner. */
+  .cxr-root[data-manager-surface="pane"] .cxr-manager-content-panel { margin-inline: calc(-1 * var(--cx-search-outset)); padding-inline: var(--cx-search-outset); }
   .cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 1px; }
   .cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) > .cxr-manager-content-seat { min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
   .cxr-manager-content-seat:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) > [data-cordisx-manager-page] { height: 100%; min-height: 0; overflow: hidden; }
@@ -398,7 +403,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
     .cxr-dialog .cxr-nav .cxr-nav-destination span:last-child { display: none; }
     .cxr-nav-group-label { overflow: hidden; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); white-space: nowrap; }
     .cxr-root { --cx-page-inset: 12px; }
-    .cxr-content { padding: 12px; }
+    .cxr-content { padding: 12px var(--cx-content-inset); }
     .cxr-grid { grid-template-columns: 1fr; }
   }
   ${PLUGIN_CONSOLE_REACT_STYLES}

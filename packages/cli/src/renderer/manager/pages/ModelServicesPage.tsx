@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelProviderRegistry, ModelProviderSnapshot } from '../../model-providers.js'
+import { ModelServicesIllustration } from '../../host-ui/ModelServicesIllustration.js'
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
 import { ModelBrandIcon } from '../../host-ui/ModelBrandIcon.js'
 import { IconButton } from '../../host-ui/IconButton.js'
@@ -11,7 +13,13 @@ import { modelProviderCopy } from '../../model-provider-copy.js'
 import css from '../../model-providers.css?inline'
 import pageCss from './model-services.css?inline'
 import catalogCss from './model-catalog/model-catalog.css?inline'
-import { CatalogBinding, type CatalogFilter, catalogQuery } from './model-catalog/CatalogBinding.js'
+import {
+  CatalogBinding,
+  catalogBindingMatches,
+  type CatalogFilter,
+  catalogMatchingRows,
+  catalogQuery,
+} from './model-catalog/CatalogBinding.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
 import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
@@ -54,6 +62,31 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
     return [{ provider: { ...provider, models }, sourceModelCount: provider.models.length }]
   })
   const views = catalog.views
+  const loading = state.loading || catalog.loading
+  const refreshing = loading || state.refreshing === true || catalog.refreshing === true
+  const unavailable = !registry || !client
+  const failed = Boolean(state.error) || Boolean(client && !catalog.connected && !catalog.loading)
+  const canCreate = Boolean(onCreate && client && catalog.connected && catalog.canCreateConnection && !loading)
+  const refresh = () => {
+    void registry?.refresh()
+    void client?.refresh()
+  }
+  const noConnections = state.providers.length === 0 && catalog.views.length === 0
+  const filtering = filters.size !== 1 || !filters.has('selectable')
+  const noMatches = normalized.length > 0
+    && !providers.some(({ provider }) =>
+      catalogQuery(`${provider.providerId} ${provider.title}`).includes(normalized) || provider.models.length > 0
+    )
+    && !views.some(view =>
+      catalogBindingMatches(view, normalized) || catalogMatchingRows(view, normalized, filters).length > 0
+    )
+  const noFilterMatches = !normalized && filtering && !noConnections
+    && providers.every(({ provider }) => provider.models.length === 0)
+    && views.every(view => catalogMatchingRows(view, normalized, filters).length === 0)
+  const clearSearch = () => {
+    setQuery('')
+    setFilters(new Set())
+  }
   const setProviderExpanded = (key: string, open: boolean) => {
     setExpanded(current => {
       const next = new Set(current)
@@ -81,13 +114,13 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
               copy={value => t(`catalog.${value}`)}
               onChange={setFilters}
             />
-            {catalog.canCreateConnection && client
+            {catalog.canCreateConnection && client && onCreate
               ? (
                 <IconButton
                   tag="button"
                   icon="add"
                   label={t('catalog.addConnection')}
-                  disabled={!catalog.connected}
+                  disabled={!catalog.connected || refreshing}
                   onClick={() => onCreate?.()}
                 />
               )
@@ -96,7 +129,8 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
               tag="button"
               icon="reload-plugin"
               label={copy.refresh}
-              disabled={!registry || state.loading}
+              disabled={!registry || refreshing}
+              aria-busy={refreshing}
               onClick={() => {
                 void registry?.refresh()
                 void client?.refresh()
@@ -105,7 +139,11 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
           </>
         }
       />
-      <div className="cxmp-results" aria-busy={state.loading}>
+      <div
+        className="cxmp-results"
+        aria-busy={refreshing}
+        data-empty-layout={noConnections && !failed && !unavailable ? 'hero' : undefined}
+      >
         {state.entries.length === 0 ? null : (
           <section className="cxms-actions" aria-label={copy.providers}>
             {state.entries.map(({ key, entry }) => (
@@ -118,9 +156,16 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
             ))}
           </section>
         )}
-        {state.error || !registry ? <p role="alert">{copy.unavailable}</p> : null}
-        {registry && managementState !== 'loading' && !catalog.connected && catalog.views.length === 0
-          ? <p role="status">{t('catalog.managementUnavailable')}</p>
+        {!loading && (failed || unavailable)
+          ? (
+            <EmptyState
+              icon="models-read"
+              state={failed ? 'error' : 'unavailable'}
+              title={t(failed ? 'empty.modelsFailed' : 'empty.modelsUnavailable')}
+              description={t('empty.retryHelp')}
+              action={registry ? { label: copy.refresh, onClick: refresh } : undefined}
+            />
+          )
           : null}
         {client
           ? views.map(view => (
@@ -165,8 +210,30 @@ export function ModelServicesPage({ registry, locale, onCreate }: {
             resetKey={`${normalized}:${[...filters].sort().join(',')}`}
           />
         ))}
-        {state.providers.length === 0 && catalog.views.length === 0 && !state.error
-          ? <p className="cxr-empty">{copy.empty}</p>
+        {(noConnections && (loading || !failed && !unavailable)
+            || (noMatches || noFilterMatches) && !loading && !failed)
+          ? (
+            <EmptyState
+              icon="models-read"
+              state={loading ? 'loading' : noMatches || noFilterMatches ? 'search' : 'empty'}
+              title={t(
+                loading ? 'empty.modelsLoading' : noMatches || noFilterMatches ? 'empty.modelMatches' : 'empty.models',
+              )}
+              description={t(
+                loading
+                  ? 'empty.modelsLoadingHelp'
+                  : noMatches || noFilterMatches
+                  ? 'empty.searchHelp'
+                  : 'empty.modelsHelp',
+              )}
+              illustration={!unavailable ? <ModelServicesIllustration /> : undefined}
+              action={loading ? undefined : noMatches || noFilterMatches
+                ? { label: t(normalized ? 'empty.clearSearch' : 'empty.clearFilters'), onClick: clearSearch }
+                : canCreate
+                ? { label: t('catalog.addConnection'), onClick: onCreate!, disabled: refreshing, variant: 'primary' }
+                : undefined}
+            />
+          )
           : null}
       </div>
     </section>

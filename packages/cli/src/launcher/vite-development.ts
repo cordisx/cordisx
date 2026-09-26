@@ -1,3 +1,4 @@
+import { nativeViteManifestLoaderSource } from './vite-manifest-loader.js'
 import { listenNativeViteServer, nativeViteWatchOptions } from './vite-development-watcher.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
@@ -914,11 +915,11 @@ export async function startNativeViteServer(
       )
       // CDP installs only the canonical manifest loader. Source modules and
       // updates remain Vite-owned after that first graph admission.
-      return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = fetch(${
-        JSON.stringify(resourceUrl('host-manifest.json'))
-      }).then(r => { if (!r.ok) throw new Error('CordisX Vite Host manifest unavailable'); return r.json(); }).then(async manifest => { await import(${
+      return `if (!globalThis.__cordisxViteBoot) { const startup = ${
+        nativeViteManifestLoaderSource(resourceUrl('host-manifest.json'))
+      }; globalThis.__cordisxViteBoot = startup.read().then(r => { startup.check(); if (!r.ok) throw new Error('CordisX Vite Host manifest unavailable'); return r.json(); }).then(async manifest => { startup.check(); await import(${
         JSON.stringify(url(PREAMBLE))
-      }); const boot = await import(/* @vite-ignore */ manifest.entry); return await boot.start(); }); globalThis.__cordisxViteBoot.catch(error => { console.error('[cordisx] Vite bootstrap failed', error); }); }`
+      }); startup.check(); const boot = await import(/* @vite-ignore */ manifest.entry); startup.check(); return await boot.start(); }); globalThis.__cordisxViteBoot.catch(error => { console.error('[cordisx] Vite bootstrap failed', error); }); }`
     },
     async synchronizePluginGenerations(handler) {
       generationHandler = handler

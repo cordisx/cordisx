@@ -1,3 +1,5 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
+import { managerCopy } from '../../ui-copy.js'
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { useMemo, useState } from 'react'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
@@ -96,9 +98,12 @@ export function MarketplacePage(
 ) {
   const copy = COPY[productLocale(snapshot.localization.locale)]
   const catalog = useMarketplaceSnapshot(marketplace)
+  const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(snapshot.localization.locale, key)
   const [query, setQuery] = useState('')
   const [officialOnly, setOfficialOnly] = useState(false)
   const [certifiedOnly, setCertifiedOnly] = useState(false)
+  const failedSources = catalog.sourceStates.some(source => source.status === 'failed')
+  const searching = Boolean(query.trim() || officialOnly || certifiedOnly)
   const [favorites, setFavorites] = useState(readMarketplaceFavorites)
   const installer = useManagerMarketplaceInstaller(manager, snapshot, {
     failed: copy.installFailed,
@@ -341,7 +346,40 @@ export function MarketplacePage(
             </div>
           )
         })}
-        {results.length === 0 ? <div className="cxr-empty">{copy.empty}</div> : null}
+        {results.length === 0
+          ? (
+            <EmptyState
+              icon="marketplace"
+              state={catalog.loading
+                ? 'loading'
+                : failedSources
+                ? 'error'
+                : query.trim() || officialOnly || certifiedOnly
+                ? 'search'
+                : 'empty'}
+              title={catalog.loading
+                ? t('manager.content.loading')
+                : failedSources
+                ? t('empty.marketplaceFailed')
+                : query.trim() || officialOnly || certifiedOnly
+                ? copy.empty
+                : t('empty.marketplace')}
+              description={catalog.loading
+                ? undefined
+                : t(failedSources ? 'empty.retryHelp' : searching ? 'empty.searchHelp' : 'empty.marketplaceHelp')}
+              action={catalog.loading ? undefined : !failedSources && searching
+                ? {
+                  label: t('empty.clearFilters'),
+                  onClick: () => {
+                    setQuery('')
+                    setOfficialOnly(false)
+                    setCertifiedOnly(false)
+                  },
+                }
+                : { label: copy.sources, onClick: () => router.navigate({ kind: 'marketplace-sources' }) }}
+            />
+          )
+          : null}
       </div>
     </section>
   )

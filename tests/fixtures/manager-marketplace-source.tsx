@@ -121,6 +121,26 @@ const snapshot: ManagerSnapshot = {
   },
 }
 const model = { snapshot: () => snapshot, subscribe: () => () => {} } as ManagerModel
+export function prepareModelEmptyState() {
+  const state = { providers: [], entries: [], loading: false }
+  const catalog = {
+    epoch: 'fixture',
+    sequence: 1,
+    views: [],
+    connected: true,
+    loading: false,
+    canCreateConnection: true,
+  }
+  Object.assign(model, {
+    modelProviders: {
+      snapshot: () => state,
+      subscribe: () => () => {},
+      refresh: async () => {},
+      management: { snapshot: () => catalog, subscribe: () => () => {}, refresh: async () => {} },
+    },
+  })
+}
+
 let releaseQuery: (() => void) | undefined
 export async function receiveSnapshot() {
   releaseQuery?.()
@@ -278,6 +298,9 @@ export async function openMarketplacePermissionSearch() {
 export async function openCollectionSearch() {
   await openSearchRoute({ kind: 'primary', page: 'about' })
   const container = document.createElement('div')
+  if (document.querySelector('.cxr-root[data-manager-surface="pane"]')) {
+    container.className = 'cxr-manager-content-panel'
+  }
   document.querySelector('.cxr-content')!.append(container)
   const host = mountManagerCollectionHost(container, {
     document,

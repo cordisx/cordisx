@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="ms-scene">
+  <g stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity=".2">
+      <path d="M35 144h103m-91 6h43m151-3h37"/>
+      <circle cx="290" cy="142" r="4"/>
+    </g>
+    <g class="ms-routes" opacity=".38">
+      <path d="M176 70V138"/>
+      <path data-output="one" d="M176 70a10 10 0 0 1 10-10h16"/>
+      <path data-output="two" d="M141 104h61"/>
+      <path data-output="three" d="M176 138a10 10 0 0 0 10 10h16"/>
+      <circle cx="176" cy="104" r="2.5" class="ms-surface" fill="var(--ms-surface, Canvas)"/>
+    </g>
+    <g class="ms-packet" stroke="none" fill="var(--ms-accent, currentColor)">
+      <circle cx="153" cy="104" r="2.2"/>
+    </g>
+    <g class="ms-model-base">
+      <path class="ms-surface" fill="var(--ms-surface, Canvas)" d="M53 109Q49 106 53 103L99 76Q104 73 109 76L155 103Q159 106 155 109L109 136Q104 139 99 136Z"/>
+      <path d="m57 112 43 25q4 2 8 0l43-25" opacity=".22"/>
+      <path class="ms-surface" fill="var(--ms-surface, Canvas)" d="M53 95Q49 92 53 89L99 62Q104 59 109 62L155 89Q159 92 155 95L109 122Q104 125 99 122Z"/>
+      <path d="m57 98 43 25q4 2 8 0l43-25" opacity=".22"/>
+      <path d="m69 108 9 5m8 5 6 3" opacity=".5"/>
+      <path d="m119 117 8-5" stroke="var(--ms-accent, currentColor)" stroke-width="2" opacity=".8"/>
+    </g>
+    <g class="ms-model-top">
+      <path class="ms-surface" fill="var(--ms-surface, Canvas)" d="M53 78Q49 75 53 72L99 45Q104 42 109 45L155 72Q159 75 155 78L109 105Q104 108 99 105Z"/>
+      <path d="m57 81 43 25q4 2 8 0l43-25" opacity=".24"/>
+      <g stroke="var(--ms-accent, currentColor)" opacity=".85">
+        <path d="m83 72 17-9m8 0 17 9m0 6-17 10m-8 0L83 78m4-3h13m8 0h13m-17-9v6m0 6v7"/>
+        <ellipse cx="79" cy="75" rx="4" ry="2.5"/>
+        <ellipse cx="104" cy="61" rx="4" ry="2.5"/>
+        <ellipse cx="129" cy="75" rx="4" ry="2.5"/>
+        <ellipse cx="104" cy="90" rx="4" ry="2.5"/>
+        <ellipse cx="104" cy="75" rx="4" ry="2.5" fill="var(--ms-accent, currentColor)" fill-opacity=".13"/>
+      </g>
+    </g>
+    <g transform="translate(208 42)">
+      <g class="ms-service ms-service-one">
+        <rect class="ms-surface" fill="var(--ms-surface, Canvas)" width="77" height="36" rx="7"/>
+        <path data-input="one" d="M0 15h-6v6h6" opacity=".6"/>
+        <g class="ms-service-detail">
+        <path d="m13 12 7-4 7 4v9l-7 4-7-4Z" stroke="var(--ms-accent, currentColor)"/>
+        <path d="m13 12 7 4 7-4m-7 4v9" stroke="var(--ms-accent, currentColor)" opacity=".6"/>
+        </g>
+        <path d="M38 13h25M38 21h16" opacity=".42"/>
+        <circle cx="66" cy="27" r="1.4" fill="var(--ms-accent, currentColor)" stroke="none"/>
+      </g>
+    </g>
+    <g transform="translate(208 86)">
+      <g class="ms-service ms-service-two">
+        <rect class="ms-surface" fill="var(--ms-surface, Canvas)" width="77" height="36" rx="7"/>
+        <path data-input="two" d="M0 15h-6v6h6" opacity=".6"/>
+        <g class="ms-service-detail">
+        <path d="M12 20c3-8 5 8 8 0s5 8 8 0M12 14c3-8 5 8 8 0s5 8 8 0" stroke="var(--ms-accent, currentColor)"/>
+        </g>
+        <path d="M38 13h22M38 21h17" opacity=".42"/>
+        <circle cx="66" cy="27" r="1.4" fill="var(--ms-accent, currentColor)" stroke="none"/>
+      </g>
+    </g>
+    <g transform="translate(208 134)">
+      <g class="ms-service ms-service-three">
+        <rect class="ms-surface" fill="var(--ms-surface, Canvas)" width="65" height="28" rx="6"/>
+        <path data-input="three" d="M0 11h-6v6h6" opacity=".6"/>
+        <g class="ms-service-detail">
+        <path d="m12 14 5-5 5 5-5 5Z" stroke="var(--ms-accent, currentColor)"/>
+        </g>
+        <path d="M33 11h20M33 18h12" opacity=".42"/>
+      </g>
+    </g>
+    <g stroke="var(--ms-accent, currentColor)" opacity=".65">
+      <path d="M34 84v8m-4-4h8M164 37v6m-3-3h6"/>
+      <circle cx="187" cy="149" r="2"/>
+    </g>
+  </g>
+</svg>

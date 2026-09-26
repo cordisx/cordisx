@@ -146,3 +146,23 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.cxmp-results[data-empty-layout="hero"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.cxmp-results[data-empty-layout="hero"] > .cxh-empty-state {
+  flex: none;
+  width: 100%;
+  margin-block: auto;
+  padding-block: 24px;
+}
+
+.cxms-illustration {
+  display: block;
+  width: 100%;
+  --cxms-illustration-surface: var(--cx-surface);
+  --cxms-illustration-accent: var(--cx-primary);
+  color: var(--cx-muted);
+}

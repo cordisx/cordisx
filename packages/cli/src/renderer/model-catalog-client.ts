@@ -10,12 +10,21 @@ import { parseManagementSnapshot, safeManagementCode } from './model-catalog-pro
 
 export interface CatalogClientState extends CatalogManagementSnapshot {
   readonly connected: boolean
+  /** Initial/invalidated read; background read progress is separate. */
   readonly loading: boolean
+  readonly refreshing?: boolean
 }
 
 /** Read-only Host projection. A failed transport never turns a retained view into authority. */
 export class ModelCatalogClient {
-  private state: CatalogClientState = { epoch: '', sequence: 0, views: [], connected: false, loading: false }
+  private state: CatalogClientState = {
+    epoch: '',
+    sequence: 0,
+    views: [],
+    connected: false,
+    loading: false,
+    refreshing: false,
+  }
   private readonly listeners = new Set<() => void>()
   private disconnect?: () => void
   private reconcile?: ReturnType<typeof setInterval>
@@ -23,10 +32,16 @@ export class ModelCatalogClient {
   private reading: Promise<void> | undefined
   private dirty = false
   private cursor?: CatalogManagementCursor
+  private invalidatedEpoch: string | undefined
 
   constructor(private readonly channel: CatalogManagementChannel) {
     try {
       this.disconnect = channel.catalogManagementSubscribe(cursor => {
+        if (this.state.epoch && cursor.epoch !== this.state.epoch) {
+          this.invalidatedEpoch = cursor.epoch
+          // A new Host epoch invalidates prior authority immediately, before readback.
+          this.publish({ ...this.state, connected: false, loading: true, refreshing: true })
+        }
         this.cursor = cursor
         void this.refresh()
       })
@@ -34,7 +49,7 @@ export class ModelCatalogClient {
       this.reconcile.unref?.()
       void this.refresh()
     } catch {
-      this.publish({ ...this.state, connected: false, loading: false })
+      this.publish({ ...this.state, connected: false, loading: false, refreshing: false })
     }
   }
 
@@ -55,8 +70,8 @@ export class ModelCatalogClient {
   }
 
   private async readLoop(): Promise<void> {
-    this.publish({ ...this.state, loading: true })
     while (this.dirty && !this.disposed) {
+      this.publish({ ...this.state, loading: !this.state.connected, refreshing: true })
       this.dirty = false
       const cursorBeforeRead = this.cursor
       try {
@@ -70,14 +85,16 @@ export class ModelCatalogClient {
           // An event during a read schedules one more read; reconciliation repairs a stale transport.
           continue
         }
+        if (this.invalidatedEpoch && snapshot.epoch !== this.invalidatedEpoch) continue
         if (snapshot.epoch === this.state.epoch && snapshot.sequence < this.state.sequence) continue
+        this.invalidatedEpoch = undefined
         this.cursor = { epoch: snapshot.epoch, sequence: snapshot.sequence }
-        this.publish({ ...snapshot, connected: true, loading: false })
+        this.publish({ ...snapshot, connected: true, loading: false, refreshing: false })
       } catch {
-        this.publish({ ...this.state, connected: false, loading: false })
+        this.publish({ ...this.state, connected: false, loading: false, refreshing: false })
       }
     }
-    if (this.state.loading) this.publish({ ...this.state, loading: false })
+    if (this.state.loading || this.state.refreshing) this.publish({ ...this.state, loading: false, refreshing: false })
   }
 
   async command(command: CatalogManagementCommand): Promise<CatalogManagementResult> {

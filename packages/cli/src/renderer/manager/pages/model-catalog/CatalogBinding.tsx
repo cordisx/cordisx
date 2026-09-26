@@ -22,6 +22,15 @@ type Intent = Exclude<CatalogManagementCommand, { operation: 'createConnection' 
   : never
 export type CatalogFilter = 'selectable' | 'blocked' | 'removed'
 export const catalogQuery = (value: string) => value.normalize('NFKC').toLocaleLowerCase().trim()
+export const catalogBindingMatches = (view: CatalogManagementView, query: string) =>
+  catalogQuery(`${view.title} ${view.providerId} ${view.scopeLabel ?? ''}`).includes(query)
+export const catalogMatchingRows = (view: CatalogManagementView, query: string, filters: ReadonlySet<CatalogFilter>) =>
+  view.rows.filter(row =>
+    (row as typeof row & { readonly compatibility?: string }).compatibility === 'supported'
+    && (catalogBindingMatches(view, query) || catalogQuery(`${row.id} ${row.label}`).includes(query))
+    && (filters.size === 0 || filters.has('selectable') && row.selectable || filters.has('blocked') && row.blocked
+      || filters.has('removed') && !row.present)
+  )
 export const catalogTime = (value: number | undefined, locale: string): string =>
   value === undefined
     ? managerCopy(locale, 'catalog.never')
@@ -136,15 +145,10 @@ export function CatalogBinding(
     'permissions',
     () => confirm({ operation: 'requestCredentialReplacement' }, 'catalog.replaceConfirm'),
   )
-  const matchesProvider = catalogQuery(`${view.title} ${view.providerId} ${view.scopeLabel ?? ''}`).includes(query)
   const supportedRows = view.rows.filter(row =>
     (row as typeof row & { readonly compatibility?: string }).compatibility === 'supported'
   )
-  const rows = supportedRows.filter(row =>
-    (matchesProvider || catalogQuery(`${row.id} ${row.label}`).includes(query))
-    && (filters.size === 0 || filters.has('selectable') && row.selectable || filters.has('blocked') && row.blocked
-      || filters.has('removed') && !row.present)
-  )
+  const rows = catalogMatchingRows(view, query, filters)
   const canExpand = rows.length > 0
   const listExpanded = canExpand && effectiveExpanded
   const scriptUnavailable = view.sourceKind === 'script' && !sourceCapabilities.includes('runScript') && !scriptRunning

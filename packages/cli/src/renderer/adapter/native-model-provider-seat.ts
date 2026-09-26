@@ -118,7 +118,7 @@ export function locateNativeModelProviderMountSeat(document: Document): NativeMo
   return { trigger, group, parent }
 }
 
-/** Exact React owner contract audited in Desktop 26.901.51231 (build 8109). */
+/** Native menu owner contracts: separate effort selection and unified model/effort selection. */
 export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeModelSelectionControl | undefined {
   let fiber: ReactFiber | null | undefined = reactFiber(trigger)
   for (let depth = 0; fiber !== undefined && fiber !== null && depth < 40; depth += 1, fiber = fiber.return) {
@@ -137,7 +137,10 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
       && Array.isArray(props.powerSelections)
       && typeof selectModel === 'function'
       && typeof props.onSelectModelOption === 'function'
-      && typeof props.onSelectReasoningEffort === 'function'
+      && (typeof props.onSelectReasoningEffort === 'function'
+        || (typeof props.onSelectComplete === 'function'
+          && typeof props.onBeforeSelectModel === 'function'
+          && typeof props.onSelectDefault === 'function'))
       && typeof props.onToggleMenuView === 'function'
     ) {
       return {

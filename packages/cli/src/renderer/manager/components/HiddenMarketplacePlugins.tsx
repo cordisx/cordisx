@@ -1,3 +1,5 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
+import { managerCopy } from '../../ui-copy.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 
 export interface HiddenMarketplacePluginView {
@@ -47,7 +49,7 @@ export function HiddenMarketplacePlugins({
           )
         })}
         {plugins.length === 0
-          ? <div className="cxr-empty">{zh ? '没有已隐藏的插件' : 'No hidden plugins'}</div>
+          ? <EmptyState icon="plugins" title={managerCopy(locale, 'empty.hiddenPlugins')} />
           : null}
       </div>
     </section>

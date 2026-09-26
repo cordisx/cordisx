@@ -250,6 +250,58 @@ describe('model provider selector contract', () => {
     oldBinding.dispose()
   })
 
+  it.each([{ projections: [] }, { projections: [provider] }])(
+    'keeps successful empty/nonempty catalogs during poll and manual refresh, clears failed authority',
+    async ({ projections }) => {
+      vi.useFakeTimers()
+      let complete!: (value: typeof provider[]) => void
+      let reject!: (error: Error) => void
+      const load = vi.fn(() =>
+        new Promise<typeof provider[]>((resolve, fail) => {
+          complete = resolve
+          reject = fail
+        })
+      )
+      const registry = new ModelProviderRegistry(load)
+      try {
+        registry.connectSource(() => () => {})
+        expect(registry.snapshot()).toMatchObject({ loading: true, refreshing: true })
+        complete(projections)
+        await Promise.resolve()
+        expect(registry.snapshot()).toMatchObject({ loading: false, refreshing: false })
+        const known = registry.snapshot().providers
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(registry.snapshot()).toMatchObject({ loading: false, refreshing: true, providers: known })
+        await vi.advanceTimersByTimeAsync(10_000)
+        expect(registry.snapshot().loading).toBe(false)
+        complete(projections)
+        await Promise.resolve()
+        const manual = registry.refresh()
+        expect(registry.snapshot()).toMatchObject({ loading: false, refreshing: true, providers: known })
+        reject(new Error('private'))
+        await manual
+        expect(registry.snapshot()).toMatchObject({
+          loading: false,
+          refreshing: false,
+          providers: [],
+          error: 'provider-catalog-unavailable',
+        })
+        const catalog = catalogFixture([])
+        registry.management = catalog.client
+        await catalog.client.refresh()
+        expect(registry.snapshot().error).toBe('provider-catalog-unavailable')
+        const recovery = registry.refresh()
+        expect(registry.snapshot().loading).toBe(true)
+        complete(projections)
+        await recovery
+        expect(registry.snapshot().error).toBeUndefined()
+      } finally {
+        registry.dispose()
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it('fences out-of-order refresh and clears stale availability on errors', async () => {
     let first!: (value: typeof provider[]) => void
     const load = vi.fn().mockImplementationOnce(() =>

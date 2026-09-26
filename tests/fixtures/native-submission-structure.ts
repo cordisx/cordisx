@@ -44,3 +44,20 @@ export const resources = () => [
   { url: 'app://-/assets/app-primary-unrecognized.js', source: primary },
   { url: 'app://-/assets/app-initial-unrecognized.js', source: initial },
 ]
+
+// New Desktop layouts share the request normalization/dispatch module and unify menu selection.
+export const sharedResources = () => {
+  const split = initial.indexOf('async function normalize')
+  const first = initial.indexOf('async function first')
+  return [
+    {
+      url: 'app://-/assets/app-primary-unified.js',
+      source: primary.replace(
+        'onSelectReasoningEffort:()=>{},',
+        "onSelectComplete:()=>{},onBeforeSelectModel:()=>true,onSelectDefault:()=>{},model:'native',reasoningEffort:'high',",
+      ),
+    },
+    { url: 'app://-/assets/app-initial-split.js', source: initial.slice(0, split) + initial.slice(first) },
+    { url: 'app://-/assets/app-shared-new.js', source: initial.slice(split, first) },
+  ]
+}

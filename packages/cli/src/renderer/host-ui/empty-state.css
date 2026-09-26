@@ -1,0 +1,105 @@
+.cxh-empty-state {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding-block: 20px;
+  color: var(--color-text-primary-surface, var(--cx-text));
+  text-align: start;
+}
+
+.cxh-empty-state > .cordisx-host-icon {
+  flex: none;
+  color: var(--color-text-tertiary, var(--cx-muted));
+}
+
+.cxh-empty-state-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cxh-empty-state-title {
+  margin: 0;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.cxh-empty-state-description {
+  margin: 4px 0 0;
+  color: var(--color-text-tertiary, var(--cx-muted));
+}
+
+.cxh-empty-state-body > .t-button {
+  margin-top: 12px;
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  min-height: 28px;
+}
+
+.cxh-empty-state[data-empty-presentation="hero"] {
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.cxh-empty-state-illustration {
+  width: min(310px, 100%);
+  aspect-ratio: 16 / 9;
+  flex: none;
+}
+
+.cxh-empty-state[data-empty-presentation="hero"] .cxh-empty-state-title {
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.cxh-empty-state[data-empty-presentation="hero"] .cxh-empty-state-description {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.cxh-empty-state[data-empty-presentation="hero"] .t-button {
+  min-height: 34px;
+  margin-top: 18px;
+}
+
+/* Primary empty-state CTA follows the native solid capsule button tokens. */
+.cxh-empty-state .t-button[data-empty-action="primary"] {
+  min-height: var(--control-size-lg, 36px);
+  border: 0;
+  border-radius: var(--radius-full, 9999px);
+  padding: calc(var(--spacing, 4px) * 2) calc(var(--spacing, 4px) * 4);
+  background: var(--color-background-primary-solid, var(--cx-text));
+  color: var(--color-text-primary-solid, var(--cx-surface));
+  font-size: var(--control-font-size-md, 13px);
+  font-weight: var(--font-weight-medium, 500);
+  line-height: calc(var(--spacing, 4px) * 5);
+}
+
+.cxh-empty-state .t-button[data-empty-action="primary"]:hover:not(:disabled) {
+  background: var(
+    --color-background-primary-solid-hover,
+    color-mix(in srgb, var(--cx-text) 92%, var(--cx-surface))
+  );
+}
+
+.cxh-empty-state .t-button[data-empty-action="primary"]:active:not(:disabled) {
+  background: var(
+    --color-background-primary-solid-active,
+    color-mix(in srgb, var(--cx-text) 84%, var(--cx-surface))
+  );
+}
+
+.cxh-empty-state .t-button[data-empty-action="primary"]:focus-visible {
+  outline: 2px solid var(--color-ring-primary-solid, var(--cx-focus));
+  outline-offset: 2px;
+}
+
+.cxh-empty-state .t-button[data-empty-action="primary"]:disabled {
+  background: var(--color-background-primary-solid, var(--cx-text));
+  color: var(--color-text-primary-solid, var(--cx-surface));
+  opacity: 0.4;
+}

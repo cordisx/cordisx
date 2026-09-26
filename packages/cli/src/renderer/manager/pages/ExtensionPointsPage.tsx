@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
@@ -42,12 +43,18 @@ export function ExtensionPointsPage(
         ))}
         {points.length === 0
           ? (
-            <div className="cxr-empty">
-              {managerCopy(
+            <EmptyState
+              icon="contributions"
+              state={normalized ? 'search' : 'empty'}
+              title={managerCopy(snapshot.localization.locale, normalized ? 'extension.no-matches' : 'extension.empty')}
+              description={managerCopy(
                 snapshot.localization.locale,
-                normalized === '' ? 'extension.empty' : 'extension.no-matches',
+                normalized ? 'empty.searchHelp' : 'empty.extensionHelp',
               )}
-            </div>
+              action={normalized
+                ? { label: managerCopy(snapshot.localization.locale, 'empty.clearSearch'), onClick: () => setQuery('') }
+                : undefined}
+            />
           )
           : null}
       </div>

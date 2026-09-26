@@ -44,7 +44,9 @@ export interface ModelProviderSnapshot {
     readonly entry: ModelProviderSelectorEntryV1
     readonly notifications?: NotificationsV1
   }[]
+  /** Initial read without a trustworthy snapshot; successful empty counts as loaded. */
   readonly loading: boolean
+  readonly refreshing?: boolean
   readonly error?: string
 }
 
@@ -162,6 +164,7 @@ export class ModelProviderRegistry {
   >()
   private readonly listeners = new Set<() => void>()
   private state: ModelProviderSnapshot = { providers: [], entries: [], loading: false }
+  private hasSnapshot = false
   private revision = 0
   private disposed = false
   private readonly disconnectVisibility: (() => void) | undefined
@@ -182,7 +185,7 @@ export class ModelProviderRegistry {
   refresh = async (): Promise<void> => {
     if (this.disposed) return
     const revision = ++this.revision
-    this.emit(true)
+    this.emit(!this.hasSnapshot, this.state.error ?? null, true)
     try {
       const projections = await this.load()
       if (this.disposed || revision !== this.revision) return
@@ -220,12 +223,14 @@ export class ModelProviderRegistry {
           )),
         })
       )
-      this.emit(false)
+      this.hasSnapshot = true
+      this.emit(false, null, false)
     } catch {
       if (!this.disposed && revision === this.revision) {
         // Failed readback cannot leave stale providers selectable.
         this.projections = []
-        this.emit(false, 'provider-catalog-unavailable')
+        this.hasSnapshot = false
+        this.emit(false, 'provider-catalog-unavailable', false)
       }
     }
   }
@@ -365,7 +370,11 @@ export class ModelProviderRegistry {
     this.listeners.clear()
   }
 
-  private emit(loading = this.state.loading, error?: string): void {
+  private emit(
+    loading = this.state.loading,
+    error: string | null = this.state.error ?? null,
+    refreshing = this.state.refreshing,
+  ): void {
     if (this.disposed) return
     this.state = Object.freeze({
       providers: Object.freeze(
@@ -412,7 +421,8 @@ export class ModelProviderRegistry {
           ),
       ),
       loading,
-      ...(error === undefined ? {} : { error }),
+      refreshing: refreshing === true,
+      ...(error === null ? {} : { error }),
     })
     for (const listener of this.listeners) listener()
   }

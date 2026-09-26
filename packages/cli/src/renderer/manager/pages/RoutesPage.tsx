@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
@@ -63,9 +64,18 @@ export function RoutesPage(
         ))}
         {routes.length + pages.length === 0
           ? (
-            <div className="cxr-empty">
-              {managerCopy(snapshot.localization.locale, normalized === '' ? 'routes.empty' : 'routes.no-matches')}
-            </div>
+            <EmptyState
+              icon="routes"
+              state={normalized ? 'search' : 'empty'}
+              title={managerCopy(snapshot.localization.locale, normalized ? 'routes.no-matches' : 'routes.empty')}
+              description={managerCopy(
+                snapshot.localization.locale,
+                normalized ? 'empty.searchHelp' : 'empty.routesHelp',
+              )}
+              action={normalized
+                ? { label: managerCopy(snapshot.localization.locale, 'empty.clearSearch'), onClick: () => setQuery('') }
+                : undefined}
+            />
           )
           : null}
       </div>
