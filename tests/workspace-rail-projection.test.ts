@@ -1,6 +1,10 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { WorkspaceRailProjection } from '../packages/cli/src/renderer/manager/workspace-rail-projection.js'
+import type {
+  NativeRailIconVisualRequest,
+  NativeRailIconVisualResult,
+} from '../packages/cli/src/renderer/adapter/native-rail-icon-visual.js'
 
 function fixture() {
   const dom = new JSDOM(`<!doctype html><body>
@@ -46,6 +50,119 @@ function nativeFiber(button: HTMLButtonElement, selected: boolean): void {
 }
 
 describe('Host-owned workspace rail selection projection', () => {
+  it('disposes an icon lease returned after Manager has left', async () => {
+    const f = fixture()
+    let finish: ((result: NativeRailIconVisualResult) => void) | undefined
+    let request: NativeRailIconVisualRequest | undefined
+    let disposed = 0
+    let lost = 0
+    const projection = new WorkspaceRailProjection(f.document, undefined, {
+      appVersion: '26.924.22138',
+      onLost: () => lost++,
+      project: input => {
+        request = input
+        return new Promise(resolve => finish = resolve)
+      },
+    })
+    expect(projection.enter()).toBe(true)
+    expect(request?.appVersion).toBe('26.924.22138')
+    expect(projection.leave()).toBe(true)
+    finish?.({
+      status: 'active',
+      handle: { destination: 'builtin:home', isCurrent: () => true, dispose: () => disposed++ },
+    })
+    await Promise.resolve()
+    expect(disposed).toBe(1)
+    request?.onLost()
+    expect(lost).toBe(0)
+    f.dom.window.close()
+  })
+
+  it('responds only to icon loss from the current Manager entry', async () => {
+    const f = fixture()
+    const requests: NativeRailIconVisualRequest[] = []
+    let lost = 0
+    let disposed = 0
+    const projection = new WorkspaceRailProjection(f.document, undefined, {
+      appVersion: '26.924.22138',
+      onLost: () => lost++,
+      project: async input => {
+        requests.push(input)
+        return {
+          status: 'active',
+          handle: { destination: 'builtin:home', isCurrent: () => true, dispose: () => disposed++ },
+        }
+      },
+    })
+    expect(projection.enter()).toBe(true)
+    await Promise.resolve()
+    expect(projection.leave()).toBe(true)
+    expect(disposed).toBe(1)
+    expect(projection.enter()).toBe(true)
+    await Promise.resolve()
+    requests[0]?.onLost()
+    expect(lost).toBe(0)
+    requests[1]?.onLost()
+    expect(lost).toBe(1)
+    projection.leave()
+    f.dom.window.close()
+  })
+
+  it('retries a busy visual lease after a fast Manager reopen', async () => {
+    const f = fixture()
+    let attempts = 0
+    let disposed = 0
+    const projection = new WorkspaceRailProjection(f.document, undefined, {
+      appVersion: '26.924.22138',
+      project: async () => {
+        attempts++
+        return attempts === 1
+          ? { status: 'unavailable', reason: 'native-icon-owner-unavailable' }
+          : {
+            status: 'active',
+            handle: { destination: 'builtin:home', isCurrent: () => true, dispose: () => disposed++ },
+          }
+      },
+    })
+    expect(projection.enter()).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 130))
+    expect(attempts).toBe(2)
+    expect(projection.leave()).toBe(true)
+    expect(disposed).toBe(1)
+    f.dom.window.close()
+  })
+
+  it('stops icon retries when native navigation changes during Manager entry', async () => {
+    const f = fixture()
+    let route = {
+      available: true,
+      key: 'home',
+      nativeLocation: { pathname: '/', search: '', hash: '' },
+    }
+    let attempts = 0
+    const projection = new WorkspaceRailProjection(
+      f.document,
+      { snapshot: () => route, subscribe: () => () => {} },
+      {
+        appVersion: '26.924.22138',
+        project: async () => {
+          attempts++
+          return { status: 'unavailable', reason: 'native-icon-owner-unavailable' }
+        },
+      },
+    )
+    expect(projection.enter()).toBe(true)
+    route = {
+      available: true,
+      key: 'library',
+      nativeLocation: { pathname: '/library', search: '', hash: '' },
+    }
+    await new Promise(resolve => setTimeout(resolve, 130))
+    expect(attempts).toBe(1)
+    projection.dispose()
+    f.dom.window.close()
+  })
+
   it('restores the same destination after entering and leaving the owned tab', async () => {
     const f = fixture()
     expect(f.projection.enter()).toBe(true)

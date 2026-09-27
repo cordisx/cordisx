@@ -144,6 +144,24 @@ function appBundleRoot(executable: string): string | undefined {
   return root.endsWith('.app') ? root : undefined
 }
 
+/** Version of the selected macOS App, read from its bundle before renderer injection. */
+export async function readCodexAppVersion(executable: string | undefined): Promise<string | undefined> {
+  if (process.platform !== 'darwin' || executable === undefined) return undefined
+  const bundleRoot = appBundleRoot(executable)
+  if (bundleRoot === undefined) return undefined
+  return await new Promise(resolve => {
+    execFile(
+      '/usr/bin/plutil',
+      ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', path.join(bundleRoot, 'Contents', 'Info.plist')],
+      { encoding: 'utf8' },
+      (error, stdout) => {
+        const version = stdout.trim()
+        resolve(error === null && /^\d+\.\d+\.\d+$/u.test(version) ? version : undefined)
+      },
+    )
+  })
+}
+
 function numericVersion(value: string): readonly bigint[] | undefined {
   const trimmed = value.trim()
   if (!/^\d+(?:\.\d+)*$/u.test(trimmed)) return undefined

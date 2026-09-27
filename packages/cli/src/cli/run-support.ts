@@ -42,6 +42,7 @@ import {
   assertLoopbackPortAvailable,
   findFreeLoopbackPort,
   prepareIsolatedCodexProfile,
+  readCodexAppVersion,
   resolveCodexExecutable,
 } from '../launcher/process.js'
 export { waitForAbort, waitForExit, waitForHostExitAfterReadiness } from './host-lifecycle.js'
@@ -522,10 +523,14 @@ export async function runDevelopment(
       profileId: managementProfileId,
     })
     const pluginManagementToken = randomBytes(32).toString('hex')
+    const nativeAppVersion = environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
+      ? await readCodexAppVersion(executable)
+      : undefined
     const composition = await buildRendererComposition(rendererConfig, stdout, {
       ...(environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
         ? { managerPresentationMode: 'workspace' as const }
         : {}),
+      ...(nativeAppVersion === undefined ? {} : { nativeAppVersion }),
       profileId: nativeProfileId,
       writable: invocation.options.writeConfig === true,
       serviceConfigWritable: false,

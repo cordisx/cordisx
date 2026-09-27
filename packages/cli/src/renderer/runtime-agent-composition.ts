@@ -860,6 +860,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       navigationController: runtimeScope.managerNavigationController()!,
       nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
       presentationMode: runtimeScope.metadata()!.managerPresentationMode === 'workspace' ? 'workspace' : 'overlay',
+      ...(runtimeScope.metadata()!.nativeAppVersion === undefined
+        ? {}
+        : { nativeAppVersion: runtimeScope.metadata()!.nativeAppVersion! }),
       ...(pluginManagement === undefined ? {} : { pluginManagement }),
       ...(runtimeScope.metadata()!.hostKind === 'playground'
         ? {

@@ -1,5 +1,11 @@
 import { resolveManagerRailSeat } from '../host-probes.js'
 import { readNativeRailSelection } from '../adapter/native-rail-selection-probe.js'
+import {
+  type NativeRailIconVisualHandle,
+  type NativeRailIconVisualRequest,
+  type NativeRailIconVisualResult,
+  projectNativeRailDefaultIcon,
+} from '../adapter/native-rail-icon-visual.js'
 import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 
 interface CapturedSelection {
@@ -11,6 +17,12 @@ interface CapturedSelection {
   clickedDestination: string | undefined
 }
 
+export interface WorkspaceRailIconOptions {
+  readonly appVersion?: string
+  readonly onLost?: () => void
+  readonly project?: (request: NativeRailIconVisualRequest) => Promise<NativeRailIconVisualResult>
+}
+
 /** Host-owned workspace rail projection; it does not register a Codex destination or route. */
 export class WorkspaceRailProjection {
   private captured: CapturedSelection | undefined
@@ -20,8 +32,15 @@ export class WorkspaceRailProjection {
   private settling: Promise<boolean> | undefined
   private fingerprint = ''
   private stableSince = 0
+  private iconRevision = 0
+  private iconHandle: NativeRailIconVisualHandle | undefined
+  private iconRetryTimer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private readonly document: Document, private readonly route?: NativeRouteSource) {}
+  constructor(
+    private readonly document: Document,
+    private readonly route?: NativeRouteSource,
+    private readonly icon?: WorkspaceRailIconOptions,
+  ) {}
 
   enter(): boolean {
     if (this.captured !== undefined || this.settling !== undefined || this.dirty || this.disposed) return false
@@ -53,10 +72,12 @@ export class WorkspaceRailProjection {
       this.leave()
       return false
     }
+    this.startIconVisual()
     return true
   }
 
   leave(): boolean {
+    this.cancelIconVisual()
     const captured = this.captured
     if (captured === undefined) return this.settling === undefined && !this.dirty
     this.captured = undefined
@@ -78,11 +99,77 @@ export class WorkspaceRailProjection {
   }
 
   dispose(): void {
+    this.cancelIconVisual()
     this.disposed = true
     this.dirty = true
     ++this.revision
     this.captured = undefined
     this.document.removeEventListener('click', this.onNativeClick, true)
+  }
+
+  private cancelIconVisual(): void {
+    ++this.iconRevision
+    clearTimeout(this.iconRetryTimer)
+    this.iconRetryTimer = undefined
+    this.iconHandle?.dispose()
+    this.iconHandle = undefined
+  }
+
+  private startIconVisual(): void {
+    const appVersion = this.icon?.appVersion
+    if (appVersion === undefined) return
+    const revision = ++this.iconRevision
+    void this.projectIconVisual(appVersion, revision, 0)
+  }
+
+  private async projectIconVisual(appVersion: string, revision: number, retry: number): Promise<void> {
+    if (!this.iconVisualEntryCurrent(revision)) return
+    const project = this.icon?.project ?? projectNativeRailDefaultIcon
+    let result: NativeRailIconVisualResult
+    try {
+      result = await project({
+        document: this.document,
+        appVersion,
+        onLost: () => {
+          if (revision !== this.iconRevision || this.disposed || this.captured === undefined) return
+          this.iconHandle = undefined
+          this.icon?.onLost?.()
+        },
+      })
+    } catch {
+      // A changed native bundle fails closed; the Host does not write native route state.
+      return
+    }
+    if (result.status === 'active') {
+      if (!this.iconVisualEntryCurrent(revision)) {
+        result.handle.dispose()
+        return
+      }
+      this.iconHandle = result.handle
+    } else if (
+      (
+        result.reason === 'visual-lease-exists' || result.reason === 'native-icon-owner-unavailable'
+        || result.reason === 'native-icon-owner-changed' || result.reason === 'native-icon-geometry-unavailable'
+      ) && retry < 30 && this.iconVisualEntryCurrent(revision)
+    ) {
+      this.iconRetryTimer = setTimeout(() => {
+        this.iconRetryTimer = undefined
+        void this.projectIconVisual(appVersion, revision, retry + 1)
+      }, 100)
+    }
+  }
+
+  private iconVisualEntryCurrent(revision: number): boolean {
+    const captured = this.captured
+    if (revision !== this.iconRevision || this.disposed || captured === undefined) return false
+    if (captured.clickedDestination !== undefined && captured.clickedDestination !== captured.destination) return false
+    if (this.route !== undefined && nativeRouteIdentity(this.route.snapshot()) !== captured.routeIdentity) return false
+    const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
+      'nav[data-app-navigation-rail="true"]',
+    )
+    const nativeSelected = rail === null || rail === undefined ? undefined : readNativeRailSelection(rail)
+    return nativeSelected === undefined
+      || nativeSelected.getAttribute('data-sidebar-destination') === captured.destination
   }
 
   private inspect(captured: CapturedSelection): 'done' | 'wait' | 'dirty' {

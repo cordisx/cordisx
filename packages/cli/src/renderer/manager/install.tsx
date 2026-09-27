@@ -37,6 +37,7 @@ export interface ReactManagerInstallOptions {
   readonly navigationController?: HostManagerNavigationController
   readonly pluginManagement?: PluginManagementBinding
   readonly nativeRouteHistory?: NativeRouteSource
+  readonly nativeAppVersion?: string
   /** Opt-in Host workspace presentation; Codex still owns its native tabs and routes. */
   readonly presentationMode?: 'overlay' | 'workspace'
   /** Explicit compatibility for legacy Host fixtures; 26.924 production uses native two-pane seats. */
@@ -296,7 +297,14 @@ export function installReactCordisXManager(
   let paneLossHandler: (() => void) | undefined
   let paneSeatMissingSince: number | undefined
   let paneSeatRetryTimer: ReturnType<typeof setTimeout> | undefined
-  const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory)
+  const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory, {
+    ...(options.nativeAppVersion === undefined ? {} : { appVersion: options.nativeAppVersion }),
+    onLost: () => {
+      if (pane === undefined) return
+      deactivatePane()
+      paneLossHandler?.()
+    },
+  })
   const restoreNativeState = ({ node, ariaHidden, inert, visibility }: NativeState) => {
     node.inert = inert
     node.style.visibility = visibility

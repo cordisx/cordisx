@@ -19,6 +19,7 @@ import {
   ONLINE_DEVTOOLS_ORIGIN,
   prepareIsolatedCodexProfile,
   projectProfileKey,
+  readCodexAppVersion,
   resolveCodexExecutable,
   retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
@@ -30,6 +31,25 @@ vi.mock('node:child_process', async importOriginal => {
 })
 
 describe('isolated Codex process support', () => {
+  it.skipIf(process.platform !== 'darwin')('reads the selected App version from Info.plist', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-version-test-'))
+    const bundle = path.join(directory, 'ChatGPT.app')
+    const contents = path.join(bundle, 'Contents')
+    const executable = path.join(contents, 'MacOS', 'ChatGPT')
+    try {
+      await mkdir(path.dirname(executable), { recursive: true })
+      await writeFile(
+        path.join(contents, 'Info.plist'),
+        `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>26.924.22138</string></dict></plist>`,
+      )
+      expect(await readCodexAppVersion(executable)).toBe('26.924.22138')
+      expect(await readCodexAppVersion(path.join(directory, 'ChatGPT'))).toBeUndefined()
+    } finally {
+      await rm(directory, { recursive: true })
+    }
+  })
+
   it('creates a stable project profile without inventing an isolated HOME', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-test-'))
     const profileDir = path.join(directory, 'codex-app-profile')

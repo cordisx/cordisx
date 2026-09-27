@@ -21,6 +21,7 @@ export interface BuildRendererBundleOptions {
   readonly playground?: boolean
   /** Host-private preview mode; normal launches retain the overlay presentation. */
   readonly managerPresentationMode?: 'workspace'
+  readonly nativeAppVersion?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly profileId?: string
@@ -351,9 +352,9 @@ export async function buildRendererCompositionSource(
     JSON.stringify(permission.policies)
   }${options.playground === true ? ', hostKind: "playground"' : ''}${
     options.managerPresentationMode === 'workspace' ? ', managerPresentationMode: "workspace"' : ''
-  }${config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''}${
-    options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`
-  }${
+  }${options.nativeAppVersion === undefined ? '' : `, nativeAppVersion: ${JSON.stringify(options.nativeAppVersion)}`}${
+    config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''
+  }${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${
     options.iconThemePreference === undefined
       ? ''
       : `, iconThemePreference: ${JSON.stringify(options.iconThemePreference)}`

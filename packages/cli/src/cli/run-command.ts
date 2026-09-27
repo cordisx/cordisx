@@ -35,6 +35,7 @@ import {
   acquireCodexProfileLaunchLease,
   type IsolatedCodexProfile,
   prepareIsolatedCodexProfile,
+  readCodexAppVersion,
   resolveCodexExecutable,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
@@ -392,10 +393,14 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         nativeSubmission = composition
       })
     }
+    const nativeAppVersion = environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
+      ? await readCodexAppVersion(plan?.executable)
+      : undefined
     rendererComposition = await buildRendererComposition(composition, stdout, {
       ...(environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
         ? { managerPresentationMode: 'workspace' as const }
         : {}),
+      ...(nativeAppVersion === undefined ? {} : { nativeAppVersion }),
       appId,
       profileId: selection.profileId,
       ...(selection.profile.iconTheme === undefined ? {} : { iconThemePreference: selection.profile.iconTheme }),
