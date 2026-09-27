@@ -367,6 +367,24 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(sidebar.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
       expect(titlebarMain.querySelector('.cxr-heading')?.textContent).toContain('Model')
 
+      const refreshedSidebar = sidebarScroll.cloneNode(true) as HTMLElement
+      refreshedSidebar.removeAttribute('aria-hidden')
+      refreshedSidebar.inert = false
+      refreshedSidebar.style.visibility = ''
+      sidebarScroll.replaceWith(refreshedSidebar)
+      await settleManager()
+      expect(document.querySelectorAll('[data-cordisx-manager-pane]')).toHaveLength(1)
+      expect(document.querySelectorAll('[data-cordisx-react-manager]')).toHaveLength(1)
+      expect(sidebar.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
+      expect(sidebarScroll.getAttribute('aria-hidden')).toBeNull()
+      expect(refreshedSidebar.getAttribute('aria-hidden')).toBe('true')
+      expect(refreshedSidebar.inert).toBe(true)
+      refreshedSidebar.replaceWith(sidebarScroll)
+      await settleManager()
+      expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
+      expect(refreshedSidebar.getAttribute('aria-hidden')).toBeNull()
+      expect(sidebarScroll.getAttribute('aria-hidden')).toBe('true')
+
       await act(async () => {
         nativeEndAction.click()
       })

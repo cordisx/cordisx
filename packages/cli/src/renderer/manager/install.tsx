@@ -93,6 +93,7 @@ export function installReactCordisXManager(
     visibility: string
   }
   let pane: {
+    rail: HTMLElement
     mainAnchor: HTMLElement
     mainFrame: HTMLElement
     sidebarContainer: HTMLElement
@@ -271,6 +272,45 @@ export function installReactCordisXManager(
   })
   let paneLossHandler: (() => void) | undefined
   const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory)
+  const restoreNativeState = ({ node, ariaHidden, inert, visibility }: NativeState) => {
+    node.inert = inert
+    node.style.visibility = visibility
+    if (ariaHidden === null) node.removeAttribute('aria-hidden')
+    else node.setAttribute('aria-hidden', ariaHidden)
+  }
+  const refreshSidebarNative = (current: NonNullable<typeof pane>, nodes: readonly HTMLElement[]) => {
+    if (
+      current.sidebarNative.length === nodes.length
+      && current.sidebarNative.every((node, index) => node === nodes[index])
+    ) return
+    const states = new Map(current.native.map(state => [state.node, state]))
+    for (const node of current.sidebarNative) {
+      if (!nodes.includes(node)) {
+        const state = states.get(node)
+        if (state !== undefined) restoreNativeState(state)
+      }
+    }
+    const sidebar = nodes.map(node => {
+      const existing = states.get(node)
+      if (existing !== undefined) return existing
+      const state: NativeState = {
+        node,
+        ariaHidden: node.getAttribute('aria-hidden'),
+        inert: node.inert,
+        visibility: node.style.visibility,
+      }
+      node.inert = true
+      node.style.visibility = 'hidden'
+      node.setAttribute('aria-hidden', 'true')
+      return state
+    })
+    current.sidebarNative = nodes
+    current.native = [
+      ...current.native.filter(state => state.node === current.mainFrame),
+      ...sidebar,
+      ...current.native.filter(state => state.node === current.sidebarResizer),
+    ]
+  }
   const deactivatePane = () => {
     const current = pane
     if (current === undefined) return
@@ -283,12 +323,7 @@ export function installReactCordisXManager(
       current.sidebarLayout.style.width = current.sidebarLayoutWidth
       current.sidebarLayout.style.flexBasis = current.sidebarLayoutFlexBasis
     }
-    for (const { node, ariaHidden, inert, visibility } of current.native) {
-      node.inert = inert
-      node.style.visibility = visibility
-      if (ariaHidden === null) node.removeAttribute('aria-hidden')
-      else node.setAttribute('aria-hidden', ariaHidden)
-    }
+    for (const state of current.native) restoreNativeState(state)
     for (const { node, ariaHidden, inert, visibility } of current.nativeTitle) {
       node.inert = inert
       node.style.visibility = visibility
@@ -359,11 +394,9 @@ export function installReactCordisXManager(
     if (titlebar === undefined) return false
     const current = pane
     if (
-      current?.mainAnchor === seat.main.anchor && current.mainFrame === seat.main.frame
+      current?.rail === seat.rail && current.mainAnchor === seat.main.anchor && current.mainFrame === seat.main.frame
       && current.sidebarContainer === seat.sidebar.container
       && current.provenance === seat.provenance
-      && current.sidebarNative.length === seat.sidebar.native.length
-      && current.sidebarNative.every((node, index) => node === seat.sidebar.native[index])
       && current.sidebarResizer === (seat.provenance === 'codex-26.924-native-two-pane'
           ? seat.sidebar.resizer
           : undefined)
@@ -372,6 +405,7 @@ export function installReactCordisXManager(
       && current.titlebarNative.length === titlebar.native.length
       && current.titlebarNative.every((node, index) => node === titlebar.native[index])
     ) {
+      refreshSidebarNative(current, seat.sidebar.native)
       placeTitlebarSeat(titlebar)
       return true
     }
@@ -415,6 +449,7 @@ export function installReactCordisXManager(
         : { titlebarSafeRight: titlebar.bounds.left + titlebar.bounds.width }),
     })
     pane = {
+      rail: seat.rail,
       mainAnchor: seat.main.anchor,
       mainFrame: seat.main.frame,
       sidebarContainer: seat.sidebar.container,
@@ -514,11 +549,9 @@ export function installReactCordisXManager(
       const seat = resolveManagerPaneSeat(document)
       const titlebar = seat === undefined ? undefined : resolveTitlebar(seat)
       if (
-        seat?.main.anchor !== pane.mainAnchor || seat.main.frame !== pane.mainFrame
+        seat?.rail !== pane.rail || seat.main.anchor !== pane.mainAnchor || seat.main.frame !== pane.mainFrame
         || seat.sidebar.container !== pane.sidebarContainer
         || seat.provenance !== pane.provenance
-        || seat.sidebar.native.length !== pane.sidebarNative.length
-        || pane.sidebarNative.some((node, index) => node !== seat.sidebar.native[index])
         || pane.sidebarResizer !== (seat.provenance === 'codex-26.924-native-two-pane'
             ? seat.sidebar.resizer
             : undefined)
@@ -530,6 +563,7 @@ export function installReactCordisXManager(
         deactivatePane()
         paneLossHandler?.()
       } else if (titlebar !== undefined) {
+        refreshSidebarNative(pane, seat.sidebar.native)
         placeTitlebarSeat(titlebar)
       }
     }
