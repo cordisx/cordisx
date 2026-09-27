@@ -1,11 +1,17 @@
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import type { ManagerModel } from '../manager.js'
-import { resolveManagerPaneSeat, resolveManagerRailSeat, resolveManagerTriggerTarget } from '../host-probes.js'
+import {
+  resolveManagerPaneSeat,
+  resolveManagerRailSeat,
+  resolveManagerTitlebarSeat,
+  resolveManagerTriggerTarget,
+} from '../host-probes.js'
 import { resolveManagerRailOnlyTitlebarSeat } from '../adapter/manager-rail-only-titlebar.js'
 import {
   captureManagerTitlebarLease,
   type ManagerTitlebarLease,
+  refreshManagerTitlebarNativeActions,
   releaseManagerTitlebarLease,
   resolveManagerTitlebarContinuation,
 } from '../adapter/manager-titlebar-continuation.js'
@@ -124,6 +130,7 @@ export function installReactCordisXManager(
     rootWidth: string
     native: NativeState[]
     nativeTitle: NativeState[]
+    selected: Array<{ button: HTMLButtonElement; current: string | null; dataSelected: string | null }>
   } | undefined
   let endResize: ((event?: PointerEvent) => void) | undefined
   const persistedWidth = (() => {
@@ -156,6 +163,9 @@ export function installReactCordisXManager(
       rootSeat.style.left = `${next}px`
       rootSeat.style.width = `calc(100% - ${next}px)`
     } else {
+      navigationSeat.style.width = '100%'
+      rootSeat.style.left = '0'
+      rootSeat.style.width = '100%'
       current.sidebarContainer.style.width = `${next}px`
       current.sidebarContainer.style.flexBasis = `${next}px`
       if (current.sidebarLayout !== undefined) {
@@ -171,7 +181,12 @@ export function installReactCordisXManager(
     resizeHandle.style.left = `${sidebarLeft + next}px`
     resizeHandle.style.top = `${anchorRect.top}px`
     resizeHandle.style.height = `${anchorRect.height}px`
-    if (current.titlebarProvenance !== 'rail-only') {
+    if (current.titlebarProvenance === 'rail-only') {
+      const titleRect = current.titlebarSlot.getBoundingClientRect()
+      const desiredLeft = Math.max(current.titlebarSafeLeft, anchorRect.left + next)
+      titlebarSeat.style.left = `${desiredLeft - titleRect.left}px`
+      titlebarSeat.style.width = `${Math.max(0, current.titlebarSafeRight - desiredLeft)}px`
+    } else {
       const titleRect = current.titlebarSlot.getBoundingClientRect()
       const desiredLeft = Math.max(current.titlebarSafeLeft, anchorRect.left)
       Object.assign(titlebarSeat.style, {
@@ -313,6 +328,39 @@ export function installReactCordisXManager(
       ...current.native.filter(state => state.node === current.sidebarResizer),
     ]
   }
+  const refreshTitlebarNative = (current: NonNullable<typeof pane>): boolean => {
+    if (current.titlebarProvenance !== 'native' || current.titlebarLease === undefined) return true
+    const seat = resolveManagerTitlebarSeat(document)
+    if (seat?.slot !== current.titlebarSlot) return false
+    const nodes = seat.native
+    if (
+      nodes.length === current.titlebarNative.length
+      && nodes.every((node, index) => node === current.titlebarNative[index])
+    ) return true
+    const states = new Map(current.nativeTitle.map(state => [state.node, state]))
+    const next = nodes.map(node => {
+      const existing = states.get(node)
+      if (existing !== undefined) return existing
+      const state: NativeState = {
+        node,
+        ariaHidden: node.getAttribute('aria-hidden'),
+        inert: node.inert,
+        visibility: node.style.visibility,
+      }
+      node.inert = true
+      node.style.visibility = 'hidden'
+      node.setAttribute('aria-hidden', 'true')
+      return state
+    })
+    if (!refreshManagerTitlebarNativeActions(document, current.titlebarLease, nodes)) {
+      for (const state of next) if (!states.has(state.node)) restoreNativeState(state)
+      return false
+    }
+    for (const state of current.nativeTitle) if (!nodes.includes(state.node)) restoreNativeState(state)
+    current.titlebarNative = nodes
+    current.nativeTitle = next
+    return true
+  }
   const deactivatePane = () => {
     const current = pane
     if (current === undefined) return
@@ -344,7 +392,16 @@ export function installReactCordisXManager(
     navigationSeat.style.width = current.navigationWidth
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
-    railProjection.leave()
+    if (presentationMode === 'workspace') railProjection.leave()
+    else {
+      for (const { button, current: value, dataSelected } of current.selected) {
+        if (!button.isConnected) continue
+        if (value !== null && !button.hasAttribute('aria-current')) button.setAttribute('aria-current', value)
+        if (dataSelected !== null && !button.hasAttribute('data-selected')) {
+          button.setAttribute('data-selected', dataSelected)
+        }
+      }
+    }
     navigationSeat.remove()
     resizeHandle.remove()
     titlebarSeat.remove()
@@ -381,11 +438,15 @@ export function installReactCordisXManager(
   }
   const placeTitlebarSeat = (titlebar: NonNullable<ReturnType<typeof resolveTitlebar>>) => {
     const slotRect = titlebar.slot.getBoundingClientRect()
+    const desiredLeft = titlebar.provenance === 'rail-only' && pane !== undefined
+      ? Math.max(titlebar.bounds.left, pane.mainAnchor.getBoundingClientRect().left + pane.width)
+      : titlebar.bounds.left
+    const right = titlebar.bounds.left + titlebar.bounds.width
     Object.assign(titlebarSeat.style, {
       position: 'absolute',
-      left: `${titlebar.bounds.left - slotRect.left}px`,
+      left: `${desiredLeft - slotRect.left}px`,
       top: `${titlebar.bounds.top - slotRect.top}px`,
-      width: `${titlebar.bounds.width}px`,
+      width: `${Math.max(0, right - desiredLeft)}px`,
       height: `${titlebar.bounds.height}px`,
       right: 'auto',
       bottom: 'auto',
@@ -415,7 +476,16 @@ export function installReactCordisXManager(
       return true
     }
     deactivatePane()
-    if (!railProjection.enter()) {
+    const selected = presentationMode === 'workspace' ? [] : [
+      ...seat.rail.querySelectorAll<HTMLButtonElement>('button[aria-current],button[data-selected]'),
+    ]
+      .filter(button => !triggerSeat.contains(button))
+      .map(button => ({
+        button,
+        current: button.getAttribute('aria-current'),
+        dataSelected: button.getAttribute('data-selected'),
+      }))
+    if (presentationMode === 'workspace' && !railProjection.enter()) {
       if (current === undefined && titlebar.lease !== undefined) releaseManagerTitlebarLease(titlebar.lease)
       return false
     }
@@ -485,6 +555,7 @@ export function installReactCordisXManager(
       rootWidth: rootSeat.style.width,
       native,
       nativeTitle,
+      selected,
     }
     seat.main.anchor.style.position = 'relative'
     seat.sidebar.container.style.position = 'relative'
@@ -510,6 +581,10 @@ export function installReactCordisXManager(
       node.inert = true
       node.style.visibility = 'hidden'
       node.setAttribute('aria-hidden', 'true')
+    }
+    for (const { button } of selected) {
+      button.removeAttribute('aria-current')
+      button.removeAttribute('data-selected')
     }
     rootSeat.dataset.managerSurface = 'pane'
     seat.main.anchor.append(rootSeat)
@@ -575,9 +650,10 @@ export function installReactCordisXManager(
             ? seat.sidebar.resizer
             : undefined)
       if (sameCore) refreshSidebarNative(pane, seat.sidebar.native)
-      const titlebar = seat === undefined ? undefined : resolveTitlebar(seat)
+      const actionsReady = sameCore && refreshTitlebarNative(pane)
+      const titlebar = seat === undefined || !actionsReady ? undefined : resolveTitlebar(seat)
       if (
-        !sameCore || titlebar?.provenance !== pane.titlebarProvenance
+        !sameCore || !actionsReady || titlebar?.provenance !== pane.titlebarProvenance
         || titlebar?.slot !== pane.titlebarSlot
         || titlebar.native.length !== pane.titlebarNative.length
         || pane.titlebarNative.some((node, index) => node !== titlebar.native[index])

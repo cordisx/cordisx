@@ -38,14 +38,14 @@ describe('26.924 Manager titlebar seat', () => {
     const before = fixture.document.body.innerHTML
     expect(resolveManagerTitlebarSeat(fixture.document)).toEqual({
       slot: fixture.slot,
-      native: [fixture.native],
+      native: [fixture.native, fixture.end],
       bounds: { left: 290, top: 0, width: 1393, height: 44 },
     })
     expect(fixture.document.body.innerHTML).toBe(before)
     const seat = fixture.document.createElement('div')
     seat.dataset.cordisxManagerTitlebarSeat = 'true'
     fixture.slot.append(seat)
-    expect(resolveManagerTitlebarSeat(fixture.document)?.native).toEqual([fixture.native])
+    expect(resolveManagerTitlebarSeat(fixture.document)?.native).toEqual([fixture.native, fixture.end])
   })
 
   it('bounds an overlaid 36px native end control instead of rejecting the main slot', () => {
@@ -58,6 +58,30 @@ describe('26.924 Manager titlebar seat', () => {
       height: 44,
     })
     fixture.end.getBoundingClientRect = () => fixture.rect(1600, 119)
+    expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
+  })
+
+  it('leases only the right page-action group and end control beside the Host title seat', () => {
+    const fixture = titlebarFixture()
+    const title = fixture.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    const actions = fixture.document.createElement('div')
+    actions.setAttribute('data-app-shell-header-obstacle', 'true')
+    actions.innerHTML = '<button>Share</button><button>More</button>'
+    title.append(actions)
+    fixture.slot.getBoundingClientRect = () => fixture.rect(290, 1257)
+    actions.getBoundingClientRect = () => fixture.rect(1553, 130)
+    expect(resolveManagerTitlebarSeat(fixture.document)?.native).toEqual([
+      fixture.native,
+      actions,
+      fixture.end,
+    ])
+  })
+
+  it('allows an empty native end slot but rejects multiple end controls', () => {
+    const fixture = titlebarFixture()
+    fixture.end.replaceChildren()
+    expect(resolveManagerTitlebarSeat(fixture.document)?.native).toEqual([fixture.native])
+    fixture.end.innerHTML = '<button>One</button><button>Two</button>'
     expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
   })
 

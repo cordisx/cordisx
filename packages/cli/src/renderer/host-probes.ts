@@ -256,13 +256,22 @@ export function resolveManagerTitlebarSeat(document: Document): {
       || hostSeats[0]?.getAttribute('data-cordisx-manager-titlebar-seat') !== 'true'
     ))
   ) return undefined
-  const native = children.filter((child): child is HTMLElement =>
+  const nativeTitle = children.filter((child): child is HTMLElement =>
     child instanceof ElementClass && !child.hasAttribute('data-cordisx-manager-titlebar-seat')
   )
-  if (native.length + hostSeats.length !== children.length) return undefined
+  if (nativeTitle.length + hostSeats.length !== children.length || ends[0]?.parentElement !== bar) return undefined
+  const pageActions = [...titles[0]!.querySelectorAll<HTMLElement>('[data-app-shell-header-obstacle="true"]')]
+    .filter(node => !slot.contains(node) && !node.contains(slot))
+    .filter(node => {
+      const rect = node.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 && rect.left >= safeRight - 2
+        && rect.right <= endRect.left + 2 && node.querySelector('button') !== null
+    })
+  const endButtons = ends[0]!.querySelectorAll('button')
+  if (pageActions.length > 1 || endButtons.length > 1) return undefined
   return {
     slot,
-    native,
+    native: [...nativeTitle, ...pageActions, ...(endButtons.length === 1 ? [ends[0]!] : [])],
     bounds: { left: slotRect.left, top: slotRect.top, width: safeRight - slotRect.left, height: slotRect.height },
   }
 }

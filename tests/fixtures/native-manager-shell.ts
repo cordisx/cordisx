@@ -1,7 +1,7 @@
 import type { JSDOM } from 'jsdom'
 
 /** Give bundle integration tests the real 26.924 Manager seat they exercise. */
-export function installNativeManagerShell(dom: JSDOM): void {
+export function installNativeManagerShell(dom: JSDOM, options: { readonly legacySelection?: boolean } = {}): void {
   const { document } = dom.window
   const originalHeader = document.querySelector<HTMLElement>('.sidebar-header')
   if (document.getElementById('root') === null) {
@@ -11,8 +11,13 @@ export function installNativeManagerShell(dom: JSDOM): void {
   if (rail === null) {
     rail = document.createElement('nav')
     rail.dataset.appNavigationRail = 'true'
-    rail.innerHTML =
-      '<div><div><button data-sidebar-destination="builtin:home" aria-current="page">Home</button></div><div><button data-sidebar-destination="builtin:automations">Automations</button></div></div>'
+    rail.innerHTML = `<div><div><button data-sidebar-destination="builtin:home" aria-current="page"${
+      options.legacySelection ? '' : ' data-selected=""'
+    }>Home</button></div><div><button data-sidebar-destination="builtin:automations">Automations</button></div></div>`
+  }
+  if (!options.legacySelection) {
+    const selected = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][aria-current="page"]')
+    if (selected.length === 1) selected[0]!.setAttribute('data-selected', '')
   }
   let navigation = document.querySelector<HTMLElement>('nav[role="navigation"][aria-label="Home"]')
   if (navigation === null) {

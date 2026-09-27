@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
   captureManagerTitlebarLease,
+  refreshManagerTitlebarNativeActions,
   releaseManagerTitlebarLease,
   resolveManagerTitlebarContinuation,
 } from '../packages/cli/src/renderer/adapter/manager-titlebar-continuation.js'
@@ -97,7 +98,7 @@ function fixture(kind: Kind) {
     navigation.append(navigationSeat)
     main.append(contentSeat)
     document.body.append(resizeHandle)
-    for (const node of settings ? [title] : [native]) {
+    for (const node of settings ? [title] : [native, end]) {
       node.inert = true
       node.style.visibility = 'hidden'
       node.setAttribute('aria-hidden', 'true')
@@ -157,5 +158,49 @@ describe('26.924 Manager titlebar continuation', () => {
       .toBeUndefined()
     f.navigation.setAttribute('aria-label', 'Other page')
     expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+  })
+
+  it('keeps Back while a bounded right page-action group and native end control are leased away', () => {
+    const f = fixture('native')
+    const slot = f.document.querySelector<HTMLElement>('[data-app-shell-titlebar-slot="main"]')!
+    const title = f.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    const group = f.document.createElement('div')
+    group.setAttribute('data-app-shell-header-obstacle', 'true')
+    group.innerHTML = '<button>Share</button><button>More</button>'
+    title.append(group)
+    f.setRect(slot, f.rect(290, 0, 1257, 44))
+    f.setRect(group, f.rect(1553, 0, 130, 44))
+    const lease = captureManagerTitlebarLease(f.document, 'native', f.pane)!
+    expect(lease.seat.native.includes(group)).toBe(true)
+    const owner = f.mount(420)
+    f.setRect(owner.titlebarSeat, f.rect(290, 0, 1257, 44))
+    group.inert = true
+    group.style.visibility = 'hidden'
+    group.setAttribute('aria-hidden', 'true')
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)?.bounds).toEqual({
+      left: 472.5,
+      top: 0,
+      width: 1074.5,
+      height: 44,
+    })
+    expect(f.document.getElementById('back')?.closest('[aria-hidden="true"],[inert]')).toBeNull()
+    const replacement = group.cloneNode(true) as HTMLElement
+    group.replaceWith(replacement)
+    f.setRect(replacement, f.rect(1553, 0, 130, 44))
+    replacement.inert = true
+    replacement.style.visibility = 'hidden'
+    replacement.setAttribute('aria-hidden', 'true')
+    const end = f.document.querySelector<HTMLElement>('[data-app-shell-header-slot="end"]')!
+    const native = f.document.getElementById('native-title')!
+    expect(refreshManagerTitlebarNativeActions(f.document, lease, [native, replacement, end])).toBe(true)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)?.bounds.left).toBe(472.5)
+    const nextEnd = end.cloneNode(true) as HTMLElement
+    end.replaceWith(nextEnd)
+    f.setRect(nextEnd, f.rect(1683, 0, 36, 44))
+    nextEnd.inert = true
+    nextEnd.style.visibility = 'hidden'
+    nextEnd.setAttribute('aria-hidden', 'true')
+    expect(refreshManagerTitlebarNativeActions(f.document, lease, [native, replacement, nextEnd])).toBe(true)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)?.bounds.left).toBe(472.5)
   })
 })

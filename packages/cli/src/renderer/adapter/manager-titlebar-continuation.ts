@@ -37,16 +37,16 @@ interface Baseline {
   readonly document: Document
   readonly header: HTMLElement
   readonly start: HTMLElement
-  readonly end: HTMLElement
+  end: HTMLElement
   readonly title: HTMLElement
   readonly slot: HTMLElement
-  readonly native: readonly HTMLElement[]
+  native: readonly HTMLElement[]
   readonly rail: HTMLElement
   readonly navigation: HTMLElement
   readonly main: HTMLElement
   readonly headerRect: DOMRect
   readonly startRect: DOMRect
-  readonly endRect: DOMRect
+  endRect: DOMRect
   readonly titleRect: DOMRect
   readonly titleRegion: string
   readonly slotRect: DOMRect
@@ -225,6 +225,40 @@ export function captureManagerTitlebarLease(
 /** Revoke the captured native identities when the owning Manager pane closes. */
 export function releaseManagerTitlebarLease(lease: ManagerTitlebarLease): void {
   issued.delete(lease)
+}
+
+/** Renew only structurally identical 26.924 right actions after a native React replacement. */
+export function refreshManagerTitlebarNativeActions(
+  document: Document,
+  lease: ManagerTitlebarLease,
+  nodes: readonly HTMLElement[],
+): boolean {
+  const baseline = issued.get(lease)
+  if (baseline === undefined || baseline.document !== document || baseline.kind !== 'native') return false
+  const seat = resolveManagerTitlebarSeat(document)
+  if (
+    seat?.slot !== baseline.slot || seat.bounds.left !== baseline.bounds.left
+    || seat.bounds.width !== baseline.bounds.width || seat.native.length !== nodes.length
+    || seat.native.some((node, index) => node !== nodes[index])
+  ) return false
+  const oldTitle = baseline.native.filter(node => baseline.slot.contains(node))
+  const newTitle = nodes.filter(node => baseline.slot.contains(node))
+  if (oldTitle.length !== newTitle.length || oldTitle.some((node, index) => node !== newTitle[index])) return false
+  const ends = baseline.header.querySelectorAll<HTMLElement>(':scope > [data-app-shell-header-slot="end"]')
+  const end = ends[0]
+  const endRect = end === undefined ? undefined : box(end)
+  if (
+    ends.length !== 1 || end === undefined || endRect === undefined
+    || !sameRect(endRect, baseline.endRect)
+    || nodes.some(node =>
+      !node.isConnected || !node.inert || node.style.visibility !== 'hidden'
+      || node.getAttribute('aria-hidden') !== 'true'
+    )
+  ) return false
+  baseline.native = nodes
+  baseline.end = end
+  baseline.endRect = endRect
+  return true
 }
 
 /**
