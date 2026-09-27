@@ -28,6 +28,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   [data-cordisx-manager-rail-item] .cxr-trigger { width: 36px; height: 36px; margin: 0; border-radius: 12.5px; opacity: 1; }
   [data-cordisx-manager-rail-item] .cxr-trigger > .cxr-trigger-mark { width: 20px; height: 20px; }
   [data-cordisx-manager-rail-item] .cxr-trigger[aria-current="page"] { background: var(--cx-hover, color-mix(in srgb,currentColor 9%,transparent)); }
+  nav[data-app-navigation-rail="true"] button[data-cordisx-manager-native-selection-suppressed="true"]::before { background-color: transparent !important; background-image: none !important; }
   .cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 58%); }
   .cxr-pane-layer { position: absolute; inset: 0; z-index: 1; overflow: hidden; background: var(--cx-surface, #17191d); }
   .cxr-pane-shell { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr); background: var(--cx-surface, #17191d); }

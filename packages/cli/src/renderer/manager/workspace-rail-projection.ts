@@ -8,6 +8,8 @@ import {
 } from '../adapter/native-rail-icon-visual.js'
 import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 
+const NATIVE_SELECTION_SUPPRESSION = 'data-cordisx-manager-native-selection-suppressed'
+
 interface CapturedSelection {
   readonly button: HTMLButtonElement
   readonly destination: string
@@ -51,7 +53,10 @@ export class WorkspaceRailProjection {
     const current = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][aria-current="page"]')
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
     const button = current[0]
-    if (current.length !== 1 || marked.length !== 1 || button === undefined || button !== marked[0]) return false
+    if (
+      current.length !== 1 || marked.length !== 1 || button === undefined || button !== marked[0]
+      || button.hasAttribute(NATIVE_SELECTION_SUPPRESSION)
+    ) return false
     const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
     if (this.route !== undefined && routeIdentity === undefined) return false
     this.captured = {
@@ -63,6 +68,7 @@ export class WorkspaceRailProjection {
       clickedDestination: undefined,
     }
     this.document.addEventListener('click', this.onNativeClick, true)
+    button.setAttribute(NATIVE_SELECTION_SUPPRESSION, 'true')
     button.removeAttribute('aria-current')
     button.removeAttribute('data-selected')
     if (
@@ -81,6 +87,7 @@ export class WorkspaceRailProjection {
     const captured = this.captured
     if (captured === undefined) return this.settling === undefined && !this.dirty
     this.captured = undefined
+    captured.button.removeAttribute(NATIVE_SELECTION_SUPPRESSION)
     this.document.removeEventListener('click', this.onNativeClick, true)
     this.fingerprint = ''
     this.stableSince = 0
@@ -103,6 +110,7 @@ export class WorkspaceRailProjection {
     this.disposed = true
     this.dirty = true
     ++this.revision
+    this.captured?.button.removeAttribute(NATIVE_SELECTION_SUPPRESSION)
     this.captured = undefined
     this.document.removeEventListener('click', this.onNativeClick, true)
   }
