@@ -50,10 +50,13 @@ export function useWorkspacePaneActivation(options: WorkspacePaneActivationOptio
     const currentRevision = ++revision.current
     const attempt = (): 'opened' | 'wait' | 'cancelled' => {
       if (currentRevision !== revision.current) return 'cancelled'
-      const current = rail?.querySelectorAll<HTMLButtonElement>(
+      const currentRails = options.document.querySelectorAll('nav[data-app-navigation-rail="true"]')
+      const currentRail = currentRails.length === 1 ? currentRails[0] : undefined
+      if (currentRail === undefined || !currentRail.isConnected) return 'wait'
+      const current = currentRail.querySelectorAll<HTMLButtonElement>(
         'button[data-sidebar-destination][aria-current="page"]',
       )
-      const marked = rail?.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
+      const marked = currentRail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
       if (current?.length !== 1 || marked?.length !== 1 || current[0] !== marked[0]) return 'wait'
       const destination = current[0]?.getAttribute('data-sidebar-destination') ?? undefined
       if (destination !== expectedDestination) return 'cancelled'

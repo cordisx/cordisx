@@ -28,6 +28,23 @@ function fixture() {
   }
 }
 
+function nativeFiber(button: HTMLButtonElement, selected: boolean): void {
+  Object.defineProperty(button, '__reactFiber$fixture', {
+    configurable: true,
+    enumerable: true,
+    value: {
+      memoizedProps: selected ? { 'data-selected': '' } : {},
+      return: {
+        memoizedProps: {
+          'data-sidebar-destination': button.getAttribute('data-sidebar-destination'),
+          selected,
+          ...(selected ? { 'aria-current': 'page' } : {}),
+        },
+      },
+    },
+  })
+}
+
 describe('Host-owned workspace rail selection projection', () => {
   it('restores the same destination after entering and leaving the owned tab', () => {
     const f = fixture()
@@ -80,6 +97,28 @@ describe('Host-owned workspace rail selection projection', () => {
     expect(projection.leave()).toBe(false)
     expect(projection.enter()).toBe(false)
     expect(f.home.hasAttribute('aria-current')).toBe(false)
+    f.dom.window.close()
+  })
+
+  it('restores the same native destination across a background route update with exact native readback', () => {
+    const f = fixture()
+    let route = {
+      available: true,
+      key: 'automations-list',
+      nativeLocation: { pathname: '/automations', search: '', hash: '' },
+    }
+    const projection = new WorkspaceRailProjection(f.document, { snapshot: () => route, subscribe: () => () => {} })
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
+    expect(projection.enter()).toBe(true)
+    route = {
+      available: true,
+      key: 'automations-detail',
+      nativeLocation: { pathname: '/automations/detail', search: '', hash: '' },
+    }
+    expect(projection.leave()).toBe(true)
+    expect(f.home.getAttribute('aria-current')).toBe('page')
     f.dom.window.close()
   })
 

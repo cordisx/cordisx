@@ -1,4 +1,5 @@
 import { resolveManagerRailSeat } from '../host-probes.js'
+import { readNativeRailSelection } from '../adapter/native-rail-selection-probe.js'
 import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 
 interface CapturedSelection {
@@ -27,12 +28,14 @@ export class WorkspaceRailProjection {
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
     const button = current[0]
     if (current.length !== 1 || marked.length !== 1 || button === undefined || button !== marked[0]) return false
+    const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
+    if (this.route !== undefined && routeIdentity === undefined) return false
     this.captured = {
       rail,
       button,
       current: button.getAttribute('aria-current')!,
       marked: button.getAttribute('data-selected')!,
-      routeIdentity: this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot()),
+      routeIdentity,
       clicked: undefined,
     }
     this.document.addEventListener('click', this.onNativeClick, true)
@@ -58,9 +61,11 @@ export class WorkspaceRailProjection {
     const current = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][aria-current="page"]')
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
     if (current.length === 0 && marked.length === 0) {
-      if (captured.clicked !== undefined && captured.clicked !== button && this.route !== undefined) {
-        const routeIdentity = nativeRouteIdentity(this.route.snapshot())
-        if (routeIdentity !== undefined && routeIdentity !== captured.routeIdentity) return this.fail()
+      const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
+      const nativeSelected = readNativeRailSelection(rail)
+      if (nativeSelected !== undefined && nativeSelected !== button) return this.fail()
+      if (routeIdentity !== captured.routeIdentity && nativeSelected !== button) {
+        return this.fail()
       }
       button.setAttribute('aria-current', captured.current)
       button.setAttribute('data-selected', captured.marked)
