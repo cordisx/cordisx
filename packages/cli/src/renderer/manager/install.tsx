@@ -17,8 +17,6 @@ import {
 } from '../adapter/manager-titlebar-continuation.js'
 import { HostThemeProjection } from '../host-theme.js'
 import { readNativeSidebarMinimum } from '../adapter/native-sidebar-minimum.js'
-import { readNativeRailSelection } from '../adapter/native-rail-selection-probe.js'
-import { nativeRailIconVersionAllowed } from '../adapter/native-rail-icon-runtime.js'
 import { ManagerApp } from './ManagerApp.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
@@ -53,8 +51,6 @@ export function installReactCordisXManager(
   options: ReactManagerInstallOptions = {},
 ): () => void {
   const presentationMode = options.legacyModal === true ? 'overlay' : options.presentationMode ?? 'overlay'
-  const nativeIconEligible = options.nativeAppVersion !== undefined
-    && nativeRailIconVersionAllowed(options.nativeAppVersion)
   const view = document.defaultView
   const installedAnimationFrameFallback = view !== null && typeof view.requestAnimationFrame !== 'function'
   if (installedAnimationFrameFallback) {
@@ -301,8 +297,6 @@ export function installReactCordisXManager(
   let paneLossHandler: (() => void) | undefined
   let paneSeatMissingSince: number | undefined
   let paneSeatRetryTimer: ReturnType<typeof setTimeout> | undefined
-  let nativeSelectionButton: HTMLButtonElement | undefined
-  let nativeSelectionStableSince = 0
   const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory, {
     ...(options.nativeAppVersion === undefined ? {} : { appVersion: options.nativeAppVersion }),
     onLost: () => {
@@ -386,7 +380,6 @@ export function installReactCordisXManager(
   const deactivatePane = () => {
     const current = pane
     if (current === undefined) return
-    nativeSelectionButton = undefined
     paneSeatMissingSince = undefined
     clearTimeout(paneSeatRetryTimer)
     paneSeatRetryTimer = undefined
@@ -487,33 +480,9 @@ export function installReactCordisXManager(
   const activatePane = () => {
     const seat = resolveManagerPaneSeat(document)
     if (seat === undefined || !railItem.isConnected) return false
-    const current = pane
-    if (current === undefined && presentationMode === 'workspace' && nativeIconEligible) {
-      const selected = seat.rail.querySelectorAll<HTMLButtonElement>(
-        'button[data-sidebar-destination][aria-current="page"]',
-      )
-      const marked = seat.rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
-      const nativeSelected = readNativeRailSelection(seat.rail)
-      const routeIdentity = options.nativeRouteHistory === undefined
-        ? undefined
-        : nativeRouteIdentity(options.nativeRouteHistory.snapshot())
-      if (
-        selected.length !== 1 || marked.length !== 1 || selected[0] !== marked[0]
-        || selected[0] !== nativeSelected
-        || (options.nativeRouteHistory !== undefined && routeIdentity === undefined)
-      ) {
-        nativeSelectionButton = undefined
-        return false
-      }
-      if (nativeSelectionButton !== nativeSelected) {
-        nativeSelectionButton = nativeSelected
-        nativeSelectionStableSince = Date.now()
-        return false
-      }
-      if (Date.now() - nativeSelectionStableSince < 200) return false
-    }
     const titlebar = resolveTitlebar(seat)
     if (titlebar === undefined) return false
+    const current = pane
     if (
       current?.rail === seat.rail && current.mainAnchor === seat.main.anchor && current.mainFrame === seat.main.frame
       && current.sidebarContainer === seat.sidebar.container

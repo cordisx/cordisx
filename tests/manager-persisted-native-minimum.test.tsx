@@ -63,6 +63,7 @@ describe('Manager native sidebar minimum after legacy persistence', () => {
       await act(async () =>
         dispose = installReactCordisXManager(dom.window.document, managerModel(), {
           presentationMode: 'workspace',
+          nativeAppVersion: '26.924.22138',
         })
       )
       const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
