@@ -29,22 +29,34 @@ export function useWorkspacePaneActivation(options: WorkspacePaneActivationOptio
   }
   const open = () => {
     if (pending.current) return
+    const rails = options.document.querySelectorAll('nav[data-app-navigation-rail="true"]')
+    const rail = rails.length === 1 ? rails[0] : undefined
+    const initialCurrent = rail?.querySelectorAll<HTMLButtonElement>(
+      'button[data-sidebar-destination][aria-current="page"]',
+    )
+    const initialMarked = rail?.querySelectorAll<HTMLButtonElement>(
+      'button[data-sidebar-destination][data-selected]',
+    )
+    if (initialCurrent?.length !== 1 || initialMarked?.length !== 1 || initialCurrent[0] !== initialMarked[0]) {
+      options.onUnavailable()
+      return
+    }
+    const expectedDestination = initialCurrent[0]?.getAttribute('data-sidebar-destination')
+    if (expectedDestination === null || expectedDestination === undefined) {
+      options.onUnavailable()
+      return
+    }
     pending.current = true
     const currentRevision = ++revision.current
-    let expectedDestination: string | undefined
     const attempt = (): 'opened' | 'wait' | 'cancelled' => {
       if (currentRevision !== revision.current) return 'cancelled'
-      const rails = options.document.querySelectorAll('nav[data-app-navigation-rail="true"]')
-      const rail = rails.length === 1 ? rails[0] : undefined
       const current = rail?.querySelectorAll<HTMLButtonElement>(
         'button[data-sidebar-destination][aria-current="page"]',
       )
       const marked = rail?.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
       if (current?.length !== 1 || marked?.length !== 1 || current[0] !== marked[0]) return 'wait'
       const destination = current[0]?.getAttribute('data-sidebar-destination') ?? undefined
-      if (destination === undefined) return 'wait'
-      if (expectedDestination === undefined) expectedDestination = destination
-      else if (expectedDestination !== destination) return 'cancelled'
+      if (destination !== expectedDestination) return 'cancelled'
       if (options.route !== undefined && nativeRouteIdentity(options.route.snapshot()) === undefined) return 'wait'
       if (options.titlebarSeat === undefined || !options.activatePane?.()) return 'wait'
       flushSync(options.onOpened)
@@ -61,12 +73,14 @@ export function useWorkspacePaneActivation(options: WorkspacePaneActivationOptio
         await new Promise(resolve => setTimeout(resolve, 50))
         const result = attempt()
         if (result !== 'wait') {
-          pending.current = false
+          if (currentRevision === revision.current) pending.current = false
           return
         }
       }
-      pending.current = false
-      if (currentRevision === revision.current) options.onUnavailable()
+      if (currentRevision === revision.current) {
+        pending.current = false
+        options.onUnavailable()
+      }
     })()
   }
   return { open, cancel, pending: () => pending.current }

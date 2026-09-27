@@ -39,7 +39,13 @@ describe('Host Manager workspace presentation', () => {
     const activatePane = vi.fn(() => ready)
     const deactivatePane = vi.fn()
     const automations = rail.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:automations"]')!
-    automations.addEventListener('click', () => route = 'automations')
+    automations.addEventListener('click', () => {
+      rail.querySelector('[data-sidebar-destination="builtin:home"]')?.removeAttribute('aria-current')
+      rail.querySelector('[data-sidebar-destination="builtin:home"]')?.removeAttribute('data-selected')
+      automations.setAttribute('aria-current', 'page')
+      automations.setAttribute('data-selected', '')
+      route = 'automations'
+    })
     try {
       await fixture.render(
         <ManagerApp
@@ -75,10 +81,35 @@ describe('Host Manager workspace presentation', () => {
 
       ready = false
       await fixture.click('[data-cordisx-manager-trigger]')
+      await fixture.click('[data-cordisx-manager-trigger]') // Cancel attempt A.
+      await fixture.click('[data-cordisx-manager-trigger]') // Start attempt B.
+      await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 80)))
+      await fixture.click('[data-cordisx-manager-trigger]') // B must still be pending after A's timer wakes.
+      ready = true
+      await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 120)))
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      ready = false
+      await fixture.click('[data-cordisx-manager-trigger]')
       await fixture.click('[data-sidebar-destination="builtin:automations"]')
       ready = true
       await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 120)))
       expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      automations.removeAttribute('data-selected')
+      const activations = activatePane.mock.calls.length
+      await fixture.click('[data-cordisx-manager-trigger]')
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      expect(activatePane).toHaveBeenCalledTimes(activations)
+      automations.removeAttribute('aria-current')
+      const home = rail.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!
+      home.setAttribute('aria-current', 'page')
+      home.setAttribute('data-selected', '')
+      await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 120)))
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      expect(activatePane).toHaveBeenCalledTimes(activations)
+      home.removeAttribute('aria-current')
+      home.removeAttribute('data-selected')
+      automations.setAttribute('aria-current', 'page')
+      automations.setAttribute('data-selected', '')
       await fixture.click('[data-cordisx-manager-trigger]')
       expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
     } finally {
@@ -87,7 +118,7 @@ describe('Host Manager workspace presentation', () => {
     }
   })
 
-  it('returns the native seat on route leave and restores the same detail, history, and unsaved draft', async () => {
+  it('keeps a native background route change and restores the same detail, history, and draft after rail leave', async () => {
     const fixture = reactManagerFixture()
     const { document, dom } = fixture
     document.getElementById('root')!.dataset.cordisxReactManager = 'true'
@@ -227,13 +258,17 @@ describe('Host Manager workspace presentation', () => {
         }
         for (const listener of routeListeners) listener()
       })
-      expect(document.querySelector('[data-cordisx-manager-pane]')).toBeNull()
-      expect(titlebarSeat.querySelector('.cxr-header')).toBeNull()
-      expect(navigationSeat.querySelector('.cxr-native-navigation')).toBeNull()
-      expect(nativeFrame.inert).toBe(false)
-      expect(document.getElementById('root')!.hidden).toBe(true)
+      expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
+      expect(titlebarSeat.querySelector('.cxr-header')).not.toBeNull()
+      expect(navigationSeat.querySelector('.cxr-native-navigation')).not.toBeNull()
+      expect(nativeFrame.inert).toBe(true)
+      expect(document.getElementById('root')!.hidden).toBe(false)
       expect(fixture.element('[aria-label="Draft configuration"]')).toBe(draft)
       expect(draft.value).toBe('unsaved value')
+      await fixture.click('[data-sidebar-destination="builtin:automations"]')
+      expect(document.querySelector('[data-cordisx-manager-pane]')).toBeNull()
+      expect(nativeFrame.inert).toBe(false)
+      expect(document.getElementById('root')!.hidden).toBe(true)
       await act(async () => nativeNewTab.click())
       expect(nativeNewTabAction).toHaveBeenCalledOnce()
 

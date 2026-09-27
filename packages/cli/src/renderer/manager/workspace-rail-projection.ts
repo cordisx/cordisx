@@ -13,11 +13,12 @@ interface CapturedSelection {
 /** Host-owned workspace rail projection; it does not register a Codex destination or route. */
 export class WorkspaceRailProjection {
   private captured: CapturedSelection | undefined
+  private dirty = false
 
   constructor(private readonly document: Document, private readonly route?: NativeRouteSource) {}
 
   enter(): boolean {
-    if (this.captured !== undefined) return false
+    if (this.captured !== undefined || this.dirty) return false
     const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
       'nav[data-app-navigation-rail="true"]',
     )
@@ -26,14 +27,12 @@ export class WorkspaceRailProjection {
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
     const button = current[0]
     if (current.length !== 1 || marked.length !== 1 || button === undefined || button !== marked[0]) return false
-    const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
-    if (this.route !== undefined && routeIdentity === undefined) return false
     this.captured = {
       rail,
       button,
       current: button.getAttribute('aria-current')!,
       marked: button.getAttribute('data-selected')!,
-      routeIdentity,
+      routeIdentity: this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot()),
       clicked: undefined,
     }
     this.document.addEventListener('click', this.onNativeClick, true)
@@ -55,19 +54,24 @@ export class WorkspaceRailProjection {
     this.captured = undefined
     this.document.removeEventListener('click', this.onNativeClick, true)
     const { rail, button } = captured
-    if (!rail.isConnected || !button.isConnected || !rail.contains(button)) return false
+    if (!rail.isConnected || !button.isConnected || !rail.contains(button)) return this.fail()
     const current = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][aria-current="page"]')
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
     if (current.length === 0 && marked.length === 0) {
-      if (captured.clicked !== undefined && captured.clicked !== button) return false
-      if (this.route !== undefined && nativeRouteIdentity(this.route.snapshot()) !== captured.routeIdentity) {
-        return false
+      if (captured.clicked !== undefined && captured.clicked !== button && this.route !== undefined) {
+        const routeIdentity = nativeRouteIdentity(this.route.snapshot())
+        if (routeIdentity !== undefined && routeIdentity !== captured.routeIdentity) return this.fail()
       }
       button.setAttribute('aria-current', captured.current)
       button.setAttribute('data-selected', captured.marked)
       return true
     }
-    return current.length === 1 && marked.length === 1 && current[0] === marked[0]
+    return current.length === 1 && marked.length === 1 && current[0] === marked[0] || this.fail()
+  }
+
+  private fail(): false {
+    this.dirty = true
+    return false
   }
 
   private readonly onNativeClick = (event: MouseEvent) => {

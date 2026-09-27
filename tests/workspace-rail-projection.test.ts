@@ -1,7 +1,6 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { WorkspaceRailProjection } from '../packages/cli/src/renderer/manager/workspace-rail-projection.js'
-import type { NativeRouteSnapshot } from '../packages/cli/src/renderer/manager/native-route-transition.js'
 
 function fixture() {
   const dom = new JSDOM(`<!doctype html><body>
@@ -18,13 +17,7 @@ function fixture() {
   const home = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!
   const automations = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:automations"]')!
   const library = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:library"]')!
-  let route: NativeRouteSnapshot = {
-    available: true,
-    key: 'home',
-    index: 0,
-    nativeLocation: { pathname: '/', search: '', hash: '' },
-  }
-  const projection = new WorkspaceRailProjection(document, { snapshot: () => route, subscribe: () => () => {} })
+  const projection = new WorkspaceRailProjection(document)
   return {
     dom,
     document,
@@ -32,7 +25,6 @@ function fixture() {
     automations,
     library,
     projection,
-    setRoute: (next: NativeRouteSnapshot) => route = next,
   }
 }
 
@@ -65,21 +57,39 @@ describe('Host-owned workspace rail selection projection', () => {
     expect(f.automations.getAttribute('aria-current')).toBe('page')
     expect(f.projection.enter()).toBe(true)
     f.library.click()
-    expect(f.projection.leave()).toBe(false)
-    expect(f.automations.hasAttribute('aria-current')).toBe(false)
+    expect(f.projection.leave()).toBe(true)
+    expect(f.automations.getAttribute('aria-current')).toBe('page')
     f.dom.window.close()
   })
 
-  it('does not restore a captured selection after a programmatic native route change', () => {
+  it('does not restore the old destination after a different native route commits without a marker', () => {
     const f = fixture()
-    expect(f.projection.enter()).toBe(true)
-    f.setRoute({
+    let route = {
+      available: true,
+      key: 'home',
+      nativeLocation: { pathname: '/', search: '', hash: '' },
+    }
+    const projection = new WorkspaceRailProjection(f.document, { snapshot: () => route, subscribe: () => () => {} })
+    expect(projection.enter()).toBe(true)
+    f.automations.click()
+    route = {
       available: true,
       key: 'automations',
-      index: 1,
       nativeLocation: { pathname: '/automations', search: '', hash: '' },
-    })
+    }
+    expect(projection.leave()).toBe(false)
+    expect(projection.enter()).toBe(false)
+    expect(f.home.hasAttribute('aria-current')).toBe(false)
+    f.dom.window.close()
+  })
+
+  it('does not revive stale selection when native markers become inconsistent', () => {
+    const f = fixture()
+    expect(f.projection.enter()).toBe(true)
+    f.automations.setAttribute('aria-current', 'page')
+    f.library.setAttribute('data-selected', '')
     expect(f.projection.leave()).toBe(false)
+    expect(f.projection.enter()).toBe(false)
     expect(f.home.hasAttribute('aria-current')).toBe(false)
     f.dom.window.close()
   })

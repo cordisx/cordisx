@@ -592,7 +592,7 @@ export function ManagerApp(
     const onKey = (event: KeyboardEvent) => {
       if (!workspaceMode && event.key === 'Escape' && !event.defaultPrevented) closeManager()
     }
-    const disposeRouteObserver = surface === 'pane' && nativeRouteHistory !== undefined
+    const disposeRouteObserver = surface === 'pane' && !workspaceMode && nativeRouteHistory !== undefined
       ? observeNativeRouteTransition(nativeRouteHistory, () => flushSync(() => closeManager(false)))
       : () => {}
     const disposeRailObserver = surface === 'pane' && !workspaceMode
