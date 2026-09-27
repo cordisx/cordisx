@@ -547,15 +547,16 @@ export function installReactCordisXManager(
     scheduled = false
     if (pane !== undefined) {
       const seat = resolveManagerPaneSeat(document)
-      const titlebar = seat === undefined ? undefined : resolveTitlebar(seat)
-      if (
-        seat?.rail !== pane.rail || seat.main.anchor !== pane.mainAnchor || seat.main.frame !== pane.mainFrame
-        || seat.sidebar.container !== pane.sidebarContainer
-        || seat.provenance !== pane.provenance
-        || pane.sidebarResizer !== (seat.provenance === 'codex-26.924-native-two-pane'
+      const sameCore = seat !== undefined
+        && seat.rail === pane.rail && seat.main.anchor === pane.mainAnchor && seat.main.frame === pane.mainFrame
+        && seat.sidebar.container === pane.sidebarContainer && seat.provenance === pane.provenance
+        && pane.sidebarResizer === (seat.provenance === 'codex-26.924-native-two-pane'
             ? seat.sidebar.resizer
             : undefined)
-        || titlebar?.provenance !== pane.titlebarProvenance
+      if (sameCore) refreshSidebarNative(pane, seat.sidebar.native)
+      const titlebar = seat === undefined ? undefined : resolveTitlebar(seat)
+      if (
+        !sameCore || titlebar?.provenance !== pane.titlebarProvenance
         || titlebar?.slot !== pane.titlebarSlot
         || titlebar.native.length !== pane.titlebarNative.length
         || pane.titlebarNative.some((node, index) => node !== titlebar.native[index])
@@ -563,7 +564,6 @@ export function installReactCordisXManager(
         deactivatePane()
         paneLossHandler?.()
       } else if (titlebar !== undefined) {
-        refreshSidebarNative(pane, seat.sidebar.native)
         placeTitlebarSeat(titlebar)
       }
     }
