@@ -1,3 +1,4 @@
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import React from 'react'
 import { PanZoomCanvas } from '../packages/cli/src/renderer/host-ui/PanZoomCanvas.js'
@@ -217,14 +218,23 @@ describe('Manager content fill layout', () => {
       await fixture.dispose()
       style.remove()
     }
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
-    )
-    expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) { display: flex;',
-    )
-    expect(REACT_MANAGER_STYLES).toContain(
-      '[data-cordisx-manager-page]:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) > [data-cordisx-manager-page-body] { grid-row: 2; height: 100%;',
-    )
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-content-panel')).toMatchObject({
+      'min-width': '0',
+      'min-height': '0',
+      flex: '1',
+      overflow: 'auto',
+    })
+    expect(
+      cssDeclarations(
+        REACT_MANAGER_STYLES,
+        '.cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"])',
+      ),
+    ).toMatchObject({ display: 'flex' })
+    expect(
+      cssDeclarations(
+        REACT_MANAGER_STYLES,
+        '[data-cordisx-manager-page]:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) > [data-cordisx-manager-page-body]',
+      ),
+    ).toMatchObject({ 'grid-row': '2', height: '100%' })
   })
 })

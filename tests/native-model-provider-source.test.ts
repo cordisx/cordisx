@@ -144,6 +144,8 @@ describe('native model provider source', () => {
       label: 'Friendly',
       disabled: true,
       supportsFastMode: false,
+      reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'low' },
+      defaultReasoningEffort: 'low',
     }])
     transport.dispose()
     dom.window.close()

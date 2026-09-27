@@ -39,6 +39,7 @@ export function ConnectionEditor(
             id,
             label: row?.label === id ? '' : row?.label ?? '',
             ...(row?.protocolCapabilities ? { protocolCapabilities: row.protocolCapabilities } : {}),
+            ...(row?.reasoningCapabilities ? { reasoningCapabilities: row.reasoningCapabilities } : {}),
           }
         })),
       ]
@@ -70,6 +71,7 @@ export function ConnectionEditor(
     id: model.id,
     ...(model.label ? { label: model.label } : {}),
     ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+    ...(model.reasoningCapabilities ? { reasoningCapabilities: model.reasoningCapabilities } : {}),
   }))
   const modelIds = models.map(model => model.id)
   let validEndpoint = false

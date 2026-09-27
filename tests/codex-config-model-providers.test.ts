@@ -24,7 +24,12 @@ describe('Codex config model providers', () => {
         models: [
           { slug: 'deepseek-chat', display_name: 'DeepSeek Chat', aliases: ['chat'], base_instructions: 'private' },
           { slug: 'deepseek-chat', display_name: 'Duplicate' },
-          { slug: 'deepseek-reasoner', display_name: 'DeepSeek Reasoner' },
+          {
+            slug: 'deepseek-reasoner',
+            display_name: 'DeepSeek Reasoner',
+            default_reasoning_level: 'medium',
+            supported_reasoning_levels: [{ effort: 'high' }, { effort: 'low' }, { effort: 'medium' }],
+          },
         ],
       }),
     )
@@ -52,12 +57,90 @@ describe('Codex config model providers', () => {
       defaultModelId: 'deepseek-reasoner',
       models: [
         { id: 'deepseek-chat', label: 'DeepSeek Chat', aliases: ['chat'] },
-        { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', aliases: [] },
+        {
+          id: 'deepseek-reasoner',
+          label: 'DeepSeek Reasoner',
+          aliases: [],
+          reasoningCapabilities: { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
+        },
       ],
     }])
     expect([...projection.providerIds]).toEqual(['deepseek'])
     expect([...projection.providerWireApis]).toEqual([['deepseek', 'responses']])
     expect(JSON.stringify(projection)).not.toMatch(/base_url|env_key|bearer|token|instruction|api\.deepseek/u)
+  })
+
+  it('retains mixed catalogs when legacy null means no default reasoning effort', async () => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'models.json'),
+      JSON.stringify({
+        models: [
+          {
+            slug: 'with-default',
+            default_reasoning_level: 'medium',
+            supported_reasoning_levels: [{ effort: 'high' }, { effort: 'low' }, { effort: 'medium' }],
+          },
+          {
+            slug: 'without-default',
+            default_reasoning_level: null,
+            supported_reasoning_levels: [{ effort: 'high' }, { effort: 'low' }],
+          },
+          {
+            slug: 'legacy-empty',
+            default_reasoning_level: null,
+            supported_reasoning_levels: [],
+          },
+        ],
+      }),
+    )
+    await writeFile(path.join(codexHome, 'config.toml'), '[model_providers.gateway]\n')
+
+    const projection = await codexConfigModelProviders(codexHome, { gateway: 'models.json' })
+    expect(projection.diagnostics).toEqual([])
+    expect(projection.providers[0]?.models).toEqual([
+      {
+        id: 'with-default',
+        label: 'with-default',
+        aliases: [],
+        reasoningCapabilities: { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
+      },
+      {
+        id: 'without-default',
+        label: 'without-default',
+        aliases: [],
+        reasoningCapabilities: { efforts: ['low', 'high'] },
+      },
+      { id: 'legacy-empty', label: 'legacy-empty', aliases: [] },
+    ])
+  })
+
+  it.each([
+    ['invalid default type', [], { invalid: true }],
+    ['unknown effort', [{ effort: 'extreme' }], null],
+    ['duplicate effort', [{ effort: 'low' }, { effort: 'low' }], null],
+    ['invalid levels type', 'low', null],
+    ['default outside efforts', [{ effort: 'low' }], 'high'],
+  ])('rejects a bound catalog atomically for %s', async (_name, levels, defaultEffort) => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'models.json'),
+      JSON.stringify({
+        models: [
+          { slug: 'valid' },
+          {
+            slug: 'invalid',
+            supported_reasoning_levels: levels,
+            default_reasoning_level: defaultEffort,
+          },
+        ],
+      }),
+    )
+    await writeFile(path.join(codexHome, 'config.toml'), '[model_providers.gateway]\n')
+
+    const projection = await codexConfigModelProviders(codexHome, { gateway: 'models.json' })
+    expect(projection.providers[0]?.models).toEqual([])
+    expect(projection.diagnostics).toEqual([{ providerId: 'gateway', code: 'catalog-unavailable' }])
   })
 
   it('keeps explicit provider and exact model overrides separate from endpoint inference', async () => {
@@ -145,6 +228,64 @@ describe('Codex config model providers', () => {
       ['defaulted', 'responses'],
     ])
     expect(JSON.stringify(projection)).not.toContain('wire_api')
+  })
+
+  it('projects only the bearer fact for a valid Codex command-auth provider', async () => {
+    const codexHome = await home()
+    await writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        '[model_providers.command]',
+        'name = "Command"',
+        'base_url = "https://openrouter.ai/api/v1"',
+        'wire_api = "responses"',
+        '[model_providers.command.auth]',
+        'command = "/not/executed/provider-token"',
+        '[model_providers.zero-refresh]',
+        'base_url = "https://api.deepseek.com"',
+        '[model_providers.zero-refresh.auth]',
+        'command = "/not/executed/zero-refresh"',
+        'args = ["private-argument", "private-handle"]',
+        'refresh_interval_ms = 0',
+        '[model_providers.missing]',
+        'base_url = "https://api.deepseek.com"',
+        '[model_providers.malformed]',
+        'base_url = "https://openrouter.ai/api/v1"',
+        '[model_providers.malformed.auth]',
+        'command = "/not/executed/malformed"',
+        'args = "not-an-array"',
+        'timeout_ms = 5000',
+        'refresh_interval_ms = 60000',
+        '[model_providers.official-login]',
+        'base_url = "https://openrouter.ai/api/v1"',
+        'requires_openai_auth = true',
+        'env_key = "SHOULD_NOT_OVERRIDE_LOGIN"',
+        '[model_providers.official-login.auth]',
+        'command = "/not/executed/login-token"',
+      ].join('\n'),
+    )
+
+    const projection = await codexConfigModelProviders(codexHome)
+    expect(projection.portableEnvironment?.get('command')).toEqual({ placeholder: true })
+    expect(projection.portableEnvironment?.get('zero-refresh')).toEqual({ placeholder: true })
+    expect(JSON.stringify(projection.portableEnvironment)).not.toMatch(/not\/executed|private-argument|private-handle/u)
+    expect([...projection.portableConnections ?? []]).toEqual([
+      ['command', {
+        endpoint: 'https://openrouter.ai/api/v1',
+        protocol: 'responses',
+        auth: 'bearer',
+      }],
+      ['zero-refresh', {
+        endpoint: 'https://api.deepseek.com',
+        protocol: 'responses',
+        auth: 'bearer',
+      }],
+    ])
+    const serialized = JSON.stringify([...projection.portableConnections ?? []])
+    expect(serialized).not.toMatch(/not\/executed|private-argument|private-handle|timeout_ms|refresh_interval_ms/u)
+    expect(projection.portableConnections?.has('missing')).toBe(false)
+    expect(projection.portableConnections?.has('malformed')).toBe(false)
+    expect(projection.portableConnections?.has('official-login')).toBe(false)
   })
 
   it('does not infer ownership from a single provider when model_provider is omitted', async () => {

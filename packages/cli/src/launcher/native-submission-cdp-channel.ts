@@ -4,6 +4,23 @@ import type {
   CatalogManagementResult,
   CatalogManagementSnapshot,
 } from '../model-catalog-management.js'
+import type {
+  CatalogEnvironmentGeneratorCancelResult,
+  CatalogEnvironmentGeneratorRunResult,
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from '../model-catalog-transfer.js'
+import {
+  EnvironmentGeneratorError,
+  EnvironmentGeneratorExecutor,
+} from './model-catalog/environment-generator-executor.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { CdpSession, CdpTarget } from './cdp-session.js'
 import type {
@@ -103,6 +120,18 @@ export function createNativeSubmissionCdpAuthority(options: {
   readonly management?: {
     snapshot(): CatalogManagementSnapshot
     command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
+    environmentRead?(authorized: () => boolean): CatalogEnvironmentReadResult
+    environmentSave?(
+      entries: readonly CatalogTransferEnvironmentVariable[],
+      authorized: () => boolean,
+    ): Promise<CatalogEnvironmentSaveResult>
+    prepareExport?(
+      request: CatalogTransferExportRequest,
+      authorized: () => boolean,
+    ): CatalogTransferExportPreparationResult
+    export?(request: CatalogTransferExportRequest, authorized: () => boolean): Promise<CatalogTransferExportResult>
+    prepareImport?(text: string, authorized: () => boolean): CatalogTransferImportPreparationResult
+    import?(request: CatalogTransferImportRequest, authorized: () => boolean): Promise<CatalogTransferImportResult>
     subscribe(listener: () => void): () => void
   }
 }): NativeSubmissionCdpAuthority {
@@ -254,6 +283,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       }
       const generation = randomUUID()
       const owner: DocumentOwner = { generation, session, disposed: false }
+      const environmentGenerator = new EnvironmentGeneratorExecutor()
       documents.set(target.id, owner)
       const active = new Set<string>()
       let catalogSequence = 0
@@ -277,7 +307,16 @@ export function createNativeSubmissionCdpAuthority(options: {
           requestId = envelope.requestId
           if (active.has(requestId)) throw new Error('Duplicate native command')
           const input = record(envelope.input)
-          if (envelope.operation === 'catalogManagementRead' || envelope.operation === 'catalogManagementCommand') {
+          if (
+            envelope.operation === 'catalogManagementRead' || envelope.operation === 'catalogManagementCommand'
+            || envelope.operation === 'catalogEnvironmentRead' || envelope.operation === 'catalogEnvironmentSave'
+            || envelope.operation === 'catalogEnvironmentGenerate'
+            || envelope.operation === 'catalogEnvironmentGenerateCancel'
+            || envelope.operation === 'catalogManagementPrepareExport'
+            || envelope.operation === 'catalogManagementExport'
+            || envelope.operation === 'catalogManagementPrepareImport'
+            || envelope.operation === 'catalogManagementImport'
+          ) {
             if (
               !options.management || input?.generation !== generation || owner.disposed
               || documents.get(target.id) !== owner || session.isClosed()
@@ -287,7 +326,55 @@ export function createNativeSubmissionCdpAuthority(options: {
             const authorized = () => !owner.disposed && documents.get(target.id) === owner && !session.isClosed()
             const result = envelope.operation === 'catalogManagementRead'
               ? options.management.snapshot()
-              : await options.management.command(input.command as CatalogManagementCommand, authorized)
+              : envelope.operation === 'catalogManagementCommand'
+              ? await options.management.command(input.command as CatalogManagementCommand, authorized)
+              : envelope.operation === 'catalogEnvironmentRead'
+              ? options.management.environmentRead?.(authorized) ?? { status: 'rejected', code: 'unavailable' }
+              : envelope.operation === 'catalogEnvironmentSave'
+              ? await options.management.environmentSave?.(
+                input.entries as readonly CatalogTransferEnvironmentVariable[],
+                authorized,
+              ) ?? { status: 'rejected', code: 'unavailable' }
+              : envelope.operation === 'catalogEnvironmentGenerate'
+              ? await (async (): Promise<CatalogEnvironmentGeneratorRunResult> => {
+                const request = record(input.request)
+                const runId = request?.runId
+                const script = request?.script
+                if (typeof runId !== 'string' || typeof script !== 'string') {
+                  return { status: 'rejected', runId: typeof runId === 'string' ? runId : '', code: 'invalid' }
+                }
+                try {
+                  const value = await environmentGenerator.run(runId, script)
+                  return { status: 'ok', runId, value }
+                } catch (error) {
+                  return {
+                    status: 'rejected',
+                    runId,
+                    code: error instanceof EnvironmentGeneratorError ? error.code : 'failed',
+                  }
+                }
+              })()
+              : envelope.operation === 'catalogEnvironmentGenerateCancel'
+              ? ((): CatalogEnvironmentGeneratorCancelResult => {
+                const runId = input.runId
+                if (typeof runId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/u.test(runId)) {
+                  return { status: 'rejected', runId: typeof runId === 'string' ? runId : '', code: 'invalid' }
+                }
+                return environmentGenerator.cancel(runId)
+                  ? { status: 'cancelled', runId }
+                  : { status: 'idle', runId }
+              })()
+              : envelope.operation === 'catalogManagementPrepareExport'
+              ? options.management.prepareExport?.(input.request as CatalogTransferExportRequest, authorized)
+                ?? { status: 'rejected', code: 'unavailable' }
+              : envelope.operation === 'catalogManagementExport'
+              ? await options.management.export?.(input.request as CatalogTransferExportRequest, authorized)
+                ?? { status: 'rejected', code: 'unavailable' }
+              : envelope.operation === 'catalogManagementPrepareImport'
+              ? options.management.prepareImport?.(input.text as string, authorized)
+                ?? { status: 'rejected', code: 'unavailable' }
+              : await options.management.import?.(input.request as CatalogTransferImportRequest, authorized)
+                ?? { status: 'rejected', code: 'unavailable' }
             if (!authorized()) throw new Error('Management retired')
             await respond(requestId, result)
             return
@@ -425,14 +512,14 @@ export function createNativeSubmissionCdpAuthority(options: {
         JSON.stringify(target.id)
       },rendererGeneration:generation});
         globalThis.${RECEIVER}=(owner,message)=>{if(owner!==generation)return;const p=pending.get(message.requestId);if(!p)return;pending.delete(message.requestId);clearTimeout(p.timer);message.ok?p.resolve(message.value):p.reject(new Error('Native submission rejected'))};
-        const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},operation==='catalogManagementCommand'?90000:30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
+        const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},operation==='catalogManagementCommand'||operation==='catalogEnvironmentSave'||operation==='catalogManagementImport'?90000:30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
         globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({${
         options.catalogSubscribe === undefined
           ? ''
           : 'catalogSubscribe:listener=>{catalogListeners.add(listener);return()=>catalogListeners.delete(listener)},'
       }${
         options.management
-          ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),"
+          ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),catalogEnvironmentRead:()=>call('catalogEnvironmentRead',{generation}),catalogEnvironmentSave:entries=>call('catalogEnvironmentSave',{generation,entries}),catalogEnvironmentGenerate:request=>call('catalogEnvironmentGenerate',{generation,request}),catalogEnvironmentGenerateCancel:runId=>call('catalogEnvironmentGenerateCancel',{generation,runId}),catalogManagementPrepareExport:request=>call('catalogManagementPrepareExport',{generation,request}),catalogManagementExport:request=>call('catalogManagementExport',{generation,request}),catalogManagementPrepareImport:text=>call('catalogManagementPrepareImport',{generation,text}),catalogManagementImport:request=>call('catalogManagementImport',{generation,request}),"
           : ''
       }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
@@ -443,6 +530,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       const dispose = async (): Promise<void> => {
         if (owner.disposed) return
         owner.disposed = true
+        environmentGenerator.close()
         unsubscribeCatalog?.()
         unsubscribeManagement?.()
         documents.delete(target.id)

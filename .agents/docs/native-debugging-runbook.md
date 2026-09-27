@@ -39,6 +39,49 @@ a tool-specific limitation from a denial of the target action and does not
 permit bypassing an applicable restriction. A permitted headless integration
 harness has its own evidence scope.
 
+## Fast path to a user-testable native Host
+
+First confirm whether the requested result is the native Codex Host or the Web
+Playground. The Playground is appropriate for fixture and extension-surface
+work, but an HTTP `200` or rendered shell does not demonstrate native accounts,
+providers, models or submission controls. Do not substitute a fixture with an
+empty `providers` array for a request to exercise the user's configured Host.
+
+Reuse a healthy target development instance when possible. Otherwise, identify
+the intended source commit and working directory, then reuse its installed
+dependencies, build output and native Vite cache. Prepare only an artifact that
+is missing or older than its source; avoid repeating installation, the complete
+build or unrelated checks merely to start a preview. The supported HMR path is
+described in [Native Vite development](vite-native-development.md).
+
+Before launch, set the intended `HOME`, `CODEX_HOME` and `CORDISX_HOME`
+explicitly and use an absolute config path. Parse JSON and TOML with their
+structured parsers to report provider and plugin IDs or counts without printing
+credential values. A project `cordisx.config.json` selects a development
+composition; it is not automatically the user's CordisX Home configuration.
+Confirm the effective executable, config source, data mode, profile directory,
+debug port and source identity before starting another Host.
+
+Prefer `cordisx dev` when live source updates are required. During a cold native
+Vite start, distinguish active dependency optimization from a proven stall and
+bound the observation period without inventing an expected duration. If a
+specific stage fails, preserve the launcher output and capture the failing
+module URL, HTTP result or permission error when available. Do not generalize
+one `Failed to fetch` into a permanent HMR limitation. When the user needs an
+immediately usable window, the same source checkout's already-built CLI may be
+used as a production-graph fallback; label it clearly as source-built but not
+HMR-enabled.
+
+Finish with the smallest real interaction that supports the claim. For model
+UI work, distinguish a visible entry, an opened provider or model menu and an
+operable reasoning slider. Verify each interaction that the result claims;
+seeing the current reasoning label does not prove that the slider can change.
+Do not change the selection or send a request unless authorized.
+Keep pre-existing Hosts and unrelated applications running. Stop only failed or
+superseded processes whose ownership was established for the current attempt,
+and report the surviving launcher PID, Host PID, debug port, source commit,
+configuration roots and evidence path.
+
 ## Keep a debug fix experienceable
 
 Use the user's existing authorization for restart/HMR/candidate switches of the

@@ -2,7 +2,6 @@ import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import type { ModelProviderRegistry, ModelProviderSnapshot } from '../packages/cli/src/renderer/model-providers.js'
-import { ModelServicesPage } from '../packages/cli/src/renderer/manager/pages/ModelServicesPage.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 describe('Manager model services catalog', () => {
@@ -27,6 +26,7 @@ describe('Manager model services catalog', () => {
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
       const provider = fixture.element('.cxms-provider')
       const toggle = fixture.element('.cxms-provider-toggle') as HTMLButtonElement
@@ -61,6 +61,7 @@ describe('Manager model services catalog', () => {
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
       const toggle = fixture.element('.cxms-provider-toggle') as HTMLButtonElement
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
@@ -108,6 +109,7 @@ describe('Manager model services catalog', () => {
     } as unknown as ModelProviderRegistry
     const fixture = reactManagerFixture()
     try {
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
       const button = fixture.element('[aria-label="Log in"]') as HTMLButtonElement
       expect(button.querySelector('[data-host-icon="host:log-in"]')).not.toBeNull()

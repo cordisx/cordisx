@@ -56,7 +56,10 @@ async function waitForRequest(
   throw new Error('request not observed')
 }
 
-async function harness(handler?: (request: Record<string, unknown>, view: Window) => boolean | void) {
+async function harness(
+  handler?: (request: Record<string, unknown>, view: Window) => boolean | void,
+  catalogReasoning?: Parameters<typeof CodexDesktopNativeModelProviderTransport.connect>[3],
+) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'app://-/index.html' })
   const control = composer(dom.window.document)
   const requests: Record<string, unknown>[] = []
@@ -131,10 +134,15 @@ async function harness(handler?: (request: Record<string, unknown>, view: Window
   }
   install('__cordisxNativeSubmitHook', undefined)
   install('__cordisxNativeSubmissionAuthority', undefined)
-  const transport = await CodexDesktopNativeModelProviderTransport.connect(true, {
-    targetId: 'target',
-    rendererGeneration: 'renderer',
-  }, channel)
+  const transport = await CodexDesktopNativeModelProviderTransport.connect(
+    true,
+    {
+      targetId: 'target',
+      rendererGeneration: 'renderer',
+    },
+    channel,
+    catalogReasoning,
+  )
   if (transport === undefined) throw new Error('transport unavailable')
   return { ...control, dom, requests, transport, channel }
 }
@@ -154,7 +162,7 @@ describe('native model provider transport', () => {
       state.applySettings(model)
       const props = (trigger as any).__reactFiber$test.return.memoizedProps
       props.model = model
-      props.reasoningEffort = effort
+      props.reasoningEffort = effort ?? 'none'
     })
     let projection: NativeProviderSelectionProjection = {
       available: true,
@@ -229,6 +237,19 @@ describe('native model provider transport', () => {
       }
     },
   )
+
+  it('does not publish unchanged model state for unrelated DOM mutations', async () => {
+    const h = await harness()
+    const changed = vi.fn()
+    h.transport.subscribe(changed)
+
+    h.dom.window.document.body.append(h.dom.window.document.createElement('aside'))
+    await settle()
+
+    expect(changed).not.toHaveBeenCalled()
+    h.transport.dispose()
+    h.dom.window.close()
+  })
 
   it.each(['thread', 'trigger', 'model'] as const)(
     'supersedes a pending read when the native %s changes',
@@ -462,7 +483,7 @@ describe('native model provider transport', () => {
       message: { method: 'turn/completed', params: { threadId: 'thread-1' } },
     })
     await settle()
-    expect(selectModel).toHaveBeenCalledWith('model-b', 'high')
+    expect(selectModel).toHaveBeenCalledWith('model-b', undefined)
     expect(transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-b', model: 'model-b' })
     transport.dispose()
     dom.window.close()
@@ -496,7 +517,7 @@ describe('native model provider transport', () => {
     selectModel.mockImplementationOnce(async (model, effort) => {
       const props = (trigger as any).__reactFiber$test.return.memoizedProps
       props.model = model
-      props.reasoningEffort = effort
+      props.reasoningEffort = effort ?? 'none'
       await completion
     })
     channel.selectionRead.mockResolvedValue({
@@ -542,7 +563,7 @@ describe('native model provider transport', () => {
     const { dom, requests, selectModel, transport, channel } = await harness()
     expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('accepted')
     expect(requests.map(request => request.method)).toEqual(['thread/read', 'config/read'])
-    expect(selectModel).toHaveBeenCalledWith('model-b', 'high')
+    expect(selectModel).toHaveBeenCalledWith('model-b', undefined)
     expect(channel.submissionPrepare).not.toHaveBeenCalled()
     expect(transport.getSnapshot()).toMatchObject({
       modelProvider: 'provider-b',
@@ -655,13 +676,53 @@ describe('native model provider transport', () => {
   it('uses the native callback without unsubscribe for a model change inside one provider', async () => {
     const { dom, requests, selectModel, transport } = await harness()
     expect(await transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
-    expect(selectModel).toHaveBeenCalledWith('model-b', 'high')
+    expect(selectModel).toHaveBeenCalledWith('model-b', undefined)
     expect(requests.map(request => request.method)).toEqual(['thread/read', 'config/read'])
     dom.window.document.body.append(dom.window.document.createElement('aside'))
     await settle()
     expect(transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-a', model: 'model-b' })
     transport.dispose()
     dom.window.close()
+  })
+
+  it('retains a supported effort and otherwise uses the external target default', async () => {
+    const supported = await harness(undefined, (providerId, model) =>
+      providerId === 'provider-a' && model === 'model-b'
+        ? { efforts: ['low', 'high'], defaultEffort: 'low' }
+        : undefined)
+    expect(await supported.transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
+    expect(supported.selectModel).toHaveBeenCalledWith('model-b', 'high')
+    supported.transport.dispose()
+    supported.dom.window.close()
+
+    const fallback = await harness(undefined, (providerId, model) =>
+      providerId === 'provider-a' && model === 'model-b'
+        ? { efforts: ['low', 'medium'], defaultEffort: 'low' }
+        : undefined)
+    expect(await fallback.transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
+    expect(fallback.selectModel).toHaveBeenCalledWith('model-b', 'low')
+    fallback.transport.dispose()
+    fallback.dom.window.close()
+  })
+
+  it('uses native reasoning metadata when a catalog model omits it', async () => {
+    const native = await harness(
+      undefined,
+      (providerId, model) => providerId === 'provider-a' && model === 'model-b' ? null : undefined,
+    )
+    const props = (native.trigger as any).__reactFiber$test.return.memoizedProps
+    const model = {
+      model: 'model-b',
+      displayName: 'Model B',
+      defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }],
+    }
+    props.models.push(model)
+    props.modelOptions.push({ model, disabledReason: null })
+    expect(await native.transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
+    expect(native.selectModel).toHaveBeenCalledWith('model-b', 'high')
+    native.transport.dispose()
+    native.dom.window.close()
   })
 
   it('restores the native model and effort when a same-provider callback mutates then rejects', async () => {
@@ -671,7 +732,7 @@ describe('native model provider transport', () => {
       .mockResolvedValueOnce(undefined)
     expect(await transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('unavailable')
     expect(selectModel.mock.calls).toEqual([
-      ['model-b', 'high'],
+      ['model-b', undefined],
       ['model-a', 'high'],
     ])
     expect(transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-a', model: 'model-a' })

@@ -175,7 +175,7 @@ it.skipIf(!executable)(
       expect(await evaluate('document.querySelector(".cxmp-results").textContent')).toContain(
         'Temporary connection browser fixture',
       )
-      await click('[aria-label^="更多目录操作"]')
+      await click('.cxmc-binding [aria-label^="更多目录操作"]')
       await run(
         `const edit=[...document.querySelectorAll('.t-dropdown__item')].find(item=>item.textContent.includes('编辑连接'));edit.click();await Fixture.settle()`,
       )

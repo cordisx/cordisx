@@ -27,11 +27,11 @@ export function composer(
     })
   }
   const trigger = document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
-  const selectModel = vi.fn(async (nextModel: string, nextEffort: string) => {
+  const selectModel = vi.fn(async (nextModel: string, nextEffort?: string) => {
     const fiber = (trigger as any).__reactFiber$test
     if (fiber) {
       fiber.return.memoizedProps.model = nextModel
-      fiber.return.memoizedProps.reasoningEffort = nextEffort
+      fiber.return.memoizedProps.reasoningEffort = nextEffort ?? 'none'
     }
   })
   const attachNativeControl = () => {
@@ -45,6 +45,7 @@ export function composer(
             reasoningEffort: 'high',
             models: [{
               model,
+              defaultReasoningEffort: 'low',
               supportedReasoningEfforts: [
                 { reasoningEffort: 'low' },
                 { reasoningEffort: 'high' },

@@ -529,7 +529,8 @@ export async function bootSurfaces() {
   await new Promise(resolve => setTimeout(resolve, 650))
   expect(environmentSeat.isConnected).toBe(false)
   transitioningMotionShell.style.display = 'none'
-  for (let attempt = 0; attempt < 20 && !environmentSeat.isConnected; attempt += 1) {
+  // Allow the renderer's bounded 400 ms retries to observe the outgoing shell becoming hidden.
+  for (let attempt = 0; attempt < 60 && !environmentSeat.isConnected; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)

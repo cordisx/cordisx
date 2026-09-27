@@ -114,6 +114,40 @@ describe('structure-based native submission composition', () => {
     expect(run.sandbox.menu.onSelectModel('model', 'high')).toBeInstanceOf(Promise)
     expect(run.sandbox.updateModel).toHaveBeenCalledWith('model', 'high')
   })
+  it('awaits the unified model/effort menu callback after the native menu contract changes', async () => {
+    const source = resources()
+    source[0]!.source = source[0]!.source.replace(
+      'onSelectReasoningEffort:()=>{},',
+      "onSelectComplete:()=>{},onBeforeSelectModel:()=>true,onSelectDefault:()=>{},model:'native',reasoningEffort:'high',",
+    )
+    // The compiler cache also reads the binding; only its function assignment is eligible.
+    source[0]!.source = source[0]!.source.replace(
+      'let select;select=',
+      'let cache=[],select;select=cache[0];select=',
+    )
+    let resolve!: (value: boolean) => void
+    const pending = new Promise<boolean>(done => {
+      resolve = done
+    })
+    const run = runtime(null, source)
+    run.sandbox.updateModel = vi.fn(() => pending)
+    expect(run.sandbox.menu.onSelectModel('model', 'high')).toBe(pending)
+    expect(run.sandbox.updateModel).toHaveBeenCalledWith('model', 'high')
+    resolve(true)
+    await expect(pending).resolves.toBe(true)
+  })
+  it('rejects incomplete or ambiguous unified model menus', () => {
+    const source = resources()
+    source[0]!.source = source[0]!.source.replace('onSelectReasoningEffort:()=>{},', 'onSelectComplete:()=>{},')
+    expect(() => nativeSubmissionTransformsForApp('future', 'x', source)).toThrow('model-completion')
+    const duplicate = resources()
+    duplicate[0]!.source += `
+      let second;second=(model,effort)=>{updateModel(model,effort)};
+      globalThis.otherMenu={onSelectModel:second,onSelectModelOption:()=>{},onSelectComplete:()=>{},
+        onBeforeSelectModel:()=>true,onSelectDefault:()=>{},model:'native',reasoningEffort:'high'};
+    `
+    expect(() => nativeSubmissionTransformsForApp('future', 'x', duplicate)).toThrow('model-completion')
+  })
   it('awaits admission before additional native guards and effects without requiring adjacency', async () => {
     const source = resources()
     source[0]!.source = source[0]!.source.replace('clear();', 'if(nativePaused())return;extraEffect();clear();')

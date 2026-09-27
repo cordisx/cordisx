@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ActionGroup } from './ActionGroup.js'
 import { SearchField } from './SearchField.js'
 import type { SearchFieldProps } from './SearchField.js'
 
@@ -16,7 +17,13 @@ export function SearchToolbar({ className, actions, toolbarLabel, ...search }: S
       aria-label={toolbarLabel ?? search['aria-label']}
     >
       <SearchField {...search} embedded />
-      {actions == null ? null : <div className="cxh-search-toolbar-actions">{actions}</div>}
+      {actions == null
+        ? null
+        : (
+          <ActionGroup className="cxh-search-toolbar-actions">
+            {actions}
+          </ActionGroup>
+        )}
     </div>
   )
 }

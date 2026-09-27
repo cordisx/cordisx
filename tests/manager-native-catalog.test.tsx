@@ -61,14 +61,21 @@ describe('Manager native catalog coverage', () => {
       await fixture.render(<ModelServicesPage registry={registry} locale="en" />)
       expect(fixture.element('.cxmp-management').dataset.catalogManagement).toBe('no-channel')
       expect(fixture.element('[aria-label="Model visibility"]').hasAttribute('disabled')).toBe(true)
-      expect(fixture.element('[role="status"]').textContent).toBe('Model management unavailable')
+      const unavailable = fixture.element('[data-empty-state="unavailable"][role="status"]')
+      expect(unavailable.getAttribute('aria-busy')).toBe('false')
+      expect(unavailable.querySelector('p')?.textContent).toBe('Model connections are currently unavailable')
+      expect(unavailable.querySelectorAll('p')[1]?.textContent).toBe('Try refreshing in a moment.')
+      expect(unavailable.querySelector('button')?.textContent).toBe('Refresh')
+      expect(unavailable.querySelector('button')?.disabled).toBe(false)
       expect(fixture.element('[data-selector-brand="deepseek"]')).toBeDefined()
       await fixture.type('[aria-label="Search services or models"]', 'ＭＯＤＥＬ－ＯＮＥ')
       expect(fixture.document.querySelectorAll('.cxms-model-identity')).toHaveLength(1)
       expect(fixture.element('.cxms-model-identity').textContent).toContain('model-one')
       expect(fixture.document.querySelector('[aria-label="Pin model: model-one"]')).toBeNull()
       await fixture.render(<ModelServicesPage registry={registry} locale="zh-CN" />)
-      expect(fixture.element('[role="status"]').textContent).toBe('模型管理暂不可用')
+      expect(fixture.element('[data-empty-state="unavailable"][role="status"] p').textContent).toBe(
+        '模型连接当前不可用',
+      )
     } finally {
       registry.dispose()
       await fixture.dispose()

@@ -86,6 +86,126 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('routes environment and transfer operations through the document-fenced Host owner', async () => {
+    const environmentRead = vi.fn(() => ({
+      status: 'ok' as const,
+      entries: [{ name: 'MODEL_KEY', value: 'fixture-value', enabled: true }],
+      applies: 'app-restart' as const,
+    }))
+    const environmentSave = vi.fn(async () => ({ status: 'applied' as const, applies: 'app-restart' as const }))
+    const prepareExport = vi.fn(() => ({ status: 'ok' as const, variables: [] }))
+    const exportModels = vi.fn(async () => ({ status: 'ok' as const, text: 'fixture-payload' }))
+    const prepareImport = vi.fn(() => ({
+      status: 'ok' as const,
+      variables: [],
+      connections: [{ transferId: '00000000-0000-4000-8000-000000000001', title: 'Fixture' }],
+    }))
+    const importModels = vi.fn(async () => ({
+      status: 'applied' as const,
+      imported: 1,
+      skipped: 0,
+      bindingRefs: ['local-ref'],
+    }))
+    const h = await harness({
+      management: {
+        snapshot: () => ({ epoch: 'fixture', sequence: 1, views: [] }),
+        subscribe: () => () => {},
+        command: async () => ({ status: 'applied' }),
+        environmentRead,
+        environmentSave,
+        prepareExport,
+        export: exportModels,
+        prepareImport,
+        import: importModels,
+      },
+    })
+    const selection = { selections: [{ bindingRef: 'codex-config:gateway', modelIds: ['one'] }] }
+    const request = { ...selection, includeValues: false, variables: [] }
+    const importRequest = { text: 'fixture-payload', variables: [] }
+    expect(await h.channel.catalogEnvironmentRead()).toMatchObject({ status: 'ok', applies: 'app-restart' })
+    expect(environmentRead).toHaveBeenCalledWith(expect.any(Function))
+    expect(
+      await h.channel.catalogEnvironmentSave([
+        { name: 'MODEL_KEY', value: 'updated-value', enabled: true },
+      ]),
+    ).toEqual({ status: 'applied', applies: 'app-restart' })
+    expect(environmentSave).toHaveBeenCalledWith(
+      [{ name: 'MODEL_KEY', value: 'updated-value', enabled: true }],
+      expect.any(Function),
+    )
+    expect(await h.channel.catalogManagementPrepareExport(selection)).toEqual({ status: 'ok', variables: [] })
+    expect(prepareExport).toHaveBeenCalledWith(selection, expect.any(Function))
+    expect(await h.channel.catalogManagementExport(request)).toEqual({ status: 'ok', text: 'fixture-payload' })
+    expect(exportModels).toHaveBeenCalledWith(request, expect.any(Function))
+    expect(await h.channel.catalogManagementPrepareImport('fixture-payload')).toMatchObject({
+      status: 'ok',
+      connections: [{ title: 'Fixture' }],
+    })
+    expect(prepareImport).toHaveBeenCalledWith('fixture-payload', expect.any(Function))
+    expect(await h.channel.catalogManagementImport(importRequest)).toMatchObject({
+      status: 'applied',
+      imported: 1,
+      bindingRefs: ['local-ref'],
+    })
+    expect(importModels).toHaveBeenCalledWith(importRequest, expect.any(Function))
+    await h.installed.dispose()
+    await expect(h.channel.catalogManagementImport(importRequest)).rejects.toThrow('unavailable')
+  })
+
+  it('runs and cancels shell generators only through explicit document-fenced operations', async () => {
+    const prepareImport = vi.fn(() => ({
+      status: 'ok' as const,
+      variables: [{
+        sourceName: 'MODEL_KEY',
+        name: 'MODEL_KEY',
+        value: '',
+        enabled: true,
+        generator: { kind: 'shell' as const, script: 'printf prepared' },
+        bindings: ['Fixture'],
+        available: false,
+      }],
+      connections: [{ transferId: '00000000-0000-4000-8000-000000000001', title: 'Fixture' }],
+    }))
+    const h = await harness({
+      management: {
+        snapshot: () => ({ epoch: 'fixture', sequence: 1, views: [] }),
+        subscribe: () => () => {},
+        command: async () => ({ status: 'applied' }),
+        prepareImport,
+      },
+    })
+    expect(await h.channel.catalogManagementRead()).toMatchObject({ epoch: 'fixture' })
+    expect(await h.channel.catalogManagementPrepareImport('fixture-payload')).toMatchObject({ status: 'ok' })
+    await expect(h.channel.catalogEnvironmentGenerate({ runId: 'run-1', script: 'printf generated' }))
+      .resolves.toEqual({ status: 'ok', runId: 'run-1', value: 'generated' })
+    const pending = h.channel.catalogEnvironmentGenerate({ runId: 'run-2', script: 'sleep 30; printf late' })
+    await expect(h.channel.catalogEnvironmentGenerateCancel('other')).resolves.toEqual({
+      status: 'idle',
+      runId: 'other',
+    })
+    await expect(h.channel.catalogEnvironmentGenerateCancel('run-2')).resolves.toEqual({
+      status: 'cancelled',
+      runId: 'run-2',
+    })
+    await expect(pending).resolves.toEqual({ status: 'rejected', runId: 'run-2', code: 'cancelled' })
+    await h.installed.dispose()
+    await expect(h.channel.catalogEnvironmentGenerate({ runId: 'run-3', script: 'printf late' }))
+      .rejects.toThrow('unavailable')
+  })
+
+  it('cancels an active generator when its renderer document is disposed', async () => {
+    const h = await harness({
+      management: {
+        snapshot: () => ({ epoch: 'fixture', sequence: 1, views: [] }),
+        subscribe: () => () => {},
+        command: async () => ({ status: 'applied' }),
+      },
+    })
+    const pending = h.channel.catalogEnvironmentGenerate({ runId: 'dispose-run', script: 'sleep 30; printf late' })
+    await h.installed.dispose()
+    await expect(pending).rejects.toThrow('disposed')
+  })
+
   it('fences management commands and invalidations to the installed document lifetime', async () => {
     let changed!: () => void
     let finish!: () => void

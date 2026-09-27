@@ -413,7 +413,8 @@ An actually removed or ambiguous Composer still retires the seat normally.
 ## Desktop Compatibility
 
 Native submission admission reads the installed App's initial and primary
-JavaScript resources without modifying or launching it. Desktop version/build
+JavaScript resources plus an optional shared resource without modifying or
+launching it. Desktop version/build
 strings are diagnostics, not an allowlist. The Host parses submission, model
 completion, draft/first-turn context, request normalization and final dispatch
 structures. Missing or ambiguous structures report the specific capability.
@@ -424,6 +425,9 @@ New resource layouts use structural discovery, not additional build entries.
 The selector consumes the launcher's verified capability and does not maintain
 a second Desktop version allowlist. Admission runs after submission options are
 bound, before subsequent native guards and effects; those guards remain intact.
+Desktop layouts may move normalization and final dispatch into the shared module
+and unify model/effort menu selection. Both menu contracts retain awaited native
+update completion; an incomplete or ambiguous owner still fails closed.
 Model-update callbacks are resolved within their owning function, so unrelated
 minified bindings with the same spelling do not reject a compatible resource.
 

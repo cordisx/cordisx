@@ -1,3 +1,5 @@
+import type { ModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
+
 /** Host-private contracts. No endpoint or credential capability is renderer data. */
 export interface CatalogModel {
   readonly id: string
@@ -6,6 +8,7 @@ export interface CatalogModel {
   readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement')[]
   readonly notListed?: boolean
   readonly protocolCapabilities?: { readonly responses: boolean }
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
 }
 
 export type CatalogStrategy =
@@ -22,6 +25,7 @@ export interface CatalogSupplement {
     readonly id: string
     readonly label?: string
     readonly protocolCapabilities?: { readonly responses: boolean }
+    readonly reasoningCapabilities?: ModelReasoningCapabilities
   }[]
 }
 

@@ -127,6 +127,13 @@ describe('native managed Desktop configuration', () => {
       'aiden: dyai-gpt-5.4',
       'traex: seed-2.1-pro',
     ])
+    expect(catalog.models.every(model => !('default_reasoning_level' in model))).toBe(true)
+    expect(
+      catalog.models.every(model =>
+        'supported_reasoning_levels' in model && Array.isArray(model.supported_reasoning_levels)
+        && model.supported_reasoning_levels.length === 0
+      ),
+    ).toBe(true)
     expect(files.configToml).toContain('model_provider = "aiden"')
     expect(files.configToml).toContain('base_url = "http://127.0.0.1:8317/v1"')
     expect(files.configToml).toContain('model_catalog_json = "/private/cordisx/models.json"')

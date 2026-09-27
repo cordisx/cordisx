@@ -449,6 +449,74 @@ describe('managed catalog production owner', () => {
     expect(secondAfter.rows.find(row => row.id === 'discovered')?.protocolCapabilities).toEqual({ responses: true })
   })
 
+  it('keeps Responses compatibility scoped when the same GLM model is exposed through different routes', async () => {
+    const { owner, options } = await setup()
+    options.fetcher.mockResolvedValueOnce(
+      Response.json({
+        data: [{
+          id: 'z-ai/glm-5',
+          name: 'GLM-5',
+          architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+          supported_parameters: ['tools', 'tool_choice'],
+          reasoning: { supported_efforts: ['low', 'high'], default_effort: 'high' },
+        }],
+      }),
+    )
+    await owner.command({
+      operation: 'createConnection',
+      settings: {
+        ...settings,
+        title: 'OpenRouter',
+        endpoint: 'https://openrouter.ai/api/v1',
+        protocol: 'responses',
+        discoveryEnabled: true,
+        strategy: { kind: 'auto', mode: 'augment', adapter: 'detect', ttlMs: 60000 },
+      },
+    }, () => true)
+    await vi.waitFor(() => expect(owner.snapshot().views[0]?.rows[0]?.id).toBe('z-ai/glm-5'))
+    const direct = owner.snapshot().views[0]!
+    expect(direct.rows[0]).toMatchObject({
+      compatibility: 'unknown',
+      selectable: false,
+      reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'high' },
+    })
+    expect(owner.catalog()[0]?.models).toEqual([])
+
+    const plugin = await PluginPreferenceAuthority.open({
+      load: async () => [{
+        pluginId: 'traex',
+        providerId: 'traex',
+        models: [{ id: 'z-ai/glm-5', label: 'GLM-5', selectable: true }],
+      }],
+      overlayStore: owner.preferenceStore,
+    })
+    try {
+      expect(plugin.snapshot().views[0]?.rows[0]).toMatchObject({
+        compatibility: 'supported',
+        selectable: true,
+      })
+      expect(plugin.catalog()[0]?.models.map(model => model.id)).toEqual(['z-ai/glm-5'])
+    } finally {
+      plugin.close()
+    }
+
+    expect(
+      (await owner.command({
+        bindingRef: direct.bindingRef,
+        scopeRevision: direct.scopeRevision,
+        expectedRevision: direct.revision,
+        operation: 'editSupplement',
+        models: [{ id: 'z-ai/glm-5', protocolCapabilities: { responses: true } }],
+      }, () => true)).status,
+    ).toBe('applied')
+    expect(owner.snapshot().views[0]?.rows[0]).toMatchObject({
+      compatibility: 'supported',
+      selectable: true,
+      provenance: ['auto', 'manual-supplement'],
+      protocolCapabilities: { responses: true },
+    })
+  })
+
   it('closes promptly when credential capture ignores cancellation', async () => {
     const { owner, options } = await setup()
     await owner.close()

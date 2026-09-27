@@ -8,6 +8,7 @@ import type {
 } from '../../../../model-catalog-management.js'
 import { IconButton } from '../../../host-ui/IconButton.js'
 import { managerCopy } from '../../../ui-copy.js'
+import { parseModelReasoningCapabilities } from '../../../../model-reasoning-capabilities.js'
 
 export function validModels(models: readonly CatalogEditableModel[]): boolean {
   return models.length <= 10_000 && new Set(models.map(model => model.id)).size === models.length
@@ -18,6 +19,8 @@ export function validModels(models: readonly CatalogEditableModel[]): boolean {
           && !/[\u0000-\u001f\u007f]/u.test(model.label))
       && (model.protocolCapabilities === undefined
         || typeof model.protocolCapabilities.responses === 'boolean')
+      && (model.reasoningCapabilities === undefined
+        || parseModelReasoningCapabilities(model.reasoningCapabilities) !== undefined)
     )
 }
 
@@ -36,6 +39,7 @@ export function ModelEditor({ view, locale, mode, save, close }: {
       id: model.id,
       label: model.label === model.id ? '' : model.label ?? '',
       ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+      ...(model.reasoningCapabilities ? { reasoningCapabilities: model.reasoningCapabilities } : {}),
     }))
   )
   const [nextKey, setNextKey] = useState(draft.length)
@@ -50,6 +54,7 @@ export function ModelEditor({ view, locale, mode, save, close }: {
     id: item.id,
     ...(item.label === '' ? {} : { label: item.label }),
     ...(item.protocolCapabilities ? { protocolCapabilities: item.protocolCapabilities } : {}),
+    ...(item.reasoningCapabilities ? { reasoningCapabilities: item.reasoningCapabilities } : {}),
   }))
   const valid = validModels(models)
   const update = (key: number, field: 'id' | 'label', value: string) => {

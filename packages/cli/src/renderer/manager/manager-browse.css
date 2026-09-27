@@ -1,0 +1,37 @@
+/* Browse controls remain outside the only scroll owner. Detail/form layouts
+   keep their own content contract. The page stays overflow-visible so the
+   accepted search negative margin and focus ring are not clipped. */
+.cxr-content:has(> .cxr-browse-page) {
+  overflow: hidden;
+}
+
+.cxr-browse-page {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.cxr-browse-page > .cxh-search-toolbar {
+  flex: none;
+}
+
+.cxr-browse-results {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
+
+.cxr-browse-results:has(> [data-empty-presentation="hero"]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.cxr-browse-results > [data-empty-presentation="hero"] {
+  flex: none;
+  width: 100%;
+  margin-block: auto;
+}

@@ -8,6 +8,7 @@ import {
   object,
 } from './contracts.js'
 import { discoverJson } from './discovery-http.js'
+import { parseModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
 
 const BASE_URL = 'https://openrouter.ai/api/v1'
 
@@ -37,13 +38,20 @@ function candidate(value: unknown): CatalogModel | undefined {
   const outputs = stringList(architecture?.output_modalities)
   if (!architecture || !supported || !inputs || !outputs) throw new CatalogError('protocol')
   const interactive = !model.id.startsWith('~') && !model.id.endsWith(':batch')
-  const responses = interactive && inputs.includes('text') && outputs.includes('text')
-    && supported.includes('tools') && supported.includes('tool_choice')
+  const textRoute = inputs.includes('text') && outputs.includes('text')
+  const reasoning = object(model.reasoning)
+  const reasoningCapabilities = reasoning === undefined
+    ? undefined
+    : parseModelReasoningCapabilities({
+      efforts: reasoning.supported_efforts,
+      defaultEffort: reasoning.default_effort,
+    })
   return Object.freeze({
     id: model.id,
     label: typeof model.name === 'string' ? model.name : model.id,
     aliases: Object.freeze([]),
-    protocolCapabilities: Object.freeze({ responses }),
+    ...(!interactive || !textRoute ? { protocolCapabilities: Object.freeze({ responses: false }) } : {}),
+    ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
   })
 }
 

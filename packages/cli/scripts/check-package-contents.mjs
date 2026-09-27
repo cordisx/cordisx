@@ -51,7 +51,21 @@ try {
   ]
   const preservedRendererStyles = [
     'renderer/host-ui/public-markdown-editor.css',
+    'renderer/host-ui/search.css',
+    'renderer/host-ui/action-group.css',
+    'renderer/host-ui/empty-state.css',
     'renderer/model-providers.css',
+    'renderer/manager/manager-browse.css',
+    'renderer/manager/manager-navigation.css',
+    'renderer/manager/manager-content.css',
+    'renderer/manager/manager-catalog.css',
+    'renderer/manager/manager-details.css',
+    'renderer/manager/manager-marketplace.css',
+    'renderer/manager/manager-markdown.css',
+    'renderer/manager/manager-plugin-details.css',
+    'renderer/manager/manager-about.css',
+    'renderer/manager/manager-collection.css',
+    'renderer/manager/manager-compact-shell.css',
     'renderer/manager/pages/model-services.css',
     'renderer/manager/pages/model-catalog/model-catalog.css',
   ]
@@ -101,6 +115,15 @@ try {
     }
     if (!sourceStyle.equals(tarballStyle)) {
       throw new Error(`renderer stylesheet differs in the cordisx tarball: ${relative}`)
+    }
+  }
+  // Illustration imports survive tsc and must resolve in the installed graph.
+  for (const relative of ['illustrations/model-services.svg', 'illustrations/model-services.css']) {
+    const source = readFileSync(path.join(repositoryRoot, 'packages/cli/assets', relative))
+    const bundled = readFileSync(path.join(repositoryRoot, 'packages/cli/dist/assets', relative))
+    const tarball = readFileSync(path.join(extractedRoot, 'package/dist/assets', relative))
+    if (!source.equals(bundled) || !source.equals(tarball)) {
+      throw new Error(`packaged illustration differs from source: ${relative}`)
     }
   }
   for (const skillName of bundledSkillNames) {
@@ -243,10 +266,7 @@ try {
       'dist/src/vite.js',
       'dist/src/vite.d.ts',
       'dist/src/launcher/builtin-skill.js',
-      'dist/src/renderer/host-ui/public-markdown-editor.css',
-      'dist/src/renderer/model-providers.css',
-      'dist/src/renderer/manager/pages/model-services.css',
-      'dist/src/renderer/manager/pages/model-catalog/model-catalog.css',
+      ...preservedRendererStyles.map(relative => `dist/src/${relative}`),
       'dist/skills/cordisx/SKILL.md',
       'dist/skills/cordisx/agents/openai.yaml',
       'dist/skills/cordisx-docs/SKILL.md',
@@ -262,6 +282,8 @@ try {
       'dist/skills/cordisx-feedback/SKILL.md',
       'dist/skills/cordisx-feedback/agents/openai.yaml',
       'dist/skills/cordisx-feedback/version.json',
+      'dist/assets/illustrations/model-services.svg',
+      'dist/assets/illustrations/model-services.css',
       'dist/assets/feedback/feedback-manifest.schema.json',
       'dist/assets/brand/cordisx-mark-light.svg',
       'dist/assets/brand/cordisx-mark-dark.svg',

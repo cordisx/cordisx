@@ -288,7 +288,9 @@ function modelCompletion(plan: ResourcePlan): void {
   visitSyntax(plan.ast, (node, parents) => {
     if (
       node.type === 'ObjectExpression'
-      && has(node, ['onSelectModel', 'onSelectReasoningEffort', 'onSelectModelOption'])
+      && has(node, ['onSelectModel', 'onSelectModelOption'])
+      && (has(node, ['onSelectReasoningEffort'])
+        || has(node, ['onSelectComplete', 'onBeforeSelectModel', 'onSelectDefault', 'model', 'reasoningEffort']))
     ) {
       const binding = properties(node).get('onSelectModel')
       if (binding?.type === 'Identifier') menus.push({ binding: binding.name, owner: parents.findLast(isFunction) })

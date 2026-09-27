@@ -14,7 +14,7 @@ import {
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
 import { applyCatalogManagementPreferences } from '../packages/cli/src/renderer/model-provider-preferences.js'
-import { resources } from './fixtures/native-submission-structure.js'
+import { resources, sharedResources } from './fixtures/native-submission-structure.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 const roots: string[] = []
@@ -22,7 +22,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
-async function bundle(incompatible = false) {
+async function bundle(incompatible = false, scripts = resources()) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cx-app-'))
   roots.push(root)
   const contents = path.join(root, 'Fixture.app/Contents')
@@ -39,7 +39,7 @@ async function bundle(incompatible = false) {
     path.join(contents, 'Info.plist'),
     '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>unknown-version</string><key>CFBundleVersion</key><string>unknown-build</string></dict></plist>',
   )
-  for (const resource of resources()) {
+  for (const resource of scripts) {
     await writeFile(
       path.join(source, 'webview/assets', path.basename(resource.url)),
       incompatible ? 'export {}' : resource.source,
@@ -129,6 +129,34 @@ it('reads the actual ASAR resource layout without relying on asset hash names', 
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
     .toEqual(resources().map(resource => resource.url).sort())
 })
+
+it.skipIf(process.platform !== 'darwin')(
+  'assembles management from a split shared resource and unified native menu',
+  async () => {
+    const scripts = sharedResources()
+    const f = await bundle(false, scripts)
+    expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
+      .toEqual(scripts.map(resource => resource.url).sort())
+    const codexHome = path.join(f.contents, 'split-codex-home')
+    await mkdir(codexHome)
+    const composition = await createNativeSubmissionComposition(
+      pluginActivation({ fixture: { pluginId: 'fixture-plugin', modelId: 'fixture-model' } }),
+      f.executable,
+      codexHome,
+      { nativeModelDiscovery: false },
+    )
+    const installed = await installNativeChannel(composition)
+    try {
+      expect(composition.installation.transforms).toHaveLength(3)
+      expect((await installed.channel.catalogManagementRead()).views)
+        .toEqual([expect.objectContaining({ providerId: 'fixture', selectableCount: 1 })])
+      expect(installed.channel.catalogManagementCommand).toBeTypeOf('function')
+    } finally {
+      await installed.dispose()
+      await composition.close()
+    }
+  },
+)
 
 it('resolves the bundled CLI in both Desktop app layouts', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cli-layout-'))

@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import type { ManagerModel } from '../manager.js'
 import {
+  resolveLegacyManagerModalTarget,
   resolveManagerPaneSeat,
   resolveManagerRailSeat,
   resolveManagerTitlebarSeat,
@@ -94,6 +95,16 @@ export function installReactCordisXManager(
   const detachTitlebarTheme = theme.attach(titlebarSeat)
   const detachTriggerTheme = theme.attach(triggerSeat)
   const marketplace = createManagerMarketplaceStore(document, options.pluginManagement)
+  let currentTarget: HTMLElement | undefined
+  const allowModalFallback = () => {
+    if (options.legacyModal === true) return true
+    const target = resolveLegacyManagerModalTarget(document)
+    return pane === undefined
+      && !railItem.isConnected
+      && currentTarget !== undefined
+      && currentTarget.isConnected
+      && currentTarget === target
+  }
   type NativeState = {
     node: HTMLElement
     ariaHidden: string | null
@@ -674,6 +685,7 @@ export function installReactCordisXManager(
         navigationSeat={navigationSeat}
         titlebarSeat={titlebarSeat}
         {...(options.legacyModal === true ? {} : { activatePane })}
+        allowModalFallback={allowModalFallback}
         deactivatePane={deactivatePane}
         registerPaneLoss={handler => {
           paneLossHandler = handler
@@ -683,7 +695,6 @@ export function installReactCordisXManager(
     )
   )
 
-  let currentTarget: HTMLElement | undefined
   let scheduled = false
   const reconcile = () => {
     scheduled = false

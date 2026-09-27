@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useMemo, useState } from 'react'
 import { Button } from 'tdesign-react'
 import type { CordisXPluginLifecycleResultV1 } from '../../../contracts.js'
@@ -7,7 +8,7 @@ import type {
 } from '../../../plugin-bundle-contracts.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
-import { productLocale } from '../../ui-copy.js'
+import { managerCopy, productLocale } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
 
@@ -329,7 +330,13 @@ export function PluginBundlesPage({ snapshot, router, query }: PluginBundlesPage
         </button>
       ))}
       {bundles.length === 0
-        ? <div className="cxr-empty">{zh ? '没有匹配的插件包。' : 'No matching plugin bundles.'}</div>
+        ? (
+          <EmptyState
+            icon="plugins"
+            state={normalized ? 'search' : 'empty'}
+            title={managerCopy(snapshot.localization.locale, normalized ? 'empty.bundleMatches' : 'empty.bundles')}
+          />
+        )
         : null}
     </div>
   )

@@ -1,4 +1,13 @@
 import type { HomeConfigProfile } from '../config/home-config.js'
+import { type HomeConfigEnvironmentVariable, mergeHomeEnvironment } from '../config/home-config-environment.js'
+
+export function hostModelServiceEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+  entries: readonly HomeConfigEnvironmentVariable[],
+  planEnvironment?: Readonly<Record<string, string>>,
+): Readonly<Record<string, string | undefined>> {
+  return mergeHomeEnvironment(environment, entries, planEnvironment)
+}
 
 export function nativeDiscoveryEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
@@ -23,14 +32,16 @@ export function nativeSubmissionCatalogOptions(
   environment: Readonly<Record<string, string | undefined>>,
   planEnvironment?: Readonly<Record<string, string>>,
   recoverLegacyLock?: Readonly<{ exitedPid: number; inode: number }>,
+  environmentVariables: readonly HomeConfigEnvironmentVariable[] = [],
 ) {
+  const nativeEnvironment = hostModelServiceEnvironment(environment, environmentVariables, planEnvironment)
   return {
     managedCatalog: {
       homeDir,
       profileId,
       ...(recoverLegacyLock === undefined ? {} : { recoverLegacyLock }),
     },
-    nativeDiscoveryEnvironment: nativeDiscoveryEnvironment(environment, planEnvironment),
+    nativeDiscoveryEnvironment: nativeEnvironment,
     ...(profile.dynamicModelCatalog === undefined ? {} : { dynamicModelCatalog: profile.dynamicModelCatalog }),
     ...(profile.nativeModelDiscovery === undefined ? {} : { nativeModelDiscovery: profile.nativeModelDiscovery }),
     ...(profile.defaultModelProvider === undefined ? {} : { defaultProviderId: profile.defaultModelProvider }),

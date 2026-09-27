@@ -15,12 +15,15 @@ import { ProviderReasoningSlider } from './model-provider-reasoning.js'
 import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from './native-provider-selection-client.js'
 import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
+import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
 export interface NativeProviderModelOption {
   readonly id: string
   readonly label: string
   readonly disabled: boolean
   readonly supportsFastMode?: boolean
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
+  readonly defaultReasoningEffort?: string
 }
 
 export interface NativeModelAssignment {
@@ -478,7 +481,13 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     matchesTerms([row.label, row.provider.providerId], providerTerms, locale)
   )
   const showProviderSearch = providerRows.length > 5
-  const reasoningEfforts = native.reasoningEfforts ?? []
+  const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
+  const reasoningCapabilities = disclosedModel?.reasoningCapabilities ?? displayedNativeModel?.reasoningCapabilities
+  const reasoningEfforts = reasoningCapabilities?.efforts
+    ?? (catalogBacked && displayedNativeModel === undefined ? [] : native.reasoningEfforts ?? [])
+  const reasoningEffort = reasoningEfforts.includes(native.reasoningEffort ?? '')
+    ? native.reasoningEffort
+    : reasoningCapabilities?.defaultEffort
   return (
     <div
       className="cxmp-selector"
@@ -560,7 +569,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       >
         <span className="cxmp-model-label">{displayedModelLabel}</span>
         <span className="cxmp-model-separator" aria-hidden="true" />
-        <span className="cxmp-effort-label">{copy.reasoningEffortLabel(native.reasoningEffort)}</span>
+        <span className="cxmp-effort-label">{copy.reasoningEffortLabel(reasoningEffort)}</span>
       </button>
       {feedback ? <span role={error ? 'alert' : 'status'} className="cxmp-announcement">{feedback}</span> : null}
       <HostMenuSurface
@@ -688,7 +697,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                           <ProviderReasoningSlider
                             key={JSON.stringify([native.modelProvider, native.model, reasoningEfforts])}
                             efforts={reasoningEfforts}
-                            value={native.reasoningEffort}
+                            value={reasoningEffort}
                             disabled={!native.available || (native.busy && !switching)}
                             pending={switching}
                             fast={fastMode}

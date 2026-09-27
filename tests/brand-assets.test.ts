@@ -1,3 +1,5 @@
+import { REACT_MANAGER_STYLES } from '../packages/cli/src/renderer/manager/styles.js'
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -61,7 +63,7 @@ describe('CordisX brand assets', () => {
       read('packages/cli/assets/brand/cordisx-mark-animated-dark.svg'),
       read('packages/cli/src/renderer/host-ui/BrandMark.tsx'),
       read('packages/cli/src/renderer/manager/pages/AboutPage.tsx'),
-      read('packages/cli/src/renderer/manager/styles.ts'),
+      Promise.resolve(REACT_MANAGER_STYLES),
     ])
 
     for (const source of [light, dark]) {
@@ -84,6 +86,9 @@ describe('CordisX brand assets', () => {
     expect(page).not.toMatch(/Beta 预览版 · AGPL-3\.0-or-later|Beta preview · AGPL-3\.0-or-later/u)
     expect(page).not.toMatch(/data-host-icon-theme-picker|cxr-icon-theme-provider|iconThemeUnavailable/u)
     expect(page).toContain('productLocale(snapshot.localization.locale)')
-    expect(styles).toContain('.cxr-about-identity > .cxr-brand-mark { width: 128px; height: 128px; }')
+    expect(cssDeclarations(styles, '.cxr-about-identity > .cxr-brand-mark')).toMatchObject({
+      width: '128px',
+      height: '128px',
+    })
   })
 })

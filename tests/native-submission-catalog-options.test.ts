@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  hostModelServiceEnvironment,
   nativeDiscoveryEnvironment,
   nativeSubmissionCatalogOptions,
 } from '../packages/cli/src/cli/native-submission-catalog-options.js'
@@ -18,6 +19,30 @@ describe('native submission catalog options', () => {
       .toEqual(nativeDiscoveryEnvironment(base, planned))
     expect(nativeSubmissionCatalogOptions('/home', 'default', { nativeModelDiscovery: false }, base))
       .toMatchObject({ nativeModelDiscovery: false })
+  })
+
+  it('uses enabled Host variables for launch and discovery while removing disabled configured names', () => {
+    const base = { MODEL_KEY: 'process-value', DISABLED_KEY: 'process-disabled', BASE_ONLY: 'base' }
+    const planned = { MODEL_KEY: 'plan-value', PLAN_ONLY: 'plan' }
+    const entries = [
+      { name: 'MODEL_KEY', value: 'host-value', enabled: true },
+      { name: 'DISABLED_KEY', value: 'disabled-value', enabled: false },
+    ]
+    expect(hostModelServiceEnvironment(base, entries, planned)).toEqual({
+      MODEL_KEY: 'host-value',
+      DISABLED_KEY: undefined,
+      BASE_ONLY: 'base',
+      PLAN_ONLY: 'plan',
+    })
+    expect(
+      nativeSubmissionCatalogOptions('/home', 'default', {}, base, planned, undefined, entries)
+        .nativeDiscoveryEnvironment,
+    ).toEqual({
+      MODEL_KEY: 'host-value',
+      DISABLED_KEY: undefined,
+      BASE_ONLY: 'base',
+      PLAN_ONLY: 'plan',
+    })
   })
 
   it('forwards one-shot legacy owner recovery only when explicitly supplied by the Host', () => {

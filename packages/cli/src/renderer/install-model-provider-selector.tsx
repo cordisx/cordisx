@@ -38,6 +38,11 @@ export async function installModelProviderSelector(
     nativeManagedModelRoutingAvailable,
     rendererOwner,
     commandChannel,
+    (providerId, modelId) => {
+      const provider = registry.snapshot().providers.find(provider => provider.providerId === providerId)
+      const model = provider?.models.find(model => model.id === modelId)
+      return provider === undefined || model === undefined ? undefined : model.reasoningCapabilities ?? null
+    },
   )
   if (!transport) return () => {}
   let root: Root | undefined

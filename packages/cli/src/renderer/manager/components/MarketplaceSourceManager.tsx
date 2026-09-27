@@ -1,3 +1,6 @@
+import { ManagerBrowseResults } from './ManagerBrowseResults.js'
+import { EmptyState } from '../../host-ui/EmptyState.js'
+import { managerCopy } from '../../ui-copy.js'
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import { useEffect, useState } from 'react'
 import { Switch } from 'tdesign-react'
@@ -152,7 +155,7 @@ export function MarketplaceSourceManager({
           </>
         }
       />
-      <div className="cxr-list" data-marketplace-source-list="true">
+      <ManagerBrowseResults className="cxr-list" data-marketplace-source-list="true">
         {visibleSources.map(source => {
           const busy = busyUrl === source.url
           return (
@@ -209,9 +212,19 @@ export function MarketplaceSourceManager({
           )
         })}
         {visibleSources.length === 0
-          ? <div className="cxr-empty">{sources.length === 0 ? copy.empty : copy.noMatches}</div>
+          ? (
+            <EmptyState
+              icon="marketplace"
+              state={query.trim() ? 'search' : 'empty'}
+              title={query.trim() ? copy.noMatches : copy.empty}
+              description={query.trim() ? managerCopy(locale, 'empty.searchHelp') : undefined}
+              action={query.trim()
+                ? { label: managerCopy(locale, 'empty.clearSearch'), onClick: () => setQuery('') }
+                : { label: copy.add, onClick: () => onEdit() }}
+            />
+          )
           : null}
-      </div>
+      </ManagerBrowseResults>
       <HostEditorDialog
         visible={removing !== undefined}
         header={copy.remove}

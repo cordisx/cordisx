@@ -208,6 +208,7 @@ export function resolveCdpInjectionTimeoutMs(value: string | undefined): number 
 
 export const CDP_INJECTION_TIMEOUT_MS = resolveCdpInjectionTimeoutMs(process.env.CORDISX_CDP_INJECTION_TIMEOUT_MS)
 export const VITE_DISPOSE_EXPRESSION = `(async () => {
+  globalThis.__cordisxViteStartupAbort?.();
   try {
     try { await globalThis.__cordisxViteClient?.dispose(); }
     finally { globalThis.__cordisxSharedReactRuntime?.dispose(); }
@@ -217,6 +218,7 @@ export const VITE_DISPOSE_EXPRESSION = `(async () => {
       delete globalThis.__cordisxViteClient;
       delete globalThis.__cordisxSharedReactRuntime;
       delete globalThis.__cordisxViteBoot;
+      delete globalThis.__cordisxViteStartupAbort;
       delete globalThis.__cordisxViteInstallId;
       delete globalThis.__cordisxViteHmrDispose;
     }

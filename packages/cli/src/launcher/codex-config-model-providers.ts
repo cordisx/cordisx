@@ -6,6 +6,8 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import { parseConfigModelCatalogs } from '../config/home-config-model-catalogs.js'
 import { inferProviderBrand, type ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import type { NativeProviderWireApi } from '../renderer/native-provider-submission-policy.js'
+import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { portableEndpoint } from './model-catalog/portable-transfer-codec.js'
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024
 const MAX_CATALOG_BYTES = 32 * 1024 * 1024
@@ -17,6 +19,25 @@ const text = (value: unknown, maximum: number): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= maximum && !/[\0\r\n]/u.test(value)
     ? value
     : undefined
+
+/** Codex treats this exact provider auth shape as a command that prints a bearer token. */
+function commandBearerAuth(value: unknown): boolean {
+  const auth = record(value)
+  if (
+    auth === undefined
+    || Object.keys(auth).some(key => !['command', 'args', 'cwd', 'timeout_ms', 'refresh_interval_ms'].includes(key))
+    || text(auth.command, 4_096) === undefined
+    || auth.args !== undefined && (!Array.isArray(auth.args) || auth.args.length > 256
+        || auth.args.some(argument =>
+          typeof argument !== 'string' || argument.length > 16_384 || argument.includes('\0')
+        ))
+    || auth.cwd !== undefined && text(auth.cwd, 4_096) === undefined
+    || auth.timeout_ms !== undefined && (!Number.isSafeInteger(auth.timeout_ms) || Number(auth.timeout_ms) < 0)
+    || auth.refresh_interval_ms !== undefined
+      && (!Number.isSafeInteger(auth.refresh_interval_ms) || Number(auth.refresh_interval_ms) < 0)
+  ) return false
+  return true
+}
 
 async function boundedText(file: string, maximum: number): Promise<string> {
   const metadata = await stat(file)
@@ -48,7 +69,30 @@ function catalogModels(value: unknown, strict = false): NativeModelProviderCatal
     const aliases = Array.isArray(model?.aliases)
       ? model.aliases.flatMap(alias => text(alias, 256) ?? []).filter(alias => alias !== id)
       : []
-    return [Object.freeze({ id, label, aliases: Object.freeze([...new Set(aliases)]) })]
+    const supportedReasoningLevels = model?.supported_reasoning_levels
+    const defaultReasoningLevel = model?.default_reasoning_level === null
+      ? undefined
+      : model?.default_reasoning_level
+    const reasoningCapabilities = supportedReasoningLevels === undefined && defaultReasoningLevel === undefined
+      ? undefined
+      : parseModelReasoningCapabilities({
+        efforts: Array.isArray(supportedReasoningLevels)
+          ? supportedReasoningLevels.map(level => record(level)?.effort)
+          : supportedReasoningLevels,
+        defaultEffort: defaultReasoningLevel,
+      })
+    const emptyReasoning = Array.isArray(supportedReasoningLevels) && supportedReasoningLevels.length === 0
+      && defaultReasoningLevel === undefined
+    if (
+      strict && !emptyReasoning && (supportedReasoningLevels !== undefined || defaultReasoningLevel !== undefined)
+      && reasoningCapabilities === undefined
+    ) throw new Error('Invalid model catalog')
+    return [Object.freeze({
+      id,
+      label,
+      aliases: Object.freeze([...new Set(aliases)]),
+      ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
+    })]
   }))
 }
 
@@ -57,6 +101,19 @@ export interface CodexConfigModelProviderProjection {
   readonly providerIds: ReadonlySet<string>
   /** Host-private route protocol used for model compatibility admission. */
   readonly providerWireApis: ReadonlyMap<string, NativeProviderWireApi>
+  /** Non-secret connection facts for Host-private, explicit model transfer only. */
+  readonly portableConnections?: ReadonlyMap<string, {
+    readonly endpoint: string
+    readonly protocol: 'responses' | 'chat-completions'
+    readonly auth: 'bearer'
+    readonly environment?: string
+  }>
+  /** Host-private credential metadata used only by explicit transfer preparation. */
+  readonly portableEnvironment?: ReadonlyMap<string, {
+    readonly name?: string
+    readonly value?: string
+    readonly placeholder: boolean
+  }>
   /** Private source identity, not an effective native endpoint/account attestation. */
   readonly sourceRevision?: string
   readonly sourceAvailable?: boolean
@@ -107,6 +164,16 @@ export async function codexConfigModelProviders(
   }
   const configured = record(config.model_providers) ?? {}
   const providerWireApis = new Map<string, NativeProviderWireApi>()
+  const portableConnections = new Map<string, {
+    endpoint: string
+    protocol: 'responses' | 'chat-completions'
+    auth: 'bearer'
+  }>()
+  const portableEnvironment = new Map<string, {
+    name?: string
+    value?: string
+    placeholder: boolean
+  }>()
   const activeProvider = text(config.model_provider, 128)
   const activeModel = text(config.model, 512)
   const nativeProviders = Object.freeze(
@@ -123,6 +190,7 @@ export async function codexConfigModelProviders(
       if (wireApi !== undefined) providerWireApis.set(id, wireApi)
       const envKey = text(provider.env_key, 512)
       const inlineToken = text(provider.experimental_bearer_token, 16_384)
+      const commandBearer = commandBearerAuth(provider.auth)
       const credential: CodexConfigNativeProvider['credential'] = envKey !== undefined
         ? Object.freeze({ kind: 'environment', reference: envKey })
         : inlineToken !== undefined
@@ -130,6 +198,25 @@ export async function codexConfigModelProviders(
         : provider.requires_openai_auth === false
         ? Object.freeze({ kind: 'none' })
         : Object.freeze({ kind: 'unknown' })
+      if (
+        endpoint !== undefined && portableEndpoint(endpoint) && wireApi !== undefined
+        && provider.requires_openai_auth !== true
+        && (credential.kind === 'environment' || credential.kind === 'inline-private' || commandBearer)
+      ) {
+        portableConnections.set(id, {
+          endpoint,
+          protocol: wireApi,
+          auth: 'bearer',
+          ...(credential.kind === 'environment' ? { environment: credential.reference } : {}),
+        })
+      }
+      if (credential.kind === 'environment') {
+        portableEnvironment.set(id, { name: credential.reference, placeholder: false })
+      } else if (credential.kind === 'inline-private') {
+        portableEnvironment.set(id, { value: credential.token, placeholder: true })
+      } else if (commandBearer) {
+        portableEnvironment.set(id, { placeholder: true })
+      }
       return [Object.freeze({
         providerId: id,
         title: text(provider.name, 256) ?? id,
@@ -216,6 +303,8 @@ export async function codexConfigModelProviders(
     sourceRevision,
     providerIds: new Set(providers.map(provider => provider.providerId)),
     providerWireApis,
+    portableConnections,
+    portableEnvironment,
     diagnostics: Object.freeze(diagnostics),
   })
 }

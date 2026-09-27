@@ -23,6 +23,7 @@ import {
 import { RUNTIME_DETAIL_COPY, RUNTIME_EMPTY_COPY } from './ui-copy/runtime.js'
 import { CONSOLE_COPY } from './ui-copy/console.js'
 import { FORM_COPY } from './ui-copy/form.js'
+import { EMPTY_STATE_COPY } from './ui-copy/empty-state.js'
 import { MODEL_CATALOG_COPY } from './ui-copy/model-catalog.js'
 
 export type { CordisXProductLocale } from './ui-copy/types.js'
@@ -49,6 +50,7 @@ const catalog = {
   ...PERMISSION_COPY,
   ...FORM_COPY,
   ...MODEL_CATALOG_COPY,
+  ...EMPTY_STATE_COPY,
 }
 
 type CopyKey = keyof typeof catalog

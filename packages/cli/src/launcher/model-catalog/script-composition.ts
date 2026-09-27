@@ -1,4 +1,5 @@
 import type { ScriptSourceSnapshot } from './script-types.js'
+import type { ModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
 
 export interface ScriptComposableModel {
   readonly id: string
@@ -7,6 +8,7 @@ export interface ScriptComposableModel {
   readonly provenance?: readonly string[]
   readonly notListed?: boolean
   readonly protocolCapabilities?: { readonly responses: boolean }
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
 }
 
 /** Membership only. The target still applies native/plugin admission and user overlays. */
@@ -45,6 +47,7 @@ export function composeScriptMembers(input: {
         provenance: Object.freeze([...new Set([...(base?.provenance ?? []), 'script-supplement'])]),
         notListed: base === undefined || base.notListed === true,
         ...(base?.protocolCapabilities ? { protocolCapabilities: base.protocolCapabilities } : {}),
+        ...(base?.reasoningCapabilities ? { reasoningCapabilities: base.reasoningCapabilities } : {}),
       }),
     )
   }

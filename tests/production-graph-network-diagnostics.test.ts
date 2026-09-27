@@ -17,22 +17,41 @@ function evaluation(value: Record<string, unknown>): Record<string, unknown> {
 
 describe('production Host graph network diagnostics', () => {
   it('labels bootloader failures by stage without preserving the private graph URL', async () => {
-    const privateOrigin = 'http://127.0.0.1:43210/cordisx-host-generation/private-secret'
-    const scope: Record<string, unknown> = { __cordisxProductionBootstrapTimeoutMs: 600 }
-    const fetch = vi.fn(async () => {
-      throw new TypeError(`Failed to fetch ${privateOrigin}/manifest.json`)
-    })
-    Function('globalThis', 'fetch', 'console', hostGenerationBootloaderSource(privateOrigin))(
-      scope,
-      fetch,
-      { error: vi.fn() },
-    )
-
-    await expect(scope.__cordisxCompositionBoot).rejects.toThrow(
-      'CordisX Host manifest fetch deadline exceeded: Failed to fetch [host graph]/manifest.json',
-    )
-    await expect(scope.__cordisxCompositionBoot).rejects.not.toThrow('private-secret')
-    expect(fetch).toHaveBeenCalledTimes(3)
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const privateOrigin = 'http://127.0.0.1:43210/cordisx-host-generation/private-secret'
+      const scope: Record<string, unknown> = { __cordisxProductionBootstrapTimeoutMs: 600 }
+      const attempts: number[] = []
+      const signals: AbortSignal[] = []
+      const fetch = vi.fn(async (_url: string, options: { signal: AbortSignal }) => {
+        attempts.push(Date.now())
+        signals.push(options.signal)
+        throw new TypeError(`Failed to fetch ${privateOrigin}/manifest.json`)
+      })
+      Function('globalThis', 'fetch', 'console', hostGenerationBootloaderSource(privateOrigin))(
+        scope,
+        fetch,
+        { error: vi.fn() },
+      )
+      const deadline = expect(scope.__cordisxCompositionBoot).rejects.toThrow(
+        'CordisX Host manifest fetch deadline exceeded: Failed to fetch [host graph]/manifest.json',
+      )
+      const sanitized = expect(scope.__cordisxCompositionBoot).rejects.not.toThrow('private-secret')
+      // Date.now and setTimeout share one clock; an early real timer wake cannot
+      // add a fourth attempt just before the 600ms deadline.
+      await vi.advanceTimersByTimeAsync(599)
+      expect(attempts).toEqual([0, 250, 500])
+      await vi.advanceTimersByTimeAsync(1)
+      await Promise.all([deadline, sanitized])
+      expect(fetch).toHaveBeenCalledTimes(3)
+      expect(signals.every(signal => signal === signals[0] && signal.aborted)).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('recovers when the launch-private manifest transport becomes reachable', async () => {

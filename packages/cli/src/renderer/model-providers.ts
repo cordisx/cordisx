@@ -12,6 +12,7 @@ import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-bra
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
@@ -29,6 +30,7 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
   readonly selectorBrand?: ModelBrandChoice
   readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
   readonly notListed?: boolean
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
 }
 
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
@@ -44,7 +46,9 @@ export interface ModelProviderSnapshot {
     readonly entry: ModelProviderSelectorEntryV1
     readonly notifications?: NotificationsV1
   }[]
+  /** Initial read without a trustworthy snapshot; successful empty counts as loaded. */
   readonly loading: boolean
+  readonly refreshing?: boolean
   readonly error?: string
 }
 
@@ -68,6 +72,30 @@ export function nativeModelProviderRegistry(managed?: {
       catalogManagementRead: () => channel.catalogManagementRead!(),
       catalogManagementSubscribe: listener => channel.catalogManagementSubscribe!(listener),
       catalogManagementCommand: command => channel.catalogManagementCommand!(command),
+      ...(channel.catalogEnvironmentRead
+        ? { catalogEnvironmentRead: () => channel.catalogEnvironmentRead!() }
+        : {}),
+      ...(channel.catalogEnvironmentSave
+        ? { catalogEnvironmentSave: entries => channel.catalogEnvironmentSave!(entries) }
+        : {}),
+      ...(channel.catalogEnvironmentGenerate
+        ? { catalogEnvironmentGenerate: request => channel.catalogEnvironmentGenerate!(request) }
+        : {}),
+      ...(channel.catalogEnvironmentGenerateCancel
+        ? { catalogEnvironmentGenerateCancel: runId => channel.catalogEnvironmentGenerateCancel!(runId) }
+        : {}),
+      ...(channel.catalogManagementPrepareExport
+        ? { catalogManagementPrepareExport: request => channel.catalogManagementPrepareExport!(request) }
+        : {}),
+      ...(channel.catalogManagementExport
+        ? { catalogManagementExport: request => channel.catalogManagementExport!(request) }
+        : {}),
+      ...(channel.catalogManagementImport
+        ? { catalogManagementImport: request => channel.catalogManagementImport!(request) }
+        : {}),
+      ...(channel.catalogManagementPrepareImport
+        ? { catalogManagementPrepareImport: text => channel.catalogManagementPrepareImport!(text) }
+        : {}),
     })
   }
   return registry
@@ -162,6 +190,7 @@ export class ModelProviderRegistry {
   >()
   private readonly listeners = new Set<() => void>()
   private state: ModelProviderSnapshot = { providers: [], entries: [], loading: false }
+  private hasSnapshot = false
   private revision = 0
   private disposed = false
   private readonly disconnectVisibility: (() => void) | undefined
@@ -182,7 +211,7 @@ export class ModelProviderRegistry {
   refresh = async (): Promise<void> => {
     if (this.disposed) return
     const revision = ++this.revision
-    this.emit(true)
+    this.emit(!this.hasSnapshot, this.state.error ?? null, true)
     try {
       const projections = await this.load()
       if (this.disposed || revision !== this.revision) return
@@ -216,16 +245,22 @@ export class ModelProviderRegistry {
                 ),
               }),
               ...(model.notListed === true ? { notListed: true } : {}),
+              ...(() => {
+                const reasoning = parseModelReasoningCapabilities(model.reasoningCapabilities)
+                return reasoning === undefined ? {} : { reasoningCapabilities: reasoning }
+              })(),
             })
           )),
         })
       )
-      this.emit(false)
+      this.hasSnapshot = true
+      this.emit(false, null, false)
     } catch {
       if (!this.disposed && revision === this.revision) {
         // Failed readback cannot leave stale providers selectable.
         this.projections = []
-        this.emit(false, 'provider-catalog-unavailable')
+        this.hasSnapshot = false
+        this.emit(false, 'provider-catalog-unavailable', false)
       }
     }
   }
@@ -365,7 +400,11 @@ export class ModelProviderRegistry {
     this.listeners.clear()
   }
 
-  private emit(loading = this.state.loading, error?: string): void {
+  private emit(
+    loading = this.state.loading,
+    error: string | null = this.state.error ?? null,
+    refreshing = this.state.refreshing,
+  ): void {
     if (this.disposed) return
     this.state = Object.freeze({
       providers: Object.freeze(
@@ -412,7 +451,8 @@ export class ModelProviderRegistry {
           ),
       ),
       loading,
-      ...(error === undefined ? {} : { error }),
+      refreshing: refreshing === true,
+      ...(error === null ? {} : { error }),
     })
     for (const listener of this.listeners) listener()
   }

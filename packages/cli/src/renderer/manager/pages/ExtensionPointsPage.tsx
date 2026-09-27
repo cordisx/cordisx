@@ -1,3 +1,5 @@
+import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
@@ -15,7 +17,7 @@ export function ExtensionPointsPage(
     )
   )
   return (
-    <section className="cxr-page">
+    <section className="cxr-page cxr-browse-page">
       <SearchToolbar
         clearLabel={snapshot.localization.locale.startsWith('zh') ? '清除搜索' : 'Clear search'}
         value={query}
@@ -23,7 +25,7 @@ export function ExtensionPointsPage(
         placeholder={managerCopy(snapshot.localization.locale, 'extension.search-placeholder')}
         onChange={setQuery}
       />
-      <div className="cxr-list">
+      <ManagerBrowseResults className="cxr-list">
         {points.map(point => (
           <button
             key={point.id}
@@ -42,15 +44,21 @@ export function ExtensionPointsPage(
         ))}
         {points.length === 0
           ? (
-            <div className="cxr-empty">
-              {managerCopy(
+            <EmptyState
+              icon="contributions"
+              state={normalized ? 'search' : 'empty'}
+              title={managerCopy(snapshot.localization.locale, normalized ? 'extension.no-matches' : 'extension.empty')}
+              description={managerCopy(
                 snapshot.localization.locale,
-                normalized === '' ? 'extension.empty' : 'extension.no-matches',
+                normalized ? 'empty.searchHelp' : 'empty.extensionHelp',
               )}
-            </div>
+              action={normalized
+                ? { label: managerCopy(snapshot.localization.locale, 'empty.clearSearch'), onClick: () => setQuery('') }
+                : undefined}
+            />
           )
           : null}
-      </div>
+      </ManagerBrowseResults>
     </section>
   )
 }

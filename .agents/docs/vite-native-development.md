@@ -26,7 +26,7 @@ preflight and failure boundaries.
 | Automatic file detection and Manager **Reload plugin** are separate update triggers           | verified    | focused tests exercise both triggers; isolated native runs completed an automatic source replacement and the Manager development-reload channel independently                                                                |
 | Vite's WebSocket owns update delivery                                                         | verified    | real Vite HMR WebSocket tests receive update and custom reload-result payloads; CDP carries no replacement source                                                                                                            |
 | Server `full-reload` becomes a CordisX Host restart in the current document                   | implemented | the server replaces outbound `full-reload` with `cordisx:restart-host`; the boot boundary accepts that event                                                                                                                 |
-| Source maps stay outside the startup code                                                     | verified    | the bootstrap is under 1 KiB and the HTTP test fetches a separately linked map                                                                                                                                               |
+| Source maps stay outside the startup code                                                     | verified    | the initial script carries only the manifest loader; source maps are fetched separately                                                                                                                                      |
 | Dependency optimization is reusable across launches                                           | verified    | the cache key binds the CLI/workspace roots plus CLI, Vite, React plugin, React, and React DOM versions; a second native launch reused the first launch's cache without dependency-optimization or optimizer-reload messages |
 | Native loopback/CSP policy and launcher session resources are restored                        | verified    | CDP integration ignores non-`app://-` pages, covers exact permission/CSP restore across multiple windows and target disconnect, and installs a Vite-client disposer for its socket, timer, and injected CSS                  |
 | Isolated native `app://` bootstrap and both update triggers                                   | verified    | the current CLI reached `app://-/index.html` with CordisX, Chatroom, Vite client, and shared React ready; targeted reload and source edit each advanced activation revision and changed digest/module generation             |
@@ -94,7 +94,15 @@ name fall back to `local-network-access`. CDP then enables
 `Page.setBypassCSP` and installs the bootstrap. Before reloading, the launcher
 waits for the initial non-blank document to reach `readyState === "complete"`,
 so it does not abort Electron's pending initial `loadURL` and fail native
-startup. This wait is bounded by the existing injection timeout and cancellation
+startup. The initial manifest transport also retries for up to 20 seconds while
+the native application network policy initializes; persistent denial remains a
+bootstrap failure, and HTTP/module failures are not retried. Installation cleanup
+aborts pending manifest requests and retry timers before deleting its boot owner.
+The same captured installation lifetime fences queued Host/HMR starts, React
+preparation and plugin loading. Importing the generated entry does not activate
+a Host; its explicit start checks that owner and passes its abort signal to the
+renderer installer, so an old pending graph cannot activate after disposal.
+This wait is bounded by the existing injection timeout and cancellation
 signal. It then reloads the page once and waits for the Vite client
 acknowledgement before reporting ready. The same initial-document ordering
 applies to production loopback graphs.

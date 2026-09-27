@@ -102,12 +102,13 @@ it(
       let source = await request('@id/__x00__virtual:cordisx-native-entry')
       source = source.replaceAll('import.meta.hot', 'globalThis.fixtureHot')
         .replace(/\bimport\(/g, 'globalThis.fixtureImport(')
-        .replace('export const ready =', 'globalThis.fixtureReady =')
+        .replace('export async function start(startup)', 'globalThis.fixtureStart = async function(startup)')
       const imports = source.match(/^import[^\n]*\n/gm) ?? []
       source = source.replace(/^import[^\n]*\n/gm, '')
       const bundle = await build({
         stdin: {
-          contents: imports.join('') + '\nglobalThis.fixtureBootstrap = (async () => {\n' + source + '\n})();',
+          contents: imports.join('') + '\nglobalThis.fixtureBootstrap = (async () => {\n' + source
+            + '\nreturn await globalThis.fixtureStart({check() {}, signal: new AbortController().signal});\n})();',
           resolveDir: process.cwd(),
         },
         bundle: true,
@@ -135,7 +136,6 @@ it(
       })
       window.eval(bundle.outputFiles[0]!.text)
       await window.fixtureBootstrap
-      await window.fixtureReady
       expect(applies).toBe(1)
       const runtime = window.__cordisxRuntime
       const previous = runtime.activePluginGeneration().plugins[0].moduleGeneration

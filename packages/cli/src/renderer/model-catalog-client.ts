@@ -6,16 +6,39 @@ import type {
   CatalogManagementSnapshot,
 } from '../model-catalog-management.js'
 import { catalogOperationAvailable } from '../model-catalog-management.js'
+import type {
+  CatalogEnvironmentGeneratorCancelResult,
+  CatalogEnvironmentGeneratorRunRequest,
+  CatalogEnvironmentGeneratorRunResult,
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from '../model-catalog-transfer.js'
 import { parseManagementSnapshot, safeManagementCode } from './model-catalog-projection.js'
 
 export interface CatalogClientState extends CatalogManagementSnapshot {
   readonly connected: boolean
+  /** Initial/invalidated read; background read progress is separate. */
   readonly loading: boolean
+  readonly refreshing?: boolean
 }
 
 /** Read-only Host projection. A failed transport never turns a retained view into authority. */
 export class ModelCatalogClient {
-  private state: CatalogClientState = { epoch: '', sequence: 0, views: [], connected: false, loading: false }
+  private state: CatalogClientState = {
+    epoch: '',
+    sequence: 0,
+    views: [],
+    connected: false,
+    loading: false,
+    refreshing: false,
+  }
   private readonly listeners = new Set<() => void>()
   private disconnect?: () => void
   private reconcile?: ReturnType<typeof setInterval>
@@ -23,10 +46,16 @@ export class ModelCatalogClient {
   private reading: Promise<void> | undefined
   private dirty = false
   private cursor?: CatalogManagementCursor
+  private invalidatedEpoch: string | undefined
 
   constructor(private readonly channel: CatalogManagementChannel) {
     try {
       this.disconnect = channel.catalogManagementSubscribe(cursor => {
+        if (this.state.epoch && cursor.epoch !== this.state.epoch) {
+          this.invalidatedEpoch = cursor.epoch
+          // A new Host epoch invalidates prior authority immediately, before readback.
+          this.publish({ ...this.state, connected: false, loading: true, refreshing: true })
+        }
         this.cursor = cursor
         void this.refresh()
       })
@@ -34,7 +63,7 @@ export class ModelCatalogClient {
       this.reconcile.unref?.()
       void this.refresh()
     } catch {
-      this.publish({ ...this.state, connected: false, loading: false })
+      this.publish({ ...this.state, connected: false, loading: false, refreshing: false })
     }
   }
 
@@ -55,8 +84,8 @@ export class ModelCatalogClient {
   }
 
   private async readLoop(): Promise<void> {
-    this.publish({ ...this.state, loading: true })
     while (this.dirty && !this.disposed) {
+      this.publish({ ...this.state, loading: !this.state.connected, refreshing: true })
       this.dirty = false
       const cursorBeforeRead = this.cursor
       try {
@@ -70,14 +99,16 @@ export class ModelCatalogClient {
           // An event during a read schedules one more read; reconciliation repairs a stale transport.
           continue
         }
+        if (this.invalidatedEpoch && snapshot.epoch !== this.invalidatedEpoch) continue
         if (snapshot.epoch === this.state.epoch && snapshot.sequence < this.state.sequence) continue
+        this.invalidatedEpoch = undefined
         this.cursor = { epoch: snapshot.epoch, sequence: snapshot.sequence }
-        this.publish({ ...snapshot, connected: true, loading: false })
+        this.publish({ ...snapshot, connected: true, loading: false, refreshing: false })
       } catch {
-        this.publish({ ...this.state, connected: false, loading: false })
+        this.publish({ ...this.state, connected: false, loading: false, refreshing: false })
       }
     }
-    if (this.state.loading) this.publish({ ...this.state, loading: false })
+    if (this.state.loading || this.state.refreshing) this.publish({ ...this.state, loading: false, refreshing: false })
   }
 
   async command(command: CatalogManagementCommand): Promise<CatalogManagementResult> {
@@ -103,6 +134,104 @@ export class ModelCatalogClient {
         ...(safeManagementCode(result.code) ? { code: result.code } : {}),
         ...(Number.isFinite(result.retryAt) ? { retryAt: result.retryAt } : {}),
       }
+    } catch {
+      await this.refresh()
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async export(request: CatalogTransferExportRequest): Promise<CatalogTransferExportResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementExport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementExport(request)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentRead(): Promise<CatalogEnvironmentReadResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentRead) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentRead()
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentSave(
+    entries: readonly CatalogTransferEnvironmentVariable[],
+  ): Promise<CatalogEnvironmentSaveResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentSave) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      const result = await this.channel.catalogEnvironmentSave(entries)
+      await this.refresh()
+      return result
+    } catch {
+      await this.refresh()
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentGenerate(
+    request: CatalogEnvironmentGeneratorRunRequest,
+  ): Promise<CatalogEnvironmentGeneratorRunResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentGenerate) {
+      return { status: 'rejected', runId: request.runId, code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentGenerate(request)
+    } catch {
+      return { status: 'rejected', runId: request.runId, code: 'unavailable' }
+    }
+  }
+
+  async environmentGenerateCancel(runId: string): Promise<CatalogEnvironmentGeneratorCancelResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentGenerateCancel) {
+      return { status: 'rejected', runId, code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentGenerateCancel(runId)
+    } catch {
+      return { status: 'rejected', runId, code: 'unavailable' }
+    }
+  }
+
+  async prepareExport(request: CatalogTransferExportRequest): Promise<CatalogTransferExportPreparationResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementPrepareExport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementPrepareExport(request)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async prepareImport(text: string): Promise<CatalogTransferImportPreparationResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementPrepareImport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementPrepareImport(text)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async import(request: CatalogTransferImportRequest): Promise<CatalogTransferImportResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementImport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      const result = await this.channel.catalogManagementImport(request)
+      await this.refresh()
+      return result
     } catch {
       await this.refresh()
       return { status: 'rejected', code: 'unavailable' }

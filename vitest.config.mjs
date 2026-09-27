@@ -36,6 +36,8 @@ export default {
   test: {
     maxWorkers: 1,
     fileParallelism: false,
+    // Match the Host's CSS text imports; leave third-party CSS stubbed in Node fixtures.
+    css: { include: [/packages\/cli\/(?:src\/renderer|assets)\/.*\.css(?:\?|$)/] },
     testTimeout: 30000,
     hookTimeout: 30000,
     projects: groups.map(({ name, include, exclude }) => ({

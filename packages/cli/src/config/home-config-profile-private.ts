@@ -48,6 +48,11 @@ export function parseManagedProviders(value: unknown, label: string): readonly M
 export function redactedHomeConfig(config: HomeConfig): unknown {
   return {
     ...config,
+    environmentVariables: config.environmentVariables.map(({ value, generator, ...entry }) => ({
+      ...entry,
+      valueState: value === '' ? 'empty' : 'set',
+      ...(generator === undefined ? {} : { generatorState: 'configured' }),
+    })),
     apps: Object.fromEntries(
       Object.entries(config.apps).map(([appId, app]) => [appId, {
         ...app,
@@ -58,10 +63,19 @@ export function redactedHomeConfig(config: HomeConfig): unknown {
               ? {}
               : {
                 managedProviders: profile.managedProviders.map((
-                  { secret: _secret, credentialRef: _ref, ...record },
+                  {
+                    secret: _secret,
+                    credentialRef: _ref,
+                    environmentReference: _environmentReference,
+                    importTransferId: _transfer,
+                    importDigest: _digest,
+                    ...record
+                  },
                 ) => ({
                   ...record,
-                  credentialState: 'set',
+                  credentialState: _environmentReference === undefined
+                    ? _secret === undefined ? 'unset' : 'set'
+                    : 'environment',
                 })),
               }),
           }]),

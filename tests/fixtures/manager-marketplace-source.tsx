@@ -56,38 +56,43 @@ export function mutations() {
   return writes
 }
 let withSearchRecords = false
+let browseRecordCount = 1
+let browseFetchGate: Promise<void> | undefined
 const marketplace = new BrowserMarketplaceModel(
   undefined,
-  async () => ({
-    ok: true,
-    status: 200,
-    text: async () =>
-      JSON.stringify({
-        $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
-        homepage: 'https://plugins.example/',
-        schemaVersion: 2,
-        name: 'Fixture',
-        fallbackLocale: 'en',
-        plugins: withSearchRecords
-          ? [{
-            $schema:
-              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
-            compatibility: { cordisx: '^0.1.0' },
-            schemaVersion: 2,
-            id: 'search-permissions',
-            fallbackLocale: 'en',
-            name: 'Search permissions',
-            description: 'Permission search fixture',
-            version: '1.0.0',
-            license: 'MIT',
-            source: 'https://plugins.example/search',
-            authors: [{ name: 'Fixture' }],
-            keywords: [],
-          }]
-          : [],
-      }),
-  }),
+  async () => {
+    await browseFetchGate
+    return ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json',
+          homepage: 'https://plugins.example/',
+          schemaVersion: 2,
+          name: 'Fixture',
+          fallbackLocale: 'en',
+          plugins: withSearchRecords
+            ? Array.from({ length: browseRecordCount }, (_, index) => ({
+              $schema:
+                'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
+              compatibility: { cordisx: '^0.1.0' },
+              schemaVersion: 2,
+              id: index === 0 ? 'search-permissions' : `search-permissions-${String(index).padStart(2, '0')}`,
+              fallbackLocale: 'en',
+              name: 'Search permissions',
+              description: 'Permission search fixture',
+              version: '1.0.0',
+              license: 'MIT',
+              source: 'https://plugins.example/search',
+              authors: [{ name: 'Fixture' }],
+              keywords: [],
+            }))
+            : [],
+        }),
+    })
+  },
 )
 const navigation = new HostManagerNavigationController()
 const snapshot: ManagerSnapshot = {
@@ -121,6 +126,26 @@ const snapshot: ManagerSnapshot = {
   },
 }
 const model = { snapshot: () => snapshot, subscribe: () => () => {} } as ManagerModel
+export function prepareModelEmptyState() {
+  const state = { providers: [], entries: [], loading: false }
+  const catalog = {
+    epoch: 'fixture',
+    sequence: 1,
+    views: [],
+    connected: true,
+    loading: false,
+    canCreateConnection: true,
+  }
+  Object.assign(model, {
+    modelProviders: {
+      snapshot: () => state,
+      subscribe: () => () => {},
+      refresh: async () => {},
+      management: { snapshot: () => catalog, subscribe: () => () => {}, refresh: async () => {} },
+    },
+  })
+}
+
 let releaseQuery: (() => void) | undefined
 export async function receiveSnapshot() {
   releaseQuery?.()
@@ -135,12 +160,31 @@ export async function refreshSource() {
   listeners.forEach(listener => listener(state))
   await settle()
 }
-export async function start(delayed = false) {
+export async function start(delayed = false, nativePane = false) {
   const seat = document.createElement('span')
   document.body.append(seat)
   const theme = new HostThemeProjection(document)
   const themeRoot = document.getElementById('manager')!
   themeRoot.className = 'cxr-root'
+  const navigationSeat = document.createElement('div')
+  const titlebarSeat = document.createElement('div')
+  if (nativePane) {
+    themeRoot.dataset.managerSurface = 'pane'
+    Object.assign(themeRoot.style, {
+      left: '200px',
+      top: '44px',
+      width: 'calc(100% - 200px)',
+      height: 'calc(100% - 44px)',
+    })
+    navigationSeat.className = 'cxr-root cxr-native-navigation-seat'
+    Object.assign(navigationSeat.style, { top: '44px', width: '200px', height: 'calc(100% - 44px)' })
+    titlebarSeat.className = 'cxr-root cxr-titlebar-root'
+    titlebarSeat.dataset.managerSurface = 'pane'
+    Object.assign(titlebarSeat.style, { left: '200px', top: '0px', width: 'calc(100% - 200px)', height: '44px' })
+    document.body.append(navigationSeat, titlebarSeat)
+    theme.attach(navigationSeat)
+    theme.attach(titlebarSeat)
+  }
   const root = createRoot(themeRoot)
   theme.attach(themeRoot)
   root.render(
@@ -159,6 +203,9 @@ export async function start(delayed = false) {
           }
           : binding}
         triggerSeat={seat}
+        navigationSeat={nativePane ? navigationSeat : undefined}
+        titlebarSeat={nativePane ? titlebarSeat : undefined}
+        activatePane={nativePane ? () => true : undefined}
         navigationController={navigation}
       />
     </>,
@@ -174,6 +221,10 @@ export async function start(delayed = false) {
     root.unmount()
     theme.dispose()
     seat.remove()
+    navigationSeat.remove()
+    titlebarSeat.remove()
+    delete themeRoot.dataset.managerSurface
+    themeRoot.removeAttribute('style')
   }
 }
 export async function settle() {
@@ -252,6 +303,9 @@ export async function openMarketplacePermissionSearch() {
 export async function openCollectionSearch() {
   await openSearchRoute({ kind: 'primary', page: 'about' })
   const container = document.createElement('div')
+  if (document.querySelector('.cxr-root[data-manager-surface="pane"]')) {
+    container.className = 'cxr-manager-content-panel'
+  }
   document.querySelector('.cxr-content')!.append(container)
   const host = mountManagerCollectionHost(container, {
     document,
@@ -305,5 +359,66 @@ export async function openCollectionSearch() {
   return () => {
     host.dispose()
     container.remove()
+  }
+}
+
+/** In-memory records exercise production browse pages without provider writes. */
+export async function prepareBrowseRecords() {
+  browseRecordCount = 81
+  snapshot.plugins = Array.from({ length: 81 }, (_, index) => ({
+    ...snapshot.plugins[0]!,
+    id: `scroll-plugin-${index}`,
+    name: `Scroll plugin ${index}`,
+  }))
+  snapshot.navigation.routes = Array.from({ length: 81 }, (_, index) => ({
+    owner: 'fixture',
+    id: `scroll-${index}`,
+    qualifiedId: `fixture:scroll-${index}`,
+    definition: { id: `scroll-${index}`, path: `/scroll/${index}`, outlet: 'main', page: 'fixture' },
+    productMetadata: { title: `Scroll route ${index}` },
+    valid: true,
+    authorized: true,
+    pointPolicy: 'inherit',
+    effectivePointPolicy: 'allow',
+  })) as ManagerSnapshot['navigation']['routes']
+  snapshot.extensionPoints = {
+    points: Array.from({ length: 81 }, (_, index) => ({
+      id: `fixture.point.${index}`,
+      titleProjection: { text: `Scroll point ${index}` },
+      descriptionProjection: { text: 'Browse scroll fixture' },
+      plugins: [],
+    })),
+  } as unknown as ManagerSnapshot['extensionPoints']
+  state = {
+    ...state,
+    revision: state.revision + 1,
+    sources: Array.from({ length: 81 }, (_, index) => ({
+      url: `https://scroll-${index}.example/marketplace.json`,
+      enabled: true,
+      trusted: false,
+      official: false,
+      removable: true,
+      local: { name: `Scroll source ${index}` },
+    })),
+  }
+  listeners.forEach(listener => listener(state))
+  await settle()
+  await marketplace.setExternalSourceRecords(state.sources)
+  await marketplace.reload()
+  await settle()
+}
+
+export async function openBrowseLoading() {
+  let release!: () => void
+  browseFetchGate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const pending = marketplace.setExternalSourceRecords([{ url: 'https://loading.example/feed.json', enabled: true }])
+  await openSearchRoute({ kind: 'primary', page: 'plugins' })
+  await openSearchRoute({ kind: 'primary', page: 'marketplace' })
+  return async () => {
+    browseFetchGate = undefined
+    release()
+    await pending
   }
 }

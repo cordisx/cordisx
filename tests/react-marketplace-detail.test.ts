@@ -1,3 +1,5 @@
+import { REACT_MANAGER_STYLES } from '../packages/cli/src/renderer/manager/styles.js'
+import { cssDeclarations } from './helpers/css-declarations.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,7 +58,7 @@ describe('React Marketplace plugin detail', () => {
   it('projects README, required permissions, and accessible source links as detail tabs', async () => {
     const [page, styles] = await Promise.all([
       read('packages/cli/src/renderer/manager/pages/MarketplacePluginPage.tsx'),
-      read('packages/cli/src/renderer/manager/styles.ts'),
+      Promise.resolve(REACT_MANAGER_STYLES),
     ])
     expect(page).toContain("type MarketplaceDetailTab = 'readme' | 'permissions' | 'authors-source'")
     expect(page).toContain('manager.previewMarketplaceArtifact')
@@ -71,10 +73,12 @@ describe('React Marketplace plugin detail', () => {
     expect(page).toContain('cxr-list cxr-permission-list')
     expect(page).toContain('<article className="cxr-card cxr-permission-summary" role="listitem"')
     expect(page).not.toContain('permissionReason')
-    expect(styles).toContain(
-      '.cxr-permission-summary .cxr-card-description { overflow: visible; text-overflow: clip; white-space: normal; }',
-    )
-    expect(styles).toContain('.cxr-permission-list { grid-template-columns: minmax(0,1fr); }')
+    expect(cssDeclarations(styles, '.cxr-permission-summary .cxr-card-description')).toMatchObject({
+      overflow: 'visible',
+      'text-overflow': 'clip',
+      'white-space': 'normal',
+    })
+    expect(cssDeclarations(styles, '.cxr-permission-list')).toMatchObject({ 'grid-template-columns': 'minmax(0,1fr)' })
     expect(page).not.toContain("router.navigate({ kind: 'permission'")
     expect(page).toContain('item.required ? copy.required : copy.optional')
     expect(page).toContain('cxr-marketplace-detail-grid')

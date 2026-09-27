@@ -2,13 +2,13 @@ import { spawn } from 'node:child_process'
 import { CatalogError } from './contracts.js'
 
 export const MANAGED_PROVIDER_CAPTURE_SCRIPT = `
-function run() {
+function run(argv) {
   ObjC.import('Cocoa');
   var app = $.NSApplication.sharedApplication;
   app.setActivationPolicy(1);
   var alert = $.NSAlert.alloc.init;
   alert.messageText = 'CordisX Provider credential';
-  alert.informativeText = 'Enter the API key for this CordisX-managed connection.';
+  alert.informativeText = 'Enter the API key for this destination:\\n' + argv[0];
   alert.addButtonWithTitle('Cancel');
   alert.addButtonWithTitle('Save');
   var field = $.NSSecureTextField.alloc.initWithFrame($.NSMakeRect(0, 0, 420, 24));
@@ -19,10 +19,30 @@ function run() {
 }`
 
 /** Static native prompt; the key travels only over this child's private stdout pipe. */
-export function captureManagedProviderCredential(signal: AbortSignal): Promise<string> {
+export function managedProviderCaptureArguments(endpoint: string): readonly string[] {
+  let destination: string
+  try {
+    const parsed = new URL(endpoint)
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error('invalid destination')
+    }
+    destination = parsed.href
+  } catch {
+    throw new CatalogError('source-invalid')
+  }
+  return ['-l', 'JavaScript', '-e', MANAGED_PROVIDER_CAPTURE_SCRIPT, destination]
+}
+
+export function captureManagedProviderCredential(signal: AbortSignal, endpoint: string): Promise<string> {
   if (process.platform !== 'darwin' || signal.aborted) return Promise.reject(new CatalogError('cancelled'))
+  let args: readonly string[]
+  try {
+    args = managedProviderCaptureArguments(endpoint)
+  } catch (error) {
+    return Promise.reject(error)
+  }
   return new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/osascript', ['-l', 'JavaScript', '-e', MANAGED_PROVIDER_CAPTURE_SCRIPT], {
+    const child = spawn('/usr/bin/osascript', [...args], {
       stdio: ['ignore', 'pipe', 'ignore'],
     })
     let output = '', failed = false

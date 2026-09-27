@@ -79,9 +79,13 @@ function SchemaFormTheme({ identity, fill = false, children }: {
 
 const HostSchemaFormSurfaceContext = createContext<string | undefined>(undefined)
 
+export type HostSchemaFormOptions = SchemaFormOptionsV1 & {
+  readonly renderArrayItemSupplement?: import('./ArrayEditor.js').ArrayEditorProps['renderItemSupplement']
+}
+
 /** Host shell integration only; the public embedded SchemaForm contract remains unchanged. */
 export function HostSchemaFormPage({ form, footer, children }: {
-  readonly form: SchemaFormOptionsV1
+  readonly form: HostSchemaFormOptions
   readonly footer: ReactNode
   readonly children?: ReactNode
 }) {
@@ -101,7 +105,16 @@ export function HostSchemaFormPage({ form, footer, children }: {
 
 /** Public embedded body; field projection, presenters, validation and nested editors are Host-owned. */
 export function SchemaForm(
-  { identity, schema, value, locale = 'en-US', disabled = false, onChange, onValidationChange }: SchemaFormOptionsV1,
+  {
+    identity,
+    schema,
+    value,
+    locale = 'en-US',
+    disabled = false,
+    renderArrayItemSupplement,
+    onChange,
+    onValidationChange,
+  }: HostSchemaFormOptions,
 ) {
   const surfaceIdentity = useContext(HostSchemaFormSurfaceContext)
   const initial = useRef({ identity, value: structuredClone(value) })
@@ -146,6 +159,7 @@ export function SchemaForm(
             changed={JSON.stringify(field.value) !== JSON.stringify(ownValue(baseline, field.path))}
             disabled={disabled}
             fieldActions="menu"
+            {...(renderArrayItemSupplement === undefined ? {} : { renderArrayItemSupplement })}
             onUseDefault={() => {
               if (field.hasDefault === true) changeField(field.path, structuredClone(field.defaultValue))
             }}

@@ -1,6 +1,6 @@
 import type { Shikitor } from '@shikitor/core'
 import shikitorVendorCss from '@shikitor/core/index.css'
-import markdownEditorCss from './public-markdown-editor.css'
+import markdownEditorCss from './public-markdown-editor.css?inline'
 
 const MARKER = '@shikitor/core@1.0.2/public-markdown-editor'
 

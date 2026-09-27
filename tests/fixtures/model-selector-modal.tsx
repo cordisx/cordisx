@@ -23,6 +23,13 @@ let state = Object.freeze({
   modelProvider: 'fixture',
   model: 'model',
   modelLabel: 'Fixture Model',
+  nativeModels: [{
+    id: 'model',
+    label: 'Fixture Model',
+    disabled: false,
+    supportsFastMode: false,
+    reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'low' },
+  }],
   reasoningEffort: 'high',
   reasoningEfforts: ['low', 'high'],
 })
@@ -259,7 +266,16 @@ export async function fastAvailable() {
 }
 
 export async function reasoning(value: string, efforts: readonly string[]) {
-  state = Object.freeze({ ...state, reasoningEffort: value, reasoningEfforts: [...efforts] })
+  state = Object.freeze({
+    ...state,
+    nativeModels: state.nativeModels?.map(model =>
+      model.id === state.model
+        ? { ...model, reasoningCapabilities: { efforts: [...efforts] } }
+        : model
+    ),
+    reasoningEffort: value,
+    reasoningEfforts: [...efforts],
+  })
   for (const listener of snapshotListeners) listener()
   await settle()
 }

@@ -1,3 +1,5 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
+import { managerCopy } from '../../ui-copy.js'
 import { useSyncExternalStore } from 'react'
 import { Button } from 'tdesign-react'
 import type { NotificationCenter } from '../../notifications/model.js'
@@ -17,7 +19,13 @@ export function NotificationRulesPage({ center, locale }: { center: Notification
         )
         : null}
       {rules.length === 0
-        ? <div className="cxr-empty">{t('没有屏蔽规则', 'No muted notifications')}</div>
+        ? (
+          <EmptyState
+            icon="settings"
+            title={managerCopy(locale, 'empty.notifications')}
+            description={managerCopy(locale, 'empty.notificationsHelp')}
+          />
+        )
         : (
           <div className="cxr-notification-rule-list">
             {rules.map(rule => (

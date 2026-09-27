@@ -231,7 +231,7 @@ describe('Vite development native submission assembly', () => {
     } satisfies NativeSubmissionComposition
     let capabilities: { pluginId: string; pluginGeneration: string; token: string }[] = []
     const runHost = vi.fn(async input => {
-      const manifestUrl = /fetch\("([^"]+host-manifest\.json)"\)/u.exec(String(input.source))?.[1]
+      const manifestUrl = /fetch\("([^"]+host-manifest\.json)"\s*(?:,|\))/u.exec(String(input.source))?.[1]
       expect(manifestUrl).toBeDefined()
       const manifest = await fetch(manifestUrl!).then(response => response.json()) as { entry: string }
       const bootSource = await fetch(manifest.entry).then(response => response.text())
@@ -396,7 +396,7 @@ describe('Vite development native submission assembly', () => {
         operation: 'load',
         documentId: 'fixture',
       })).resolves.toEqual({ status: 'missing', revision: 0 })
-      const manifestUrl = /fetch\("([^"]+host-manifest\.json)"\)/u.exec(String(input.source))?.[1]
+      const manifestUrl = /fetch\("([^"]+host-manifest\.json)"\s*(?:,|\))/u.exec(String(input.source))?.[1]
       expect(manifestUrl).toBeDefined()
       const manifest = await fetch(manifestUrl!).then(response => response.json()) as { entry: string }
       const bootSource = await fetch(manifest.entry).then(response => response.text())

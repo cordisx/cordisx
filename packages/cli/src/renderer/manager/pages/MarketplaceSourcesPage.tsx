@@ -1,3 +1,5 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
+import { managerCopy } from '../../ui-copy.js'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
 import { type MarketplaceModel, projectMarketplaceSource } from '../../marketplace.js'
 import { MarketplaceSourceManager } from '../components/MarketplaceSourceManager.js'
@@ -31,7 +33,13 @@ export function MarketplaceSourcesPage({
     )
   }
   if (pluginManagement === undefined || managementSnapshot === undefined) {
-    return <div className="cxr-empty">{zh ? '当前 Host 未提供插件管理服务' : 'Plugin management is unavailable'}</div>
+    return (
+      <EmptyState
+        icon="marketplace"
+        state="unavailable"
+        title={managerCopy(locale, 'empty.pluginManagementUnavailable')}
+      />
+    )
   }
   const sources = managementSnapshot.sources.map(source => {
     const state = catalog.sourceStates.find(item => item.url === source.url)
@@ -78,7 +86,7 @@ export function MarketplaceSourcesPage({
     }
   }
   return (
-    <section className="cxr-page cxr-source-management-page">
+    <section className="cxr-page cxr-browse-page cxr-source-management-page">
       <MarketplaceSourceManager
         locale={locale}
         sources={sources}

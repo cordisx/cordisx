@@ -2,6 +2,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react'
 import type { CordisXPluginConsoleEntryV1, CordisXPluginConsolePageV1 } from '../../../contracts.js'
 import type { ManagerModel } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
+import { ActionGroup } from '../../host-ui/ActionGroup.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { SelectField } from '../../host-ui/SelectField.js'
@@ -12,6 +13,11 @@ import { createPluginConsoleStore } from '../model/console-store.js'
 export const PLUGIN_CONSOLE_REACT_STYLES = String.raw`
   .cxm-console-panel { display: grid; min-height: 0; flex: 1; grid-template-rows: auto minmax(0,1fr); gap: 0; overflow: hidden; }
   .cxm-console-controls { display: grid; min-width: 0; grid-template-columns: minmax(12rem,1fr) auto auto; align-items: center; gap: 6px; margin: 0; padding: 0; }
+  /* Expand the whole controls grid, never its search cell into adjacent buttons.
+     The workspace keeps its own overflow owner and aligned body origin. */
+  .cxr-root[data-manager-surface="pane"] .cxr-page:has(> .cxm-console-panel),
+  .cxr-root[data-manager-surface="pane"] .cxm-console-panel { overflow: visible; }
+  .cxm-console-controls { margin-inline: calc(-1 * var(--cx-search-outset, 0px)); }
   .cxm-console-filters { display: flex; min-width: 0; align-items: center; gap: 5px; }
   .cxr-ui-filter-control { --cx-filter-control-height: 30px; --cx-filter-control-gap: 6px; --cx-filter-control-radius: 7px; }
   .cxh-select-field { display: block; width: 6.75rem; min-width: 0; height: var(--cx-filter-control-height); color: var(--cx-muted,#aeb5c3); }
@@ -20,7 +26,7 @@ export const PLUGIN_CONSOLE_REACT_STYLES = String.raw`
   .cxh-select-field .t-input { box-sizing: border-box; border-color: var(--cx-border,#353a42); border-radius: var(--cx-filter-control-radius); background: var(--cx-surface-raised,#20242b); color: var(--cx-text,#d8dce3); }
   .cxh-select-field .t-input__inner { min-width: 0; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .cxh-select-field .t-input__prefix, .cxh-select-field .t-input__suffix { color: var(--cx-muted,#aeb5c3); }
-  .cxm-console-action-toolbar { position: relative; display: flex; align-items: center; gap: 0; }
+  .cxm-console-action-toolbar { position: relative; display: flex; align-items: center; }
   .cxh-more-menu { position: relative; display: inline-flex; }
   .cxh-more-menu-popup { position: absolute; top: calc(100% + 5px); right: 0; z-index: 4; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--cx-border); border-radius: 8px; background: var(--cx-surface-raised); box-shadow: 0 12px 30px var(--cx-shadow); }
   .cxh-more-menu-popup button { display: flex; align-items: center; gap: 8px; min-height: 30px; border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; color: var(--cx-text); cursor: pointer; text-align: left; font: 11px/1.3 system-ui, sans-serif; }
@@ -167,10 +173,10 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
             onChange={setSource}
           />
         </div>
-        <div
-          className="cxm-console-action-toolbar cxr-ui-action-toolbar"
+        <ActionGroup
+          className="cxm-console-action-toolbar"
           role="toolbar"
-          aria-label={managerCopy(locale, 'console.toolbar')}
+          label={managerCopy(locale, 'console.toolbar')}
         >
           <IconButton
             icon={pausedPage === undefined ? 'console-pause' : 'console-resume'}
@@ -210,7 +216,7 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
               },
             ]}
           />
-        </div>
+        </ActionGroup>
       </div>
       <div className="cxm-console-workspace" data-inspector={selected === undefined ? undefined : 'true'}>
         <div className="cxm-console-body">
