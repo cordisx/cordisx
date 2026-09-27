@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxr-fb-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g class="cxr-fb-motion cxr-fb-tag-left"><path fill="var(--cxr-fb-surface, #f7f7f5)" d="M72 38h35l11 11v70H72Z"/><circle class="cxr-fb-guide" cx="94" cy="49" r="3"/><path stroke="var(--cxr-fb-olive, #85866a)" d="M85 69h18v20H85Zm9-5v5m0 20v5"/></g>
+ <g class="cxr-fb-motion cxr-fb-tag-center"><path fill="var(--cxr-fb-soft, #eceee9)" d="M133 25h35l13 13v81h-48Z"/><circle class="cxr-fb-guide" cx="156" cy="38" r="3"/><path stroke="var(--cxr-fb-coral, #a17c74)" d="m156 65 12 12-12 12-12-12Z"/></g>
+ <g class="cxr-fb-motion cxr-fb-tag-right"><path fill="var(--cxr-fb-surface, #f7f7f5)" d="M196 38h35l11 11v70h-46Z"/><circle class="cxr-fb-guide" cx="218" cy="49" r="3"/><path stroke="var(--cxr-fb-olive, #85866a)" d="M207 73h20m-20 9h20m-15-14v21m10-21v21"/></g>
+ <g data-fixed="bundle-label"><path fill="var(--cxr-fb-soft, #eceee9)" d="M59 113h194v35H59l9-17Z"/><circle stroke="var(--cxr-fb-olive, #85866a)" cx="156" cy="131" r="8"/><path stroke="var(--cxr-fb-olive, #85866a)" d="M152 131h8m-4-4v8"/><path class="cxr-fb-detail" d="M83 130h44m59 0h44"/></g>
+</g></svg>

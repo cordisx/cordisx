@@ -201,7 +201,7 @@ describe('binding catalog Manager', () => {
       expect(toggle.disabled).toBe(true)
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
       expect(fixture.element('.cxms-provider-identity').textContent).toContain('Provider A')
-      expect(fixture.element('.cxms-model-count').textContent).toBe('No models')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No models')
       expect((fixture.element('.cxmc-models') as HTMLUListElement).hidden).toBe(true)
 
       await fixture.click('[aria-label="Diagnostics: Provider A"]')
@@ -224,7 +224,7 @@ describe('binding catalog Manager', () => {
         await host.client.refresh()
       })
       expect(toggle.disabled).toBe(true)
-      expect(fixture.element('.cxms-model-count').textContent).toBe('No selectable models')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No selectable models')
 
       await fixture.click('[aria-label="Model visibility"]')
       await act(async () => {
@@ -238,7 +238,7 @@ describe('binding catalog Manager', () => {
       await fixture.type('[aria-label="Search services or models"]', 'not-present')
       expect(toggle.disabled).toBe(true)
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
-      expect(fixture.element('.cxms-model-count').textContent).toBe('No matching models')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No matching models')
       expect(fixture.element('.cxms-provider-identity').textContent).toContain('Provider A')
     } finally {
       host.client.dispose()
@@ -332,7 +332,7 @@ describe('binding catalog Manager', () => {
       [...fixture.document.querySelectorAll('[data-model-id]')].map(row => row.getAttribute('data-model-id'))
     try {
       await render(new Set())
-      expect(fixture.element('.cxms-model-count').textContent).toBe('Models: 3')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('Models: 3')
       expect(visibleIds()).toEqual(['supported-ready', 'supported-blocked', 'supported-offline'])
 
       await render(new Set(['blocked']))

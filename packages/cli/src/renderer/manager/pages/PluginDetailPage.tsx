@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useState } from 'react'
 import { projectPermissionCapabilityName } from '../../../permission-locales.js'
 import { Button } from 'tdesign-react'
@@ -131,7 +132,14 @@ export function PluginDetailPage(
   if (route.kind !== 'plugin') return null
   const plugin = snapshot.plugins.find(item => item.id === route.pluginId)
   if (plugin === undefined) {
-    return <div className="cxr-empty">{managerCopy(snapshot.localization.locale, 'plugins.missing')}</div>
+    return (
+      <EmptyState
+        icon="plugins"
+        family="plugins"
+        presentation="compact"
+        title={managerCopy(snapshot.localization.locale, 'plugins.missing')}
+      />
+    )
   }
   const permissions = snapshot.permissions.filter(item =>
     item.identity.id === plugin.id && item.identity.source === plugin.source
@@ -247,10 +255,16 @@ export function PluginDetailPage(
       />
       {route.page === 'readme' && (
         <div role="tabpanel" aria-label="README">
-          <MarkdownDocument
-            source={plugin.readme ?? plugin.description
-              ?? managerCopy(snapshot.localization.locale, 'plugins.no-readme')}
-          />
+          {(plugin.readme ?? plugin.description) !== undefined
+            ? <MarkdownDocument source={(plugin.readme ?? plugin.description)!} />
+            : (
+              <EmptyState
+                icon="plugins"
+                family="plugins"
+                presentation="compact"
+                title={managerCopy(snapshot.localization.locale, 'plugins.no-readme')}
+              />
+            )}
         </div>
       )}
       {route.page === 'config' && (
@@ -316,7 +330,14 @@ export function PluginDetailPage(
             </div>
           ))}
           {permissions.length === 0 && runtimeExactPermissions.length === 0
-            ? <div className="cxr-empty">{managerCopy(snapshot.localization.locale, 'plugins.no-permissions')}</div>
+            ? (
+              <EmptyState
+                icon="plugins"
+                family="plugins"
+                presentation="compact"
+                title={managerCopy(snapshot.localization.locale, 'plugins.no-permissions')}
+              />
+            )
             : null}
         </div>
       )}
@@ -364,12 +385,16 @@ export function PluginDetailPage(
             ))}
             {visiblePoints.length === 0
               ? (
-                <div className="cxr-empty">
-                  {managerCopy(
+                <EmptyState
+                  icon="plugins"
+                  family="plugins"
+                  presentation="compact"
+                  state={pointUsage.length === 0 ? 'empty' : 'search'}
+                  title={managerCopy(
                     snapshot.localization.locale,
                     pointUsage.length === 0 ? 'plugins.no-extension-points' : 'plugins.no-matching-extension-points',
                   )}
-                </div>
+                />
               )
               : null}
           </div>
@@ -401,12 +426,16 @@ export function PluginDetailPage(
             ))}
             {visibleRoutes.length === 0
               ? (
-                <div className="cxr-empty">
-                  {managerCopy(
+                <EmptyState
+                  icon="plugins"
+                  family="plugins"
+                  presentation="compact"
+                  state={routes.length === 0 ? 'empty' : 'search'}
+                  title={managerCopy(
                     snapshot.localization.locale,
                     routes.length === 0 ? 'plugins.no-routes' : 'plugins.no-matching-routes',
                   )}
-                </div>
+                />
               )
               : null}
           </div>

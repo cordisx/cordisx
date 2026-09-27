@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { managerCopy } from '../../ui-copy.js'
 import { Select } from 'tdesign-react'
 import type { CordisXPermissionPolicy } from '../../../contracts.js'
@@ -22,7 +23,9 @@ export function PermissionDetailPage(
     item.identity.id === route.pluginId && item.capability === route.capability
     && item.fingerprint === route.fingerprint
   )
-  if (permission === undefined) return <div className="cxr-empty">权限记录已不存在</div>
+  if (permission === undefined) {
+    return <EmptyState icon="permissions" family="plugins" presentation="compact" title={'权限记录已不存在'} />
+  }
   const certifiedAutomatic = permission.authorizationOrigin === 'certified-implicit' && permission.policy === 'ask'
   return (
     <section className="cxr-page cxr-grid">

@@ -1,0 +1,9 @@
+.cxr-fm-scene { display:block; width:100%; height:auto; overflow:visible; color:var(--cxr-fm-ink,currentColor); }
+.cxr-fm-scene .cxr-fm-detail { stroke-width:1.1; stroke-opacity:.52; }
+.cxr-fm-scene .cxr-fm-guide { stroke-width:1; stroke-opacity:.24; }
+
+.cxr-fm-scene .cxr-fm-discovery-lens { animation:cxr-fm-discover 12s cubic-bezier(.22,.68,.32,1) infinite; }
+@keyframes cxr-fm-discover { 0%,14%,45%,100% { transform:translate(0,0); } 24%,31% { transform:translate(-26px,-12px); } }
+
+.cxr-fm-scene[data-motion="low"] .cxr-fm-motion { animation:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .cxr-fm-scene .cxr-fm-motion { animation:none; transform:none; } }

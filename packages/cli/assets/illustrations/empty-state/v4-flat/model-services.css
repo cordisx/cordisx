@@ -1,0 +1,9 @@
+.cxr-fms-scene { display:block; width:100%; height:auto; overflow:visible; color:var(--cxr-fms-ink,currentColor); }
+.cxr-fms-scene .cxr-fms-detail { stroke-width:1.1; stroke-opacity:.52; }
+.cxr-fms-scene .cxr-fms-guide { stroke-width:1; stroke-opacity:.24; }
+
+.cxr-fms-scene .cxr-fms-model-peek { animation:cxr-fms-browse 12s cubic-bezier(.22,.68,.32,1) infinite; }
+@keyframes cxr-fms-browse { 0%,16%,44%,100% { transform:translateX(0); } 25%,31% { transform:translateX(20px); } }
+
+.cxr-fms-scene[data-motion="low"] .cxr-fms-motion { animation:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .cxr-fms-scene .cxr-fms-motion { animation:none; transform:none; } }

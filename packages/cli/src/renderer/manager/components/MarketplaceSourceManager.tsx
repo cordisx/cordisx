@@ -214,13 +214,17 @@ export function MarketplaceSourceManager({
         {visibleSources.length === 0
           ? (
             <EmptyState
+              family="marketplace-sources"
               icon="marketplace"
               state={query.trim() ? 'search' : 'empty'}
               title={query.trim() ? copy.noMatches : copy.empty}
               description={query.trim() ? managerCopy(locale, 'empty.searchHelp') : undefined}
               action={query.trim()
                 ? { label: managerCopy(locale, 'empty.clearSearch'), onClick: () => setQuery('') }
-                : { label: copy.add, onClick: () => onEdit() }}
+                : {
+                  label: copy.add,
+                  onClick: () => onEdit(),
+                }}
             />
           )
           : null}

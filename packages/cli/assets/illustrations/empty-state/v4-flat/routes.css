@@ -1,0 +1,14 @@
+.cxfr-scene{display:block;width:100%;height:auto;overflow:visible;color:var(--cxfr-ink,currentColor)}
+.cxfr-paper{fill:var(--cxfr-paper,Canvas)} .cxfr-detail{stroke-width:1;stroke-opacity:.48}
+.cxfr-scene[data-variant="compact"]{max-width:224px}
+
+.cxfr-route-dot{opacity:0;offset-path:path('M44 124H84Q92 124 92 116V90H124');offset-rotate:0deg;animation:cxfr-route 12s ease-in-out infinite}
+.cxfr-tab-motion{animation:cxfr-tab 12s cubic-bezier(.22,.68,.32,1) infinite}
+.cxfr-page-mark{animation:cxfr-reading 12s ease-in-out infinite}
+@keyframes cxfr-route{0%,17%,57%,100%{opacity:0;offset-distance:0%}21%{opacity:1;offset-distance:0%}46%{opacity:1;offset-distance:100%}51%{opacity:0;offset-distance:100%}58%,99%{opacity:0;offset-distance:0%}}
+@keyframes cxfr-tab{0%,55%,100%{opacity:1;transform:translateX(0)}63%,72%{opacity:1;transform:translateX(18px)}81%,90%{opacity:0;transform:translateX(30px)}91%,94%{opacity:0;transform:translateX(0)}}
+@keyframes cxfr-reading{0%,23%,58%,100%{opacity:.5}38%,47%{opacity:1}}
+
+.cxfr-scene[data-variant="search"] *, .cxfr-scene[data-motion="low"] *{animation:none}
+.cxfr-scene[data-variant="search"] .cxfr-route-dot,.cxfr-scene[data-motion="low"] .cxfr-route-dot{opacity:0}
+@media(prefers-reduced-motion:reduce){.cxfr-scene *{animation:none}.cxfr-route-dot{opacity:0!important}}

@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useEffect, useState } from 'react'
 import { projectPermissionCapabilityName } from '../../../permission-locales.js'
 import type { PluginManagementSnapshot } from '../../../management/contracts.js'
@@ -212,7 +213,9 @@ export function MarketplacePluginPage({
     return () => controller.abort()
   }, [manager, plugin])
   if (identity === undefined) return null
-  if (plugin === undefined) return <div className="cxr-empty">{copy.missing}</div>
+  if (plugin === undefined) {
+    return <EmptyState icon="marketplace" family="marketplace" presentation="compact" title={copy.missing} />
+  }
   const projection = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
   const installed = managerSnapshot.plugins.find(item => item.id === plugin.id && item.source === plugin.source)
   const readme = installed?.readme ?? marketplaceReadme
@@ -410,12 +413,24 @@ export function MarketplacePluginPage({
       {tab === 'readme' && (
         <div role="tabpanel" aria-label={copy.tabs.readme}>
           {readme === undefined
-            ? <div className="cxr-empty" aria-busy="true">{copy.loadingReadme}</div>
+            ? (
+              <EmptyState
+                icon="marketplace"
+                family="marketplace"
+                presentation="compact"
+                state="loading"
+                title={copy.loadingReadme}
+              />
+            )
             : readme === null
             ? (
-              <div className="cxr-empty">
-                {readmeError === undefined ? copy.noReadme : `${copy.readmeUnavailable}：${readmeError}`}
-              </div>
+              <EmptyState
+                icon="marketplace"
+                family="marketplace"
+                presentation="compact"
+                state={readmeError === undefined ? 'empty' : 'error'}
+                title={readmeError === undefined ? copy.noReadme : `${copy.readmeUnavailable}：${readmeError}`}
+              />
             )
             : <MarkdownDocument source={readme} />}
         </div>
@@ -445,12 +460,24 @@ export function MarketplacePluginPage({
             ))}
             {permissions.length === 0
               ? (
-                <div className="cxr-empty">
-                  {installed === undefined ? copy.permissionsUnavailable : copy.noPermissions}
-                </div>
+                <EmptyState
+                  icon="marketplace"
+                  family="marketplace"
+                  presentation="compact"
+                  state={installed === undefined ? 'unavailable' : 'empty'}
+                  title={installed === undefined ? copy.permissionsUnavailable : copy.noPermissions}
+                />
               )
               : visiblePermissions.length === 0
-              ? <div className="cxr-empty">{copy.noMatchingPermissions}</div>
+              ? (
+                <EmptyState
+                  icon="marketplace"
+                  family="marketplace"
+                  presentation="compact"
+                  state="search"
+                  title={copy.noMatchingPermissions}
+                />
+              )
               : null}
           </div>
         </div>

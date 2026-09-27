@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxr-fh-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g data-fixed="folder-back"><path fill="var(--cxr-fh-soft, #eceee9)" d="M54 70V56q0-7 7-7h49l15 14h131q8 0 8 8v71q0 9-9 9H63q-9 0-9-9Z"/></g>
+ <g data-fixed="stored-page"><rect fill="var(--cxr-fh-surface, #f7f7f5)" x="159" y="49" width="64" height="82" rx="6"/><path stroke="var(--cxr-fh-coral, #a17c74)" d="m191 63 9 9-9 9-9-9Z"/><path class="cxr-fh-detail" d="M175 95h32m-32 11h24"/></g>
+ <g class="cxr-fh-motion cxr-fh-retrievable-page"><rect fill="var(--cxr-fh-surface, #f7f7f5)" x="94" y="39" width="60" height="92" rx="6"/><path stroke="var(--cxr-fh-olive, #85866a)" d="M116 54h16v18h-16Z"/><path class="cxr-fh-detail" d="M107 88h33m-33 11h24"/></g>
+ <g data-fixed="folder-front"><path fill="var(--cxr-fh-surface, #f7f7f5)" d="M54 88q0-8 8-8h196q8 0 8 8v56q0 8-8 8H62q-8 0-8-8Z"/><path class="cxr-fh-guide" d="M70 93h180"/><path fill="var(--cxr-fh-soft, #eceee9)" stroke="var(--cxr-fh-olive, #85866a)" d="M75 110h70v21H75Z"/><path stroke="var(--cxr-fh-olive, #85866a)" d="M88 120h25"/></g>
+</g></svg>

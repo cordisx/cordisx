@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxfn-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g transform="translate(53 31) rotate(-7 27 45)" class="cxfn-paper" stroke-opacity=".58">
+  <rect width="54" height="89" rx="5"/>
+  <path class="cxfn-detail" d="M12 16h28M12 34h9m7 0h13M12 52h9m7 0h13M12 70h9m7 0h13"/>
+ </g>
+ <g class="cxfn-bell-motion">
+  <path class="cxfn-paper" d="M132 48c22 0 34 17 34 39 0 15 5 25 13 32H85c9-8 13-18 13-33 0-22 13-38 34-38Z"/>
+  <path d="M124 48v-7a8 8 0 0 1 16 0v7"/>
+  <path class="cxfn-detail" d="M108 77c1-8 5-14 11-17M94 116h75"/>
+  <path d="M124 126a8 8 0 0 0 16 0"/>
+ </g>
+ <g transform="translate(174 72) rotate(6 42 29)">
+  <g class="cxfn-message-motion">
+   <path class="cxfn-paper" d="M7 0h70q7 0 7 7v39q0 7-7 7H25L12 64V53H7q-7 0-7-7V7q0-7 7-7Z"/>
+   <circle cx="17" cy="17" r="3" fill="var(--cxfn-accent)" stroke="none"/>
+   <path class="cxfn-detail" d="M29 17h37M14 31h49M14 39h31"/>
+  </g>
+ </g>
+ <g stroke-width="1.1" stroke="var(--cxfn-accent)" opacity=".65"><path d="M189 42q4 6 4 13"/><circle cx="276" cy="141" r="4"/></g>
+ <circle cx="37" cy="137" r="2.5" fill="var(--cxfn-warm)" stroke="none" opacity=".6"/>
+ </g></svg>

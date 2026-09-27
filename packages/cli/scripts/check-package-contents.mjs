@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { extract as extractTar } from 'tar'
+import { verifyEmptyStateAssets } from './empty-state-assets.mjs'
 import { npmPackItem } from '../../../scripts/npm-pack-report.mjs'
 import {
   NATIVE_HELPER_MANIFEST,
@@ -54,6 +55,7 @@ try {
     'renderer/host-ui/search.css',
     'renderer/host-ui/action-group.css',
     'renderer/host-ui/empty-state.css',
+    'renderer/host-ui/empty-state-illustration-theme.css',
     'renderer/model-providers.css',
     'renderer/manager/manager-browse.css',
     'renderer/manager/manager-navigation.css',
@@ -118,7 +120,12 @@ try {
     }
   }
   // Illustration imports survive tsc and must resolve in the installed graph.
-  for (const relative of ['illustrations/model-services.svg', 'illustrations/model-services.css']) {
+  for (
+    const relative of [
+      ...['illustrations/model-services.svg', 'illustrations/model-services.css'],
+      ...verifyEmptyStateAssets(path.join(repositoryRoot, 'packages/cli/assets')),
+    ]
+  ) {
     const source = readFileSync(path.join(repositoryRoot, 'packages/cli/assets', relative))
     const bundled = readFileSync(path.join(repositoryRoot, 'packages/cli/dist/assets', relative))
     const tarball = readFileSync(path.join(extractedRoot, 'package/dist/assets', relative))
@@ -126,6 +133,8 @@ try {
       throw new Error(`packaged illustration differs from source: ${relative}`)
     }
   }
+  verifyEmptyStateAssets(path.join(repositoryRoot, 'packages/cli/dist/assets'))
+  verifyEmptyStateAssets(path.join(extractedRoot, 'package/dist/assets'))
   for (const skillName of bundledSkillNames) {
     const sourceSkillRoot = path.join(repositoryRoot, 'skills', skillName)
     const bundledSkillRoot = path.join(repositoryRoot, 'packages/cli/dist/skills', skillName)

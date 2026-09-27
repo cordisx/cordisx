@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxr-fs-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g class="cxr-fs-guide" data-fixed="source-spine"><path d="M70 44h20q9 0 9 9v73q0 9-9 9H70m9-45h20"/></g>
+ <g data-fixed="source-markers"><rect fill="var(--cxr-fs-soft, #eceee9)" x="42" y="30" width="28" height="28" rx="7"/><path stroke="var(--cxr-fs-olive, #85866a)" d="M50 38h12v12H50Z"/>
+ <circle fill="var(--cxr-fs-surface, #f7f7f5)" cx="65" cy="90" r="14"/><path stroke="var(--cxr-fs-coral, #a17c74)" d="m65 83 7 7-7 7-7-7Z"/>
+ <rect fill="var(--cxr-fs-surface, #f7f7f5)" x="42" y="121" width="28" height="28" rx="7"/><path stroke="var(--cxr-fs-olive, #85866a)" d="M50 135h12m-6-6v12"/></g>
+ <g data-fixed="back-source-page"><rect fill="var(--cxr-fs-soft, #eceee9)" x="143" y="43" width="114" height="115" rx="7"/><path class="cxr-fs-guide" d="M155 139h57"/></g>
+ <g class="cxr-fs-motion cxr-fs-source-page"><rect fill="var(--cxr-fs-surface, #f7f7f5)" x="123" y="25" width="114" height="115" rx="7"/><path stroke="var(--cxr-fs-olive, #85866a)" d="M138 39h14v14h-14Z"/><path class="cxr-fs-detail" d="M164 42h53m-53 9h33M138 72h75m-75 14h61m-61 14h72m-72 14h48"/><path class="cxr-fs-guide" d="M138 61h84"/></g>
+</g></svg>

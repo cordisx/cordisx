@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ManagerModel } from '../../manager.js'
 import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
@@ -136,10 +137,26 @@ export function ManagerContentPage(
         aria-labelledby={activeTab === undefined ? undefined : `${panelId}-${activeTab.id}`}
       >
         {state === 'loading'
-          ? <div className="cxr-notice" role="status">{managerCopy(locale, 'manager.content.loading')}</div>
+          ? (
+            <EmptyState
+              icon="routes"
+              family="routes"
+              presentation="compact"
+              state="loading"
+              title={managerCopy(locale, 'manager.content.loading')}
+            />
+          )
           : null}
         {state === 'error'
-          ? <div className="cxr-notice" role="alert">{managerCopy(locale, 'manager.content.failed')}</div>
+          ? (
+            <EmptyState
+              icon="routes"
+              family="routes"
+              presentation="compact"
+              state="error"
+              title={managerCopy(locale, 'manager.content.failed')}
+            />
+          )
           : null}
         <div
           ref={seat}

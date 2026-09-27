@@ -332,6 +332,7 @@ export function PluginBundlesPage({ snapshot, router, query }: PluginBundlesPage
       {bundles.length === 0
         ? (
           <EmptyState
+            family="plugin-bundles"
             icon="plugins"
             state={normalized ? 'search' : 'empty'}
             title={managerCopy(snapshot.localization.locale, normalized ? 'empty.bundleMatches' : 'empty.bundles')}

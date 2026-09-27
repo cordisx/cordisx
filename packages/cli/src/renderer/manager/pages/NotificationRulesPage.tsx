@@ -10,7 +10,10 @@ export function NotificationRulesPage({ center, locale }: { center: Notification
   const rules = center.getRules()
   const t = (cn: string, en: string) => zh ? cn : en
   return (
-    <section className="cxr-page cxr-notification-rules" data-notification-rules-page="true">
+    <section
+      className={`cxr-page cxr-notification-rules${rules.length === 0 ? ' cxr-empty-page' : ''}`}
+      data-notification-rules-page="true"
+    >
       {center.persistenceError
         ? (
           <div className="cxr-notice" role="alert">
@@ -21,6 +24,7 @@ export function NotificationRulesPage({ center, locale }: { center: Notification
       {rules.length === 0
         ? (
           <EmptyState
+            family="notification-rules"
             icon="settings"
             title={managerCopy(locale, 'empty.notifications')}
             description={managerCopy(locale, 'empty.notificationsHelp')}

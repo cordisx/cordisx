@@ -9,6 +9,8 @@
     "**/dist/**",
     "**/build/**",
     "package-lock.json",
+    // Approved immutable artwork is pinned by receipt; preserve original SVG/CSS bytes.
+    "packages/cli/assets/illustrations/empty-state/v4-flat/*.css",
     // Preserve the bytes of the versioned public Host migration schema.
     "packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json",
     // Security smoke packages pin the original runtime-manifest bytes.

@@ -1,0 +1,11 @@
+.cxfn-scene{display:block;width:100%;height:auto;overflow:visible;color:var(--cxfn-ink,currentColor)}
+.cxfn-paper{fill:var(--cxfn-paper,Canvas)} .cxfn-detail{stroke-width:1;stroke-opacity:.48}
+.cxfn-scene[data-variant="compact"]{max-width:224px}
+
+.cxfn-bell-motion{transform-origin:132px 41px;animation:cxfn-sway 12s ease-in-out infinite}
+.cxfn-message-motion{animation:cxfn-message 12s cubic-bezier(.22,.68,.32,1) infinite}
+@keyframes cxfn-sway{0%,15%,42%,100%{transform:rotate(0)}22%{transform:rotate(-5deg)}29%{transform:rotate(4deg)}35%{transform:rotate(-2deg)}}
+@keyframes cxfn-message{0%,14%,100%{opacity:0;transform:translate(24px,0)}21%,59%{opacity:1;transform:translate(0,0)}68%,82%{opacity:0;transform:translate(0,-24px)}83%,99%{opacity:0;transform:translate(24px,0)}}
+
+.cxfn-scene[data-variant="search"] *, .cxfn-scene[data-motion="low"] *{animation:none}
+@media(prefers-reduced-motion:reduce){.cxfn-scene *{animation:none}}

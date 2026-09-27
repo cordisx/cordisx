@@ -1,0 +1,9 @@
+.cxr-fs-scene { display:block; width:100%; height:auto; overflow:visible; color:var(--cxr-fs-ink,currentColor); }
+.cxr-fs-scene .cxr-fs-detail { stroke-width:1.1; stroke-opacity:.52; }
+.cxr-fs-scene .cxr-fs-guide { stroke-width:1; stroke-opacity:.24; }
+
+.cxr-fs-scene .cxr-fs-source-page { transform-origin:180px 83px; animation:cxr-fs-read 12s cubic-bezier(.22,.68,.32,1) infinite; }
+@keyframes cxr-fs-read { 0%,18%,49%,100% { transform:translateY(0) rotate(0); } 28%,35% { transform:translateY(-14px) rotate(-3deg); } }
+
+.cxr-fs-scene[data-motion="low"] .cxr-fs-motion { animation:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .cxr-fs-scene .cxr-fs-motion { animation:none; transform:none; } }

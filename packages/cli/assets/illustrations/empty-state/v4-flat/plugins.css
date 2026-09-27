@@ -1,0 +1,9 @@
+.cxr-fp-scene { display:block; width:100%; height:auto; overflow:visible; color:var(--cxr-fp-ink,currentColor); }
+.cxr-fp-scene .cxr-fp-detail { stroke-width:1.1; stroke-opacity:.52; }
+.cxr-fp-scene .cxr-fp-guide { stroke-width:1; stroke-opacity:.24; }
+
+.cxr-fp-scene .cxr-fp-fit-piece { animation:cxr-fp-fit 12s cubic-bezier(.22,.68,.32,1) infinite; }
+@keyframes cxr-fp-fit { 0%,12%,40%,100% { transform:translateX(0); } 20%,27% { transform:translateX(-22px); } }
+
+.cxr-fp-scene[data-motion="low"] .cxr-fp-motion { animation:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .cxr-fp-scene .cxr-fp-motion { animation:none; transform:none; } }

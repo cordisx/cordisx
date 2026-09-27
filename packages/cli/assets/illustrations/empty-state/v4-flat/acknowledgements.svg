@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxfa-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g transform="translate(54 39) rotate(-9 38 54)">
+  <g class="cxfa-leaf-motion">
+   <rect class="cxfa-paper" width="76" height="109" rx="5" stroke-opacity=".65"/>
+   <path class="cxfa-detail" d="M14 18h42M14 27h28M14 51h35M14 60h43M14 81h24M14 90h35"/>
+  </g>
+ </g>
+ <g transform="translate(122 28)">
+  <rect class="cxfa-paper" width="105" height="125" rx="5"/>
+  <path class="cxfa-detail" d="M16 18h57M16 27h39M16 70h68M16 107h68"/>
+  <circle cx="18" cy="50" r="3.5" stroke="var(--cxfa-accent)"/>
+  <path class="cxfa-signature-a" pathLength="100" d="M30 55q7-20 10-8t12-3q5-6 6 2t13-4q5-7 6 0t12-3" stroke="var(--cxfa-accent)"/>
+  <circle cx="18" cy="87" r="3.5" stroke="var(--cxfa-warm)"/>
+  <path class="cxfa-signature-b" pathLength="100" d="M31 92q5-11 8-4t11-3q5-7 5 1t15-5" stroke="var(--cxfa-warm)"/>
+ </g>
+ <g transform="translate(238 92) rotate(7 22 25)">
+  <rect class="cxfa-paper" width="43" height="50" rx="4"/>
+  <path class="cxfa-detail" d="M10 13h24M10 23h16M10 33h20"/>
+ </g>
+ <path d="M260 36c-6-5-11-1-10 4s8 9 12 6 4-7 0-9m-7 13c4 4 10 4 13 0" stroke="var(--cxfa-accent)" stroke-opacity=".6"/>
+ <circle cx="35" cy="119" r="2.5" fill="var(--cxfa-warm)" stroke="none" opacity=".55"/>
+ </g></svg>

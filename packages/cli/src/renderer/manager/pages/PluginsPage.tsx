@@ -165,6 +165,7 @@ export function PluginsPage(
         {empty
           ? (
             <EmptyState
+              family="plugins"
               icon="plugins"
               state={normalized ? 'search' : 'empty'}
               title={managerCopy(snapshot.localization.locale, normalized ? 'plugins.no-matches' : 'empty.plugins')}

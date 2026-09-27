@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useMemo, useState, useSyncExternalStore } from 'react'
 import type { CordisXPluginConsoleEntryV1, CordisXPluginConsolePageV1 } from '../../../contracts.js'
 import type { ManagerModel } from '../../manager.js'
@@ -240,11 +241,15 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
           >
             {entries.length === 0
               ? (
-                <div className="cxm-console-empty">
-                  {page.entries.length === 0
+                <EmptyState
+                  icon="plugins"
+                  family="plugins"
+                  presentation="compact"
+                  state={page.entries.length === 0 ? 'empty' : 'search'}
+                  title={page.entries.length === 0
                     ? managerCopy(locale, 'console.empty')
                     : managerCopy(locale, 'console.no-matches')}
-                </div>
+                />
               )
               : entries.map(entry => (
                 <button

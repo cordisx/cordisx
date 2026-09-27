@@ -1,0 +1,497 @@
+{
+  "designVersion": "v4-flat",
+  "files": [
+    {
+      "file": "plugins.svg",
+      "sha256": "5947074e214bf998f2f060b105f64c44577ad1e590cedab689145617c4886da8",
+      "bytes": 1121
+    },
+    {
+      "file": "plugins.css",
+      "sha256": "15a5d7a2513d114eed7fddcdc4570eec86690b6a9919a9f09e72ef92e5a87f58",
+      "bytes": 657
+    },
+    {
+      "file": "model-services.svg",
+      "sha256": "bd21a4cf5bc30771d86898603d6b3c6fb6bc52686727ffe75a831730e8b9b9a3",
+      "bytes": 1803
+    },
+    {
+      "file": "model-services.css",
+      "sha256": "a48eb3ec09b8e4873b382348e53fe40316a3b11bb31a90669ed1458c2ff5148c",
+      "bytes": 677
+    },
+    {
+      "file": "marketplace.svg",
+      "sha256": "95ef7cc649f1bcc42a1a271d3c6fb160f2942702e99432e80adadf632e72d51a",
+      "bytes": 1256
+    },
+    {
+      "file": "marketplace.css",
+      "sha256": "270726f6c9fe43ad67ff03ce7bf65ed9315e7ba7800ab479f1a5a263f259179e",
+      "bytes": 678
+    },
+    {
+      "file": "marketplace-sources.svg",
+      "sha256": "56f13ef08730e1c42bdbaf664373b59ecde8ab8788c9cd951415423c1268a5d0",
+      "bytes": 1332
+    },
+    {
+      "file": "marketplace-sources.css",
+      "sha256": "fc6cf81c48c994c8ada849347c4c50a14ac697609118b569a6cd7d7425ef872c",
+      "bytes": 714
+    },
+    {
+      "file": "plugin-bundles.svg",
+      "sha256": "935f93a9fb384c575bae530a887c9feb59aba300c0746d0e95c45d56a64942ad",
+      "bytes": 1274
+    },
+    {
+      "file": "plugin-bundles.css",
+      "sha256": "10b50e8900020722d5877d85a69d871e6068988841d50bd653d9b13fae5aa072",
+      "bytes": 1132
+    },
+    {
+      "file": "hidden-marketplace-plugins.svg",
+      "sha256": "c39299dec7879b06235d4b313138ed850477194fa63d805a5867a2f3e1eb6fab",
+      "bytes": 1214
+    },
+    {
+      "file": "hidden-marketplace-plugins.css",
+      "sha256": "d3fa5fb2a5594a806c0ba0550cfb32411e4c30ece50c3a6196eb641776a5dfa6",
+      "bytes": 674
+    },
+    {
+      "file": "extension-points.svg",
+      "sha256": "081625a6125152e39747652d84e6a43025e6b5a8dffa3d757e75eb41c87c1c3f",
+      "bytes": 1437
+    },
+    {
+      "file": "extension-points.css",
+      "sha256": "d676c8f5435ee79efd37fb8363ec97ab05e37b74d566e66bc78893b88dd09f79",
+      "bytes": 630
+    },
+    {
+      "file": "routes.svg",
+      "sha256": "4ec4457eb96f4bb499fca25d7d07b68e230e4e834254114e431edbf97ff489b5",
+      "bytes": 1353
+    },
+    {
+      "file": "routes.css",
+      "sha256": "d5a72f2d6c20cf687d1f7c6444bf50ba8ba487a51143210ff979735a3d9ddfce",
+      "bytes": 1316
+    },
+    {
+      "file": "notification-rules.svg",
+      "sha256": "3c83f006be9aead1705c8c0fd4ad96258dcafecc22175db8092634e50eccc5ce",
+      "bytes": 1285
+    },
+    {
+      "file": "notification-rules.css",
+      "sha256": "fa8d75995cc77f6817a039ea6bad91d129f4897f1e5e40ce0f5f2856dec3c671",
+      "bytes": 936
+    },
+    {
+      "file": "acknowledgements.svg",
+      "sha256": "e5185e89f308ef2da9a5deaadd5804430a7d2a75af932e64c79eeb3857070eea",
+      "bytes": 1418
+    },
+    {
+      "file": "acknowledgements.css",
+      "sha256": "51d643d5d7eff29ba29f8aa1d3cf9f3228457eaeb38f4d0119fd1a00d0a9cdde",
+      "bytes": 1266
+    }
+  ],
+  "ownerThemes": {
+    "plugins": {
+      "prefix": "cxr-fp",
+      "variables": [
+        "--cxr-fp-ink",
+        "--cxr-fp-surface",
+        "--cxr-fp-soft",
+        "--cxr-fp-olive",
+        "--cxr-fp-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fp-ink": "#858a8d",
+          "--cxr-fp-surface": "#f7f7f5",
+          "--cxr-fp-soft": "#eceee9",
+          "--cxr-fp-olive": "#85866a",
+          "--cxr-fp-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fp-ink": "#91969e",
+          "--cxr-fp-surface": "#24272b",
+          "--cxr-fp-soft": "#2b2f33",
+          "--cxr-fp-olive": "#a0a185",
+          "--cxr-fp-coral": "#bb9288"
+        }
+      }
+    },
+    "model-services": {
+      "prefix": "cxr-fms",
+      "variables": [
+        "--cxr-fms-ink",
+        "--cxr-fms-surface",
+        "--cxr-fms-soft",
+        "--cxr-fms-olive",
+        "--cxr-fms-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fms-ink": "#858a8d",
+          "--cxr-fms-surface": "#f7f7f5",
+          "--cxr-fms-soft": "#eceee9",
+          "--cxr-fms-olive": "#85866a",
+          "--cxr-fms-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fms-ink": "#91969e",
+          "--cxr-fms-surface": "#24272b",
+          "--cxr-fms-soft": "#2b2f33",
+          "--cxr-fms-olive": "#a0a185",
+          "--cxr-fms-coral": "#bb9288"
+        }
+      }
+    },
+    "marketplace": {
+      "prefix": "cxr-fm",
+      "variables": [
+        "--cxr-fm-ink",
+        "--cxr-fm-surface",
+        "--cxr-fm-soft",
+        "--cxr-fm-olive",
+        "--cxr-fm-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fm-ink": "#858a8d",
+          "--cxr-fm-surface": "#f7f7f5",
+          "--cxr-fm-soft": "#eceee9",
+          "--cxr-fm-olive": "#85866a",
+          "--cxr-fm-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fm-ink": "#91969e",
+          "--cxr-fm-surface": "#24272b",
+          "--cxr-fm-soft": "#2b2f33",
+          "--cxr-fm-olive": "#a0a185",
+          "--cxr-fm-coral": "#bb9288"
+        }
+      }
+    },
+    "marketplace-sources": {
+      "prefix": "cxr-fs",
+      "variables": [
+        "--cxr-fs-ink",
+        "--cxr-fs-surface",
+        "--cxr-fs-soft",
+        "--cxr-fs-olive",
+        "--cxr-fs-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fs-ink": "#858a8d",
+          "--cxr-fs-surface": "#f7f7f5",
+          "--cxr-fs-soft": "#eceee9",
+          "--cxr-fs-olive": "#85866a",
+          "--cxr-fs-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fs-ink": "#91969e",
+          "--cxr-fs-surface": "#24272b",
+          "--cxr-fs-soft": "#2b2f33",
+          "--cxr-fs-olive": "#a0a185",
+          "--cxr-fs-coral": "#bb9288"
+        }
+      }
+    },
+    "plugin-bundles": {
+      "prefix": "cxr-fb",
+      "variables": [
+        "--cxr-fb-ink",
+        "--cxr-fb-surface",
+        "--cxr-fb-soft",
+        "--cxr-fb-olive",
+        "--cxr-fb-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fb-ink": "#858a8d",
+          "--cxr-fb-surface": "#f7f7f5",
+          "--cxr-fb-soft": "#eceee9",
+          "--cxr-fb-olive": "#85866a",
+          "--cxr-fb-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fb-ink": "#91969e",
+          "--cxr-fb-surface": "#24272b",
+          "--cxr-fb-soft": "#2b2f33",
+          "--cxr-fb-olive": "#a0a185",
+          "--cxr-fb-coral": "#bb9288"
+        }
+      }
+    },
+    "hidden-marketplace-plugins": {
+      "prefix": "cxr-fh",
+      "variables": [
+        "--cxr-fh-ink",
+        "--cxr-fh-surface",
+        "--cxr-fh-soft",
+        "--cxr-fh-olive",
+        "--cxr-fh-coral"
+      ],
+      "owner": "01a0e1e0-0f3a-73b0-b862-a843a5fac813",
+      "light": {
+        "color": "#858a8d",
+        "ink": "#858a8d",
+        "surface": "#f7f7f5",
+        "soft": "#eceee9",
+        "olive": "#85866a",
+        "coral": "#a17c74",
+        "variableValues": {
+          "--cxr-fh-ink": "#858a8d",
+          "--cxr-fh-surface": "#f7f7f5",
+          "--cxr-fh-soft": "#eceee9",
+          "--cxr-fh-olive": "#85866a",
+          "--cxr-fh-coral": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#91969e",
+        "ink": "#91969e",
+        "surface": "#24272b",
+        "soft": "#2b2f33",
+        "olive": "#a0a185",
+        "coral": "#bb9288",
+        "variableValues": {
+          "--cxr-fh-ink": "#91969e",
+          "--cxr-fh-surface": "#24272b",
+          "--cxr-fh-soft": "#2b2f33",
+          "--cxr-fh-olive": "#a0a185",
+          "--cxr-fh-coral": "#bb9288"
+        }
+      }
+    },
+    "extension-points": {
+      "prefix": "cxfe",
+      "variables": [
+        "--cxfe-ink",
+        "--cxfe-paper",
+        "--cxfe-accent",
+        "--cxfe-warm"
+      ],
+      "owner": "01a0e1e0-eb65-7840-beb5-58e9db96af70",
+      "light": {
+        "color": "#8c949c",
+        "ink": "#8c949c",
+        "paper": "#f2f2ef",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfe-ink": "#8c949c",
+          "--cxfe-paper": "#f2f2ef",
+          "--cxfe-accent": "#85866a",
+          "--cxfe-warm": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#9ba2aa",
+        "ink": "#9ba2aa",
+        "paper": "#252625",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfe-ink": "#9ba2aa",
+          "--cxfe-paper": "#252625",
+          "--cxfe-accent": "#85866a",
+          "--cxfe-warm": "#a17c74"
+        }
+      }
+    },
+    "routes": {
+      "prefix": "cxfr",
+      "variables": [
+        "--cxfr-ink",
+        "--cxfr-paper",
+        "--cxfr-accent",
+        "--cxfr-warm"
+      ],
+      "owner": "01a0e1e0-eb65-7840-beb5-58e9db96af70",
+      "light": {
+        "color": "#8c949c",
+        "ink": "#8c949c",
+        "paper": "#f2f2ef",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfr-ink": "#8c949c",
+          "--cxfr-paper": "#f2f2ef",
+          "--cxfr-accent": "#85866a",
+          "--cxfr-warm": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#9ba2aa",
+        "ink": "#9ba2aa",
+        "paper": "#252625",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfr-ink": "#9ba2aa",
+          "--cxfr-paper": "#252625",
+          "--cxfr-accent": "#85866a",
+          "--cxfr-warm": "#a17c74"
+        }
+      }
+    },
+    "notification-rules": {
+      "prefix": "cxfn",
+      "variables": [
+        "--cxfn-ink",
+        "--cxfn-paper",
+        "--cxfn-accent",
+        "--cxfn-warm"
+      ],
+      "owner": "01a0e1e0-eb65-7840-beb5-58e9db96af70",
+      "light": {
+        "color": "#8c949c",
+        "ink": "#8c949c",
+        "paper": "#f2f2ef",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfn-ink": "#8c949c",
+          "--cxfn-paper": "#f2f2ef",
+          "--cxfn-accent": "#85866a",
+          "--cxfn-warm": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#9ba2aa",
+        "ink": "#9ba2aa",
+        "paper": "#252625",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfn-ink": "#9ba2aa",
+          "--cxfn-paper": "#252625",
+          "--cxfn-accent": "#85866a",
+          "--cxfn-warm": "#a17c74"
+        }
+      }
+    },
+    "acknowledgements": {
+      "prefix": "cxfa",
+      "variables": [
+        "--cxfa-ink",
+        "--cxfa-paper",
+        "--cxfa-accent",
+        "--cxfa-warm"
+      ],
+      "owner": "01a0e1e0-eb65-7840-beb5-58e9db96af70",
+      "light": {
+        "color": "#8c949c",
+        "ink": "#8c949c",
+        "paper": "#f2f2ef",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfa-ink": "#8c949c",
+          "--cxfa-paper": "#f2f2ef",
+          "--cxfa-accent": "#85866a",
+          "--cxfa-warm": "#a17c74"
+        }
+      },
+      "dark": {
+        "color": "#9ba2aa",
+        "ink": "#9ba2aa",
+        "paper": "#252625",
+        "accent": "#85866a",
+        "warm": "#a17c74",
+        "variableValues": {
+          "--cxfa-ink": "#9ba2aa",
+          "--cxfa-paper": "#252625",
+          "--cxfa-accent": "#85866a",
+          "--cxfa-warm": "#a17c74"
+        }
+      }
+    }
+  }
+}

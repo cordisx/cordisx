@@ -645,6 +645,24 @@ states:
   facts they qualify. Removing repetition must never imply stronger isolation
   or capability enforcement than the runtime provides.
 
+The shared Host `EmptyState` selects approved artwork by family from the trusted
+V4-flat registry. Whole-page collection states use a transparent 320 by 180
+scene centered in the available content seat. Detail and local states use compact
+family artwork; catalog summaries keep a smaller illustration in their existing
+status seat. Fixed search/actions and result scrolling remain owned by the page.
+About, editable source forms, and sidebar search do not invent a whole-page empty
+state. Retained bundle/hidden-plugin components do not gain routes merely to show
+artwork.
+
+Initial loading shares its family's scene and omits actions. Background refresh
+retains known content and the SVG DOM identity. Copy, error/unavailable roles and
+existing recovery commands remain state-specific. The registry uses function
+exports compatible with native HMR and memoizes only trusted SVG DOM. Exact
+owner light/dark variables and each asset's complete reduced-motion scene are
+preserved. The versioned artwork receipt pins all ten SVG/CSS pairs; build and
+package checks verify the source, dist and tarball bytes, and renderer tests use
+the real CSS `?inline` import chain.
+
 ## Accessibility and regression evidence
 
 Manager changes must audit all affected primary pages, secondary details, and

@@ -250,10 +250,14 @@
   padding-block: 24px;
 }
 
-.cxms-illustration {
-  display: block;
-  width: 100%;
-  --cxms-illustration-surface: var(--cx-surface);
-  --cxms-illustration-accent: var(--cx-primary);
-  color: var(--cx-muted);
+/* Catalog status remains a compact header seat, rather than a whole-page hero. */
+.cxms-model-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  --cxh-empty-compact-width: 48px;
+}
+
+.cxms-model-empty .cxh-empty-illustration {
+  width: var(--cxh-empty-compact-width);
 }

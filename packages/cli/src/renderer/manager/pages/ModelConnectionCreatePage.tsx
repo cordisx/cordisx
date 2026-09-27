@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useSyncExternalStore } from 'react'
 import type { ModelProviderRegistry } from '../../model-providers.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
@@ -20,7 +21,17 @@ export function ModelConnectionCreatePage({ registry, locale, close, responsesOn
   return (
     <section className="cxr-page" data-model-connection-create="true">
       <style>{css}</style>
-      {!available ? <p role="status">{managerCopy(locale, 'catalog.managementUnavailable')}</p> : null}
+      {!available
+        ? (
+          <EmptyState
+            icon="models-read"
+            family="model-services"
+            presentation="compact"
+            state="unavailable"
+            title={managerCopy(locale, 'catalog.managementUnavailable')}
+          />
+        )
+        : null}
       <ConnectionEditor
         standalone
         responsesOnly={responsesOnly}

@@ -1,0 +1,13 @@
+.cxfa-scene{display:block;width:100%;height:auto;overflow:visible;color:var(--cxfa-ink,currentColor)}
+.cxfa-paper{fill:var(--cxfa-paper,Canvas)} .cxfa-detail{stroke-width:1;stroke-opacity:.48}
+.cxfa-scene[data-variant="compact"]{max-width:224px}
+
+.cxfa-leaf-motion{animation:cxfa-reorder 12s cubic-bezier(.22,.68,.32,1) infinite}
+.cxfa-signature-a,.cxfa-signature-b{stroke-dasharray:100;stroke-dashoffset:100;animation-duration:12s;animation-timing-function:ease-in-out;animation-iteration-count:infinite}
+.cxfa-signature-a{animation-name:cxfa-script-a}.cxfa-signature-b{animation-name:cxfa-script-b}
+@keyframes cxfa-reorder{0%,40%,82%,100%{transform:translateX(0)}56%,66%{transform:translateX(-18px)}}
+@keyframes cxfa-script-a{0%,14%,100%{stroke-dashoffset:100;opacity:1}28%,80%{stroke-dashoffset:0;opacity:1}88%,98%{stroke-dashoffset:0;opacity:0}99%{stroke-dashoffset:100;opacity:0}}
+@keyframes cxfa-script-b{0%,35%,100%{stroke-dashoffset:100;opacity:1}52%,80%{stroke-dashoffset:0;opacity:1}88%,98%{stroke-dashoffset:0;opacity:0}99%{stroke-dashoffset:100;opacity:0}}
+
+.cxfa-scene[data-variant="search"] *, .cxfa-scene[data-motion="low"] *{animation:none;stroke-dashoffset:0}
+@media(prefers-reduced-motion:reduce){.cxfa-scene *{animation:none;stroke-dashoffset:0}}

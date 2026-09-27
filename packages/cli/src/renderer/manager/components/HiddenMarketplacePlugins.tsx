@@ -49,7 +49,14 @@ export function HiddenMarketplacePlugins({
           )
         })}
         {plugins.length === 0
-          ? <EmptyState icon="plugins" title={managerCopy(locale, 'empty.hiddenPlugins')} />
+          ? (
+            <EmptyState
+              family="hidden-marketplace-plugins"
+              presentation="compact"
+              icon="plugins"
+              title={managerCopy(locale, 'empty.hiddenPlugins')}
+            />
+          )
           : null}
       </div>
     </section>

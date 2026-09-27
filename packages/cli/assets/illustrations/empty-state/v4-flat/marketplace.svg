@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxr-fm-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g data-fixed="catalog-window"><rect fill="var(--cxr-fm-surface, #f7f7f5)" x="69" y="29" width="158" height="120" rx="10"/><path class="cxr-fm-guide" d="M69 54h158"/><circle fill="var(--cxr-fm-olive, #85866a)" stroke="none" cx="84" cy="42" r="2.5"/><path class="cxr-fm-detail" d="M94 42h34"/>
+ <rect fill="var(--cxr-fm-soft, #eceee9)" x="87" y="70" width="48" height="53" rx="5"/><path stroke="var(--cxr-fm-olive, #85866a)" d="M101 84h18v16h-18Zm9-6v6m-15 8h6m18 0h6"/><path class="cxr-fm-detail" d="M99 113h23"/>
+ <rect fill="var(--cxr-fm-surface, #f7f7f5)" x="150" y="70" width="59" height="53" rx="5"/><path stroke="var(--cxr-fm-coral, #a17c74)" d="m178 83 10 9-10 9-10-9Z"/><path class="cxr-fm-detail" d="M163 113h29"/></g>
+ <g class="cxr-fm-motion cxr-fm-discovery-lens"><circle fill="var(--cxr-fm-surface, #f7f7f5)" fill-opacity=".88" cx="249" cy="106" r="23"/><path d="m265 123 21 22"/><path stroke="var(--cxr-fm-olive, #85866a)" d="M240 106h18m-9-9v18"/></g>
+ <path class="cxr-fm-guide" d="M43 62v33m-9-21h18M263 35h18m-9-9v18"/>
+</g></svg>

@@ -45,6 +45,7 @@ export function ExtensionPointsPage(
         {points.length === 0
           ? (
             <EmptyState
+              family="extension-points"
               icon="contributions"
               state={normalized ? 'search' : 'empty'}
               title={managerCopy(snapshot.localization.locale, normalized ? 'extension.no-matches' : 'extension.empty')}

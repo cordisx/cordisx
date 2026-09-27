@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxr-fp-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g class="cxr-fp-guide"><path d="M52 35h44m149 0h23M51 151h50m105 0h62M63 29v15m0 95v16m205-126v17"/></g>
+ <g data-fixed="main-module"><path fill="var(--cxr-fp-soft, #eceee9)" d="M85 44h60q8 0 8 8v22c16-4 16 24 0 20v22q0 8-8 8H85q-8 0-8-8V52q0-8 8-8Z"/><path stroke="var(--cxr-fp-olive, #85866a)" d="M100 70h18v20h-18Zm9-7v7m-16 10h7m18 0h7m-16 10v7"/><path class="cxr-fp-detail" d="M99 109h30"/></g>
+ <g class="cxr-fp-motion cxr-fp-fit-piece"><path fill="var(--cxr-fp-surface, #f7f7f5)" d="M183 44h56q8 0 8 8v64q0 8-8 8h-56q-8 0-8-8V94c16 4 16-24 0-20V52q0-8 8-8Z"/><path stroke="var(--cxr-fp-coral, #a17c74)" d="m208 70 11 10-11 10-11-10Z"/><path class="cxr-fp-detail" d="M197 109h29"/></g>
+ <g transform="rotate(-8 57 131)"><rect fill="var(--cxr-fp-surface, #f7f7f5)" x="34" y="108" width="46" height="46" rx="7"/><path stroke="var(--cxr-fp-olive, #85866a)" d="M48 123h18v16H48Zm9 0v-5m0 21v5"/></g>
+</g></svg>

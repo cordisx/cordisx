@@ -1,0 +1,181 @@
+.cxh-empty-illustration[data-empty-family="plugins"] {
+  color: #858a8d;
+  --cxr-fp-ink: #858a8d;
+  --cxr-fp-surface: #f7f7f5;
+  --cxr-fp-soft: #eceee9;
+  --cxr-fp-olive: #85866a;
+  --cxr-fp-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="model-services"] {
+  color: #858a8d;
+  --cxr-fms-ink: #858a8d;
+  --cxr-fms-surface: #f7f7f5;
+  --cxr-fms-soft: #eceee9;
+  --cxr-fms-olive: #85866a;
+  --cxr-fms-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="marketplace"] {
+  color: #858a8d;
+  --cxr-fm-ink: #858a8d;
+  --cxr-fm-surface: #f7f7f5;
+  --cxr-fm-soft: #eceee9;
+  --cxr-fm-olive: #85866a;
+  --cxr-fm-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="marketplace-sources"] {
+  color: #858a8d;
+  --cxr-fs-ink: #858a8d;
+  --cxr-fs-surface: #f7f7f5;
+  --cxr-fs-soft: #eceee9;
+  --cxr-fs-olive: #85866a;
+  --cxr-fs-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="plugin-bundles"] {
+  color: #858a8d;
+  --cxr-fb-ink: #858a8d;
+  --cxr-fb-surface: #f7f7f5;
+  --cxr-fb-soft: #eceee9;
+  --cxr-fb-olive: #85866a;
+  --cxr-fb-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="hidden-marketplace-plugins"] {
+  color: #858a8d;
+  --cxr-fh-ink: #858a8d;
+  --cxr-fh-surface: #f7f7f5;
+  --cxr-fh-soft: #eceee9;
+  --cxr-fh-olive: #85866a;
+  --cxr-fh-coral: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="extension-points"] {
+  color: #8c949c;
+  --cxfe-ink: #8c949c;
+  --cxfe-paper: #f2f2ef;
+  --cxfe-accent: #85866a;
+  --cxfe-warm: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="routes"] {
+  color: #8c949c;
+  --cxfr-ink: #8c949c;
+  --cxfr-paper: #f2f2ef;
+  --cxfr-accent: #85866a;
+  --cxfr-warm: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="notification-rules"] {
+  color: #8c949c;
+  --cxfn-ink: #8c949c;
+  --cxfn-paper: #f2f2ef;
+  --cxfn-accent: #85866a;
+  --cxfn-warm: #a17c74;
+}
+
+.cxh-empty-illustration[data-empty-family="acknowledgements"] {
+  color: #8c949c;
+  --cxfa-ink: #8c949c;
+  --cxfa-paper: #f2f2ef;
+  --cxfa-accent: #85866a;
+  --cxfa-warm: #a17c74;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="plugins"] {
+  color: #91969e;
+  --cxr-fp-ink: #91969e;
+  --cxr-fp-surface: #24272b;
+  --cxr-fp-soft: #2b2f33;
+  --cxr-fp-olive: #a0a185;
+  --cxr-fp-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="model-services"] {
+  color: #91969e;
+  --cxr-fms-ink: #91969e;
+  --cxr-fms-surface: #24272b;
+  --cxr-fms-soft: #2b2f33;
+  --cxr-fms-olive: #a0a185;
+  --cxr-fms-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="marketplace"] {
+  color: #91969e;
+  --cxr-fm-ink: #91969e;
+  --cxr-fm-surface: #24272b;
+  --cxr-fm-soft: #2b2f33;
+  --cxr-fm-olive: #a0a185;
+  --cxr-fm-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="marketplace-sources"] {
+  color: #91969e;
+  --cxr-fs-ink: #91969e;
+  --cxr-fs-surface: #24272b;
+  --cxr-fs-soft: #2b2f33;
+  --cxr-fs-olive: #a0a185;
+  --cxr-fs-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="plugin-bundles"] {
+  color: #91969e;
+  --cxr-fb-ink: #91969e;
+  --cxr-fb-surface: #24272b;
+  --cxr-fb-soft: #2b2f33;
+  --cxr-fb-olive: #a0a185;
+  --cxr-fb-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="hidden-marketplace-plugins"] {
+  color: #91969e;
+  --cxr-fh-ink: #91969e;
+  --cxr-fh-surface: #24272b;
+  --cxr-fh-soft: #2b2f33;
+  --cxr-fh-olive: #a0a185;
+  --cxr-fh-coral: #bb9288;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="extension-points"] {
+  color: #9ba2aa;
+  --cxfe-ink: #9ba2aa;
+  --cxfe-paper: #252625;
+  --cxfe-accent: #85866a;
+  --cxfe-warm: #a17c74;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="routes"] {
+  color: #9ba2aa;
+  --cxfr-ink: #9ba2aa;
+  --cxfr-paper: #252625;
+  --cxfr-accent: #85866a;
+  --cxfr-warm: #a17c74;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="notification-rules"] {
+  color: #9ba2aa;
+  --cxfn-ink: #9ba2aa;
+  --cxfn-paper: #252625;
+  --cxfn-accent: #85866a;
+  --cxfn-warm: #a17c74;
+}
+
+[data-cordisx-app-theme="dark"]
+  .cxh-empty-illustration[data-empty-family="acknowledgements"] {
+  color: #9ba2aa;
+  --cxfa-ink: #9ba2aa;
+  --cxfa-paper: #252625;
+  --cxfa-accent: #85866a;
+  --cxfa-warm: #a17c74;
+}

@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import type { ManagerSnapshot } from '../../manager.js'
 import type { ManagerRouter } from '../model/routes.js'
 
@@ -14,7 +15,9 @@ export function NavigationDetailPage(
     : route.kind === 'page'
     ? snapshot.navigation.pages.find(candidate => candidate.qualifiedId === route.qualifiedId)
     : undefined
-  if (item === undefined) return <div className="cxr-empty">导航记录已不存在</div>
+  if (item === undefined) {
+    return <EmptyState icon="routes" family="routes" presentation="compact" title={'导航记录已不存在'} />
+  }
   return (
     <section className="cxr-page cxr-grid">
       <section className="cxr-section">

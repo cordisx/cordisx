@@ -1,3 +1,4 @@
+import { EmptyStateIllustration } from '../../../host-ui/EmptyStateIllustration.js'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Switch } from 'tdesign-react'
 import type {
@@ -242,7 +243,12 @@ export function CatalogBinding(
           ? t('catalog.credentialRequired')
           : rows.length > 0
           ? `${t('catalog.sourceCount')}: ${view.sourceCount}`
-          : emptyLabel}
+          : (
+            <span className="cxms-model-empty">
+              <EmptyStateIllustration family="model-services" compact search={query !== ''} />
+              {emptyLabel}
+            </span>
+          )}
       </span>
     </>
   )

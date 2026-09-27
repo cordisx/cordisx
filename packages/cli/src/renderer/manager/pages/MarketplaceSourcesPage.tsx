@@ -34,11 +34,14 @@ export function MarketplaceSourcesPage({
   }
   if (pluginManagement === undefined || managementSnapshot === undefined) {
     return (
-      <EmptyState
-        icon="marketplace"
-        state="unavailable"
-        title={managerCopy(locale, 'empty.pluginManagementUnavailable')}
-      />
+      <section className="cxr-page cxr-empty-page">
+        <EmptyState
+          family="marketplace-sources"
+          icon="marketplace"
+          state="unavailable"
+          title={managerCopy(locale, 'empty.pluginManagementUnavailable')}
+        />
+      </section>
     )
   }
   const sources = managementSnapshot.sources.map(source => {

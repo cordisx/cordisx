@@ -155,7 +155,7 @@ export function AcknowledgementsPage({ locale: localeSource }: { readonly locale
           <h3 id="cxr-ack-contributors-title">{copy.contributors}</h3>
         </header>
         {CONTRIBUTORS.length === 0
-          ? <EmptyState icon="acknowledgements" title={copy.empty} />
+          ? <EmptyState family="acknowledgements" presentation="compact" icon="acknowledgements" title={copy.empty} />
           : (
             <ul className="cxr-ack-grid cxr-contributor-grid">
               {CONTRIBUTORS.map(contributor => {

@@ -66,6 +66,7 @@ export function RoutesPage(
         {routes.length + pages.length === 0
           ? (
             <EmptyState
+              family="routes"
               icon="routes"
               state={normalized ? 'search' : 'empty'}
               title={managerCopy(snapshot.localization.locale, normalized ? 'routes.no-matches' : 'routes.empty')}

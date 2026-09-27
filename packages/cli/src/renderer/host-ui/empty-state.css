@@ -46,7 +46,7 @@
 }
 
 .cxh-empty-state-illustration {
-  width: min(310px, 100%);
+  width: min(320px, 100%);
   aspect-ratio: 16 / 9;
   flex: none;
 }
@@ -102,4 +102,35 @@
   background: var(--color-background-primary-solid, var(--cx-text));
   color: var(--color-text-primary-solid, var(--cx-surface));
   opacity: 0.4;
+}
+
+/* Shared artwork owns geometry; feature pages only own the available viewport. */
+.cxh-empty-illustration {
+  display: block;
+  width: min(320px, 100%);
+  aspect-ratio: 16 / 9;
+  flex: none;
+}
+
+.cxh-empty-illustration-scene {
+  display: block;
+}
+
+.cxh-empty-illustration svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cxh-empty-illustration[data-empty-size="compact"] {
+  width: min(var(--cxh-empty-compact-width, 112px), 30%);
+}
+
+.cxh-empty-state[data-empty-presentation="compact"] {
+  align-items: center;
+  gap: 16px;
+}
+
+.cxh-empty-illustration[data-empty-search] * {
+  animation: none;
 }

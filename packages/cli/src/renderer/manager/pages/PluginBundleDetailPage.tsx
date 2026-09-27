@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from 'tdesign-react'
 import type {
@@ -47,7 +48,16 @@ export function PluginBundleDetailPage(
       Object.fromEntries(bundle.permissions.map(item => [item.permissionId, item.pluginOverride ?? 'inherit'])),
     )
   }, [bundle?.id, bundle?.updatedAt])
-  if (bundle === undefined) return <div className="cxr-empty">{zh ? '插件包不存在。' : 'Plugin bundle not found.'}</div>
+  if (bundle === undefined) {
+    return (
+      <EmptyState
+        icon="plugins"
+        family="plugin-bundles"
+        presentation="compact"
+        title={zh ? '插件包不存在。' : 'Plugin bundle not found.'}
+      />
+    )
+  }
 
   const run = async (operation: CordisXPluginBundleLifecycleOperationV1) => {
     if (model.requestPluginBundleLifecycle === undefined) return
@@ -307,7 +317,15 @@ export function PluginBundleDetailPage(
               </div>
             ))}
             {members.length === 0
-              ? <div className="cxr-empty">{zh ? '没有匹配的成员。' : 'No matching members.'}</div>
+              ? (
+                <EmptyState
+                  icon="plugins"
+                  family="plugin-bundles"
+                  presentation="compact"
+                  state="search"
+                  title={zh ? '没有匹配的成员。' : 'No matching members.'}
+                />
+              )
               : null}
           </div>
         </div>
@@ -408,7 +426,14 @@ export function PluginBundleDetailPage(
                 </div>
               ))}
               {bundle.dependencies.length === 0
-                ? <div className="cxr-empty">{zh ? '无成员依赖。' : 'No member dependencies.'}</div>
+                ? (
+                  <EmptyState
+                    icon="plugins"
+                    family="plugin-bundles"
+                    presentation="compact"
+                    title={zh ? '无成员依赖。' : 'No member dependencies.'}
+                  />
+                )
                 : null}
             </div>
           </section>
@@ -428,7 +453,14 @@ export function PluginBundleDetailPage(
             </div>
           ))}
           {bundle.records.length === 0
-            ? <div className="cxr-empty">{zh ? '暂无记录。' : 'No records yet.'}</div>
+            ? (
+              <EmptyState
+                icon="plugins"
+                family="plugin-bundles"
+                presentation="compact"
+                title={zh ? '暂无记录。' : 'No records yet.'}
+              />
+            )
             : null}
         </div>
       )}

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxfr-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g data-fixed="navigation-paths" stroke-opacity=".5">
+  <path d="M44 53h40q8 0 8 8v29h42M44 124h40q8 0 8-8V90M208 90h25q8 0 8 8v16h20"/>
+  <circle cx="44" cy="53" r="6" class="cxfr-paper"/>
+  <circle cx="44" cy="124" r="6" class="cxfr-paper"/>
+  <circle cx="261" cy="114" r="6" class="cxfr-paper"/>
+ </g>
+ <g transform="translate(128 35)">
+  <path class="cxfr-paper" d="M7 0h64q7 0 7 7v99q0 7-7 7H7q-7 0-7-7V7q0-7 7-7Z"/>
+  <path class="cxfr-detail" d="M0 20h78M12 10h16m7 0h5M13 37h47M13 47h31M13 84h45M13 94h27"/>
+  <g class="cxfr-page-mark"><path d="M13 61h13m-3-3 3 3-3 3" stroke="var(--cxfr-accent)"/><path d="M35 61h25" class="cxfr-detail"/></g>
+ </g>
+ <g transform="translate(229 42) rotate(8 24 18)">
+  <g class="cxfr-tab-motion"><rect class="cxfr-paper" width="48" height="34" rx="5"/><path class="cxfr-detail" d="M10 11h26M10 21h17"/></g>
+ </g>
+ <circle class="cxfr-route-dot" r="2.8" fill="var(--cxfr-accent)" stroke="none"/>
+ <path d="M60 82h14m-14 5h9" class="cxfr-detail"/>
+ <path d="M88 151h23" stroke="var(--cxfr-warm)" stroke-opacity=".65"/>
+ <circle cx="285" cy="143" r="3" stroke="var(--cxfr-accent)" opacity=".55"/>
+ </g></svg>

@@ -51,6 +51,9 @@ describe('Manager shared list states', () => {
       await fixture.render(<ModelServicesPage registry={source} locale="en" onCreate={onCreate} />)
       const status = fixture.element('[data-empty-state]')
       expect(status.dataset.emptyState).toBe(kind)
+      expect(status.querySelector('[data-empty-family="model-services"] svg')?.getAttribute('viewBox')).toBe(
+        '0 0 320 180',
+      )
       expect(status.textContent).toContain(text)
       expect(status.querySelector('button')?.textContent === 'Add model connection').toBe(create)
       expect(fixture.document.querySelector('.cxr-empty')).toBeNull()
@@ -87,17 +90,17 @@ describe('Manager shared list states', () => {
     source.management = catalog as never
     try {
       await fixture.render(<ModelServicesPage registry={source} locale="en" onCreate={vi.fn()} />)
-      const scene = fixture.element('.cxms-illustration svg')
+      const scene = fixture.element('[data-empty-family="model-services"] svg')
       expect(fixture.element('[data-empty-state="loading"]').textContent).toContain('Loading model services…')
       expect(fixture.element('[data-empty-state="loading"]').querySelector('button')).toBeNull()
       await act(async () => complete([]))
-      expect(fixture.element('.cxms-illustration svg')).toBe(scene)
+      expect(fixture.element('[data-empty-family="model-services"] svg')).toBe(scene)
       let pending!: Promise<void>
       await act(async () => {
         pending = source.refresh()
       })
       expect(fixture.element('[data-empty-state="empty"]').textContent).toContain('No model connections yet')
-      expect(fixture.element('.cxms-illustration svg')).toBe(scene)
+      expect(fixture.element('[data-empty-family="model-services"] svg')).toBe(scene)
       expect(fixture.element('.cxmp-results').getAttribute('aria-busy')).toBe('true')
       expect((fixture.element('[data-empty-state="empty"] button') as HTMLButtonElement).disabled).toBe(true)
       await act(async () => {
@@ -113,14 +116,14 @@ describe('Manager shared list states', () => {
         ;[...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
           .find(item => item.textContent === 'Refresh')!.click()
       })
-      expect(fixture.element('.cxms-illustration svg')).toBe(scene)
+      expect(fixture.element('[data-empty-family="model-services"] svg')).toBe(scene)
       await act(async () => complete([]))
       await act(async () => {
         pending = source.refresh()
         fail(new Error('read'))
         await pending
       })
-      expect(fixture.document.querySelector('.cxms-illustration')).toBeNull()
+      expect(fixture.element('[data-empty-family="model-services"] svg')).not.toBeNull()
       expect(fixture.element('[data-empty-state="error"]').textContent).toContain('Could not load model services')
     } finally {
       source.dispose()
@@ -301,6 +304,9 @@ describe('Manager shared list states', () => {
         )
         const status = fixture.element('[data-empty-state]')
         expect(status.dataset.emptyState).toBe(kind)
+        expect(status.querySelector('[data-empty-family="marketplace"] svg')?.getAttribute('viewBox')).toBe(
+          '0 0 320 180',
+        )
         if (kind === 'loading') expect(status.querySelector('button')).toBeNull()
         else {
           await fixture.click('[data-empty-state] button')

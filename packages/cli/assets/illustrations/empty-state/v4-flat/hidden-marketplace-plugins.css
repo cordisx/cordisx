@@ -1,0 +1,9 @@
+.cxr-fh-scene { display:block; width:100%; height:auto; overflow:visible; color:var(--cxr-fh-ink,currentColor); }
+.cxr-fh-scene .cxr-fh-detail { stroke-width:1.1; stroke-opacity:.52; }
+.cxr-fh-scene .cxr-fh-guide { stroke-width:1; stroke-opacity:.24; }
+
+.cxr-fh-scene .cxr-fh-retrievable-page { animation:cxr-fh-retrieve 12s cubic-bezier(.22,.68,.32,1) infinite; }
+@keyframes cxr-fh-retrieve { 0%,20%,49%,100% { transform:translateY(0); } 29%,36% { transform:translateY(-20px); } }
+
+.cxr-fh-scene[data-motion="low"] .cxr-fh-motion { animation:none; transform:none; }
+@media(prefers-reduced-motion:reduce) { .cxr-fh-scene .cxr-fh-motion { animation:none; transform:none; } }

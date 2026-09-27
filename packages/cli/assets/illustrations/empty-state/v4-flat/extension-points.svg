@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" fill="none" class="cxfe-scene" aria-hidden="true"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+ <g data-fixed="host-layout" stroke-opacity=".55"><path d="M62 35H48v105h14M165 35h14v105h-14"/><path class="cxfe-detail" d="M57 149h113"/></g>
+ <g data-fixed="open-slots">
+  <path d="M75 51H63v25h12m77-25h13v25h-13M75 87H63v25h12m77-25h13v25h-13M75 123H63v16h12m77-16h13v16h-13"/>
+  <path class="cxfe-detail" stroke-dasharray="2 5" d="M88 64h49M88 99h49M88 131h49"/>
+  <circle cx="83" cy="64" r="2.2" fill="var(--cxfe-accent)" stroke="none"/>
+  <circle cx="83" cy="99" r="2.2" fill="var(--cxfe-warm)" stroke="none"/>
+ </g>
+ <g transform="translate(203 44)">
+  <g class="cxfe-entry-motion">
+   <rect class="cxfe-paper" width="70" height="35" rx="5"/>
+   <path stroke="var(--cxfe-accent)" d="M12 12h-4v11h4m11-11h4v11h-4"/>
+   <circle cx="17" cy="17.5" r="2" stroke="var(--cxfe-accent)"/>
+   <path class="cxfe-detail" d="M36 13h23M36 22h16"/>
+  </g>
+ </g>
+ <g transform="translate(203 103) rotate(5 32 20)">
+  <rect class="cxfe-paper" width="64" height="40" rx="5"/>
+  <path stroke="var(--cxfe-warm)" d="M11 14h10v12H11Z"/>
+  <path class="cxfe-detail" d="M31 15h21M31 24h14"/>
+ </g>
+ <g class="cxfe-detail"><path d="M184 91h20M184 96h11"/></g>
+ <circle cx="280" cy="153" r="3.5" stroke="var(--cxfe-accent)" opacity=".6"/>
+ </g></svg>

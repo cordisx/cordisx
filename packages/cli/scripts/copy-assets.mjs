@@ -1,5 +1,6 @@
 import { chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { verifyEmptyStateAssets } from './empty-state-assets.mjs'
 import { fileURLToPath } from 'node:url'
 
 const source = fileURLToPath(new URL('../assets', import.meta.url))
@@ -14,6 +15,7 @@ const preservedRendererStyles = [
   'renderer/host-ui/public-markdown-editor.css',
   'renderer/host-ui/search.css',
   'renderer/host-ui/empty-state.css',
+  'renderer/host-ui/empty-state-illustration-theme.css',
   'renderer/host-ui/action-group.css',
   'renderer/model-providers.css',
   'renderer/manager/manager-navigation.css',
@@ -31,8 +33,10 @@ const preservedRendererStyles = [
   'renderer/manager/pages/model-catalog/model-catalog.css',
 ]
 
+verifyEmptyStateAssets(source)
 await mkdir(destination, { recursive: true })
 await cp(source, destination, { recursive: true, force: true })
+verifyEmptyStateAssets(destination)
 // TypeScript preserves CSS imports used by the installed renderer graph. Keep
 // each stylesheet beside its compiled module so Vite can resolve that graph.
 for (const relative of preservedRendererStyles) {

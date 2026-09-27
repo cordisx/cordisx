@@ -1,8 +1,8 @@
+import { EmptyStateIllustration, EmptyStateIllustrationStyles } from '../../host-ui/EmptyStateIllustration.js'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Checkbox } from 'tdesign-react'
 import { inferModelBrand } from '../../../model-selector-branding.js'
 import type { ModelProviderRegistry, ModelProviderSnapshot } from '../../model-providers.js'
-import { ModelServicesIllustration } from '../../host-ui/ModelServicesIllustration.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
 import { ModelBrandIcon } from '../../host-ui/ModelBrandIcon.js'
@@ -145,6 +145,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
         data-exporting={transfer.exporting}
         hidden={secondaryPage !== undefined}
       >
+        <EmptyStateIllustrationStyles />
         <style>{`${css}\n${pageCss}\n${catalogCss}`}</style>
         <SearchToolbar
           toolbarLabel={t('catalog.tools')}
@@ -251,7 +252,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
         <div
           className="cxmp-results"
           aria-busy={refreshing}
-          data-empty-layout={noConnections && !failed && !unavailable ? 'hero' : undefined}
+          data-empty-layout={noConnections ? 'hero' : undefined}
         >
           {transfer.exporting || state.entries.length === 0
             ? null
@@ -270,7 +271,9 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           {!loading && (failed || unavailable)
             ? (
               <EmptyState
+                family="model-services"
                 icon="models-read"
+                presentation={noConnections ? 'hero' : 'compact'}
                 state={failed ? 'error' : 'unavailable'}
                 title={t(failed ? 'empty.modelsFailed' : 'empty.modelsUnavailable')}
                 description={t('empty.retryHelp')}
@@ -340,6 +343,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
               || (noMatches || noFilterMatches) && !loading && !failed)
             ? (
               <EmptyState
+                family="model-services"
                 icon="models-read"
                 state={loading ? 'loading' : noMatches || noFilterMatches ? 'search' : 'empty'}
                 title={t(
@@ -356,7 +360,6 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                     ? 'empty.searchHelp'
                     : 'empty.modelsHelp',
                 )}
-                illustration={!unavailable ? <ModelServicesIllustration /> : undefined}
                 action={loading ? undefined : noMatches || noFilterMatches
                   ? { label: t(normalized ? 'empty.clearSearch' : 'empty.clearFilters'), onClick: clearSearch }
                   : canCreate
@@ -510,7 +513,12 @@ function LegacyProvider({
               : <code>{provider.providerId}</code>}
           </span>
           <span className="cxms-model-count">
-            {canExpand ? `${modelsLabel}: ${provider.models.length}` : emptyLabel}
+            {canExpand ? `${modelsLabel}: ${provider.models.length}` : (
+              <span className="cxms-model-empty">
+                <EmptyStateIllustration family="model-services" compact />
+                {emptyLabel}
+              </span>
+            )}
           </span>
         </button>
       </header>

@@ -1,3 +1,4 @@
+import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useEffect, useState } from 'react'
 import { Select } from 'tdesign-react'
 import type { ManagerSettingsNavigationProjectionV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
@@ -110,7 +111,9 @@ export function ExtensionPointDetailPage(
   }, [pointId])
   if (pointId === undefined) return null
   const point = snapshot.extensionPoints?.points.find(item => item.id === pointId)
-  if (point === undefined) return <div className="cxr-empty">扩展点已不存在</div>
+  if (point === undefined) {
+    return <EmptyState icon="contributions" family="extension-points" presentation="compact" title={'扩展点已不存在'} />
+  }
   const options = [{ label: '继承', value: 'inherit' }, { label: '允许', value: 'allow' }, {
     label: '拒绝',
     value: 'deny',
@@ -247,7 +250,14 @@ export function ExtensionPointDetailPage(
             </section>
           ))}
           {point.plugins.length === 0 && (control?.candidates.length ?? 0) === 0
-            ? <div className="cxr-empty">当前没有插件使用这个扩展点</div>
+            ? (
+              <EmptyState
+                icon="contributions"
+                family="extension-points"
+                presentation="compact"
+                title={'当前没有插件使用这个扩展点'}
+              />
+            )
             : null}
         </div>
       )}

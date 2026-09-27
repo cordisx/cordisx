@@ -350,6 +350,7 @@ export function MarketplacePage(
         {results.length === 0
           ? (
             <EmptyState
+              family="marketplace"
               icon="marketplace"
               state={catalog.loading
                 ? 'loading'
