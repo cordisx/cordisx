@@ -163,7 +163,6 @@ export class WorkspaceRailProjection {
     const captured = this.captured
     if (revision !== this.iconRevision || this.disposed || captured === undefined) return false
     if (captured.clickedDestination !== undefined && captured.clickedDestination !== captured.destination) return false
-    if (this.route !== undefined && nativeRouteIdentity(this.route.snapshot()) !== captured.routeIdentity) return false
     const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
       'nav[data-app-navigation-rail="true"]',
     )

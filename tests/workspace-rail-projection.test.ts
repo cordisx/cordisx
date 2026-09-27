@@ -132,7 +132,7 @@ describe('Host-owned workspace rail selection projection', () => {
     f.dom.window.close()
   })
 
-  it('stops icon retries when native navigation changes during Manager entry', async () => {
+  it('keeps icon retries through same-destination route churn and stops after another rail click', async () => {
     const f = fixture()
     let route = {
       available: true,
@@ -154,11 +154,14 @@ describe('Host-owned workspace rail selection projection', () => {
     expect(projection.enter()).toBe(true)
     route = {
       available: true,
-      key: 'library',
-      nativeLocation: { pathname: '/library', search: '', hash: '' },
+      key: 'home-detail',
+      nativeLocation: { pathname: '/home/detail', search: '', hash: '' },
     }
     await new Promise(resolve => setTimeout(resolve, 130))
-    expect(attempts).toBe(1)
+    expect(attempts).toBe(2)
+    f.library.click()
+    await new Promise(resolve => setTimeout(resolve, 130))
+    expect(attempts).toBe(2)
     projection.dispose()
     f.dom.window.close()
   })
