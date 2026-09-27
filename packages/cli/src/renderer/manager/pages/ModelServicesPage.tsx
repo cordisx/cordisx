@@ -268,12 +268,12 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                 ))}
               </section>
             )}
-          {!loading && (failed || unavailable)
+          {!noConnections && !loading && (failed || unavailable)
             ? (
               <EmptyState
                 family="model-services"
                 icon="models-read"
-                presentation={noConnections ? 'hero' : 'compact'}
+                presentation="compact"
                 state={failed ? 'error' : 'unavailable'}
                 title={t(failed ? 'empty.modelsFailed' : 'empty.modelsUnavailable')}
                 description={t('empty.retryHelp')}
@@ -339,16 +339,28 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           {transfer.exporting && views.length === 0
             ? <p className="cxr-empty">{locale.startsWith('zh') ? '没有可导出的连接' : 'No exportable connections'}</p>
             : null}
-          {!transfer.exporting && (noConnections && (loading || !failed && !unavailable)
+          {!transfer.exporting && (noConnections
               || (noMatches || noFilterMatches) && !loading && !failed)
             ? (
               <EmptyState
                 family="model-services"
                 icon="models-read"
-                state={loading ? 'loading' : noMatches || noFilterMatches ? 'search' : 'empty'}
+                state={loading
+                  ? 'loading'
+                  : failed
+                  ? 'error'
+                  : unavailable
+                  ? 'unavailable'
+                  : noMatches || noFilterMatches
+                  ? 'search'
+                  : 'empty'}
                 title={t(
                   loading
                     ? 'empty.modelsLoading'
+                    : failed
+                    ? 'empty.modelsFailed'
+                    : unavailable
+                    ? 'empty.modelsUnavailable'
                     : noMatches || noFilterMatches
                     ? 'empty.modelMatches'
                     : 'empty.models',
@@ -356,11 +368,15 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                 description={t(
                   loading
                     ? 'empty.modelsLoadingHelp'
+                    : failed || unavailable
+                    ? 'empty.retryHelp'
                     : noMatches || noFilterMatches
                     ? 'empty.searchHelp'
                     : 'empty.modelsHelp',
                 )}
-                action={loading ? undefined : noMatches || noFilterMatches
+                action={loading ? undefined : failed || unavailable
+                  ? registry ? { label: copy.refresh, onClick: refresh } : undefined
+                  : noMatches || noFilterMatches
                   ? { label: t(normalized ? 'empty.clearSearch' : 'empty.clearFilters'), onClick: clearSearch }
                   : canCreate
                   ? { label: t('catalog.addConnection'), onClick: onCreate!, disabled: refreshing, variant: 'primary' }

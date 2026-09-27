@@ -123,7 +123,7 @@ describe('Manager shared list states', () => {
         fail(new Error('read'))
         await pending
       })
-      expect(fixture.element('[data-empty-family="model-services"] svg')).not.toBeNull()
+      expect(fixture.element('[data-empty-family="model-services"] svg')).toBe(scene)
       expect(fixture.element('[data-empty-state="error"]').textContent).toContain('Could not load model services')
     } finally {
       source.dispose()
