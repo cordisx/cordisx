@@ -19,7 +19,7 @@ import type { ManagerModel, ManagerSnapshot } from '../packages/cli/src/renderer
 import type { ManagedManagerPageMount, ManagerContentPresentation } from '../packages/cli/src/renderer/navigation.js'
 import { installReactCordisXManager } from '../packages/cli/src/renderer/manager/install.js'
 import { HostManagerNavigationController } from '../packages/cli/src/renderer/manager/navigation-controller.js'
-import type { NativeRouteSource } from '../packages/cli/src/renderer/manager/native-route-transition.js'
+import { bindNativeRailSelection, createNativeRouteSource } from './helpers/native-rail-navigation.js'
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
 
@@ -37,27 +37,6 @@ const previous = {
 }
 
 afterEach(() => Object.assign(globalThis, previous))
-
-function createNativeRouteSource(): NativeRouteSource & { navigate(): void } {
-  let index = 0
-  const listeners = new Set<() => void>()
-  return {
-    snapshot: () => ({
-      available: true,
-      key: `native-${index}`,
-      index,
-      nativeLocation: { pathname: index === 0 ? '/' : `/native/${index}`, search: '', hash: '' },
-    }),
-    subscribe: listener => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    navigate: () => {
-      index += 1
-      for (const listener of listeners) listener()
-    },
-  }
-}
 
 function snapshot(): ManagerSnapshot {
   return {
@@ -179,6 +158,7 @@ describe('programmatic Manager identity detail navigation', () => {
     Object.defineProperty(dom.window.Node.prototype, 'attachEvent', { value: () => {} })
     Object.defineProperty(dom.window.Node.prototype, 'detachEvent', { value: () => {} })
     const rail = document.querySelector<HTMLElement>('nav')!
+    bindNativeRailSelection(rail)
     const sidebarNavigation = document.querySelector<HTMLElement>('nav[role="navigation"]')!
     const sidebar = sidebarNavigation
     const sidebarHeader = document.getElementById('native-sidebar-header')!
@@ -277,7 +257,7 @@ describe('programmatic Manager identity detail navigation', () => {
       })
     }
     const trigger = () => document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
-    const nativeRouteHistory = createNativeRouteSource()
+    const nativeRouteHistory = createNativeRouteSource(rail)
     try {
       await act(async () => {
         dispose = installReactCordisXManager(document, model, { nativeRouteHistory })
@@ -490,7 +470,9 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(nativeTitle.getAttribute('aria-hidden')).toBeNull()
       expect(sidebar.querySelector('[data-cordisx-manager-sidebar-root]')).toBeNull()
       expect(document.querySelector('[data-cordisx-react-manager]')?.parentElement).toBe(document.body)
-      expect(document.querySelector('[data-sidebar-destination="builtin:home"]')?.hasAttribute('data-selected'))
+      expect(document.querySelector('[data-sidebar-destination="builtin:automations"]')?.getAttribute('aria-current'))
+        .toBe('page')
+      expect(document.querySelector('[data-sidebar-destination="builtin:automations"]')?.hasAttribute('data-selected'))
         .toBe(true)
     } finally {
       await act(async () => dispose?.())
@@ -515,7 +497,7 @@ describe('programmatic Manager identity detail navigation', () => {
         </header>
         <aside data-app-shell-left-panel-appearance="default"><div>
           <nav data-app-navigation-rail="true" aria-label="应用导航"><div>
-            <div><button data-sidebar-destination="builtin:home">Home</button></div>
+            <div><button data-sidebar-destination="builtin:home" aria-current="page" data-selected="">Home</button></div>
             <div><button data-sidebar-destination="builtin:automations">Automations</button></div>
             <div><button data-sidebar-destination="builtin:library">Library</button></div>
           </div></nav>
@@ -545,6 +527,7 @@ describe('programmatic Manager identity detail navigation', () => {
       Object.defineProperty(dom.window.Node.prototype, 'detachEvent', { value: () => {} })
       const document = dom.window.document
       const rail = document.querySelector<HTMLElement>('nav')!
+      bindNativeRailSelection(rail)
       const aside = document.querySelector<HTMLElement>('aside')!
       const header = document.querySelector<HTMLElement>('header')!
       const headerStart = header.querySelector<HTMLElement>('[data-app-shell-header-slot="start"]')!
@@ -612,7 +595,7 @@ describe('programmatic Manager identity detail navigation', () => {
         setPluginBlocked: async () => {},
         setPermissionPolicy: async () => {},
       } as unknown as ManagerModel
-      const nativeRouteHistory = createNativeRouteSource()
+      const nativeRouteHistory = createNativeRouteSource(rail)
       let dispose: (() => void) | undefined
       try {
         await act(async () => {
@@ -735,7 +718,7 @@ describe('programmatic Manager identity detail navigation', () => {
       `<!doctype html><body>
       <aside data-app-shell-left-panel-appearance="default">
         <nav data-app-navigation-rail="true" aria-label="应用导航"><div>
-          <div><button data-sidebar-destination="builtin:home">Home</button></div>
+          <div><button data-sidebar-destination="builtin:home" aria-current="page" data-selected="">Home</button></div>
           <div><button data-sidebar-destination="builtin:automations">Automations</button></div>
         </div></nav>
         <nav aria-label="设置"><div>Native Settings</div></nav>
@@ -761,6 +744,7 @@ describe('programmatic Manager identity detail navigation', () => {
     const document = dom.window.document
     const aside = document.querySelector<HTMLElement>('aside')!
     const rail = document.querySelector<HTMLElement>('nav[data-app-navigation-rail]')!
+    bindNativeRailSelection(rail)
     const navigation = document.querySelector<HTMLElement>('nav[aria-label="设置"]')!
     const nativeResizer = document.getElementById('native-resizer')!
     const main = document.querySelector<HTMLElement>('[data-app-shell-main-content-layout]')!

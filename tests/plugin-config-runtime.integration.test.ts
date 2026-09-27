@@ -89,7 +89,7 @@ async function boot(): Promise<{
     <div id="root"></div>
     <aside data-app-shell-left-panel-appearance="default">
     <nav data-app-navigation-rail="true"><div>
-      <div><button data-sidebar-destination="builtin:home" aria-current="page">Home</button></div>
+      <div><button data-sidebar-destination="builtin:home" aria-current="page" data-selected="">Home</button></div>
       <div><button data-sidebar-destination="builtin:automations">Automations</button></div>
     </div></nav>
     <nav role="navigation" aria-label="Home"><div class="sidebar-header">Native sidebar</div></nav>

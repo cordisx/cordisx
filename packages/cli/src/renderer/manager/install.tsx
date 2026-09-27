@@ -21,6 +21,7 @@ import {
 import type { HostManagerNavigationController } from './navigation-controller.js'
 import type { PluginManagementBinding } from '../management-binding.js'
 import type { NativeRouteSource } from './native-route-transition.js'
+import { WorkspaceRailProjection } from './workspace-rail-projection.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
 
@@ -122,7 +123,6 @@ export function installReactCordisXManager(
     rootWidth: string
     native: NativeState[]
     nativeTitle: NativeState[]
-    selected: Array<{ button: HTMLButtonElement; current: string | null; dataSelected: string | null }>
   } | undefined
   let endResize: ((event?: PointerEvent) => void) | undefined
   const persistedWidth = (() => {
@@ -270,6 +270,7 @@ export function installReactCordisXManager(
     saveWidth(pane.width)
   })
   let paneLossHandler: (() => void) | undefined
+  const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory)
   const deactivatePane = () => {
     const current = pane
     if (current === undefined) return
@@ -303,13 +304,7 @@ export function installReactCordisXManager(
     navigationSeat.style.width = current.navigationWidth
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
-    for (const { button, current: value, dataSelected } of current.selected) {
-      if (!button.isConnected) continue
-      if (value !== null && !button.hasAttribute('aria-current')) button.setAttribute('aria-current', value)
-      if (dataSelected !== null && !button.hasAttribute('data-selected')) {
-        button.setAttribute('data-selected', dataSelected)
-      }
-    }
+    railProjection.leave()
     navigationSeat.remove()
     resizeHandle.remove()
     titlebarSeat.remove()
@@ -381,15 +376,10 @@ export function installReactCordisXManager(
       return true
     }
     deactivatePane()
-    const selected = [
-      ...seat.rail.querySelectorAll<HTMLButtonElement>('button[aria-current],button[data-selected]'),
-    ]
-      .filter(button => !triggerSeat.contains(button))
-      .map(button => ({
-        button,
-        current: button.getAttribute('aria-current'),
-        dataSelected: button.getAttribute('data-selected'),
-      }))
+    if (!railProjection.enter()) {
+      if (current === undefined && titlebar.lease !== undefined) releaseManagerTitlebarLease(titlebar.lease)
+      return false
+    }
     const sidebarResizer = seat.provenance === 'codex-26.924-native-two-pane'
       ? seat.sidebar.resizer
       : undefined
@@ -455,7 +445,6 @@ export function installReactCordisXManager(
       rootWidth: rootSeat.style.width,
       native,
       nativeTitle,
-      selected,
     }
     seat.main.anchor.style.position = 'relative'
     seat.sidebar.container.style.position = 'relative'
@@ -481,10 +470,6 @@ export function installReactCordisXManager(
       node.inert = true
       node.style.visibility = 'hidden'
       node.setAttribute('aria-hidden', 'true')
-    }
-    for (const { button } of selected) {
-      button.removeAttribute('aria-current')
-      button.removeAttribute('data-selected')
     }
     rootSeat.dataset.managerSurface = 'pane'
     seat.main.anchor.append(rootSeat)

@@ -16,6 +16,77 @@ vi.mock('../packages/cli/src/renderer/host-ui/HostForm.js', () => ({
 }))
 
 describe('Host Manager workspace presentation', () => {
+  it('waits for a settling native seat and cancels that wait when native navigation wins', async () => {
+    const fixture = reactManagerFixture()
+    const { document, dom } = fixture
+    document.getElementById('root')!.dataset.cordisxReactManager = 'true'
+    const triggerSeat = document.createElement('div')
+    const navigationSeat = document.createElement('div')
+    const titlebarSeat = document.createElement('div')
+    const rail = document.createElement('nav')
+    rail.dataset.appNavigationRail = 'true'
+    rail.innerHTML = `<div>
+      <div><button data-sidebar-destination="builtin:home" aria-current="page" data-selected="">Home</button></div>
+      <div><button data-sidebar-destination="builtin:automations">Automations</button></div>
+    </div>`
+    for (const element of [rail, ...rail.querySelectorAll('button')]) {
+      element.getClientRects = () => ({ length: 1 }) as DOMRectList
+    }
+    document.body.append(triggerSeat, navigationSeat, titlebarSeat, rail)
+    const marketplace = createManagerMarketplaceStore(document)
+    let ready = false
+    let route = 'home'
+    const activatePane = vi.fn(() => ready)
+    const deactivatePane = vi.fn()
+    const automations = rail.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:automations"]')!
+    automations.addEventListener('click', () => route = 'automations')
+    try {
+      await fixture.render(
+        <ManagerApp
+          model={managerModel()}
+          marketplace={marketplace.model}
+          triggerSeat={triggerSeat}
+          navigationSeat={navigationSeat}
+          titlebarSeat={titlebarSeat}
+          activatePane={activatePane}
+          deactivatePane={deactivatePane}
+          presentationMode="workspace"
+          setWorkspaceVisible={visible => document.getElementById('root')!.hidden = !visible}
+          nativeRouteHistory={{
+            snapshot: () => ({
+              available: true,
+              key: route,
+              nativeLocation: { pathname: `/${route}`, search: '', hash: '' },
+            }),
+            subscribe: () => () => {},
+          }}
+        />,
+      )
+      await fixture.click('[data-cordisx-manager-trigger]')
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      await act(async () => {
+        route = 'home-loaded' // Native route key changes while the selected rail destination stays Home.
+        ready = true
+        await new Promise(resolve => dom.window.setTimeout(resolve, 120))
+      })
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+      expect(activatePane.mock.calls.length).toBeGreaterThan(1)
+      await fixture.click('[data-cordisx-manager-trigger]')
+
+      ready = false
+      await fixture.click('[data-cordisx-manager-trigger]')
+      await fixture.click('[data-sidebar-destination="builtin:automations"]')
+      ready = true
+      await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 120)))
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      await fixture.click('[data-cordisx-manager-trigger]')
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+    } finally {
+      marketplace.dispose()
+      await fixture.dispose()
+    }
+  })
+
   it('returns the native seat on route leave and restores the same detail, history, and unsaved draft', async () => {
     const fixture = reactManagerFixture()
     const { document, dom } = fixture
@@ -36,7 +107,7 @@ describe('Host Manager workspace presentation', () => {
     nativeRail.dataset.appNavigationRail = 'true'
     nativeRail.innerHTML = `<div>
       <div><button data-sidebar-destination="builtin:home">Home</button></div>
-      <div><button data-sidebar-destination="builtin:automations" aria-current="page">Automations</button></div>
+      <div><button data-sidebar-destination="builtin:automations" aria-current="page" data-selected="">Automations</button></div>
     </div>`
     const nativeHome = nativeRail.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!
     const nativeAutomation = nativeRail.querySelector<HTMLButtonElement>(

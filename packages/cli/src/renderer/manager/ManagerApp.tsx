@@ -12,6 +12,7 @@ import { HostBrandIcon } from '../host-ui/HostBrandIcon.js'
 import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
 import { observeNativeRailActivation } from '../adapter/native-rail-activation.js'
+import { useWorkspacePaneActivation } from './use-workspace-pane-activation.js'
 import { notificationCenterForDocument } from '../notifications/host.js'
 import type { NotificationCenter } from '../notifications/model.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
@@ -499,11 +500,40 @@ export function ManagerApp(
   const [surface, setSurface] = useState<'pane' | 'modal'>('modal')
   const [seatUnavailable, setSeatUnavailable] = useState(false)
   const restoreTriggerFocus = useRef(true)
+  const showSeatUnavailable = () => {
+    deactivatePane?.()
+    setOpen(false)
+    setSeatUnavailable(true)
+    unavailableFeedback?.api.show({
+      kind: 'manager.seat-unavailable',
+      type: 'warning',
+      message: productLocale(snapshot.localization.locale) === 'zh-CN'
+        ? '当前页面暂时无法打开 CordisX'
+        : 'CordisX is unavailable on this page',
+    })
+  }
+  const workspaceActivation = useWorkspacePaneActivation({
+    document: triggerSeat.ownerDocument,
+    ...(nativeRouteHistory === undefined ? {} : { route: nativeRouteHistory }),
+    ...(activatePane === undefined ? {} : { activatePane }),
+    ...(titlebarSeat === undefined ? {} : { titlebarSeat }),
+    onOpened: () => {
+      setSeatUnavailable(false)
+      setSurface('pane')
+      setWorkspaceVisited(true)
+      setOpen(true)
+    },
+    onUnavailable: showSeatUnavailable,
+  })
   const openManager = () => {
     restoreTriggerFocus.current = true
     if (playgroundStorage !== undefined || activatePane === undefined) {
       setSurface('modal')
       setOpen(true)
+      return
+    }
+    if (workspaceMode) {
+      workspaceActivation.open()
       return
     }
     if (
@@ -515,19 +545,11 @@ export function ManagerApp(
       if (workspaceMode) setWorkspaceVisited(true)
       setOpen(true)
     } else {
-      deactivatePane?.()
-      setOpen(false)
-      setSeatUnavailable(true)
-      unavailableFeedback?.api.show({
-        kind: 'manager.seat-unavailable',
-        type: 'warning',
-        message: productLocale(snapshot.localization.locale) === 'zh-CN'
-          ? '当前页面暂时无法打开 CordisX'
-          : 'CordisX is unavailable on this page',
-      })
+      showSeatUnavailable()
     }
   }
   const closeManager = (restoreFocus = true) => {
+    workspaceActivation.cancel()
     restoreTriggerFocus.current = restoreFocus
     setOpen(false)
   }
@@ -573,7 +595,7 @@ export function ManagerApp(
     const disposeRouteObserver = surface === 'pane' && nativeRouteHistory !== undefined
       ? observeNativeRouteTransition(nativeRouteHistory, () => flushSync(() => closeManager(false)))
       : () => {}
-    const disposeRailObserver = surface === 'pane'
+    const disposeRailObserver = surface === 'pane' && !workspaceMode
       ? observeNativeRailActivation(triggerSeat.ownerDocument, () => flushSync(() => closeManager(false)))
       : () => {}
     window.addEventListener('keydown', onKey)
@@ -584,6 +606,12 @@ export function ManagerApp(
       disposeRailObserver()
     }
   }, [nativeRouteHistory, open, surface, triggerSeat, workspaceMode])
+  useLayoutEffect(() => {
+    if (!workspaceMode) return
+    return observeNativeRailActivation(triggerSeat.ownerDocument, () => {
+      if (workspaceActivation.pending() || open) flushSync(() => closeManager(false))
+    })
+  }, [open, triggerSeat, workspaceMode])
   useLayoutEffect(() => {
     if (!open) deactivatePane?.()
   }, [deactivatePane, open])
@@ -697,7 +725,7 @@ export function ManagerApp(
             aria-current={open && surface === 'pane' ? 'page' : undefined}
             title={managerCopy(snapshot.localization.locale, 'manager.trigger.manage')}
             icon={<BrandMark className="cxr-trigger-mark" />}
-            onClick={() => flushSync(() => open ? closeManager() : openManager())}
+            onClick={() => flushSync(() => open || workspaceActivation.pending() ? closeManager() : openManager())}
           />,
           triggerSeat,
         )
