@@ -9,16 +9,18 @@ function response(body: string, status = 200): Response {
 }
 
 async function failedReason(fetchEndpoint: typeof fetch): Promise<MainInspectorUnavailableError> {
-  const failure = waitForMainInspectorUrl({
+  const failure = await waitForMainInspectorUrl({
     port,
     hostPid,
     hostStatus: () => 'alive',
     helperExited: () => false,
-    timeoutMs: 1,
-    pollIntervalMs: 0,
+    // Leave enough time for the first probe even when CI schedules this test slowly.
+    timeoutMs: 250,
+    pollIntervalMs: 10,
     fetch: fetchEndpoint,
   }).catch(error => error as MainInspectorUnavailableError)
-  return await failure
+  expect(fetchEndpoint).toHaveBeenCalled()
+  return failure
 }
 
 describe('owned Host main inspector discovery', () => {
