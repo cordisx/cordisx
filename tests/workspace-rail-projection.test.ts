@@ -50,8 +50,89 @@ function nativeFiber(button: HTMLButtonElement, selected: boolean): void {
 }
 
 describe('Host-owned workspace rail selection projection', () => {
+  it('passes a prior committed route token when the new native marker outruns its fiber', () => {
+    const f = fixture()
+    f.dom.reconfigure({ url: 'app://-/index.html' })
+    const root = f.document.createElement('div')
+    root.id = 'root'
+    f.document.body.append(root)
+    const listeners = new Set<() => void>()
+    const router = {
+      state: {
+        location: { pathname: '/', search: '', hash: '', key: 'home' },
+        navigation: { state: 'idle' },
+        revalidation: 'idle',
+      },
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+    }
+    Object.defineProperty(root, '__reactContainer$fixture', {
+      enumerable: true,
+      value: { memoizedProps: { value: { router } } },
+    })
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
+    const svg = f.document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    const path = f.document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', 'selected-automation')
+    svg.append(path)
+    f.automations.append(svg)
+    let provisionalDestination: string | undefined
+    const projection = new WorkspaceRailProjection(f.document, {
+      snapshot: () => ({
+        available: true,
+        key: router.state.location.key,
+        nativeLocation: router.state.location,
+      }),
+      subscribe: router.subscribe,
+    }, {
+      appVersion: '26.924.22138',
+      project: async request => {
+        provisionalDestination = request.provisionalOwner?.destination
+        return { status: 'unavailable', reason: 'native-react-runtime-unavailable' }
+      },
+    })
+    f.home.removeAttribute('aria-current')
+    f.home.removeAttribute('data-selected')
+    f.automations.setAttribute('aria-current', 'page')
+    f.automations.setAttribute('data-selected', '')
+    router.state.location.pathname = '/automations'
+    router.state.location.key = 'automations'
+    for (const listener of listeners) listener()
+    expect(projection.enter()).toBe(true)
+    expect(provisionalDestination).toBe('builtin:automations')
+    projection.dispose()
+    expect(listeners.size).toBe(0)
+    f.dom.window.close()
+  })
+
+  it('does not project without a token when the readable native fiber owns another button', () => {
+    const f = fixture()
+    nativeFiber(f.home, false)
+    nativeFiber(f.automations, true)
+    nativeFiber(f.library, false)
+    let attempts = 0
+    const projection = new WorkspaceRailProjection(f.document, undefined, {
+      appVersion: '26.924.22138',
+      project: async () => {
+        attempts++
+        return { status: 'unavailable', reason: 'native-icon-owner-unavailable' }
+      },
+    })
+    expect(projection.enter()).toBe(true)
+    expect(attempts).toBe(0)
+    projection.dispose()
+    f.dom.window.close()
+  })
+
   it('disposes an icon lease returned after Manager has left', async () => {
     const f = fixture()
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
     let finish: ((result: NativeRailIconVisualResult) => void) | undefined
     let request: NativeRailIconVisualRequest | undefined
     let disposed = 0
@@ -80,6 +161,9 @@ describe('Host-owned workspace rail selection projection', () => {
 
   it('responds only to icon loss from the current Manager entry', async () => {
     const f = fixture()
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
     const requests: NativeRailIconVisualRequest[] = []
     let lost = 0
     let disposed = 0
@@ -110,6 +194,9 @@ describe('Host-owned workspace rail selection projection', () => {
 
   it('retries a busy visual lease after a fast Manager reopen', async () => {
     const f = fixture()
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
     let attempts = 0
     let disposed = 0
     const projection = new WorkspaceRailProjection(f.document, undefined, {
@@ -134,6 +221,9 @@ describe('Host-owned workspace rail selection projection', () => {
 
   it('keeps icon retries through same-destination route churn and stops after another rail click', async () => {
     const f = fixture()
+    nativeFiber(f.home, true)
+    nativeFiber(f.automations, false)
+    nativeFiber(f.library, false)
     let route = {
       available: true,
       key: 'home',

@@ -1,6 +1,12 @@
 import { resolveManagerRailSeat } from '../host-probes.js'
 import { readNativeRailSelection } from '../adapter/native-rail-selection-probe.js'
 import {
+  captureNativeRailIconOwner,
+  nativeRailCommittedRouteIdentity,
+  nativeRailIconOwnerCurrent,
+  type NativeRailIconOwnerToken,
+} from '../adapter/native-rail-icon-owner.js'
+import {
   type NativeRailIconVisualHandle,
   type NativeRailIconVisualRequest,
   type NativeRailIconVisualResult,
@@ -37,12 +43,25 @@ export class WorkspaceRailProjection {
   private iconRevision = 0
   private iconHandle: NativeRailIconVisualHandle | undefined
   private iconRetryTimer: ReturnType<typeof setTimeout> | undefined
+  private currentCommittedRoute: string | undefined
+  private previousCommittedRoute: string | undefined
+  private unsubscribeRoute: (() => void) | undefined
 
   constructor(
     private readonly document: Document,
     private readonly route?: NativeRouteSource,
     private readonly icon?: WorkspaceRailIconOptions,
-  ) {}
+  ) {
+    this.currentCommittedRoute = nativeRailCommittedRouteIdentity(document)
+    this.unsubscribeRoute = route?.subscribe(() => this.rememberCommittedRoute())
+  }
+
+  private rememberCommittedRoute(): void {
+    const identity = nativeRailCommittedRouteIdentity(this.document)
+    if (identity === undefined || identity === this.currentCommittedRoute) return
+    this.previousCommittedRoute = this.currentCommittedRoute
+    this.currentCommittedRoute = identity
+  }
 
   enter(): boolean {
     if (this.captured !== undefined || this.settling !== undefined || this.dirty || this.disposed) return false
@@ -59,6 +78,11 @@ export class WorkspaceRailProjection {
     ) return false
     const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
     if (this.route !== undefined && routeIdentity === undefined) return false
+    this.rememberCommittedRoute()
+    const provisionalOwner = this.icon?.appVersion !== undefined
+        && readNativeRailSelection(rail) !== button && this.previousCommittedRoute !== undefined
+      ? captureNativeRailIconOwner(this.document, this.previousCommittedRoute)
+      : undefined
     this.captured = {
       button,
       destination: button.getAttribute('data-sidebar-destination')!,
@@ -78,7 +102,7 @@ export class WorkspaceRailProjection {
       this.leave()
       return false
     }
-    this.startIconVisual()
+    this.startIconVisual(provisionalOwner)
     return true
   }
 
@@ -112,6 +136,7 @@ export class WorkspaceRailProjection {
     ++this.revision
     this.captured?.button.removeAttribute(NATIVE_SELECTION_SUPPRESSION)
     this.captured = undefined
+    this.unsubscribeRoute?.()
     this.document.removeEventListener('click', this.onNativeClick, true)
   }
 
@@ -123,21 +148,27 @@ export class WorkspaceRailProjection {
     this.iconHandle = undefined
   }
 
-  private startIconVisual(): void {
+  private startIconVisual(provisionalOwner?: NativeRailIconOwnerToken): void {
     const appVersion = this.icon?.appVersion
     if (appVersion === undefined) return
     const revision = ++this.iconRevision
-    void this.projectIconVisual(appVersion, revision, 0)
+    void this.projectIconVisual(appVersion, revision, 0, provisionalOwner)
   }
 
-  private async projectIconVisual(appVersion: string, revision: number, retry: number): Promise<void> {
-    if (!this.iconVisualEntryCurrent(revision)) return
+  private async projectIconVisual(
+    appVersion: string,
+    revision: number,
+    retry: number,
+    provisionalOwner?: NativeRailIconOwnerToken,
+  ): Promise<void> {
+    if (!this.iconVisualEntryCurrent(revision, provisionalOwner)) return
     const project = this.icon?.project ?? projectNativeRailDefaultIcon
     let result: NativeRailIconVisualResult
     try {
       result = await project({
         document: this.document,
         appVersion,
+        ...(provisionalOwner === undefined ? {} : { provisionalOwner }),
         onLost: () => {
           if (revision !== this.iconRevision || this.disposed || this.captured === undefined) return
           this.iconHandle = undefined
@@ -149,7 +180,10 @@ export class WorkspaceRailProjection {
       return
     }
     if (result.status === 'active') {
-      if (!this.iconVisualEntryCurrent(revision)) {
+      if (
+        !this.iconVisualEntryCurrent(revision, provisionalOwner)
+        || result.handle.destination !== this.captured?.destination || !result.handle.isCurrent()
+      ) {
         result.handle.dispose()
         return
       }
@@ -158,6 +192,7 @@ export class WorkspaceRailProjection {
       (
         result.reason === 'visual-lease-exists' || result.reason === 'native-icon-owner-unavailable'
         || result.reason === 'native-icon-owner-changed' || result.reason === 'native-icon-geometry-unavailable'
+        || result.reason === 'native-provisional-owner-invalid'
       ) && retry < 30 && this.iconVisualEntryCurrent(revision)
     ) {
       this.iconRetryTimer = setTimeout(() => {
@@ -167,16 +202,21 @@ export class WorkspaceRailProjection {
     }
   }
 
-  private iconVisualEntryCurrent(revision: number): boolean {
+  private iconVisualEntryCurrent(revision: number, provisionalOwner?: NativeRailIconOwnerToken): boolean {
     const captured = this.captured
     if (revision !== this.iconRevision || this.disposed || captured === undefined) return false
     if (captured.clickedDestination !== undefined && captured.clickedDestination !== captured.destination) return false
     const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
       'nav[data-app-navigation-rail="true"]',
     )
-    const nativeSelected = rail === null || rail === undefined ? undefined : readNativeRailSelection(rail)
-    return nativeSelected === undefined
-      || nativeSelected.getAttribute('data-sidebar-destination') === captured.destination
+    if (rail === null || rail === undefined || !rail.contains(captured.button)) return false
+    const marked = rail.querySelectorAll<HTMLButtonElement>(
+      'button[data-sidebar-destination][aria-current="page"],button[data-sidebar-destination][data-selected]',
+    )
+    if ([...marked].some(button => button !== captured.button)) return false
+    return provisionalOwner === undefined
+      ? readNativeRailSelection(rail) === captured.button
+      : provisionalOwner.button === captured.button && nativeRailIconOwnerCurrent(provisionalOwner, true)
   }
 
   private inspect(captured: CapturedSelection): 'done' | 'wait' | 'dirty' {
