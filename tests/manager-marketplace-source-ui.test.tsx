@@ -140,12 +140,12 @@ describe('React Marketplace source controls', () => {
 
   it('reports source retry failures through Host notifications', async () => {
     const fixture = reactManagerFixture()
-    const shadows: ShadowRoot[] = []
+    const shadows = new WeakMap<HTMLElement, ShadowRoot>()
     const attach = fixture.dom.window.HTMLElement.prototype.attachShadow
     const shadowSpy = vi.spyOn(fixture.dom.window.HTMLElement.prototype, 'attachShadow').mockImplementation(
       function(this: HTMLElement, options) {
         const shadow = attach.call(this, options)
-        shadows.push(shadow)
+        shadows.set(this, shadow)
         return shadow
       },
     )
@@ -193,7 +193,8 @@ describe('React Marketplace source controls', () => {
       await fixture.click('[aria-label^="View source error"]')
       expect(dialogCenterForDocument(fixture.document)!.visible()[0]!.chrome.title).toBe('Source error')
       await act(async () => {
-        shadows.at(-1)!.querySelector<HTMLButtonElement>('[data-action=confirm]')!.click()
+        const dialog = fixture.document.querySelector<HTMLElement>('[data-cordisx-dialog]')!
+        shadows.get(dialog)!.querySelector<HTMLButtonElement>('[data-action=confirm]')!.click()
         await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
       })
       expect(reloadSource).toHaveBeenCalledExactlyOnceWith(OFFICIAL_MARKETPLACE_SOURCE)
