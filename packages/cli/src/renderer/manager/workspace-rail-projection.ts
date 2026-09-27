@@ -100,7 +100,6 @@ export class WorkspaceRailProjection {
     const nativeSelected = readNativeRailSelection(rail)
     const marker = current.length === 1 && marked.length === 1 ? current[0] : undefined
     const fingerprint = JSON.stringify([
-      routeIdentity,
       nativeSelected?.getAttribute('data-sidebar-destination'),
       marker?.getAttribute('data-sidebar-destination'),
     ])
