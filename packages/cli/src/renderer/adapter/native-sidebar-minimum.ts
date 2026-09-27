@@ -38,7 +38,7 @@ export function readNativeSidebarMinimum(seat: NativeSidebarMinimumSeat): Native
   if (!valid) return { width: MIN_MANAGER_SIDEBAR_WIDTH, source: 'host-floor' }
   const minimum = (total: number): number | undefined => {
     const content = Math.ceil(total - railRect.width)
-    return Number.isFinite(total) && total <= asideRect.width + 2
+    return Number.isFinite(total)
         && content >= MIN_MANAGER_SIDEBAR_WIDTH && content <= MAX_MANAGER_SIDEBAR_WIDTH
       ? content
       : undefined
