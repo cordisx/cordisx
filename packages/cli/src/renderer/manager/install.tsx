@@ -587,6 +587,7 @@ export function installReactCordisXManager(
     view?.removeEventListener('resize', onViewportResize)
     root.unmount()
     deactivatePane()
+    railProjection.dispose()
     marketplace.dispose()
     detachTriggerTheme()
     detachNavigationTheme()

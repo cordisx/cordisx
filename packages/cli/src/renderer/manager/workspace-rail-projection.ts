@@ -4,20 +4,27 @@ import { nativeRouteIdentity, type NativeRouteSource } from './native-route-tran
 
 interface CapturedSelection {
   readonly button: HTMLButtonElement
+  readonly destination: string
   readonly current: string
   readonly marked: string
   readonly routeIdentity: string | undefined
+  clickedDestination: string | undefined
 }
 
 /** Host-owned workspace rail projection; it does not register a Codex destination or route. */
 export class WorkspaceRailProjection {
   private captured: CapturedSelection | undefined
   private dirty = false
+  private disposed = false
+  private revision = 0
+  private settling: Promise<boolean> | undefined
+  private fingerprint = ''
+  private stableSince = 0
 
   constructor(private readonly document: Document, private readonly route?: NativeRouteSource) {}
 
   enter(): boolean {
-    if (this.captured !== undefined || this.dirty) return false
+    if (this.captured !== undefined || this.settling !== undefined || this.dirty || this.disposed) return false
     const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
       'nav[data-app-navigation-rail="true"]',
     )
@@ -30,10 +37,13 @@ export class WorkspaceRailProjection {
     if (this.route !== undefined && routeIdentity === undefined) return false
     this.captured = {
       button,
+      destination: button.getAttribute('data-sidebar-destination')!,
       current: button.getAttribute('aria-current')!,
       marked: button.getAttribute('data-selected')!,
       routeIdentity,
+      clickedDestination: undefined,
     }
+    this.document.addEventListener('click', this.onNativeClick, true)
     button.removeAttribute('aria-current')
     button.removeAttribute('data-selected')
     if (
@@ -48,35 +58,131 @@ export class WorkspaceRailProjection {
 
   leave(): boolean {
     const captured = this.captured
-    if (captured === undefined) return true
+    if (captured === undefined) return this.settling === undefined && !this.dirty
     this.captured = undefined
+    this.document.removeEventListener('click', this.onNativeClick, true)
+    this.fingerprint = ''
+    this.stableSince = 0
+    const result = this.inspect(captured)
+    if (result === 'done') return true
+    if (result === 'dirty') return this.fail()
+    const revision = ++this.revision
+    this.settling = this.settle(captured, revision).finally(() => {
+      if (revision === this.revision) this.settling = undefined
+    })
+    return false
+  }
+
+  async settled(): Promise<boolean> {
+    return await (this.settling ?? Promise.resolve(!this.dirty))
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.dirty = true
+    ++this.revision
+    this.captured = undefined
+    this.document.removeEventListener('click', this.onNativeClick, true)
+  }
+
+  private inspect(captured: CapturedSelection): 'done' | 'wait' | 'dirty' {
     const rail = resolveManagerRailSeat(this.document)?.homeButton.closest<HTMLElement>(
       'nav[data-app-navigation-rail="true"]',
     )
-    if (rail === null || rail === undefined) return this.fail()
+    if (rail === null || rail === undefined) return 'wait'
     const current = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][aria-current="page"]')
     const marked = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination][data-selected]')
-    if (current.length === 0 && marked.length === 0) {
-      const nativeSelected = readNativeRailSelection(rail)
-      if (nativeSelected !== undefined) {
-        nativeSelected.setAttribute('aria-current', captured.current)
-        nativeSelected.setAttribute('data-selected', captured.marked)
-        return true
-      }
-      const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
-      if (
-        routeIdentity !== captured.routeIdentity || !captured.button.isConnected
-        || !rail.contains(captured.button)
-      ) return this.fail()
-      captured.button.setAttribute('aria-current', captured.current)
-      captured.button.setAttribute('data-selected', captured.marked)
-      return true
+    if (
+      current.length > 1 || marked.length > 1 || (current.length === 1 && marked.length === 1
+        && current[0] !== marked[0])
+    ) return 'dirty'
+    const routeIdentity = this.route === undefined ? undefined : nativeRouteIdentity(this.route.snapshot())
+    const nativeSelected = readNativeRailSelection(rail)
+    const marker = current.length === 1 && marked.length === 1 ? current[0] : undefined
+    const fingerprint = JSON.stringify([
+      routeIdentity,
+      nativeSelected?.getAttribute('data-sidebar-destination'),
+      marker?.getAttribute('data-sidebar-destination'),
+    ])
+    if (fingerprint !== this.fingerprint) {
+      this.fingerprint = fingerprint
+      this.stableSince = Date.now()
     }
-    return current.length === 1 && marked.length === 1 && current[0] === marked[0] || this.fail()
+    const stableMs = Date.now() - this.stableSince
+    const clickedOther = captured.clickedDestination !== undefined
+      && captured.clickedDestination !== captured.destination
+    if (marker !== undefined) {
+      const destination = marker.getAttribute('data-sidebar-destination')
+      if (captured.clickedDestination === undefined || destination === captured.clickedDestination) return 'done'
+      if (
+        clickedOther && destination === captured.destination
+        && routeIdentity === captured.routeIdentity && stableMs >= 500
+      ) {
+        return 'done'
+      }
+      return 'wait'
+    }
+    if (current.length === 0 && marked.length === 0) {
+      if (
+        captured.clickedDestination === undefined && routeIdentity === captured.routeIdentity
+        && captured.button.isConnected && rail.contains(captured.button)
+        && (nativeSelected === undefined || nativeSelected === captured.button)
+      ) {
+        return this.restore(rail, captured.button, captured) ? 'done' : 'dirty'
+      }
+      const selectedDestination = nativeSelected?.getAttribute('data-sidebar-destination')
+      if (
+        nativeSelected !== undefined && stableMs >= 250 && !clickedOther
+        && selectedDestination === captured.destination
+      ) {
+        return this.restore(rail, nativeSelected, captured) ? 'done' : 'dirty'
+      }
+      if (
+        routeIdentity === captured.routeIdentity && stableMs >= 500
+        && captured.button.isConnected && rail.contains(captured.button)
+        && (nativeSelected === undefined || nativeSelected === captured.button)
+      ) {
+        return this.restore(rail, captured.button, captured) ? 'done' : 'dirty'
+      }
+    }
+    return 'wait'
+  }
+
+  private restore(rail: HTMLElement, button: HTMLButtonElement, captured: CapturedSelection): boolean {
+    button.setAttribute('aria-current', captured.current)
+    button.setAttribute('data-selected', captured.marked)
+    const current = rail.querySelectorAll('button[data-sidebar-destination][aria-current="page"]')
+    const marked = rail.querySelectorAll('button[data-sidebar-destination][data-selected]')
+    return current.length === 1 && marked.length === 1 && current[0] === button && marked[0] === button
+  }
+
+  private async settle(captured: CapturedSelection, revision: number): Promise<boolean> {
+    const deadline = Date.now() + 6_000
+    while (Date.now() < deadline && revision === this.revision && !this.disposed) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+      if (revision !== this.revision || this.disposed) return false
+      const result = this.inspect(captured)
+      if (result === 'done') return true
+      if (result === 'dirty') return this.fail()
+    }
+    return this.fail()
   }
 
   private fail(): false {
     this.dirty = true
     return false
+  }
+
+  private readonly onNativeClick = (event: MouseEvent) => {
+    const captured = this.captured
+    const ElementClass = this.document.defaultView?.Element
+    if (captured === undefined || ElementClass === undefined || !(event.target instanceof ElementClass)) return
+    const button = event.target.closest<HTMLButtonElement>('button[data-sidebar-destination]')
+    const rail = resolveManagerRailSeat(this.document)?.homeButton.closest('nav[data-app-navigation-rail="true"]')
+    if (
+      button === null || rail === null || rail === undefined || !rail.contains(button) || button.disabled
+      || button.getAttribute('aria-disabled') === 'true' || button.closest('[inert]') !== null
+    ) return
+    captured.clickedDestination = button.getAttribute('data-sidebar-destination') ?? undefined
   }
 }
