@@ -23,7 +23,7 @@ import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../../contrac
 import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
 import type { ConfigMutationOperation } from '../configuration.js'
 import { managerCopy } from '../ui-copy.js'
-import { ArrayEditor, type ArrayEditorFieldRowRenderProps } from './ArrayEditor.js'
+import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps } from './ArrayEditor.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
@@ -164,7 +164,16 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
   }
 }
 
-function Control({ field, resolved, value, onChange, controlId, locale, transientSecret }: {
+function Control({
+  field,
+  resolved,
+  value,
+  onChange,
+  controlId,
+  locale,
+  transientSecret,
+  renderArrayItemSupplement,
+}: {
   readonly field: CordisXConfigFieldSnapshot
   readonly resolved: ReturnType<typeof primitive>
   readonly value: unknown
@@ -172,6 +181,7 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   readonly controlId?: string
   readonly locale: string
   readonly transientSecret?: boolean
+  readonly renderArrayItemSupplement?: ArrayEditorProps['renderItemSupplement']
 }) {
   // TDesign values exclude null. Stable option keys preserve every JSON scalar,
   // including null and distinct boolean, numeric and string schema choices.
@@ -194,6 +204,7 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
         locale={locale}
         validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)}
         renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />}
+        {...(renderArrayItemSupplement === undefined ? {} : { renderItemSupplement: renderArrayItemSupplement })}
       />
     )
   }
@@ -410,7 +421,7 @@ function ConfigControl({ model, pluginId, field, blocked, value, resolved, onCha
       focusable.id = controlId
       focusable.dataset.hostFormPrimitive = 'custom'
       const labelId = custom.current?.closest('.cxf-control-seat')?.getAttribute('aria-labelledby')
-      if (labelId) focusable.setAttribute('aria-labelledby', `${labelId}-text`)
+      if (labelId) focusable.setAttribute('aria-labelledby', labelId)
       focusable.setAttribute(
         'aria-describedby',
         `${field.description === undefined ? '' : `${controlId}-help `}${controlId}-error`,
@@ -540,6 +551,7 @@ interface HostFieldRowBaseProps {
   readonly transientSecret?: boolean
   readonly disabled?: boolean
   readonly customControl?: { readonly model: ManagerModel; readonly pluginId: string }
+  readonly renderArrayItemSupplement?: ArrayEditorProps['renderItemSupplement']
   readonly onChange: (value: unknown) => void
 }
 
@@ -567,6 +579,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
     controlId,
     transientSecret,
     customControl,
+    renderArrayItemSupplement,
     onChange,
   } = props
   const disabled = field.disabled || props.disabled === true
@@ -662,6 +675,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
               controlId={resolvedControlId}
               locale={locale}
               {...(transientSecret === undefined ? {} : { transientSecret })}
+              {...(renderArrayItemSupplement === undefined ? {} : { renderArrayItemSupplement })}
             />
           )
           : (

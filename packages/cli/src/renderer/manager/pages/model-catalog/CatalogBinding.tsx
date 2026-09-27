@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Button, Switch } from 'tdesign-react'
+import { Button, Checkbox, Switch } from 'tdesign-react'
 import type {
   CatalogManagementCommand,
   CatalogManagementOperation,
   CatalogManagementView,
 } from '../../../../model-catalog-management.js'
+import { inferModelBrand } from '../../../../model-selector-branding.js'
 import type { ModelCatalogClient } from '../../../model-catalog-client.js'
 import type { HostModelProvider } from '../../../model-providers.js'
 import { HostBrandIcon } from '../../../host-ui/HostBrandIcon.js'
@@ -37,7 +38,20 @@ export const catalogTime = (value: number | undefined, locale: string): string =
     : new Date(value).toLocaleString(locale)
 
 export function CatalogBinding(
-  { view, client, provider, locale, query, filters, connected, expanded, onExpandedChange }: {
+  {
+    view,
+    client,
+    provider,
+    locale,
+    query,
+    filters,
+    connected,
+    expanded,
+    onExpandedChange,
+    exportSelection,
+    onShare,
+    onShareProvider,
+  }: {
     readonly view: CatalogManagementView
     readonly client: ModelCatalogClient
     readonly provider?: HostModelProvider | undefined
@@ -47,6 +61,13 @@ export function CatalogBinding(
     readonly connected: boolean
     readonly expanded?: boolean
     readonly onExpandedChange?: (open: boolean) => void
+    readonly exportSelection?: {
+      readonly selected: boolean
+      readonly disabled: boolean
+      readonly toggle: () => void
+    }
+    readonly onShare?: (id: string) => void | Promise<void>
+    readonly onShareProvider?: () => void
   },
 ) {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
@@ -141,15 +162,45 @@ export function CatalogBinding(
   action('updateConnection', 'catalog.editConnection', 'configuration', () => openEditor('connection'))
   action(
     'requestCredentialReplacement',
-    'catalog.replaceCredential',
+    view.credentialState === 'unset' ? 'catalog.addCredential' : 'catalog.replaceCredential',
     'permissions',
-    () => confirm({ operation: 'requestCredentialReplacement' }, 'catalog.replaceConfirm'),
+    () =>
+      confirm(
+        { operation: 'requestCredentialReplacement' },
+        view.credentialState === 'unset' ? 'catalog.addCredentialConfirm' : 'catalog.replaceConfirm',
+      ),
   )
+  if (
+    onShareProvider && view.sourceKind !== 'plugin'
+    && view.rows.some(row =>
+      row.present && !row.provenance.some(value => value === 'script' || value === 'script-supplement')
+    )
+  ) {
+    items.push({
+      id: view.transferAvailable ? 'share-provider' : 'share-unavailable',
+      label: view.transferAvailable
+        ? locale.startsWith('zh') ? '分享' : 'Share'
+        : locale.startsWith('zh')
+        ? '此连接暂不可分享'
+        : 'Cannot share this connection',
+      icon: 'copy',
+      disabled: !view.transferAvailable,
+      onSelect: view.transferAvailable ? onShareProvider : () => {},
+    })
+  }
   const supportedRows = view.rows.filter(row =>
-    (row as typeof row & { readonly compatibility?: string }).compatibility === 'supported'
+    exportSelection
+      ? row.present && !row.provenance.some(value => value === 'script' || value === 'script-supplement')
+      : (row as typeof row & { readonly compatibility?: string }).compatibility === 'supported'
   )
-  const rows = catalogMatchingRows(view, query, filters)
-  const canExpand = rows.length > 0
+  const rows = exportSelection === undefined
+    ? catalogMatchingRows(view, query, filters)
+    : supportedRows.filter(row =>
+      (catalogBindingMatches(view, query) || catalogQuery(`${row.id} ${row.label}`).includes(query))
+      && (filters.size === 0 || filters.has('selectable') && row.selectable || filters.has('blocked') && row.blocked
+        || filters.has('removed') && !row.present)
+    )
+  const canExpand = exportSelection === undefined && rows.length > 0
   const listExpanded = canExpand && effectiveExpanded
   const scriptUnavailable = view.sourceKind === 'script' && !sourceCapabilities.includes('runScript') && !scriptRunning
   const detailVisible = listExpanded || diagnosticsOpen || confirmation !== undefined || editor !== undefined
@@ -177,6 +228,24 @@ export function CatalogBinding(
   const sameConfirmation = confirmation?.revision === view.revision && confirmation.scope === view.scopeRevision
   const credentialBlocked = confirmation?.intent.operation === 'requestCredentialReplacement'
     && view.supplement.length > 0
+  const bindingIdentity = (
+    <>
+      {provider?.selectorBrand
+        ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+        : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
+      <span className="cxms-provider-identity">
+        <strong>{view.title}</strong>
+        <code>{view.scopeLabel ?? view.providerId}</code>
+      </span>
+      <span className="cxms-model-count">
+        {view.credentialState === 'unset'
+          ? t('catalog.credentialRequired')
+          : rows.length > 0
+          ? `${t('catalog.sourceCount')}: ${view.sourceCount}`
+          : emptyLabel}
+      </span>
+    </>
+  )
   return (
     <section
       ref={root}
@@ -188,100 +257,113 @@ export function CatalogBinding(
       data-expanded={listExpanded}
     >
       <header className="cxmc-binding-header">
-        <button
-          type="button"
-          className="cxmc-binding-toggle"
-          aria-expanded={listExpanded}
-          aria-controls={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-          disabled={!canExpand}
-          onClick={() => changeExpanded(!listExpanded)}
-        >
-          <span className="cxms-disclosure-mark" aria-hidden="true" />
-          {provider?.selectorBrand
-            ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
-            : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
-          <span className="cxms-provider-identity">
-            <strong>{view.title}</strong>
-            <code>{view.scopeLabel ?? view.providerId}</code>
-          </span>
-          <span className="cxms-model-count">
-            {canExpand ? `${t('catalog.sourceCount')}: ${view.sourceCount}` : emptyLabel}
-          </span>
-        </button>
+        {exportSelection
+          ? (
+            <div className="cxmc-binding-toggle cxmc-export-binding">
+              <Checkbox
+                className="cxmc-export-checkbox"
+                aria-label={`${locale.startsWith('zh') ? '选择模型服务' : 'Select model service'}: ${view.title}`}
+                checked={exportSelection.selected}
+                disabled={exportSelection.disabled}
+                onChange={exportSelection.toggle}
+              />
+              {bindingIdentity}
+            </div>
+          )
+          : (
+            <button
+              type="button"
+              className="cxmc-binding-toggle"
+              aria-expanded={listExpanded}
+              aria-controls={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+              disabled={!canExpand}
+              onClick={() => changeExpanded(!listExpanded)}
+            >
+              <span className="cxms-disclosure-mark" aria-hidden="true" />
+              {bindingIdentity}
+            </button>
+          )}
         <div className="cxmc-binding-actions" data-menu-open={actionMenuOpen}>
-          {view.sourceKind === 'auto' && sourceCapabilities.includes('setAutoPaused')
-            ? (
-              <Switch
-                value={!view.autoPaused}
-                disabled={!sourceAllowed('setAutoPaused')}
-                aria-label={t(view.autoPaused ? 'catalog.resume' : 'catalog.pause')}
-                onChange={enabled => void run({ operation: 'setAutoPaused', paused: !enabled })}
-              />
-            )
-            : null}
-          {sourceCapabilities.includes('runScript') || sourceCapabilities.includes('cancelScript')
-            ? (
+          {exportSelection ? null : (
+            <>
+              {view.sourceKind === 'auto' && sourceCapabilities.includes('setAutoPaused')
+                ? (
+                  <Switch
+                    value={!view.autoPaused}
+                    disabled={!sourceAllowed('setAutoPaused')}
+                    aria-label={t(view.autoPaused ? 'catalog.resume' : 'catalog.pause')}
+                    onChange={enabled => void run({ operation: 'setAutoPaused', paused: !enabled })}
+                  />
+                )
+                : null}
+              {sourceCapabilities.includes('runScript') || sourceCapabilities.includes('cancelScript')
+                ? (
+                  <IconButton
+                    tag="button"
+                    icon={scriptRunning ? 'console-pause' : 'console-resume'}
+                    label={t(scriptRunning ? 'catalog.cancelScript' : 'catalog.runScript')}
+                    disabled={!sourceAllowed(scriptRunning ? 'cancelScript' : 'runScript')}
+                    onClick={() => void run({ operation: scriptRunning ? 'cancelScript' : 'runScript' })}
+                  />
+                )
+                : null}
+              {sourceCapabilities.includes('refresh')
+                ? (
+                  <IconButton
+                    tag="button"
+                    icon="reload-plugin"
+                    label={`${t('catalog.refresh')}: ${view.title}`}
+                    disabled={!sourceAllowed('refresh') || view.activity !== 'idle'}
+                    aria-busy={view.activity !== 'idle'}
+                    onClick={() => void run({ operation: 'refresh' })}
+                  />
+                )
+                : null}
               <IconButton
                 tag="button"
-                icon={scriptRunning ? 'console-pause' : 'console-resume'}
-                label={t(scriptRunning ? 'catalog.cancelScript' : 'catalog.runScript')}
-                disabled={!sourceAllowed(scriptRunning ? 'cancelScript' : 'runScript')}
-                onClick={() => void run({ operation: scriptRunning ? 'cancelScript' : 'runScript' })}
+                icon="point-info"
+                label={`${t('catalog.diagnostics')}: ${view.title}`}
+                aria-expanded={diagnosticsOpen}
+                onClick={() => {
+                  setDiagnosticsOpen(!diagnosticsOpen)
+                }}
               />
-            )
-            : null}
-          {sourceCapabilities.includes('refresh')
-            ? (
-              <IconButton
-                tag="button"
-                icon="reload-plugin"
-                label={`${t('catalog.refresh')}: ${view.title}`}
-                disabled={!sourceAllowed('refresh') || view.activity !== 'idle'}
-                aria-busy={view.activity !== 'idle'}
-                onClick={() => void run({ operation: 'refresh' })}
-              />
-            )
-            : null}
-          <IconButton
-            tag="button"
-            icon="point-info"
-            label={`${t('catalog.diagnostics')}: ${view.title}`}
-            aria-expanded={diagnosticsOpen}
-            onClick={() => {
-              setDiagnosticsOpen(!diagnosticsOpen)
-            }}
-          />
-          {items.length > 0
-            ? (
-              <MoreMenu
-                label={`${t('catalog.more')}: ${view.title}`}
-                items={items}
-                onOpenChange={setActionMenuOpen}
-              />
-            )
-            : null}
-          {preferenceCapabilities.includes('setProviderFavorite')
-            ? (
-              <IconButton
-                tag="button"
-                className="cxmc-provider-favorite"
-                icon={capabilityView.providerFavorite ? 'favorite-active' : 'favorite'}
-                label={`${
-                  t(capabilityView.providerFavorite ? 'catalog.unfavoriteProvider' : 'catalog.favoriteProvider')
-                }: ${view.title}`}
-                aria-pressed={capabilityView.providerFavorite}
-                disabled={!preferenceAllowed('setProviderFavorite')}
-                onClick={() =>
-                  void run({
-                    operation: 'setProviderFavorite',
-                    favorite: !capabilityView.providerFavorite,
-                  })}
-              />
-            )
-            : null}
+              {items.length > 0
+                ? (
+                  <MoreMenu
+                    label={`${t('catalog.more')}: ${view.title}`}
+                    items={items}
+                    onOpenChange={setActionMenuOpen}
+                  />
+                )
+                : null}
+              {preferenceCapabilities.includes('setProviderFavorite')
+                ? (
+                  <IconButton
+                    tag="button"
+                    className="cxmc-provider-favorite"
+                    icon={capabilityView.providerFavorite ? 'favorite-active' : 'favorite'}
+                    label={`${
+                      t(capabilityView.providerFavorite ? 'catalog.unfavoriteProvider' : 'catalog.favoriteProvider')
+                    }: ${view.title}`}
+                    aria-pressed={capabilityView.providerFavorite}
+                    disabled={!preferenceAllowed('setProviderFavorite')}
+                    onClick={() =>
+                      void run({
+                        operation: 'setProviderFavorite',
+                        favorite: !capabilityView.providerFavorite,
+                      })}
+                  />
+                )
+                : null}
+            </>
+          )}
         </div>
       </header>
-      <div id={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`} hidden={!detailVisible}>
+      <div
+        id={`cxmc-binding-${view.bindingRef.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+        hidden={exportSelection !== undefined || !detailVisible}
+      >
         {scriptUnavailable
           ? <p className="cxmc-muted">{t('catalog.scriptUnavailable')}</p>
           : null}
@@ -393,6 +475,12 @@ export function CatalogBinding(
         >
           {rows.slice(0, progressive.limit).map(row => (
             <li key={row.id} data-model-id={row.id} data-present={row.present}>
+              <ModelBrandIcon
+                brand={provider?.models.find(model =>
+                  model.id === row.id
+                )?.selectorBrand ?? inferModelBrand(row.id, row.label)}
+                kind="model"
+              />
               <div className="cxms-model-identity">
                 <strong>{row.label}</strong>
                 {row.id !== row.label ? <code>{row.id}</code> : null}
@@ -415,14 +503,29 @@ export function CatalogBinding(
                 {row.present && !row.selectable && !row.blocked ? <span>{t('catalog.unavailable')}</span> : null}
               </div>
               <div className="cxmc-row-actions">
+                {onShare && view.sourceKind !== 'plugin' && view.transferAvailable && row.present
+                    && !row.provenance.some(value =>
+                      value === 'script' || value === 'script-supplement'
+                    )
+                  ? (
+                    <MoreMenu
+                      label={`${locale.startsWith('zh') ? '更多' : 'More'}: ${row.label}`}
+                      items={[{
+                        id: 'share-model',
+                        label: locale.startsWith('zh') ? '分享模型配置' : 'Share model configuration',
+                        icon: 'copy',
+                        onSelect: () => void onShare(row.id),
+                      }]}
+                    />
+                  )
+                  : null}
                 <IconButton
                   tag="button"
                   icon={row.pinned ? 'favorite-active' : 'favorite'}
                   label={`${t(row.pinned ? 'catalog.unpin' : 'catalog.pin')}: ${row.id}`}
                   aria-pressed={row.pinned}
                   disabled={!preferenceAllowed('setOverlay')}
-                  onClick={() =>
-                    void run({ operation: 'setOverlay', modelId: row.id, pinned: !row.pinned })}
+                  onClick={() => void run({ operation: 'setOverlay', modelId: row.id, pinned: !row.pinned })}
                 />
                 <IconButton
                   tag="button"
@@ -430,8 +533,7 @@ export function CatalogBinding(
                   label={`${t(row.blocked ? 'catalog.unblock' : 'catalog.block')}: ${row.id}`}
                   aria-pressed={row.blocked}
                   disabled={!preferenceAllowed('setOverlay')}
-                  onClick={() =>
-                    void run({ operation: 'setOverlay', modelId: row.id, blocked: !row.blocked })}
+                  onClick={() => void run({ operation: 'setOverlay', modelId: row.id, blocked: !row.blocked })}
                 />
               </div>
             </li>

@@ -113,7 +113,7 @@ export async function runInjectedHost(input: {
   readonly launcher: CordisXLauncherOptions
   readonly profile?: IsolatedCodexProfile
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
-  readonly environment?: Readonly<Record<string, string>>
+  readonly environment?: Readonly<Record<string, string | undefined>>
   readonly stdout: (line: string) => void
   readonly onReady?: (signal?: AbortSignal) => void | Promise<void>
   readonly onHostLaunched?: import('../launcher/process.js').HostLaunchIdentityObserver

@@ -142,6 +142,12 @@ export const MODEL_CATALOG_COPY = {
   'catalog.cancelScript': { en: 'Cancel script', 'zh-CN': '取消运行' },
   'catalog.scriptUnavailable': { en: 'Script execution unavailable', 'zh-CN': '脚本执行暂不可用' },
   'catalog.replaceCredential': { en: 'Replace credential', 'zh-CN': '更换凭据' },
+  'catalog.addCredential': { en: 'Add API key', 'zh-CN': '添加 API 密钥' },
+  'catalog.credentialRequired': { en: 'API key required', 'zh-CN': '需要 API 密钥' },
+  'catalog.addCredentialConfirm': {
+    en: 'Continue to secure key entry? The native prompt will show the exact destination.',
+    'zh-CN': '继续安全输入密钥？系统提示会显示准确的目标地址。',
+  },
   'catalog.replaceConfirm': {
     en: 'Continue to secure credential entry? Existing connection history is isolated after replacement.',
     'zh-CN': '继续安全输入凭据？更换后旧连接历史将隔离。',

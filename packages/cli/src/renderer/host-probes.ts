@@ -15,6 +15,16 @@ export function resolveManagerTriggerTarget(document: Document): HTMLElement | u
   return visibleCandidates.length === 1 ? visibleCandidates[0] : undefined
 }
 
+/** Legacy modal compatibility is unavailable once either 26.924 shell marker is present. */
+export function resolveLegacyManagerModalTarget(document: Document): HTMLElement | undefined {
+  if (
+    document.querySelector(
+      'nav[data-app-navigation-rail="true"], header[data-app-shell-titlebar="true"]',
+    ) !== null
+  ) return undefined
+  return resolveManagerTriggerTarget(document)
+}
+
 /** Host-private 26.924 rail seat. Insert a tagged Host-owned item before `before`; leave native items in place. */
 export function resolveManagerRailSeat(document: Document): {
   container: HTMLElement

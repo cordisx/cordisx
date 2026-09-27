@@ -43,6 +43,7 @@ import { RoutesPage } from './pages/RoutesPage.js'
 
 import { ModelConnectionCreatePage } from './pages/ModelConnectionCreatePage.js'
 import { ModelServicesPage } from './pages/ModelServicesPage.js'
+import type { ModelServicesSecondaryPage } from './pages/model-catalog/ModelTransferPages.js'
 
 export function reconcileManagerContentRoute(
   route: ManagerRoute,
@@ -283,6 +284,7 @@ function Content(
     pluginManagement,
     pluginManagementSnapshot,
     pluginManagementError,
+    onModelServicesSecondaryPageChange,
   }: {
     readonly model: ManagerModel
     readonly marketplace: MarketplaceModel
@@ -292,6 +294,7 @@ function Content(
     readonly pluginManagement: ManagerPluginManagementBinding | undefined
     readonly pluginManagementSnapshot: import('../../management/contracts.js').PluginManagementSnapshot | undefined
     readonly pluginManagementError: string | undefined
+    readonly onModelServicesSecondaryPageChange: (page: ModelServicesSecondaryPage | undefined) => void
   },
 ) {
   const current = route.route
@@ -392,6 +395,7 @@ function Content(
         registry={model.modelProviders}
         locale={snapshot.localization.locale}
         onCreate={() => route.navigate({ kind: 'model-connection-create' })}
+        onSecondaryPageChange={onModelServicesSecondaryPageChange}
       />
     )
   }
@@ -409,6 +413,7 @@ export interface ManagerAppProps {
   readonly navigationController?: HostManagerNavigationController
   readonly pluginManagement?: ManagerPluginManagementBinding
   readonly activatePane?: () => boolean
+  readonly allowModalFallback?: () => boolean
   readonly deactivatePane?: () => void
   readonly registerPaneLoss?: (handler: () => void) => void
   readonly nativeRouteHistory?: NativeRouteSource
@@ -462,6 +467,7 @@ export function ManagerApp(
     navigationController,
     pluginManagement,
     activatePane,
+    allowModalFallback,
     deactivatePane,
     registerPaneLoss,
     nativeRouteHistory,
@@ -489,6 +495,7 @@ export function ManagerApp(
   const [open, setOpen] = useState(() => playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true')
   const [surface, setSurface] = useState<'pane' | 'modal'>('modal')
   const [seatUnavailable, setSeatUnavailable] = useState(false)
+  const [modelServicesSecondaryPage, setModelServicesSecondaryPage] = useState<ModelServicesSecondaryPage>()
   const restoreTriggerFocus = useRef(true)
   const openManager = () => {
     restoreTriggerFocus.current = true
@@ -503,6 +510,11 @@ export function ManagerApp(
     ) {
       setSeatUnavailable(false)
       setSurface('pane')
+      setOpen(true)
+    } else if (allowModalFallback?.()) {
+      deactivatePane?.()
+      setSeatUnavailable(false)
+      setSurface('modal')
       setOpen(true)
     } else {
       deactivatePane?.()
@@ -529,7 +541,15 @@ export function ManagerApp(
   }, { document: triggerSeat.ownerDocument, feedbackActive: open })
   const previousOpen = useRef(open)
   const managerMain = useRef<HTMLElement>(null)
-  const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
+  const heading = useMemo(
+    () => modelServicesSecondaryPage?.title ?? title(router.route, snapshot),
+    [modelServicesSecondaryPage?.title, router.route, snapshot],
+  )
+  useEffect(() => {
+    if (router.route.kind !== 'primary' || router.route.page !== 'model-services') {
+      setModelServicesSecondaryPage(undefined)
+    }
+  }, [router.route])
   useLayoutEffect(() =>
     navigationController?.bind(request => {
       if ('contributionId' in request) {
@@ -606,7 +626,9 @@ export function ManagerApp(
   const managerContentParent = router.route.kind === 'manager-content'
     ? model.managerContentPresentation?.(router.route.id, router.route.reference)?.parent
     : undefined
-  const backRoute = managerHeaderBackRoute(router.route, managerContentParent, router.capture().at(-2))
+  const backRoute = modelServicesSecondaryPage === undefined
+    ? managerHeaderBackRoute(router.route, managerContentParent, router.capture().at(-2))
+    : undefined
   const onBack = () => {
     if (backRoute === undefined) return
     const previous = router.capture().at(-2)
@@ -616,7 +638,18 @@ export function ManagerApp(
   const header = (
     <header className="cxr-header" data-manager-surface={surface}>
       <span className="cxr-header-seat">
-        {backRoute !== undefined
+        {modelServicesSecondaryPage !== undefined
+          ? (
+            <Button
+              className="cxr-header-back"
+              shape="square"
+              variant="text"
+              aria-label={managerCopy(snapshot.localization.locale, 'manager.back')}
+              icon={<HostIcon token="back" />}
+              onClick={modelServicesSecondaryPage.back}
+            />
+          )
+          : backRoute !== undefined
           ? (
             <Button
               className="cxr-header-back"
@@ -636,13 +669,28 @@ export function ManagerApp(
           : <BrandMark />}
       </span>
       <div className="cxr-heading">
-        <ManagerBreadcrumbs
-          route={router.route}
-          navigate={router.navigate}
-          heading={heading}
-          model={model}
-          snapshot={snapshot}
-        />
+        {modelServicesSecondaryPage === undefined
+          ? (
+            <ManagerBreadcrumbs
+              route={router.route}
+              navigate={router.navigate}
+              heading={heading}
+              model={model}
+              snapshot={snapshot}
+            />
+          )
+          : (
+            <HostBreadcrumbs
+              segments={[
+                {
+                  key: 'model-services',
+                  label: title({ kind: 'primary', page: 'model-services' }, snapshot),
+                  onActivate: modelServicesSecondaryPage.back,
+                },
+                { key: modelServicesSecondaryPage.id, label: modelServicesSecondaryPage.title },
+              ]}
+            />
+          )}
       </div>
       <div className="cxr-titlebar-actions">
         <Button
@@ -729,7 +777,8 @@ export function ManagerApp(
                 {surface === 'modal' ? header : null}
                 <div
                   className="cxr-content"
-                  data-content-layout={(router.route.kind === 'model-connection-create'
+                  data-content-layout={(modelServicesSecondaryPage !== undefined
+                      || router.route.kind === 'model-connection-create'
                       || router.route.kind === 'marketplace-source-edit')
                     ? 'form'
                     : 'document'}
@@ -744,6 +793,7 @@ export function ManagerApp(
                       pluginManagement={pluginManagement}
                       pluginManagementSnapshot={management.snapshot}
                       pluginManagementError={management.error}
+                      onModelServicesSecondaryPageChange={setModelServicesSecondaryPage}
                     />
                   </MarketplaceInstallerProvider>
                 </div>

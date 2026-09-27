@@ -10,6 +10,7 @@ import {
   persistedPermissionRecordKey,
 } from '../permission-persistence.js'
 import { type HomeConfigProfileManagement, parseHomeConfigProfileManagement } from './home-config-management.js'
+import { type HomeConfigEnvironmentVariable, parseHomeConfigEnvironmentVariables } from './home-config-environment.js'
 import {
   DEFAULT_MARKETPLACE_TRUST_SOURCE,
   type HomeConfigMarketplaceSource,
@@ -139,6 +140,7 @@ export interface HomeConfigPublisherGrantIssuer {
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
+  readonly environmentVariables: readonly HomeConfigEnvironmentVariable[]
   readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
   readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
@@ -502,6 +504,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   rejectUnknownKeys(config, [
     'version',
     'defaultApp',
+    'environmentVariables',
     'providers',
     'plugins',
     'permissions',
@@ -511,6 +514,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   ], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
+  const environmentVariables = parseHomeConfigEnvironmentVariables(config.environmentVariables)
   if (config.providers !== undefined && !Array.isArray(config.providers)) {
     throw new Error('config.providers must be an array')
   }
@@ -573,6 +577,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   return {
     version: 1,
     defaultApp,
+    environmentVariables,
     providers,
     plugins,
     permissions,
@@ -587,6 +592,7 @@ export function createDefaultHomeConfig(): HomeConfig {
   return {
     version: 1,
     defaultApp: 'codex',
+    environmentVariables: [],
     providers: [],
     plugins: [],
     permissions: [],

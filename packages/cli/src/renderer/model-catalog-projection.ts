@@ -10,6 +10,7 @@ import type {
   CatalogSafeDiagnostics,
   CatalogSourceOperation,
 } from '../model-catalog-management.js'
+import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
 const codes = [
   'unsupported',
@@ -84,6 +85,9 @@ function editable(value: unknown): CatalogEditableModel {
     ...(item.protocolCapabilities === undefined
       ? {}
       : { protocolCapabilities: protocolCapabilities(item.protocolCapabilities) }),
+    ...(item.reasoningCapabilities === undefined
+      ? {}
+      : { reasoningCapabilities: reasoningCapabilities(item.reasoningCapabilities) }),
   })
 }
 
@@ -109,6 +113,9 @@ function row(value: unknown): CatalogManagementRow {
     ...(item.protocolCapabilities === undefined
       ? {}
       : { protocolCapabilities: protocolCapabilities(item.protocolCapabilities) }),
+    ...(item.reasoningCapabilities === undefined
+      ? {}
+      : { reasoningCapabilities: reasoningCapabilities(item.reasoningCapabilities) }),
     ...(item.reason === undefined ? {} : {
       reason: choice(item.reason, ['blocked', 'removed', 'unconfirmed', 'permission', 'pending-apply']),
     }),
@@ -164,6 +171,10 @@ function view(value: unknown): CatalogManagementView {
     scopeRevision: text(item.scopeRevision),
     revision: text(item.revision),
     sourceKind: choice(item.sourceKind, ['native', 'plugin', 'auto', 'manual', 'script']),
+    ...(item.transferAvailable === undefined ? {} : { transferAvailable: bool(item.transferAvailable) }),
+    ...(item.credentialState === undefined
+      ? {}
+      : { credentialState: choice(item.credentialState, ['set', 'unset']) }),
     mode: choice(item.mode, ['only', 'augment', 'replace', 'supplement']),
     freshness: choice(item.freshness, ['unknown', 'fresh', 'stale']),
     activity: choice(item.activity, ['idle', 'scheduled', 'loading', 'applying']),
@@ -215,6 +226,10 @@ function scriptState(value: unknown): NonNullable<CatalogManagementView['scriptS
 function protocolCapabilities(value: unknown): NonNullable<CatalogManagementView['protocolCapabilities']> {
   const item = record(value)
   return Object.freeze({ responses: bool(item.responses) })
+}
+
+function reasoningCapabilities(value: unknown): NonNullable<CatalogManagementRow['reasoningCapabilities']> {
+  return parseModelReasoningCapabilities(value) ?? fail()
 }
 
 /** Positive field projection prevents accidental Host internals from reaching React state. */

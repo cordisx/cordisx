@@ -6,6 +6,7 @@ import {
   type ModelSelectorIconOverrides,
   type ProviderBrandProjection,
 } from '../model-selector-branding.js'
+import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
 export interface NativeModelProviderCatalogEntry {
   readonly providerId: string
@@ -20,6 +21,7 @@ export interface NativeModelProviderCatalogEntry {
     readonly provenance?:
       readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
     readonly notListed?: boolean
+    readonly reasoningCapabilities?: ModelReasoningCapabilities
   }[]
   readonly defaultModelId?: string
 }

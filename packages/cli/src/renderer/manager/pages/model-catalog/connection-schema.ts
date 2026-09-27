@@ -1,6 +1,7 @@
 import type { SchemaFormOptionsV1 } from '@cordisx/protocol/schema-form/v1'
 import Schema from '@deepseek-ai/schemastery'
 import type { CordisXConfigFormIcon } from '../../../../contracts.js'
+import type { ModelReasoningCapabilities } from '../../../../model-reasoning-capabilities.js'
 import { managerCopy } from '../../../ui-copy.js'
 
 export interface ConnectionDraft extends Record<string, unknown> {
@@ -9,7 +10,12 @@ export interface ConnectionDraft extends Record<string, unknown> {
   protocol: 'responses' | 'chat-completions'
   source: 'manual' | 'only' | 'augment'
   discoveryEnabled: boolean
-  models: { id: string; label?: string; protocolCapabilities?: { responses: boolean } }[]
+  models: {
+    id: string
+    label?: string
+    protocolCapabilities?: { responses: boolean }
+    reasoningCapabilities?: ModelReasoningCapabilities
+  }[]
   emptyConfirmed: boolean
 }
 

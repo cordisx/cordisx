@@ -4,7 +4,7 @@ import {
   createNativeSubmissionComposition,
   type NativeSubmissionComposition,
 } from '../launcher/native-submission-composition.js'
-import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
@@ -372,6 +372,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       selection.profile,
       environment,
       plan?.environment,
+      undefined,
+      currentHomeConfig.environmentVariables,
     )
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined
@@ -925,9 +927,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           : { startupNavigation: supervisorRuntime.startupNavigation }),
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
-        ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)
-          ? {}
-          : { environment: { ...plan.environment, ...nativeSubmission?.environment } }),
+        environment: {
+          ...hostModelServiceEnvironment(environment, currentHomeConfig.environmentVariables, plan.environment),
+          ...nativeSubmission?.environment,
+        },
         stdout,
       }
       profileLeaseHandedOff = profileLease !== undefined

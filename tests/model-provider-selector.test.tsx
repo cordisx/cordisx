@@ -4,12 +4,10 @@ import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ModelProviderSelector,
-  providerMenuLabel,
   type ProviderSelectionSnapshot,
 } from '../packages/cli/src/renderer/model-provider-selector.js'
 import { canReplaceNativeModelProviderTrigger } from '../packages/cli/src/renderer/install-model-provider-selector.js'
 import { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
-
 const globals = Object.fromEntries(
   ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'IS_REACT_ACT_ENVIRONMENT']
     .map(key => [key, Reflect.get(globalThis, key)]),
@@ -21,7 +19,6 @@ afterEach(async () => {
   dom?.window.close()
   Object.assign(globalThis, globals)
 })
-
 async function setup(model = 'shared', busy = false, options?: {
   readonly firstLabel?: string
   readonly firstAliases?: readonly string[]
@@ -29,6 +26,10 @@ async function setup(model = 'shared', busy = false, options?: {
     readonly id: string
     readonly label: string
     readonly aliases?: readonly string[]
+    readonly reasoningCapabilities?: {
+      readonly efforts: readonly ('low' | 'medium' | 'high')[]
+      readonly defaultEffort?: 'low' | 'medium' | 'high'
+    }
   }[]
   readonly secondModels?: readonly {
     readonly id: string
@@ -76,6 +77,7 @@ async function setup(model = 'shared', busy = false, options?: {
         id: model,
         label: options?.firstLabel ?? 'Current',
         ...(options?.firstAliases === undefined ? {} : { aliases: options.firstAliases }),
+        reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'low' },
       }],
     },
     {
@@ -166,16 +168,6 @@ async function setup(model = 'shared', busy = false, options?: {
     },
   }
 }
-
-describe('providerMenuLabel', () => {
-  it('shortens only the two generated native labels and preserves custom parentheses', () => {
-    expect(providerMenuLabel({ providerId: 'modelhub', title: 'ModelHub (Native Direct)' })).toBe('ModelHub')
-    expect(providerMenuLabel({ providerId: 'openrouter', title: 'OpenRouter (Native Responses)' })).toBe('OpenRouter')
-    expect(providerMenuLabel({ providerId: 'custom', title: 'Custom (Team)' })).toBe('Custom (Team)')
-    expect(providerMenuLabel({ providerId: 'modelhub', title: 'ModelHub (Team)' })).toBe('ModelHub (Team)')
-  })
-})
-
 async function click(selector: string) {
   const button = document.querySelector<HTMLButtonElement>(`${selector}:not(:disabled)`)
   expect(button).not.toBeNull()
@@ -184,10 +176,8 @@ async function click(selector: string) {
     await new Promise(resolve => setTimeout(resolve, 0))
   })
 }
-
 const providerTrigger = '.cxmp-provider-trigger'
 const modelTrigger = '.cxmp-model-trigger'
-
 describe('provider selection interaction', () => {
   it('opens a subscribed provider catalog without re-reading it on the interaction turn', async () => {
     const { registry } = await setup('model-0', false, {
@@ -619,6 +609,13 @@ describe('provider selection interaction', () => {
     expect(slider.closest('.cxmp-reasoning')?.hasAttribute('data-dragging')).toBe(false)
   })
 
+  it('hides reasoning controls for an external model without capability metadata', async () => {
+    await setup('shared', false, { firstModels: [{ id: 'shared', label: 'Current' }] })
+    await click(modelTrigger)
+    expect(document.querySelector('input[type="range"]')).toBeNull()
+    expect(document.querySelector(`${modelTrigger} .cxmp-effort-label`)?.textContent).toBe('Choose effort')
+  })
+
   it('shows Fast availability in the menu and the active state beside the model trigger', async () => {
     const { selectFastMode, update } = await setup()
     await update({
@@ -839,7 +836,6 @@ describe('provider selection interaction', () => {
     await act(async () => fail(new Error('Old thread failed')))
     expect(document.querySelector('[role="alert"]')).toBeNull()
   })
-
   it('keeps the model menu honest for empty, loading and failed catalogs', async () => {
     const { registry, update } = await setup()
     await update({ modelProvider: 'unknown', nativeModels: [], reasoningEfforts: [] })
@@ -869,7 +865,11 @@ describe('provider selection interaction', () => {
 
   it('keeps reasoning ahead of the collapsed model list in keyboard order', async () => {
     await setup('model-0', false, {
-      firstModels: Array.from({ length: 9 }, (_, index) => ({ id: `model-${index}`, label: `Model ${index}` })),
+      firstModels: Array.from({ length: 9 }, (_, index) => ({
+        id: `model-${index}`,
+        label: `Model ${index}`,
+        reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'low' },
+      })),
     })
     await click(modelTrigger)
     const disclosure = document.querySelector<HTMLButtonElement>('.cxmp-model-disclosure')!

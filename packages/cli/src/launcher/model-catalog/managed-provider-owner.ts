@@ -1,7 +1,13 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureHomeConfig, type HomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../../config/home-config.js'
+import {
+  enabledHomeEnvironment,
+  HOME_ENVIRONMENT_NAME,
+  type HomeConfigEnvironmentVariable,
+  parseHomeConfigEnvironmentVariables,
+} from '../../config/home-config-environment.js'
 import { CatalogError, type DiscoveryConnection, type DiscoveryRequest } from './contracts.js'
 import { withAbort } from './abort.js'
 import { createDiscoveryRequestCapability, type DiscoveryFetch } from './request-capability.js'
@@ -16,12 +22,28 @@ import {
 } from './managed-provider-schema.js'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../kernel-operation-lock.js'
 import { liveProcessStartedAt, recordedProcessStatus } from '../process-identity.js'
+import { type PortableBundle, validatePortableBundle } from './portable-transfer-codec.js'
 
 const nonce = () => randomBytes(32).toString('base64url')
+// One 256,000-byte portable connection may duplicate 512 maximum-length IDs in strategy.ids.
+// The final allowance covers the Host-generated record fields and a later 8 KB credential.
+const MAX_MANAGED_PROVIDER_RECORD_CHARS = 256_000 + 512 * (512 + 3) + 16 * 1024
 const failure = () => new CatalogError('credential-unavailable')
 const lockBusy = () => new CatalogError('temporary')
 const lockInvalid = () => new CatalogError('source-invalid')
 const recordsSource = (records: readonly ManagedProviderRecord[]) => JSON.stringify(records)
+const allocateEnvironmentName = (requested: string, used: ReadonlySet<string>): string => {
+  if (!used.has(requested)) return requested
+  for (let suffix = 1; suffix <= 128; suffix += 1) {
+    const stem = requested.slice(0, Math.max(1, 127 - String(suffix).length))
+    const candidate = `${stem}_${suffix}`
+    if (!used.has(candidate)) return candidate
+  }
+  throw new CatalogError('source-invalid')
+}
+const assertRecordCapacity = (record: ManagedProviderRecord): void => {
+  if (JSON.stringify(record).length > MAX_MANAGED_PROVIDER_RECORD_CHARS) throw new CatalogError('source-invalid')
+}
 
 interface OwnerOptions {
   readonly homeDir: string
@@ -172,6 +194,7 @@ export class ManagedProviderOwner {
   readonly #releaseLock: () => Promise<void>
   readonly #fetcher: DiscoveryFetch | undefined
   #records = new Map<string, ManagedProviderRecord>()
+  #environmentEntries: readonly HomeConfigEnvironmentVariable[] = Object.freeze([])
   #source = ''
   #tail: Promise<unknown> = Promise.resolve()
   #closed = false
@@ -233,7 +256,50 @@ export class ManagedProviderOwner {
 
   snapshot(): readonly ManagedProviderView[] {
     if (this.#closed) return []
-    return Object.freeze([...this.#records.values()].map(managedProviderView))
+    return Object.freeze(
+      [...this.#records.values()].map(record => managedProviderView(record, this.#credential(record) !== undefined)),
+    )
+  }
+
+  environmentReference(id: string): string | undefined {
+    return this.#records.get(id)?.environmentReference
+  }
+
+  portableEnvironment(id: string): {
+    readonly name?: string
+    readonly value?: string
+    readonly placeholder: boolean
+  } | undefined {
+    const record = this.#records.get(id)
+    if (record?.environmentReference !== undefined) return { name: record.environmentReference, placeholder: false }
+    return record?.secret === undefined ? undefined : { value: record.secret, placeholder: true }
+  }
+
+  environmentEntries(): readonly HomeConfigEnvironmentVariable[] {
+    return this.#environmentEntries
+  }
+
+  saveEnvironment(
+    entries: readonly HomeConfigEnvironmentVariable[],
+    authorized: () => boolean = () => true,
+  ): Promise<void> {
+    return this.#serial(async () => {
+      if (!authorized()) throw new CatalogError('permission')
+      const expectedEnvironment = JSON.stringify(this.#environmentEntries)
+      await this.#assertCurrent()
+      if (JSON.stringify(this.#environmentEntries) !== expectedEnvironment) throw new CatalogError('source-invalid')
+      const environmentVariables = parseHomeConfigEnvironmentVariables(entries)
+      const updated = await updateHomeConfigAtomic(current => {
+        if (!authorized()) throw new CatalogError('permission')
+        if (recordsSource(this.#profileRecords(current)) !== this.#source) throw new CatalogError('source-invalid')
+        if (JSON.stringify(current.environmentVariables) !== expectedEnvironment) {
+          throw new CatalogError('source-invalid')
+        }
+        return { ...current, environmentVariables }
+      }, { configPath: this.#configPath })
+      this.#acceptConfig(updated)
+      this.#changed()
+    })
   }
 
   subscribe(listener: () => void): () => void {
@@ -262,11 +328,15 @@ export class ManagedProviderOwner {
   ): Promise<NativeManagedGatewayConnectionSession> {
     await this.#assertCurrent()
     const record = this.#records.get(id)
-    if (!record || record.settings.protocol !== 'responses' && !admittedResponses()) {
+    const credential = record === undefined ? undefined : this.#credential(record)
+    if (!record || credential === undefined || record.settings.protocol !== 'responses' && !admittedResponses()) {
       throw new CatalogError('unsupported')
     }
     await this.#assertCurrent()
-    if (this.#records.get(id) !== record || record.settings.protocol !== 'responses' && !admittedResponses()) {
+    if (
+      this.#records.get(id) !== record || this.#credential(record) !== credential
+      || record.settings.protocol !== 'responses' && !admittedResponses()
+    ) {
       throw new CatalogError('cancelled')
     }
     const endpoint = new URL(record.settings.endpoint)
@@ -276,7 +346,7 @@ export class ManagedProviderOwner {
         endpoint: {
           origin: endpoint.origin,
           apiPath: endpoint.pathname as `/${string}`,
-          auth: { scheme: 'bearer' as const, token: record.secret },
+          auth: { scheme: 'bearer' as const, token: credential },
         },
         models: { generation: record.revision, defaultAlias: '', aliases: [] },
         cleanup: { authorityId: record.scopeRevision },
@@ -322,18 +392,203 @@ export class ManagedProviderOwner {
           credentialRevision: capture ? nonce() : prior!.credentialRevision,
           credentialRef: capture ? nonce() : prior!.credentialRef,
           settings,
-          secret,
+          ...(capture || prior?.environmentReference === undefined
+            ? {}
+            : { environmentReference: prior.environmentReference }),
+          ...(secret === undefined ? {} : { secret }),
+          ...(prior?.importTransferId === undefined ? {} : {
+            importTransferId: prior.importTransferId,
+            importDigest: prior.importDigest,
+          }),
         })
-        const raw = JSON.stringify(record)
-        if (raw.length > 16 * 1024) throw new CatalogError('source-invalid')
+        assertRecordCapacity(record)
         const next = new Map(this.#records).set(record.id, record)
         await this.#commit(next, authorized)
-        return managedProviderView(record)
+        return managedProviderView(record, this.#credential(record) !== undefined)
       } finally {
         clearTimeout(timer)
         this.#leases.delete(abort)
         abort.abort()
       }
+    })
+  }
+
+  preparePortableImport(bundle: PortableBundle): readonly {
+    readonly sourceName: string
+    readonly name: string
+    readonly value: string
+    readonly enabled: boolean
+    readonly description?: string
+    readonly generator?: HomeConfigEnvironmentVariable['generator']
+  }[] {
+    const parsed = validatePortableBundle(bundle)
+    if (parsed.version === 1) return Object.freeze([])
+    const used = new Set(this.#environmentEntries.map(entry => entry.name))
+    return Object.freeze(parsed.environment.map(variable => {
+      const name = allocateEnvironmentName(variable.name, used)
+      used.add(name)
+      return Object.freeze({
+        sourceName: variable.name,
+        name,
+        value: variable.value ?? '',
+        enabled: true,
+        ...(variable.description === undefined ? {} : { description: variable.description }),
+        ...(variable.generator === undefined ? {} : { generator: variable.generator }),
+      })
+    }))
+  }
+
+  /** Validates the whole bundle, then appends environment and Provider records in one atomic config write. */
+  importPortable(
+    bundle: PortableBundle,
+    variablesOrAuthorized:
+      | readonly {
+        readonly sourceName: string
+        readonly name: string
+        readonly value: string
+        readonly enabled: boolean
+        readonly description?: string
+        readonly generator?: HomeConfigEnvironmentVariable['generator']
+      }[]
+      | (() => boolean) = [],
+    authorize: () => boolean = () => true,
+  ): Promise<{
+    readonly imported: number
+    readonly skipped: number
+    readonly bindingRefs: readonly string[]
+  }> {
+    const authorized = typeof variablesOrAuthorized === 'function' ? variablesOrAuthorized : authorize
+    const requestedVariables = typeof variablesOrAuthorized === 'function' ? [] : variablesOrAuthorized
+    return this.#serial(async () => {
+      if (!authorized()) throw new CatalogError('permission')
+      await this.#assertCurrent()
+      const parsed = validatePortableBundle(bundle)
+      const sourceVariables = parsed.version === 1 ? [] : parsed.environment
+      const supplied = new Map(requestedVariables.map(variable => [variable.sourceName, variable]))
+      if (
+        supplied.size !== requestedVariables.length || supplied.size !== sourceVariables.length
+        || sourceVariables.some(variable => !supplied.has(variable.name))
+        || requestedVariables.some(variable =>
+          !HOME_ENVIRONMENT_NAME.test(variable.sourceName) || !HOME_ENVIRONMENT_NAME.test(variable.name)
+          || typeof variable.value !== 'string' || variable.value.length > 16_384 || variable.value.includes('\0')
+          || typeof variable.enabled !== 'boolean'
+          || variable.description !== undefined
+            && (variable.description.length > 512 || variable.description.includes('\0'))
+          || variable.generator !== undefined
+            && (variable.generator.kind !== 'shell' || typeof variable.generator.script !== 'string'
+              || variable.generator.script.length > 16_384 || variable.generator.script.includes('\0'))
+        )
+      ) throw new CatalogError('source-invalid')
+      const next = new Map(this.#records)
+      const identities = new Map(
+        [...next.values()].flatMap(record =>
+          record.importTransferId === undefined ? [] : [[record.importTransferId, record] as const]
+        ),
+      )
+      let skipped = 0
+      const bindingRefs: string[] = []
+      const pending: Array<{ readonly connection: PortableBundle['connections'][number]; readonly recordId: string }> =
+        []
+      for (const connection of parsed.connections) {
+        const digest = createHash('sha256').update(JSON.stringify(connection)).digest('hex')
+        const prior = identities.get(connection.transferId)
+        if (prior) {
+          if (prior.importDigest !== digest) throw new CatalogError('source-invalid')
+          skipped++
+          continue
+        }
+        if (next.size >= 64) throw new CatalogError('source-invalid')
+        const models = connection.models.map(model => ({
+          id: model.id,
+          label: model.label,
+          ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+          ...(model.reasoningCapabilities ? { reasoningCapabilities: model.reasoningCapabilities } : {}),
+        }))
+        const settings = managedProviderSettings({
+          title: connection.title,
+          endpoint: connection.endpoint,
+          protocol: connection.protocol,
+          discoveryEnabled: false,
+          strategy: { kind: 'manual', ids: models.map(model => model.id) },
+          supplement: [],
+          models,
+        })
+        const recordId = nonce()
+        const record = parseManagedProviderRecord({
+          id: recordId,
+          revision: nonce(),
+          scopeRevision: nonce(),
+          credentialRevision: nonce(),
+          credentialRef: nonce(),
+          importTransferId: connection.transferId,
+          importDigest: digest,
+          ...(connection.environment === undefined ? {} : { environmentReference: connection.environment }),
+          settings,
+        })
+        assertRecordCapacity(record)
+        next.set(record.id, record)
+        identities.set(connection.transferId, record)
+        bindingRefs.push(record.id)
+        pending.push({ connection, recordId })
+      }
+      if (bindingRefs.length > 0) {
+        let committedRecords = next
+        const updated = await updateHomeConfigAtomic(current => {
+          if (!authorized()) throw new CatalogError('permission')
+          if (recordsSource(this.#profileRecords(current)) !== this.#source) throw new CatalogError('source-invalid')
+          const used = new Set(current.environmentVariables.map(entry => entry.name))
+          const allocated = new Map<string, string>()
+          const appended: HomeConfigEnvironmentVariable[] = []
+          for (const source of sourceVariables) {
+            if (!pending.some(item => item.connection.environment === source.name)) continue
+            const requested = supplied.get(source.name)!
+            const name = allocateEnvironmentName(requested.name, used)
+            used.add(name)
+            allocated.set(source.name, name)
+            appended.push({
+              name,
+              value: requested.value,
+              enabled: requested.enabled,
+              ...(requested.description === undefined || requested.description === ''
+                ? {}
+                : { description: requested.description }),
+              ...(requested.generator === undefined ? {} : { generator: requested.generator }),
+            })
+          }
+          committedRecords = new Map(next)
+          for (const item of pending) {
+            if (item.connection.environment === undefined) continue
+            const record = committedRecords.get(item.recordId)!
+            committedRecords.set(
+              item.recordId,
+              parseManagedProviderRecord({
+                ...record,
+                environmentReference: allocated.get(item.connection.environment),
+              }),
+            )
+          }
+          const app = current.apps[this.#appId]!
+          const profile = app.profiles[this.#profileId]!
+          return {
+            ...current,
+            environmentVariables: [...current.environmentVariables, ...appended],
+            apps: {
+              ...current.apps,
+              [this.#appId]: {
+                ...app,
+                profiles: {
+                  ...app.profiles,
+                  [this.#profileId]: { ...profile, managedProviders: [...committedRecords.values()] },
+                },
+              },
+            },
+          }
+        }, { configPath: this.#configPath })
+        this.#records = committedRecords
+        this.#acceptConfig(updated)
+        this.#changed()
+      }
+      return { imported: bindingRefs.length, skipped, bindingRefs: Object.freeze(bindingRefs) }
     })
   }
 
@@ -352,8 +607,10 @@ export class ManagedProviderOwner {
   /** At most one fixed operation. No plugin-supplied adapter, URL, headers or credential lookup. */
   connection(id: string): DiscoveryConnection | undefined {
     const record = this.#records.get(id)
+    const credential = record === undefined ? undefined : this.#credential(record)
     if (
-      this.#closed || !record || !record.settings.discoveryEnabled || record.settings.strategy.kind !== 'auto'
+      this.#closed || !record || credential === undefined || !record.settings.discoveryEnabled
+      || record.settings.strategy.kind !== 'auto'
     ) return undefined
     const current = () => !this.#closed && this.#records.get(id) === record
     const endpoint = new URL(record.settings.endpoint)
@@ -379,7 +636,9 @@ export class ManagedProviderOwner {
             bearer: async () => {
               await this.#assertCurrent()
               if (this.#records.get(id) !== record) throw new CatalogError('cancelled')
-              return record.secret
+              const currentCredential = this.#credential(record)
+              if (currentCredential === undefined) throw new CatalogError('credential-unavailable')
+              return currentCredential
             },
             ...(this.#fetcher ? { fetcher: this.#fetcher } : {}),
           })
@@ -398,7 +657,10 @@ export class ManagedProviderOwner {
   }
 
   async #load(): Promise<void> {
-    const records = this.#profileRecords(await loadHomeConfig(this.#configPath))
+    const config = await loadHomeConfig(this.#configPath)
+    const records = this.#profileRecords(config)
+    this.#environmentEntries = config.environmentVariables
+    this.#environment = enabledHomeEnvironment(this.#environmentEntries)
     this.#source = recordsSource(records)
     this.#records = new Map(records.map(record => [record.id, record]))
   }
@@ -415,12 +677,15 @@ export class ManagedProviderOwner {
       this.#revoke()
       throw failure()
     }
-    const source = recordsSource(this.#profileRecords(await loadHomeConfig(this.#configPath)))
+    const config = await loadHomeConfig(this.#configPath)
+    const source = recordsSource(this.#profileRecords(config))
     if (source !== this.#source) {
       this.#closed = true
       this.#revoke()
       throw failure()
     }
+    this.#environmentEntries = config.environmentVariables
+    this.#environment = enabledHomeEnvironment(this.#environmentEntries)
     if (this.#closed) throw failure()
   }
 
@@ -428,6 +693,31 @@ export class ManagedProviderOwner {
     const profile = config.apps[this.#appId]?.profiles[this.#profileId]
     if (!profile) throw new CatalogError('source-invalid')
     return profile.managedProviders ?? []
+  }
+
+  #environment: Readonly<Record<string, string>> = Object.freeze({})
+
+  #credential(record: ManagedProviderRecord): string | undefined {
+    const value = record.environmentReference === undefined
+      ? record.secret
+      : this.#environment[record.environmentReference]
+    return value === '' ? undefined : value
+  }
+
+  #acceptConfig(config: HomeConfig): void {
+    this.#source = recordsSource(this.#profileRecords(config))
+    this.#environmentEntries = config.environmentVariables
+    this.#environment = enabledHomeEnvironment(this.#environmentEntries)
+  }
+
+  #changed(): void {
+    this.#revoke()
+    if (this.#closed) return
+    for (const listener of this.#listeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
   }
 
   async #commit(next: Map<string, ManagedProviderRecord>, authorized: () => boolean = () => true): Promise<void> {
@@ -453,15 +743,9 @@ export class ManagedProviderOwner {
         },
       }
     }, { configPath: this.#configPath })
-    this.#source = recordsSource(this.#profileRecords(updated))
+    this.#acceptConfig(updated)
     this.#records = next
-    this.#revoke()
-    if (this.#closed) return
-    for (const listener of this.#listeners) {
-      try {
-        listener()
-      } catch { /* Reader isolation. */ }
-    }
+    this.#changed()
   }
 
   #revoke(): void {

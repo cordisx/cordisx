@@ -223,7 +223,7 @@
 
 .cxmc-models > li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 64px;
+  grid-template-columns: 20px minmax(0, 1fr) auto max-content;
   align-items: center;
   gap: 8px;
   border-top: 1px solid var(--cx-border);
@@ -262,6 +262,33 @@
 .cxmc-models > li:focus-within .cxmc-row-actions {
   opacity: 1;
   pointer-events: auto;
+}
+
+.cxmc-export-checkbox {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.cxmc-export-binding {
+  grid-template-columns: 16px 18px minmax(0, 1fr) auto;
+  gap: 9px;
+  padding-inline: 12px;
+  cursor: default;
+}
+
+.cxmc-export-binding > .cordisx-host-icon,
+.cxmc-export-binding > .cxmp-brand-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.cxmp-management[data-exporting="true"] .cxmc-binding-actions {
+  display: none;
 }
 
 .cxmc-diagnostics {
@@ -356,6 +383,10 @@
     grid-template-columns: 10px 20px minmax(0, 1fr);
   }
 
+  .cxmc-export-binding {
+    grid-template-columns: 16px 18px minmax(0, 1fr);
+  }
+
   .cxmc-binding-toggle .cxms-model-count {
     grid-column: 3;
   }
@@ -365,7 +396,7 @@
   }
 
   .cxmc-models > li {
-    grid-template-columns: minmax(0, 1fr) 64px;
+    grid-template-columns: minmax(0, 1fr) max-content;
   }
 
   .cxmc-row-state {

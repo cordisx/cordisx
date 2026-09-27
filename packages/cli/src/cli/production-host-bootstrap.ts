@@ -19,6 +19,8 @@ import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
+import { loadHomeConfig } from '../config/home-config.js'
+import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 
 export interface ProductionHostBootstrap {
   readonly plan?: ResolvedLaunchPlan
@@ -122,7 +124,11 @@ export async function prepareProductionHostBootstrap(
       stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
     }
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
-    const hostEnvironment = { ...plan.environment, ...nativeSubmissionBootstrap?.environment }
+    const configured = await loadHomeConfig(configPath)
+    const hostEnvironment = {
+      ...hostModelServiceEnvironment(environment, configured.environmentVariables, plan.environment),
+      ...nativeSubmissionBootstrap?.environment,
+    }
     const hiddenLaunch = mainInspector
       ? await launchCodexHidden(
         plan.executable,

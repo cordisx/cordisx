@@ -23,6 +23,7 @@ import {
   retainProfileLeaseAfterHiddenHostFailure,
   terminateIsolatedCodex,
 } from '../packages/cli/src/launcher/process.js'
+import { hostModelServiceEnvironment } from '../packages/cli/src/cli/native-submission-catalog-options.js'
 
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>()
@@ -30,6 +31,52 @@ vi.mock('node:child_process', async importOriginal => {
 })
 
 describe('isolated Codex process support', () => {
+  it('removes explicitly disabled inherited environment variables at the launch boundary', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-launch-environment-test-'))
+    const executable = path.join(directory, 'fake-host')
+    const environmentPath = path.join(directory, 'environment.json')
+    const previous = process.env.CORDISX_DISABLED_FIXTURE
+    process.env.CORDISX_DISABLED_FIXTURE = 'inherited-value'
+    let launched: ReturnType<typeof launchCodex> | undefined
+    try {
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
+const { writeFileSync } = require('node:fs')
+writeFileSync(${JSON.stringify(environmentPath)}, JSON.stringify({
+  disabled: process.env.CORDISX_DISABLED_FIXTURE,
+  enabled: process.env.CORDISX_ENABLED_FIXTURE,
+}))
+`,
+        { mode: 0o755 },
+      )
+      launched = launchCodex(
+        executable,
+        43122,
+        [],
+        undefined,
+        false,
+        hostModelServiceEnvironment(
+          process.env,
+          [
+            { name: 'CORDISX_DISABLED_FIXTURE', value: 'disabled-value', enabled: false },
+            { name: 'CORDISX_ENABLED_FIXTURE', value: 'configured-value', enabled: true },
+          ],
+        ),
+      )
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        if (await readFile(environmentPath, 'utf8').then(() => true).catch(() => false)) break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(JSON.parse(await readFile(environmentPath, 'utf8'))).toEqual({ enabled: 'configured-value' })
+    } finally {
+      if (launched !== undefined && launched.exitCode === null && launched.signalCode === null) launched.kill('SIGTERM')
+      if (previous === undefined) delete process.env.CORDISX_DISABLED_FIXTURE
+      else process.env.CORDISX_DISABLED_FIXTURE = previous
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('creates a stable project profile without inventing an isolated HOME', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-test-'))
     const profileDir = path.join(directory, 'codex-app-profile')

@@ -221,12 +221,15 @@ describe('discovery contracts', () => {
     )
   })
 
-  it('retains the complete OpenRouter catalog while marking bounded interactive Responses candidates', async () => {
+  it('retains the complete OpenRouter catalog without inferring Responses support from tool parameters', async () => {
     const compatible = Array.from({ length: 293 }, (_, index) => ({
       id: index === 0 ? 'openai/o4-mini' : `fixture/compatible-${index}`,
       name: `Compatible ${index}`,
       architecture: { input_modalities: ['text'], output_modalities: ['text'] },
       supported_parameters: ['tools', 'tool_choice'],
+      ...(index === 0
+        ? { reasoning: { supported_efforts: ['high', 'low', 'medium'], default_effort: 'medium' } }
+        : {}),
     }))
     const incompatible = [
       ...Array.from({ length: 161 }, (_, index) => ({
@@ -266,11 +269,17 @@ describe('discovery contracts', () => {
       new AbortController().signal,
     )
     expect(models).toHaveLength(458)
-    expect(models.filter(model => model.protocolCapabilities?.responses === true)).toHaveLength(293)
+    expect(models.filter(model => model.protocolCapabilities?.responses === true)).toHaveLength(0)
     expect(models.find(model => model.id === 'openai/o4-mini')).toMatchObject({
-      protocolCapabilities: { responses: true },
+      reasoningCapabilities: { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
     })
-    expect(models.slice(-4).every(model => model.protocolCapabilities?.responses === false)).toBe(true)
+    expect(models.find(model => model.id === 'openai/o4-mini')?.protocolCapabilities).toBeUndefined()
+    expect(models.slice(-4).map(model => model.protocolCapabilities?.responses)).toEqual([
+      false,
+      false,
+      false,
+      undefined,
+    ])
     expect(fetcher).toHaveBeenCalledWith(
       'https://openrouter.ai/api/v1/models',
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer fixture-key' }) }),

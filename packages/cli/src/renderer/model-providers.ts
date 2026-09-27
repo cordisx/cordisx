@@ -12,6 +12,7 @@ import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-bra
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
@@ -29,6 +30,7 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
   readonly selectorBrand?: ModelBrandChoice
   readonly provenance?: readonly ('auto' | 'native' | 'manual' | 'manual-supplement' | 'script' | 'script-supplement')[]
   readonly notListed?: boolean
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
 }
 
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
@@ -70,6 +72,30 @@ export function nativeModelProviderRegistry(managed?: {
       catalogManagementRead: () => channel.catalogManagementRead!(),
       catalogManagementSubscribe: listener => channel.catalogManagementSubscribe!(listener),
       catalogManagementCommand: command => channel.catalogManagementCommand!(command),
+      ...(channel.catalogEnvironmentRead
+        ? { catalogEnvironmentRead: () => channel.catalogEnvironmentRead!() }
+        : {}),
+      ...(channel.catalogEnvironmentSave
+        ? { catalogEnvironmentSave: entries => channel.catalogEnvironmentSave!(entries) }
+        : {}),
+      ...(channel.catalogEnvironmentGenerate
+        ? { catalogEnvironmentGenerate: request => channel.catalogEnvironmentGenerate!(request) }
+        : {}),
+      ...(channel.catalogEnvironmentGenerateCancel
+        ? { catalogEnvironmentGenerateCancel: runId => channel.catalogEnvironmentGenerateCancel!(runId) }
+        : {}),
+      ...(channel.catalogManagementPrepareExport
+        ? { catalogManagementPrepareExport: request => channel.catalogManagementPrepareExport!(request) }
+        : {}),
+      ...(channel.catalogManagementExport
+        ? { catalogManagementExport: request => channel.catalogManagementExport!(request) }
+        : {}),
+      ...(channel.catalogManagementImport
+        ? { catalogManagementImport: request => channel.catalogManagementImport!(request) }
+        : {}),
+      ...(channel.catalogManagementPrepareImport
+        ? { catalogManagementPrepareImport: text => channel.catalogManagementPrepareImport!(text) }
+        : {}),
     })
   }
   return registry
@@ -219,6 +245,10 @@ export class ModelProviderRegistry {
                 ),
               }),
               ...(model.notListed === true ? { notListed: true } : {}),
+              ...(() => {
+                const reasoning = parseModelReasoningCapabilities(model.reasoningCapabilities)
+                return reasoning === undefined ? {} : { reasoningCapabilities: reasoning }
+              })(),
             })
           )),
         })

@@ -1,4 +1,10 @@
 import { nativeModelProviderInteractionAllowed } from './native-model-provider-interaction.js'
+import {
+  isModelReasoningEffort,
+  type ModelReasoningCapabilities,
+  type ModelReasoningEffort,
+  parseModelReasoningCapabilities,
+} from '../../model-reasoning-capabilities.js'
 
 export interface NativeModelProviderSeat {
   readonly trigger: HTMLElement
@@ -14,11 +20,13 @@ export interface NativeModelSelectionControl {
     readonly label: string
     readonly disabled: boolean
     readonly supportsFastMode: boolean
+    readonly reasoningCapabilities?: ModelReasoningCapabilities
+    readonly defaultReasoningEffort?: ModelReasoningEffort
   }[]
   readonly reasoningEffort: string
   readonly reasoningEfforts: readonly string[]
   readonly serviceTier: 'priority' | null
-  selectModel(model: string, reasoningEffort: string): Promise<void>
+  selectModel(model: string, reasoningEffort?: string): Promise<void>
 }
 
 interface ReactFiber {
@@ -74,6 +82,16 @@ function supportsFastMode(model: Record<string, unknown> | undefined): boolean {
   return additional.includes('fast') || tiers.some(value => {
     const tier = record(value)
     return tier?.id === 'priority' || tier?.id === 'fast' || tier?.name === 'Fast'
+  })
+}
+
+function modelReasoningCapabilities(model: Record<string, unknown> | undefined) {
+  if (model === undefined) return undefined
+  const supported = Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : undefined
+  if (supported === undefined) return undefined
+  return parseModelReasoningCapabilities({
+    efforts: supported.map(record).map(option => option?.reasoningEffort),
+    defaultEffort: model.defaultReasoningEffort,
   })
 }
 
@@ -143,19 +161,27 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
           && typeof props.onSelectDefault === 'function'))
       && typeof props.onToggleMenuView === 'function'
     ) {
+      const models = props.models
       return {
         model,
-        ...modelPresentation(props.models, model),
+        ...modelPresentation(models, model),
         models: props.modelOptions.map(record).flatMap(option => {
           const item = record(option?.model)
           if (typeof item?.model !== 'string' || item.hidden === true) return []
-          const label = modelPresentation([item], item.model).modelLabel
+          const metadata = models.map(record).find(candidate => candidate?.model === item.model) ?? item
+          const label = modelPresentation([metadata], item.model).modelLabel
+          const defaultReasoningEffort = metadata?.defaultReasoningEffort
           return label
             ? [{
               id: item.model,
               label,
               disabled: props.modelOptionsDisabled === true || option?.disabledReason != null,
-              supportsFastMode: supportsFastMode(item),
+              supportsFastMode: supportsFastMode(metadata),
+              ...(isModelReasoningEffort(defaultReasoningEffort) ? { defaultReasoningEffort } : {}),
+              ...(() => {
+                const reasoningCapabilities = modelReasoningCapabilities(metadata)
+                return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
+              })(),
             }]
             : []
         }),

@@ -17,15 +17,13 @@ import {
   type NativeSubmissionRejection,
   type NativeSubmissionScope,
 } from './native-provider-selection-client.js'
+import { type NativeMcpBridge, NativeMcpRequestClient } from './native-mcp-request-client.js'
+import { type CatalogReasoningLookup, resolveTargetReasoning, type TargetReasoning } from './native-model-reasoning.js'
 
 type NativeHookGlobal = typeof globalThis & {
   __cordisxNativeSubmitHook?: NativeProviderSelectionClient['submitHook']
   __cordisxNativeSubmissionAuthority?: { snapshot: () => { scope: NativeSubmissionScope; idle: boolean } }
   __cordisxNativeServiceTierOverride?: 'priority' | 'default'
-}
-
-interface ElectronBridge {
-  readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
 }
 
 interface PendingNativeRequest {
@@ -34,12 +32,6 @@ interface PendingNativeRequest {
   readonly threadId?: string
   readonly provider?: string
   readonly model?: string
-}
-
-interface PendingRequest {
-  readonly resolve: (value: unknown) => void
-  readonly reject: (error: Error) => void
-  readonly timer: ReturnType<typeof setTimeout>
 }
 
 interface EffectiveSelection {
@@ -65,7 +57,6 @@ interface SelectionPatch {
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
-const clone = <Value>(value: Value): Value => structuredClone(value)
 const record = (value: unknown): Record<string, unknown> | undefined => (
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 )
@@ -100,13 +91,13 @@ function threadBusy(thread: Record<string, unknown>): boolean | undefined {
 /** Host-private selection control using the launcher's verified native capability. */
 export class CodexDesktopNativeModelProviderTransport implements ProviderSelectionTransport {
   private readonly listeners = new Set<() => void>()
-  private readonly pending = new Map<string, PendingRequest>()
   private readonly nativeRequests = new Map<string, PendingNativeRequest>()
   private readonly effectiveByThread = new Map<string, EffectiveSelection>()
   private readonly nativeModelAssignments = new Map<string, { readonly providerId: string; readonly model: string }>()
   private nativeModelAssignmentScope: string | undefined
   private nativeModelCatalogIdentity: string | undefined
   private readonly nativeModelSource = new NativeModelSource()
+  private readonly requestClient: NativeMcpRequestClient
   private readonly providerNames = new Map<string, string>()
   private observer?: MutationObserver
   private controlDiscoveryRetry?: ReturnType<typeof setTimeout>
@@ -134,13 +125,15 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }
 
   private constructor(
-    private readonly bridge: Required<ElectronBridge>,
+    bridge: Required<NativeMcpBridge>,
     private readonly hostId: string,
     private readonly document: Document,
     private readonly nativeManagedModelRoutingAvailable: boolean,
     private readonly rendererOwner: NativeProviderSelectionOwner,
     commandChannel: NativeProviderSelectionCommandChannel,
+    private readonly catalogReasoning: CatalogReasoningLookup,
   ) {
+    this.requestClient = new NativeMcpRequestClient(bridge, hostId)
     this.visibleThreadId = currentThreadId(document)
     this.selectionClient = new NativeProviderSelectionClient(
       commandChannel,
@@ -168,11 +161,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         const trigger = this.visibleTrigger
         const control = trigger?.isConnected ? locateNativeModelSelectionControl(trigger) : undefined
         if (!control) throw new Error('Native model control unavailable')
-        const effort = this.state.reasoningEffort ?? control.reasoningEffort
-        const key = JSON.stringify([navigation, threadId, selection.model, effort])
+        const reasoning = this.targetReasoning(selection, control)
+        const key = JSON.stringify([navigation, threadId, selection.model, reasoning.effort])
         if (this.nativeModelUpdate?.key === key) await this.nativeModelUpdate.completion
         else if (control.model !== selection.model) {
-          const update = { key, completion: control.selectModel(selection.model, effort) }
+          const update = { key, completion: control.selectModel(selection.model, reasoning.effort) }
           this.nativeModelUpdate = update
           try {
             await update.completion
@@ -190,7 +183,17 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
           await new Promise(resolve => setTimeout(resolve, 25))
         }
         this.confirmNativeModelAssignment(selection.providerId, selection.model)
-        this.publishPatch({ modelProvider: selection.providerId, model: selection.model, reasoningEffort: effort })
+        const selectedControl = this.modelControl()
+        this.publishPatch({
+          modelProvider: selection.providerId,
+          model: selection.model,
+          reasoningEffort: reasoning.catalogBacked
+            ? reasoning.effort ?? null
+            : selectedControl?.reasoningEffort ?? reasoning.effort ?? null,
+          reasoningEfforts: reasoning.catalogBacked
+            ? reasoning.efforts
+            : selectedControl?.reasoningEfforts ?? reasoning.efforts,
+        })
       },
     )
     this.selectionClient.subscribe(() => {
@@ -242,13 +245,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     nativeManagedModelRoutingAvailable = false,
     rendererOwner?: NativeProviderSelectionOwner,
     commandChannel?: NativeProviderSelectionCommandChannel,
+    catalogReasoning: CatalogReasoningLookup = () => undefined,
   ): Promise<CodexDesktopNativeModelProviderTransport | undefined> {
     if (
       !nativeManagedModelRoutingAvailable || !rendererOwner?.targetId || !rendererOwner.rendererGeneration
       || !commandChannel
     ) return undefined
     const page = globalThis as typeof globalThis & {
-      readonly electronBridge?: ElectronBridge
+      readonly electronBridge?: NativeMcpBridge
       readonly codexWindowType?: unknown
       readonly document?: Document
       readonly location?: Location
@@ -260,12 +264,13 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     ) return undefined
     try {
       const transport = new CodexDesktopNativeModelProviderTransport(
-        bridge as Required<ElectronBridge>,
+        bridge as Required<NativeMcpBridge>,
         'local',
         page.document,
         nativeManagedModelRoutingAvailable,
         rendererOwner,
         commandChannel,
+        catalogReasoning,
       )
       await transport.refreshComposer()
       return transport
@@ -326,12 +331,13 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const control = this.modelControl()
     if (control === undefined) return 'unavailable'
     const previousModel = this.state.model ?? control.model
-    const effort = this.state.reasoningEffort ?? control.reasoningEffort
+    const previousEffort = this.state.reasoningEffort ?? control.reasoningEffort
+    const reasoning = this.targetReasoning(target, control)
     const targetSupportsFastMode = control.models.some(item => item.id === target.model && item.supportsFastMode)
     this.selecting = true
     this.publishPatch({ error: null, submissionError: null })
     try {
-      await control.selectModel(target.model, effort)
+      await control.selectModel(target.model, reasoning.effort)
       this.assertCurrent(navigation, threadId)
       if (await this.selectionClient.select(target, options) !== 'accepted') {
         if (options?.source === 'preference') await this.selectionClient.refresh()
@@ -341,7 +347,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.retireNativeResumes(threadId)
       this.publishPatch({
         model: target.model,
-        reasoningEffort: effort,
+        reasoningEffort: reasoning.catalogBacked
+          ? reasoning.effort ?? null
+          : this.modelControl()?.reasoningEffort ?? reasoning.effort ?? null,
+        reasoningEfforts: reasoning.catalogBacked
+          ? reasoning.efforts
+          : this.modelControl()?.reasoningEfforts ?? reasoning.efforts,
         ...(!targetSupportsFastMode && this.state.serviceTier === 'priority' ? { serviceTier: null } : {}),
         error: null,
       })
@@ -350,7 +361,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     } catch {
       if (this.isCurrent(navigation, threadId)) {
         try {
-          await this.modelControl()?.selectModel(previousModel, effort)
+          await this.modelControl()?.selectModel(previousModel, previousEffort)
         } catch {
           this.publishPatch({ available: false })
         }
@@ -425,7 +436,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.publishPatch({ error: null })
     try {
       if (threadId !== undefined) {
-        await this.request('thread/settings/update', { threadId, serviceTier: enabled ? 'priority' : null })
+        await this.requestClient.request('thread/settings/update', {
+          threadId,
+          serviceTier: enabled ? 'priority' : null,
+        })
       }
       this.assertCurrent(navigationGeneration, threadId)
       this.publishPatch({ serviceTier: enabled ? 'priority' : null, error: null })
@@ -459,11 +473,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.observer?.disconnect()
     window.removeEventListener('message', this.receive, true)
     window.removeEventListener('codex-message-from-view', this.observeNativeRequest as EventListener, true)
-    for (const item of this.pending.values()) {
-      clearTimeout(item.timer)
-      item.reject(new Error('Native model provider transport disposed'))
-    }
-    this.pending.clear()
+    this.requestClient.dispose()
     this.nativeRequests.clear()
     this.effectiveByThread.clear()
     this.listeners.clear()
@@ -555,7 +565,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     try {
       const response = threadId === undefined
         ? undefined
-        : record(await this.request('thread/read', { threadId, includeTurns: false }))
+        : record(await this.requestClient.request('thread/read', { threadId, includeTurns: false }))
       if (!this.isRefreshCurrent(generation, threadId)) return
       const config = await this.readConfig()
       if (!this.isRefreshCurrent(generation, threadId)) return
@@ -581,7 +591,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       else {
         await this.nativeModelSource.refresh(
           string(config.model_provider) ?? 'openai',
-          params => this.request('model/list', params),
+          params => this.requestClient.request('model/list', params),
         )
       }
       if (!this.isRefreshCurrent(generation, threadId)) return
@@ -620,6 +630,18 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     return seat === undefined ? undefined : locateNativeModelSelectionControl(seat.trigger)
   }
 
+  private targetReasoning(
+    target: { readonly providerId: string; readonly model: string },
+    control: NonNullable<ReturnType<CodexDesktopNativeModelProviderTransport['modelControl']>>,
+  ): TargetReasoning {
+    return resolveTargetReasoning(
+      target,
+      this.state.reasoningEffort ?? control.reasoningEffort,
+      control.models,
+      this.catalogReasoning,
+    )
+  }
+
   private clearControlDiscoveryRetry(): void {
     if (this.controlDiscoveryRetry === undefined) return
     clearTimeout(this.controlDiscoveryRetry)
@@ -652,7 +674,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       || !this.isCurrent(navigationGeneration, threadId)
     ) return
     try {
-      const response = record(await this.request('thread/read', { threadId, includeTurns: false }))
+      const response = record(await this.requestClient.request('thread/read', { threadId, includeTurns: false }))
       if (
         !this.turnBusy || turnGeneration !== this.turnGeneration
         || !this.isCurrent(navigationGeneration, threadId)
@@ -688,6 +710,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       return
     }
     const model = effective?.model ?? control.model
+    const projectedModels = this.nativeModelSource.project(
+      this.state.nativeModelsScope,
+      this.state.modelProvider,
+      control.models,
+    )
     this.updateNativeModelAssignmentScope(
       threadId,
       this.nativeModelCatalogIdentity,
@@ -696,7 +723,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (
       this.state.model === model
       && this.state.modelLabel === control.modelLabel
-      && JSON.stringify(this.state.nativeModels) === JSON.stringify(control.models)
+      && JSON.stringify(this.state.nativeModels) === JSON.stringify(projectedModels.nativeModels)
+      && this.state.nativeModelsProviderId === projectedModels.nativeModelsProviderId
       && this.state.reasoningEffort === control.reasoningEffort
       && this.sameValues(this.state.reasoningEfforts, control.reasoningEfforts)
     ) return
@@ -808,14 +836,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private receiveResponse(message: Record<string, unknown> | undefined): void {
     const requestId = string(message?.id)
     if (requestId === undefined) return
-    const pending = this.pending.get(requestId)
-    if (pending !== undefined) {
-      this.pending.delete(requestId)
-      clearTimeout(pending.timer)
-      if (message?.error === undefined) pending.resolve(message?.result)
-      else pending.reject(new Error(string(record(message.error)?.message) ?? 'Codex Desktop request failed'))
-      return
-    }
+    if (this.requestClient.receive(message)) return
     const native = this.nativeRequests.get(requestId)
     if (native === undefined) return
     this.nativeRequests.delete(requestId)
@@ -850,7 +871,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }
 
   private async readConfig(): Promise<Record<string, unknown>> {
-    const result = record(await this.request('config/read', { includeLayers: false, cwd: null }))
+    const result = record(await this.requestClient.request('config/read', { includeLayers: false, cwd: null }))
     return record(result?.config) ?? {}
   }
 
@@ -894,33 +915,6 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
 
   private assertCurrent(generation: number, threadId: string | undefined): void {
     if (!this.isCurrent(generation, threadId)) throw new Error('Native composer changed during selection')
-  }
-
-  private async request(method: string, params: Record<string, unknown>): Promise<unknown> {
-    if (this.disposed) throw new Error('Native model provider transport unavailable')
-    const requestId = `cordisx-native-model-provider:${crypto.randomUUID()}`
-    const response = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(requestId)
-        reject(new Error(`Codex Desktop ${method} timed out`))
-      }, 30_000)
-      this.pending.set(requestId, { resolve, reject, timer })
-    })
-    try {
-      await this.bridge.sendMessageFromView({
-        type: 'mcp-request',
-        hostId: this.hostId,
-        request: { id: requestId, method, params: clone(params) },
-      })
-    } catch (error) {
-      const pending = this.pending.get(requestId)
-      if (pending !== undefined) {
-        this.pending.delete(requestId)
-        clearTimeout(pending.timer)
-        pending.reject(error instanceof Error ? error : new Error(`Codex Desktop ${method} rejected`))
-      }
-    }
-    return await response
   }
 
   private replaceState(next: SelectionSnapshot): void {

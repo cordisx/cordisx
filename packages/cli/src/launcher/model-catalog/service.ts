@@ -103,6 +103,9 @@ export class ModelCatalogService {
           ...(byId.get(model.id)?.protocolCapabilities
             ? { protocolCapabilities: { responses: byId.get(model.id)!.protocolCapabilities!.responses === true } }
             : {}),
+          ...(byId.get(model.id)?.reasoningCapabilities
+            ? { reasoningCapabilities: byId.get(model.id)!.reasoningCapabilities }
+            : {}),
         })),
       )
       entry.snapshot = Object.freeze({
@@ -211,6 +214,9 @@ export class ModelCatalogService {
                   responses: byId.get(model.id)!.protocolCapabilities!.responses === true,
                 }),
               }
+              : {}),
+            ...(byId.get(model.id)?.reasoningCapabilities
+              ? { reasoningCapabilities: byId.get(model.id)!.reasoningCapabilities }
               : {}),
           })
         ))

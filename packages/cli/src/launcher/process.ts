@@ -36,6 +36,15 @@ export interface IsolatedCodexProfileOptions {
 
 export const ONLINE_DEVTOOLS_ORIGIN = 'https://chrome-devtools-frontend.appspot.com'
 
+function launchEnvironment(environment?: Readonly<Record<string, string | undefined>>): NodeJS.ProcessEnv {
+  const result = { ...process.env }
+  for (const [name, value] of Object.entries(environment ?? {})) {
+    if (value === undefined) delete result[name]
+    else result[name] = value
+  }
+  return result
+}
+
 const launchedProcessOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
 const pendingHiddenOwnership = new WeakMap<ChildProcess, ProcessOwnershipTracker>()
 
@@ -336,7 +345,7 @@ export function launchCodex(
   extraArgs: readonly string[],
   profile?: IsolatedCodexProfile,
   allowOnlineDevTools = false,
-  environment?: Readonly<Record<string, string>>,
+  environment?: Readonly<Record<string, string | undefined>>,
   mainInspector = false,
 ): ChildProcess {
   const args = [
@@ -345,7 +354,7 @@ export function launchCodex(
   ]
   const child = spawn(executable, args, {
     stdio: mainInspector ? ['ignore', 'ignore', 'pipe'] : profile === undefined ? 'inherit' : 'ignore',
-    env: environment === undefined ? process.env : { ...process.env, ...environment },
+    env: launchEnvironment(environment),
     // A launcher owns exactly one process group, so cleanup can stop the Host
     // tree (including Chromium helpers) without touching an ordinary Host.
     detached: process.platform !== 'win32',
@@ -438,7 +447,7 @@ export async function launchCodexHidden(
   extraArgs: readonly string[],
   profile?: IsolatedCodexProfile,
   allowOnlineDevTools = false,
-  environment?: Readonly<Record<string, string>>,
+  environment?: Readonly<Record<string, string | undefined>>,
   mainInspectorPort?: number,
 ): Promise<HiddenCodexLaunch> {
   if (process.platform !== 'darwin') throw new Error('Hidden Host launch requires macOS')
@@ -452,8 +461,7 @@ export async function launchCodexHidden(
     {
       stdio: 'ignore',
       env: {
-        ...process.env,
-        ...environment,
+        ...launchEnvironment(environment),
         CODEX_ELECTRON_START_IN_BACKGROUND: '1',
       },
       detached: true,

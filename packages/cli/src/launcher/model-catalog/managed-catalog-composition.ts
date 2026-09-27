@@ -28,6 +28,13 @@ import { composeScriptMembers } from './script-composition.js'
 import { type ScriptSourceConfig, ScriptSourceError } from './script-types.js'
 import { withAbort } from './abort.js'
 import type { ProviderSyncConnectionDefinition } from '../provider-profile-sync-contracts.js'
+import {
+  type PortableBundle,
+  type PortableConnection,
+  portableConnection,
+  portableEndpoint,
+  PortableTransferError,
+} from './portable-transfer-codec.js'
 
 type ScriptSetting = {
   scopeRevision: string
@@ -131,7 +138,7 @@ export class ManagedCatalogComposition {
     owner: ManagedProviderOwner,
     state: StoredState,
     private readonly options: {
-      capture?: (signal: AbortSignal) => Promise<string>
+      capture?: (signal: AbortSignal, endpoint: string) => Promise<string>
       responsesAvailable: boolean
       environment?: () => Readonly<Record<string, string | undefined>>
       legacyNativePreferenceFile?: string
@@ -191,7 +198,7 @@ export class ManagedCatalogComposition {
 
   static async open(
     options: Parameters<typeof ManagedProviderOwner.open>[0] & {
-      capture?: (signal: AbortSignal) => Promise<string>
+      capture?: (signal: AbortSignal, endpoint: string) => Promise<string>
       responsesAvailable: boolean
       environment?: () => Readonly<Record<string, string | undefined>>
       legacyNativePreferenceFile?: string
@@ -298,12 +305,64 @@ export class ManagedCatalogComposition {
     })
   }
 
+  portableSelection(ref: string, modelIds: readonly string[]): PortableConnection {
+    const view = this.#owner.snapshot().find(item => item.id === ref)
+    if (!view || this.#closed || this.#scripts.readStatus(ref)) throw new PortableTransferError('invalid')
+    const members = new Map(this.members(view).map(model => [model.id, model]))
+    const models = modelIds.map(id => {
+      const source = members.get(id)
+      if (!source || source.provenance?.some(value => value === 'script' || value === 'script-supplement')) {
+        throw new PortableTransferError('invalid')
+      }
+      return {
+        id: source.id,
+        label: source.label,
+        ...(source.protocolCapabilities ? { protocolCapabilities: source.protocolCapabilities } : {}),
+        ...(source.reasoningCapabilities ? { reasoningCapabilities: source.reasoningCapabilities } : {}),
+      }
+    })
+    const environment = this.#owner.environmentReference(ref)
+    return portableConnection({
+      title: view.settings.title,
+      endpoint: view.settings.endpoint,
+      protocol: view.settings.protocol,
+      auth: 'bearer',
+      ...(environment === undefined ? {} : { environment }),
+      models,
+    })
+  }
+
+  portableEnvironment(ref: string) {
+    return this.#owner.portableEnvironment(ref)
+  }
+
+  environmentEntries() {
+    return this.#owner.environmentEntries()
+  }
+
+  saveEnvironment(entries: Parameters<ManagedProviderOwner['saveEnvironment']>[0], authorized: () => boolean) {
+    return this.#owner.saveEnvironment(entries, () => !this.#closed && !this.#closing && authorized())
+  }
+
+  preparePortableImport(bundle: PortableBundle) {
+    return this.#owner.preparePortableImport(bundle)
+  }
+
+  importPortable(
+    bundle: PortableBundle,
+    variables: Parameters<ManagedProviderOwner['importPortable']>[1],
+    authorized: () => boolean,
+  ) {
+    if (this.#closed || this.#closing) throw new PortableTransferError('invalid')
+    return this.#owner.importPortable(bundle, variables, () => !this.#closed && !this.#closing && authorized())
+  }
+
   private rows(
     view: ManagedProviderView,
     overlay: ManagementOverlay = this.preferenceStore.read(view.id, view.scopeRevision),
   ) {
     const denied = ['authentication', 'permission', 'account'].includes(this.#service.snapshot(view.id)?.error ?? '')
-    const route = this.options.responsesAvailable && !this.#persistError
+    const route = view.credentialState === 'set' && this.options.responsesAvailable && !this.#persistError
       && !denied
     const source = this.members(view).map(model => {
       const userDeclared = model.provenance?.includes('manual') === true
@@ -375,7 +434,7 @@ export class ManagedCatalogComposition {
       const replacing = script?.mode === 'replace'
       const status = replacing ? script : snapshot
       const supportsResponses = rows.some(row => row.compatibility === 'supported')
-      const route = this.options.responsesAvailable && !this.#persistError
+      const route = view.credentialState === 'set' && this.options.responsesAvailable && !this.#persistError
         && !['authentication', 'permission', 'account'].includes(snapshot?.error ?? '')
       return {
         bindingRef: view.id,
@@ -384,6 +443,8 @@ export class ManagedCatalogComposition {
         scopeRevision: view.scopeRevision,
         revision: this.revision(view, overlay),
         sourceKind: replacing ? 'script' : strategy.kind === 'auto' ? 'auto' : 'manual',
+        transferAvailable: script === undefined && portableEndpoint(view.settings.endpoint),
+        credentialState: view.credentialState,
         mode: replacing
           ? 'replace'
           : strategy.kind === 'auto'
@@ -494,6 +555,9 @@ export class ManagedCatalogComposition {
           aliases: row.aliases,
           notListed: row.notListed,
           provenance: row.provenance as NonNullable<NativeModelProviderCatalogEntry['models'][number]['provenance']>,
+          ...('reasoningCapabilities' in row && row.reasoningCapabilities !== undefined
+            ? { reasoningCapabilities: row.reasoningCapabilities }
+            : {}),
         })),
     }))
   }
@@ -570,9 +634,9 @@ export class ManagedCatalogComposition {
     return job
   }
 
-  private capture(signal: AbortSignal): Promise<string> {
+  private capture(signal: AbortSignal, endpoint: string): Promise<string> {
     const combined = AbortSignal.any([signal, this.#abort.signal])
-    return withAbort((this.options.capture ?? captureManagedProviderCredential)(combined), combined)
+    return withAbort((this.options.capture ?? captureManagedProviderCredential)(combined, endpoint), combined)
   }
 
   command(
@@ -592,9 +656,10 @@ export class ManagedCatalogComposition {
           if (Object.keys(command).some(key => !['operation', 'settings'].includes(key))) {
             throw new CatalogError('source-invalid')
           }
+          const settings = managedProviderSettings({ ...command.settings, supplement: [] })
           await this.#owner.save(
-            { settings: managedProviderSettings({ ...command.settings, supplement: [] }) },
-            signal => this.capture(signal),
+            { settings },
+            signal => this.capture(signal, settings.endpoint),
             admitted,
           )
         } else {
@@ -741,6 +806,7 @@ export class ManagedCatalogComposition {
         id: model.id,
         label: model.label,
         ...(model.protocolCapabilities ? { protocolCapabilities: model.protocolCapabilities } : {}),
+        ...(model.reasoningCapabilities ? { reasoningCapabilities: model.reasoningCapabilities } : {}),
       }))
       settings = managedProviderSettings({
         title: settings.title,
@@ -766,7 +832,7 @@ export class ManagedCatalogComposition {
     }
     await this.#owner.save(
       { id: view.id, expectedRevision: view.revision, settings },
-      operation === 'requestCredentialReplacement' ? signal => this.capture(signal) : undefined,
+      operation === 'requestCredentialReplacement' ? signal => this.capture(signal, settings.endpoint) : undefined,
       authorized,
     )
   }

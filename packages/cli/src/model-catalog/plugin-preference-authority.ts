@@ -12,6 +12,18 @@ import {
   type ManagementPreferenceData,
   projectManagementOverlay,
 } from './management-overlay.js'
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import type {
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from '../model-catalog-transfer.js'
 
 export interface PluginPreferenceProvider {
   readonly providerId: string
@@ -25,6 +37,7 @@ export interface PluginPreferenceProvider {
     readonly selectable?: boolean
     readonly provenance?: CatalogManagementView['rows'][number]['provenance']
     readonly notListed?: boolean
+    readonly reasoningCapabilities?: ModelReasoningCapabilities
   }[]
 }
 
@@ -45,6 +58,18 @@ export interface CatalogManagementAuthority {
   snapshot(): CatalogManagementSnapshot
   command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
   subscribe(listener: () => void): () => void
+  environmentRead?(authorized: () => boolean): CatalogEnvironmentReadResult
+  environmentSave?(
+    entries: readonly CatalogTransferEnvironmentVariable[],
+    authorized: () => boolean,
+  ): Promise<CatalogEnvironmentSaveResult>
+  prepareExport?(
+    request: CatalogTransferExportRequest,
+    authorized: () => boolean,
+  ): CatalogTransferExportPreparationResult
+  export?(request: CatalogTransferExportRequest, authorized: () => boolean): Promise<CatalogTransferExportResult>
+  prepareImport?(text: string, authorized: () => boolean): CatalogTransferImportPreparationResult
+  import?(request: CatalogTransferImportRequest, authorized: () => boolean): Promise<CatalogTransferImportResult>
   close?(): void
 }
 
@@ -100,8 +125,17 @@ function normalizeProviders(providers: readonly PluginPreferenceProvider[]): rea
       if (!bounded(model.id) || !bounded(model.label, 256) || ids.has(model.id)) {
         throw new ManagementOverlayError('source-invalid')
       }
+      const reasoningCapabilities = model.reasoningCapabilities === undefined
+        ? undefined
+        : parseModelReasoningCapabilities(model.reasoningCapabilities)
+      if (model.reasoningCapabilities !== undefined && reasoningCapabilities === undefined) {
+        throw new ManagementOverlayError('source-invalid')
+      }
       ids.add(model.id)
-      return Object.freeze({ ...model })
+      return Object.freeze({
+        ...model,
+        ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
+      })
     })
     return Object.freeze({ ...provider, models: Object.freeze(models) })
   }))
@@ -461,6 +495,39 @@ export class PluginPreferenceManagementAdapter implements CatalogManagementAutho
       : this.base
     const result = await owner.command(command, authorized)
     return result.snapshot === undefined ? result : { ...result, snapshot: this.snapshot() }
+  }
+
+  export(request: CatalogTransferExportRequest, authorized: () => boolean): Promise<CatalogTransferExportResult> {
+    return this.base.export?.(request, authorized)
+      ?? Promise.resolve({ status: 'rejected', code: 'unavailable' })
+  }
+
+  environmentRead(authorized: () => boolean): CatalogEnvironmentReadResult {
+    return this.base.environmentRead?.(authorized) ?? { status: 'rejected', code: 'unavailable' }
+  }
+
+  environmentSave(
+    entries: readonly CatalogTransferEnvironmentVariable[],
+    authorized: () => boolean,
+  ): Promise<CatalogEnvironmentSaveResult> {
+    return this.base.environmentSave?.(entries, authorized)
+      ?? Promise.resolve({ status: 'rejected', code: 'unavailable' })
+  }
+
+  prepareExport(
+    request: CatalogTransferExportRequest,
+    authorized: () => boolean,
+  ): CatalogTransferExportPreparationResult {
+    return this.base.prepareExport?.(request, authorized) ?? { status: 'rejected', code: 'unavailable' }
+  }
+
+  prepareImport(text: string, authorized: () => boolean): CatalogTransferImportPreparationResult {
+    return this.base.prepareImport?.(text, authorized) ?? { status: 'rejected', code: 'unavailable' }
+  }
+
+  import(request: CatalogTransferImportRequest, authorized: () => boolean): Promise<CatalogTransferImportResult> {
+    return this.base.import?.(request, authorized)
+      ?? Promise.resolve({ status: 'rejected', code: 'unavailable' })
   }
 
   subscribe(listener: () => void): () => void {

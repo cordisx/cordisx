@@ -7,7 +7,7 @@ import { managerCopy } from '../ui-copy.js'
 import { HostFormSubpage, useHostFormPageNavigation } from './HostFormPages.js'
 import { HostIcon } from './HostIcon.js'
 
-const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
+const SENSITIVE_ROLES = new Set(['secret', 'password', 'credential', 'credential-ref', 'permission', 'capability'])
 
 export interface ArrayEditorFieldRowRenderProps {
   readonly field: CordisXConfigFieldSnapshot
@@ -23,6 +23,11 @@ export interface ArrayEditorProps {
   readonly locale: string
   readonly validateField: (field: CordisXConfigFieldSnapshot) => string | undefined
   readonly renderFieldRow: (props: ArrayEditorFieldRowRenderProps) => ReactElement
+  readonly renderItemSupplement?: (props: {
+    readonly value: Readonly<Record<string, unknown>>
+    readonly onChange: (value: Record<string, unknown>) => void
+    readonly disabled: boolean
+  }) => ReactElement
 }
 
 type ArrayEditorTarget =
@@ -155,7 +160,18 @@ function ArrayItemFields({ fields, setDraft, validateField, renderFieldRow }: {
 }
 
 function ArrayItemSubpage(
-  { pageId, field, rowId, mode, initialValue, locale, validateField, renderFieldRow, onConfirm }: {
+  {
+    pageId,
+    field,
+    rowId,
+    mode,
+    initialValue,
+    locale,
+    validateField,
+    renderFieldRow,
+    renderItemSupplement,
+    onConfirm,
+  }: {
     readonly pageId: string
     readonly field: CordisXConfigFieldSnapshot
     readonly rowId: string
@@ -164,6 +180,7 @@ function ArrayItemSubpage(
     readonly locale: string
     readonly validateField: ArrayEditorProps['validateField']
     readonly renderFieldRow: ArrayEditorProps['renderFieldRow']
+    readonly renderItemSupplement?: ArrayEditorProps['renderItemSupplement']
     readonly onConfirm: (draft: Record<string, unknown>) => void
   },
 ) {
@@ -220,12 +237,25 @@ function ArrayItemSubpage(
           validateField={validateField}
           renderFieldRow={renderFieldRow}
         />
+        {renderItemSupplement?.({
+          value: draft,
+          onChange: next => setDraft(next),
+          disabled: field.disabled,
+        })}
       </div>
     </HostFormSubpage>
   )
 }
 
-export function ArrayEditor({ field, value, onChange, locale, validateField, renderFieldRow }: ArrayEditorProps) {
+export function ArrayEditor({
+  field,
+  value,
+  onChange,
+  locale,
+  validateField,
+  renderFieldRow,
+  renderItemSupplement,
+}: ArrayEditorProps) {
   const [ids, setIds] = useState(() => value.map(stableId))
   const identity = useRef<{ value: readonly Record<string, unknown>[]; ids: readonly string[] }>({ value, ids })
   const [target, setTarget] = useState<ArrayEditorTarget>()
@@ -273,6 +303,7 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           locale={locale}
           validateField={validateField}
           renderFieldRow={renderFieldRow}
+          {...(renderItemSupplement === undefined ? {} : { renderItemSupplement })}
           onConfirm={next => {
             if (nextTarget.kind === 'create') {
               if (value.length >= limit) return
@@ -442,6 +473,11 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           validateField={validateField}
           renderFieldRow={renderFieldRow}
         />
+        {renderItemSupplement?.({
+          value: draft,
+          onChange: next => setDraft(next),
+          disabled: field.disabled,
+        })}
       </HostEditorDialog>
     </div>
   )

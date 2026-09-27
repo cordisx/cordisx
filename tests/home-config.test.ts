@@ -12,6 +12,7 @@ import {
   resolveHomeConfigPath,
   updateHomeConfigAtomic,
 } from '../packages/cli/src/config/home-config.js'
+import { mergeHomeEnvironment } from '../packages/cli/src/config/home-config-environment.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 
 async function fixturePath(): Promise<{ root: string; configPath: string }> {
@@ -20,6 +21,57 @@ async function fixturePath(): Promise<{ root: string; configPath: string }> {
 }
 
 describe('CordisX home configuration', () => {
+  it('validates, normalizes, redacts, and merges Host-private environment variables', () => {
+    const parsed = parseHomeConfig({
+      ...createDefaultHomeConfig(),
+      environmentVariables: [
+        {
+          name: 'MODEL_KEY',
+          value: 'fixture-secret',
+          enabled: true,
+          description: 'Model service key',
+          generator: { kind: 'shell', script: "printf 'fixture-secret'" },
+        },
+        { name: 'DISABLED_KEY', value: 'disabled-secret', enabled: false, description: '' },
+      ],
+    })
+    expect(parsed.environmentVariables).toEqual([
+      {
+        name: 'MODEL_KEY',
+        value: 'fixture-secret',
+        enabled: true,
+        description: 'Model service key',
+        generator: { kind: 'shell', script: "printf 'fixture-secret'" },
+      },
+      { name: 'DISABLED_KEY', value: 'disabled-secret', enabled: false },
+    ])
+    const printable = JSON.stringify(redactedHomeConfig(parsed))
+    expect(printable).toContain('"valueState":"set"')
+    expect(printable).toContain('"generatorState":"configured"')
+    expect(printable).not.toMatch(/fixture-secret|disabled-secret|printf/u)
+    expect(mergeHomeEnvironment(
+      { MODEL_KEY: 'process-value', DISABLED_KEY: 'process-disabled', BASE_ONLY: 'base' },
+      parsed.environmentVariables,
+      { MODEL_KEY: 'plan-value', PLAN_ONLY: 'plan' },
+    )).toEqual({ MODEL_KEY: 'fixture-secret', DISABLED_KEY: undefined, BASE_ONLY: 'base', PLAN_ONLY: 'plan' })
+
+    for (
+      const environmentVariables of [
+        [{ name: '1INVALID', value: 'x', enabled: true }],
+        [{ name: 'DUPLICATE', value: 'x', enabled: true }, { name: 'DUPLICATE', value: 'y', enabled: false }],
+        [{ name: 'VALID', value: 'x\0y', enabled: true }],
+        [{ name: 'VALID', value: 'x', enabled: 'yes' }],
+        [{ name: 'VALID', value: 'x', enabled: true, extra: true }],
+        [{ name: 'VALID', value: 'x', enabled: true, generator: { kind: 'shell', script: 'x\0y' } }],
+        [{ name: 'VALID', value: 'x', enabled: true, generator: { kind: 'other', script: 'printf x' } }],
+      ]
+    ) {
+      expect(() => parseHomeConfig({ ...createDefaultHomeConfig(), environmentVariables })).toThrow(
+        'config.environmentVariables',
+      )
+    }
+  })
+
   it('redacts managed Provider credentials from printable configuration', () => {
     const config = createDefaultHomeConfig()
     const record = {

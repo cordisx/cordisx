@@ -295,6 +295,15 @@
   padding: 0 4px 4px 8px;
   margin-bottom: 4px;
 }
+.cxmp-menu > .cxmp-search,
+.cxmp-model-options .cxmp-search {
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+  gap: 8px;
+}
+.cxmp-menu > .cxmp-search > :first-child,
+.cxmp-model-options .cxmp-search > :first-child {
+  justify-self: center;
+}
 .cxmp-search-bottom {
   padding-top: 4px;
   padding-bottom: 0;
@@ -481,6 +490,9 @@
   flex-direction: column;
   overflow: hidden;
 }
+.cxmp-menu-scroll
+  > button.cxmp-choice[data-provider-id]
+  + button.cxmp-choice[data-provider-id],
 .cxmp-model-choice + .cxmp-model-choice {
   margin-top: 4px;
 }

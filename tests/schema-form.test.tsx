@@ -23,6 +23,18 @@ it('uses configuration field rows and validates bounds without losing invalid dr
   expect(dom.window.document.querySelector('input')).not.toBeNull()
 })
 
+it('keeps ordinary SchemaForm fields in the standard framed layout', async () => {
+  const schema = Schema.object({ entries: Schema.array(Schema.string()).default([]) })
+  await act(async () =>
+    root.render(<SchemaForm identity="ordinary" schema={schema} value={{ entries: [] }} onChange={() => {}} />)
+  )
+  const body = dom.window.document.querySelector('.cxf-form-grid')
+  expect(body).not.toBeNull()
+  expect(body?.querySelector('.cxf-label-row')?.textContent).toContain('Entries')
+  expect(body?.querySelector('.cxf-item')?.hasAttribute('data-page-body')).toBe(false)
+  expect(dom.window.document.querySelector('[data-schema-form-presentation]')).toBeNull()
+})
+
 it('revalidates against replaced choices and rejects asynchronous sources', () => {
   const schema = Schema.object({ mode: Schema.union(['score', 'token']).required() })
   expect(schemaFormSnapshot(schema, { mode: 'gone' }, 'en-US').valid).toBe(false)

@@ -6,6 +6,20 @@ import type {
   CatalogManagementSnapshot,
 } from '../model-catalog-management.js'
 import { catalogOperationAvailable } from '../model-catalog-management.js'
+import type {
+  CatalogEnvironmentGeneratorCancelResult,
+  CatalogEnvironmentGeneratorRunRequest,
+  CatalogEnvironmentGeneratorRunResult,
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from '../model-catalog-transfer.js'
 import { parseManagementSnapshot, safeManagementCode } from './model-catalog-projection.js'
 
 export interface CatalogClientState extends CatalogManagementSnapshot {
@@ -120,6 +134,104 @@ export class ModelCatalogClient {
         ...(safeManagementCode(result.code) ? { code: result.code } : {}),
         ...(Number.isFinite(result.retryAt) ? { retryAt: result.retryAt } : {}),
       }
+    } catch {
+      await this.refresh()
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async export(request: CatalogTransferExportRequest): Promise<CatalogTransferExportResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementExport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementExport(request)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentRead(): Promise<CatalogEnvironmentReadResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentRead) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentRead()
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentSave(
+    entries: readonly CatalogTransferEnvironmentVariable[],
+  ): Promise<CatalogEnvironmentSaveResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentSave) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      const result = await this.channel.catalogEnvironmentSave(entries)
+      await this.refresh()
+      return result
+    } catch {
+      await this.refresh()
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async environmentGenerate(
+    request: CatalogEnvironmentGeneratorRunRequest,
+  ): Promise<CatalogEnvironmentGeneratorRunResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentGenerate) {
+      return { status: 'rejected', runId: request.runId, code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentGenerate(request)
+    } catch {
+      return { status: 'rejected', runId: request.runId, code: 'unavailable' }
+    }
+  }
+
+  async environmentGenerateCancel(runId: string): Promise<CatalogEnvironmentGeneratorCancelResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogEnvironmentGenerateCancel) {
+      return { status: 'rejected', runId, code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogEnvironmentGenerateCancel(runId)
+    } catch {
+      return { status: 'rejected', runId, code: 'unavailable' }
+    }
+  }
+
+  async prepareExport(request: CatalogTransferExportRequest): Promise<CatalogTransferExportPreparationResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementPrepareExport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementPrepareExport(request)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async prepareImport(text: string): Promise<CatalogTransferImportPreparationResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementPrepareImport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      return await this.channel.catalogManagementPrepareImport(text)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async import(request: CatalogTransferImportRequest): Promise<CatalogTransferImportResult> {
+    if (this.disposed || !this.state.connected || !this.channel.catalogManagementImport) {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+    try {
+      const result = await this.channel.catalogManagementImport(request)
+      await this.refresh()
+      return result
     } catch {
       await this.refresh()
       return { status: 'rejected', code: 'unavailable' }

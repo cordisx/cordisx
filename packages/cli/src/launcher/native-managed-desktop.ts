@@ -21,11 +21,7 @@ interface NativeManagedModelCatalogEntry {
   readonly priority: number
   readonly shell_type: 'shell_command'
   readonly base_instructions: string
-  readonly default_reasoning_level: 'medium'
-  readonly supported_reasoning_levels: readonly {
-    readonly effort: 'low' | 'medium' | 'high'
-    readonly description: string
-  }[]
+  readonly supported_reasoning_levels: readonly []
   readonly experimental_supported_tools: readonly []
   readonly supports_reasoning_summaries: false
   readonly supports_reasoning_summary_parameter: false
@@ -135,12 +131,7 @@ function modelEntry(providerId: string, alias: string, gatewayModelId: string, p
     priority,
     shell_type: 'shell_command' as const,
     base_instructions: 'You are Codex, a coding agent.',
-    default_reasoning_level: 'medium' as const,
-    supported_reasoning_levels: Object.freeze([
-      Object.freeze({ effort: 'low' as const, description: 'Fast responses with lighter reasoning' }),
-      Object.freeze({ effort: 'medium' as const, description: 'Balanced reasoning' }),
-      Object.freeze({ effort: 'high' as const, description: 'Greater reasoning depth' }),
-    ]),
+    supported_reasoning_levels: Object.freeze([] as const),
     experimental_supported_tools: Object.freeze([] as const),
     supports_reasoning_summaries: false as const,
     supports_reasoning_summary_parameter: false as const,

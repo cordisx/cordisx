@@ -1,9 +1,72 @@
-.cxms-actions {
+.cxmp-management {
+  display: flex;
+  flex-direction: column;
+}
+
+.cxmp-management[hidden] {
+  display: none;
+}
+
+.cxmp-management .cxmp-results {
+  flex: 1 1 0;
+}
+
+.cxms-export-toolbar {
   display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
+  min-height: 32px;
+  grid-template-columns: 16px minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 9px;
   border-bottom: 1px solid var(--cx-border);
-  padding-bottom: 10px;
+  padding: 2px 12px;
+  color: var(--cx-muted);
+  font-size: 12px;
+}
+
+.cxms-export-select-all {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.cxms-export-count {
+  min-width: 0;
+}
+
+.cxms-actions {
+  display: block;
+}
+
+.cxms-actions .cxmp-action-entry {
+  border-bottom: 1px solid var(--cx-border);
+}
+
+.cxms-actions .cxmp-action-entry:hover,
+.cxms-actions .cxmp-action-entry:focus-within {
+  background: color-mix(in srgb, var(--cx-text) 4%, var(--cx-surface));
+}
+
+.cxms-actions .cxmp-provider-row {
+  min-height: 46px;
+  grid-template-columns: 10px 20px minmax(0, 1fr) 28px;
+  padding: 6px 8px;
+}
+
+.cxms-actions .cxmp-provider-row::before {
+  content: "";
+}
+
+.cxms-actions .cxmp-provider-row > span:not(.cordisx-host-icon) {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cxms-actions .cxmp-icon-action:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: -2px;
 }
 
 .cxms-provider {
@@ -115,8 +178,9 @@
 }
 
 .cxms-provider li {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
+  gap: 8px;
   border-top: 1px solid color-mix(in srgb, var(--cx-border) 72%, transparent);
   padding: 8px;
 }
@@ -127,6 +191,33 @@
   color: var(--cx-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cxms-transfer-page-host {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.cxms-transfer-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.cxms-transfer-page-body {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.cxms-transfer-page-body > p,
+.cxms-transfer-page-body > ul {
+  margin: 0;
 }
 
 @media (max-width: 480px) {

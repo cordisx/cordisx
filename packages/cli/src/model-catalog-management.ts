@@ -3,6 +3,21 @@ import type {
   ScriptSourceConfig,
   ScriptSourceSnapshot,
 } from './launcher/model-catalog/script-types.js'
+import type { ModelReasoningCapabilities } from './model-reasoning-capabilities.js'
+import type {
+  CatalogEnvironmentGeneratorCancelResult,
+  CatalogEnvironmentGeneratorRunRequest,
+  CatalogEnvironmentGeneratorRunResult,
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from './model-catalog-transfer.js'
 
 /** Host-private management DTOs. Script configuration is write-only, never a snapshot. */
 export type CatalogSourceKind = 'native' | 'plugin' | 'auto' | 'manual' | 'script'
@@ -27,6 +42,7 @@ export interface CatalogEditableModel {
   readonly label?: string
   /** User declaration for this exact connection scope and model ID, not adapter evidence. */
   readonly protocolCapabilities?: CatalogProtocolCapabilities
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
 }
 
 export interface CatalogConnectionSettings {
@@ -60,6 +76,7 @@ export interface CatalogManagementRow {
   readonly blocked: boolean
   readonly pinned: boolean
   readonly protocolCapabilities?: CatalogProtocolCapabilities
+  readonly reasoningCapabilities?: ModelReasoningCapabilities
   readonly reason?: 'blocked' | 'removed' | 'unconfirmed' | 'permission' | 'pending-apply'
 }
 
@@ -131,6 +148,9 @@ export interface CatalogManagementView {
   readonly scopeRevision: string
   readonly revision: string
   readonly sourceKind: CatalogSourceKind
+  /** Host-private portability gate; never infer it from source writability. */
+  readonly transferAvailable?: boolean
+  readonly credentialState?: 'set' | 'unset'
   readonly mode: 'only' | 'augment' | 'replace' | 'supplement'
   readonly freshness: 'unknown' | 'fresh' | 'stale'
   readonly activity: 'idle' | 'scheduled' | 'loading' | 'applying'
@@ -231,4 +251,16 @@ export interface CatalogManagementChannel {
   catalogManagementRead(): Promise<CatalogManagementSnapshot>
   catalogManagementSubscribe(listener: (cursor: CatalogManagementCursor) => void): () => void
   catalogManagementCommand(command: CatalogManagementCommand): Promise<CatalogManagementResult>
+  catalogEnvironmentRead?(): Promise<CatalogEnvironmentReadResult>
+  catalogEnvironmentSave?(entries: readonly CatalogTransferEnvironmentVariable[]): Promise<CatalogEnvironmentSaveResult>
+  catalogEnvironmentGenerate?(
+    request: CatalogEnvironmentGeneratorRunRequest,
+  ): Promise<CatalogEnvironmentGeneratorRunResult>
+  catalogEnvironmentGenerateCancel?(runId: string): Promise<CatalogEnvironmentGeneratorCancelResult>
+  catalogManagementPrepareExport?(
+    request: CatalogTransferExportRequest,
+  ): Promise<CatalogTransferExportPreparationResult>
+  catalogManagementExport?(request: CatalogTransferExportRequest): Promise<CatalogTransferExportResult>
+  catalogManagementPrepareImport?(text: string): Promise<CatalogTransferImportPreparationResult>
+  catalogManagementImport?(request: CatalogTransferImportRequest): Promise<CatalogTransferImportResult>
 }

@@ -6,6 +6,7 @@ import {
   type CatalogSupplement,
   object,
 } from './contracts.js'
+import { parseModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
 
 export function parseSupplement(value: unknown): CatalogSupplement {
   const input = object(value)
@@ -21,13 +22,17 @@ export function parseSupplement(value: unknown): CatalogSupplement {
     const model = object(value)
     if (
       !model || !boundedString(model.id) || (model.label !== undefined && !boundedString(model.label, 256))
-      || Object.keys(model).some(key => !['id', 'label', 'protocolCapabilities'].includes(key))
+      || Object.keys(model).some(key => !['id', 'label', 'protocolCapabilities', 'reasoningCapabilities'].includes(key))
     ) throw new CatalogError('source-invalid')
     const capabilities = model.protocolCapabilities === undefined ? undefined : object(model.protocolCapabilities)
+    const reasoningCapabilities = model.reasoningCapabilities === undefined
+      ? undefined
+      : parseModelReasoningCapabilities(model.reasoningCapabilities)
     if (
       capabilities
         && (Object.keys(capabilities).length !== 1 || typeof capabilities.responses !== 'boolean')
       || model.protocolCapabilities !== undefined && !capabilities
+      || model.reasoningCapabilities !== undefined && !reasoningCapabilities
     ) throw new CatalogError('source-invalid')
     if (seen.has(model.id)) return []
     seen.add(model.id)
@@ -37,6 +42,7 @@ export function parseSupplement(value: unknown): CatalogSupplement {
       ...(capabilities
         ? { protocolCapabilities: Object.freeze({ responses: capabilities.responses as boolean }) }
         : {}),
+      ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
     })]
   })
   return Object.freeze({
@@ -72,6 +78,11 @@ export function composeMembers(
             ? { protocolCapabilities: model.protocolCapabilities }
             : existing?.protocolCapabilities
             ? { protocolCapabilities: existing.protocolCapabilities }
+            : {}),
+          ...(model.reasoningCapabilities
+            ? { reasoningCapabilities: model.reasoningCapabilities }
+            : existing?.reasoningCapabilities
+            ? { reasoningCapabilities: existing.reasoningCapabilities }
             : {}),
         }) as CatalogModel,
       )

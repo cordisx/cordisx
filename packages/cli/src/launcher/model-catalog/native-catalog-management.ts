@@ -17,11 +17,142 @@ import type { CodexConfigModelProviderProjection } from '../codex-config-model-p
 import type { NativeModelProviderCatalogEntry } from '../native-model-provider-catalog.js'
 import { resolveNativeModelEligibility } from '../../renderer/native-provider-submission-policy.js'
 import type { CatalogSnapshot } from './contracts.js'
+import { type PortableConnection, portableConnection, PortableTransferError } from './portable-transfer-codec.js'
+import { decodePortableBundle, encodePortableBundle, type PortableBundle } from './portable-transfer-codec.js'
+import type {
+  CatalogEnvironmentReadResult,
+  CatalogEnvironmentSaveResult,
+  CatalogTransferEnvironmentVariable,
+  CatalogTransferExportPreparationResult,
+  CatalogTransferExportRequest,
+  CatalogTransferExportResult,
+  CatalogTransferImportPreparationResult,
+  CatalogTransferImportRequest,
+  CatalogTransferImportResult,
+} from '../../model-catalog-transfer.js'
+import { boundedString, CatalogError, object } from './contracts.js'
 
 type CatalogManagementAuthority = {
   snapshot(): CatalogManagementSnapshot
   command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
   subscribe(listener: () => void): () => void
+  portableSelection?(ref: string, modelIds: readonly string[]): PortableConnection
+  portableEnvironment?(ref: string): {
+    readonly name?: string
+    readonly value?: string
+    readonly description?: string
+    readonly placeholder: boolean
+  } | undefined
+  environmentEntries?(): readonly CatalogTransferEnvironmentVariable[]
+  saveEnvironment?(entries: readonly CatalogTransferEnvironmentVariable[], authorized: () => boolean): Promise<void>
+  preparePortableImport?(bundle: PortableBundle): readonly {
+    readonly sourceName: string
+    readonly name: string
+    readonly value: string
+    readonly enabled: boolean
+    readonly description?: string
+  }[]
+  importPortable?(
+    bundle: PortableBundle,
+    variables: CatalogTransferImportRequest['variables'],
+    authorized: () => boolean,
+  ): Promise<{
+    readonly imported: number
+    readonly skipped: number
+    readonly bindingRefs: readonly string[]
+  }>
+}
+
+function transferSelections(value: unknown): CatalogTransferExportRequest['selections'] {
+  const request = object(value)
+  if (
+    !request || Object.keys(request).some(key => !['selections', 'variables', 'includeValues'].includes(key))
+    || !Array.isArray(request.selections) || request.selections.length === 0
+    || request.selections.length > 24
+  ) throw new PortableTransferError('invalid')
+  let count = 0
+  const refs = new Set<string>()
+  return request.selections.map(value => {
+    const item = object(value)
+    if (
+      !item || Object.keys(item).some(key => !['bindingRef', 'modelIds'].includes(key))
+      || !boundedString(item.bindingRef, 512) || refs.has(item.bindingRef)
+      || !Array.isArray(item.modelIds) || item.modelIds.length === 0
+      || item.modelIds.some(id => !boundedString(id, 512))
+      || new Set(item.modelIds).size !== item.modelIds.length
+    ) throw new PortableTransferError('invalid')
+    count += item.modelIds.length
+    if (count > 512) throw new PortableTransferError('too-large')
+    refs.add(item.bindingRef)
+    return { bindingRef: item.bindingRef, modelIds: item.modelIds as string[] }
+  })
+}
+
+function exportVariables(value: CatalogTransferExportRequest, required: ReadonlySet<string>) {
+  const variables = value.variables ?? []
+  if (
+    !Array.isArray(variables) || variables.length !== required.size
+    || typeof value.includeValues !== 'boolean'
+  ) throw new PortableTransferError('invalid')
+  const sourceNames = new Set<string>()
+  const names = new Set<string>()
+  const parsed = variables.map(variable => {
+    if (
+      !variable || typeof variable !== 'object'
+      || !boundedString(variable.sourceName, 128) || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(variable.sourceName)
+      || !boundedString(variable.name, 128) || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(variable.name)
+      || sourceNames.has(variable.sourceName) || names.has(variable.name) || !required.has(variable.sourceName)
+      || variable.value !== undefined
+        && (typeof variable.value !== 'string' || variable.value.length > 16_384 || variable.value.includes('\0'))
+      || variable.description !== undefined
+        && (!boundedString(variable.description, 512) || variable.description.includes('\0'))
+    ) throw new PortableTransferError('invalid')
+    const generator = variable.generator
+    if (
+      generator !== undefined
+      && (generator.kind !== 'shell' || typeof generator.script !== 'string'
+        || generator.script.length > 16_384 || generator.script.includes('\0'))
+    ) throw new PortableTransferError('invalid')
+    sourceNames.add(variable.sourceName)
+    names.add(variable.name)
+    return variable
+  })
+  if ([...required].some(name => !sourceNames.has(name))) throw new PortableTransferError('invalid')
+  return parsed
+}
+
+type PortableEnvironment = NonNullable<ReturnType<NonNullable<CatalogManagementAuthority['portableEnvironment']>>>
+
+function transferEnvironment(
+  selections: CatalogTransferExportRequest['selections'],
+  native: CatalogManagementAuthority,
+  managed?: CatalogManagementAuthority,
+): ReadonlyMap<string, PortableEnvironment & { readonly sourceName: string }> {
+  const dependencies = new Map<string, PortableEnvironment & { readonly sourceName: string }>()
+  const named = new Map<string, string>()
+  const sources = selections.map(selection => {
+    const owner = selection.bindingRef.startsWith('codex-config:') ? native : managed
+    return { selection, source: owner?.portableEnvironment?.(selection.bindingRef) }
+  })
+  const used = new Set(sources.flatMap(({ source }) => source?.name === undefined ? [] : [source.name]))
+  let placeholder = 0
+  for (const { selection, source } of sources) {
+    if (!source) continue
+    let sourceName = source.name === undefined ? undefined : named.get(source.name)
+    if (sourceName === undefined) {
+      if (source.name !== undefined) sourceName = source.name
+      else {
+        do {
+          sourceName = `CORDISX_MODEL_SERVICE_KEY${placeholder === 0 ? '' : `_${placeholder}`}`
+          placeholder++
+        } while (used.has(sourceName))
+      }
+      if (source.name !== undefined) named.set(source.name, sourceName)
+      used.add(sourceName)
+    }
+    dependencies.set(selection.bindingRef, { ...source, sourceName })
+  }
+  return dependencies
 }
 
 interface NativeCatalogDiscovery {
@@ -182,6 +313,7 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     const comparable = (value: CodexConfigModelProviderProjection) => ({
       ...value,
       providerWireApis: [...value.providerWireApis],
+      portableConnections: [...value.portableConnections ?? []],
     })
     const changed = safeRevision(comparable(this.#projection)) !== safeRevision(comparable(projection))
     this.#projection = projection
@@ -214,6 +346,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
           ...(discovered?.protocolCapabilities === undefined
             ? {}
             : { protocolCapabilities: discovered.protocolCapabilities }),
+          ...(discovered?.reasoningCapabilities === undefined
+            ? {}
+            : { reasoningCapabilities: discovered.reasoningCapabilities }),
         }),
       )
     }
@@ -288,6 +423,36 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
     })
   }
 
+  /** Uses the current Host-private Codex config projection, never renderer-supplied connection facts. */
+  portableSelection(ref: string, modelIds: readonly string[]): PortableConnection {
+    const provider = this.#projection.providers.find(item => bindingRef(item.providerId) === ref)
+    if (
+      this.#closed || this.#projection.sourceAvailable === false || !provider
+      || this.options.shadowed?.(provider.providerId)
+      || diagnosticCode(this.#projection, provider.providerId) !== undefined
+    ) throw new PortableTransferError('invalid')
+    const connection = this.#projection.portableConnections?.get(provider.providerId)
+    if (!connection) throw new PortableTransferError('invalid')
+    const members = new Map(this.sourceModels(provider).map(model => [model.id, model]))
+    const models = modelIds.map(id => {
+      const source = members.get(id)
+      if (!source) throw new PortableTransferError('invalid')
+      return {
+        id: source.id,
+        label: source.label,
+        ...(source.protocolCapabilities ? { protocolCapabilities: source.protocolCapabilities } : {}),
+        ...(source.reasoningCapabilities ? { reasoningCapabilities: source.reasoningCapabilities } : {}),
+      }
+    })
+    return portableConnection({ title: provider.title ?? provider.providerId, ...connection, models })
+  }
+
+  portableEnvironment(ref: string) {
+    const provider = this.#projection.providers.find(item => bindingRef(item.providerId) === ref)
+    if (!provider) return undefined
+    return this.#projection.portableEnvironment?.get(provider.providerId)
+  }
+
   snapshot(): CatalogManagementSnapshot {
     if (this.#closed) return { epoch: this.#epoch, sequence: this.#sequence, views: [], canCreateConnection: false }
     const views = this.providersForManagement().map((provider): CatalogManagementView => {
@@ -317,6 +482,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
         scopeRevision: this.scope(provider.providerId),
         revision: this.revision(provider),
         sourceKind: 'native',
+        transferAvailable: this.#projection.sourceAvailable !== false
+          && this.#projection.portableConnections?.has(provider.providerId) === true
+          && diagnosticCode(this.#projection, provider.providerId) === undefined,
         mode: discovery === undefined ? 'only' : 'augment',
         freshness: unavailable ? 'stale' : discovery?.freshness ?? 'fresh',
         activity: discovery?.loading ? 'loading' : 'idle',
@@ -370,6 +538,9 @@ export class NativeCatalogManagement implements CatalogManagementAuthority {
             ...(source?.selectorBrand === undefined ? {} : { selectorBrand: source.selectorBrand }),
             provenance: row.provenance,
             notListed: row.notListed,
+            ...('reasoningCapabilities' in row && row.reasoningCapabilities !== undefined
+              ? { reasoningCapabilities: row.reasoningCapabilities }
+              : {}),
           })
         })),
         ...(defaultModelId === undefined ? {} : { defaultModelId }),
@@ -523,6 +694,171 @@ export class CompositeCatalogManagement implements CatalogManagementAuthority {
     if (!owner) return { status: 'rejected', code: 'unavailable' }
     const result = await owner.command(command, authorized)
     return result.snapshot === undefined ? result : { ...result, snapshot: this.snapshot() }
+  }
+
+  environmentRead(authorized: () => boolean): CatalogEnvironmentReadResult {
+    if (!authorized() || !this.managed?.environmentEntries) return { status: 'rejected', code: 'unavailable' }
+    return { status: 'ok', entries: this.managed.environmentEntries(), applies: 'app-restart' }
+  }
+
+  async environmentSave(
+    entries: readonly CatalogTransferEnvironmentVariable[],
+    authorized: () => boolean,
+  ): Promise<CatalogEnvironmentSaveResult> {
+    if (!authorized() || !this.managed?.saveEnvironment) return { status: 'rejected', code: 'unavailable' }
+    try {
+      await this.managed.saveEnvironment(entries, authorized)
+      return { status: 'applied', applies: 'app-restart' }
+    } catch (error) {
+      return {
+        status: 'rejected',
+        code: error instanceof CatalogError && error.code === 'permission'
+          ? 'unavailable'
+          : error instanceof CatalogError && error.code === 'source-invalid'
+          ? 'invalid'
+          : 'persist-failed',
+      }
+    }
+  }
+
+  prepareExport(
+    request: CatalogTransferExportRequest,
+    authorized: () => boolean,
+  ): CatalogTransferExportPreparationResult {
+    if (!authorized()) return { status: 'rejected', code: 'unavailable' }
+    try {
+      const selections = transferSelections(request)
+      const entries = new Map(this.managed?.environmentEntries?.().map(entry => [entry.name, entry]) ?? [])
+      const prepared: Array<Extract<CatalogTransferExportPreparationResult, { status: 'ok' }>['variables'][number]> = []
+      const dependencies = transferEnvironment(selections, this.native, this.managed)
+      for (const [ref, source] of dependencies) {
+        const existing = prepared.find(item => item.sourceName === source.sourceName)
+        if (existing) {
+          ;(existing.bindings as string[]).push(ref)
+          continue
+        }
+        const entry = source.name === undefined ? undefined : entries.get(source.name)
+        const value = source.value ?? entry?.value ?? ''
+        prepared.push({
+          sourceName: source.sourceName,
+          name: source.sourceName,
+          value,
+          enabled: entry?.enabled ?? true,
+          ...((source.description ?? entry?.description) === undefined
+            ? {}
+            : { description: source.description ?? entry?.description! }),
+          ...(entry?.generator === undefined ? {} : { generator: entry.generator }),
+          bindings: [ref],
+          available: value !== '' && (entry?.enabled ?? true),
+        })
+      }
+      return {
+        status: 'ok',
+        variables: Object.freeze(prepared.map(variable =>
+          Object.freeze({
+            ...variable,
+            bindings: Object.freeze(variable.bindings),
+          })
+        )),
+      }
+    } catch {
+      return { status: 'rejected', code: 'invalid' }
+    }
+  }
+
+  async export(request: CatalogTransferExportRequest, authorized: () => boolean): Promise<CatalogTransferExportResult> {
+    if (!authorized()) return { status: 'rejected', code: 'unavailable' }
+    try {
+      const selections = transferSelections(request)
+      const dependencies = transferEnvironment(selections, this.native, this.managed)
+      const connections = selections.map(({ bindingRef: ref, modelIds }) => {
+        const connection = ref.startsWith('codex-config:')
+          ? this.native.portableSelection(ref, modelIds)
+          : this.managed?.portableSelection?.(ref, modelIds)
+            ?? (() => {
+              throw new PortableTransferError('invalid')
+            })()
+        const dependency = dependencies.get(ref)
+        return dependency === undefined ? connection : { ...connection, environment: dependency.sourceName }
+      })
+      const required = new Set([...dependencies.values()].map(dependency => dependency.sourceName))
+      if (required.size === 0 && (request.variables?.length || request.includeValues !== false)) {
+        throw new PortableTransferError('invalid')
+      }
+      const variables = required.size === 0 ? [] : exportVariables(request, required)
+      const mapping = new Map(variables.map(variable => [variable.sourceName, variable]))
+      const mapped = connections.map(connection =>
+        connection.environment === undefined
+          ? connection
+          : { ...connection, environment: mapping.get(connection.environment)!.name }
+      )
+      const hasGenerator = variables.some(variable => variable.generator !== undefined)
+      const text = encodePortableBundle(
+        required.size === 0
+          ? { version: 1, connections: mapped }
+          : {
+            version: hasGenerator ? 3 : 2,
+            environment: variables.map(variable => ({
+              name: variable.name,
+              ...(request.includeValues ? { value: variable.value ?? '' } : {}),
+              ...(variable.description === undefined ? {} : { description: variable.description }),
+              ...(variable.generator === undefined ? {} : { generator: variable.generator }),
+            })),
+            connections: mapped,
+          },
+      )
+      return authorized() ? { status: 'ok', text } : { status: 'rejected', code: 'unavailable' }
+    } catch (error) {
+      return {
+        status: 'rejected',
+        code: error instanceof PortableTransferError ? error.code : 'invalid',
+      }
+    }
+  }
+
+  prepareImport(text: string, authorized: () => boolean): CatalogTransferImportPreparationResult {
+    if (!authorized() || !this.managed?.preparePortableImport) return { status: 'rejected', code: 'unavailable' }
+    try {
+      const bundle = decodePortableBundle(text)
+      return {
+        status: 'ok',
+        variables: this.managed.preparePortableImport(bundle).map(variable => ({
+          ...variable,
+          bindings: Object.freeze(
+            bundle.connections
+              .filter(connection => connection.environment === variable.sourceName)
+              .map(connection => connection.title),
+          ),
+          available: variable.value !== '',
+        })),
+        connections: Object.freeze(bundle.connections.map(connection => ({
+          transferId: connection.transferId,
+          title: connection.title,
+        }))),
+      }
+    } catch (error) {
+      return { status: 'rejected', code: error instanceof PortableTransferError ? error.code : 'invalid' }
+    }
+  }
+
+  async import(request: CatalogTransferImportRequest, authorized: () => boolean): Promise<CatalogTransferImportResult> {
+    if (!authorized() || !this.managed?.importPortable) return { status: 'rejected', code: 'unavailable' }
+    try {
+      const bundle = decodePortableBundle(request.text)
+      const result = await this.managed.importPortable(bundle, request.variables, authorized)
+      return { status: 'applied', ...result }
+    } catch (error) {
+      return {
+        status: 'rejected',
+        code: error instanceof PortableTransferError
+          ? error.code
+          : error instanceof CatalogError && error.code === 'permission'
+          ? 'unavailable'
+          : error instanceof CatalogError && error.code === 'source-invalid'
+          ? 'invalid'
+          : 'persist-failed',
+      }
+    }
   }
 
   subscribe(listener: () => void): () => void {

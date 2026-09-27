@@ -128,7 +128,7 @@ import {
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
-import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
 import { runInjectedHost } from './run-injected-host.js'
 import { type CordisXCliRuntime, createDevelopmentManagedServiceActivation } from './run-runtime.js'
 export { captureMainInspectorUrl, completeHostReadiness, runInjectedHost } from './run-injected-host.js'
@@ -489,6 +489,7 @@ export async function runDevelopment(
             environment,
             undefined,
             runtime.internalNativeSubmissionLegacyLockRecovery,
+            homeConfig.environmentVariables,
           ),
         )
         managedServiceProjection = await createNativeViteManagedServiceProjection({
@@ -646,6 +647,7 @@ export async function runDevelopment(
           ? {}
           : {
             environment: {
+              ...hostModelServiceEnvironment(environment, homeConfig.environmentVariables),
               ...(entry === undefined
                 ? {}
                 : {

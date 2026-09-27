@@ -85,14 +85,18 @@ export interface ManagedProviderView {
   readonly revision: string
   readonly scopeRevision: string
   readonly credentialRevision: string
-  readonly credentialState: 'set'
+  readonly credentialState: 'set' | 'unset'
   readonly settings: ManagedProviderSettings
 }
 
 /** Stored only in the Host-private profile configuration; never a renderer/plugin descriptor. */
 export interface ManagedProviderRecord extends Omit<ManagedProviderView, 'credentialState'> {
   readonly credentialRef: string
-  readonly secret: string
+  readonly environmentReference?: string
+  readonly secret?: string
+  /** Private idempotency marker for an imported clipboard connection. */
+  readonly importTransferId?: string
+  readonly importDigest?: string
   readonly settings: ManagedProviderSettings
 }
 
@@ -101,12 +105,33 @@ export function parseManagedProviderRecord(value: unknown): ManagedProviderRecor
   if (
     !input
     || Object.keys(input).some(key =>
-      !['id', 'revision', 'scopeRevision', 'credentialRevision', 'credentialRef', 'settings', 'secret'].includes(key)
+      ![
+        'id',
+        'revision',
+        'scopeRevision',
+        'credentialRevision',
+        'credentialRef',
+        'environmentReference',
+        'settings',
+        'secret',
+        'importTransferId',
+        'importDigest',
+      ].includes(key)
     )
     || ![input.id, input.revision, input.scopeRevision, input.credentialRevision, input.credentialRef].every(
       opaqueProviderId,
     )
-    || !boundedString(input.secret, 8192) || /\s/u.test(input.secret)
+    || input.environmentReference !== undefined
+      && (typeof input.environmentReference !== 'string'
+        || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(input.environmentReference))
+    || input.secret !== undefined && (!boundedString(input.secret, 8192) || /\s/u.test(input.secret))
+    || (input.importTransferId === undefined) !== (input.importDigest === undefined)
+    || input.importTransferId !== undefined
+      && (typeof input.importTransferId !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          input.importTransferId,
+        )
+        || typeof input.importDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(input.importDigest))
   ) throw new CatalogError('source-invalid')
   return Object.freeze({
     id: input.id as string,
@@ -114,18 +139,26 @@ export function parseManagedProviderRecord(value: unknown): ManagedProviderRecor
     scopeRevision: input.scopeRevision as string,
     credentialRevision: input.credentialRevision as string,
     credentialRef: input.credentialRef as string,
-    secret: input.secret,
+    ...(input.environmentReference === undefined ? {} : { environmentReference: input.environmentReference as string }),
+    ...(input.secret === undefined ? {} : { secret: input.secret as string }),
+    ...(input.importTransferId === undefined ? {} : {
+      importTransferId: input.importTransferId as string,
+      importDigest: input.importDigest as string,
+    }),
     settings: managedProviderSettings(input.settings),
   })
 }
 
-export function managedProviderView(record: Omit<ManagedProviderRecord, 'secret'>): ManagedProviderView {
+export function managedProviderView(
+  record: ManagedProviderRecord,
+  credentialAvailable = record.secret !== undefined,
+): ManagedProviderView {
   return Object.freeze({
     id: record.id,
     revision: record.revision,
     scopeRevision: record.scopeRevision,
     credentialRevision: record.credentialRevision,
-    credentialState: 'set',
+    credentialState: credentialAvailable ? 'set' : 'unset',
     settings: record.settings,
   })
 }
