@@ -122,6 +122,12 @@ export class WorkspaceRailProjection {
       return 'wait'
     }
     if (current.length === 0 && marked.length === 0) {
+      if (captured.clickedDestination === captured.destination) {
+        const sameDestination = [...rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination]')]
+          .filter(button => button.getAttribute('data-sidebar-destination') === captured.destination)
+        if (sameDestination.length !== 1) return 'dirty'
+        return this.restore(rail, sameDestination[0]!, captured) ? 'done' : 'dirty'
+      }
       if (
         captured.clickedDestination === undefined && routeIdentity === captured.routeIdentity
         && captured.button.isConnected && rail.contains(captured.button)

@@ -56,7 +56,7 @@ describe('Host-owned workspace rail selection projection', () => {
     expect(f.home.hasAttribute('data-selected')).toBe(true)
     expect(f.projection.enter()).toBe(true)
     f.home.click()
-    expect(f.projection.leave()).toBe(false)
+    expect(f.projection.leave()).toBe(true)
     expect(await f.projection.settled()).toBe(true)
     expect(f.home.getAttribute('aria-current')).toBe('page')
     f.dom.window.close()
@@ -174,7 +174,7 @@ describe('Host-owned workspace rail selection projection', () => {
     f.dom.window.close()
   })
 
-  it('waits past a transient other selection before restoring the same clicked destination', async () => {
+  it('restores the same clicked destination on the current rail despite transient native props', () => {
     const f = fixture()
     f.home.removeAttribute('aria-current')
     f.home.removeAttribute('data-selected')
@@ -185,15 +185,19 @@ describe('Host-owned workspace rail selection projection', () => {
     nativeFiber(f.library, false)
     expect(f.projection.enter()).toBe(true)
     f.automations.click()
-    nativeFiber(f.home, true)
-    nativeFiber(f.automations, false)
-    expect(f.projection.leave()).toBe(false)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(f.home.hasAttribute('aria-current')).toBe(false)
-    nativeFiber(f.home, false)
-    nativeFiber(f.automations, true)
-    expect(await f.projection.settled()).toBe(true)
-    expect(f.automations.getAttribute('aria-current')).toBe('page')
+    const original = f.document.querySelector<HTMLElement>('nav')!
+    const replacement = original.cloneNode(true) as HTMLElement
+    original.replaceWith(replacement)
+    for (const element of [replacement, ...replacement.querySelectorAll('button')]) {
+      element.getClientRects = () => ({ length: 1 }) as DOMRectList
+    }
+    const [home, automations, library] = [...replacement.querySelectorAll<HTMLButtonElement>('button')]
+    nativeFiber(home!, true)
+    nativeFiber(automations!, false)
+    nativeFiber(library!, false)
+    expect(f.projection.leave()).toBe(true)
+    expect(home?.hasAttribute('aria-current')).toBe(false)
+    expect(automations?.getAttribute('aria-current')).toBe('page')
     f.dom.window.close()
   })
 
