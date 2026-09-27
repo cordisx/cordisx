@@ -25,7 +25,7 @@ export function resolveTargetReasoning(
 ): TargetReasoning {
   const catalog = catalogReasoning(target.providerId, target.model)
   const native = models.find(model => model.id === target.model)
-  const capabilities = catalog === undefined ? native?.reasoningCapabilities : catalog ?? undefined
+  const capabilities = catalog ?? native?.reasoningCapabilities
   const effort = resolveModelReasoningEffort(capabilities, currentEffort) ?? native?.defaultReasoningEffort
   return {
     ...(effort === undefined ? {} : { effort }),

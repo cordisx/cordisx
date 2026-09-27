@@ -705,6 +705,26 @@ describe('native model provider transport', () => {
     fallback.dom.window.close()
   })
 
+  it('uses native reasoning metadata when a catalog model omits it', async () => {
+    const native = await harness(
+      undefined,
+      (providerId, model) => providerId === 'provider-a' && model === 'model-b' ? null : undefined,
+    )
+    const props = (native.trigger as any).__reactFiber$test.return.memoizedProps
+    const model = {
+      model: 'model-b',
+      displayName: 'Model B',
+      defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }],
+    }
+    props.models.push(model)
+    props.modelOptions.push({ model, disabledReason: null })
+    expect(await native.transport.select({ providerId: 'provider-a', model: 'model-b' })).toBe('accepted')
+    expect(native.selectModel).toHaveBeenCalledWith('model-b', 'high')
+    native.transport.dispose()
+    native.dom.window.close()
+  })
+
   it('restores the native model and effort when a same-provider callback mutates then rejects', async () => {
     const { dom, selectModel, transport } = await harness()
     selectModel

@@ -1,10 +1,5 @@
 import React, { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { ModelServicesPage } from '../packages/cli/src/renderer/manager/pages/ModelServicesPage.js'
-import { PluginsPage } from '../packages/cli/src/renderer/manager/pages/PluginsPage.js'
-import { RoutesPage } from '../packages/cli/src/renderer/manager/pages/RoutesPage.js'
-import { ExtensionPointsPage } from '../packages/cli/src/renderer/manager/pages/ExtensionPointsPage.js'
-import { MarketplacePage } from '../packages/cli/src/renderer/manager/pages/MarketplacePage.js'
 import { ModelProviderRegistry, type ModelProviderSnapshot } from '../packages/cli/src/renderer/model-providers.js'
 import type { CatalogClientState } from '../packages/cli/src/renderer/model-catalog-client.js'
 import type { MarketplaceModel, MarketplaceSnapshot } from '../packages/cli/src/renderer/marketplace.js'
@@ -49,6 +44,7 @@ describe('Manager shared list states', () => {
     ] as const,
   )('distinguishes %s without exposing an unusable create action', async (kind, state, catalog, text, create) => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     const onCreate = vi.fn()
     const source = registry(state, catalog)
     try {
@@ -78,6 +74,7 @@ describe('Manager shared list states', () => {
 
   it('keeps the same hero from initial load through known-empty slow automatic/manual reads and exposes failures', async () => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     let complete!: (value: []) => void
     let fail!: (error: Error) => void
     const source = new ModelProviderRegistry(() =>
@@ -107,7 +104,15 @@ describe('Manager shared list states', () => {
         complete([])
         await pending
       })
-      await fixture.click('[aria-label="Refresh"]')
+      await fixture.click('.cxh-search-toolbar [aria-label="More catalog actions"]')
+      await vi.waitFor(() => {
+        expect([...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+          .some(item => item.textContent === 'Refresh')).toBe(true)
+      })
+      await act(async () => {
+        ;[...fixture.document.querySelectorAll<HTMLElement>('.t-dropdown__item')]
+          .find(item => item.textContent === 'Refresh')!.click()
+      })
       expect(fixture.element('.cxms-illustration svg')).toBe(scene)
       await act(async () => complete([]))
       await act(async () => {
@@ -125,6 +130,7 @@ describe('Manager shared list states', () => {
 
   it('preserves known provider rows, query and focus during a slow background read', async () => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     let complete!: (
       rows: { providerId: string; pluginId: string; title: string; models: { id: string; label: string }[] }[],
     ) => void
@@ -174,6 +180,7 @@ describe('Manager shared list states', () => {
 
   it('omits create without a navigation callback and clears an empty search back to the real empty state', async () => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     try {
       await fixture.render(<ModelServicesPage registry={registry()} locale="zh-CN" />)
       expect(fixture.document.querySelector('[aria-label="添加模型连接"]')).toBeNull()
@@ -190,6 +197,7 @@ describe('Manager shared list states', () => {
 
   it('clears model filters when a chosen state has no rows, retaining provider controls', async () => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     const source = registry({
       providers: [{
         providerId: 'a',
@@ -221,6 +229,7 @@ describe('Manager shared list states', () => {
 
   it('shows unavailable Host without a fake retry or create action', async () => {
     const fixture = reactManagerFixture()
+    const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
     try {
       await fixture.render(<ModelServicesPage registry={undefined} locale="en" onCreate={vi.fn()} />)
       expect(fixture.element('[data-empty-state="unavailable"]').querySelector('button')).toBeNull()
@@ -230,21 +239,28 @@ describe('Manager shared list states', () => {
     }
   })
 
-  it.each([RoutesPage, ExtensionPointsPage])('clears a no-match search for a read-only collection', async Page => {
-    const fixture = reactManagerFixture()
-    try {
-      await fixture.render(<Page snapshot={managerSnapshot()} router={managerRouter()} />)
-      expect(fixture.element('[data-empty-state="empty"]').querySelector('button')).toBeNull()
-      await fixture.type('input[type="search"]', 'missing')
-      await fixture.click('[data-empty-state="search"] button')
-      expect((fixture.element('input[type="search"]') as HTMLInputElement).value).toBe('')
-    } finally {
-      await fixture.dispose()
-    }
-  })
+  it.each(['routes', 'extension-points'] as const)(
+    'clears a no-match search for a read-only collection',
+    async kind => {
+      const fixture = reactManagerFixture()
+      const Page = kind === 'routes'
+        ? (await import('../packages/cli/src/renderer/manager/pages/RoutesPage.js')).RoutesPage
+        : (await import('../packages/cli/src/renderer/manager/pages/ExtensionPointsPage.js')).ExtensionPointsPage
+      try {
+        await fixture.render(<Page snapshot={managerSnapshot()} router={managerRouter()} />)
+        expect(fixture.element('[data-empty-state="empty"]').querySelector('button')).toBeNull()
+        await fixture.type('input[type="search"]', 'missing')
+        await fixture.click('[data-empty-state="search"] button')
+        expect((fixture.element('input[type="search"]') as HTMLInputElement).value).toBe('')
+      } finally {
+        await fixture.dispose()
+      }
+    },
+  )
 
   it('gives an installed-plugin empty list an existing Marketplace navigation action', async () => {
     const fixture = reactManagerFixture(), router = managerRouter(), snapshot = managerSnapshot()
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
     try {
       await fixture.render(<PluginsPage snapshot={snapshot} model={managerModel(snapshot)} router={router} />)
       await fixture.click('[data-empty-state] button')
@@ -261,6 +277,7 @@ describe('Manager shared list states', () => {
     'distinguishes Marketplace %s and exposes only available recovery',
     async kind => {
       const fixture = reactManagerFixture(), router = managerRouter(), snapshot = managerSnapshot()
+      const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
       const catalog: MarketplaceSnapshot = {
         sources: [],
         sourceRecords: [],

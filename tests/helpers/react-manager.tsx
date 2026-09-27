@@ -62,10 +62,20 @@ export function reactManagerFixture() {
   }
   const previous = Object.fromEntries(Object.keys(replacements).map(key => [key, Reflect.get(globalThis, key)]))
   Object.assign(globalThis, replacements)
+  const attachEvent = function(this: EventTarget, name: string, listener: EventListenerOrEventListenerObject) {
+    this.addEventListener(name.replace(/^on/u, ''), listener)
+  }
+  const detachEvent = function(this: EventTarget, name: string, listener: EventListenerOrEventListenerObject) {
+    this.removeEventListener(name.replace(/^on/u, ''), listener)
+  }
   Object.defineProperties(dom.window.HTMLElement.prototype, {
-    attachEvent: { configurable: true, value() {} },
-    detachEvent: { configurable: true, value() {} },
+    attachEvent: { configurable: true, value: attachEvent },
+    detachEvent: { configurable: true, value: detachEvent },
     scrollIntoView: { configurable: true, value() {} },
+  })
+  Object.defineProperties(dom.window.Document.prototype, {
+    attachEvent: { configurable: true, value: attachEvent },
+    detachEvent: { configurable: true, value: detachEvent },
   })
   Object.defineProperty(dom.window, 'matchMedia', {
     value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),

@@ -482,12 +482,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   )
   const showProviderSearch = providerRows.length > 5
   const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
-  const reasoningCapabilities = 'reasoningCapabilities' in (disclosedModel ?? {})
-    ? disclosedModel?.reasoningCapabilities
-    : undefined
-  const reasoningEfforts = catalogBacked
-    ? reasoningCapabilities?.efforts ?? []
-    : reasoningCapabilities?.efforts ?? native.reasoningEfforts ?? []
+  const reasoningCapabilities = disclosedModel?.reasoningCapabilities ?? displayedNativeModel?.reasoningCapabilities
+  const reasoningEfforts = reasoningCapabilities?.efforts
+    ?? (catalogBacked && displayedNativeModel === undefined ? [] : native.reasoningEfforts ?? [])
   const reasoningEffort = reasoningEfforts.includes(native.reasoningEffort ?? '')
     ? native.reasoningEffort
     : reasoningCapabilities?.defaultEffort
