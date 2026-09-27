@@ -54,6 +54,7 @@ describe('workspace pane activation', () => {
       await fixture.click('#open')
       const refreshedHome = rail(document, 'builtin:home')
       current.replaceWith(refreshedHome)
+      await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 2_200)))
       ready = true
       await act(async () => await new Promise(resolve => dom.window.setTimeout(resolve, 120)))
       expect(fixture.element('#open').getAttribute('data-open')).toBe('true')

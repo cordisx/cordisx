@@ -71,7 +71,7 @@ export function useWorkspacePaneActivation(options: WorkspacePaneActivationOptio
       return
     }
     void (async () => {
-      const deadline = Date.now() + 2_000
+      const deadline = Date.now() + 7_000
       while (Date.now() < deadline && currentRevision === revision.current) {
         await new Promise(resolve => setTimeout(resolve, 50))
         const result = attempt()
