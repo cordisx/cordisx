@@ -506,7 +506,6 @@ describe('Agent conversation shell public runtime', () => {
     // DOM presence alone can precede that effect on a loaded CI renderer.
     await act(async () => {
       staleUnmount = registration.mount(mountContext(dom, { roomId: 'room-v4-identity' }))
-      await settle()
     })
     await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-message-mention')).not.toBeNull())
     await act(async () => {
