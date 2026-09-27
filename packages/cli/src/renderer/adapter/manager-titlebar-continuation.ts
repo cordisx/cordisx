@@ -286,7 +286,8 @@ export function resolveManagerTitlebarContinuation(
     || owner.sidebarWidth < 180 || owner.sidebarWidth > 420
     || !Number.isFinite(owner.sidebarWidth)
     || owner.titlebarSeat.parentElement !== slot
-    || owner.navigationSeat.parentElement !== navigation
+    || (owner.navigationSeat.parentElement !== navigation
+      && owner.navigationSeat.parentElement !== navigation.closest('aside[data-app-shell-left-panel-appearance]'))
     || owner.contentSeat.parentElement !== main
     || !owner.resizeHandle.isConnected
     || owner.titlebarSeat.getAttribute('data-cordisx-manager-titlebar-seat') !== 'true'

@@ -163,7 +163,7 @@ export function installReactCordisXManager(
       rootSeat.style.left = `${next}px`
       rootSeat.style.width = `calc(100% - ${next}px)`
     } else {
-      navigationSeat.style.width = '100%'
+      navigationSeat.style.width = `${next}px`
       rootSeat.style.left = '0'
       rootSeat.style.width = '100%'
       current.sidebarContainer.style.width = `${next}px`
@@ -172,6 +172,8 @@ export function installReactCordisXManager(
         const railWidth = current.sidebarContainer.getBoundingClientRect().left
         current.sidebarLayout.style.width = `${railWidth + next}px`
         current.sidebarLayout.style.flexBasis = `${railWidth + next}px`
+        navigationSeat.style.left = `${railWidth}px`
+        navigationSeat.style.right = 'auto'
       }
     }
     const anchorRect = current.mainAnchor.getBoundingClientRect()
@@ -588,7 +590,8 @@ export function installReactCordisXManager(
     }
     rootSeat.dataset.managerSurface = 'pane'
     seat.main.anchor.append(rootSeat)
-    seat.sidebar.container.append(navigationSeat)
+    ;(seat.provenance === 'codex-26.924-native-two-pane' ? sidebarLayout! : seat.sidebar.container)
+      .append(navigationSeat)
     placeTitlebarSeat(titlebar)
     titlebar.slot.append(titlebarSeat)
     return true

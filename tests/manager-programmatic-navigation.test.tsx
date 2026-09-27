@@ -294,7 +294,9 @@ describe('programmatic Manager identity detail navigation', () => {
       })
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
       expect(document.querySelector('[data-cordisx-manager-modal]')).toBeNull()
-      expect(sidebar.querySelector('[data-cordisx-manager-sidebar-root] .cxr-nav')).not.toBeNull()
+      const hostNavigation = sidebar.closest('aside')!
+      expect(hostNavigation.querySelector('[data-cordisx-manager-sidebar-root] .cxr-nav')).not.toBeNull()
+      expect(hostNavigation.querySelector('[data-cordisx-manager-sidebar-root]')?.parentElement).toBe(hostNavigation)
       expect(anchor.querySelector('[data-cordisx-manager-pane] .cxr-main')).not.toBeNull()
       expect(anchor.querySelector('[data-cordisx-manager-pane] .cxr-header')).toBeNull()
       expect(titlebarMain.querySelector('[data-cordisx-manager-titlebar-seat] .cxr-heading')?.textContent)
@@ -360,9 +362,9 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(titlebarMain.querySelector('.cxr-header-seat [aria-label="Back"]')).toBeNull()
 
       await act(async () => {
-        sidebar.querySelector<HTMLButtonElement>('[data-tab="model-services"]')?.click()
+        hostNavigation.querySelector<HTMLButtonElement>('[data-tab="model-services"]')?.click()
       })
-      expect(sidebar.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
+      expect(hostNavigation.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
       expect(titlebarMain.querySelector('.cxr-heading')?.textContent).toContain('Model')
 
       const refreshedSidebar = sidebarScroll.cloneNode(true) as HTMLElement
@@ -373,7 +375,7 @@ describe('programmatic Manager identity detail navigation', () => {
       await settleManager()
       expect(document.querySelectorAll('[data-cordisx-manager-pane]')).toHaveLength(1)
       expect(document.querySelectorAll('[data-cordisx-react-manager]')).toHaveLength(1)
-      expect(sidebar.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
+      expect(hostNavigation.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe('page')
       expect(sidebarScroll.getAttribute('aria-hidden')).toBeNull()
       expect(refreshedSidebar.getAttribute('aria-hidden')).toBe('true')
       expect(refreshedSidebar.inert).toBe(true)
@@ -486,7 +488,7 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(sidebarScroll.inert).toBe(sidebarScrollInert)
       expect(titlebarMain.querySelector('[data-cordisx-manager-titlebar-seat]')).toBeNull()
       expect(nativeTitle.getAttribute('aria-hidden')).toBeNull()
-      expect(sidebar.querySelector('[data-cordisx-manager-sidebar-root]')).toBeNull()
+      expect(hostNavigation.querySelector('[data-cordisx-manager-sidebar-root]')).toBeNull()
       expect(document.querySelector('[data-cordisx-react-manager]')?.parentElement).toBe(document.body)
       expect(document.querySelector('[data-sidebar-destination="builtin:automations"]')?.getAttribute('aria-current'))
         .toBe('page')
