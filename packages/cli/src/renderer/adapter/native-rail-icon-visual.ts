@@ -234,6 +234,8 @@ async function projectReservedNativeRailDefaultIcon(
   let themeObserver: MutationObserver | undefined
   let colorScheme: MediaQueryList | undefined
   let checkTheme: (() => void) | undefined
+  let scheduleThemeChecks: (() => void) | undefined
+  let themeCheckTimers: ReturnType<typeof setTimeout>[] = []
   const handle: NativeRailIconVisualHandle = {
     destination: item.id,
     isCurrent: () =>
@@ -246,8 +248,10 @@ async function projectReservedNativeRailDefaultIcon(
       disposed = true
       observer?.disconnect()
       themeObserver?.disconnect()
-      if (colorScheme !== undefined && checkTheme !== undefined) {
-        colorScheme.removeEventListener('change', checkTheme)
+      for (const timer of themeCheckTimers) clearTimeout(timer)
+      themeCheckTimers = []
+      if (colorScheme !== undefined && scheduleThemeChecks !== undefined) {
+        colorScheme.removeEventListener('change', scheduleThemeChecks)
       }
       overlay.remove()
       nativeSvg.style.visibility = previousVisibility
@@ -286,12 +290,18 @@ async function projectReservedNativeRailDefaultIcon(
         lost()
       }
     }
-    themeObserver = new Observer(checkTheme)
+    scheduleThemeChecks = () => {
+      checkTheme?.()
+      if (disposed) return
+      for (const timer of themeCheckTimers) clearTimeout(timer)
+      themeCheckTimers = [40, 240].map(delay => setTimeout(() => checkTheme?.(), delay))
+    }
+    themeObserver = new Observer(scheduleThemeChecks)
     themeObserver.observe(document.documentElement, { attributes: true })
     themeObserver.observe(document.body, { attributes: true })
     themeObserver.observe(document.head, { attributes: true, childList: true, subtree: true })
     colorScheme = document.defaultView?.matchMedia?.('(prefers-color-scheme: dark)')
-    colorScheme?.addEventListener('change', checkTheme)
+    colorScheme?.addEventListener('change', scheduleThemeChecks)
     observer.observe(currentRail, {
       childList: true,
       subtree: true,

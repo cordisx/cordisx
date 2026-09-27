@@ -212,4 +212,25 @@ describe('native rail icon visual lease', () => {
     expect(f.document.querySelector('[data-cordisx-native-rail-icon-visual]')).toBeNull()
     f.dom.window.close()
   })
+
+  it('rechecks theme color after a CSS transition begins', async () => {
+    const f = fixture()
+    const lost = vi.fn()
+    const result = await projectNativeRailDefaultIcon({
+      document: f.document,
+      appVersion: '26.924.22138',
+      runtime: f.runtime,
+      onLost: lost,
+    })
+    expect(result.status).toBe('active')
+    if (result.status !== 'active') return
+    f.document.documentElement.setAttribute('data-theme', 'dark')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    f.buttons[1]!.style.color = 'red'
+    await new Promise(resolve => setTimeout(resolve, 70))
+    expect(lost).toHaveBeenCalledOnce()
+    expect(f.document.querySelector('[data-cordisx-native-rail-icon-visual]')).toBeNull()
+    expect(f.buttons[0]!.querySelector('svg')?.style.visibility).toBe('')
+    f.dom.window.close()
+  })
 })
