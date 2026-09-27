@@ -501,15 +501,23 @@ describe('Agent conversation shell public runtime', () => {
 
     driver.replace()
     expect(authority.definitionPresentation(definition.identity)).toBeUndefined()
-    const staleUnmount = registration.mount(mountContext(dom, { roomId: 'room-v4-identity' }))
+    let staleUnmount: ReturnType<typeof registration.mount>
+    // Flush the new room's passive reset before the simulated mention click.
+    // DOM presence alone can precede that effect on a loaded CI renderer.
+    await act(async () => {
+      staleUnmount = registration.mount(mountContext(dom, { roomId: 'room-v4-identity' }))
+      await settle()
+    })
     await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-message-mention')).not.toBeNull())
-    dom.window.document.querySelector<HTMLButtonElement>('.cxa-message-mention')!.click()
+    await act(async () => {
+      dom.window.document.querySelector<HTMLButtonElement>('.cxa-message-mention')!.click()
+    })
     await vi.waitFor(() =>
-      expect(dom.window.document.querySelector('[data-host-conversation-member-search="true"] input')).not.toBeNull()
+      expect(
+        dom.window.document.querySelector<HTMLInputElement>('[data-host-conversation-member-search="true"] input')
+          ?.value,
+      ).toBe('Lead source')
     )
-    expect(
-      dom.window.document.querySelector<HTMLInputElement>('[data-host-conversation-member-search="true"] input')?.value,
-    ).toBe('Lead source')
     expect(dom.window.document.querySelector<HTMLButtonElement>('.cxa-member-button')?.disabled).toBe(true)
     if (typeof staleUnmount === 'function') staleUnmount()
     registration.dispose()

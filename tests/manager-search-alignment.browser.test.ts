@@ -137,17 +137,23 @@ it.skipIf(!executable)(
                   `${route.page} title/search text ${theme}/${width}/${query}: ${JSON.stringify(starts)}`,
                 ).toBeLessThanOrEqual(1)
               }
-              // Shared statuses must inherit the list's left baseline and wrap on narrow pages.
+              // Hero art is centered; local compact states retain the list's left baseline.
               const emptyStates = await evaluate(`(() => [...document.querySelectorAll('.cxh-empty-state')].map(e=>{
-                const style=getComputedStyle(e),icon=e.querySelector('.cordisx-host-icon'),body=e.parentElement;
-                return {left:e.getBoundingClientRect().left,owner:body.getBoundingClientRect().left,
-                  icon:icon.getBoundingClientRect().left,overflow:e.scrollWidth-e.clientWidth,
-                  border:style.borderTopWidth,color:style.color,muted:getComputedStyle(icon).color,
-                  align:style.textAlign};
+                const style=getComputedStyle(e),art=e.querySelector('.cxh-empty-illustration svg,.cordisx-host-icon'),body=e.parentElement;
+                const box=e.getBoundingClientRect(),scene=art.getBoundingClientRect();
+                return {left:box.left,owner:body.getBoundingClientRect().left,
+                  artLeft:scene.left,artCenter:(scene.left+scene.right-box.left-box.right)/2,
+                  width:scene.width,height:scene.height,presentation:e.dataset.emptyPresentation,
+                  overflow:e.scrollWidth-e.clientWidth,border:style.borderTopWidth,
+                  color:style.color,muted:getComputedStyle(art).color,align:style.textAlign};
               }))()`) as {
                 left: number
                 owner: number
-                icon: number
+                artLeft: number
+                artCenter: number
+                width: number
+                height: number
+                presentation: string
                 overflow: number
                 border: string
                 color: string
@@ -156,10 +162,18 @@ it.skipIf(!executable)(
               }[]
               for (const state of emptyStates) {
                 expect(Math.abs(state.left - state.owner)).toBeLessThanOrEqual(1)
-                expect(Math.abs(state.icon - state.left)).toBeLessThanOrEqual(1)
+                if (state.presentation === 'hero') {
+                  expect(Math.abs(state.artCenter)).toBeLessThanOrEqual(1)
+                  expect(state.width).toBeLessThanOrEqual(320)
+                  expect(Math.abs(state.height - state.width * 9 / 16)).toBeLessThan(1)
+                  expect(state.align).toBe('center')
+                } else {
+                  expect(Math.abs(state.artLeft - state.left)).toBeLessThanOrEqual(1)
+                  expect(state.width).toBeLessThanOrEqual(112)
+                  expect(state.align).toBe('start')
+                }
                 expect(state.overflow).toBeLessThanOrEqual(1)
                 expect(state.border).toBe('0px')
-                expect(state.align).toBe('start')
                 expect(state.color).not.toBe(state.muted)
               }
               expect(actual.left).toBeGreaterThanOrEqual(0)
@@ -321,13 +335,29 @@ it.skipIf(!executable)(
             expect(fieldChrome.outline, `${label} field outline`).toBe('none')
             expect(fieldChrome.border, `${label} field border`).not.toBe('rgba(0, 0, 0, 0)')
             expect(fieldChrome.background, `${label} field background`).not.toBe('rgba(0, 0, 0, 0)')
-            const sharedStates = await evaluate(`(() => [...document.querySelectorAll('.cxh-empty-state')].map(e=>({
-              left:e.getBoundingClientRect().left,icon:e.querySelector('.cordisx-host-icon').getBoundingClientRect().left,
-              overflow:e.scrollWidth-e.clientWidth,border:getComputedStyle(e).borderTopWidth,
-            })))()`) as { left: number; icon: number; overflow: number; border: string }[]
+            const sharedStates = await evaluate(`(() => [...document.querySelectorAll('.cxh-empty-state')].map(e=>{
+              const box=e.getBoundingClientRect(),art=e.querySelector('.cxh-empty-illustration svg,.cordisx-host-icon').getBoundingClientRect();
+              return {left:box.left,artLeft:art.left,artCenter:(art.left+art.right-box.left-box.right)/2,
+                width:art.width,presentation:e.dataset.emptyPresentation,
+                overflow:e.scrollWidth-e.clientWidth,border:getComputedStyle(e).borderTopWidth};
+            }))()`) as {
+              left: number
+              artLeft: number
+              artCenter: number
+              width: number
+              presentation: string
+              overflow: number
+              border: string
+            }[]
             for (const state of sharedStates) {
               expect(Math.abs(state.left - Number(actual.bodyStart)), `${label} status baseline`).toBeLessThanOrEqual(1)
-              expect(Math.abs(state.icon - state.left), `${label} status icon`).toBeLessThanOrEqual(1)
+              if (state.presentation === 'hero') {
+                expect(Math.abs(state.artCenter), `${label} hero center`).toBeLessThanOrEqual(1)
+                expect(state.width).toBeLessThanOrEqual(320)
+              } else {
+                expect(Math.abs(state.artLeft - state.left), `${label} compact art baseline`).toBeLessThanOrEqual(1)
+                expect(state.width).toBeLessThanOrEqual(112)
+              }
               expect(state.overflow, `${label} status overflow`).toBeLessThanOrEqual(1)
               expect(state.border).toBe('0px')
             }
@@ -519,7 +549,7 @@ it.skipIf(!executable)(
                 centerY:(a.top+a.bottom-b.top-b.bottom)/2,overflow:e.scrollWidth-e.clientWidth,
                 scroll:r.scrollHeight>r.clientHeight,toolbar:document.querySelector('.cxh-search-toolbar').getBoundingClientRect().top};
             })()`) as Record<string, number | boolean>
-            expect(hero.width).toBeLessThanOrEqual(310)
+            expect(hero.width).toBeLessThanOrEqual(320)
             expect(Math.abs(Number(hero.height) - Number(hero.width) * 9 / 16)).toBeLessThan(1)
             expect(Math.abs(Number(hero.centerX))).toBeLessThan(1)
             expect(hero.overflow).toBe(0)
@@ -532,24 +562,35 @@ it.skipIf(!executable)(
               )
             }
             const endpoints = await evaluate(`(() => {
-              const scene=document.querySelector('.cxms-illustration svg');
+              const scene=document.querySelector('[data-empty-family="model-services"] svg');
+              const route=scene.querySelector('[data-fixed="node-routes"] path');
+              const coordinates=route.getAttribute('d').match(/-?\\d+(?:\\.\\d+)?/g).map(Number);
+              const nodes=[...scene.querySelectorAll('[data-fixed="network-nodes"] > circle')];
+              const gap=(x,y,node)=>{
+                const cx=node.cx.baseVal.value,cy=node.cy.baseVal.value,r=node.r.baseVal.value;
+                const dx=x-cx,dy=y-cy,d=Math.hypot(dx,dy);
+                const expected=new DOMPoint(cx+dx/d*r,cy+dy/d*r).matrixTransform(node.getCTM());
+                const actual=new DOMPoint(x,y).matrixTransform(route.getCTM());
+                return Math.hypot(actual.x-expected.x,actual.y-expected.y);
+              };
               return [0,3000,7000,11000].flatMap(time=>{
                 scene.getAnimations({subtree:true}).forEach(a=>{a.pause();a.currentTime=time});
-                return ['one','two','three'].map(name=>{
-                  const o=scene.querySelector('[data-output="'+name+'"]'),i=scene.querySelector('[data-input="'+name+'"]');
-                  const p=o.getPointAtLength(o.getTotalLength()).matrixTransform(o.getCTM()),box=i.getBBox();
-                  const q=new DOMPoint(box.x,box.y+box.height/2).matrixTransform(i.getCTM());
-                  return Math.hypot(p.x-q.x,p.y-q.y);
+                return [0,1,2,3].flatMap(index=>{
+                  const [x1,y1,x2,y2]=coordinates.slice(index*4,index*4+4);
+                  return [gap(x1,y1,nodes[0]),gap(x2,y2,nodes[index+1])];
                 });
               });
             })()`) as number[]
+            expect(endpoints).toHaveLength(32)
             expect(Math.max(...endpoints)).toBeLessThan(0.01)
             await cdp.send('Emulation.setEmulatedMedia', {
               features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
             })
             await run('await Fixture.settle()')
             expect(
-              await evaluate(`document.querySelector('.cxms-illustration svg').getAnimations({subtree:true}).length`),
+              await evaluate(
+                `document.querySelector('[data-empty-family="model-services"] svg').getAnimations({subtree:true}).length`,
+              ),
             ).toBe(0)
             await cdp.send('Emulation.setEmulatedMedia', { features: [] })
             if (process.env.CORDISX_EMPTY_STATE_ARTIFACTS && width === 580 && height === 280) {

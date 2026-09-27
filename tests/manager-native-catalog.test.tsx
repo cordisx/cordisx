@@ -39,7 +39,7 @@ describe('Manager native catalog coverage', () => {
       expect(toggle.disabled).toBe(true)
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
       expect(fixture.element('.cxms-provider-identity').textContent).toContain('DeepSeek')
-      expect(fixture.element('.cxms-model-count').textContent).toBe('No models available')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No models available')
 
       await act(async () => {
         snapshot = { ...snapshot, providers }
@@ -111,7 +111,7 @@ describe('Manager native catalog coverage', () => {
           .find(item => item.textContent?.includes('Blocked'))!.click()
       })
       expect((fixture.element('.cxms-provider-toggle') as HTMLButtonElement).disabled).toBe(true)
-      expect(fixture.element('.cxms-model-count').textContent).toBe('No models available')
+      expect(fixture.element('.cxms-model-count').textContent?.trim()).toBe('No models available')
       await act(async () => {
         ;[...fixture.document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')]
           .find(item => item.textContent?.includes('All models'))!.click()
