@@ -160,6 +160,16 @@ describe('26.924 Manager titlebar continuation', () => {
     expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
   })
 
+  it('releases a native titlebar lease when Codex changes the page shell width', () => {
+    const f = fixture('native')
+    const lease = captureManagerTitlebarLease(f.document, 'native', f.pane)!
+    const owner = f.mount(420)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+    const slot = f.document.querySelector<HTMLElement>('[data-app-shell-titlebar-slot="main"]')!
+    f.setRect(slot, f.rect(290, 0, 1257, 44))
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+  })
+
   it('keeps Back while a bounded right page-action group and native end control are leased away', () => {
     const f = fixture('native')
     const slot = f.document.querySelector<HTMLElement>('[data-app-shell-titlebar-slot="main"]')!

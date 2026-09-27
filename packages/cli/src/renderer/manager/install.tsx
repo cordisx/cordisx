@@ -26,7 +26,7 @@ import {
 } from './sidebar-width.js'
 import type { HostManagerNavigationController } from './navigation-controller.js'
 import type { PluginManagementBinding } from '../management-binding.js'
-import type { NativeRouteSource } from './native-route-transition.js'
+import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 import { WorkspaceRailProjection } from './workspace-rail-projection.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
@@ -133,6 +133,7 @@ export function installReactCordisXManager(
     native: NativeState[]
     nativeTitle: NativeState[]
     selected: Array<{ button: HTMLButtonElement; current: string | null; dataSelected: string | null }>
+    nativeRouteIdentity: string | undefined
   } | undefined
   let endResize: ((event?: PointerEvent) => void) | undefined
   const persistedWidth = (() => {
@@ -400,11 +401,16 @@ export function installReactCordisXManager(
     rootSeat.style.width = current.rootWidth
     if (presentationMode === 'workspace') railProjection.leave()
     else {
-      for (const { button, current: value, dataSelected } of current.selected) {
-        if (!button.isConnected) continue
-        if (value !== null && !button.hasAttribute('aria-current')) button.setAttribute('aria-current', value)
-        if (dataSelected !== null && !button.hasAttribute('data-selected')) {
-          button.setAttribute('data-selected', dataSelected)
+      const rail = resolveManagerRailSeat(document)?.homeButton.closest('nav[data-app-navigation-rail="true"]')
+      const selected = rail?.querySelectorAll('button[data-sidebar-destination][aria-current="page"]')
+      const marked = rail?.querySelectorAll('button[data-sidebar-destination][data-selected]')
+      const sameRoute = options.nativeRouteHistory === undefined
+        || nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === current.nativeRouteIdentity
+      if (rail !== null && rail !== undefined && selected?.length === 0 && marked?.length === 0 && sameRoute) {
+        for (const { button, current: value, dataSelected } of current.selected) {
+          if (!button.isConnected || !rail.contains(button)) continue
+          if (value !== null) button.setAttribute('aria-current', value)
+          if (dataSelected !== null) button.setAttribute('data-selected', dataSelected)
         }
       }
     }
@@ -580,6 +586,9 @@ export function installReactCordisXManager(
       native,
       nativeTitle,
       selected,
+      nativeRouteIdentity: options.nativeRouteHistory === undefined
+        ? undefined
+        : nativeRouteIdentity(options.nativeRouteHistory.snapshot()),
     }
     seat.main.anchor.style.position = 'relative'
     seat.sidebar.container.style.position = 'relative'
