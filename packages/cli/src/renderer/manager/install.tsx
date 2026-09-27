@@ -271,6 +271,8 @@ export function installReactCordisXManager(
     saveWidth(pane.width)
   })
   let paneLossHandler: (() => void) | undefined
+  let paneSeatMissingSince: number | undefined
+  let paneSeatRetryTimer: ReturnType<typeof setTimeout> | undefined
   const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory)
   const restoreNativeState = ({ node, ariaHidden, inert, visibility }: NativeState) => {
     node.inert = inert
@@ -314,6 +316,9 @@ export function installReactCordisXManager(
   const deactivatePane = () => {
     const current = pane
     if (current === undefined) return
+    paneSeatMissingSince = undefined
+    clearTimeout(paneSeatRetryTimer)
+    paneSeatRetryTimer = undefined
     stopResize()
     pane = undefined
     if (current.titlebarLease !== undefined) releaseManagerTitlebarLease(current.titlebarLease)
@@ -547,6 +552,22 @@ export function installReactCordisXManager(
     scheduled = false
     if (pane !== undefined) {
       const seat = resolveManagerPaneSeat(document)
+      if (seat === undefined) {
+        paneSeatMissingSince ??= Date.now()
+        if (Date.now() - paneSeatMissingSince < 150) {
+          if (paneSeatRetryTimer === undefined) {
+            paneSeatRetryTimer = setTimeout(() => {
+              paneSeatRetryTimer = undefined
+              schedule()
+            }, 25)
+          }
+          return
+        }
+      } else {
+        paneSeatMissingSince = undefined
+        clearTimeout(paneSeatRetryTimer)
+        paneSeatRetryTimer = undefined
+      }
       const sameCore = seat !== undefined
         && seat.rail === pane.rail && seat.main.anchor === pane.mainAnchor && seat.main.frame === pane.mainFrame
         && seat.sidebar.container === pane.sidebarContainer && seat.provenance === pane.provenance

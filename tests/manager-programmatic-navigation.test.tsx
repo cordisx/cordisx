@@ -384,7 +384,12 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
       expect(refreshedSidebar.getAttribute('aria-hidden')).toBeNull()
       expect(sidebarScroll.getAttribute('aria-hidden')).toBe('true')
-
+      sidebarHeader.remove()
+      sidebarScroll.remove()
+      await act(async () => await new Promise(resolve => setTimeout(resolve, 50)))
+      expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
+      sidebarNavigation.prepend(sidebarHeader, sidebarScroll)
+      await settleManager()
       await act(async () => {
         nativeEndAction.click()
       })
@@ -476,7 +481,7 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
 
       frame.removeAttribute('data-app-shell-thread-edge-divider')
-      await settleManager()
+      await act(async () => await new Promise(resolve => setTimeout(resolve, 200)))
       expect(document.querySelector('[data-cordisx-manager-pane],[data-cordisx-manager-modal]')).toBeNull()
       expect(frame.getAttribute('aria-hidden')).toBeNull()
       expect(frame.inert).toBe(originalInert)
@@ -718,9 +723,7 @@ describe('programmatic Manager identity detail navigation', () => {
         await act(async () => trigger.click())
         expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
         frame.removeAttribute('data-app-shell-thread-edge-divider')
-        await act(async () => {
-          await new Promise(resolve => setTimeout(resolve, 0))
-        })
+        await act(async () => await new Promise(resolve => setTimeout(resolve, 200)))
         expect(document.querySelector('[data-cordisx-manager-pane]')).toBeNull()
         expect(frame.inert).toBe(originalFrameInert)
         expect(anchor.querySelector('[data-cordisx-manager-sidebar-root]')).toBeNull()
