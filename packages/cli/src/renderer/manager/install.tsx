@@ -126,6 +126,8 @@ export function installReactCordisXManager(
     navigationLeft: string
     navigationRight: string
     navigationWidth: string
+    navigationRadius: string
+    navigationOverflow: string
     rootLeft: string
     rootWidth: string
     native: NativeState[]
@@ -392,6 +394,8 @@ export function installReactCordisXManager(
     navigationSeat.style.left = current.navigationLeft
     navigationSeat.style.right = current.navigationRight
     navigationSeat.style.width = current.navigationWidth
+    navigationSeat.style.borderTopLeftRadius = current.navigationRadius
+    navigationSeat.style.overflow = current.navigationOverflow
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
     if (presentationMode === 'workspace') railProjection.leave()
@@ -407,6 +411,7 @@ export function installReactCordisXManager(
     navigationSeat.remove()
     resizeHandle.remove()
     titlebarSeat.remove()
+    delete titlebarSeat.dataset.cordisxManagerTitleDivider
     rootSeat.dataset.managerSurface = 'modal'
     ;(document.body ?? document.documentElement).append(rootSeat)
   }
@@ -510,6 +515,21 @@ export function installReactCordisXManager(
     const sidebarLayout = seat.provenance === 'codex-26.924-native-two-pane'
       ? seat.sidebar.container.closest<HTMLElement>('aside[data-app-shell-left-panel-appearance]') ?? undefined
       : undefined
+    const nativeSidebarRadius = (() => {
+      if (seat.provenance !== 'codex-26.924-native-two-pane' || view === null) return ''
+      const sidebarRect = seat.sidebar.container.getBoundingClientRect()
+      let node = seat.sidebar.container.parentElement
+      while (node !== null && node !== sidebarLayout) {
+        const rect = node.getBoundingClientRect()
+        const style = view.getComputedStyle(node)
+        if (
+          Math.abs(rect.left - sidebarRect.left) <= 2 && Math.abs(rect.top - sidebarRect.top) <= 2
+          && style.overflowX === 'hidden' && style.borderTopLeftRadius !== '0px'
+        ) return style.borderTopLeftRadius
+        node = node.parentElement
+      }
+      return ''
+    })()
     const initialWidth = seat.provenance === 'codex-26.924-rail-only'
       ? seat.sidebar.width
       : seat.geometry.sidebarRight - seat.geometry.sidebarLeft
@@ -553,6 +573,8 @@ export function installReactCordisXManager(
       navigationLeft: navigationSeat.style.left,
       navigationRight: navigationSeat.style.right,
       navigationWidth: navigationSeat.style.width,
+      navigationRadius: navigationSeat.style.borderTopLeftRadius,
+      navigationOverflow: navigationSeat.style.overflow,
       rootLeft: rootSeat.style.left,
       rootWidth: rootSeat.style.width,
       native,
@@ -589,6 +611,11 @@ export function installReactCordisXManager(
       button.removeAttribute('data-selected')
     }
     rootSeat.dataset.managerSurface = 'pane'
+    titlebarSeat.dataset.cordisxManagerTitleDivider = 'true'
+    if (seat.provenance === 'codex-26.924-native-two-pane') {
+      navigationSeat.style.borderTopLeftRadius = nativeSidebarRadius
+      navigationSeat.style.overflow = 'hidden'
+    }
     seat.main.anchor.append(rootSeat)
     ;(seat.provenance === 'codex-26.924-native-two-pane' ? sidebarLayout! : seat.sidebar.container)
       .append(navigationSeat)

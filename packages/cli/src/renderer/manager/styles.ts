@@ -85,6 +85,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-header-seat > :is(.t-icon,.cordisx-host-icon), .cxr-header > .t-button :is(.t-icon,.cordisx-host-icon), .cxr-header-seat > .t-button :is(.t-icon,.cordisx-host-icon) { width: 16px; height: 16px; color: var(--cx-muted, #aab2c0); font-size: 16px !important; }
   .cxr-titlebar-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; }
   .cxr-titlebar-root { pointer-events: none; }
+  .cxr-titlebar-root[data-cordisx-manager-title-divider="true"]::before { position: absolute; top: 10px; bottom: 10px; left: 0; width: 1px; background: var(--cx-border, #d3d8de); pointer-events: none; content: ""; }
   .cxr-titlebar-root .cxr-header { width: 100%; min-width: 0; min-height: 44px; grid-template-columns: 28px minmax(0,1fr) auto; gap: 6px; border-bottom: 0; padding: 8px 12px; background: transparent; }
   .cxr-titlebar-root .cxr-header > .cxr-heading { grid-column: 2; }
   .cxr-titlebar-root .cxr-header > .cxr-titlebar-actions { grid-column: 3; }
