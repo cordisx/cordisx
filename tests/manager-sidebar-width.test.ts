@@ -29,4 +29,13 @@ describe('Manager sidebar width beside native titlebar', () => {
       mainLeft: 52,
     })).toBe(330)
   })
+
+  it('never lowers the maximum below a measured native expanded minimum', () => {
+    expect(maximumManagerSidebarWidth({
+      availableWidth: 530,
+      currentWidth: 238,
+      mainLeft: 290,
+      minimumWidth: 238,
+    })).toBe(238)
+  })
 })

@@ -7,11 +7,13 @@ export function maximumManagerSidebarWidth(input: {
   readonly availableWidth: number
   readonly currentWidth: number
   readonly mainLeft: number
+  readonly minimumWidth?: number
   readonly titlebarSafeRight?: number
 }): number {
+  const minimumWidth = input.minimumWidth ?? MIN_MANAGER_SIDEBAR_WIDTH
   const contentLimit = Math.floor(input.availableWidth - MIN_CONTENT_WIDTH)
   const titlebarLimit = input.titlebarSafeRight === undefined
     ? MAX_MANAGER_SIDEBAR_WIDTH
     : Math.floor(input.titlebarSafeRight - MIN_CONTENT_WIDTH - (input.mainLeft - input.currentWidth))
-  return Math.max(MIN_MANAGER_SIDEBAR_WIDTH, Math.min(MAX_MANAGER_SIDEBAR_WIDTH, contentLimit, titlebarLimit))
+  return Math.max(minimumWidth, Math.min(MAX_MANAGER_SIDEBAR_WIDTH, contentLimit, titlebarLimit))
 }

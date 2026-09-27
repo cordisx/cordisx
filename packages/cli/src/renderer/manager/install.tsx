@@ -16,6 +16,7 @@ import {
   resolveManagerTitlebarContinuation,
 } from '../adapter/manager-titlebar-continuation.js'
 import { HostThemeProjection } from '../host-theme.js'
+import { readNativeSidebarMinimum } from '../adapter/native-sidebar-minimum.js'
 import { ManagerApp } from './ManagerApp.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
@@ -122,6 +123,7 @@ export function installReactCordisXManager(
     sidebarLayoutWidth: string
     sidebarLayoutFlexBasis: string
     width: number
+    minimumWidth: number
     maximumWidth: number
     navigationLeft: string
     navigationRight: string
@@ -158,7 +160,7 @@ export function installReactCordisXManager(
   const setSidebarWidth = (width: number) => {
     const current = pane
     if (current === undefined) return
-    const next = Math.round(Math.min(current.maximumWidth, Math.max(MIN_SIDEBAR_WIDTH, width)))
+    const next = Math.round(Math.min(current.maximumWidth, Math.max(current.minimumWidth, width)))
     current.width = next
     resizeHandle.setAttribute('aria-valuenow', String(next))
     if (current.provenance === 'codex-26.924-rail-only') {
@@ -220,6 +222,7 @@ export function installReactCordisXManager(
       availableWidth,
       currentWidth: current.width,
       mainLeft: mainRect.left,
+      minimumWidth: current.minimumWidth,
       ...(current.titlebarProvenance === 'rail-only' ? {} : { titlebarSafeRight: current.titlebarSafeRight }),
     })
     resizeHandle.setAttribute('aria-valuemax', String(current.maximumWidth))
@@ -281,7 +284,7 @@ export function installReactCordisXManager(
       : event.key === 'ArrowRight'
       ? pane.width + step
       : event.key === 'Home'
-      ? MIN_SIDEBAR_WIDTH
+      ? pane.minimumWidth
       : event.key === 'End'
       ? pane.maximumWidth
       : undefined
@@ -539,6 +542,16 @@ export function installReactCordisXManager(
     const initialWidth = seat.provenance === 'codex-26.924-rail-only'
       ? seat.sidebar.width
       : seat.geometry.sidebarRight - seat.geometry.sidebarLeft
+    const minimumWidth = seat.provenance === 'codex-26.924-native-two-pane' && sidebarLayout !== undefined
+        && sidebarResizer !== undefined
+      ? readNativeSidebarMinimum({
+        document,
+        aside: sidebarLayout,
+        rail: seat.rail,
+        navigation: seat.sidebar.container,
+        resizer: sidebarResizer,
+      }).width
+      : MIN_SIDEBAR_WIDTH
     const mainRect = seat.main.anchor.getBoundingClientRect()
     const availableWidth = seat.provenance === 'codex-26.924-rail-only'
       ? mainRect.width
@@ -547,6 +560,7 @@ export function installReactCordisXManager(
       availableWidth,
       currentWidth: initialWidth,
       mainLeft: mainRect.left,
+      minimumWidth,
       ...(titlebar.provenance === 'rail-only'
         ? {}
         : { titlebarSafeRight: titlebar.bounds.left + titlebar.bounds.width }),
@@ -575,6 +589,7 @@ export function installReactCordisXManager(
       sidebarLayoutWidth: sidebarLayout?.style.width ?? '',
       sidebarLayoutFlexBasis: sidebarLayout?.style.flexBasis ?? '',
       width: initialWidth,
+      minimumWidth,
       maximumWidth,
       navigationLeft: navigationSeat.style.left,
       navigationRight: navigationSeat.style.right,
@@ -600,7 +615,7 @@ export function installReactCordisXManager(
       rootSeat.style.left = seat.sidebar.inMain ? `${seat.sidebar.width}px` : '0'
       rootSeat.style.width = seat.sidebar.inMain ? `calc(100% - ${seat.sidebar.width}px)` : '100%'
     }
-    resizeHandle.setAttribute('aria-valuemin', String(MIN_SIDEBAR_WIDTH))
+    resizeHandle.setAttribute('aria-valuemin', String(minimumWidth))
     resizeHandle.setAttribute('aria-valuemax', String(maximumWidth))
     resizeHandle.setAttribute('aria-valuenow', String(initialWidth))
     ;(document.body ?? document.documentElement).append(resizeHandle)
