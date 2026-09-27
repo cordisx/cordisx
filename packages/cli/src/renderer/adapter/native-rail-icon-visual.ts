@@ -1,5 +1,11 @@
 import { readNativeRailSelection } from './native-rail-selection-probe.js'
 import {
+  consumeNativeRailIconOwner,
+  nativeRailIconOwnerCurrent,
+  type NativeRailIconOwnerToken,
+  watchNativeRailIconOwner,
+} from './native-rail-icon-owner.js'
+import {
   loadNativeRailRuntime,
   nativeRailIconVersionAllowed,
   type NativeRailReact,
@@ -12,7 +18,7 @@ interface RailItem {
   readonly id: string
   readonly isCurrentDestination: boolean
   readonly largeIcon?: unknown
-  readonly railIcons?: { readonly default?: unknown }
+  readonly railIcons?: { readonly default?: unknown; readonly selected?: unknown }
 }
 
 export interface NativeRailIconVisualHandle {
@@ -28,6 +34,8 @@ export type NativeRailIconVisualResult =
 export interface NativeRailIconVisualRequest {
   readonly document: Document
   readonly appVersion: string
+  /** Captured before Host clears native markers; used only while item fibers lag. */
+  readonly provisionalOwner?: NativeRailIconOwnerToken
   /** The owner must close its Host projection if native icon ownership changes. */
   readonly onLost: () => void
   /** Test seam; normal launches discover the already-loaded native ESM module. */
@@ -171,11 +179,17 @@ async function projectReservedNativeRailDefaultIcon(
     return { status: 'unavailable', reason: 'unsupported-app-context' }
   }
   const currentRail = rail(document)
-  const button = currentRail === undefined ? undefined : readNativeRailSelection(currentRail)
+  const token = request.provisionalOwner
+  if (token !== undefined && !consumeNativeRailIconOwner(token, document)) {
+    return { status: 'unavailable', reason: 'native-provisional-owner-invalid' }
+  }
+  const button = token?.button ?? (currentRail === undefined ? undefined : readNativeRailSelection(currentRail))
   const item = button === undefined ? undefined : railItem(button)
   const nativeSvg = button === undefined ? undefined : iconSvg(button)
+  const provisional = token !== undefined && item?.isCurrentDestination === false
   if (
-    currentRail === undefined || button === undefined || item?.isCurrentDestination !== true
+    currentRail === undefined || button === undefined || !currentRail.contains(button)
+    || (item?.isCurrentDestination !== true && !provisional)
     || nativeSvg === undefined || variant(item) === undefined
   ) return { status: 'unavailable', reason: 'native-icon-owner-unavailable' }
   const runtime = request.runtime ?? await loadNativeRailRuntime(document, appVersion, request.runtimeIO)
@@ -197,10 +211,37 @@ async function projectReservedNativeRailDefaultIcon(
   }
   const replacement = await renderDefaultSvg(document, runtime.react, runtime.reactDOM, variant(item), peerColor)
   if (replacement === undefined) return { status: 'unavailable', reason: 'native-default-render-failed' }
+  let selectedSignature: string | undefined
+  if (provisional) {
+    const selectedVariant = item.railIcons?.selected ?? item.largeIcon
+    const selectedIcon = await renderDefaultSvg(
+      document,
+      runtime.react,
+      runtime.reactDOM,
+      selectedVariant,
+      document.defaultView!.getComputedStyle(button).color,
+    )
+    selectedSignature = selectedIcon === undefined ? undefined : visualSignature(selectedIcon)
+    if (selectedSignature === undefined || selectedSignature !== visualSignature(nativeSvg)) {
+      return { status: 'unavailable', reason: 'native-selected-render-mismatch' }
+    }
+    if (visualSignature(replacement) === selectedSignature) {
+      return { status: 'unavailable', reason: 'native-icon-already-default' }
+    }
+  }
   const freshRail = rail(document)
+  const ownerCurrent = () => {
+    if (
+      rail(document) !== currentRail || !button.isConnected || !currentRail?.contains(button)
+      || railItem(button)?.id !== item.id
+    ) return false
+    if (token !== undefined && !nativeRailIconOwnerCurrent(token, true)) return false
+    if (readNativeRailSelection(currentRail) === button && railItem(button)?.isCurrentDestination === true) return true
+    return provisional && token !== undefined
+      && selectedSignature === visualSignature(nativeSvg)
+  }
   if (
-    freshRail !== currentRail || readNativeRailSelection(currentRail) !== button
-    || railItem(button)?.isCurrentDestination !== true || iconSvg(button) !== nativeSvg
+    freshRail !== currentRail || !ownerCurrent() || iconSvg(button) !== nativeSvg
   ) return { status: 'unavailable', reason: 'native-icon-owner-changed' }
   const iconParent = nativeSvg.parentElement
   const svgRect = nativeSvg.getBoundingClientRect()
@@ -232,6 +273,7 @@ async function projectReservedNativeRailDefaultIcon(
   let disposed = false
   let observer: MutationObserver | undefined
   let themeObserver: MutationObserver | undefined
+  let unwatchRoute: (() => void) | undefined
   let colorScheme: MediaQueryList | undefined
   let checkTheme: (() => void) | undefined
   let scheduleThemeChecks: (() => void) | undefined
@@ -240,14 +282,14 @@ async function projectReservedNativeRailDefaultIcon(
     destination: item.id,
     isCurrent: () =>
       !disposed && active.get(document) === handle && button.isConnected
-      && rail(document) === currentRail && readNativeRailSelection(currentRail) === button
-      && railItem(button)?.isCurrentDestination === true && iconSvg(button) === nativeSvg
+      && ownerCurrent() && iconSvg(button) === nativeSvg
       && iconParent.contains(overlay),
     dispose: () => {
       if (disposed) return
       disposed = true
       observer?.disconnect()
       themeObserver?.disconnect()
+      unwatchRoute?.()
       for (const timer of themeCheckTimers) clearTimeout(timer)
       themeCheckTimers = []
       if (colorScheme !== undefined && scheduleThemeChecks !== undefined) {
@@ -308,6 +350,11 @@ async function projectReservedNativeRailDefaultIcon(
       attributes: true,
       attributeFilter: ['data-sidebar-destination', 'aria-current', 'data-selected', 'class', 'style'],
     })
+    if (token !== undefined) {
+      unwatchRoute = watchNativeRailIconOwner(token, () => {
+        if (!handle.isCurrent()) lost()
+      })
+    }
     if (!handle.isCurrent()) throw Error('native icon owner changed during commit')
     return { status: 'active', handle }
   } catch {

@@ -2,6 +2,10 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import { projectNativeRailDefaultIcon } from '../packages/cli/src/renderer/adapter/native-rail-icon-visual.js'
 import type { NativeRailRuntime } from '../packages/cli/src/renderer/adapter/native-rail-icon-runtime.js'
+import {
+  captureNativeRailIconOwner,
+  nativeRailCommittedRouteIdentity,
+} from '../packages/cli/src/renderer/adapter/native-rail-icon-owner.js'
 
 const HOME = 'builtin:home'
 const AUTOMATIONS = 'builtin:automations'
@@ -25,7 +29,11 @@ function fixture(peerPath = 'automation-outline') {
     element.getBoundingClientRect = () => ({ left: 10, top: 10, width: 20, height: 20 }) as DOMRect
   }
   const buttons = [...document.querySelectorAll<HTMLButtonElement>('button')]
-  const homeItem = { id: HOME, isCurrentDestination: true, railIcons: { default: () => 'home-outline' } }
+  const homeItem = {
+    id: HOME,
+    isCurrentDestination: true,
+    railIcons: { default: () => 'home-outline', selected: () => 'home-filled' },
+  }
   const automationItem = {
     id: AUTOMATIONS,
     isCurrentDestination: false,
@@ -74,6 +82,30 @@ function fixture(peerPath = 'automation-outline') {
     },
   }
   return { dom, document, buttons, runtime, homeItem, automationItem }
+}
+
+function committedRoute(document: Document) {
+  const root = document.createElement('div')
+  root.id = 'root'
+  document.body.append(root)
+  const listeners = new Set<() => void>()
+  const router = {
+    state: {
+      location: { pathname: '/home', search: '', hash: '', key: 'new-route' },
+      navigation: { state: 'idle' },
+      revalidation: 'idle',
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+  Object.defineProperty(root, '__reactContainer$fixture', {
+    enumerable: true,
+    value: { memoizedProps: { value: { router } } },
+  })
+  const previous = JSON.stringify(['/previous', '', '', 'old-route'])
+  return { router, listeners, previous }
 }
 
 describe('native rail icon visual lease', () => {
@@ -154,6 +186,73 @@ describe('native rail icon visual lease', () => {
     }
     expect(f.buttons[0]!.getAttribute('aria-current')).toBeNull()
     expect(f.buttons[0]!.hasAttribute('data-selected')).toBe(false)
+    f.dom.window.close()
+  })
+
+  it('accepts a minted committed-route token while the selected item fiber lags, then revokes on route jump', async () => {
+    const f = fixture()
+    const route = committedRoute(f.document)
+    const token = captureNativeRailIconOwner(f.document, route.previous)
+    expect(token?.destination).toBe(HOME)
+    f.homeItem.isCurrentDestination = false
+    f.buttons[0]!.removeAttribute('aria-current')
+    f.buttons[0]!.removeAttribute('data-selected')
+    const lost = vi.fn()
+    const result = await projectNativeRailDefaultIcon({
+      document: f.document,
+      appVersion: '26.924.22138',
+      provisionalOwner: token,
+      runtime: f.runtime,
+      onLost: lost,
+    })
+    expect(result.status).toBe('active')
+    if (result.status !== 'active') return
+    expect(result.handle.isCurrent()).toBe(true)
+    expect(f.buttons[0]!.querySelector('[data-cordisx-native-rail-icon-visual] path')?.getAttribute('d'))
+      .toBe('home-outline')
+    f.homeItem.isCurrentDestination = true // Fiber catches up before a programmatic native route jump.
+    route.router.state.location.key = 'next-route'
+    for (const listener of route.listeners) listener()
+    expect(lost).toHaveBeenCalledOnce()
+    expect(result.handle.isCurrent()).toBe(false)
+    expect(f.document.querySelector('[data-cordisx-native-rail-icon-visual]')).toBeNull()
+    expect(route.listeners.size).toBe(0)
+    f.dom.window.close()
+  })
+
+  it('rejects a provisional token before route commit, on wrong destination, or mismatched selected SVG', async () => {
+    const f = fixture()
+    const route = committedRoute(f.document)
+    route.router.state.navigation.state = 'loading'
+    expect(captureNativeRailIconOwner(f.document, route.previous)).toBeUndefined()
+    route.router.state.navigation.state = 'idle'
+    expect(captureNativeRailIconOwner(f.document, nativeRailCommittedRouteIdentity(f.document)!))
+      .toBeUndefined()
+    const wrong = captureNativeRailIconOwner(f.document, route.previous)!
+    f.buttons[1]!.setAttribute('aria-current', 'page')
+    expect(
+      await projectNativeRailDefaultIcon({
+        document: f.document,
+        appVersion: '26.924.22138',
+        provisionalOwner: wrong,
+        runtime: f.runtime,
+        onLost: vi.fn(),
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'native-provisional-owner-invalid' })
+    f.buttons[1]!.removeAttribute('aria-current')
+    const mismatch = captureNativeRailIconOwner(f.document, route.previous)!
+    f.homeItem.isCurrentDestination = false
+    f.buttons[0]!.querySelector('path')!.setAttribute('d', 'foreign-selected')
+    expect(
+      await projectNativeRailDefaultIcon({
+        document: f.document,
+        appVersion: '26.924.22138',
+        provisionalOwner: mismatch,
+        runtime: f.runtime,
+        onLost: vi.fn(),
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'native-selected-render-mismatch' })
+    expect(f.document.querySelector('[data-cordisx-native-rail-icon-visual]')).toBeNull()
     f.dom.window.close()
   })
 
