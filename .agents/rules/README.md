@@ -20,6 +20,7 @@
 - Follow [functional-delivery.md](functional-delivery.md) for user-visible Manager,
   launcher, bridge, and preview work. It defines the requirement ledger,
   Host/plugin ownership checks, intermediate previews, production-path proof, and formal delivery gates.
+- Before implementing a Manager editor or form dialog, follow [Manager forms](manager-forms.md) and its surface-selection table.
 - Follow [showcase-capture-integration.md](../docs/showcase-capture-integration.md)
   before changing Manager localization, Slot Showcase capture behavior, CDP
   injection timing, or the real Codex Desktop homepage capture workflow.
