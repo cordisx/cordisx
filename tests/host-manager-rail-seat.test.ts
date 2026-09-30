@@ -67,6 +67,41 @@ describe('26.924 Manager rail seat', () => {
     expect(resolveManagerRailSeat(document)).toBeUndefined()
   })
 
+  it.each([false, true])('preserves 26.928 direct native buttons with Space enabled: %s', withSpace => {
+    const document = railDocument()
+    const home = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:home"]')!
+    const automations = document.querySelector<HTMLButtonElement>('[data-sidebar-destination="builtin:automations"]')!
+    automations.parentElement!.replaceWith(automations)
+    const space = document.createElement('button')
+    space.dataset.sidebarDestination = 'builtin:space'
+    space.getClientRects = () => ({ length: 1 }) as DOMRectList
+    if (withSpace) automations.before(space)
+
+    const seat = resolveManagerRailSeat(document)!
+    expect(seat.homeButton).toBe(home)
+    expect(seat.before).toBe(withSpace ? space : automations)
+    const nativeItems = [...seat.container.children]
+    const managerItem = document.createElement('div')
+    managerItem.dataset.cordisxManagerRailItem = 'true'
+    seat.container.insertBefore(managerItem, seat.before)
+    expect(resolveManagerRailSeat(document)).toEqual(seat)
+    expect([...seat.container.children].filter(item => item !== managerItem)).toEqual(nativeItems)
+    managerItem.remove()
+    expect(resolveManagerRailSeat(document)).toEqual(seat)
+
+    if (withSpace) {
+      space.getClientRects = () => ({ length: 0 }) as DOMRectList
+      expect(resolveManagerRailSeat(document)).toBeUndefined()
+      space.getClientRects = () => ({ length: 1 }) as DOMRectList
+      const duplicate = space.cloneNode(true)
+      automations.after(duplicate)
+      expect(resolveManagerRailSeat(document)).toBeUndefined()
+      duplicate.remove()
+      automations.after(space)
+      expect(resolveManagerRailSeat(document)).toBeUndefined()
+    }
+  })
+
   it('fails closed when the rail or its native anchors are ambiguous', () => {
     const document = railDocument()
     const rail = document.querySelector('nav')!

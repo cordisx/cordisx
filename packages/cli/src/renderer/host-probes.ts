@@ -25,7 +25,7 @@ export function resolveLegacyManagerModalTarget(document: Document): HTMLElement
   return resolveManagerTriggerTarget(document)
 }
 
-/** Host-private 26.924 rail seat. Insert a tagged Host-owned item before `before`; leave native items in place. */
+/** Host-private rail seat. Preserve the wrapped 26.924 and direct-button 26.928 native items. */
 export function resolveManagerRailSeat(document: Document): {
   container: HTMLElement
   before: HTMLElement
@@ -62,12 +62,19 @@ export function resolveManagerRailSeat(document: Document): {
       || managerItem.getAttribute('data-cordisx-manager-rail-item') !== 'true')
   ) return undefined
   const before = managerItem?.nextElementSibling ?? next
+  const spaces = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination="builtin:space"]')
+  const space = spaces[0]
+  const wrappedAutomations = before?.tagName === 'DIV' && before.contains(automationButton)
+    && spaces.length === 0
+  const directAutomations = before === automationButton && spaces.length === 0
+  const spaceThenAutomations = spaces.length === 1 && space !== undefined && before === space && visible(space)
+    && space.nextElementSibling === automationButton
   if (
     homeItem?.tagName !== 'DIV'
     || container?.tagName !== 'DIV'
     || container.parentElement !== rail
-    || before?.tagName !== 'DIV'
-    || !before.contains(automationButton)
+    || before === null || before === undefined
+    || (!wrappedAutomations && !directAutomations && !spaceThenAutomations)
   ) return undefined
 
   return { container, before: before as HTMLElement, homeButton }
