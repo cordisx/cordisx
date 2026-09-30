@@ -261,7 +261,10 @@ export function registerAdmissionTests() {
     expect(runtime.lastStaged?.authorizationDecision).toEqual(decision)
   })
 
-  it('binds lifecycle certification to the exact downloaded artifact rather than its normalized store digest', async () => {
+  it('binds lifecycle certification to the exact downloaded artifact rather than its normalized store digest', async context => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
+    context.onTestFinished(() => vi.useRealTimers())
     const { root, home } = await workspace()
     const source = await localPackageV5(root)
     const canonicalSource = 'https://github.com/example/certified-permission-v5'
@@ -343,6 +346,9 @@ export function registerAdmissionTests() {
       runtime: new FormalRuntime(),
     })
     await expect(wrongVersion.certificationFor(staged)).resolves.toBeUndefined()
+
+    vi.setSystemTime(new Date('2026-09-30T00:00:00.000Z'))
+    await expect(coordinator.certificationFor(staged)).resolves.toBeUndefined()
   })
 
   it('reviews and applies a manifest-v14 managed backend through an exact V4 candidate binding', async () => {
