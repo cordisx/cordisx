@@ -25,6 +25,23 @@ function nativeCard() {
 }
 
 describe('26.924 Manager card seat', () => {
+  it('ignores only explicitly inactive, non-rendered retained native pages', () => {
+    const { document, anchor, frame } = nativeCard()
+    const page = document.createElement('div')
+    page.dataset.appShellActivePage = 'false'
+    const duplicate = anchor.cloneNode(true) as HTMLElement
+    page.append(duplicate)
+    document.body.append(page)
+    expect(resolveManagerCardSeat(document)).toEqual({ anchor, frame })
+    duplicate.getClientRects = () => ({ length: 1 }) as DOMRectList
+    expect(resolveManagerCardSeat(document)).toBeUndefined()
+    duplicate.getClientRects = () => ({ length: 0 }) as DOMRectList
+    page.dataset.appShellActivePage = 'true'
+    expect(resolveManagerCardSeat(document)).toBeUndefined()
+    page.removeAttribute('data-app-shell-active-page')
+    expect(resolveManagerCardSeat(document)).toBeUndefined()
+  })
+
   it('resolves the exact native frame while permitting a separate Host-owned sibling', () => {
     const { document, anchor, frame } = nativeCard()
     expect(resolveManagerCardSeat(document)).toEqual({ anchor, frame })

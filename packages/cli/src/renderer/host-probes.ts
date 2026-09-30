@@ -4,6 +4,12 @@ function visible(element: Element): element is HTMLElement {
   return element.getClientRects().length > 0
 }
 
+/** Native 26.928 retains inactive pages; only its explicit, non-rendered pages may be ignored. */
+export function isRetainedInactiveNativePage(element: Element): boolean {
+  return element.closest('[data-app-shell-active-page]')?.getAttribute('data-app-shell-active-page') === 'false'
+    && !visible(element)
+}
+
 /** Private fallback probe for the current manager trigger. Structured adapters use semantic probes. */
 export function resolveManagerTriggerTarget(document: Document): HTMLElement | undefined {
   const candidates = document.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')
@@ -85,9 +91,9 @@ export function resolveManagerCardSeat(document: Document): {
   anchor: HTMLElement
   frame: HTMLElement
 } | undefined {
-  const anchors = document.querySelectorAll<HTMLElement>(
+  const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout="thread-edge-scroll"], [data-app-shell-main-content-layout="default"], [data-app-shell-main-content-layout="full-bleed"]',
-  )
+  )].filter(element => !isRetainedInactiveNativePage(element))
   const anchor = anchors[0]
   if (anchors.length !== 1 || anchor === undefined || !visible(anchor)) return undefined
   const ElementClass = document.defaultView?.HTMLElement
@@ -229,7 +235,8 @@ export function resolveManagerTitlebarSeat(document: Document): {
   /** Viewport bounds for Host chrome, excluding an end control overlaid on the native main slot. */
   readonly bounds: Readonly<{ left: number; top: number; width: number; height: number }>
 } | undefined {
-  const bars = document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')
+  const bars = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
   const bar = bars[0]
   if (bars.length !== 1 || bar === undefined || !visible(bar)) return undefined
   const titles = bar.querySelectorAll<HTMLElement>(

@@ -114,6 +114,21 @@ function fixture(kind: Kind) {
 }
 
 describe('26.924 Manager titlebar continuation', () => {
+  it.each(['settings', 'native'] as const)('retains a %s lease with an explicitly inactive native page', kind => {
+    const f = fixture(kind)
+    const page = f.document.createElement('div')
+    page.dataset.appShellActivePage = 'false'
+    const header = f.header.cloneNode(true) as HTMLElement
+    page.append(header, f.main.cloneNode(true), f.navigation.cloneNode(true))
+    f.document.body.append(page)
+    const lease = captureManagerTitlebarLease(f.document, kind, f.pane)!
+    expect(lease).toBeDefined()
+    const owner = f.mount(420)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+    header.getClientRects = () => ({ length: 1 }) as DOMRectList
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+  })
+
   it.each(['settings', 'native'] as const)(
     'keeps the same %s pane after Host widens its sidebar without moving native chrome',
     kind => {

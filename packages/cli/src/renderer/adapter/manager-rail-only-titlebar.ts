@@ -1,3 +1,5 @@
+import { isRetainedInactiveNativePage } from '../host-probes.js'
+
 /** Host-private 26.924 probe for destinations with a rail and no native sidebar. */
 export interface ManagerRailOnlyTitlebarSeat {
   readonly anchor: HTMLElement
@@ -32,9 +34,9 @@ function near(left: number, right: number): boolean {
 export function resolveManagerRailOnlyTitlebarSeat(document: Document): ManagerRailOnlyTitlebarSeat | undefined {
   const view = document.defaultView
   if (view === null) return undefined
-  const headers = document.querySelectorAll<HTMLElement>(
+  const headers = [...document.querySelectorAll<HTMLElement>(
     'header[data-app-shell-titlebar="true"][data-app-shell-application-menu-bar="false"]',
-  )
+  )].filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
   if (headers.length !== 1 || header === undefined) return undefined
   const layout = header.getAttribute('data-app-shell-header-layout')

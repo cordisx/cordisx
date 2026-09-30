@@ -1,4 +1,4 @@
-import { resolveManagerTitlebarSeat } from '../host-probes.js'
+import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
 import { resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 
@@ -300,7 +300,8 @@ export function resolveManagerTitlebarContinuation(
     || main.getAttribute('data-app-shell-main-content-layout') !== baseline.mainLayout
     || navigation.getAttribute('aria-label') !== baseline.navigationLabel
   ) return undefined
-  const headers = document.querySelectorAll('header[data-app-shell-titlebar="true"]')
+  const headers = [...document.querySelectorAll('header[data-app-shell-titlebar="true"]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
   const starts = header.querySelectorAll(':scope > [data-app-shell-header-slot="start"]')
   const ends = header.querySelectorAll(':scope > [data-app-shell-header-slot="end"]')
   const titles = header.querySelectorAll(

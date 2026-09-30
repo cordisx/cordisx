@@ -1,3 +1,5 @@
+import { isRetainedInactiveNativePage } from '../host-probes.js'
+
 /** Host-private 26.924 seat for the native full-bleed Settings layout. */
 export interface ManagerSettingsTitlebarSeat {
   readonly anchor: HTMLElement
@@ -32,9 +34,9 @@ function near(left: number, right: number): boolean {
 export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerSettingsTitlebarSeat | undefined {
   const view = document.defaultView
   if (view === null) return undefined
-  const headers = document.querySelectorAll<HTMLElement>(
+  const headers = [...document.querySelectorAll<HTMLElement>(
     'header[data-app-shell-titlebar="true"][data-app-shell-application-menu-bar="false"][data-app-shell-header-layout="full-bleed"]',
-  )
+  )].filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
   if (headers.length !== 1 || header === undefined) return undefined
   const headerRect = visibleBox(header)
@@ -47,8 +49,10 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   ) return undefined
 
   const rails = document.querySelectorAll<HTMLElement>('nav[data-app-navigation-rail="true"]')
-  const mains = document.querySelectorAll<HTMLElement>('[data-app-shell-main-content-layout="full-bleed"]')
+  const mains = [...document.querySelectorAll<HTMLElement>('[data-app-shell-main-content-layout="full-bleed"]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
   const navigation = [...document.querySelectorAll<HTMLElement>('nav[aria-label]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
     .filter(element => !element.hasAttribute('role'))
     .filter(element => ['设置', 'Settings'].includes(element.getAttribute('aria-label') ?? ''))
   const railRect = rails[0] === undefined ? undefined : visibleBox(rails[0])

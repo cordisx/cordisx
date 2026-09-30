@@ -1,3 +1,5 @@
+import { isRetainedInactiveNativePage } from '../host-probes.js'
+
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
 export interface ManagerSplitTitlebarSeat {
@@ -22,16 +24,17 @@ function near(a: number, b: number): boolean {
  * activated here.
  */
 export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSplitTitlebarSeat | undefined {
-  const headers = document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')
+  const headers = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
   if (
     headers.length !== 1 || header === undefined
     || header.parentElement?.getAttribute('data-app-shell-unified-tab-strip') !== 'true'
     || header.getAttribute('data-app-shell-header-layout') !== 'default'
   ) return undefined
-  const anchors = document.querySelectorAll<HTMLElement>(
+  const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout][data-app-shell-workspace-layout="split"]',
-  )
+  )].filter(element => !isRetainedInactiveNativePage(element))
   const anchor = anchors[0]
   const titles = header.querySelectorAll<HTMLElement>(
     ':scope > [data-app-shell-main-titlebar="true"][data-testid="app-shell-header-context-menu-surface"]',
@@ -83,7 +86,7 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   const activeId = active[0]!.getAttribute('data-tab-id')
   const panels = [...document.querySelectorAll<HTMLElement>(
     '[role="tabpanel"][data-app-shell-tab-panel-controller="right"][data-tab-id]',
-  )].filter(panel => panel.getAttribute('data-tab-id') === activeId)
+  )].filter(panel => !isRetainedInactiveNativePage(panel) && panel.getAttribute('data-tab-id') === activeId)
   if (panels.length !== 1 || box(panels[0]!) === undefined) return undefined
   if (
     controllers.some(controller => {

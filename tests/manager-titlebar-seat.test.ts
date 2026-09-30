@@ -33,6 +33,21 @@ function titlebarFixture() {
 }
 
 describe('26.924 Manager titlebar seat', () => {
+  it('ignores only explicitly inactive, non-rendered retained native titlebars', () => {
+    const f = titlebarFixture()
+    const page = f.document.createElement('div')
+    page.dataset.appShellActivePage = 'false'
+    const duplicate = f.bar.cloneNode(true) as HTMLElement
+    page.append(duplicate)
+    f.document.body.append(page)
+    expect(resolveManagerTitlebarSeat(f.document)?.slot).toBe(f.slot)
+    duplicate.getClientRects = () => ({ length: 1 }) as DOMRectList
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    duplicate.getClientRects = () => ({ length: 0 }) as DOMRectList
+    page.dataset.appShellActivePage = 'true'
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+  })
+
   it('resolves the unique main title slot without altering native controls', () => {
     const fixture = titlebarFixture()
     const before = fixture.document.body.innerHTML
