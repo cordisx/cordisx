@@ -489,9 +489,21 @@ selection transaction; a global model fallback can select a model unsupported
 by the default provider. Verified main-conversation routing does not establish
 correct routing for every background request.
 
-Managed-service preparation currently fails the launch if a required plugin
-cannot start. Partial preparation is disposed, but isolating startup failure
-to one plugin is not implemented by this candidate.
+Initial managed-service startup isolates activation failures by plugin and
+connected context-service dependency component. A failed component is drained
+and disposed; independent components continue, without publishing failed
+providers or changing persistent plugin enablement. Retry through a subsequent
+activation. Invalid module declarations and dependency graphs still fail closed.
+Installation/update transactions remain strict so a failed candidate can roll
+back instead of replacing a working generation with a partial one.
+
+The launcher records bounded startup diagnostics distinguishing timeout, spawn
+error, early exit and preparation failure. These include elapsed time, the
+declared startup budget and exit metadata when available, never child output,
+arguments, environment, credentials or raw exception messages. Public managed
+service diagnostic codes remain unchanged. Health probes cannot extend the
+startup deadline. A generic `launch-failed` or a standalone startup measurement
+alone does not establish a timeout or CPU-contention root cause.
 
 Formal dependency pins, repository delivery gates, publication and explicit user
 acceptance remain separate from an experimental local candidate.

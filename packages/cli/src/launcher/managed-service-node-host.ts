@@ -22,6 +22,8 @@ import {
   ManagedServiceRuntime,
 } from './managed-service-runtime.js'
 import { createManagedServiceSource, type ManagedServiceNodeSourceBinding } from './managed-service-ui-source.js'
+import { managedServiceStartupGroups } from './managed-service-startup-groups.js'
+import { reportManagedServiceStartup } from './managed-service-startup-diagnostic.js'
 
 const SERVICE_NAME = /^[a-z][A-Za-z0-9]{0,95}$/
 const PROVIDER_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -98,12 +100,15 @@ export class ManagedServiceNodeHost {
     private readonly runtimeGeneration: string = randomUUID(),
   ) {}
 
-  async replace(accesses: readonly ManagedBackendRuntimeServiceModuleAccess[]): Promise<ManagedServiceNodeActivation> {
+  async replace(
+    accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
+    options: { readonly isolateStartupFailures?: boolean } = {},
+  ): Promise<ManagedServiceNodeActivation> {
     const operation = this.transition.then(async () => {
       const previous = this.current
       this.current = undefined
       await previous?.dispose()
-      const activation = await this.activate(accesses)
+      const activation = await this.activate(accesses, options.isolateStartupFailures === true)
       this.current = activation
       return activation
     })
@@ -123,6 +128,7 @@ export class ManagedServiceNodeHost {
 
   private async activate(
     accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
+    isolateStartupFailures: boolean,
   ): Promise<ManagedServiceNodeActivation> {
     const rootContext = new Context()
     const states: ModuleState[] = []
@@ -137,12 +143,6 @@ export class ManagedServiceNodeHost {
         await settleCleanup([...cleanup].reverse())
       })()
       return cleanupPromise
-    }
-    const startBatch = async (batch: readonly ModuleState[]): Promise<void> => {
-      const pending = batch.map(state => this.startModule(rootContext, state, providers, cleanup))
-      for (const promise of pending) inFlight.add(promise)
-      await Promise.all(pending)
-      for (const promise of pending) inFlight.delete(promise)
     }
     try {
       for (const access of accesses) {
@@ -189,27 +189,79 @@ export class ManagedServiceNodeHost {
         }
       }
       this.validateDependencies(states, providers)
-      for (const state of providers.values()) {
-        const root = await state.provider.create({
-          target: state.module.binding.authority,
-          signal: state.module.controller.signal,
-        })
-        if (
-          root === null || typeof root !== 'object' || typeof root.bind !== 'function'
-          || typeof root.dispose !== 'function'
-        ) {
-          if (root !== null && typeof root === 'object' && typeof root.dispose === 'function') await root.dispose()
-          throw new Error(`managed context service ${state.provider.service} returned an invalid root`)
+      const groups = isolateStartupFailures
+        ? managedServiceStartupGroups(
+          states,
+          state => `${state.access.pluginIdentity.source}\u0000${state.access.pluginIdentity.pluginId}`,
+          state =>
+            injectionNames(state.module!.apply).flatMap(name => {
+              const provider = providers.get(name)
+              return provider === undefined ? [] : [provider.module]
+            }),
+        )
+        : [states]
+      const failed = new Set<ModuleState>()
+      const pendingGroups = groups.map(async group => {
+        const groupProviders = new Map([...providers].filter(([, provider]) => group.includes(provider.module)))
+        const groupCleanup: (() => void | Promise<void>)[] = []
+        const pending = new Set<Promise<void>>()
+        let groupDisposal: Promise<void> | undefined
+        const disposeGroup = (): Promise<void> => {
+          groupDisposal ??= (async () => {
+            for (const state of group) state.controller.abort(new Error('managed service activation disposed'))
+            await Promise.allSettled([...pending])
+            await settleCleanup([
+              ...groupCleanup.slice().reverse(),
+              ...group.map(state => () => state.binding.dispose()),
+            ])
+          })()
+          return groupDisposal
         }
-        state.root = root
-        cleanup.push(async () => await root.dispose())
-      }
-      const providerOwners = new Set([...providers.values()].map(provider => provider.module))
-      await startBatch(states.filter(state => !providerOwners.has(state)))
-      for (const batch of this.providerOwnerBatches(states, providers)) await startBatch(batch)
+        cleanup.push(disposeGroup)
+        const startBatch = async (batch: readonly ModuleState[]): Promise<void> => {
+          const operations = batch.map(state => this.startModule(rootContext, state, groupProviders, groupCleanup))
+          for (const operation of operations) pending.add(operation)
+          await Promise.all(operations)
+          for (const operation of operations) pending.delete(operation)
+        }
+        try {
+          for (const state of groupProviders.values()) {
+            const root = await state.provider.create({
+              target: state.module.binding.authority,
+              signal: state.module.controller.signal,
+            })
+            if (
+              root === null || typeof root !== 'object' || typeof root.bind !== 'function'
+              || typeof root.dispose !== 'function'
+            ) {
+              if (root !== null && typeof root === 'object' && typeof root.dispose === 'function') await root.dispose()
+              throw new Error(`managed context service ${state.provider.service} returned an invalid root`)
+            }
+            state.root = root
+            groupCleanup.push(async () => await root.dispose())
+          }
+          const providerOwners = new Set([...groupProviders.values()].map(provider => provider.module))
+          await startBatch(group.filter(state => !providerOwners.has(state)))
+          for (const batch of this.providerOwnerBatches(group, groupProviders)) await startBatch(batch)
+        } catch (error) {
+          await disposeGroup()
+          if (!isolateStartupFailures) throw error
+          for (const state of group) {
+            failed.add(state)
+            reportManagedServiceStartup({
+              pluginId: state.access.pluginIdentity.pluginId,
+              serviceId: state.access.serviceId,
+              reason: 'activation-failed',
+            })
+          }
+        }
+      })
+      for (const operation of pendingGroups) inFlight.add(operation)
+      await Promise.all(pendingGroups)
       inFlight.clear()
       const sources: ManagedServiceNodeSourceBinding[] = []
       for (const state of states) {
+        if (failed.has(state)) continue
         const identity: ManagedServiceIdentityV1 = {
           source: state.access.pluginIdentity.source as `https://${string}`,
           pluginId: state.access.pluginIdentity.pluginId,
@@ -276,7 +328,7 @@ export class ManagedServiceNodeHost {
       })
       return Object.freeze({
         hostGeneration: accesses[0]?.hostGeneration ?? randomUUID(),
-        authorities: Object.freeze(states.map(state => state.binding.authority)),
+        authorities: Object.freeze(states.filter(state => !failed.has(state)).map(state => state.binding.authority)),
         sources: Object.freeze(sources),
         get nativeProviderIds() {
           return runtime.listNativeProviderIds()

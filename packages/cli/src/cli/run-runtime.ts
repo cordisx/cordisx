@@ -123,7 +123,7 @@ export async function createDevelopmentManagedServiceActivation(input: {
     runtimeGeneration,
   )
   try {
-    return await host.replace(nestedAccesses.flat())
+    return await host.replace(nestedAccesses.flat(), { isolateStartupFailures: true })
   } catch (error) {
     await host.dispose().catch(() => undefined)
     throw error

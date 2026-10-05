@@ -3,6 +3,7 @@ import type { ChildProcess, spawn as nodeSpawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import {
   assertManagedServiceEnvironmentBindings,
@@ -12,6 +13,7 @@ import {
 import type { ManagedServiceRecord } from './managed-service-runtime-record.js'
 import { managedServiceGenerationDirectory } from './managed-service-process.js'
 import type { ManagedServiceChildTerminationTimeouts } from './managed-service-process.js'
+import { ManagedServiceStartupError } from './managed-service-startup-diagnostic.js'
 import {
   readManagedContainedFile,
   readManagedResponseBody,
@@ -94,12 +96,27 @@ export class ManagedServiceRuntimeProcess {
       if (typeof value !== 'string') throw new Error('managed service environment binding must be a string')
       record.environment[binding.variable] = value
     }
-    const child = this.options.spawn(executable, arguments_, {
-      cwd: record.access.artifactDirectory,
-      env: record.environment,
-      stdio: 'ignore',
-      detached: process.platform !== 'win32',
-    })
+    const started = performance.now()
+    const timeoutMs = record.definition.launch.startupTimeoutMs
+    const failure = (reason: 'startup-timeout' | 'spawn-error' | 'process-exited', child?: ChildProcess) =>
+      new ManagedServiceStartupError({
+        reason,
+        elapsedMs: Math.round(performance.now() - started),
+        timeoutMs,
+        ...(child?.exitCode == null ? {} : { exitCode: child.exitCode }),
+        ...(child?.signalCode == null ? {} : { signal: child.signalCode }),
+      })
+    let child: ChildProcess
+    try {
+      child = this.options.spawn(executable, arguments_, {
+        cwd: record.access.artifactDirectory,
+        env: record.environment,
+        stdio: 'ignore',
+        detached: process.platform !== 'win32',
+      })
+    } catch {
+      throw failure('spawn-error')
+    }
     record.child = child
     let childError: Error | undefined
     child.on('error', error => {
@@ -107,25 +124,34 @@ export class ManagedServiceRuntimeProcess {
       this.options.invalidateExitedChild(record, child)
     })
     child.once('exit', () => this.options.invalidateExitedChild(record, child))
-    const deadline = Date.now() + record.definition.launch.startupTimeoutMs
-    while (Date.now() < deadline) {
+    const deadline = started + timeoutMs
+    while (performance.now() < deadline) {
       this.assertActive(record, signal)
-      if (childError !== undefined) throw childError
-      if (child.exitCode !== null || child.signalCode !== null) throw new Error('managed service exited during startup')
+      if (childError !== undefined) throw failure('spawn-error')
+      if (child.exitCode !== null || child.signalCode !== null) throw failure('process-exited', child)
       const discoveredPort = port ?? await this.readRestrictedPort(record)
       if (discoveredPort !== undefined) {
         const origin = `http://127.0.0.1:${discoveredPort}`
-        if (await this.healthy(record, origin, signal).catch(() => false)) {
+        const remaining = Math.max(1, Math.ceil(deadline - performance.now()))
+        if (
+          await this.healthy(record, origin, signal, Math.min(record.definition.health.timeoutMs, remaining)).catch(
+            () => false,
+          )
+        ) {
           this.assertActive(record, signal)
           if (childError !== undefined || record.child !== child) {
-            throw childError ?? new Error('managed service exited')
+            throw failure(childError === undefined ? 'process-exited' : 'spawn-error', child)
           }
+          if (performance.now() >= deadline) throw failure('startup-timeout')
           return origin
         }
       }
-      await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))))
+      await delay(Math.min(50, Math.max(1, deadline - performance.now())), undefined, { signal })
     }
-    throw new Error('managed service startup timed out')
+    this.assertActive(record, signal)
+    if (childError !== undefined) throw failure('spawn-error')
+    if (child.exitCode !== null || child.signalCode !== null) throw failure('process-exited', child)
+    throw failure('startup-timeout')
   }
 
   async resolveExecutable(
@@ -138,8 +164,13 @@ export class ManagedServiceRuntimeProcess {
     return file
   }
 
-  async healthy(record: ManagedServiceRecord, origin: string, signal?: AbortSignal): Promise<boolean> {
-    const timeout = AbortSignal.timeout(record.definition.health.timeoutMs)
+  async healthy(
+    record: ManagedServiceRecord,
+    origin: string,
+    signal?: AbortSignal,
+    timeoutMs = record.definition.health.timeoutMs,
+  ): Promise<boolean> {
+    const timeout = AbortSignal.timeout(timeoutMs)
     const response = await this.options.fetch(new URL(record.definition.health.path, origin), {
       method: 'GET',
       headers: this.authorizationHeaders(record),

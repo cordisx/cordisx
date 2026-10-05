@@ -148,6 +148,7 @@ describe('managed service plugin lifecycle participant', () => {
   it('stages isolated owner tokens, publishes the candidate, retires old sources, and restores rollback', async () => {
     const base = new BaseRuntime()
     const activations = new Map<string, ReturnType<typeof fleet>>()
+    const activationOptions: boolean[] = []
     const runtime = new ManagedServicePluginLifecycleRuntime({
       runtime: base,
       profileId: 'work',
@@ -156,7 +157,8 @@ describe('managed service plugin lifecycle participant', () => {
         let index = 0
         return () => `token-${++index}-${'x'.repeat(32)}`
       })(),
-      activate: async record => {
+      activate: async (record, options) => {
+        activationOptions.push(options.isolateStartupFailures)
         const generation = record.plugins[0]!.moduleGeneration
         if (generation === 'aiden-activation-fail') throw new Error('token=private /private/runtime/path')
         const created = fleet(generation, record.revision === 2 ? 'authenticated' : 'missing')
@@ -166,6 +168,7 @@ describe('managed service plugin lifecycle participant', () => {
     })
     const first = activation(1, 'aiden-old')
     await runtime.initialize(first)
+    expect(activationOptions).toEqual([true])
     const nativeChanges = vi.fn()
     const unsubscribeNativeChanges = runtime.nativeActivation().subscribeNativeProviders(nativeChanges)
     const oldCapability = runtime.capabilities()[0]!
@@ -181,6 +184,7 @@ describe('managed service plugin lifecycle participant', () => {
       affectedPluginIds: ['aiden'],
     })
     const candidateCapability = base.mutations.get(second.transactionId!)!.managedServiceUICapabilities?.[0]!
+    expect(activationOptions).toEqual([true, false])
     expect(candidateCapability.pluginGeneration).toBe('aiden-new')
     expect(candidateCapability.token).not.toBe(oldCapability.token)
     expect(await runtime.managedServiceUI.handleBindingValue(request(oldCapability.token, 'aiden-old', 'get')))
