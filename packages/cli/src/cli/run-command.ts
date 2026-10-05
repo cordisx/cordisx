@@ -233,7 +233,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       runtime: platformProviderLifecycleRuntime,
       profileId: selection.profileId,
       runtimeGeneration: lifecycleGeneration,
-      activate: async activation => {
+      activate: async (activation, options) => {
         if (invocation.options.dryRun) return undefined
         const plugins = await loadPluginComposition(lifecycleStore, activation)
         const accesses = await Promise.all(plugins.flatMap(plugin => {
@@ -264,7 +264,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           lifecycleGeneration,
         )
         try {
-          return await host.replace(accesses)
+          return await host.replace(accesses, options)
         } catch (error) {
           await host.dispose().catch(() => undefined)
           throw error

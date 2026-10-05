@@ -36,6 +36,10 @@ import { runManagedServiceChildAction, terminateManagedServiceChild } from './ma
 import type { ManagedServiceChildTerminationTimeouts } from './managed-service-process.js'
 import { ManagedServiceRuntimeProcess } from './managed-service-runtime-process.js'
 import {
+  diagnoseManagedServiceStartup,
+  type ManagedServiceStartupDiagnostic,
+} from './managed-service-startup-diagnostic.js'
+import {
   managedBindingCurrent,
   managedDiagnostic,
   managedFailure,
@@ -68,6 +72,7 @@ export interface ManagedServiceRuntimeOptions {
   }) => Promise<NodeJS.ProcessEnv>
   readonly childTerminationTimeouts?: ManagedServiceChildTerminationTimeouts
   readonly failuresBeforeUnhealthy?: number
+  readonly onStartupDiagnostic?: (diagnostic: ManagedServiceStartupDiagnostic) => void
 }
 
 class BorrowedServiceUnavailableError extends Error {
@@ -398,6 +403,16 @@ export class ManagedServiceRuntime {
       this.startHealthMonitoring(record)
       return { status: 'ready', projection: this.projection(record) }
     } catch (error) {
+      if (!signal.aborted && !(error instanceof BorrowedServiceUnavailableError)) {
+        diagnoseManagedServiceStartup(
+          {
+            pluginId: record.binding.identity.pluginId,
+            serviceId: record.definition.serviceId,
+          },
+          error,
+          this.options.onStartupDiagnostic,
+        )
+      }
       await Promise.allSettled([this.stopOwned(record), this.process.removeGenerationDirectory(record)])
       this.revokeRuntimeState(record)
       if (record.disposed) return managedFailure('stale-generation', 'disposed', false)

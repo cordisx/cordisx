@@ -1,13 +1,13 @@
 import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ManagedServiceNodeHost } from '../packages/cli/src/launcher/managed-service-node-host.js'
 import { ManagedServiceRuntime } from '../packages/cli/src/launcher/managed-service-runtime.js'
 import type { ManagedBackendRuntimeServiceModuleAccess } from '../packages/cli/src/launcher/packages/authority-access.js'
-import { syntheticChild } from './managed-service-runtime-fixture.js'
+import { definition, syntheticChild } from './managed-service-runtime-fixture.js'
 
 const DEFINITION_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-definition.v1.schema.json'
@@ -67,6 +67,127 @@ afterEach(() => {
 })
 
 describe('managed service Node context providers', () => {
+  it('isolates a timed-out startup while a healthy native provider remains available', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-managed-startup-'))
+    await mkdir(path.join(root, 'services'))
+    const child = syntheticChild({ exitOnKill: 'SIGTERM' })
+    const diagnostic = vi.fn()
+    const runtime = new ManagedServiceRuntime({
+      homeDir: path.join(root, 'home'),
+      spawn: (() => child.child) as ConstructorParameters<typeof ManagedServiceRuntime>[0]['spawn'],
+      fetch: async url => new Response(null, { status: new URL(String(url)).port === '41231' ? 204 : 503 }),
+      onStartupDiagnostic: diagnostic,
+    })
+    const host = new ManagedServiceNodeHost(runtime)
+    for (const id of ['healthy', 'slow']) {
+      const value = definition(id, { fixedPort: id === 'healthy' ? 41_231 : 41_232 })
+      value.launch = {
+        executable: { kind: 'named-command', command: 'synthetic' },
+        arguments: [],
+        startupTimeoutMs: 100,
+      }
+      await writeFile(
+        path.join(root, 'services', `${id}.mjs`),
+        `
+export async function apply(ctx) {
+  const registration = await ctx.managedServices.register(${JSON.stringify(value)}, { revision: 'sha256:${
+          'a'.repeat(64)
+        }' })
+  const result = await registration.ensureReady()
+  if (result.status !== 'ready') throw new Error('service not ready')
+  const published = await registration.publishNativeProvider(${
+          JSON.stringify(nativePublication(id, 'one', 'model-one'))
+        })
+  if (published.status !== 'accepted') throw new Error('publication failed')
+}
+apply.inject = ['managedServices']
+`,
+      )
+    }
+    const warning = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      const activation = await host.replace([
+        access(root, 'healthy-plugin', 'healthy', 'one'),
+        access(root, 'slow-plugin', 'slow', 'one'),
+      ], { isolateStartupFailures: true })
+      expect(diagnostic).toHaveBeenCalledWith(expect.objectContaining({ reason: 'startup-timeout' }))
+      expect(child.signals).toContain('SIGTERM')
+      expect(activation.authorities.map(item => item.pluginId)).toEqual(['healthy-plugin'])
+      expect(activation.sources.map(item => item.serviceId)).toEqual(['healthy'])
+      expect(activation.nativeProviderIds).toEqual(['healthy'])
+      expect(activation.prepareNativeConnection('healthy').value.models.defaultAlias).toBe('one')
+      expect(() => activation.prepareNativeConnection('slow')).toThrow('unavailable')
+      expect(runtime.listRegistrationIdentities().map(item => item.serviceId)).toEqual(['healthy'])
+      await activation.dispose()
+      expect(runtime.listRegistrationIdentities()).toEqual([])
+    } finally {
+      warning.mockRestore()
+      await host.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('drains a failed dependency component without revoking an independent module', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-managed-startup-'))
+    await mkdir(path.join(root, 'services'))
+    globalThis.__cordisxManagedContextEvents = []
+    await writeFile(
+      path.join(root, 'services', 'provider.mjs'),
+      `
+const events = globalThis.${eventsKey}
+export const contextServices = [{
+  service: 'testService',
+  create() {
+    return { providerValue: {}, bind() { return { value: {}, dispose() { events.push('unbind') } } },
+      dispose() { events.push('root:dispose') } }
+  },
+}]
+export async function apply() { throw new Error('secret=must-not-log') }
+`,
+    )
+    await writeFile(
+      path.join(root, 'services', 'consumer.mjs'),
+      `
+export async function apply(ctx, input) {
+  globalThis.${eventsKey}.push('consumer:apply')
+  input.signal.addEventListener('abort', () => globalThis.${eventsKey}.push('consumer:abort'), { once: true })
+}
+apply.inject = ['testService']
+`,
+    )
+    await writeFile(
+      path.join(root, 'services', 'independent.mjs'),
+      `
+export async function apply(ctx, input) {
+  input.signal.addEventListener('abort', () => globalThis.${eventsKey}.push('independent:abort'), { once: true })
+}
+`,
+    )
+    const host = new ManagedServiceNodeHost(new ManagedServiceRuntime({ homeDir: path.join(root, 'home') }))
+    const warning = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      const activation = await host.replace([
+        access(root, 'provider-plugin', 'provider', 'one'),
+        access(root, 'consumer-plugin', 'consumer', 'one'),
+        access(root, 'independent-plugin', 'independent', 'one'),
+      ], { isolateStartupFailures: true })
+      expect(activation.authorities.map(item => item.pluginId)).toEqual(['independent-plugin'])
+      expect(globalThis.__cordisxManagedContextEvents).toEqual([
+        'consumer:apply',
+        'consumer:abort',
+        'unbind',
+        'root:dispose',
+      ])
+      expect(JSON.stringify(warning.mock.calls)).not.toContain('must-not-log')
+      await activation.dispose()
+      expect(globalThis.__cordisxManagedContextEvents?.at(-1)).toBe('independent:abort')
+    } finally {
+      warning.mockRestore()
+      await host.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('publishes logout only for a declared helper and projects the completed action', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-managed-node-'))
     await mkdir(path.join(root, 'services'))

@@ -43,7 +43,10 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly runtime: PluginLifecycleRuntime
   readonly profileId: string
   readonly runtimeGeneration: string
-  readonly activate: (activation: CordisXPluginActivationRecordV1) => Promise<ManagedServiceNodeActivation | undefined>
+  readonly activate: (
+    activation: CordisXPluginActivationRecordV1,
+    options: { readonly isolateStartupFailures: boolean },
+  ) => Promise<ManagedServiceNodeActivation | undefined>
   readonly createToken?: () => string
 }
 
@@ -252,7 +255,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     record: CordisXPluginActivationRecordV1,
     previous?: ManagedServiceFleet,
   ): Promise<ManagedServiceFleet> {
-    const activation = await this.options.activate(record)
+    const activation = await this.options.activate(record, { isolateStartupFailures: previous === undefined })
     if (activation === undefined) return { activation: undefined, routes: new Map() }
     const routes = new Map<string, ManagedServiceOwnerRoute>()
     const readNativeProviders = nativeModelProviderCatalog(activation)
