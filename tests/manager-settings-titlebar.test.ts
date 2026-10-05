@@ -88,6 +88,35 @@ describe('26.924 Settings full-bleed titlebar safety probe', () => {
     expect(f.document.body.innerHTML).toBe(before)
   })
 
+  it('returns the 26.930 page-placed destination span beside a native sidebar and its toggle', () => {
+    const f = fixture()
+    const surface = f.document.createElement('div')
+    surface.dataset.appShellHeaderPlacement = 'page'
+    f.header.replaceWith(surface)
+    surface.append(f.header)
+    f.header.setAttribute('data-app-shell-header-layout', 'default')
+    f.main.setAttribute('data-app-shell-main-content-layout', 'default')
+    f.navigation.setAttribute('role', 'navigation')
+    f.navigation.setAttribute('aria-label', '定时任务')
+    const toggle = f.document.createElement('button')
+    toggle.setAttribute('aria-controls', 'app-shell-sidebar')
+    toggle.style.pointerEvents = 'auto'
+    f.document.getElementById('forward')!.after(toggle)
+    f.setRect(toggle, f.rect(156, 8, 28, 28))
+    f.regions.set(toggle, 'no-drag')
+    expect(resolveManagerSettingsTitlebarSeat(f.document)).toEqual({
+      anchor: f.header,
+      nativeTitle: f.title,
+      bounds: { left: 290, top: 0, right: 1683, bottom: 44, width: 1393, height: 44 },
+      provenance: 'codex-26.930-page-titlebar',
+    })
+    toggle.removeAttribute('aria-controls')
+    expect(resolveManagerSettingsTitlebarSeat(f.document)).toBeUndefined()
+    toggle.setAttribute('aria-controls', 'app-shell-sidebar')
+    surface.dataset.appShellHeaderPlacement = 'titlebar'
+    expect(resolveManagerSettingsTitlebarSeat(f.document)).toBeUndefined()
+  })
+
   it('rejects changed Settings identity, title placement, or an occupied blank span', () => {
     const f = fixture()
     f.navigation.setAttribute('role', 'navigation')

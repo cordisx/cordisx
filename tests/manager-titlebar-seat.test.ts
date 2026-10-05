@@ -100,6 +100,56 @@ describe('26.924 Manager titlebar seat', () => {
     expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
   })
 
+  it('leases the 26.930 end toolbar of workspace layout toggles but not a wider or tabbed group', () => {
+    const fixture = titlebarFixture()
+    fixture.end.innerHTML = '<span aria-hidden="true"></span>'
+      + '<button data-app-shell-workspace-layout-toggle="right-panel">Full view</button>'
+      + '<button data-app-shell-workspace-layout-toggle="main">Tabs</button>'
+    fixture.end.getBoundingClientRect = () => fixture.rect(1642, 77)
+    fixture.slot.getBoundingClientRect = () => fixture.rect(290, 1352)
+    expect(resolveManagerTitlebarSeat(fixture.document)).toEqual({
+      slot: fixture.slot,
+      native: [fixture.native, fixture.end],
+      bounds: { left: 290, top: 0, width: 1352, height: 44 },
+    })
+    fixture.end.getBoundingClientRect = () => fixture.rect(1589, 130)
+    fixture.slot.getBoundingClientRect = () => fixture.rect(290, 1299)
+    expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
+    fixture.end.getBoundingClientRect = () => fixture.rect(1642, 77)
+    fixture.slot.getBoundingClientRect = () => fixture.rect(290, 1352)
+    fixture.end.insertAdjacentHTML('beforeend', '<button role="tab">File</button>')
+    expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
+  })
+
+  it('seats on the 26.930 full-view title surface whose tab row replaces the hidden main slot', () => {
+    const fixture = titlebarFixture()
+    const title = fixture.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    const content = fixture.document.createElement('div')
+    content.dataset.appShellTitlebarContent = 'true'
+    content.dataset.appShellHeaderObstacle = 'true'
+    content.innerHTML =
+      '<div><div data-app-shell-tab-row="true" role="presentation"><button role="tab">Thread</button></div></div>'
+    content.append(fixture.slot)
+    title.replaceChildren(content)
+    fixture.bar.dataset.appShellTabRow = 'true'
+    fixture.slot.getClientRects = () => ({ length: 0 }) as DOMRectList
+    content.querySelector<HTMLElement>('[data-app-shell-tab-row]')!.getClientRects = () =>
+      ({ length: 1 }) as DOMRectList
+    title.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.getBoundingClientRect = () => fixture.rect(290, 1318)
+    fixture.end.innerHTML = '<button aria-haspopup="dialog">Summary</button>'
+      + '<button data-app-shell-workspace-layout-toggle="right-panel">Exit full view</button>'
+      + '<button data-app-shell-workspace-layout-toggle="main">Split view</button>'
+    fixture.end.getBoundingClientRect = () => fixture.rect(1608, 111)
+    expect(resolveManagerTitlebarSeat(fixture.document)).toEqual({
+      slot: title,
+      native: [content, fixture.end],
+      bounds: { left: 290, top: 0, width: 1318, height: 44 },
+    })
+    fixture.bar.removeAttribute('data-app-shell-tab-row')
+    expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
+  })
+
   it('fails closed when the title slot is ambiguous, displaced, or the Host seat is misplaced', () => {
     const fixture = titlebarFixture()
     const duplicate = fixture.bar.cloneNode(true) as HTMLElement

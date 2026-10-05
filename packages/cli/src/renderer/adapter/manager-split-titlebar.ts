@@ -18,10 +18,26 @@ function near(a: number, b: number): boolean {
   return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 2
 }
 
+/** A horizontally scrolled 26.930 tab strip clips headers outside its own viewport. */
+export function clippedTabSpan(element: HTMLElement, header: HTMLElement): { left: number; right: number } {
+  const rect = element.getBoundingClientRect()
+  const view = element.ownerDocument.defaultView
+  let left = rect.left
+  let right = rect.right
+  for (let node = element.parentElement; node !== null && node !== header; node = node.parentElement) {
+    const overflow = view?.getComputedStyle(node).overflowX ?? ''
+    if (overflow === '' || overflow === 'visible') continue
+    const clip = node.getBoundingClientRect()
+    left = Math.max(left, clip.left)
+    right = Math.min(right, clip.right)
+  }
+  return { left, right }
+}
+
 /**
  * Read-only 26.924 split-tab seat. CordisX may use the left title span while
  * Codex keeps the right tab strip and its panel. No native tab is created or
- * activated here.
+ * activated here. 26.930 threads use the same split with a thread header layout.
  */
 export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSplitTitlebarSeat | undefined {
   const headers = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
@@ -30,7 +46,7 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   if (
     headers.length !== 1 || header === undefined
     || header.parentElement?.getAttribute('data-app-shell-unified-tab-strip') !== 'true'
-    || header.getAttribute('data-app-shell-header-layout') !== 'default'
+    || !['default', 'thread-edge-scroll'].includes(header.getAttribute('data-app-shell-header-layout') ?? '')
   ) return undefined
   const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout][data-app-shell-workspace-layout="split"]',
@@ -91,11 +107,14 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   if (
     controllers.some(controller => {
       const rect = controller.getBoundingClientRect()
+      const span = clippedTabSpan(controller, header)
       // Codex may collapse a selected tab header to zero width while its
       // matching right panel remains visible; that header occupies no left seat.
+      // A header scrolled wholly out of its strip occupies no seat either.
+      const scrolledOut = rect.width > 0 && span.right <= span.left
       return !Number.isFinite(rect.left) || !Number.isFinite(rect.right)
         || rect.width < 0 || rect.height <= 0
-        || rect.left < endRect.left - 2 || rect.right > endRect.right + 2
+        || (!scrolledOut && (span.left < endRect.left - 2 || span.right > endRect.right + 2))
     })
   ) return undefined
 

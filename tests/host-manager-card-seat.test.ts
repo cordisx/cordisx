@@ -51,6 +51,31 @@ describe('26.924 Manager card seat', () => {
     expect(resolveManagerCardSeat(document)).toEqual({ anchor, frame })
   })
 
+  it('accepts the 26.930 Spaces custom-titlebar card', () => {
+    const { document, anchor, frame } = nativeCard()
+    anchor.setAttribute('data-app-shell-main-content-layout', 'custom-titlebar')
+    expect(resolveManagerCardSeat(document)).toEqual({ anchor, frame })
+  })
+
+  it('admits a frame below a 26.930 page-placed title only for that exact title band', () => {
+    const { document, anchor, frame } = nativeCard()
+    const surface = document.createElement('div')
+    surface.dataset.appShellHeaderPlacement = 'page'
+    surface.innerHTML =
+      '<header data-app-shell-titlebar="true"><div data-app-shell-main-titlebar="true"></div></header>'
+    document.body.prepend(surface)
+    const title = surface.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    title.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.getBoundingClientRect = () => ({ left: 290, top: 44, width: 1200, height: 46 }) as DOMRect
+    frame.getBoundingClientRect = () => ({ left: 290, top: 90, width: 1200, height: 654 }) as DOMRect
+    expect(resolveManagerCardSeat(document)).toEqual({ anchor, frame })
+    title.getBoundingClientRect = () => ({ left: 290, top: 44, width: 1200, height: 30 }) as DOMRect
+    expect(resolveManagerCardSeat(document)).toBeUndefined()
+    title.getBoundingClientRect = () => ({ left: 290, top: 44, width: 1200, height: 46 }) as DOMRect
+    surface.dataset.appShellHeaderPlacement = 'titlebar'
+    expect(resolveManagerCardSeat(document)).toBeUndefined()
+  })
+
   it('fails closed when native identity, frame, or geometry changes', () => {
     const { document, anchor, frame } = nativeCard()
     const duplicate = anchor.cloneNode(true)

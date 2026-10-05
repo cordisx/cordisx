@@ -605,6 +605,19 @@ version-sensitive adapter seam, not a public Codex route API. The 26.924 Data
 Router does not expose the older History `index`/`location` navigator, so its
 read-only observer must not be treated as proof that plugin route writes work.
 
+The pane opens only on a verified native seat; otherwise the trigger reports
+that CordisX is unavailable on the current page. The Host-private probes in
+`host-probes.ts` and `renderer/adapter/manager-*-titlebar.ts` also recognize
+the Desktop 26.930 shell: retained inactive pages are ignored on every seat;
+thread headers may hold an end toolbar of workspace-layout toggles; a
+full-view thread seats on the title surface that holds its tab row; the split
+view keeps the right tab strip, including a scrolled strip that clips its
+first tab; Automations, Customize, Code review, Spaces, and Settings place
+their title in the page below the titlebar; and Projects keeps a collapsed
+zero-width sidebar beside its rail-only layout. A full-view file tab, which
+collapses the thread card and floats the composer outside the main surface,
+is not seated and still reports the page as unavailable.
+
 Manager-owned content follows one semantic context at a time: a title,
 breadcrumb, or selected tab is not restated by body headings or redundant
 cards. The reusable hierarchy, flat-list/card, exceptional-state,

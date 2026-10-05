@@ -111,6 +111,28 @@ describe('26.924 split-tab Manager titlebar seat', () => {
     expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
   })
 
+  it('admits a 26.930 thread split whose scrolled strip clips a tab header out of the left seat', () => {
+    const f = fixture()
+    f.element('header').setAttribute('data-app-shell-header-layout', 'thread-edge-scroll')
+    const controller = f.element('[data-app-shell-tab-controller="right"]')
+    const strip = f.document.createElement('div')
+    strip.style.overflowX = 'auto'
+    controller.replaceWith(strip)
+    strip.append(controller)
+    strip.getBoundingClientRect = () => f.rect(858, 0, 860, 44)
+    f.setRect('[data-app-shell-tab-controller="right"]', f.rect(780, 6, 240, 32))
+    const close = f.document.createElement('button')
+    close.id = 'scrolled-close'
+    close.style.pointerEvents = 'none'
+    controller.append(close)
+    f.setRect('#scrolled-close', f.rect(840, 12, 20, 20))
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeDefined()
+    expect(captureManagerTitlebarLease(f.document, 'split', f.pane)?.seat.provenance).toBe('split')
+    strip.style.overflowX = 'visible'
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
+    expect(captureManagerTitlebarLease(f.document, 'split', f.pane)).toBeUndefined()
+  })
+
   it('leases a two-tab titlebar with a noninteractive close button outside the Host seat', () => {
     const f = fixture()
     const first = f.element('[data-app-shell-tab-controller="right"]')

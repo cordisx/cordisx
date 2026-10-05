@@ -54,6 +54,19 @@ describe('26.924 rail-only Manager seat', () => {
     },
   )
 
+  it('ignores 26.930 retained pages and its collapsed zero-width sidebar navigation', () => {
+    const f = fixture('default')
+    const page = f.document.createElement('div')
+    page.dataset.appShellActivePage = 'false'
+    page.append(f.anchor.cloneNode(true))
+    f.document.body.append(page)
+    const collapsed = f.document.createElement('nav')
+    collapsed.setAttribute('role', 'navigation')
+    f.aside.append(collapsed)
+    f.setRect(collapsed, f.rect(52, 44, 0, 800))
+    expect(resolveManagerRailOnlySeat(f.document)?.main).toEqual({ anchor: f.anchor, frame: f.frame })
+  })
+
   it('rejects an unrecognized wide panel without a semantic native navigation', () => {
     const f = fixture('full-bleed', 290)
     expect(resolveManagerRailOnlySeat(f.document)).toBeUndefined()
@@ -69,6 +82,7 @@ describe('26.924 rail-only Manager seat', () => {
     const nav = f.document.createElement('nav')
     nav.setAttribute('role', 'navigation')
     f.aside.append(nav)
+    f.setRect(nav, f.rect(52, 44, 238, 800))
     expect(resolveManagerRailOnlySeat(f.document)).toBeUndefined()
     nav.remove()
     f.setRect(f.anchor, f.rect(62, 44, 1200, 800))

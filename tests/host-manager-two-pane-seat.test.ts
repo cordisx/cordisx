@@ -117,6 +117,16 @@ describe('26.924 Manager paired sidebar and card seat', () => {
     expect(resolveManagerTwoPaneSeat(fixture.document)?.sidebar.navigation).toBe(fixture.navigation)
   })
 
+  it('uses the outer 26.930 Spaces sidebar when it nests a labelled list navigation', () => {
+    const fixture = nativeTwoPane()
+    const inner = fixture.document.createElement('nav')
+    inner.setAttribute('aria-label', '空间导航')
+    inner.innerHTML = '<div><button>空间</button></div>'
+    fixture.scroll.append(inner)
+    fixture.setRect(inner, fixture.rect(52, 44, 238, 937))
+    expect(resolveManagerTwoPaneSeat(fixture.document)?.sidebar.navigation).toBe(fixture.navigation)
+  })
+
   it('rejects a missing native sidebar or ambiguous adjacent navigation', () => {
     const fixture = nativeTwoPane()
     const duplicate = fixture.navigation.cloneNode(true) as HTMLElement

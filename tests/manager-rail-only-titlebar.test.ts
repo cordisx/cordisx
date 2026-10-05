@@ -127,8 +127,11 @@ describe('26.924 rail-only native titlebar safety probe', () => {
     const nav = f.document.createElement('nav')
     nav.setAttribute('role', 'navigation')
     f.document.body.append(nav)
-    nav.getClientRects = () => ({ length: 1 }) as DOMRectList
+    f.setRect(nav, f.rect(52, 44, 238, 937))
     expect(resolveManagerRailOnlyTitlebarSeat(f.document)).toBeUndefined()
+    // 26.930 keeps the collapsed sidebar navigation mounted with zero width.
+    f.setRect(nav, f.rect(52, 44, 0, 937))
+    expect(resolveManagerRailOnlyTitlebarSeat(f.document)?.provenance).toBe('codex-26.924-rail-only-titlebar')
     nav.remove()
     const duplicate = f.header.cloneNode(true)
     f.header.after(duplicate)

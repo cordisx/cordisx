@@ -1,5 +1,5 @@
 import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
-import { resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
+import { clippedTabSpan, resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
@@ -114,11 +114,14 @@ function nativeControlStyleAllowed(
   if (region(style) !== 'no-drag') return false
   if (style.pointerEvents === 'auto') return true
   // In the split tab strip, an inactive tab's close button can be hidden from
-  // pointer input. It remains wholly outside the Host's left title seat.
+  // pointer input. It remains wholly outside the Host's left title seat, after
+  // clipping by a horizontally scrolled 26.930 strip.
+  const header = element.closest<HTMLElement>('header[data-app-shell-titlebar="true"]')
+  const left = header === null ? bounds.left : clippedTabSpan(element, header).left
   return kind === 'split' && style.pointerEvents === 'none'
     && element.matches('button:not([role="tab"])')
     && element.closest('[data-app-shell-tab-controller="right"][data-tab-id]') !== null
-    && bounds.left >= seatRight - 2
+    && left >= seatRight - 2
 }
 
 /** Capture exact native identities before the Host changes sidebar width. */

@@ -80,8 +80,9 @@ export function resolveManagerRailOnlyTitlebarSeat(document: Document): ManagerR
   if (titleStyle.pointerEvents !== 'none' || region(titleStyle) !== titleRegion) return undefined
 
   // A native sidebar gives this route a different header owner and layout.
+  // 26.930 keeps a collapsed zero-width sidebar mounted beside rail-only pages.
   const visibleNavigation = [...document.querySelectorAll('nav[role="navigation"]')]
-    .some(element => element.getClientRects().length > 0)
+    .some(element => (box(element)?.width ?? 0) > 0)
   if (visibleNavigation) return undefined
   const hostSeats = header.querySelectorAll(':scope > [data-cordisx-manager-titlebar-seat="true"]')
   if (hostSeats.length > 1 || (hostSeats.length === 1 && hostSeats[0] !== header.lastElementChild)) {

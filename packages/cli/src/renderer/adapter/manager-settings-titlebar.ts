@@ -1,13 +1,18 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
 
-/** Host-private 26.924 seat for the native full-bleed Settings layout. */
+/**
+ * Host-private seat for the native full-bleed Settings layout. 26.930 uses the
+ * same page-placed title for Settings, Automations, Customize, Code review, and Spaces.
+ */
 export interface ManagerSettingsTitlebarSeat {
   readonly anchor: HTMLElement
   readonly nativeTitle: HTMLElement
   /** Viewport bounds in the fixed y=0 titlebar, clear of native controls. */
   readonly bounds: Readonly<{ left: number; top: number; right: number; bottom: number; width: number; height: number }>
-  readonly provenance: 'codex-26.924-settings-titlebar'
+  readonly provenance: 'codex-26.924-settings-titlebar' | 'codex-26.930-page-titlebar'
 }
+
+const PAGE_LAYOUTS = ['default', 'custom-titlebar', 'full-bleed']
 
 function visibleBox(element: Element): DOMRect | undefined {
   if (element.getClientRects().length === 0) return undefined
@@ -35,10 +40,15 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   const view = document.defaultView
   if (view === null) return undefined
   const headers = [...document.querySelectorAll<HTMLElement>(
-    'header[data-app-shell-titlebar="true"][data-app-shell-application-menu-bar="false"][data-app-shell-header-layout="full-bleed"]',
+    'header[data-app-shell-titlebar="true"][data-app-shell-application-menu-bar="false"]',
   )].filter(element => !isRetainedInactiveNativePage(element))
   const header = headers[0]
   if (headers.length !== 1 || header === undefined) return undefined
+  const layout = header.getAttribute('data-app-shell-header-layout') ?? ''
+  // 26.930 marks every destination whose title is placed in the page below the titlebar.
+  const page = header.parentElement?.getAttribute('data-app-shell-header-placement') === 'page'
+    && PAGE_LAYOUTS.includes(layout)
+  if (layout !== 'full-bleed' && !page) return undefined
   const headerRect = visibleBox(header)
   const headerStyle = view.getComputedStyle(header)
   if (
@@ -49,13 +59,20 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   ) return undefined
 
   const rails = document.querySelectorAll<HTMLElement>('nav[data-app-navigation-rail="true"]')
-  const mains = [...document.querySelectorAll<HTMLElement>('[data-app-shell-main-content-layout="full-bleed"]')]
+  const mains = [...document.querySelectorAll<HTMLElement>(`[data-app-shell-main-content-layout="${layout}"]`)]
     .filter(element => !isRetainedInactiveNativePage(element))
-  const navigation = [...document.querySelectorAll<HTMLElement>('nav[aria-label]')]
-    .filter(element => !isRetainedInactiveNativePage(element))
-    .filter(element => !element.hasAttribute('role'))
-    .filter(element => ['设置', 'Settings'].includes(element.getAttribute('aria-label') ?? ''))
   const railRect = rails[0] === undefined ? undefined : visibleBox(rails[0])
+  const navigations = [...document.querySelectorAll<HTMLElement>(
+    page ? 'nav[role="navigation"], nav:not([role])[aria-label]' : 'nav[aria-label]:not([role])',
+  )].filter(element => !isRetainedInactiveNativePage(element) && element !== rails[0])
+  const navigation = page
+    // A 26.930 page sidebar is the outermost rendered navigation beside the rail.
+    ? navigations.filter(element => {
+      const rect = visibleBox(element)
+      return rect !== undefined && rect.width > 0 && railRect !== undefined && near(rect.left, railRect.right)
+        && !navigations.some(outer => outer !== element && outer.contains(element))
+    })
+    : navigations.filter(element => ['设置', 'Settings'].includes(element.getAttribute('aria-label') ?? ''))
   const navRect = navigation[0] === undefined ? undefined : visibleBox(navigation[0])
   const mainRect = mains[0] === undefined ? undefined : visibleBox(mains[0])
   if (
@@ -94,7 +111,8 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
     || endRect.top < headerRect.bottom - 2
   ) return undefined
   const titleStyle = view.getComputedStyle(title)
-  if (titleStyle.pointerEvents !== 'none' || region(titleStyle) !== 'none') return undefined
+  const titleRegion = layout === 'custom-titlebar' ? 'no-drag' : 'none'
+  if (titleStyle.pointerEvents !== 'none' || region(titleStyle) !== titleRegion) return undefined
 
   const hostSeats = header.querySelectorAll(':scope > [data-cordisx-manager-titlebar-seat="true"]')
   if (hostSeats.length > 1 || (hostSeats.length === 1 && hostSeats[0] !== header.lastElementChild)) {
@@ -107,19 +125,27 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
       item.rect !== undefined && item.rect.top < headerRect.bottom && item.rect.bottom > headerRect.top
       && item.style.display !== 'none' && item.style.visibility === 'visible'
     )
+  const sorted = actions.sort((left, right) => left.rect.left - right.rect.left)
+  // 26.930 adds the native sidebar toggle after Back and Forward on page destinations.
+  const toggle = page && sorted.length === 3 && sorted[2]!.element.getAttribute('aria-controls') === 'app-shell-sidebar'
+    ? sorted[2]
+    : undefined
   if (
-    actions.length !== 2
-    || actions.some(({ element, rect, style }) =>
+    sorted.length !== (toggle === undefined ? 2 : 3)
+    || sorted.some(({ element, rect, style }) =>
       element.tagName !== 'BUTTON' || rect.left < headerRect.left + 80
-      || rect.right > headerRect.left + 170 || rect.width < 24 || rect.width > 36
+      || rect.right > headerRect.left + (element === toggle?.element ? 240 : 170) || rect.width < 24 || rect.width > 36
       || rect.height < 24 || rect.height > 36 || style.pointerEvents !== 'auto'
       || region(style) !== 'no-drag'
     )
   ) return undefined
-  const [first, second] = actions.sort((left, right) => left.rect.left - right.rect.left)
-  if (first === undefined || second === undefined || first.rect.right > second.rect.left + 2) return undefined
+  const [first, second] = sorted
+  if (
+    first === undefined || second === undefined || first.rect.right > second.rect.left + 2
+    || (toggle !== undefined && second.rect.right > toggle.rect.left + 2)
+  ) return undefined
 
-  const left = Math.ceil(Math.max(navRect.right, second.rect.right + 16))
+  const left = Math.ceil(Math.max(navRect.right, (toggle ?? second).rect.right + 16))
   // Reserve the 26.924 end control width even though Settings currently gives
   // that y=0 slot zero width. The Host never claims the macOS/window edge.
   const right = Math.floor(Math.min(headerRect.right - 36, titleRect.right))
@@ -152,6 +178,6 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
       width: right - left,
       height: headerRect.height,
     },
-    provenance: 'codex-26.924-settings-titlebar',
+    provenance: page ? 'codex-26.930-page-titlebar' : 'codex-26.924-settings-titlebar',
   }
 }

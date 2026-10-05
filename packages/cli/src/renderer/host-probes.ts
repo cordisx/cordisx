@@ -86,13 +86,37 @@ export function resolveManagerRailSeat(document: Document): {
   return { container, before: before as HTMLElement, homeButton }
 }
 
+/**
+ * 26.930 page-placed destination titles render in the fixed header at y=44 and
+ * may push the main frame below them. Accept only that exact title band.
+ */
+function pageTitleInset(document: Document, anchorRect: DOMRect, frameRect: DOMRect): number | undefined {
+  const inset = frameRect.top - anchorRect.top
+  if (inset < 30 || inset > 64) return undefined
+  const headers = [...document.querySelectorAll<HTMLElement>('header[data-app-shell-titlebar="true"]')]
+    .filter(element => !isRetainedInactiveNativePage(element))
+  const header = headers[0]
+  if (
+    headers.length !== 1 || header === undefined
+    || header.parentElement?.getAttribute('data-app-shell-header-placement') !== 'page'
+  ) return undefined
+  const titles = header.querySelectorAll<HTMLElement>(':scope > [data-app-shell-main-titlebar="true"]')
+  const title = titles[0]
+  if (titles.length !== 1 || title === undefined || !visible(title)) return undefined
+  const titleRect = title.getBoundingClientRect()
+  return Math.abs(titleRect.left - anchorRect.left) <= 2 && Math.abs(titleRect.top - anchorRect.top) <= 2
+      && Math.abs(titleRect.width - anchorRect.width) <= 2 && Math.abs(titleRect.height - inset) <= 2
+    ? inset
+    : undefined
+}
+
 /** Host-private 26.924 main card. Reject changed or ambiguous native structure. */
 export function resolveManagerCardSeat(document: Document): {
   anchor: HTMLElement
   frame: HTMLElement
 } | undefined {
   const anchors = [...document.querySelectorAll<HTMLElement>(
-    '[data-app-shell-main-content-layout="thread-edge-scroll"], [data-app-shell-main-content-layout="default"], [data-app-shell-main-content-layout="full-bleed"]',
+    '[data-app-shell-main-content-layout="thread-edge-scroll"], [data-app-shell-main-content-layout="default"], [data-app-shell-main-content-layout="full-bleed"], [data-app-shell-main-content-layout="custom-titlebar"]',
   )].filter(element => !isRetainedInactiveNativePage(element))
   const anchor = anchors[0]
   if (anchors.length !== 1 || anchor === undefined || !visible(anchor)) return undefined
@@ -112,13 +136,14 @@ export function resolveManagerCardSeat(document: Document): {
   const frameRect = frame.getBoundingClientRect()
   const rail = document.querySelector<HTMLElement>('nav[data-app-navigation-rail="true"]')
   const railRect = rail?.getBoundingClientRect()
+  const inset = Math.abs(anchorRect.top - frameRect.top) <= 2 ? 0 : pageTitleInset(document, anchorRect, frameRect)
   if (
     anchorRect.width < 320 || anchorRect.height < 240 || anchorRect.top < 36
     || railRect === undefined || anchorRect.left < railRect.right
+    || inset === undefined
     || Math.abs(anchorRect.left - frameRect.left) > 2
-    || Math.abs(anchorRect.top - frameRect.top) > 2
     || Math.abs(anchorRect.width - frameRect.width) > 2
-    || Math.abs(anchorRect.height - frameRect.height) > 2
+    || Math.abs(anchorRect.height - inset - frameRect.height) > 2
   ) return undefined
   return { anchor, frame }
 }
@@ -167,7 +192,10 @@ export function resolveManagerTwoPaneSeat(document: Document): ManagerTwoPaneSea
 
   const ElementClass = document.defaultView?.HTMLElement
   if (ElementClass === undefined) return undefined
-  const candidates = [...document.querySelectorAll<HTMLElement>('nav[role="navigation"], nav:not([role])[aria-label]')]
+  const navigations = [...document.querySelectorAll<HTMLElement>('nav[role="navigation"], nav:not([role])[aria-label]')]
+  // 26.930 Spaces nests its labelled list navigation inside the sidebar navigation.
+  const candidates = navigations
+    .filter(navigation => !navigations.some(outer => outer !== navigation && outer.contains(navigation)))
     .flatMap(navigation => {
       if (
         !visible(navigation) || rail.contains(navigation)
@@ -228,6 +256,20 @@ export function resolveManagerTwoPaneSeat(document: Document): ManagerTwoPaneSea
   }
 }
 
+/**
+ * 26.930 full-view threads hide the main slot and render one native tab row in
+ * its titlebar content. The Host then seats on the pointer-transparent title.
+ */
+function isTabRowTitle(bar: HTMLElement, title: HTMLElement | undefined, slot: HTMLElement | undefined): boolean {
+  if (
+    bar.getAttribute('data-app-shell-tab-row') !== 'true' || title === undefined
+    || slot === undefined || visible(slot)
+  ) return false
+  const contents = title.querySelectorAll<HTMLElement>(':scope > [data-app-shell-titlebar-content="true"]')
+  const rows = contents[0]?.querySelectorAll<HTMLElement>('[data-app-shell-tab-row="true"]')
+  return contents.length === 1 && contents[0]!.contains(slot) && rows?.length === 1 && visible(rows[0]!)
+}
+
 /** 26.924 exposes one title surface between its native start and end controls. */
 export function resolveManagerTitlebarSeat(document: Document): {
   readonly slot: HTMLElement
@@ -247,12 +289,18 @@ export function resolveManagerTitlebarSeat(document: Document): {
   )
   const starts = bar.querySelectorAll<HTMLElement>('[data-app-shell-header-slot="start"]')
   const ends = bar.querySelectorAll<HTMLElement>('[data-app-shell-header-slot="end"]')
-  const slot = slots?.[0]
+  const slot = isTabRowTitle(bar, titles[0], slots?.[0]) ? titles[0] : slots?.[0]
   if (
     titles.length !== 1 || slots?.length !== 1 || starts.length !== 1 || ends.length !== 1
     || slot === undefined || !visible(slot)
   ) return undefined
 
+  // 26.930 groups its workspace layout toggles (and a summary popover beside
+  // a tab row) in the end slot. Earlier builds expose at most one 36px control.
+  const endButtons = [...ends[0]!.querySelectorAll<HTMLElement>('button')]
+  const layoutToggles = endButtons.filter(button => button.hasAttribute('data-app-shell-workspace-layout-toggle'))
+  const endToolbar = layoutToggles.length > 0 && layoutToggles.length <= 2 && endButtons.length <= 3
+    && ends[0]!.querySelector('[role="tab"]') === null
   const barRect = bar.getBoundingClientRect()
   const slotRect = slot.getBoundingClientRect()
   const startRect = starts[0]!.getBoundingClientRect()
@@ -263,7 +311,7 @@ export function resolveManagerTitlebarSeat(document: Document): {
     || slotRect.width < 200 || slotRect.height < 30 || safeRight - slotRect.left < 200
     || Math.abs(slotRect.top - barRect.top) > 2
     || Math.abs(slotRect.left - startRect.right) > 2
-    || Math.abs(endRect.top - barRect.top) > 2 || endRect.width <= 0 || endRect.width > 64
+    || Math.abs(endRect.top - barRect.top) > 2 || endRect.width <= 0 || endRect.width > (endToolbar ? 120 : 64)
     || Math.abs(endRect.right - barRect.right) > 2
     || slotRect.right > barRect.right + 2 || endRect.left < slotRect.left
     || (slotRect.right > endRect.left + 2 && endRect.right > slotRect.right + 2)
@@ -291,11 +339,10 @@ export function resolveManagerTitlebarSeat(document: Document): {
       return rect.width > 0 && rect.height > 0 && rect.left >= safeRight - 2
         && rect.right <= endRect.left + 2 && node.querySelector('button') !== null
     })
-  const endButtons = ends[0]!.querySelectorAll('button')
-  if (pageActions.length > 1 || endButtons.length > 1) return undefined
+  if (pageActions.length > 1 || (!endToolbar && endButtons.length > 1)) return undefined
   return {
     slot,
-    native: [...nativeTitle, ...pageActions, ...(endButtons.length === 1 ? [ends[0]!] : [])],
+    native: [...nativeTitle, ...pageActions, ...(endButtons.length > 0 ? [ends[0]!] : [])],
     bounds: { left: slotRect.left, top: slotRect.top, width: safeRight - slotRect.left, height: slotRect.height },
   }
 }
@@ -322,15 +369,18 @@ export function resolveManagerRailOnlySeat(document: Document): ManagerRailOnlyS
   const rail = rails[0]
   const asides = document.querySelectorAll<HTMLElement>('aside[data-app-shell-left-panel-appearance]')
   const aside = asides[0]
-  const anchors = document.querySelectorAll<HTMLElement>(
+  const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout="default"], [data-app-shell-main-content-layout="custom-titlebar"], [data-app-shell-main-content-layout="full-bleed"]',
-  )
+  )].filter(element => !isRetainedInactiveNativePage(element))
   const anchor = anchors[0]
   if (
     rails.length !== 1 || rail === undefined || !visible(rail)
     || asides.length !== 1 || aside === undefined || !visible(aside) || !aside.contains(rail)
     || anchors.length !== 1 || anchor === undefined || !visible(anchor)
-    || [...aside.querySelectorAll('nav')].some(navigation => navigation !== rail)
+    // 26.930 keeps its collapsed zero-width sidebar navigation mounted in the aside.
+    || [...aside.querySelectorAll('nav')].some(navigation =>
+      navigation !== rail && visible(navigation) && navigation.getBoundingClientRect().width > 0
+    )
   ) return undefined
   const ElementClass = document.defaultView?.HTMLElement
   if (ElementClass === undefined) return undefined

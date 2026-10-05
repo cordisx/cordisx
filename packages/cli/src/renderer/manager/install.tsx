@@ -626,7 +626,11 @@ export function installReactCordisXManager(
     }
     seat.main.anchor.style.position = 'relative'
     seat.sidebar.container.style.position = 'relative'
-    if (titlebar.provenance === 'native') titlebar.slot.style.position = 'relative'
+    // The 26.930 tab-row title surface is already positioned; only anchor a static slot.
+    const titlePosition = view?.getComputedStyle(titlebar.slot).position ?? ''
+    if (titlebar.provenance === 'native' && ['', 'static'].includes(titlePosition)) {
+      titlebar.slot.style.position = 'relative'
+    }
     if (seat.provenance === 'codex-26.924-rail-only') {
       navigationSeat.style.left = `${seat.sidebar.left}px`
       navigationSeat.style.right = 'auto'
