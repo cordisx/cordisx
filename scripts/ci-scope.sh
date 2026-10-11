@@ -62,6 +62,11 @@ while IFS= read -r -d '' file; do
   esac
 done < "$changed_files"
 test -s "$changed_files" || full=true
+# Package validation covers Host and Creator; shipped Skill checks select it too.
+# Its prepared artifact must contain every distributable workspace, not only Host.
+if [[ "$skill_changed" == true || "$package_checks" == true ]]; then
+  cli_only=false
+fi
 if [[ "$node_all" == true && "$browser" != true ]]; then
   browser=$(node "$(dirname "${BASH_SOURCE[0]}")/ci-browser-dependencies.mjs")
 fi

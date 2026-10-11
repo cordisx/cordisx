@@ -39,6 +39,8 @@ implementation of those contracts, not a second public specification.
 | [plugin-devtools-console](plugin-devtools-console.md) | Reference              | Plugin-scoped Console attribution, coverage, privacy, and lifetime                                    |
 | [agent-trace-showcase](agent-trace-showcase.md)       | Reference              | Development-only Trace plugin, Timeline, fixtures, and validation scope                               |
 
+- [Manager form composition](manager-form-composition.md): editing-surface selection, Host/plugin boundaries and reusable production paths.
+
 ## Host development checks
 
 - [Host testing](testing.md): local test selection, CI groups, and test necessity.

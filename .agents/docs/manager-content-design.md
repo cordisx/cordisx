@@ -6,6 +6,8 @@ marketplace, configuration, and future manager slices. Product-specific
 documents may define their data and operations, but they must not redefine the
 content hierarchy below.
 
+For editing surfaces and schema-page composition, follow [Manager form composition](manager-form-composition.md).
+
 ## Semantic hierarchy
 
 Manager content has one active semantic context at each level:
