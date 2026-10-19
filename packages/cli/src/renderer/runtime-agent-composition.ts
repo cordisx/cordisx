@@ -1,4 +1,5 @@
 import { isNativeRequiredTaskSession } from './native-agent-session-recovery.js'
+import { mountStartupPlugins } from './runtime-startup-plugins.js'
 import { historicalNativeSessionDetails } from './native-agent-session-recovery.js'
 import { CordisXEntitySettingsNavigationService } from './entity-settings-navigation.js'
 import { CordisXManagerSelfConfigurationService } from './manager-self-configuration.js'
@@ -450,7 +451,7 @@ export const runRuntimeStage1188 = async (runtimeScope: RuntimeClosureScope): Pr
   }
 }
 
-export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Promise<void> => {
+export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, signal?: AbortSignal): Promise<void> => {
   try {
     runtimeScope.i18nFiber = runtimeScope.ctx.plugin(CordisXI18nService)
     await runtimeScope.i18nFiber
@@ -822,12 +823,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
         group.policies.has('allow') ? 'allow-persistent' : 'deny-persistent',
       )
     }
-    for (const controller of runtimeScope.controllers()!) {
-      if (controller.status !== 'active') {
-        continue
-      }
-      await runtimeScope.mountPlugin()!(controller)
-    }
+    await mountStartupPlugins(runtimeScope.controllers()!, runtimeScope.mountPlugin()!, signal)
     await runtimeScope.routeService.registry.startHistoryProjection()
     if (runtimeScope.metadata()!.iconThemePreference! !== undefined) {
       // Restore only after every provider has had a chance to register. An

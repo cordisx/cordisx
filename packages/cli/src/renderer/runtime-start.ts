@@ -979,7 +979,7 @@ export async function start(
 
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)
     const managerModel: ManagerModel = runtimeClosures5.createRuntimeManagerModel(closureScope)
-    await runtimeClosures6.runRuntimeStage4077(closureScope)
+    await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
     disposeDialogs()

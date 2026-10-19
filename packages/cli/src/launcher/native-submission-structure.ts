@@ -215,6 +215,26 @@ function normalizedRequest(plan: ResourcePlan, fn: SyntaxNode): void {
   plan.capabilities.push('normalized-request')
 }
 
+function wireRequestInputs(expression: SyntaxNode): SyntaxNode[] {
+  if (member(expression, 'request')) return [expression]
+  if (
+    expression.type === 'CallExpression' && member(expression.arguments[0], 'request')
+    && expression.arguments[1]?.type === 'CallExpression'
+    && member(expression.arguments[1].callee, 'getAppServerVersion')
+  ) return [expression.arguments[0]]
+  if (expression.type === 'ConditionalExpression') {
+    return [...wireRequestInputs(expression.consequent), ...wireRequestInputs(expression.alternate)]
+  }
+  throw new Error('Native capability wire-normalizer: unsupported request source')
+}
+
+function sameRequestReference(left: SyntaxNode, right: SyntaxNode): boolean {
+  if (left.type === 'Identifier' && right.type === 'Identifier') return left.name === right.name
+  return left.type === 'MemberExpression' && right.type === 'MemberExpression'
+    && !left.computed && !right.computed && left.property.name === right.property.name
+    && sameRequestReference(left.object, right.object)
+}
+
 function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
   plan.binding(fn.params[0], 'operation')
   const call = plan.require(fn.body, n =>
@@ -224,17 +244,24 @@ function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
   if (argument?.type !== 'Identifier') throw new Error('Native capability turn-dispatch: expected normalized request')
   const wire = plan.require(
     fn.body,
-    n =>
-      n.type === 'VariableDeclarator' && n.id.name === argument.name
-      && n.init?.type === 'CallExpression' && member(n.init.arguments[0], 'request')
-      && n.init.arguments[1]?.type === 'CallExpression' && member(n.init.arguments[1].callee, 'getAppServerVersion'),
+    n => n.type === 'VariableDeclarator' && n.id.name === argument.name && n.init != null,
     'wire-normalizer',
   )
   if (wire.end > call.start) throw new Error('Native capability turn-dispatch: invalid normalization order')
-  const request = wire.init.arguments[0]
+  const requests = wireRequestInputs(wire.init)
+  if (!requests.every(request => sameRequestReference(requests[0]!, request))) {
+    throw new Error('Native capability wire-normalizer: branches use different request sources')
+  }
   const capturedRequest = uniqueBinding(plan, fn, '__cordisxOperationRequest')
-  plan.insert(wire.start, `${capturedRequest}=${plan.text(request)},`)
-  plan.replace(request, capturedRequest)
+  const statement = plan.require(
+    fn.body,
+    n => n.type === 'VariableDeclaration' && n.declarations.includes(wire),
+    'wire-declaration',
+  )
+  plan.require(fn.body, n => n.type === 'BlockStatement' && n.body.includes(statement), 'wire-declaration-block')
+  plan.insert(statement.start, `let ${capturedRequest};`)
+  // Capture only the selected branch, preserving guard order and getter evaluation count.
+  for (const request of requests) plan.replace(request, `(${capturedRequest}=${plan.text(request)})`)
   const token = valid(`${capturedRequest}.config?.[${JSON.stringify(TOKEN)}]`)
   // Preserve every normalized field and native permission check, carrying only the transaction token.
   plan.replace(
@@ -251,12 +278,15 @@ function firstTurn(plan: ResourcePlan, fn: SyntaxNode): void {
       'projectAssignment',
       'threadStartKind',
       'input',
-      'config',
-      'serviceTier',
       'localTurnMetadata',
       'attachments',
     ]), 'first-turn-input')
-  const incomingConfig = plan.binding(declaration.id, 'config')
+  const incomingConfig = properties(declaration.id).has('config')
+    ? plan.binding(declaration.id, 'config')
+    : declaration.init?.type === 'Identifier'
+    ? `${plan.text(declaration.init)}.config`
+    : undefined
+  if (incomingConfig === undefined) throw new Error('Native capability first-turn-input: missing config source')
   const request = plan.require(fn.body, n =>
     n.type === 'ObjectExpression'
     && has(n, ['model', 'effort', 'multiAgentMode', 'input', 'toolOutput', 'collaborationMode']), 'first-turn-request')
@@ -368,8 +398,6 @@ export function analyzeNativeSubmissionTransforms(
             'projectAssignment',
             'threadStartKind',
             'input',
-            'config',
-            'serviceTier',
             'localTurnMetadata',
             'attachments',
           ])

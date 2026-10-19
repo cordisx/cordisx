@@ -8,7 +8,7 @@ import type { CordisXPluginModule } from '../packages/cli/src/contracts.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 describe('managed service UI runtime', () => {
-  it('isolates the owner-bound registry for every plugin generation', async () => {
+  it.each([0, 1, 2])('keeps startup usable with %s unavailable managed-service owners', async failedOwners => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const entry = path.join(root, 'tests/fixtures/managed-service-ui-plugin.ts')
     const plugins = ['managed-ui-one', 'managed-ui-two'].map((id, index) => ({
@@ -51,7 +51,7 @@ describe('managed service UI runtime', () => {
       profileId: 'work',
       generation: 'managed-service-ui-generation',
       pluginActivation,
-      managedServiceUICapabilities: plugins.map(plugin => ({
+      managedServiceUICapabilities: plugins.filter((_, index) => index >= failedOwners).map(plugin => ({
         pluginId: plugin.id,
         pluginGeneration: plugin.package.moduleGeneration,
         token: `${plugin.id}-token`,
@@ -74,15 +74,27 @@ describe('managed service UI runtime', () => {
         dispose(): Promise<void>
       }
     }
-    expect(globals.__cordisxManagedServiceUIFixtures).toHaveLength(2)
-    expect(globals.__cordisxManagedServiceUIFixtures?.[0]?.managedServices)
-      .not.toBe(globals.__cordisxManagedServiceUIFixtures?.[1]?.managedServices)
-    expect(globals.__cordisxManagedServiceUIFixtures?.[0]?.platform).toBeDefined()
-    expect(globals.__cordisxManagedServiceUIFixtures?.[1]?.platform).toBeDefined()
+    expect(globals.__cordisxManagedServiceUIFixtures ?? []).toHaveLength(2 - failedOwners)
+    if (failedOwners === 0) {
+      expect(globals.__cordisxManagedServiceUIFixtures?.[0]?.managedServices)
+        .not.toBe(globals.__cordisxManagedServiceUIFixtures?.[1]?.managedServices)
+      expect(globals.__cordisxManagedServiceUIFixtures?.[1]?.platform).toBeDefined()
+    }
+    if (failedOwners < 2) expect(globals.__cordisxManagedServiceUIFixtures?.[0]?.platform).toBeDefined()
     expect(globals.__cordisxRuntime?.snapshot().plugins).toMatchObject([
-      { id: 'managed-ui-one', status: 'active' },
-      { id: 'managed-ui-two', status: 'active' },
+      failedOwners > 0
+        ? { id: 'managed-ui-one', status: 'failed', error: 'plugin dependencies are unavailable: managedServices' }
+        : { id: 'managed-ui-one', status: 'active' },
+      failedOwners > 1
+        ? { id: 'managed-ui-two', status: 'failed', error: 'plugin dependencies are unavailable: managedServices' }
+        : { id: 'managed-ui-two', status: 'active' },
     ])
+    expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
+    const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
+    expect(trigger).not.toBeNull()
+    trigger!.click()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(trigger!.getAttribute('aria-expanded')).toBe('true')
 
     await globals.__cordisxRuntime?.dispose()
     dom.window.close()

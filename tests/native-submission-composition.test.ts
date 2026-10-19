@@ -39,6 +39,27 @@ function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unkn
 }
 
 describe('structure-based native submission composition', () => {
+  it('carries first-turn config when native creation no longer destructures config or service tier', async () => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace('config:incoming,serviceTier:serviceTier,', '')
+      .replace('conversationResponse:receipt}', 'conversationResponse:receipt,serviceTier:serviceTier}')
+    const run = runtime(null, source)
+    run.sandbox.createNativeThread = async () => ({
+      conversationResponse: { model: 'accepted-model' },
+      serviceTier: 'priority',
+    })
+    const mode = { mode: 'default', settings: { model: 'old-model', reasoning_effort: 'high' } }
+    const result = await run.sandbox.first({
+      input: 'hello',
+      config: { 'cordisx.operation_token': token },
+      collaborationMode: mode,
+    })
+    expect(result.config).toEqual({ 'cordisx.operation_token': token })
+    expect(result.serviceTier).toBe('priority')
+    expect(result.collaborationMode.settings.model).toBe('accepted-model')
+    expect(mode.settings.model).toBe('old-model')
+    expect(await run.sandbox.first({ input: 'hello', collaborationMode: mode })).not.toHaveProperty('config')
+  })
   it('uses the accepted first-thread model for the native collaboration baseline', async () => {
     const run = runtime()
     const mode = { mode: 'default', settings: { model: 'gpt-5.6-sol', reasoning_effort: 'medium' } }
@@ -258,6 +279,70 @@ describe('structure-based native submission composition', () => {
     })
     const transformed = run.transforms[1]!.transform(source[1]!.source).source
     expect(transformed).toContain('__cordisxOperationRequest2=prepared.request')
+  })
+  it.each([
+    'useDirect() ? prepared.request : normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+    'useDirect() ? normalizeWire(prepared.request,manager.requestClient.getAppServerVersion()) : prepared.request',
+    'prepared.request',
+  ])('preserves conditional/direct dispatch and captures only the chosen request: %s', async expression => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace(
+      'let prepared={request:n.request};',
+      'let prepared={get request(){return readRequest(n.request)}};',
+    ).replace('normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())', expression)
+    const run = runtime(null, source)
+    for (const direct of [true, false]) {
+      for (const config of [undefined, { 'cordisx.operation_token': token }]) {
+        const effects: string[] = []
+        const request = { input: 'hello', config, permission: 'native', extra: 'unchanged' }
+        run.sandbox.useDirect = () => {
+          effects.push('guard')
+          return direct
+        }
+        run.sandbox.readRequest = (value: unknown) => {
+          effects.push('read')
+          return value
+        }
+        run.sandbox.normalizeWire = (value: any) => {
+          effects.push('normalize')
+          return { input: value.input, permission: 'normalized' }
+        }
+        const manager = dispatchManager()
+        const wire = await run.sandbox.dispatch({ manager, operation: { request } })
+        expect(effects.filter(effect => effect === 'read')).toHaveLength(1)
+        if (expression !== 'prepared.request') expect(effects[0]).toBe('guard')
+        const normalized = effects.includes('normalize')
+        expect(wire).toEqual(
+          normalized
+            ? { input: 'hello', permission: 'normalized', ...(config ? { config } : {}) }
+            : request,
+        )
+        expect(manager.sendRequest).toHaveBeenCalledWith('turn/start', wire)
+        expect(request.config).toBe(config)
+      }
+    }
+  })
+  it('rejects conditional dispatch with unrelated or unknown request branches', () => {
+    for (const alternate of ['other.request', 'unknownRequest()']) {
+      const source = resources()
+      source[1]!.source = source[1]!.source.replace(
+        'normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+        `useDirect() ? prepared.request : ${alternate}`,
+      )
+      expect(() => nativeSubmissionTransformsForApp('future', 'x', source)).toThrow('wire-normalizer')
+    }
+  })
+  it('preserves a const wire declaration with conditional normalization', async () => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace('let wire=', 'const wire=').replace(
+      'normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+      'true ? prepared.request : normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+    )
+    const run = runtime(null, source)
+    const request = { input: 'hello', config: { 'cordisx.operation_token': token } }
+    await expect(run.sandbox.dispatch({ manager: dispatchManager(), operation: { request } }))
+      .resolves.toEqual(request)
+    expect(run.transforms[1]!.transform(source[1]!.source).source).toContain('const wire=')
   })
   it('does not alter the active-turn steer boundary', async () => {
     const run = runtime()

@@ -1,4 +1,5 @@
 import { isolateRuntimeOwnerServices } from './runtime-owner-context.js'
+import { PluginActivationFailure } from './runtime-startup-plugins.js'
 import { disposePluginProfileSurfaces, installPluginProfileSurfaces } from './plugin-profile-surfaces.js'
 import { installPluginDialogs } from './dialogs/plugin.js'
 import { notificationCenterForDocument } from './notifications/host.js'
@@ -596,6 +597,7 @@ export const createRuntimeMountPlugin = async (
   if (managedServices !== undefined) {
     controller.unregisterManagedServices = pluginContext.reflect.provide('managedServices', managedServices)
   }
+  let activatingPlugin = false
   try {
     const owner = runtimeScope.agentSessionRuntime.ownerFromContext(pluginContext)
     const entityPrincipal = runtimeScope.entityPrincipalBindings()!.get(JSON.stringify([
@@ -770,6 +772,7 @@ export const createRuntimeMountPlugin = async (
       controller.activation === 1 ? 'activate' : 'reload',
       'Plugin activation started',
     )
+    activatingPlugin = true
     controller.fiber = pluginContext.plugin(
       pluginFromModule(module),
       runtimeScope.configuration()!.get(controller.item.id, runtimeScope.generationVisibility()!.view(pluginContext)),
@@ -883,6 +886,6 @@ export const createRuntimeMountPlugin = async (
     await controller.unregisterConnector?.()
     delete controller.unregisterConnector
     runtimeScope.retirePrincipal()!(controller, 'Plugin disposed after activation failure')
-    throw error
+    throw activatingPlugin ? new PluginActivationFailure(error) : error
   }
 }

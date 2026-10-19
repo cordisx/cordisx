@@ -123,11 +123,12 @@ describe('native model provider selector installation', () => {
   })
 
   it.each(['models', 'login-only', 'empty'])(
-    'owns one seat for a %s catalog and restores the native trigger only on disposal',
+    'owns one seat across multiple footers for a %s catalog and restores the native trigger on disposal',
     async catalogKind => {
       const dom = new JSDOM(
         `<!doctype html><body>
       <main data-codex-composer-root data-composer-placement="home">
+        <div data-composer-footer-responsive><button id="workspace-control">Workspace</button></div>
         <footer data-composer-footer-responsive>
           <span id="native-group"><span aria-haspopup="menu" aria-expanded="false"><button data-codex-intelligence-trigger="true" aria-haspopup="menu">Model</button></span></span>
         </footer>
@@ -259,6 +260,7 @@ describe('native model provider selector installation', () => {
         )
       })
       expect(trigger.hidden).toBe(true)
+      expect(dom.window.document.getElementById('workspace-control')!.hidden).toBe(false)
       expect(trigger.dataset.cordisxModelProviderHidden).toBe('true')
       expect(dom.window.getComputedStyle(trigger).display).toBe('none')
       expect(dom.window.document.querySelectorAll('[data-cordisx-model-provider-selector]')).toHaveLength(1)

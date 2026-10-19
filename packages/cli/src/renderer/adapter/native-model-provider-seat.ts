@@ -95,11 +95,7 @@ function modelReasoningCapabilities(model: Record<string, unknown> | undefined) 
   })
 }
 
-/**
- * Exact native Composer model trigger audited in Desktop 26.901.51231 (build 8109).
- * The stable semantic attributes are emitted directly by the native renderer;
- * ambiguous or detached layouts fail closed.
- */
+/** Locate the native model control by its semantic ownership, not the surrounding layout. */
 export function locateNativeModelProviderSeat(document: Document): NativeModelProviderSeat | undefined {
   const seat = locateNativeModelProviderMountSeat(document)
   return seat && nativeModelProviderInteractionAllowed(seat.trigger) ? seat : undefined
@@ -107,25 +103,22 @@ export function locateNativeModelProviderSeat(document: Document): NativeModelPr
 
 /** Structural ownership survives the Host temporarily isolating its background. */
 export function locateNativeModelProviderMountSeat(document: Document): NativeModelProviderSeat | undefined {
-  const composers = [...document.querySelectorAll<HTMLElement>(
-    '[data-codex-composer-root][data-composer-placement]',
-  )].filter(visible)
-  if (composers.length !== 1) return undefined
-  const composer = composers[0]!
-  const footers = [...composer.querySelectorAll<HTMLElement>('[data-composer-footer-responsive]')].filter(visible)
-  if (footers.length !== 1) return undefined
-  const footer = footers[0]!
-  const triggers = [...footer.querySelectorAll<HTMLElement>(
+  const candidates = [...document.querySelectorAll<HTMLElement>(
     'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"]',
-  )].filter(visible)
-  if (triggers.length !== 1) return undefined
-  const trigger = triggers[0]!
-  // build8109 wraps the button in an interactive Radix span and a ref-only span.
-  // Own their entire group, never insert under the native event handlers.
+  )].flatMap(trigger => {
+    const composer = trigger.closest<HTMLElement>('[data-codex-composer-root][data-composer-placement]')
+    const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')
+    if (!composer || !footer || !composer.contains(footer)) return []
+    if (!visible(trigger) || !visible(composer) || !visible(footer)) return []
+    return [{ trigger, footer }]
+  })
+  if (candidates.length !== 1) return undefined
+  const { trigger, footer } = candidates[0]!
+  // Include single-child event wrappers, but leave unrelated sibling controls intact.
   let group = trigger
-  for (let depth = 0; depth < 3 && group.parentElement?.tagName === 'SPAN'; depth++) {
+  while (group.parentElement !== footer && group.parentElement?.tagName === 'SPAN') {
     const wrapper = group.parentElement
-    if (wrapper.children.length !== 1) return undefined
+    if (wrapper.children.length !== 1) break
     group = wrapper
   }
   const parent = group.parentElement

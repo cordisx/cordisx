@@ -394,6 +394,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ).then(composition => {
         nativeSubmission = composition
       })
+      // Observe early failure during renderer assembly; readiness still awaits the original promise.
+      void nativeSubmissionCompletion.catch(() => undefined)
     }
     const nativeAppVersion = environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
       ? await readCodexAppVersion(plan?.executable)
@@ -962,7 +964,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     await productionPluginManagement?.close().catch(() => undefined)
     await rendererComposition?.close().catch(() => undefined)
     await supervisorRuntime.close()
-    await nativeSubmissionCompletion
+    await nativeSubmissionCompletion?.catch(() => undefined)
     await nativeSubmission?.close().catch(() => undefined)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)

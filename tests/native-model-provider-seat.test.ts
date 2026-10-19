@@ -7,6 +7,71 @@ import {
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it.each(['sibling-footer', 'nested-footer', 'empty-composer', 'shared-wrapper', 'deep-wrappers'])(
+    'keeps the model seat available with a %s layout',
+    layout => {
+      const dom = new JSDOM('<!doctype html><body></body>')
+      const { trigger } = composer(dom.window.document)
+      const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')!
+      const root = footer.parentElement!
+      const extra = dom.window.document.createElement('div')
+      extra.getBoundingClientRect = root.getBoundingClientRect
+      if (layout === 'empty-composer') {
+        extra.dataset.codexComposerRoot = ''
+        extra.dataset.composerPlacement = 'home'
+        root.after(extra)
+      } else if (layout === 'shared-wrapper') {
+        trigger.parentElement!.append(extra)
+      } else if (layout === 'deep-wrappers') {
+        for (let depth = 0; depth < 5; depth++) {
+          const wrapper = dom.window.document.createElement('span')
+          trigger.before(wrapper)
+          wrapper.append(trigger)
+        }
+      } else {
+        extra.dataset.composerFooterResponsive = ''
+        if (layout === 'sibling-footer') footer.before(extra)
+        else {
+          footer.before(extra)
+          extra.append(footer)
+        }
+      }
+      const seat = locateNativeModelProviderSeat(dom.window.document)
+      expect(seat?.trigger).toBe(trigger)
+      expect(seat?.parent.closest('[aria-haspopup]')).toBeNull()
+      if (layout === 'shared-wrapper') expect(seat?.group).toBe(trigger)
+      dom.window.close()
+    },
+  )
+
+  it('does not choose between model controls in separate footers', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const { trigger } = composer(dom.window.document)
+    const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')!
+    const duplicate = footer.cloneNode(true) as HTMLElement
+    footer.after(duplicate)
+    duplicate.getBoundingClientRect = footer.getBoundingClientRect
+    duplicate.querySelector<HTMLElement>('button')!.getBoundingClientRect = trigger.getBoundingClientRect
+    expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
+
+  it('ignores a model trigger outside its composer and unrelated hidden controls', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const { trigger } = composer(dom.window.document)
+    const outside = trigger.cloneNode(true) as HTMLElement
+    outside.getBoundingClientRect = trigger.getBoundingClientRect
+    dom.window.document.body.append(outside)
+    const hidden = trigger.cloneNode(true) as HTMLElement
+    hidden.getBoundingClientRect = trigger.getBoundingClientRect
+    hidden.hidden = true
+    trigger.after(hidden)
+    expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
+    trigger.remove()
+    expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
+
   it('locates only the unique visible native intelligence trigger in the composer footer', () => {
     const dom = new JSDOM(`<!doctype html><body>
       <main data-codex-composer-root data-composer-placement="thread">
