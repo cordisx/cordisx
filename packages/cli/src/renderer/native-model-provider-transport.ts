@@ -1,4 +1,5 @@
 import {
+  currentNativeComposerThreadId as currentThreadId,
   locateNativeModelProviderMountSeat,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
@@ -70,16 +71,6 @@ const errorMessage = (error: unknown): string =>
 const CONTROL_DISCOVERY_RETRY_MS = 50
 const CONTROL_DISCOVERY_ATTEMPTS = 20
 const TURN_STATUS_RETRY_MS = 500
-
-function currentThreadId(document: Document): string | undefined {
-  const values = new Set(
-    [...document.querySelectorAll('[data-above-composer-conversation-id]')]
-      .filter(element => element.closest('[data-codex-composer-root][data-composer-placement]') !== null)
-      .map(element => element.getAttribute('data-above-composer-conversation-id'))
-      .filter((value): value is string => value !== null && value !== ''),
-  )
-  return values.size === 1 ? [...values][0] : undefined
-}
 
 function threadBusy(thread: Record<string, unknown>): boolean | undefined {
   const status = string(record(thread.status)?.type)

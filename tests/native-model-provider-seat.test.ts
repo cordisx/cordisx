@@ -1,12 +1,42 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  currentNativeComposerThreadId,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
 } from '../packages/cli/src/renderer/adapter/native-model-provider-seat.js'
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it.each([null, 'foreground-thread'])(
+    'reads only the visible %s composer thread when old composers remain mounted',
+    threadId => {
+      const dom = new JSDOM('<!doctype html><body></body>')
+      composer(dom.window.document, 'background-thread')
+      const retained = dom.window.document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+      retained.style.display = 'none'
+      const { trigger } = composer(dom.window.document, threadId)
+      dom.window.document.body.append(retained)
+      expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
+      expect(currentNativeComposerThreadId(dom.window.document)).toBe(threadId ?? undefined)
+      dom.window.close()
+    },
+  )
+
+  it('does not borrow a nested composer thread or choose between conflicting markers', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    composer(dom.window.document, 'foreground-thread')
+    const root = dom.window.document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+    root.insertAdjacentHTML(
+      'beforeend',
+      '<aside data-codex-composer-root data-composer-placement="thread"><i data-above-composer-conversation-id="nested-thread"></i></aside>',
+    )
+    expect(currentNativeComposerThreadId(dom.window.document)).toBe('foreground-thread')
+    root.insertAdjacentHTML('beforeend', '<i data-above-composer-conversation-id="conflicting-thread"></i>')
+    expect(currentNativeComposerThreadId(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
+
   it.each(['sibling-footer', 'nested-footer', 'empty-composer', 'shared-wrapper', 'deep-wrappers'])(
     'keeps the model seat available with a %s layout',
     layout => {

@@ -148,6 +148,37 @@ async function harness(
 }
 
 describe('native model provider transport', () => {
+  it('admits a home send without borrowing the retained hidden thread scope', async () => {
+    const { dom, transport, channel } = await harness()
+    const retained = dom.window.document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+    composer(dom.window.document, null)
+    retained.style.display = 'none'
+    dom.window.document.body.append(retained)
+    channel.submissionPrepare.mockImplementation(async ({ scope, action }) =>
+      scope.threadId === action.threadId
+        ? { status: 'pass-through' }
+        : { status: 'reject', reason: 'scope-mismatch' }
+    )
+    await settle()
+    const hook = (globalThis as any).__cordisxNativeSubmitHook
+    try {
+      await expect(hook({
+        target: 'local',
+        response: false,
+        promptOverride: false,
+      })).resolves.toEqual({ allow: true })
+      expect(channel.submissionPrepare).toHaveBeenLastCalledWith({
+        scope: expect.not.objectContaining({ threadId: expect.any(String) }),
+        action: expect.objectContaining({ intent: 'ordinary-send' }),
+      })
+      expect(transport.getSnapshot().threadId).toBeUndefined()
+      expect(retained.querySelector('[data-above-composer-conversation-id]')).not.toBeNull()
+    } finally {
+      transport.dispose()
+      dom.window.close()
+    }
+  })
+
   it('keeps first-turn baseline synchronization silent and a later user switch observable', async () => {
     const { dom, transport, channel, selectModel, trigger } = await harness()
     const run = firstTurnRuntime(async () => ({ conversationResponse: { model: 'deepseek-v4-flash' } }))

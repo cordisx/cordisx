@@ -129,6 +129,21 @@ export function locateNativeModelProviderMountSeat(document: Document): NativeMo
   return { trigger, group, parent }
 }
 
+/** Retained background composers must not supply the foreground submission's thread. */
+export function currentNativeComposerThreadId(document: Document): string | undefined {
+  const composer = locateNativeModelProviderMountSeat(document)?.trigger.closest(
+    '[data-codex-composer-root][data-composer-placement]',
+  )
+  if (!composer) return undefined
+  const values = new Set(
+    [...composer.querySelectorAll('[data-above-composer-conversation-id]')]
+      .filter(element => element.closest('[data-codex-composer-root][data-composer-placement]') === composer)
+      .map(element => element.getAttribute('data-above-composer-conversation-id'))
+      .filter((value): value is string => value !== null && value !== ''),
+  )
+  return values.size === 1 ? [...values][0] : undefined
+}
+
 /** Native menu owner contracts: separate effort selection and unified model/effort selection. */
 export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeModelSelectionControl | undefined {
   let fiber: ReactFiber | null | undefined = reactFiber(trigger)
