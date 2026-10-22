@@ -17,9 +17,18 @@ import {
   type NativeProviderSubmitConfirmation,
   type NativeSubmissionRejection,
   type NativeSubmissionScope,
+  type PendingNativeProviderSelection,
 } from './native-provider-selection-client.js'
 import { type NativeMcpBridge, NativeMcpRequestClient } from './native-mcp-request-client.js'
-import { type CatalogReasoningLookup, resolveTargetReasoning, type TargetReasoning } from './native-model-reasoning.js'
+import {
+  type CatalogReasoningLookup,
+  PendingModelReasoning,
+  resolveTargetReasoning,
+  type TargetReasoning,
+} from './native-model-reasoning.js'
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import { NativeModelSelectionSynchronizer } from './native-model-selection-synchronizer.js'
+import { patchNativeSelection, type SelectionPatch, type SelectionSnapshot } from './native-model-provider-state.js'
 
 type NativeHookGlobal = typeof globalThis & {
   __cordisxNativeSubmitHook?: NativeProviderSelectionClient['submitHook']
@@ -38,24 +47,6 @@ interface PendingNativeRequest {
 interface EffectiveSelection {
   readonly providerId?: string
   readonly model?: string
-}
-
-interface SelectionSnapshot extends ProviderSelectionSnapshot {
-  readonly error?: string
-}
-
-interface SelectionPatch {
-  readonly available?: boolean
-  readonly threadId?: string | null
-  readonly modelProvider?: string | null
-  readonly model?: string | null
-  readonly reasoningEffort?: string | null
-  readonly reasoningEfforts?: readonly string[] | null
-  readonly serviceTier?: 'priority' | null
-  readonly nativeModelsScope?: ProviderSelectionSnapshot['nativeModelsScope']
-  readonly error?: string | null
-  readonly submissionError?: NativeSubmissionRejection | null
-  readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined => (
@@ -104,9 +95,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private visibleThreadId: string | undefined
   private visibleTrigger: HTMLElement | undefined
   private suspendedAvailability: boolean | undefined
-  private nativeModelUpdate: { readonly key: string; readonly completion: Promise<void> } | undefined
+  private readonly nativeSelection = new NativeModelSelectionSynchronizer()
   private readonly selectionClient: NativeProviderSelectionClient
   private submissionError: NativeSubmissionRejection | undefined
+  private readonly pendingReasoning = new PendingModelReasoning()
   private state: SelectionSnapshot = Object.freeze({ available: false, busy: false })
   private readonly submissionAuthority = {
     snapshot: () => ({
@@ -143,7 +135,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
           }),
       }),
       reason => this.publishPatch({ submissionError: reason }),
-      async selection => {
+      async (selection, submittedEffort) => {
         const navigation = this.navigationGeneration
         const threadId = this.visibleThreadId
         if (!threadId) throw new Error('Native existing thread unavailable')
@@ -152,27 +144,18 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         const trigger = this.visibleTrigger
         const control = trigger?.isConnected ? locateNativeModelSelectionControl(trigger) : undefined
         if (!control) throw new Error('Native model control unavailable')
-        const reasoning = this.targetReasoning(selection, control)
-        const key = JSON.stringify([navigation, threadId, selection.model, reasoning.effort])
-        if (this.nativeModelUpdate?.key === key) await this.nativeModelUpdate.completion
-        else if (control.model !== selection.model) {
-          const update = { key, completion: control.selectModel(selection.model, reasoning.effort) }
-          this.nativeModelUpdate = update
-          try {
-            await update.completion
-          } finally {
-            if (this.nativeModelUpdate === update) this.nativeModelUpdate = undefined
-          }
-        }
-        // Completion precedes React's committed control projection; never trust optimistic display alone.
-        for (let attempt = 0;; attempt++) {
-          this.assertCurrent(navigation, threadId)
-          const liveTrigger = this.visibleTrigger
-          const live = liveTrigger?.isConnected ? locateNativeModelSelectionControl(liveTrigger) : undefined
-          if (live?.model === selection.model) break
-          if (attempt >= 80) throw new Error('Native model selection was not acknowledged')
-          await new Promise(resolve => setTimeout(resolve, 25))
-        }
+        const reasoning = this.targetReasoning(selection, control, submittedEffort)
+        await this.nativeSelection.synchronize({
+          scopeKey: JSON.stringify([navigation, threadId]),
+          model: selection.model,
+          effort: reasoning.effort,
+          verifyEffort: submittedEffort !== undefined,
+          readControl: () => {
+            const liveTrigger = this.visibleTrigger
+            return liveTrigger?.isConnected ? locateNativeModelSelectionControl(liveTrigger) : undefined
+          },
+          assertCurrent: () => this.assertCurrent(navigation, threadId),
+        })
         this.confirmNativeModelAssignment(selection.providerId, selection.model)
         const selectedControl = this.modelControl()
         this.publishPatch({
@@ -185,6 +168,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
             ? reasoning.efforts
             : selectedControl?.reasoningEfforts ?? reasoning.efforts,
         })
+      },
+      undefined,
+      pending => {
+        const control = this.modelControl()
+        const effort = control === undefined ? undefined : this.pendingTargetReasoning(pending, control).effort
+        return isModelReasoningEffort(effort) ? effort : undefined
       },
     )
     this.selectionClient.subscribe(() => {
@@ -367,23 +356,38 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
 
   async selectReasoningEffort(reasoningEffort: string): Promise<'accepted' | 'busy' | 'unavailable'> {
     if (this.disposed || !this.nativeManagedModelRoutingAvailable || !this.state.available) return 'unavailable'
-    if (this.state.busy) return 'busy'
+    if (this.state.busy || this.selectionClient.submissionActive()) return 'busy'
+    const pending = this.selectionClient.snapshot().pending
+    const pendingControl = this.modelControl()
+    if (pending !== undefined) {
+      if (
+        pendingControl === undefined || !isModelReasoningEffort(reasoningEffort)
+        || !this.pendingTargetReasoning(pending, pendingControl).efforts.includes(reasoningEffort)
+      ) return 'unavailable'
+      this.pendingReasoning.select(this.navigationGeneration, pending, reasoningEffort)
+      this.publishPatch({ error: null })
+      return 'accepted'
+    }
     const navigationGeneration = this.navigationGeneration
     const selectionGeneration = ++this.selectionGeneration
     const threadId = this.state.threadId
     const control = this.modelControl()
     const model = this.state.model ?? control?.model
     const previousReasoningEffort = this.state.reasoningEffort ?? control?.reasoningEffort
+    const reasoning = control === undefined || model === undefined || this.state.modelProvider === undefined
+      ? undefined
+      : this.targetReasoning({ providerId: this.state.modelProvider, model }, control)
+    const reasoningEfforts = reasoning?.catalogBacked ? reasoning.efforts : control?.reasoningEfforts
     if (
       control === undefined || model === undefined || previousReasoningEffort === undefined
-      || !control.reasoningEfforts.includes(reasoningEffort)
+      || !reasoningEfforts?.includes(reasoningEffort)
     ) return 'unavailable'
     this.selecting = true
     this.publishPatch({ error: null })
     try {
       await control.selectModel(model, reasoningEffort)
       this.assertCurrent(navigationGeneration, threadId)
-      this.publishPatch({ model, reasoningEffort, reasoningEfforts: control.reasoningEfforts, error: null })
+      this.publishPatch({ model, reasoningEffort, reasoningEfforts, error: null })
       return 'accepted'
     } catch (error) {
       const targetFailure = errorMessage(error)
@@ -624,13 +628,26 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private targetReasoning(
     target: { readonly providerId: string; readonly model: string },
     control: NonNullable<ReturnType<CodexDesktopNativeModelProviderTransport['modelControl']>>,
+    effort: string | undefined = this.state.reasoningEffort ?? control.reasoningEffort,
   ): TargetReasoning {
     return resolveTargetReasoning(
       target,
-      this.state.reasoningEffort ?? control.reasoningEffort,
+      effort,
       control.models,
       this.catalogReasoning,
     )
+  }
+
+  private pendingTargetReasoning(
+    pending: PendingNativeProviderSelection,
+    control: NonNullable<ReturnType<CodexDesktopNativeModelProviderTransport['modelControl']>>,
+  ): TargetReasoning {
+    const effort = this.pendingReasoning.resolve(
+      this.navigationGeneration,
+      pending,
+      this.state.reasoningEffort ?? control.reasoningEffort,
+    )
+    return this.targetReasoning(pending, control, effort)
   }
 
   private clearControlDiscoveryRetry(): void {
@@ -701,6 +718,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       return
     }
     const model = effective?.model ?? control.model
+    const reasoning = this.state.modelProvider === undefined
+      ? undefined
+      : this.targetReasoning({ providerId: this.state.modelProvider, model }, control, control.reasoningEffort)
+    const reasoningEfforts = reasoning?.catalogBacked ? reasoning.efforts : control.reasoningEfforts
     const projectedModels = this.nativeModelSource.project(
       this.state.nativeModelsScope,
       this.state.modelProvider,
@@ -717,7 +738,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       && JSON.stringify(this.state.nativeModels) === JSON.stringify(projectedModels.nativeModels)
       && this.state.nativeModelsProviderId === projectedModels.nativeModelsProviderId
       && this.state.reasoningEffort === control.reasoningEffort
-      && this.sameValues(this.state.reasoningEfforts, control.reasoningEfforts)
+      && this.sameValues(this.state.reasoningEfforts, reasoningEfforts)
     ) return
     this.confirmNativeModelAssignment(
       this.state.modelProvider,
@@ -728,7 +749,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.publishPatch({
       model,
       reasoningEffort: control.reasoningEffort,
-      reasoningEfforts: control.reasoningEfforts,
+      reasoningEfforts,
     })
   }
 
@@ -915,6 +936,13 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const seat = locateNativeModelProviderMountSeat(this.document)
     const control = seat === undefined ? undefined : locateNativeModelSelectionControl(seat.trigger)
     const projection = this.selectionClient.snapshot()
+    this.pendingReasoning.resolve(this.navigationGeneration, projection.pending)
+    const pendingReasoning = projection.pending === undefined || control === undefined
+      ? undefined
+      : this.pendingTargetReasoning(projection.pending, control)
+    const effectiveReasoning = next.modelProvider === undefined || next.model === undefined || control === undefined
+      ? undefined
+      : this.targetReasoning({ providerId: next.modelProvider, model: next.model }, control, next.reasoningEffort)
     const confirmation: NativeProviderSubmitConfirmation | undefined = this.selectionClient.confirmation()
     const nativeModelSource = this.nativeModelSource.project(
       next.nativeModelsScope,
@@ -924,6 +952,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (this.suspendedAvailability !== undefined) this.suspendedAvailability = next.available
     this.state = Object.freeze({
       ...base,
+      ...(effectiveReasoning?.catalogBacked ? { reasoningEfforts: effectiveReasoning.efforts } : {}),
       available: this.suspendedAvailability === undefined && next.available,
       modelLabel: control?.model === next.model ? control?.modelLabel : undefined,
       ...nativeModelSource,
@@ -935,6 +964,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       ...(projection.pending === undefined ? {} : {
         pendingProviderId: projection.pending.providerId,
         pendingModel: projection.pending.model,
+        ...(pendingReasoning?.effort === undefined ? {} : { pendingReasoningEffort: pendingReasoning.effort }),
       }),
       ...(confirmation === undefined ? {} : { confirmation }),
       ...(this.submissionError === undefined ? {} : { submissionError: this.submissionError }),
@@ -948,35 +978,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private publishPatch(next: SelectionPatch = {}): void {
     if (this.disposed) return
     if (Object.hasOwn(next, 'submissionError')) this.submissionError = next.submissionError ?? undefined
-    const threadId = Object.hasOwn(next, 'threadId') ? next.threadId ?? undefined : this.state.threadId
-    const modelProvider = Object.hasOwn(next, 'modelProvider')
-      ? next.modelProvider ?? undefined
-      : this.state.modelProvider
-    const model = Object.hasOwn(next, 'model') ? next.model ?? undefined : this.state.model
-    const reasoningEffort = Object.hasOwn(next, 'reasoningEffort')
-      ? next.reasoningEffort ?? undefined
-      : this.state.reasoningEffort
-    const reasoningEfforts = Object.hasOwn(next, 'reasoningEfforts')
-      ? next.reasoningEfforts ?? undefined
-      : this.state.reasoningEfforts
-    const serviceTier = Object.hasOwn(next, 'serviceTier') ? next.serviceTier ?? null : this.state.serviceTier
-    const nativeModelsScope = next.nativeModelsScope ?? this.state.nativeModelsScope
-    const draftPreference = Object.hasOwn(next, 'draftPreference')
-      ? next.draftPreference ?? undefined
-      : this.state.draftPreference
-    const error = Object.hasOwn(next, 'error') ? next.error ?? undefined : this.state.error
-    this.replaceState({
-      available: next.available ?? this.suspendedAvailability ?? this.state.available,
-      busy: this.selecting || this.turnBusy,
-      ...(threadId === undefined ? {} : { threadId }),
-      ...(modelProvider === undefined ? {} : { modelProvider }),
-      ...(model === undefined ? {} : { model }),
-      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-      ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
-      ...(serviceTier === undefined ? {} : { serviceTier }),
-      ...(nativeModelsScope === undefined ? {} : { nativeModelsScope }),
-      ...(draftPreference === undefined ? {} : { draftPreference }),
-      ...(error === undefined ? {} : { error }),
-    })
+    this.replaceState(
+      patchNativeSelection(this.state, next, this.selecting || this.turnBusy, this.suspendedAvailability),
+    )
   }
 }

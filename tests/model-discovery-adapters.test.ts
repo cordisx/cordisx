@@ -15,16 +15,22 @@ import {
   isOpenRouterEndpoint,
   openRouterDiscoveryAdapter,
 } from '../packages/cli/src/launcher/model-catalog/openrouter.js'
+import { resolveTargetReasoning } from '../packages/cli/src/renderer/native-model-reasoning.js'
 import { DiscoveryAdapterRegistry } from '../packages/cli/src/launcher/model-catalog/registry.js'
 import {
   createDiscoveryRequestCapability,
   type DiscoveryFetch,
 } from '../packages/cli/src/launcher/model-catalog/request-capability.js'
 
-const response = (ids: string[]) =>
+const response = (ids: string[], efforts: Readonly<Record<string, unknown>> = {}) =>
   Response.json({
     object: 'list',
-    data: ids.map(id => ({ id, object: 'model', owned_by: 'deepseek' })),
+    data: ids.map(id => ({
+      id,
+      object: 'model',
+      owned_by: 'deepseek',
+      ...(efforts[id] === undefined ? {} : { effort: efforts[id] }),
+    })),
   })
 const connection = ({
   endpoint = 'https://api.deepseek.com',
@@ -129,6 +135,51 @@ describe('discovery contracts', () => {
       }),
     )
     expect(fetcher.mock.calls[0]?.[1]).not.toHaveProperty('body')
+  })
+
+  it('projects only server-declared official DeepSeek reasoning efforts', async () => {
+    const models = await deepSeekDiscoveryAdapter().discover(
+      connection({
+        fetcher: async () =>
+          response(
+            ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro', 'without-effort', 'invalid-effort'],
+            {
+              'deepseek-flash': { supported_levels: ['low', 'high', 'max'], default_level: 'high' },
+              'deepseek-v4-pro': { supported_levels: ['low', 'high'], default_level: 'low' },
+              'invalid-effort': { supported_levels: ['low', 'extreme'], default_level: 'low' },
+            },
+          ),
+      }),
+      new AbortController().signal,
+    )
+
+    expect(models.map(model => [model.id, model.reasoningCapabilities])).toEqual([
+      ['deepseek-flash', { efforts: ['low', 'high', 'max'], defaultEffort: 'high' }],
+      ['deepseek-v4-flash', undefined],
+      ['deepseek-v4-pro', { efforts: ['low', 'high'], defaultEffort: 'low' }],
+      ['invalid-effort', undefined],
+      ['without-effort', undefined],
+    ])
+    const flash = models.find(model => model.id === 'deepseek-flash')!
+    const legacyAlias = models.find(model => model.id === 'deepseek-v4-flash')!
+    expect(resolveTargetReasoning(
+      { providerId: 'deepseek', model: flash.id },
+      undefined,
+      [],
+      (providerId, modelId) =>
+        providerId === 'deepseek' && modelId === flash.id
+          ? flash.reasoningCapabilities
+          : undefined,
+    )).toEqual({ effort: 'high', efforts: ['low', 'high', 'max'], catalogBacked: true })
+    expect(resolveTargetReasoning(
+      { providerId: 'deepseek', model: legacyAlias.id },
+      undefined,
+      [],
+      (providerId, modelId) =>
+        providerId === 'deepseek' && modelId === legacyAlias.id
+          ? legacyAlias.reasoningCapabilities
+          : undefined,
+    )).toEqual({ efforts: [], catalogBacked: false })
   })
 
   it('does not resolve credentials on an ineligible connection', async () => {

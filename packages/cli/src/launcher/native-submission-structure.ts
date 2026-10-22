@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
+import { modelReasoningEfforts } from '../model-reasoning-capabilities.js'
 import { resolveNativeVariable } from './native-source-bindings.js'
 import {
   applySourceEdits,
@@ -23,6 +24,7 @@ export interface NativeSubmissionTransformAnalysis {
 }
 const TOKEN = 'cordisx.operation_token'
 const carrier = '__cordisxOperationToken'
+const reasoningCarrier = '__cordisxReasoningEffort'
 const decision = '__cordisxAdmissionDecision'
 const tier = 'globalThis.__cordisxNativeServiceTierOverride'
 const hash = (source: string): string => createHash('sha256').update(source).digest('hex')
@@ -149,7 +151,12 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
     && has(n, ['threadReferences', 'openingPromptForHistory']) && n.properties.some((p: SyntaxNode) =>
       p.type === 'SpreadElement'
     ), 'submit-context')
-  plan.insert(context.end - 1, `,...(${decision}.operationToken===void 0?{}:{${carrier}:${decision}.operationToken})`)
+  plan.insert(
+    context.end - 1,
+    `,...(${decision}.operationToken===void 0?{}:{${carrier}:${decision}.operationToken,...(${
+      JSON.stringify(modelReasoningEfforts)
+    }.includes(${decision}.reasoningEffort)?{${reasoningCarrier}:${decision}.reasoningEffort}:{})})`,
+  )
   plan.capabilities.push('submit-guard')
 }
 
@@ -159,7 +166,14 @@ function draftRequest(plan: ResourcePlan, fn: SyntaxNode): void {
     n.type === 'ObjectExpression'
     && has(n, ['configOverrides', 'requiresThreadReferences', 'input', 'serviceTier']), 'draft-request')
   const overrides = properties(request).get('configOverrides')!
-  plan.replace(overrides, config(valid(`${context}.${carrier}`), plan.text(overrides)))
+  const token = valid(`${context}.${carrier}`)
+  const effort = `${context}.${reasoningCarrier}`
+  plan.replace(
+    overrides,
+    `(${token}===void 0?${plan.text(overrides)}:{...${plan.text(overrides)},${JSON.stringify(TOKEN)}:${token},...(${
+      JSON.stringify(modelReasoningEfforts)
+    }.includes(${effort})?{model_reasoning_effort:${effort}}:{})})`,
+  )
   plan.serviceTier(request)
   plan.capabilities.push('draft-request')
 }
@@ -297,14 +311,20 @@ function firstTurn(plan: ResourcePlan, fn: SyntaxNode): void {
     throw new Error('Native capability first-turn-receipt: model is not bound to the creation response')
   }
   const mode = properties(request).get('collaborationMode')!
+  const requestEffort = properties(request).get('effort')!
+  const effort = `${incomingConfig}?.model_reasoning_effort`
+  const validEffort = `${token}!==void 0&&${JSON.stringify(modelReasoningEfforts)}.includes(${effort})`
   // The intermediary already routes this first turn to the receipt's model. Seed the
   // native turn state too, before idle control synchronization can look like a switch.
   plan.replace(
     mode,
-    `(${token}===void 0?${plan.text(mode)}:((mode,model)=>
+    `(${token}===void 0?${plan.text(mode)}:((mode,model,effort)=>
       mode!=null&&mode.settings!=null&&typeof model==='string'&&model.length>0&&model.length<=512
-      ?{...mode,settings:{...mode.settings,model}}:mode)(${plan.text(mode)},${response}.model))`,
+      ?{...mode,settings:{...mode.settings,model,...(effort===void 0?{}:{reasoning_effort:effort})}}:mode)(${
+      plan.text(mode)
+    },${response}.model,${validEffort}?${effort}:void 0))`,
   )
+  plan.replace(requestEffort, `(${validEffort}?${effort}:${plan.text(requestEffort)})`)
   plan.addConfig(request, token)
   plan.serviceTier(request)
   plan.capabilities.push('first-turn')

@@ -1,4 +1,10 @@
 /** Host-private clipboard transfer; this is not a plugin contract. */
+export const CATALOG_TRANSFER_MAX_TEXT = 48_000
+export const CATALOG_TRANSFER_MAX_JSON = 256_000
+export const CATALOG_TRANSFER_MAX_REQUEST_BYTES = 65_536
+export const CATALOG_TRANSFER_MAX_CONNECTIONS = 24
+export const CATALOG_TRANSFER_MAX_MODELS_PER_CONNECTION = 10_000
+
 export interface CatalogTransferSelection {
   readonly bindingRef: string
   readonly modelIds: readonly string[]
@@ -37,7 +43,7 @@ export interface CatalogTransferVariablePreparation extends CatalogTransferEnvir
 
 export type CatalogTransferExportPreparationResult =
   | { readonly status: 'ok'; readonly variables: readonly CatalogTransferVariablePreparation[] }
-  | { readonly status: 'rejected'; readonly code: 'invalid' | 'unavailable' }
+  | { readonly status: 'rejected'; readonly code: 'invalid' | 'unavailable' | 'too-large' }
 
 export interface CatalogTransferImportRequest {
   readonly text: string

@@ -44,6 +44,7 @@ export interface ProviderSelectionSnapshot {
   readonly nativeModelAssignments?: readonly NativeModelAssignment[]
   readonly reasoningEffort?: string
   readonly reasoningEfforts?: readonly string[]
+  readonly pendingReasoningEffort?: string
   readonly serviceTier?: 'priority' | null
   readonly busy: boolean
   readonly pendingProviderId?: string
@@ -297,8 +298,13 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       if (result !== 'accepted') {
         setStatus(undefined)
         setError(result === 'busy' ? copy.busy : copy.failed)
-      } else if (transport.getSnapshot().reasoningEffort === effort) setStatus(copy.updated)
-      else setStatus(copy.accepted)
+      } else {
+        const current = transport.getSnapshot()
+        const selectedEffort = current.pendingProviderId === undefined
+          ? current.reasoningEffort
+          : current.pendingReasoningEffort
+        setStatus(selectedEffort === effort ? copy.updated : copy.accepted)
+      }
     } catch {
       if (generation !== operation.current) return
       setStatus(undefined)
@@ -485,8 +491,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const reasoningCapabilities = disclosedModel?.reasoningCapabilities ?? displayedNativeModel?.reasoningCapabilities
   const reasoningEfforts = reasoningCapabilities?.efforts
     ?? (catalogBacked && displayedNativeModel === undefined ? [] : native.reasoningEfforts ?? [])
-  const reasoningEffort = reasoningEfforts.includes(native.reasoningEffort ?? '')
+  const selectedReasoningEffort = native.pendingProviderId === undefined
     ? native.reasoningEffort
+    : native.pendingReasoningEffort
+  const reasoningEffort = reasoningEfforts.includes(selectedReasoningEffort ?? '')
+    ? selectedReasoningEffort
     : reasoningCapabilities?.defaultEffort
   return (
     <div
@@ -695,7 +704,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       {reasoningEfforts.length > 0
                         ? (
                           <ProviderReasoningSlider
-                            key={JSON.stringify([native.modelProvider, native.model, reasoningEfforts])}
+                            key={JSON.stringify([
+                              displayedProviderId,
+                              native.pendingModel ?? native.model,
+                              reasoningEfforts,
+                            ])}
                             efforts={reasoningEfforts}
                             value={reasoningEffort}
                             disabled={!native.available || (native.busy && !switching)}

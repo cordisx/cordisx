@@ -1,4 +1,9 @@
-import { type ModelReasoningCapabilities, resolveModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import {
+  type ModelReasoningCapabilities,
+  type ModelReasoningEffort,
+  resolveModelReasoningEffort,
+} from '../model-reasoning-capabilities.js'
+import type { PendingNativeProviderSelection } from './native-provider-selection-client.js'
 
 export type CatalogReasoningLookup = (
   providerId: string,
@@ -15,6 +20,27 @@ export interface TargetReasoning {
   readonly effort?: string
   readonly efforts: readonly string[]
   readonly catalogBacked: boolean
+}
+
+export class PendingModelReasoning {
+  private selection: { readonly key: string; readonly effort: ModelReasoningEffort } | undefined
+
+  select(navigation: number, pending: PendingNativeProviderSelection, effort: ModelReasoningEffort): void {
+    this.selection = { key: this.key(navigation, pending), effort }
+  }
+
+  resolve(
+    navigation: number,
+    pending: PendingNativeProviderSelection | undefined,
+    fallback?: string,
+  ): string | undefined {
+    if (pending === undefined || this.selection?.key !== this.key(navigation, pending)) this.selection = undefined
+    return this.selection?.effort ?? fallback
+  }
+
+  private key(navigation: number, pending: PendingNativeProviderSelection): string {
+    return JSON.stringify([navigation, pending.generation, pending.providerId, pending.model])
+  }
 }
 
 export function resolveTargetReasoning(

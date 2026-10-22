@@ -17,6 +17,7 @@ import type {
   CatalogTransferImportRequest,
   CatalogTransferImportResult,
 } from '../model-catalog-transfer.js'
+import { CATALOG_TRANSFER_MAX_REQUEST_BYTES } from '../model-catalog-transfer.js'
 import {
   EnvironmentGeneratorError,
   EnvironmentGeneratorExecutor,
@@ -34,6 +35,7 @@ import type {
   NormalizedNativeSubmissionAction,
   PendingNativeProviderChange,
 } from '../renderer/native-provider-submission-policy.js'
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 const BINDING = '__cordisxNativeSubmissionCommand'
 const RECEIVER = '__cordisxNativeSubmissionReceive'
@@ -69,6 +71,7 @@ function actionOf(value: unknown): NormalizedNativeSubmissionAction {
   if (
     !action || !text(action.operationId, 256) || !Number.isSafeInteger(action.operationGeneration)
     || (action.operationGeneration as number) < 1 || (action.threadId !== undefined && !text(action.threadId))
+    || (action.reasoningEffort !== undefined && !isModelReasoningEffort(action.reasoningEffort))
     || !['ordinary-send', 'steer', 'queue', 'edit-retry', 'unknown-submission', 'non-submission'].includes(
       String(action.intent),
     )
@@ -299,7 +302,7 @@ export function createNativeSubmissionCdpAuthority(options: {
         let requestId = 'invalid'
         let admitted = false
         try {
-          if (Buffer.byteLength(payload) > 65_536 || owner.disposed || active.size >= 16) {
+          if (Buffer.byteLength(payload) > CATALOG_TRANSFER_MAX_REQUEST_BYTES || owner.disposed || active.size >= 16) {
             throw new Error('Native channel unavailable')
           }
           const envelope = record(JSON.parse(payload))

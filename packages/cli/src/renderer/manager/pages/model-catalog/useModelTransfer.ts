@@ -1,5 +1,6 @@
 import type { NotificationsV1 } from '@cordisx/protocol/notifications/v1'
 import { useEffect, useRef, useState } from 'react'
+import { CATALOG_TRANSFER_MAX_REQUEST_BYTES, CATALOG_TRANSFER_MAX_TEXT } from '../../../../model-catalog-transfer.js'
 import type {
   CatalogTransferEnvironmentVariable,
   CatalogTransferSelection,
@@ -18,6 +19,18 @@ export interface ModelTransferImportDraft {
   readonly text: string
   readonly variables: readonly CatalogTransferVariablePreparation[]
   readonly connections: readonly { readonly transferId: string; readonly title: string }[]
+}
+
+function exceedsNativeRequestLimit(
+  operation: 'catalogManagementPrepareExport' | 'catalogManagementExport',
+  request: Record<string, unknown>,
+): boolean {
+  const payload = JSON.stringify({
+    requestId: '0'.repeat(36),
+    operation,
+    input: { generation: '0'.repeat(36), request },
+  })
+  return new TextEncoder().encode(payload).byteLength > CATALOG_TRANSFER_MAX_REQUEST_BYTES
 }
 
 export function useModelTransfer(client: ModelCatalogClient | undefined, locale: string, onImported: () => void) {
@@ -63,10 +76,36 @@ export function useModelTransfer(client: ModelCatalogClient | undefined, locale:
   }
   const prepareExport = async (selections: readonly CatalogTransferSelection[], bulk: boolean) => {
     if (!client || busy || selections.length === 0) return
+    if (exceedsNativeRequestLimit('catalogManagementPrepareExport', { selections })) {
+      notify(
+        'export.failed',
+        'error',
+        zh ? '模型配置过大' : 'Model configuration is too large',
+        zh ? '请减少所选模型服务或模型数量后重试。' : 'Select fewer model services or models and try again.',
+      )
+      return
+    }
     setBusy(true)
     try {
       const result = await client.prepareExport({ selections })
-      if (result.status !== 'ok') throw new Error(result.code)
+      if (result.status !== 'ok') {
+        const tooLarge = result.code === 'too-large'
+        notify(
+          'export.failed',
+          'error',
+          tooLarge
+            ? zh ? '模型配置过大' : 'Model configuration is too large'
+            : zh
+            ? '无法准备模型配置'
+            : 'Could not prepare model configuration',
+          tooLarge
+            ? zh ? '请减少所选模型服务或模型数量后重试。' : 'Select fewer model services or models and try again.'
+            : zh
+            ? '请检查连接状态后重试。'
+            : 'Check the connection state and try again.',
+        )
+        return
+      }
       setExportDraft({ selections, bulk, variables: result.variables })
     } catch {
       notify(
@@ -132,7 +171,7 @@ export function useModelTransfer(client: ModelCatalogClient | undefined, locale:
       if (!client || busy || !exportDraft) return false
       setBusy(true)
       try {
-        const result = await client.export({
+        const request = {
           selections: exportDraft.selections,
           includeValues,
           variables: variables.map(variable => ({
@@ -142,8 +181,14 @@ export function useModelTransfer(client: ModelCatalogClient | undefined, locale:
             ...(variable.description === undefined ? {} : { description: variable.description }),
             ...(variable.generator === undefined ? {} : { generator: variable.generator }),
           })),
-        })
-        if (result.status !== 'ok' || !navigator.clipboard?.writeText) throw new Error('clipboard-unavailable')
+        }
+        if (exceedsNativeRequestLimit('catalogManagementExport', request)) throw new Error('transfer-too-large')
+        const result = await client.export(request)
+        if (result.status === 'rejected') {
+          if (result.code === 'too-large') throw new Error('transfer-too-large')
+          throw new Error('transfer-unavailable')
+        }
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard-unavailable')
         await navigator.clipboard.writeText(result.text)
         setExportDraft(undefined)
         if (exportDraft.bulk) {
@@ -163,12 +208,21 @@ export function useModelTransfer(client: ModelCatalogClient | undefined, locale:
             : 'Configuration was copied without variable values.',
         )
         return true
-      } catch {
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === 'transfer-too-large'
         notify(
           'export.failed',
           'error',
-          zh ? '无法复制模型配置' : 'Could not copy model configuration',
-          zh ? '请检查连接和剪贴板权限。' : 'Check the connection and clipboard permission.',
+          tooLarge
+            ? zh ? '模型配置过大' : 'Model configuration is too large'
+            : zh
+            ? '无法复制模型配置'
+            : 'Could not copy model configuration',
+          tooLarge
+            ? zh ? '请减少所选模型服务或模型数量后重试。' : 'Select fewer model services or models and try again.'
+            : zh
+            ? '请检查连接和剪贴板权限。'
+            : 'Check the connection and clipboard permission.',
         )
         return false
       } finally {
@@ -181,7 +235,7 @@ export function useModelTransfer(client: ModelCatalogClient | undefined, locale:
       try {
         if (!navigator.clipboard?.readText) throw new Error('clipboard-unavailable')
         const text = await navigator.clipboard.readText()
-        if (text.length > 48_000) throw new Error('too-large')
+        if (text.length > CATALOG_TRANSFER_MAX_TEXT) throw new Error('too-large')
         const result = await client.prepareImport(text)
         if (result.status !== 'ok') throw new Error(result.code)
         setImportDraft({ text, variables: result.variables, connections: result.connections })

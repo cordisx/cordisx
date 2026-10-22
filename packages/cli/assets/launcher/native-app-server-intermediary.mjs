@@ -212,14 +212,27 @@ async function forward(line) {
       params.modelProvider = dispatch.providerId
       params.model = dispatch.model
       params.config = { ...nextConfig, ...dispatch.configOverrides }
+      if (typeof dispatch.reasoningEffort === 'string') {
+        params.config.model_reasoning_effort = dispatch.reasoningEffort
+      }
     } else {
       // The private resume sets provider config. The original turn retains all user input and controls.
       params.model = dispatch.model
+      if (typeof dispatch.reasoningEffort === 'string') params.effort = dispatch.reasoningEffort
       if (Object.keys(nextConfig).length === 0) delete params.config
       else params.config = nextConfig
       const mode = object(params.collaborationMode)
       if (mode && object(mode.settings)) {
-        params.collaborationMode = { ...mode, settings: { ...mode.settings, model: dispatch.model } }
+        params.collaborationMode = {
+          ...mode,
+          settings: {
+            ...mode.settings,
+            model: dispatch.model,
+            ...(typeof dispatch.reasoningEffort === 'string'
+              ? { reasoning_effort: dispatch.reasoningEffort }
+              : {}),
+          },
+        }
       }
     }
     const authorized = await controlCall('authorize', { token, requestId: message.id })

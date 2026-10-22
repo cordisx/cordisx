@@ -23,11 +23,14 @@ import {
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../kernel-operation-lock.js'
 import { liveProcessStartedAt, recordedProcessStatus } from '../process-identity.js'
 import { type PortableBundle, validatePortableBundle } from './portable-transfer-codec.js'
+import { CATALOG_TRANSFER_MAX_JSON } from '../../model-catalog-transfer.js'
 
 const nonce = () => randomBytes(32).toString('base64url')
-// One 256,000-byte portable connection may duplicate 512 maximum-length IDs in strategy.ids.
-// The final allowance covers the Host-generated record fields and a later 8 KB credential.
-const MAX_MANAGED_PROVIDER_RECORD_CHARS = 256_000 + 512 * (512 + 3) + 16 * 1024
+// The source allowance covers one imported bundle; another bundle-sized budget
+// covers duplicated IDs in strategy.ids, plus Host fields and an 8 KB credential.
+const MAX_MANAGED_PROVIDER_RECORD_CHARS = 256_000
+  + CATALOG_TRANSFER_MAX_JSON
+  + 16 * 1024
 const failure = () => new CatalogError('credential-unavailable')
 const lockBusy = () => new CatalogError('temporary')
 const lockInvalid = () => new CatalogError('source-invalid')

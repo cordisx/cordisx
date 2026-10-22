@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import type { CatalogProtocolCapabilities } from '../../model-catalog-management.js'
+import {
+  CATALOG_TRANSFER_MAX_CONNECTIONS,
+  CATALOG_TRANSFER_MAX_JSON,
+  CATALOG_TRANSFER_MAX_MODELS_PER_CONNECTION,
+  CATALOG_TRANSFER_MAX_TEXT,
+} from '../../model-catalog-transfer.js'
 import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
 import { boundedString, object } from './contracts.js'
 
 const PREFIX_V1 = 'cordisx-models-v1.'
 const PREFIX_V2 = 'cordisx-models-v2.'
 const PREFIX_V3 = 'cordisx-models-v3.'
-const MAX_TEXT = 48_000
 const MAX_COMPRESSED = 36_000
-const MAX_JSON = 256_000
-const MAX_CONNECTIONS = 24
-const MAX_MODELS = 512
 const MAX_ENVIRONMENT = 128
 const transferIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const portableApiPaths = new Set(['/', '/v1', '/api/v1', '/zen/go/v1'])
@@ -135,7 +137,7 @@ function connection(value: unknown, version: 1 | 2 | 3): PortableConnection {
     || !['responses', 'chat-completions'].includes(String(input.protocol))
     || input.auth !== 'bearer' || !Array.isArray(input.models)
     || input.environment !== undefined && (version < 2 || !environmentName(input.environment))
-    || input.models.length === 0 || input.models.length > MAX_MODELS
+    || input.models.length === 0 || input.models.length > CATALOG_TRANSFER_MAX_MODELS_PER_CONNECTION
   ) return invalid()
   const models = input.models.map(model)
   if (new Set(models.map(item => item.id)).size !== models.length) return invalid()
@@ -182,13 +184,12 @@ export function validatePortableBundle(value: unknown): PortableBundle {
     !input || ![1, 2, 3].includes(Number(input.version))
     || !exact(input, input.version === 1 ? ['version', 'connections'] : ['version', 'environment', 'connections'])
     || !Array.isArray(input.connections) || input.connections.length === 0
-    || input.connections.length > MAX_CONNECTIONS
+    || input.connections.length > CATALOG_TRANSFER_MAX_CONNECTIONS
   ) return invalid()
   const version = input.version as 1 | 2 | 3
   const connections = input.connections.map(value => connection(value, version))
   if (
     new Set(connections.map(item => item.transferId)).size !== connections.length
-    || connections.reduce((count, item) => count + item.models.length, 0) > MAX_MODELS
   ) return invalid()
   if (version === 1) return Object.freeze({ version: 1, connections: Object.freeze(connections) })
   if (!Array.isArray(input.environment) || input.environment.length > MAX_ENVIRONMENT) return invalid()
@@ -211,17 +212,17 @@ export function portableConnection(input: Omit<PortableConnection, 'transferId'>
 export function encodePortableBundle(value: PortableBundle): string {
   const bundle = validatePortableBundle(value)
   const json = Buffer.from(JSON.stringify(bundle))
-  if (json.length > MAX_JSON) throw new PortableTransferError('too-large')
+  if (json.length > CATALOG_TRANSFER_MAX_JSON) throw new PortableTransferError('too-large')
   const compressed = deflateRawSync(json)
   if (compressed.length > MAX_COMPRESSED) throw new PortableTransferError('too-large')
   const prefix = bundle.version === 1 ? PREFIX_V1 : bundle.version === 2 ? PREFIX_V2 : PREFIX_V3
   const text = `${prefix}${compressed.toString('base64url')}`
-  if (text.length > MAX_TEXT) throw new PortableTransferError('too-large')
+  if (text.length > CATALOG_TRANSFER_MAX_TEXT) throw new PortableTransferError('too-large')
   return text
 }
 
 export function decodePortableBundle(text: unknown): PortableBundle {
-  if (typeof text !== 'string' || text.length > MAX_TEXT) return invalid()
+  if (typeof text !== 'string' || text.length > CATALOG_TRANSFER_MAX_TEXT) return invalid()
   const prefix = text.startsWith(PREFIX_V1)
     ? PREFIX_V1
     : text.startsWith(PREFIX_V2)
@@ -236,7 +237,7 @@ export function decodePortableBundle(text: unknown): PortableBundle {
   if (compressed.length > MAX_COMPRESSED || compressed.toString('base64url') !== encoded) return invalid()
   let json: Buffer
   try {
-    json = inflateRawSync(compressed, { maxOutputLength: MAX_JSON })
+    json = inflateRawSync(compressed, { maxOutputLength: CATALOG_TRANSFER_MAX_JSON })
   } catch {
     return invalid()
   }

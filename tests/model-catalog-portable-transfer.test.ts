@@ -16,6 +16,7 @@ import {
   encodePortableBundle,
   type PortableBundle,
   portableConnection,
+  PortableTransferError,
 } from '../packages/cli/src/launcher/model-catalog/portable-transfer-codec.js'
 import {
   MANAGED_PROVIDER_CAPTURE_SCRIPT,
@@ -61,6 +62,98 @@ describe('portable model transfer', () => {
     expect(text).toMatch(/^cordisx-models-v1\.[A-Za-z0-9_-]+$/u)
     expect(decodePortableBundle(text)).toEqual(payload)
     expect(text).not.toContain('exact-model')
+  })
+
+  it('keeps the encoded byte limit as the portable bundle resource bound', () => {
+    const large = portableConnection({
+      title: 'Large catalog',
+      endpoint: 'https://openrouter.ai/api/v1',
+      protocol: 'responses',
+      auth: 'bearer',
+      models: Array.from({ length: 600 }, (_, index) => ({
+        id: `model-${index}-${'x'.repeat(400)}`,
+        label: `Model ${index} ${'y'.repeat(180)}`,
+      })),
+    })
+    expect(() => encodePortableBundle(bundle(large))).toThrowError(PortableTransferError)
+  })
+
+  it('prepares and round trips the full 530-model selected catalog within byte limits', async () => {
+    const providers = [
+      { id: 'deepseek', count: 2, endpoint: 'https://api.deepseek.com' },
+      { id: 'opencode-go', count: 37, endpoint: 'https://opencode.ai/zen/go/v1' },
+      { id: 'openrouter', count: 491, endpoint: 'https://openrouter.ai/api/v1' },
+    ]
+    const providerIds = new Set(providers.map(provider => provider.id))
+    const selections = providers.map(provider => ({
+      bindingRef: `codex-config:${provider.id}`,
+      modelIds: Array.from({ length: provider.count }, (_, index) => `${provider.id}-model-${index}`),
+    }))
+    const native = await NativeCatalogManagement.open({
+      load: async () => ({
+        providers: providers.map(provider => ({
+          providerId: provider.id,
+          pluginId: 'cordisx.codex-config',
+          title: provider.id,
+          models: selections.find(selection => selection.bindingRef === `codex-config:${provider.id}`)!.modelIds
+            .map(id => ({ id, label: id, aliases: [] })),
+        })),
+        providerIds,
+        providerWireApis: new Map(providers.map(provider => [provider.id, 'responses' as const])),
+        portableConnections: new Map(providers.map(provider => [provider.id, {
+          endpoint: provider.endpoint,
+          protocol: 'responses' as const,
+          auth: 'bearer' as const,
+        }])),
+        portableEnvironment: new Map(),
+        sourceAvailable: true,
+        diagnostics: [],
+      }),
+    })
+    const managed = {
+      snapshot: () => ({ epoch: 'managed', sequence: 0, views: [], canCreateConnection: true }),
+      command: async () => ({ status: 'rejected' as const, code: 'unsupported' as const }),
+      subscribe: () => () => {},
+    }
+    const management = new CompositeCatalogManagement(native, managed)
+    try {
+      const prepared = management.prepareExport({ selections }, () => true)
+      expect(prepared.status).toBe('ok')
+      const exported = await management.export({ selections, includeValues: false }, () => true)
+      expect(exported.status).toBe('ok')
+      if (exported.status !== 'ok') return
+      const decoded = decodePortableBundle(exported.text)
+      expect(decoded.connections.map(item => item.models.length)).toEqual([2, 37, 491])
+      expect(decoded.connections.reduce((count, item) => count + item.models.length, 0)).toBe(530)
+      expect(decoded.connections.map(item => item.models[0]?.id)).toEqual([
+        'deepseek-model-0',
+        'opencode-go-model-0',
+        'openrouter-model-0',
+      ])
+      const homeDir = await mkdtemp(path.join(os.tmpdir(), 'portable-530-import-'))
+      homes.push(homeDir)
+      const configPath = path.join(homeDir, 'config.json')
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          ...createDefaultHomeConfig(),
+          apps: { codex: { defaultProfile: 'test', profiles: { test: { displayName: 'Test', dataMode: 'shared' } } } },
+        }),
+        { mode: 0o600 },
+      )
+      const owner = await ManagedProviderOwner.open({ homeDir, profileId: 'test' })
+      owners.push(owner)
+      expect(await owner.importPortable(decoded)).toMatchObject({ imported: 3, skipped: 0 })
+      expect(owner.snapshot().map(record => record.settings.models?.length).sort((a, b) => a! - b!))
+        .toEqual([2, 37, 491])
+      await owner.close()
+      const reopened = await ManagedProviderOwner.open({ homeDir, profileId: 'test' })
+      owners.push(reopened)
+      expect(reopened.snapshot().map(record => record.settings.models?.length).sort((a, b) => a! - b!))
+        .toEqual([2, 37, 491])
+    } finally {
+      management.close()
+    }
   })
 
   it('round trips v2 variables while omitting values unless they are explicitly supplied', () => {
@@ -406,6 +499,55 @@ describe('portable model transfer', () => {
     }
   })
 
+  it('does not reuse a managed environment name for a command-auth export placeholder', async () => {
+    const native = await NativeCatalogManagement.open({
+      load: async () => ({
+        providers: [{
+          providerId: 'command',
+          pluginId: 'cordisx.codex-config',
+          title: 'Command provider',
+          models: [{ id: 'command-model', label: 'Command model', aliases: [] }],
+        }],
+        providerIds: new Set(['command']),
+        providerWireApis: new Map([['command', 'responses' as const]]),
+        portableConnections: new Map([['command', {
+          endpoint: 'https://openrouter.ai/api/v1',
+          protocol: 'responses' as const,
+          auth: 'bearer' as const,
+        }]]),
+        portableEnvironment: new Map([['command', { placeholder: true }]]),
+        sourceAvailable: true,
+        diagnostics: [],
+      }),
+    })
+    const managed = {
+      snapshot: () => ({ epoch: 'managed', sequence: 0, views: [], canCreateConnection: true }),
+      command: async () => ({ status: 'rejected' as const, code: 'unsupported' as const }),
+      subscribe: () => () => {},
+      environmentEntries: () => [{
+        name: 'CORDISX_MODEL_SERVICE_KEY',
+        value: 'unrelated-existing-value',
+        enabled: true,
+      }],
+    }
+    const management = new CompositeCatalogManagement(native, managed)
+    try {
+      expect(management.prepareExport({
+        selections: [{ bindingRef: 'codex-config:command', modelIds: ['command-model'] }],
+      }, () => true)).toEqual({
+        status: 'ok',
+        variables: [expect.objectContaining({
+          sourceName: 'CORDISX_MODEL_SERVICE_KEY_1',
+          name: 'CORDISX_MODEL_SERVICE_KEY_1',
+          value: '',
+          available: false,
+        })],
+      })
+    } finally {
+      management.close()
+    }
+  })
+
   it('imports keyless atomically, preserves exact metadata, and skips only the same transfer identity', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'portable-transfer-'))
     homes.push(homeDir)
@@ -667,7 +809,7 @@ describe('portable model transfer', () => {
     expect(await readFile(configPath, 'utf8')).toBe(beforeConflict)
   })
 
-  it('imports 286 selected models across restart and still permits adding a key', async () => {
+  it('imports 600 models for one provider across restart and still permits adding a key', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'portable-large-transfer-'))
     homes.push(homeDir)
     const configPath = path.join(homeDir, 'config.json')
@@ -679,9 +821,9 @@ describe('portable model transfer', () => {
       }),
       { mode: 0o600 },
     )
-    const models = Array.from({ length: 286 }, (_, index) => ({
-      id: `openrouter/vendor-model-${String(index).padStart(3, '0')}`,
-      label: `Vendor Model ${String(index).padStart(3, '0')} Extended`,
+    const models = Array.from({ length: 600 }, (_, index) => ({
+      id: `m${index}`,
+      label: `Model ${index}`,
     }))
     const large = bundle(portableConnection({
       title: 'OpenRouter fixture',

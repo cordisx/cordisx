@@ -1,145 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-
 import {
-  createNativeSubmissionController,
-  type NativeProviderCredentialLease,
-  type NativeSubmissionScope,
-  type NativeSubmissionSelectionSnapshot,
-} from '../packages/cli/src/launcher/native-submission-controller.js'
-import type { PendingNativeProviderChange } from '../packages/cli/src/renderer/native-provider-submission-policy.js'
-
-const draftScope: NativeSubmissionScope = {
-  targetId: 'target-a',
-  rendererGeneration: 'renderer-1',
-  navigationGeneration: 3,
-}
-const threadScope: NativeSubmissionScope = { ...draftScope, threadId: 'thread-1' }
-const pendingDraft: PendingNativeProviderChange = {
-  providerId: 'provider-b',
-  model: 'model-b',
-  selectionGeneration: 7,
-}
-const pendingThread: PendingNativeProviderChange = { ...pendingDraft, threadId: 'thread-1' }
-const draftAction = {
-  operationId: 'operation-draft',
-  operationGeneration: 11,
-  intent: 'ordinary-send' as const,
-}
-const threadAction = { ...draftAction, operationId: 'operation-thread', threadId: 'thread-1' }
-const requestId = 'native-request-1'
-
-function harness(input: {
-  scope?: NativeSubmissionScope
-  pending?: PendingNativeProviderChange
-  now?: () => number
-  runtimeValid?: () => boolean
-  createdNavigation?: () => number
-  providerSource?: (providerId: string) => 'managed' | 'config' | undefined
-  validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
-} = {}) {
-  const scope = input.scope ?? draftScope
-  let snapshot: NativeSubmissionSelectionSnapshot = {
-    revision: 4,
-    effective: { providerId: 'provider-a', model: 'model-a' },
-    ...(input.pending === undefined ? {} : { pending: input.pending }),
-  }
-  const snapshots = new Map([[JSON.stringify(scope), snapshot]])
-  const disposed: string[] = []
-  let leaseSequence = 0
-  const prepare = vi.fn(async (providerId: string): Promise<NativeProviderCredentialLease> => {
-    const id = `${providerId}-${++leaseSequence}`
-    return {
-      serviceGeneration: `service-${id}`,
-      endpoint: { baseUrl: 'http://127.0.0.1:43127/v1', wireApi: 'responses' },
-      auth: {
-        scheme: 'bearer-command',
-        command: '/usr/bin/node',
-        args: ['/private/helper.mjs', id],
-        cwd: '/private',
-        timeoutMs: 5_000,
-        refreshIntervalMs: 200,
-      },
-      dispose: () => disposed.push(id),
-    }
-  })
-  const commitEffective = vi.fn((value: {
-    scope: NativeSubmissionScope
-    expectedRevision: number
-    pendingGeneration: number
-    selection: { providerId: string; model: string }
-  }) => {
-    const key = JSON.stringify(value.scope)
-    const current = snapshots.get(key) ?? snapshot
-    if (
-      current.revision !== value.expectedRevision
-      || current.pending?.selectionGeneration !== value.pendingGeneration
-    ) return false
-    const next = { revision: current.revision + 1, effective: value.selection }
-    snapshots.set(key, next)
-    if (key === JSON.stringify(scope)) snapshot = next
-    return true
-  })
-  const clearPending = vi.fn((value: {
-    scope: NativeSubmissionScope
-    expectedRevision: number
-    pendingGeneration: number
-  }) => {
-    const key = JSON.stringify(value.scope)
-    const current = snapshots.get(key) ?? snapshot
-    if (
-      current.revision !== value.expectedRevision
-      || current.pending?.selectionGeneration !== value.pendingGeneration
-    ) return false
-    const next = { revision: current.revision + 1, effective: current.effective }
-    snapshots.set(key, next)
-    if (key === JSON.stringify(scope)) snapshot = next
-    return true
-  })
-  const switchThread = vi.fn(async () => undefined)
-  const runtimeRevalidate = vi.fn(async () => input.runtimeValid?.() ?? true)
-  let id = 0
-  const controller = createNativeSubmissionController({
-    selection: {
-      adoptScope: (source, target) => {
-        const current = snapshots.get(JSON.stringify(source))
-        if (!current) return false
-        snapshots.set(JSON.stringify(target), current)
-        return true
-      },
-      snapshot: requested => snapshots.get(JSON.stringify(requested)) ?? snapshot,
-      commitEffective,
-      clearPending,
-    },
-    credentials: { prepare },
-    runtime: {
-      revalidate: runtimeRevalidate,
-      resolveCreatedScope: async (draft, threadId) => ({
-        ...draft,
-        threadId,
-        navigationGeneration: input.createdNavigation?.() ?? draft.navigationGeneration,
-      }),
-    },
-    existingThread: { switch: switchThread },
-    ...(input.providerSource === undefined ? {} : { providerSource: input.providerSource }),
-    ...(input.validateSelection === undefined ? {} : { validateSelection: input.validateSelection }),
-    operationTtlMs: 100,
-    now: input.now,
-    createId: () => `opaque-operation-${String(++id).padStart(4, '0')}`,
-  })
-  return {
-    controller,
-    disposed,
-    prepare,
-    commitEffective,
-    clearPending,
-    switchThread,
-    runtimeRevalidate,
-    setSnapshot(next: NativeSubmissionSelectionSnapshot, requested = scope) {
-      snapshots.set(JSON.stringify(requested), next)
-      if (JSON.stringify(requested) === JSON.stringify(scope)) snapshot = next
-    },
-  }
-}
+  draftAction,
+  draftScope,
+  harness,
+  pendingDraft,
+  pendingThread,
+  requestId,
+  threadAction,
+  threadScope,
+} from './fixtures/native-submission-controller-harness.js'
 
 describe('native submission controller', () => {
   it('revalidates config membership at preparation, reservation and final authorization', async () => {
@@ -377,6 +246,27 @@ describe('native submission controller', () => {
     expect(fixture.disposed).toEqual(['provider-b-1'])
   })
 
+  it('preserves explicit reasoning effort through existing-thread confirmation', async () => {
+    const fixture = harness({ scope: threadScope, pending: pendingThread })
+    const prepared = await fixture.controller.prepareSubmission(threadScope, {
+      ...threadAction,
+      reasoningEffort: 'high',
+    })
+    if (prepared.kind !== 'confirm') throw new Error('confirmation not prepared')
+    const confirmed = await fixture.controller.confirmSubmission({
+      scope: threadScope,
+      confirmationId: prepared.confirmationId,
+      expectedSelectionRevision: prepared.selectionRevision,
+    })
+    if (confirmed.kind !== 'allow-original') throw new Error('confirmation not allowed')
+    await expect(fixture.controller.consumeMarkedRequest({
+      method: 'turn/start',
+      threadId: 'thread-1',
+      requestId,
+      operationToken: confirmed.operationToken,
+    })).resolves.toMatchObject({ kind: 'dispatch', reasoningEffort: 'high' })
+  })
+
   it('rejects non-loopback cleartext endpoints', async () => {
     const fixture = harness({ pending: pendingDraft })
     const lease = await fixture.prepare('unsafe')
@@ -474,6 +364,38 @@ describe('native submission controller', () => {
     expect(disposed).toEqual(['provider-b-1'])
   })
 
+  it('carries an explicit reasoning effort through native config and marked dispatch', async () => {
+    const { controller } = harness({ pending: pendingDraft })
+    const prepared = await controller.prepareSubmission(draftScope, { ...draftAction, reasoningEffort: 'xhigh' })
+    expect(prepared.kind).toBe('allow-original')
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+    await expect(controller.consumeMarkedRequest({
+      method: 'thread/start',
+      requestId,
+      operationToken: prepared.operationToken,
+    })).resolves.toMatchObject({
+      kind: 'dispatch',
+      reasoningEffort: 'xhigh',
+      configOverrides: { model_reasoning_effort: 'xhigh' },
+    })
+  })
+
+  it('omits reasoning effort from native config and dispatch when no explicit effort was selected', async () => {
+    const { controller } = harness({ pending: pendingDraft })
+    const prepared = await controller.prepareSubmission(draftScope, draftAction)
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+    const consumed = await controller.consumeMarkedRequest({
+      method: 'thread/start',
+      requestId,
+      operationToken: prepared.operationToken,
+    })
+    expect(consumed).toMatchObject({ kind: 'dispatch' })
+    if (consumed.kind === 'dispatch') {
+      expect(consumed).not.toHaveProperty('reasoningEffort')
+      expect(consumed.configOverrides).not.toHaveProperty('model_reasoning_effort')
+    }
+  })
+
   it('forwards the catalog model id unchanged without adding the provider prefix', async () => {
     const publishedModelId = 'dyai-aiden-gpt-5.6-sol'
     const fixture = harness({
@@ -515,6 +437,32 @@ describe('native submission controller', () => {
       model: 'deepseek-chat',
       serviceGeneration: 'native-config',
       configOverrides: { model_provider: 'deepseek', model: 'deepseek-chat' },
+    })
+    expect(fixture.prepare).not.toHaveBeenCalled()
+  })
+
+  it('adds explicit reasoning effort to config-backed native model config', async () => {
+    const fixture = harness({
+      pending: { ...pendingDraft, providerId: 'deepseek', model: 'deepseek-chat' },
+      providerSource: id => id === 'deepseek' ? 'config' : undefined,
+    })
+    const prepared = await fixture.controller.prepareSubmission(draftScope, {
+      ...draftAction,
+      reasoningEffort: 'high',
+    })
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+
+    await expect(fixture.controller.consumeMarkedRequest({
+      method: 'thread/start',
+      requestId,
+      operationToken: prepared.operationToken,
+    })).resolves.toMatchObject({
+      kind: 'dispatch',
+      configOverrides: {
+        model_provider: 'deepseek',
+        model: 'deepseek-chat',
+        model_reasoning_effort: 'high',
+      },
     })
     expect(fixture.prepare).not.toHaveBeenCalled()
   })

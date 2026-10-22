@@ -7,6 +7,7 @@ import type {
   CatalogManagementSnapshot,
   CatalogManagementView,
 } from '../../model-catalog-management.js'
+import { CATALOG_TRANSFER_MAX_CONNECTIONS } from '../../model-catalog-transfer.js'
 import { favoriteCatalogManagementViews } from '../../model-catalog-management.js'
 import {
   ManagementOverlayError,
@@ -68,9 +69,8 @@ function transferSelections(value: unknown): CatalogTransferExportRequest['selec
   if (
     !request || Object.keys(request).some(key => !['selections', 'variables', 'includeValues'].includes(key))
     || !Array.isArray(request.selections) || request.selections.length === 0
-    || request.selections.length > 24
+    || request.selections.length > CATALOG_TRANSFER_MAX_CONNECTIONS
   ) throw new PortableTransferError('invalid')
-  let count = 0
   const refs = new Set<string>()
   return request.selections.map(value => {
     const item = object(value)
@@ -81,8 +81,6 @@ function transferSelections(value: unknown): CatalogTransferExportRequest['selec
       || item.modelIds.some(id => !boundedString(id, 512))
       || new Set(item.modelIds).size !== item.modelIds.length
     ) throw new PortableTransferError('invalid')
-    count += item.modelIds.length
-    if (count > 512) throw new PortableTransferError('too-large')
     refs.add(item.bindingRef)
     return { bindingRef: item.bindingRef, modelIds: item.modelIds as string[] }
   })
@@ -134,7 +132,10 @@ function transferEnvironment(
     const owner = selection.bindingRef.startsWith('codex-config:') ? native : managed
     return { selection, source: owner?.portableEnvironment?.(selection.bindingRef) }
   })
-  const used = new Set(sources.flatMap(({ source }) => source?.name === undefined ? [] : [source.name]))
+  const used = new Set([
+    ...(managed?.environmentEntries?.().map(entry => entry.name) ?? []),
+    ...sources.flatMap(({ source }) => source?.name === undefined ? [] : [source.name]),
+  ])
   let placeholder = 0
   for (const { selection, source } of sources) {
     if (!source) continue
@@ -761,8 +762,11 @@ export class CompositeCatalogManagement implements CatalogManagementAuthority {
           })
         )),
       }
-    } catch {
-      return { status: 'rejected', code: 'invalid' }
+    } catch (error) {
+      return {
+        status: 'rejected',
+        code: error instanceof PortableTransferError && error.code === 'too-large' ? 'too-large' : 'invalid',
+      }
     }
   }
 

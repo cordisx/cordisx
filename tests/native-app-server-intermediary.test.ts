@@ -16,6 +16,7 @@ async function harness() {
         providerId: 'provider-b',
         model: 'model-b',
         serviceGeneration: 'generation',
+        ...(input.operationToken === 'allowed-with-effort-token' ? { reasoningEffort: 'xhigh' } : {}),
         configOverrides: {
           model_provider: 'provider-b',
           model: 'model-b',
@@ -190,6 +191,48 @@ describe('native app-server intermediary', () => {
       })
       h.send({ id: 3, method: 'turn/start', params: { threadId: 'created-thread', model: 'old' } })
       expect(JSON.parse(await h.read())).toMatchObject({ id: 3, error: { code: -32000 } })
+    } finally {
+      await h.close()
+    }
+  })
+
+  it('preserves explicit effort in new-thread config and rejects an unmarked first turn', async () => {
+    const h = await harness()
+    try {
+      h.send({
+        id: 2,
+        method: 'thread/start',
+        params: { config: { 'cordisx.operation_token': 'allowed-with-effort-token' } },
+      })
+      const created = JSON.parse(await h.read()).result.received
+      expect(created.config.model_reasoning_effort).toBe('xhigh')
+      h.send({
+        id: 3,
+        method: 'turn/start',
+        params: {
+          threadId: 'created-thread',
+          input: [{ type: 'text', text: 'hello' }],
+          effort: 'low',
+          collaborationMode: { mode: 'plan', settings: { model: 'old', reasoning_effort: 'low' } },
+        },
+      })
+      expect(JSON.parse(await h.read())).toMatchObject({ id: 3, error: { code: -32000 } })
+      h.send({
+        id: 4,
+        method: 'turn/start',
+        params: {
+          threadId: 'created-thread',
+          input: [{ type: 'text', text: 'hello again' }],
+          effort: 'low',
+          config: { 'cordisx.operation_token': 'allowed-operation-token' },
+        },
+      })
+      const associatedTurn = JSON.parse(await h.read()).result.received
+      expect(associatedTurn).toMatchObject({
+        model: 'model-b',
+        input: [{ type: 'text', text: 'hello again' }],
+        effort: 'low',
+      })
     } finally {
       await h.close()
     }

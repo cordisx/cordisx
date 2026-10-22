@@ -83,6 +83,66 @@ const brandedProvider = {
 }
 
 describe('Manager model transfer', () => {
+  it('reports oversized model catalog preparation accurately', async () => {
+    const host = catalogFixture([catalogView({ transferAvailable: true })])
+    const fixture = reactManagerFixture()
+    let disposeNotifications!: () => void
+    await act(async () => {
+      disposeNotifications = installNotificationHost(fixture.document, 'test')
+    })
+    const prepareExport = vi.spyOn(host.client, 'prepareExport').mockResolvedValue({
+      status: 'rejected',
+      code: 'too-large',
+    })
+    try {
+      await host.client.refresh()
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+      await fixture.render(<ModelServicesPage registry={registryFor(host)} locale="en" />)
+      await fixture.click('.cxh-search-toolbar [aria-label="More catalog actions"]')
+      await act(async () => menuItem(fixture.document, 'Export model configuration').click())
+      await fixture.click('[aria-label="Select model service: Provider A"]')
+      await fixture.click('[aria-label="Copy selected model service configuration"]')
+      await vi.waitFor(() => expect(prepareExport).toHaveBeenCalledOnce())
+      expect(fixture.document.querySelector('[data-model-transfer-page="export"]')).toBeNull()
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Model configuration is too large')
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).not.toContain('Check the connection state')
+    } finally {
+      await act(async () => disposeNotifications())
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('reports oversized confirmed exports without writing to clipboard', async () => {
+    const host = catalogFixture([catalogView({ transferAvailable: true })])
+    const fixture = reactManagerFixture()
+    let disposeNotifications!: () => void
+    await act(async () => {
+      disposeNotifications = installNotificationHost(fixture.document, 'test')
+    })
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...globalThis.navigator, userAgent: 'Mozilla/5.0', clipboard: { writeText } })
+    const prepareExport = vi.spyOn(host.client, 'prepareExport').mockResolvedValue({ status: 'ok', variables: [] })
+    const exportModels = vi.spyOn(host.client, 'export').mockResolvedValue({ status: 'rejected', code: 'too-large' })
+    try {
+      await host.client.refresh()
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+      await fixture.render(<ModelServicesPage registry={registryFor(host)} locale="en" />)
+      await fixture.click('[aria-label="More: Model-A"]')
+      await act(async () => menuItem(fixture.document, 'Share model configuration').click())
+      await vi.waitFor(() => expect(prepareExport).toHaveBeenCalledOnce())
+      await pageAction(fixture, 'export', 'Copy configuration')
+      expect(exportModels).toHaveBeenCalledOnce()
+      expect(writeText).not.toHaveBeenCalled()
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Model configuration is too large')
+    } finally {
+      vi.unstubAllGlobals()
+      await act(async () => disposeNotifications())
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
   it('uses the existing Manager header for environment variables and returns to the list', async () => {
     const host = catalogFixture([catalogView({ transferAvailable: true })])
     const fixture = reactManagerFixture()
@@ -187,6 +247,129 @@ describe('Manager model transfer', () => {
       expect(fixture.document.querySelector('.cxms-export-toolbar')).toBeNull()
     } finally {
       vi.unstubAllGlobals()
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('dispatches a 530-model provider export within the native request budget', async () => {
+    const rows = Array.from({ length: 530 }, (_, index) => ({
+      id: `model-${index}`,
+      label: `Model ${index}`,
+      provenance: ['auto'] as const,
+      notListed: false,
+      present: true,
+      compatibility: 'supported' as const,
+      selectable: true,
+      blocked: false,
+      pinned: false,
+    }))
+    const host = catalogFixture([catalogView({ rows, sourceCount: rows.length, transferAvailable: true })])
+    const fixture = reactManagerFixture()
+    const prepareExport = vi.spyOn(host.client, 'prepareExport').mockResolvedValue({ status: 'ok', variables: [] })
+    try {
+      await host.client.refresh()
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+      await fixture.render(<ModelServicesPage registry={registryFor(host)} locale="en" />)
+      await fixture.click('[aria-label="More catalog actions: Provider A"]')
+      await act(async () => menuItem(fixture.document, 'Share').click())
+      await vi.waitFor(() => expect(prepareExport).toHaveBeenCalledOnce())
+      expect((prepareExport.mock.calls[0]?.[0].selections[0]?.modelIds).length).toBe(530)
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('rejects a provider selection over the native request budget before dispatch', async () => {
+    const rows = Array.from({ length: 4_000 }, (_, index) => ({
+      id: `provider-model-${String(index).padStart(4, '0')}`,
+      label: `Provider model ${index}`,
+      provenance: ['auto'] as const,
+      notListed: false,
+      present: true,
+      compatibility: 'supported' as const,
+      selectable: true,
+      blocked: false,
+      pinned: false,
+    }))
+    const host = catalogFixture([catalogView({ rows, sourceCount: rows.length, transferAvailable: true })])
+    const fixture = reactManagerFixture()
+    let disposeNotifications!: () => void
+    await act(async () => {
+      disposeNotifications = installNotificationHost(fixture.document, 'test')
+    })
+    const prepareExport = vi.spyOn(host.client, 'prepareExport')
+    try {
+      await host.client.refresh()
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+      await fixture.render(<ModelServicesPage registry={registryFor(host)} locale="en" />)
+      await fixture.click('[aria-label="More catalog actions: Provider A"]')
+      await act(async () => menuItem(fixture.document, 'Share').click())
+      await vi.waitFor(() =>
+        expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Model configuration is too large')
+      )
+      expect(prepareExport).not.toHaveBeenCalled()
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).not.toContain('Check the connection state')
+    } finally {
+      await act(async () => disposeNotifications())
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps the export draft when confirmed variables exceed the native request budget', async () => {
+    const rows = Array.from({ length: 900 }, (_, index) => ({
+      id: `model-${String(index).padStart(4, '0')}-${'x'.repeat(48)}`,
+      label: `Model ${index}`,
+      provenance: ['auto'],
+      notListed: false,
+      present: true,
+      compatibility: 'supported',
+      selectable: true,
+      blocked: false,
+      pinned: false,
+    }))
+    const host = catalogFixture([catalogView({
+      transferAvailable: true,
+      rows,
+    })])
+    const fixture = reactManagerFixture()
+    let disposeNotifications!: () => void
+    await act(async () => {
+      disposeNotifications = installNotificationHost(fixture.document, 'test')
+    })
+    const writeText = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...globalThis.navigator, userAgent: 'Mozilla/5.0', clipboard: { writeText } })
+    const prepareExport = vi.spyOn(host.client, 'prepareExport').mockResolvedValue({
+      status: 'ok',
+      variables: [{
+        sourceName: 'SOURCE_KEY',
+        name: 'SOURCE_KEY',
+        value: 'v'.repeat(16_000),
+        enabled: true,
+        bindings: ['binding-a'],
+        available: true,
+      }],
+    })
+    const exportModels = vi.spyOn(host.client, 'export')
+    try {
+      await host.client.refresh()
+      const { ModelServicesPage } = await import('../packages/cli/src/renderer/manager/pages/ModelServicesPage.js')
+      await fixture.render(<ModelServicesPage registry={registryFor(host)} locale="en" />)
+      await fixture.click('[aria-label="More catalog actions: Provider A"]')
+      await act(async () => menuItem(fixture.document, 'Share').click())
+      await vi.waitFor(() => expect(prepareExport).toHaveBeenCalledOnce())
+      expect(fixture.document.querySelector('[data-model-transfer-page="export"]')).not.toBeNull()
+
+      await pageAction(fixture, 'export', 'Copy configuration')
+      expect(exportModels).not.toHaveBeenCalled()
+      expect(writeText).not.toHaveBeenCalled()
+      expect(fixture.document.querySelector('[data-model-transfer-page="export"]')).not.toBeNull()
+      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Model configuration is too large')
+    } finally {
+      vi.unstubAllGlobals()
+      await act(async () => disposeNotifications())
       host.client.dispose()
       await fixture.dispose()
     }

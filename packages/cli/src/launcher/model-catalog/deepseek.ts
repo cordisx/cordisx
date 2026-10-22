@@ -8,6 +8,7 @@ import {
   object,
 } from './contracts.js'
 import { discoverJson } from './discovery-http.js'
+import { parseModelReasoningCapabilities } from '../../model-reasoning-capabilities.js'
 
 export function isDeepSeekOfficialEndpoint(endpoint: string): boolean {
   // Check spelling before URL normalization can discard dot segments or empty delimiters.
@@ -19,7 +20,7 @@ export function isDeepSeekOfficialEndpoint(endpoint: string): boolean {
 export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
   return Object.freeze({
     id: 'deepseek-official',
-    version: '2',
+    version: '3',
     pagination: 'none',
     matches: (target: DiscoveryTarget) => isDeepSeekOfficialEndpoint(target.endpoint),
     async discover(connection: DiscoveryConnection, externalSignal: AbortSignal) {
@@ -30,18 +31,34 @@ export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
           !body || body.object !== 'list' || !Array.isArray(body.data) || body.data.length > 1000
           || body.has_more === true || body.nextCursor != null || body.next_cursor != null
         ) throw new CatalogError('protocol')
-        const ids = body.data.map(item => {
+        const discovered = body.data.map(item => {
           const model = object(item)
           if (!model || model.object !== 'model' || !boundedString(model.id) || !boundedString(model.owned_by, 256)) {
             throw new CatalogError('protocol')
           }
-          return model.id
+          const effort = object(model.effort)
+          const reasoningCapabilities = effort === undefined
+            ? undefined
+            : parseModelReasoningCapabilities({
+              efforts: effort.supported_levels,
+              defaultEffort: effort.default_level,
+            })
+          return reasoningCapabilities === undefined
+            ? { id: model.id }
+            : { id: model.id, reasoningCapabilities }
         })
+        const reasoningById = new Map(
+          discovered.flatMap(model =>
+            model.reasoningCapabilities === undefined ? [] : [[model.id, model.reasoningCapabilities] as const]
+          ),
+        )
         // Official Codex integration and compatibility notices document these exact accepted IDs.
         return Object.freeze(
-          catalogModels(ids).map(model =>
-            Object.freeze({
+          catalogModels(discovered.map(model => model.id)).map(model => {
+            const reasoningCapabilities = reasoningById.get(model.id)
+            return Object.freeze({
               ...model,
+              ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
               ...([
                   'deepseek-flash',
                   'deepseek-v4-pro',
@@ -51,7 +68,7 @@ export function deepSeekDiscoveryAdapter(): DiscoveryAdapter {
                 ? { protocolCapabilities: Object.freeze({ responses: true }) }
                 : {}),
             })
-          ),
+          }),
         )
       } catch (error) {
         if (error instanceof CatalogError) throw error

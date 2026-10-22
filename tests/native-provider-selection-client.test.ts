@@ -27,7 +27,7 @@ function deferred<T>() {
   })
   return { promise, resolve }
 }
-async function harness(hasPending = true, existing = false) {
+async function harness(hasPending = true, existing = false, effort?: 'low' | 'high' | 'max') {
   let authority: MutableNativeSubmitAuthority = {
     scope: { ...scope, ...(existing ? { threadId: 'thread-1' } : {}) },
     idle: true,
@@ -64,6 +64,7 @@ async function harness(hasPending = true, existing = false) {
     notice,
     synchronizeEffective,
     () => 'operation-id',
+    () => effort,
   )
   await client.refresh()
   return {
@@ -81,6 +82,39 @@ async function harness(hasPending = true, existing = false) {
 }
 
 describe('native provider selection client', () => {
+  it.each([true, false])('adds target effort only for a pending ordinary send (%s)', async hasPending => {
+    const h = await harness(hasPending, false, 'max')
+    await h.client.submitHook(descriptor)
+    expect(h.channel.submissionPrepare).toHaveBeenCalledWith({
+      scope,
+      action: {
+        operationId: 'operation-id',
+        operationGeneration: 1,
+        intent: 'ordinary-send',
+        ...(hasPending ? { reasoningEffort: 'max' } : {}),
+      },
+    })
+  })
+
+  it('retains target effort while confirming and passes the captured value to native synchronization', async () => {
+    const h = await harness(true, true, 'max')
+    h.channel.submissionPrepare.mockResolvedValueOnce({
+      status: 'confirm',
+      confirmationId: 'confirmation-token',
+      expectedSelectionRevision: 2,
+    })
+    const send = h.client.submitHook({
+      ...descriptor,
+      target: 'local',
+      thread: 'thread-1',
+      followUp: 'local',
+      followUpThread: 'thread-1',
+    })
+    await Promise.resolve()
+    h.client.confirmSubmission(true)
+    await expect(send).resolves.toEqual({ allow: true, operationToken: token, reasoningEffort: 'max' })
+    expect(h.synchronizeEffective).toHaveBeenLastCalledWith({ providerId: 'b', model: 'b-model' }, 'max')
+  })
   it('keeps a draft selection pending for its first thread start', async () => {
     const h = await harness(false)
     expect(await h.client.select({ providerId: 'b', model: 'b-model' })).toBe('accepted')

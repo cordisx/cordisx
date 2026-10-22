@@ -64,6 +64,33 @@ describe('native first-turn model baseline', () => {
     expect(request).not.toHaveProperty('config')
   })
 
+  it.each([
+    { token: undefined, effort: 'max' },
+    { token: 'short', effort: 'max' },
+    { token: firstTurnToken, effort: 'invalid' },
+  ])('does not apply untrusted or invalid config effort %#', async ({ token, effort }) => {
+    const run = firstTurnRuntime(create())
+    const original = input(null)
+    original.config = {
+      'cordisx.operation_token': token,
+      model_reasoning_effort: effort,
+    }
+    const request = await run.first(original)
+    expect(request.effort).toBe('medium')
+    expect(request.collaborationMode.settings.reasoning_effort).toBe('medium')
+  })
+
+  it('applies token-bound explicit effort without inventing a collaboration mode', async () => {
+    const run = firstTurnRuntime(create())
+    const request = await run.first({
+      input: 'hello',
+      config: { 'cordisx.operation_token': firstTurnToken, model_reasoning_effort: 'max' },
+    })
+    expect(request).toMatchObject({ model: selectedModel })
+    expect(request.effort).toBe('max')
+    expect(request.collaborationMode).toBeUndefined()
+  })
+
   it.each([null, '', 17, 'x'.repeat(513)])('does not guess a missing or invalid accepted model (%j)', async model => {
     const run = firstTurnRuntime(create(model))
     const original = input()

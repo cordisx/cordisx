@@ -56,6 +56,10 @@ async function harness(options: Readonly<{
     }),
   }
   const controller = {
+    prepareSubmission: vi.fn<NativeSubmissionController['prepareSubmission']>(async () => ({
+      kind: 'reject',
+      reason: 'unsupported-submission-intent',
+    })),
     commitSelection: vi.fn<NativeSubmissionController['commitSelection']>(async () => ({
       kind: 'reject',
       reason: 'stale-operation',
@@ -86,6 +90,23 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('rejects an invalid reasoning effort before forwarding the action to the controller', async () => {
+    const h = await harness()
+    try {
+      await expect(h.channel.submissionPrepare({
+        action: {
+          operationId: 'operation-1',
+          operationGeneration: 1,
+          intent: 'ordinary-send',
+          reasoningEffort: 'not-a-model-effort',
+        },
+      })).rejects.toThrow('Native submission rejected')
+      expect(h.controller.prepareSubmission).not.toHaveBeenCalled()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('routes environment and transfer operations through the document-fenced Host owner', async () => {
     const environmentRead = vi.fn(() => ({
       status: 'ok' as const,

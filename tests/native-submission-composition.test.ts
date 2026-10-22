@@ -72,6 +72,94 @@ describe('structure-based native submission composition', () => {
     expect(mode.settings.model).toBe('gpt-5.6-sol')
     expect(run.sandbox.updateModel).not.toHaveBeenCalled()
   })
+  it('carries only a token-bound explicit effort from admission to the first native turn', async () => {
+    const run = runtime(async () => ({ allow: true, operationToken: token, reasoningEffort: 'max' }))
+    const context = await run.submit('message')
+    expect(context.__cordisxReasoningEffort).toBe('max')
+    const draft = await run.sandbox.draft({ context, prompt: 'message', serviceTier: null })
+    expect(draft.configOverrides).toMatchObject({
+      'cordisx.operation_token': token,
+      model_reasoning_effort: 'max',
+    })
+    const originalMode = { mode: 'default', settings: { model: 'gpt-5.6-sol', reasoning_effort: 'medium' } }
+    const first = await run.sandbox.first({
+      input: 'message',
+      config: draft.configOverrides,
+      collaborationMode: originalMode,
+    })
+    expect(first.effort).toBe('max')
+    expect(first.collaborationMode.settings).toMatchObject({
+      model: 'deepseek-v4-flash',
+      reasoning_effort: 'max',
+    })
+    expect(originalMode.settings).toEqual({ model: 'gpt-5.6-sol', reasoning_effort: 'medium' })
+  })
+
+  it('omits invalid admitted effort and leaves missing/tokenless first-turn effort unchanged', async () => {
+    for (const invalid of ['invalid', null, 1]) {
+      const run = runtime(async () => ({ allow: true, operationToken: token, reasoningEffort: invalid }))
+      const context = await run.submit('message')
+      expect(context).not.toHaveProperty('__cordisxReasoningEffort')
+      const draft = await run.sandbox.draft({ context, prompt: 'message', serviceTier: null })
+      expect(draft.configOverrides).not.toHaveProperty('model_reasoning_effort')
+      const mode = { mode: 'default', settings: { model: 'gpt-5.6-sol', reasoning_effort: 'medium' } }
+      const first = await run.sandbox.first({
+        input: 'message',
+        config: draft.configOverrides,
+        collaborationMode: mode,
+      })
+      expect(first.effort).toBe('medium')
+      expect(first.collaborationMode.settings.reasoning_effort).toBe('medium')
+    }
+    const tokenless = runtime(async () => ({ allow: true, reasoningEffort: 'max' }))
+    const context = await tokenless.submit('message')
+    expect(context).not.toHaveProperty('__cordisxReasoningEffort')
+    const draft = await tokenless.sandbox.draft({ context, prompt: 'message', serviceTier: null })
+    const mode = { mode: 'default', settings: { model: 'gpt-5.6-sol', reasoning_effort: 'medium' } }
+    const first = await tokenless.sandbox.first({
+      input: 'message',
+      config: draft.configOverrides,
+      collaborationMode: mode,
+    })
+    expect(first.effort).toBe('medium')
+  })
+  it('keeps concurrent submit efforts isolated through their first-turn requests', async () => {
+    const run = runtime(async input => ({
+      allow: true,
+      operationToken: `${input.target}-operation-token`,
+      reasoningEffort: input.target === 'first' ? 'max' : 'low',
+    }))
+    const makeSubmit = (type: string) =>
+      run.sandbox.submit({
+        clearStopTurnConfirmation: () => {},
+        submitTarget: { type },
+        isResponseInProgress: false,
+        options: { input: type },
+        conversationId: type,
+        defaultFollowUpSubmitAction: 'steer',
+      })
+    const [firstContext, secondContext] = await Promise.all([makeSubmit('first'), makeSubmit('second')])
+    expect([firstContext.__cordisxReasoningEffort, secondContext.__cordisxReasoningEffort]).toEqual(['max', 'low'])
+    const [firstDraft, secondDraft] = await Promise.all([
+      run.sandbox.draft({ context: firstContext, prompt: 'first', serviceTier: null }),
+      run.sandbox.draft({ context: secondContext, prompt: 'second', serviceTier: null }),
+    ])
+    expect(firstDraft.configOverrides.model_reasoning_effort).toBe('max')
+    expect(secondDraft.configOverrides.model_reasoning_effort).toBe('low')
+    const [firstRequest, secondRequest] = await Promise.all([
+      run.sandbox.first({
+        input: 'first',
+        config: firstDraft.configOverrides,
+        collaborationMode: { mode: 'default', settings: { model: 'native', reasoning_effort: 'medium' } },
+      }),
+      run.sandbox.first({
+        input: 'second',
+        config: secondDraft.configOverrides,
+        collaborationMode: { mode: 'default', settings: { model: 'native', reasoning_effort: 'medium' } },
+      }),
+    ])
+    expect([firstRequest.effort, secondRequest.effort]).toEqual(['max', 'low'])
+  })
   it('shares parsed resource syntax with account discovery and emits valid transformed modules', () => {
     const source = resources()
     const initial = source[1]!

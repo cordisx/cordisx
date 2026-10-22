@@ -4,6 +4,7 @@ import {
 } from './adapter/native-submission-action-normalizer.js'
 import type { NormalizedNativeSubmissionAction } from './native-provider-submission-policy.js'
 import type { CatalogManagementChannel } from '../model-catalog-management.js'
+import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 export interface NativeSubmissionScope {
   readonly targetId: string
@@ -101,7 +102,9 @@ export interface MutableNativeSubmitAuthority {
   readonly effective?: NativeProviderSelection
 }
 
-export type NativeSubmitHookResult = Readonly<{ allow: false }> | Readonly<{ allow: true; operationToken?: string }>
+export type NativeSubmitHookResult =
+  | Readonly<{ allow: false }>
+  | Readonly<{ allow: true; operationToken?: string; reasoningEffort?: ModelReasoningEffort }>
 export type NativeSubmissionRejection = 'unsupported-submission-intent' | 'submission-rejected'
 
 interface ConfirmationWaiter {
@@ -139,8 +142,13 @@ export class NativeProviderSelectionClient {
     private readonly channel: NativeProviderSelectionCommandChannel,
     private readonly authority: () => MutableNativeSubmitAuthority,
     private readonly rejected: (reason: NativeSubmissionRejection) => void,
-    private readonly synchronizeEffective: (selection: NativeProviderSelection) => Promise<void>,
+    private readonly synchronizeEffective: (
+      selection: NativeProviderSelection,
+      reasoningEffort?: ModelReasoningEffort,
+    ) => Promise<void>,
     private readonly createId: () => string = () => crypto.randomUUID(),
+    private readonly pendingReasoning: (pending: PendingNativeProviderSelection) => ModelReasoningEffort | undefined =
+      () => undefined,
   ) {}
 
   snapshot = (): NativeProviderSelectionProjection => this.projection
@@ -244,10 +252,14 @@ export class NativeProviderSelectionClient {
     }
     if (pending !== undefined && this.admission !== undefined) return { allow: false }
     const sequence = ++this.operationSequence
-    const action = normalizeNativeSubmissionAction(
+    const normalized = normalizeNativeSubmissionAction(
       { operationId: this.createId(), operationGeneration: sequence },
       descriptor,
     )
+    const reasoningEffort = pending !== undefined && normalized.intent === 'ordinary-send'
+      ? this.pendingReasoning(pending)
+      : undefined
+    const action = reasoningEffort === undefined ? normalized : { ...normalized, reasoningEffort }
     if (pending !== undefined && action.intent !== 'ordinary-send') {
       this.notice('unsupported-submission-intent')
       return { allow: false }
@@ -334,7 +346,8 @@ export class NativeProviderSelectionClient {
         }
         this.projectionGeneration++
         this.replace({ available: true, revision: committed.revision, effective: { ...effective } })
-        await this.synchronizeEffective(effective)
+        if (action.reasoningEffort === undefined) await this.synchronizeEffective(effective)
+        else await this.synchronizeEffective(effective, action.reasoningEffort)
         const live = this.authority()
         if (
           !this.scopeCurrent(before.scope, lifetime) || this.admission !== sequence || !live.idle
@@ -348,7 +361,11 @@ export class NativeProviderSelectionClient {
         return { allow: false }
       }
       cancelId = undefined
-      return { allow: true, operationToken: token }
+      return {
+        allow: true,
+        operationToken: token,
+        ...(action.reasoningEffort === undefined ? {} : { reasoningEffort: action.reasoningEffort }),
+      }
     } catch {
       this.notice('submission-rejected')
       return { allow: false }

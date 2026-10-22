@@ -1,3 +1,5 @@
+import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
+
 export interface NativeProviderSelection {
   readonly providerId: string
   readonly model: string
@@ -61,6 +63,7 @@ export interface NormalizedNativeSubmissionAction {
   readonly operationGeneration: number
   readonly intent: NativeSubmissionIntent
   readonly threadId?: string
+  readonly reasoningEffort?: ModelReasoningEffort
 }
 
 export interface PendingNativeProviderChange extends NativeProviderSelection {

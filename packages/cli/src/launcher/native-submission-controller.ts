@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 import {
   decideNativeProviderSubmission,
@@ -128,6 +129,7 @@ export type NativeMarkedRequestConsumption =
     providerId: string
     model: string
     serviceGeneration: string
+    reasoningEffort?: ModelReasoningEffort
   }>
   | Readonly<{
     kind: 'reject'
@@ -415,11 +417,22 @@ export function createNativeSubmissionController(
       if (source === 'openai' || source === 'config') {
         // Codex owns built-in and config-backed authentication. Never synthesize a managed provider table.
         credential = { serviceGeneration: `native-${source}`, dispose() {} }
-        configOverrides = Object.freeze({ model_provider: prepared.pending.providerId, model: prepared.pending.model })
+        configOverrides = Object.freeze({
+          model_provider: prepared.pending.providerId,
+          model: prepared.pending.model,
+          ...(prepared.action.reasoningEffort === undefined
+            ? {}
+            : { model_reasoning_effort: prepared.action.reasoningEffort }),
+        })
       } else if (source === 'managed' || options.providerSource === undefined) {
         const managed = await options.credentials.prepare(prepared.pending.providerId)
         credential = managed
-        configOverrides = requestConfig(prepared.pending, managed)
+        configOverrides = Object.freeze({
+          ...requestConfig(prepared.pending, managed),
+          ...(prepared.action.reasoningEffort === undefined
+            ? {}
+            : { model_reasoning_effort: prepared.action.reasoningEffort }),
+        })
       } else throw new Error('native provider is unknown')
       if (disposed || !revalidateSelection(prepared)) {
         await credential.dispose()
@@ -716,6 +729,9 @@ export function createNativeSubmissionController(
         providerId: operation.pending.providerId,
         model: operation.pending.model,
         serviceGeneration: operation.serviceGeneration,
+        ...(operation.action.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: operation.action.reasoningEffort }),
       }
     },
     async authorizeMarkedRequest(request) {
