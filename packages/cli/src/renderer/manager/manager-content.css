@@ -75,7 +75,7 @@
   width: 100%;
   min-width: 0;
   min-height: 44px;
-  grid-template-columns: var(--cx-titlebar-control-size) minmax(0, 1fr) auto;
+  grid-template-columns: var(--cx-titlebar-control-size) minmax(0, 1fr);
   gap: calc(var(--cx-control-gap) - var(--cx-titlebar-icon-inset));
   border-bottom: 0;
   padding: 8px var(--cx-page-inset);
@@ -88,15 +88,11 @@
 .cxr-titlebar-root .cxr-header > .cxr-heading {
   grid-column: 2;
 }
-.cxr-titlebar-root .cxr-header > .cxr-titlebar-actions {
-  grid-column: 3;
-}
 .cxr-titlebar-root .cxr-header-seat {
   width: var(--cx-titlebar-control-size);
   height: var(--cx-titlebar-control-size);
 }
-.cxr-titlebar-root .cxr-header-seat > .t-button,
-.cxr-titlebar-root .cxr-titlebar-action {
+.cxr-titlebar-root .cxr-header-seat > .t-button {
   display: grid;
   width: var(--cx-titlebar-control-size);
   min-width: var(--cx-titlebar-control-size);
@@ -113,11 +109,7 @@
 .cxr-titlebar-root .cxr-header-seat > .t-button {
   border-radius: 9.375px;
 }
-.cxr-titlebar-root .cxr-titlebar-action {
-  border-radius: 12.5px;
-}
-.cxr-titlebar-root .cxr-header-seat > .t-button:hover:not(:disabled),
-.cxr-titlebar-root .cxr-titlebar-action:hover:not(:disabled) {
+.cxr-titlebar-root .cxr-header-seat > .t-button:hover:not(:disabled) {
   background: var(
     --color-background-primary-soft-hover,
     var(--cx-hover, rgba(255, 255, 255, 0.08))
@@ -126,22 +118,18 @@
 }
 .cxr-titlebar-root
   .cxr-header-seat
-  > .t-button:is(:active, [aria-pressed="true"]):not(:disabled),
-.cxr-titlebar-root
-  .cxr-titlebar-action:is(:active, [aria-pressed="true"], [data-state="open"]):not(:disabled) {
+  > .t-button:is(:active, [aria-pressed="true"]):not(:disabled) {
   background: var(
     --color-background-primary-soft-active,
     var(--cx-pressed, var(--cx-hover, rgba(255, 255, 255, 0.12)))
   );
   color: var(--color-text-primary-surface, var(--cx-text, #edf0f4));
 }
-.cxr-titlebar-root .cxr-header-seat > .t-button:focus-visible,
-.cxr-titlebar-root .cxr-titlebar-action:focus-visible {
+.cxr-titlebar-root .cxr-header-seat > .t-button:focus-visible {
   outline: 2px solid var(--color-ring-primary-ghost, var(--cx-focus, #8aa8ff));
   outline-offset: -2px;
 }
-.cxr-titlebar-root .cxr-header-seat > .t-button:disabled,
-.cxr-titlebar-root .cxr-titlebar-action:disabled {
+.cxr-titlebar-root .cxr-header-seat > .t-button:disabled {
   cursor: default;
   opacity: 0.4;
 }
@@ -156,16 +144,14 @@
 .cxr-titlebar-root
   .cxr-header-seat
   > .t-button
-  :is(.t-icon, .cordisx-host-icon),
-.cxr-titlebar-root .cxr-titlebar-action :is(.t-icon, .cordisx-host-icon, svg) {
+  :is(.t-icon, .cordisx-host-icon) {
   width: 16px;
   height: 16px;
   color: currentColor;
   font-size: 16px !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cxr-titlebar-root .cxr-header-seat > .t-button,
-  .cxr-titlebar-root .cxr-titlebar-action {
+  .cxr-titlebar-root .cxr-header-seat > .t-button {
     transition: none;
   }
 }

@@ -737,7 +737,7 @@ export function ManagerApp(
             />
           )}
       </div>
-      {!workspaceMode
+      {!workspaceMode && surface === 'modal'
         ? (
           <div className="cxr-titlebar-actions">
             <Button
