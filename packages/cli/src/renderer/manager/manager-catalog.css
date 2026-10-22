@@ -217,9 +217,7 @@ button.cxr-card:hover {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 2px;
-  border-radius: 8px;
-  padding: 2px;
+  padding: 3px;
   background: color-mix(
     in srgb,
     var(--cx-surface-raised, #20242b) 92%,

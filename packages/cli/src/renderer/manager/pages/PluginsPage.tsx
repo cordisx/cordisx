@@ -2,6 +2,7 @@ import { ManagerBrowseResults } from '../components/ManagerBrowseResults.js'
 import { EmptyState } from '../../host-ui/EmptyState.js'
 import { useMemo, useState } from 'react'
 import { IconButton } from '../../host-ui/IconButton.js'
+import { ActionGroup } from '../../host-ui/ActionGroup.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
@@ -112,8 +113,9 @@ export function PluginsPage(
                   <code className="cxr-card-code">{plugin.id}</code>
                 </span>
               </button>
-              <span className="cxr-plugin-actions">
+              <ActionGroup className="cxr-plugin-actions">
                 <IconButton
+                  tag="button"
                   icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'}
                   label={managerCopy(
                     snapshot.localization.locale,
@@ -130,6 +132,7 @@ export function PluginsPage(
                     )}
                 />
                 <IconButton
+                  tag="button"
                   icon="reload-plugin"
                   label={managerCopy(snapshot.localization.locale, 'plugins.reload')}
                   loading={lifecycle.busyPluginId === plugin.id}
@@ -158,7 +161,7 @@ export function PluginsPage(
                     },
                   ]}
                 />
-              </span>
+              </ActionGroup>
             </div>
           )
         })}
@@ -179,6 +182,7 @@ export function PluginsPage(
                   normalized ? 'empty.clearSearch' : 'empty.browsePlugins',
                 ),
                 onClick: () => normalized ? setQuery('') : router.navigate({ kind: 'primary', page: 'marketplace' }),
+                ...(normalized ? {} : { variant: 'primary' as const }),
               }}
             />
           )

@@ -10,6 +10,7 @@ import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
+import { ActionGroup } from '../../host-ui/ActionGroup.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 import type { MoreMenuItem } from '../../host-ui/MoreMenu.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
@@ -290,7 +291,7 @@ export function MarketplacePage(
                   <span className="cxr-marketplace-meta">{result.plugin.version} · {result.projection.feedName}</span>
                 </span>
               </button>
-              <span className="cxr-marketplace-actions">
+              <ActionGroup className="cxr-marketplace-actions">
                 <IconButton
                   icon={installing ? 'close' : installedVersion === undefined ? 'import-plugin' : 'uninstall-plugin'}
                   label={primaryLabel}
@@ -343,7 +344,7 @@ export function MarketplacePage(
                     },
                   ]}
                 />
-              </span>
+              </ActionGroup>
             </div>
           )
         })}

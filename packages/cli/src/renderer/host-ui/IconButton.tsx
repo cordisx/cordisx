@@ -10,7 +10,7 @@ export interface IconButtonProps extends Omit<ButtonProps, 'children' | 'content
 }
 
 export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function IconButton(
-  { icon, label, description, className, ...props },
+  { icon, label, description, className, tag, href, ...props },
   ref,
 ) {
   const selected = props['aria-pressed'] === true
@@ -18,6 +18,8 @@ export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function Icon
   return (
     <Button
       {...props}
+      tag={tag ?? (href ? 'a' : 'button')}
+      {...(href === undefined ? {} : { href })}
       ref={ref}
       type="button"
       shape="square"

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { Switch } from 'tdesign-react'
 import { HostEditorDialog } from '../../dialogs/internal.js'
 import { IconButton } from '../../host-ui/IconButton.js'
+import { ActionGroup } from '../../host-ui/ActionGroup.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
 
 export interface MarketplaceSourceView {
@@ -172,41 +173,43 @@ export function MarketplaceSourceManager({
                   aria-label={`${source.enabled ? copy.disabled : copy.enabled} ${source.name}`}
                   onChange={enabled => void onSetEnabled(source.url, enabled)}
                 />
-                {source.error === undefined
-                  ? null
-                  : (
-                    <IconButton
-                      icon="diagnostics"
-                      label={`${copy.error}: ${source.name}`}
-                      description={source.error}
-                      loading={source.refreshing}
-                      theme="danger"
-                      onClick={() => setSourceError({ url: source.url, message: source.error! })}
-                    />
-                  )}
-                <MoreMenu
-                  label={`${copy.more}: ${source.name}`}
-                  items={[{
-                    id: 'edit',
-                    label: copy.edit,
-                    icon: 'marketplace-source-edit',
-                    disabled: busy,
-                    onSelect: () => onEdit(source),
-                  }, {
-                    id: 'copy',
-                    label: copy.copy,
-                    icon: 'marketplace-source-copy',
-                    disabled: busy || window.navigator.clipboard === undefined,
-                    onSelect: () => void window.navigator.clipboard.writeText(source.url),
-                  }, {
-                    id: 'remove',
-                    label: copy.remove,
-                    icon: 'delete',
-                    theme: 'error',
-                    disabled: busy || !source.removable,
-                    onSelect: () => setRemovingUrl(source.url),
-                  }]}
-                />
+                <ActionGroup>
+                  {source.error === undefined
+                    ? null
+                    : (
+                      <IconButton
+                        icon="diagnostics"
+                        label={`${copy.error}: ${source.name}`}
+                        description={source.error}
+                        loading={source.refreshing}
+                        theme="danger"
+                        onClick={() => setSourceError({ url: source.url, message: source.error! })}
+                      />
+                    )}
+                  <MoreMenu
+                    label={`${copy.more}: ${source.name}`}
+                    items={[{
+                      id: 'edit',
+                      label: copy.edit,
+                      icon: 'marketplace-source-edit',
+                      disabled: busy,
+                      onSelect: () => onEdit(source),
+                    }, {
+                      id: 'copy',
+                      label: copy.copy,
+                      icon: 'marketplace-source-copy',
+                      disabled: busy || window.navigator.clipboard === undefined,
+                      onSelect: () => void window.navigator.clipboard.writeText(source.url),
+                    }, {
+                      id: 'remove',
+                      label: copy.remove,
+                      icon: 'delete',
+                      theme: 'error',
+                      disabled: busy || !source.removable,
+                      onSelect: () => setRemovingUrl(source.url),
+                    }]}
+                  />
+                </ActionGroup>
               </span>
             </section>
           )
@@ -224,6 +227,7 @@ export function MarketplaceSourceManager({
                 : {
                   label: copy.add,
                   onClick: () => onEdit(),
+                  variant: 'primary',
                 }}
             />
           )
