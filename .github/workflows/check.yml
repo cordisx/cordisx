@@ -196,12 +196,35 @@ jobs:
           if [[ "$EVENT" == pull_request && "$FULL" != true && "$NODE_ALL" != true && "$PROJECT" != browser ]]; then
             args+=(--changed "$BASE_SHA" --passWithNoTests)
           fi
-          npx --no-install vitest "${args[@]}"
+          selection_status=0
+          ordinary_status=0
+          dynamic_status=0
+          if [[ "$EVENT" == pull_request && "$FULL" != true && "$NODE_ALL" != true && "$PROJECT" != browser ]]; then
+            selected_file=$(mktemp)
+            filtered_file=$(mktemp)
+            trap 'rm -f "$selected_file" "$filtered_file"' EXIT
+            node scripts/ci-dynamic-bundle-tests.mjs "$BASE_SHA" HEAD "$PROJECT" > "$selected_file"
+          fi
+          npx --no-install vitest "${args[@]}" || ordinary_status=$?
+          if [[ -n "${selected_file:-}" && -s "$selected_file" ]]; then
+            if ! node scripts/ci-filter-dynamic-bundle-tests.mjs test-result.json "$selected_file" > "$filtered_file"; then
+              echo 'Vitest report unavailable or invalid; rerunning all mapped tests and failing this job.' >&2
+              cp "$selected_file" "$filtered_file"
+              selection_status=1
+            fi
+            mapfile -d '' -t dynamic_tests < "$filtered_file"
+            if (( ${#dynamic_tests[@]} )); then
+              npx --no-install vitest run --project "$PROJECT" "${dynamic_tests[@]}" --reporter=default --reporter=json --outputFile=dynamic-test-result.json || dynamic_status=$?
+            fi
+          fi
+          (( ordinary_status == 0 && dynamic_status == 0 && selection_status == 0 ))
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-result-${{ matrix.project }}-${{ github.run_attempt }}
-          path: test-result.json
+          path: |
+            test-result.json
+            dynamic-test-result.json
           if-no-files-found: warn
 
   package:
