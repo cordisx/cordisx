@@ -522,18 +522,48 @@ export async function bootSurfaces() {
   const transitioningMotionShell = dom.window.document.createElement('div')
   transitioningMotionShell.id = 'transitioning-summary-motion-shell'
   Object.defineProperty(transitioningMotionShell, 'getBoundingClientRect', { value: () => rect(960, 46, 300, 654) })
-  dom.window.document.getElementById('native-summary-frame')?.append(transitioningMotionShell)
-  await settle()
-  await settle()
-  expect(environmentSeat.isConnected).toBe(false)
-  await new Promise(resolve => setTimeout(resolve, 650))
-  expect(environmentSeat.isConnected).toBe(false)
-  transitioningMotionShell.style.display = 'none'
-  // Allow the renderer's bounded 400 ms retries to observe the outgoing shell becoming hidden.
-  for (let attempt = 0; attempt < 60 && !environmentSeat.isConnected; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 50))
+  const nativeSetTimeout = dom.window.setTimeout.bind(dom.window)
+  const nativeClearTimeout = dom.window.clearTimeout.bind(dom.window)
+  const environmentRetries = new Map<number, () => void>()
+  let nextRetryId = -1
+  dom.window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+    if (delay === 400 && typeof handler === 'function') {
+      const id = nextRetryId--
+      environmentRetries.set(id, () => handler(...args))
+      return id
+    }
+    return nativeSetTimeout(handler, delay, ...args)
+  }) as typeof dom.window.setTimeout
+  dom.window.clearTimeout = ((id?: number) => {
+    if (id !== undefined && environmentRetries.delete(id)) return
+    nativeClearTimeout(id)
+  }) as typeof dom.window.clearTimeout
+  const runNextEnvironmentRetry = () => {
+    expect(environmentRetries.size).toBe(1)
+    const [id, retry] = environmentRetries.entries().next().value!
+    environmentRetries.delete(id)
+    retry()
   }
-  expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+  try {
+    dom.window.document.getElementById('native-summary-frame')?.append(transitioningMotionShell)
+    await settle()
+    await settle()
+    expect(environmentSeat.isConnected).toBe(false)
+    runNextEnvironmentRetry()
+    await settle()
+    expect(environmentSeat.isConnected).toBe(false)
+    expect(environmentRetries.size).toBe(1)
+    transitioningMotionShell.style.display = 'none'
+    runNextEnvironmentRetry()
+    // The second bounded retry must recover the same host after the unobserved style change.
+    for (let attempt = 0; attempt < 60 && !environmentSeat.isConnected; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="environment"]')).toBe(environmentSeat)
+  } finally {
+    dom.window.setTimeout = nativeSetTimeout
+    dom.window.clearTimeout = nativeClearTimeout
+  }
   transitioningMotionShell.remove()
   const replacementMotionShell = dom.window.document.createElement('div')
   replacementMotionShell.id = 'native-summary-motion-shell-rerendered'
