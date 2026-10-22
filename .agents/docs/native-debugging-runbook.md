@@ -29,6 +29,16 @@ first failed stage instead of changing data mode, reload strategy and plugin
 code together. Fresh-home template hydration can expose generation ordering
 that an existing home hides; repair the ordering, not the stale-principal check.
 
+For production Host graphs, the launch-owned manifest retries within the
+existing renderer-injection deadline (60 seconds by default), without a separate
+10-second cutoff. The deadline is not reset after the manifest succeeds, and
+HTTP errors, invalid manifests, module imports and activation failures are not
+replayed. Native document readiness does not prove that the application's
+network policy has finished initializing. An `other / ERR_BLOCKED_BY_CLIENT`
+result identifies a canceled network request, not a specific policy state or
+cause. Preserve explicit network restrictions; a successful retry is recovery,
+not proof of the original failure's cause.
+
 A `renderer ready` log proves that startup stage only. Check that the expected
 route/contribution exists and its relevant interaction works before calling the
 result usable. For CordisX plugin debugging, follow the skill's

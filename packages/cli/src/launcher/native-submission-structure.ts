@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
+import { resolveNativeVariable } from './native-source-bindings.js'
 import {
   applySourceEdits,
   literal,
@@ -242,11 +243,7 @@ function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
     && member(n.callee, 'sendRequest') && literal(n.arguments[0]) === 'turn/start', 'turn-dispatch')
   const argument = call.arguments[1]
   if (argument?.type !== 'Identifier') throw new Error('Native capability turn-dispatch: expected normalized request')
-  const wire = plan.require(
-    fn.body,
-    n => n.type === 'VariableDeclarator' && n.id.name === argument.name && n.init != null,
-    'wire-normalizer',
-  )
+  const wire = resolveNativeVariable(fn, argument, 'wire-normalizer')
   if (wire.end > call.start) throw new Error('Native capability turn-dispatch: invalid normalization order')
   const requests = wireRequestInputs(wire.init)
   if (!requests.every(request => sameRequestReference(requests[0]!, request))) {

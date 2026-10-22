@@ -28,6 +28,7 @@ export interface ProductionHostBootstrap {
   readonly profile?: IsolatedCodexProfile
   readonly profileLease?: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>>
   readonly nativeSubmissionBootstrap?: NativeSubmissionBootstrap
+  readonly nativeSubmissionUnavailable?: true
   readonly prelaunchedHost?: Readonly<{ child: ChildProcess; hostPid: number; inspectorUrl?: Promise<string> }>
 }
 
@@ -90,6 +91,7 @@ export async function prepareProductionHostBootstrap(
   }
   let profileLease: Awaited<ReturnType<typeof acquireCodexProfileLaunchLease>> | undefined
   let nativeSubmissionBootstrap: NativeSubmissionBootstrap | undefined
+  let nativeSubmissionUnavailable = false
   let child: ChildProcess | undefined
   try {
     profileLease = profile === undefined
@@ -104,11 +106,16 @@ export async function prepareProductionHostBootstrap(
         preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,
       })
     ) {
-      const cacheDirectory = (runtime.env ?? process.env).CORDISX_INTERNAL_NATIVE_SUBMISSION_CACHE_DIRECTORY
-      nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(
-        plan.executable,
-        cacheDirectory === undefined ? {} : { cacheDirectory },
-      )
+      try {
+        const cacheDirectory = (runtime.env ?? process.env).CORDISX_INTERNAL_NATIVE_SUBMISSION_CACHE_DIRECTORY
+        nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(
+          plan.executable,
+          cacheDirectory === undefined ? {} : { cacheDirectory },
+        )
+      } catch (error) {
+        nativeSubmissionUnavailable = true
+        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
+      }
     }
     if (!input.prelaunch) {
       return {
@@ -117,6 +124,7 @@ export async function prepareProductionHostBootstrap(
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
+        ...(nativeSubmissionUnavailable ? { nativeSubmissionUnavailable: true as const } : {}),
       }
     }
     const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
@@ -165,6 +173,7 @@ export async function prepareProductionHostBootstrap(
       ...(profile === undefined ? {} : { profile }),
       ...(profileLease === undefined ? {} : { profileLease }),
       ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
+      ...(nativeSubmissionUnavailable ? { nativeSubmissionUnavailable: true as const } : {}),
       prelaunchedHost: { child, hostPid, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
     }
   } catch (error) {

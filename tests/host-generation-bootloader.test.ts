@@ -50,6 +50,35 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('owned manifest startup window', () => {
+  it('recovers after ten seconds without discarding the remaining startup budget', async () => {
+    const fetch = vi.fn(async () => {
+      if (Date.now() < 12_000) throw new TypeError('Failed to fetch')
+      return response()
+    })
+    const run = launch(fetch, 60_000)
+    // Observe rejection immediately so the pre-fix deadline is an assertion failure.
+    const outcome = run.result.then(value => ({ value }), error => ({ error: String(error) }))
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(await outcome).toEqual({ value: {} })
+    expect(run.importModule).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not reset the startup deadline after a late manifest succeeds', async () => {
+    const fetch = vi.fn(async () => {
+      if (Date.now() < 12_000) throw new TypeError('Failed to fetch')
+      return response()
+    })
+    const boot = vi.fn(() => new Promise(() => undefined))
+    const run = launch(fetch, 15_000, vi.fn(async () => ({ boot })))
+    const outcome = run.result.then(value => ({ value }), error => ({ error: String(error) }))
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(boot).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await outcome).toEqual({ error: expect.stringContaining('startup deadline exceeded') })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('accepts a manifest that is denied until 500ms and activates exactly once', async () => {
     const fetch = vi.fn(async () => {
       if (Date.now() < 500) throw new TypeError('Failed to fetch')
@@ -66,17 +95,17 @@ describe('owned manifest startup window', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('bounds persistent denial and preserves its diagnostic without private URLs', async () => {
+  it.each([1000, 60_000])('bounds persistent denial at %ims without exposing private URLs', async budget => {
     const fetch = vi.fn(async () => {
       throw new TypeError(`ERR_BLOCKED_BY_CLIENT ${origin}`)
     })
-    const run = launch(fetch)
+    const run = launch(fetch, budget)
     const rejected = expect(run.result).rejects.toThrow(
       'manifest fetch deadline exceeded: ERR_BLOCKED_BY_CLIENT [host graph]',
     )
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(budget)
     await rejected
-    expect(fetch).toHaveBeenCalledTimes(4)
+    expect(fetch).toHaveBeenCalledTimes(budget / 250)
     expect(run.importModule).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })

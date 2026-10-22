@@ -55,7 +55,7 @@ type NativeSubmissionActivation =
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 3
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 4
 const SHA256 = /^[a-f0-9]{64}$/u
 
 interface CachedNativeTransform {
@@ -94,6 +94,12 @@ export interface NativeSubmissionBootstrap {
     options?: NativeSubmissionCatalogOptions,
   ): Promise<NativeSubmissionComposition>
   close(): Promise<void>
+}
+export class NativeSubmissionCompatibilityError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'NativeSubmissionCompatibilityError'
+  }
 }
 interface NativeSubmissionCatalogOptions {
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
@@ -421,10 +427,15 @@ export async function prepareNativeSubmissionBootstrap(
           } catch { /* Diagnostics must not change native submission startup. */ }
         }
         reportStage('native-submission-completion-start')
-        const discovered = await (capabilities ??= nativeSubmissionTransforms(
-          contents,
-          options.cacheDirectory ?? defaultNativeSubmissionCacheDirectory(),
-        ))
+        let discovered: Awaited<ReturnType<typeof nativeSubmissionTransforms>>
+        try {
+          discovered = await (capabilities ??= nativeSubmissionTransforms(
+            contents,
+            options.cacheDirectory ?? defaultNativeSubmissionCacheDirectory(),
+          ))
+        } catch (error) {
+          throw new NativeSubmissionCompatibilityError(error)
+        }
         reportStage('native-submission-resource-analysis-ready')
         if (closePromise !== undefined) throw new Error('Native submission bootstrap was closed')
         const legacyNativePreferenceFile = completeOptions.managedCatalog === undefined

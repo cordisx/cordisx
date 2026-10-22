@@ -2,6 +2,7 @@ import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import path from 'node:path'
 import {
   createNativeSubmissionComposition,
+  NativeSubmissionCompatibilityError,
   type NativeSubmissionComposition,
 } from '../launcher/native-submission-composition.js'
 import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
@@ -167,6 +168,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   let nativeSubmission: NativeSubmissionComposition | undefined
   let nativeSubmissionCompletion: Promise<void> | undefined
   let nativeSubmissionBootstrap: ProductionHostBootstrap['nativeSubmissionBootstrap']
+  let nativeSubmissionUnavailable = false
   let rendererComposition: RendererComposition | undefined
   let productionPluginManagement: ProductionPluginManagementComposition | undefined
   let profileLease: ProductionHostBootstrap['profileLease']
@@ -192,6 +194,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       prelaunchedHost,
       nativeSubmissionBootstrap,
     } = bootstrap)
+    nativeSubmissionUnavailable = bootstrap.nativeSubmissionUnavailable === true
     certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
       homeDir: rootFromConfigPath(configPath),
       configPath,
@@ -817,15 +820,31 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const resolvedDebugPort = debugPort
     if (nativeSubmissionCompletion !== undefined) {
       stdout('[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-wait', at: Date.now() }))
-      await nativeSubmissionCompletion
-      stdout('[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-resolved', at: Date.now() }))
+      try {
+        await nativeSubmissionCompletion
+        stdout(
+          '[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-resolved', at: Date.now() }),
+        )
+      } catch (error) {
+        if (!(error instanceof NativeSubmissionCompatibilityError)) throw error
+        stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
+        nativeSubmissionUnavailable = true
+        if (prelaunchedHost !== undefined) {
+          await terminateIsolatedCodex(prelaunchedHost.child, profile)
+          prelaunchedHost = undefined
+        }
+        await nativeSubmissionBootstrap?.close()
+        nativeSubmissionBootstrap = undefined
+        nativeSubmissionCompletion = undefined
+      }
     }
     if (profile !== undefined && profileLease === undefined && runHost === runInjectedHost) {
       profileLease = await acquireCodexProfileLaunchLease(profile.userDataDir, { stdout })
     }
     try {
       if (
-        shouldEnableNativeSubmission({
+        !nativeSubmissionUnavailable
+        && shouldEnableNativeSubmission({
           platform: runtime.internalNativeSubmissionPlatform ?? process.platform,
           adapterId: adapter.id,
           preference: (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION,

@@ -7,8 +7,9 @@ export function hostGenerationBootloaderSource(origin: string): string {
   const controller = new AbortController()
   const signal = controller.signal
   const startupBudget = globalThis.__cordisxProductionBootstrapTimeoutMs ?? 60000
-  const budget = Math.min(10000, startupBudget)
-  const deadline = Date.now() + budget
+  // Native network policy can initialize after the document has finished loading.
+  // Share the existing startup deadline instead of failing early at ten seconds.
+  const deadline = Date.now() + startupBudget
   let lastFailure
   let activation
   const diagnostic = (stage, error) => {
@@ -34,7 +35,7 @@ export function hostGenerationBootloaderSource(origin: string): string {
     signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) abort()
   })
-  const timer = setTimeout(() => controller.abort(expired()), budget)
+  const timer = setTimeout(() => controller.abort(expired()), startupBudget)
   const startupTimer = setTimeout(() => controller.abort(Error('CordisX Host graph startup deadline exceeded')), startupBudget)
   const owner = {
     installId: globalThis.__cordisxProductionInstallId,

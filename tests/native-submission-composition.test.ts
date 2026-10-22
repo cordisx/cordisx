@@ -332,6 +332,48 @@ describe('structure-based native submission composition', () => {
       expect(() => nativeSubmissionTransformsForApp('future', 'x', source)).toThrow('wire-normalizer')
     }
   })
+  it.each([
+    'let wire=n.request;',
+    '{let wire=n.request;} function unrelated(){let wire=unknownRequest();}',
+  ])('resolves the dispatched wire binding despite outer or unrelated declarations: %s', async extra => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace(
+      'let prepared={request:n.request};',
+      `${extra} let prepared={get request(){return readRequest(n.request)}};`,
+    ).replace(
+      'normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+      'useDirect() ? prepared.request : normalizeWire(prepared.request,manager.requestClient.getAppServerVersion())',
+    )
+    const run = runtime(null, source)
+    for (const direct of [true, false]) {
+      for (const config of [undefined, { 'cordisx.operation_token': token }]) {
+        const request = { input: 'hello', permission: 'native', config }
+        run.sandbox.useDirect = () => direct
+        run.sandbox.readRequest = vi.fn(value => value)
+        const manager = dispatchManager()
+        const wire = await run.sandbox.dispatch({ manager, operation: { request } })
+        expect(run.sandbox.readRequest).toHaveBeenCalledTimes(1)
+        expect(wire).toEqual(
+          direct ? request : {
+            input: 'hello',
+            permission: 'preserved',
+            ...(config ? { config } : {}),
+          },
+        )
+        expect(manager.sendRequest).toHaveBeenCalledWith('turn/start', wire)
+        expect(request.config).toBe(config)
+      }
+    }
+  })
+  it.each([
+    'var wire; let prepared={request:n.request};',
+    'var wire=n.request; let prepared={request:n.request};',
+  ])('rejects ambiguous or uninitialized function-scoped wire bindings: %s', extra => {
+    const source = resources()
+    source[1]!.source = source[1]!.source.replace('let prepared={request:n.request};', extra)
+      .replace('let wire=normalizeWire', 'var wire=normalizeWire')
+    expect(() => nativeSubmissionTransformsForApp('future', 'x', source)).toThrow('wire-normalizer')
+  })
   it('preserves a const wire declaration with conditional normalization', async () => {
     const source = resources()
     source[1]!.source = source[1]!.source.replace('let wire=', 'const wire=').replace(
