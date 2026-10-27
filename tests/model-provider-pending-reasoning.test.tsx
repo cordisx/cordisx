@@ -3,6 +3,50 @@ import { describe, expect, it } from 'vitest'
 import { click, dom, modelTrigger, setup } from './fixtures/model-provider-selector-harness.js'
 
 describe('pending model reasoning slider', () => {
+  it('keeps current native effort controls when native model metadata is temporarily omitted', async () => {
+    const { update } = await setup('same', false, {
+      firstModels: [{ id: 'same', label: 'Same' }],
+      nativeModels: [{ id: 'same', label: 'Same', disabled: false }],
+    })
+    await update({ reasoningEffort: 'high', reasoningEfforts: ['low', 'high'] })
+    await click(modelTrigger)
+    expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
+  })
+
+  it('uses same-model native capabilities before the pending provider has a native model list', async () => {
+    const { update, selectReasoningEffort } = await setup('GPT-6-Astra', false, {
+      firstProviderId: 'gateway',
+      firstModels: [{ id: 'GPT-6-Astra', label: 'GPT-6 Astra' }],
+      nativeModels: [{
+        id: 'gpt-6-astra',
+        label: 'GPT-6 Astra',
+        disabled: false,
+        reasoningCapabilities: { efforts: ['low', 'high', 'max'], defaultEffort: 'high' },
+      }],
+    })
+    await update({
+      modelProvider: 'openai',
+      model: 'gpt-6-astra',
+      nativeModelsScope: 'active-provider',
+      nativeModelsProviderId: 'openai',
+      pendingProviderId: 'gateway',
+      pendingModel: 'GPT-6-Astra',
+      pendingReasoningEffort: 'high',
+    })
+    await click(modelTrigger)
+    const slider = document.querySelector<HTMLInputElement>('input[type="range"]')!
+    expect(slider.disabled).toBe(false)
+    expect(slider.max).toBe('2')
+    await act(async () => {
+      slider.value = '2'
+      slider.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
+      slider.dispatchEvent(new dom!.window.KeyboardEvent('keyup', { key: 'End', bubbles: true }))
+    })
+    expect(selectReasoningEffort).toHaveBeenCalledWith('max')
+    await update({ pendingModel: 'unrelated-model', pendingReasoningEffort: undefined })
+    expect(document.querySelector('input[type="range"]')).toBeNull()
+  })
+
   it('uses the pending direct-provider effort instead of the effective native effort and commits a change', async () => {
     const { update, selectReasoningEffort } = await setup('deepseek-flash', false, {
       firstProviderId: 'deepseek',

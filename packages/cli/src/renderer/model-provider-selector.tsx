@@ -16,6 +16,7 @@ import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from
 import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { resolveTargetReasoning } from './native-model-reasoning.js'
 
 export interface NativeProviderModelOption {
   readonly id: string
@@ -212,7 +213,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     ? copy.official
     : displayedProvider?.title ?? providerLabel
   const displayedModel = pendingModel ?? effectiveModel
-  const displayedModelId = displayedModel?.id
+  const displayedModelId = native.pendingModel ?? displayedModel?.id
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
   const menuProvider = native.pendingProviderId === undefined ? selected : pendingProvider
   const menuModels = menuProvider?.models
@@ -488,15 +489,25 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   )
   const showProviderSearch = providerRows.length > 5
   const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
-  const reasoningCapabilities = disclosedModel?.reasoningCapabilities ?? displayedNativeModel?.reasoningCapabilities
-  const reasoningEfforts = reasoningCapabilities?.efforts
-    ?? (catalogBacked && displayedNativeModel === undefined ? [] : native.reasoningEfforts ?? [])
   const selectedReasoningEffort = native.pendingProviderId === undefined
     ? native.reasoningEffort
     : native.pendingReasoningEffort
+  // Model availability stays provider-scoped; reasoning metadata can still describe
+  // the pending model before its provider switch has reached the native control.
+  const reasoning = resolveTargetReasoning(
+    { providerId: displayedProviderId, model: displayedModelId ?? '' },
+    selectedReasoningEffort,
+    native.nativeModels ?? [],
+    () => disclosedModel?.reasoningCapabilities ?? (catalogBacked ? null : undefined),
+  )
+  const reasoningEfforts = reasoning.efforts.length > 0
+    ? reasoning.efforts
+    : !reasoning.catalogBacked || displayedNativeModel?.id === native.model && native.model !== undefined
+    ? native.reasoningEfforts ?? []
+    : []
   const reasoningEffort = reasoningEfforts.includes(selectedReasoningEffort ?? '')
     ? selectedReasoningEffort
-    : reasoningCapabilities?.defaultEffort
+    : reasoning.effort
   return (
     <div
       className="cxmp-selector"

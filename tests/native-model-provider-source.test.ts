@@ -204,6 +204,9 @@ describe('native model provider source', () => {
         label: 'GPT Official',
         disabled,
         supportsFastMode: false,
+        ...(providerId === 'openai'
+          ? { reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'low' } }
+          : {}),
       }])
     }
     expect(channel.selectionSelect).toHaveBeenCalledTimes(3)

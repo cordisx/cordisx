@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from 'vitest'
 import { NativeModelSource, parseNativeModelListPage } from '../packages/cli/src/renderer/adapter/native-model-list.js'
 
 describe('native model list source', () => {
+  it('retains native reasoning metadata and fills omitted fields from the same provider control', async () => {
+    const source = new NativeModelSource()
+    const row = { id: 'protocol-a', model: 'model-a', displayName: 'Model A', hidden: false }
+    const reasoningCapabilities = { efforts: ['low', 'high'] as const, defaultEffort: 'high' as const }
+    const control = { id: 'model-a', label: 'Model A', disabled: false, supportsFastMode: false, reasoningCapabilities }
+    await source.refresh('openai', async () => ({ data: [row], nextCursor: null }))
+    expect(source.project('active-provider', 'openai', [control]).nativeModels[0]?.reasoningCapabilities)
+      .toEqual(reasoningCapabilities)
+    expect(source.project('active-provider', 'other', [control]).nativeModels[0]?.reasoningCapabilities)
+      .toBeUndefined()
+    expect(
+      parseNativeModelListPage({
+        data: [{
+          ...row,
+          supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }],
+          defaultReasoningEffort: 'high',
+        }],
+      })?.models[0]?.reasoningCapabilities,
+    ).toEqual(reasoningCapabilities)
+  })
+
   it('parses visible model/list rows without inferring provider ownership', () => {
     expect(parseNativeModelListPage({
       data: [

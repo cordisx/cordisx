@@ -50,7 +50,9 @@ export function resolveTargetReasoning(
   catalogReasoning: CatalogReasoningLookup,
 ): TargetReasoning {
   const catalog = catalogReasoning(target.providerId, target.model)
+  const equivalent = models.filter(model => model.id.toLowerCase() === target.model.toLowerCase())
   const native = models.find(model => model.id === target.model)
+    ?? (equivalent.length === 1 ? equivalent[0] : undefined)
   const capabilities = catalog ?? native?.reasoningCapabilities
   const effort = resolveModelReasoningEffort(capabilities, currentEffort) ?? native?.defaultReasoningEffort
   return {

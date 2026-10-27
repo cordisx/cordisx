@@ -1,4 +1,8 @@
-import { friendlyModelLabel, type NativeModelSelectionControl } from './native-model-provider-seat.js'
+import {
+  friendlyModelLabel,
+  nativeModelReasoningCapabilities,
+  type NativeModelSelectionControl,
+} from './native-model-provider-seat.js'
 
 export type NativeModelOption = NativeModelSelectionControl['models'][number]
 
@@ -50,11 +54,13 @@ export function parseNativeModelListPage(value: unknown):
     ) return undefined
     if (model.hidden) continue
     const displayLabel = friendlyModelLabel(label)
+    const reasoningCapabilities = nativeModelReasoningCapabilities(model)
     models.push(Object.freeze({
       id,
       label: displayLabel === '' ? id : displayLabel,
       disabled: false,
       supportsFastMode: supportsFastMode(model),
+      ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
     }))
   }
   const nextCursor = page.nextCursor === null || page.nextCursor === undefined
@@ -118,13 +124,20 @@ export class NativeModelSource {
     if (scope !== 'active-provider') {
       return Object.freeze({ nativeModels: controlModels })
     }
-    const disabledById = this.current?.providerId === providerId
-      ? new Map(controlModels.map(model => [model.id, model.disabled]))
+    const controlById = this.current?.providerId === providerId
+      ? new Map(controlModels.map(model => [model.id, model]))
       : undefined
     return Object.freeze({
       nativeModels: this.current?.models.map(model => {
-        const disabled = disabledById?.get(model.id)
-        return disabled === undefined || disabled === model.disabled ? model : Object.freeze({ ...model, disabled })
+        const control = controlById?.get(model.id)
+        if (control === undefined) return model
+        return Object.freeze({
+          ...model,
+          disabled: control.disabled,
+          ...(model.reasoningCapabilities === undefined && control.reasoningCapabilities !== undefined
+            ? { reasoningCapabilities: control.reasoningCapabilities }
+            : {}),
+        })
       }) ?? [],
       ...(this.current === undefined ? {} : { nativeModelsProviderId: this.current.providerId }),
     })
