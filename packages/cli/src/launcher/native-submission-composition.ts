@@ -370,6 +370,22 @@ export async function resolveBundledCodexCliPath(contents: string): Promise<stri
   throw new Error('The selected Desktop app does not contain a supported bundled Codex CLI')
 }
 
+/** Keep the intermediary inside the selected App's signed runtime chain, without changing the Host's Node. */
+export async function resolveBundledCodexNodePath(contents: string): Promise<string> {
+  const resources = await realpath(path.join(contents, 'Resources'))
+  let runtime: string
+  try {
+    runtime = await realpath(path.join(resources, 'cua_node/bin/node'))
+  } catch (error) {
+    throw new Error('The selected Desktop app does not contain its bundled intermediary Node runtime', { cause: error })
+  }
+  if (!runtime.startsWith(`${resources}${path.sep}`)) {
+    throw new Error('The intermediary Node runtime must remain inside the selected Desktop app')
+  }
+  await access(runtime, constants.X_OK)
+  return runtime
+}
+
 /** Start only the fail-closed native transport; compatibility discovery continues off the Host launch path. */
 export async function prepareNativeSubmissionBootstrap(
   desktopExecutable: string,
@@ -383,6 +399,7 @@ export async function prepareNativeSubmissionBootstrap(
   }
   const contents = path.dirname(macos)
   const cli = await resolveBundledCodexCliPath(contents)
+  const node = await resolveBundledCodexNodePath(contents)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   let capabilities: ReturnType<typeof nativeSubmissionTransforms> | undefined
   const control = await startNativeSubmissionControlServer()
@@ -421,6 +438,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_CONTROL_SOCKET: control.socketPath,
     CORDISX_NATIVE_CONTROL_NONCE: control.nonce,
     CORDISX_NATIVE_REAL_CODEX_PATH: cli,
+    CORDISX_NATIVE_NODE_PATH: node,
   }
   return {
     environment,

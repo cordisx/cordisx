@@ -1,4 +1,5 @@
-#!/usr/bin/env node
+#!/bin/sh
+':' // ; exec "${CORDISX_NATIVE_NODE_PATH:-${CORDISX_NATIVE_REAL_CODEX_PATH%%/Contents/Resources/*}/Contents/Resources/cua_node/bin/node}" "$0" "$@"
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
@@ -17,6 +18,7 @@ for (
     'CORDISX_NATIVE_CONTROL_SOCKET',
     'CORDISX_NATIVE_CONTROL_NONCE',
     'CORDISX_NATIVE_REAL_CODEX_PATH',
+    'CORDISX_NATIVE_NODE_PATH',
   ]
 ) delete process.env[key]
 
