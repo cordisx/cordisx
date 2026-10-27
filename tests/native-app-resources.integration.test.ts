@@ -22,7 +22,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
-async function bundle(incompatible = false, scripts = resources()) {
+async function bundle(incompatible = false, scripts = resources(), entryHtml?: string) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cx-app-'))
   roots.push(root)
   const contents = path.join(root, 'Fixture.app/Contents')
@@ -45,6 +45,7 @@ async function bundle(incompatible = false, scripts = resources()) {
       incompatible ? 'export {}' : resource.source,
     )
   }
+  if (entryHtml !== undefined) await writeFile(path.join(source, 'webview/index.html'), entryHtml)
   await createPackage(source, path.join(contents, 'Resources/app.asar'))
   return { contents, executable }
 }
@@ -128,6 +129,42 @@ it('reads the actual ASAR resource layout without relying on asset hash names', 
   const f = await bundle()
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
     .toEqual(resources().map(resource => resource.url).sort())
+})
+
+it('finds relocated capabilities through static and literal dynamic imports without including unrelated chunks', async () => {
+  const scripts = resources()
+  const split = scripts[0]!.source.indexOf('let select;')
+  const submit = scripts[0]!.source.slice(0, split)
+  scripts[0]!.source = scripts[0]!.source.slice(split)
+    + '\nvoid import(`./entry-lazy.js`); void import(dynamicPath);'
+  scripts.push({
+    url: 'app://-/assets/entry-lazy.js',
+    source: 'export * from "./relocated-composer.js"; import "./unrelated.js";',
+  })
+  scripts.push({ url: 'app://-/assets/relocated-composer.js', source: submit + '\nimport "./entry-lazy.js";' })
+  scripts.push({ url: 'app://-/assets/unrelated.js', source: 'export const unrelated = 1;' })
+  scripts.push({ url: 'app://-/assets/unreachable.js', source: submit })
+  const f = await bundle(false, scripts)
+  const found = readNativeSubmissionResources(f.contents)
+  expect(found.map(resource => resource.url).sort()).toEqual([
+    scripts[0]!.url,
+    scripts[1]!.url,
+    'app://-/assets/relocated-composer.js',
+  ].sort())
+})
+
+it('uses the application HTML entry when the bundler changes every chunk prefix', async () => {
+  const scripts = resources().map((resource, index) => ({
+    ...resource,
+    url: `app://-/assets/renamed-part-${index}.js`,
+  }))
+  scripts.push({
+    url: 'app://-/assets/new-entry.js',
+    source: 'import "./renamed-part-0.js"; void import(`./renamed-part-1.js`);',
+  })
+  const f = await bundle(false, scripts, '<script type="module" src="./assets/new-entry.js"></script>')
+  expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
+    .toEqual(scripts.map(resource => resource.url).sort())
 })
 
 it.skipIf(process.platform !== 'darwin')(

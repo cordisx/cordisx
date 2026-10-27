@@ -39,6 +39,21 @@ function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unkn
 }
 
 describe('structure-based native submission composition', () => {
+  it('keeps menu completion independent of a submit function moved to another resource', async () => {
+    const source = resources()
+    const split = source[0]!.source.indexOf('let select;')
+    const submit = source[0]!.source.slice(0, split)
+    source[0]!.source = source[0]!.source.slice(split)
+    source.push({ url: 'app://-/assets/relocated-composer.js', source: submit })
+    const analysis = analyzeNativeSubmissionTransforms(source)
+    expect(analysis.transforms).toHaveLength(3)
+    expect(analysis.transforms.filter(transform => transform.requiredForDocumentReady).map(transform => transform.url))
+      .toEqual(['app://-/assets/relocated-composer.js'])
+    for (const transform of analysis.transforms) {
+      const resource = source.find(resource => resource.url === transform.url)!
+      expect(() => parseNativeSource(transform.transform(resource.source).source)).not.toThrow()
+    }
+  })
   it('carries first-turn config when native creation no longer destructures config or service tier', async () => {
     const source = resources()
     source[1]!.source = source[1]!.source.replace('config:incoming,serviceTier:serviceTier,', '')
@@ -201,7 +216,7 @@ describe('structure-based native submission composition', () => {
   )
   it('rejects missing, duplicate and malformed structures with specific diagnostics', () => {
     const missing = resources()
-    missing[0]!.source = missing[0]!.source.replace('skipGoalSubmit:', 'unknownOption:')
+    missing[0]!.source = missing[0]!.source.replace('promptRawOverride:', 'unknownOption:')
     expect(() => nativeSubmissionTransformsForApp('future', 'x', missing)).toThrow('submit-options')
     const duplicate = resources()
     duplicate.push({ url: 'app://-/assets/duplicate.js', source: duplicate[0]!.source })
@@ -209,6 +224,43 @@ describe('structure-based native submission composition', () => {
     expect(() =>
       nativeSubmissionTransformsForApp('future', 'x', [{ url: 'app://-/assets/bad.js', source: 'async function {' }])
     ).toThrow('incompatible')
+  })
+  it('keeps admission and token propagation when unrelated goal options disappear or input destructuring moves', async () => {
+    const source = resources()
+    source[0]!.source = source[0]!.source.replace(
+      'skipGoalReplacementConfirmation:skip=false,skipGoalSubmit:skipSubmit=false,',
+      '',
+    )
+    const begin = source[0]!.source.indexOf('async function submit({')
+    const end = source[0]!.source.indexOf('}) {', begin)
+    const parameters = source[0]!.source.slice(begin + 'async function submit('.length, end + 1)
+    source[0]!.source = source[0]!.source.slice(0, begin)
+      + `async function submit(incoming) { let ${parameters}=incoming;`
+      + source[0]!.source.slice(end + 4)
+    const hook = vi.fn<() => Promise<{ allow: boolean; operationToken?: string }>>(async () => ({ allow: false }))
+    const run = runtime(hook, source)
+    expect(await run.submit()).toBeUndefined()
+    expect(run.effects).toEqual([])
+    expect(hook).toHaveBeenCalledWith(expect.objectContaining({ target: 'local', thread: 'thread' }))
+    hook.mockResolvedValueOnce({ allow: true, operationToken: token })
+    expect((await run.submit()).__cordisxOperationToken).toBe(token)
+    expect(run.effects).toEqual(['send'])
+  })
+  it('does not require unrelated permission, restore or UI-cleanup fields to route an ordinary send', async () => {
+    const source = resources().map(resource => ({
+      ...resource,
+      source: resource.source.replace('clearStopTurnConfirmation:clear,', '')
+        .replace('clear();', 'globalThis.nativeEffect();')
+        .replace('workspaceRoots:roots,permissionSelection:permission,', '')
+        .replace('restoreMessage:restore,', '')
+        .replace(',readPersistedValue:read,ownerWindowError:error', ''),
+    }))
+    const run = runtime(async () => ({ allow: true, operationToken: token }), source)
+    run.sandbox.nativeEffect = vi.fn()
+    expect((await run.submit()).__cordisxOperationToken).toBe(token)
+    expect(run.sandbox.nativeEffect).toHaveBeenCalledOnce()
+    const draft = await run.sandbox.draft({ context: await run.submit(), prompt: 'message', serviceTier: null })
+    expect(draft.configOverrides['cordisx.operation_token']).toBe(token)
   })
   it('fences resource changes between discovery and interception', () => {
     const run = runtime()

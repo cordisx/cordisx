@@ -43,6 +43,18 @@ const uniqueBinding = (plan: ResourcePlan, root: SyntaxNode, base: string): stri
   return binding
 }
 
+/** Parameter destructuring and a local destructuring of that parameter have the same authority. */
+function inputPattern(plan: ResourcePlan, fn: SyntaxNode, keys: readonly string[]): SyntaxNode | undefined {
+  const parameter = fn.params[0]?.type === 'AssignmentPattern' ? fn.params[0].left : fn.params[0]
+  if (has(parameter, keys)) return parameter
+  if (parameter?.type !== 'Identifier') return undefined
+  const patterns = (plan.declarations.get(fn) ?? []).filter(declaration =>
+    declaration.init?.type === 'Identifier' && declaration.init.name === parameter.name && has(declaration.id, keys)
+  )
+  if (patterns.length === 0) return undefined
+  return one(patterns, 'submission-input').id
+}
+
 class ResourcePlan {
   readonly ast: SyntaxNode
   readonly edits: SourceEdit[] = []
@@ -99,33 +111,38 @@ class ResourcePlan {
 }
 
 function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
-  const input = fn.params[0]
+  const input = inputPattern(plan, fn, ['submitTarget', 'isResponseInProgress', 'options'])!
   const bind = (name: string): string => plan.binding(input, name)
   const options = bind('options')
   const declaration = plan.require(fn.body, n =>
     n.type === 'VariableDeclarator'
-    && has(n.id, [
-      'skipGoalReplacementConfirmation',
-      'skipGoalSubmit',
-      'promptRawOverride',
-      'persistedPromptRawOverride',
-    ])
+    && has(n.id, ['promptRawOverride', 'persistedPromptRawOverride'])
     && n.init?.type === 'Identifier' && n.init.name === options, 'submit-options')
   // Bind admission to normalized options, not adjacency to a later native effect.
-  const clear = bind('clearStopTurnConfirmation')
-  const call = plan.require(fn.body, n =>
-    n.type === 'ExpressionStatement'
-    && n.expression.type === 'CallExpression' && n.expression.callee.name === clear
-    && n.expression.arguments.length === 0, 'submit-first-effect')
-  if (call.start < declaration.end || !fn.async) throw new Error('Native capability submit guard ordering changed')
-  const block = plan.require(fn.body, n => n.type === 'BlockStatement' && n.body.includes(call), 'submit-effect-block')
+  if (!fn.async) throw new Error('Native capability submit guard requires asynchronous admission')
+  const block = plan.require(
+    fn.body,
+    n =>
+      n.type === 'BlockStatement'
+      && n.body.some((statement: SyntaxNode) =>
+        statement.type === 'VariableDeclaration' && statement.declarations.includes(declaration)
+      ),
+    'submit-options-block',
+  )
   const optionsStatement = one<SyntaxNode>(
     block.body.filter((statement: SyntaxNode) =>
       statement.type === 'VariableDeclaration' && statement.declarations.includes(declaration)
     ),
     'submit-options-statement',
   )
-  if (optionsStatement.end > call.start) throw new Error('Native capability submit guard ordering changed')
+  const prefix = block.body.slice(0, block.body.indexOf(optionsStatement)) as SyntaxNode[]
+  const effectfulPrefix = prefix.some(statement =>
+    plan.nodes(statement, (node, parents) =>
+      !parents.some(parent => parent !== statement && isFunction(parent))
+      && (node.type === 'ExpressionStatement' || node.type === 'AwaitExpression' || node.type === 'NewExpression'))
+      .length > 0
+  )
+  if (effectfulPrefix) throw new Error('Native capability submit guard ordering changed')
   const follow = bind('followUp')
   const raw = plan.binding(declaration.id, 'promptRawOverride')
   const persisted = plan.binding(declaration.id, 'persistedPromptRawOverride')
@@ -161,7 +178,7 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
 }
 
 function draftRequest(plan: ResourcePlan, fn: SyntaxNode): void {
-  const context = plan.binding(fn.params[0], 'context')
+  const context = plan.binding(inputPattern(plan, fn, ['context', 'prompt', 'serviceTier'])!, 'context')
   const request = plan.require(fn.body, n =>
     n.type === 'ObjectExpression'
     && has(n, ['configOverrides', 'requiresThreadReferences', 'input', 'serviceTier']), 'draft-request')
@@ -179,7 +196,7 @@ function draftRequest(plan: ResourcePlan, fn: SyntaxNode): void {
 }
 
 function existingRequest(plan: ResourcePlan, fn: SyntaxNode): void {
-  const context = plan.binding(fn.params[0], 'context')
+  const context = plan.binding(inputPattern(plan, fn, ['context', 'targetConversationId', 'serviceTier'])!, 'context')
   const request = plan.require(
     fn.body,
     n =>
@@ -251,7 +268,7 @@ function sameRequestReference(left: SyntaxNode, right: SyntaxNode): boolean {
 }
 
 function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
-  plan.binding(fn.params[0], 'operation')
+  plan.binding(inputPattern(plan, fn, ['manager', 'operation'])!, 'operation')
   const call = plan.require(fn.body, n =>
     n.type === 'CallExpression'
     && member(n.callee, 'sendRequest') && literal(n.arguments[0]) === 'turn/start', 'turn-dispatch')
@@ -343,6 +360,7 @@ function modelCompletion(plan: ResourcePlan): void {
       if (binding?.type === 'Identifier') menus.push({ binding: binding.name, owner: parents.findLast(isFunction) })
     }
   })
+  if (menus.length === 0) return
   // Minified names are local bindings, not unique identifiers across the asset.
   const callbacks = plan.nodes(
     plan.ast,
@@ -384,17 +402,30 @@ export function analyzeNativeSubmissionTransforms(
   const plans = resources.map(resource => new ResourcePlan(resource))
   for (const plan of plans) {
     for (const fn of plan.functions) {
-      const input = fn.params[0]
-      if (has(input, ['clearStopTurnConfirmation', 'submitTarget', 'isResponseInProgress', 'options'])) {
+      if (inputPattern(plan, fn, ['submitTarget', 'isResponseInProgress', 'options'])) {
         submitGuard(plan, fn)
       }
-      if (has(input, ['context', 'prompt', 'workspaceRoots', 'permissionSelection', 'serviceTier'])) {
+      if (inputPattern(plan, fn, ['context', 'prompt', 'serviceTier'])) {
         draftRequest(plan, fn)
       }
-      if (has(input, ['context', 'targetConversationId', 'restoreMessage', 'clientUserMessageId', 'serviceTier'])) {
+      if (
+        inputPattern(plan, fn, [
+          'context',
+          'targetConversationId',
+          'clientUserMessageId',
+          'serviceTier',
+        ])
+      ) {
         existingRequest(plan, fn)
       }
-      if (has(input, ['manager', 'operation', 'readPersistedValue', 'ownerWindowError'])) finalDispatch(plan, fn)
+      if (
+        inputPattern(plan, fn, ['manager', 'operation'])
+        && plan.nodes(fn.body, node =>
+            node.type === 'CallExpression' && member(node.callee, 'sendRequest')
+            && literal(node.arguments[0]) === 'turn/start').length > 0
+      ) {
+        finalDispatch(plan, fn)
+      }
       const declarations = plan.declarations.get(fn) ?? []
       if (
         declarations.some(n => has(n.id, ['configOverrides', 'input', 'threadStartKind', 'requiresThreadReferences']))
@@ -421,7 +452,7 @@ export function analyzeNativeSubmissionTransforms(
         )
       ) firstTurn(plan, fn)
     }
-    if (plan.capabilities.includes('submit-guard')) modelCompletion(plan)
+    if (plan.resource.source.includes('onSelectModelOption')) modelCompletion(plan)
   }
   const required = [
     'submit-guard',

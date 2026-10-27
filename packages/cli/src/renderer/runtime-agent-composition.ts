@@ -7,6 +7,7 @@ import { installUsageService } from './usage.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { installModelProviderSelector } from './install-model-provider-selector.js'
+import { reportNativeModelSelectionUnavailable } from './native-model-availability-notice.js'
 import type {
   NativeProviderSelectionCommandChannel,
   NativeProviderSelectionOwner,
@@ -876,6 +877,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       const nativeReady = native.__cordisxNativeSubmissionReady === undefined
         ? false
         : await native.__cordisxNativeSubmissionReady
+      if (!nativeReady && document.location.href === 'app://-/index.html') {
+        runtimeScope.registrySubscriptions()!.push(reportNativeModelSelectionUnavailable(
+          document,
+          runtimeScope.i18nService?.getSnapshot().locale ?? 'en',
+        ))
+      }
       const disposeModelProviderSelector = await installModelProviderSelector(
         document,
         runtimeScope.modelProviders()!,
