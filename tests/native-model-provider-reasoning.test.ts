@@ -19,8 +19,15 @@ describe('catalog-backed reasoning selection', () => {
       await settle()
       expect(await h.transport.select({ providerId: 'gateway', model: 'MODEL-A' })).toBe('accepted')
       expect(await h.transport.selectReasoningEffort('low')).toBe('accepted')
-      h.channel.submissionPrepare.mockResolvedValueOnce({ status: 'allow-original', operationToken: 'draft-token' })
-      expect(await hook()(descriptor)).toEqual({ allow: true, operationToken: 'draft-token', reasoningEffort: 'low' })
+      h.channel.submissionPrepare.mockResolvedValueOnce({
+        status: 'allow-original',
+        operationToken: 'draft-operation-token',
+      })
+      expect(await hook()(descriptor)).toEqual({
+        allow: true,
+        operationToken: 'draft-operation-token',
+        reasoningEffort: 'low',
+      })
       expect(h.channel.submissionPrepare).toHaveBeenLastCalledWith(expect.objectContaining({
         action: expect.objectContaining({ reasoningEffort: 'low' }),
       }))
