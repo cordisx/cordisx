@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -13,7 +12,8 @@ const generated = [
   'packages/schemastery-ui/dist',
   'packages/cli/dist',
 ]
-const backup = await mkdtemp(path.join(tmpdir(), 'cordisx-clean-dev-'))
+// rename must stay on the checkout filesystem; runner /tmp may be another mount.
+const backup = await mkdtemp(path.join(root, '.cordisx-clean-dev-'))
 const moved = []
 
 async function exists(target) {
@@ -50,7 +50,7 @@ try {
   await rm(backup, { recursive: true, force: true })
   console.log('[clean-dev] source CLI preparation and renderer bundle verified')
 } catch (error) {
-  for (const relative of generated) {
+  for (const relative of moved) {
     await rm(path.join(root, relative), { recursive: true, force: true })
   }
   for (const relative of moved) {
