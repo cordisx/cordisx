@@ -500,9 +500,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     native.nativeModels ?? [],
     () => disclosedModel?.reasoningCapabilities ?? (catalogBacked ? null : undefined),
   )
-  const reasoningEfforts = reasoning.catalogBacked || reasoning.efforts.length > 0
+  const reasoningEfforts = reasoning.efforts.length > 0
     ? reasoning.efforts
-    : native.reasoningEfforts ?? []
+    : !reasoning.catalogBacked || displayedNativeModel?.id === native.model && native.model !== undefined
+    ? native.reasoningEfforts ?? []
+    : []
   const reasoningEffort = reasoningEfforts.includes(selectedReasoningEffort ?? '')
     ? selectedReasoningEffort
     : reasoning.effort
