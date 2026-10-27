@@ -412,7 +412,7 @@ An actually removed or ambiguous Composer still retires the seat normally.
 
 ## Agent access to configured providers
 
-Unreleased: the native submission composition adds a launch-scoped stdio MCP
+Starting with 0.1.0-beta.31, the native submission composition adds a launch-scoped stdio MCP
 server named `cordisx_models`. `list_model_providers` projects the same admitted
 configured/plugin/managed provider catalog as the UI, with exact provider/model
 IDs and labels. It does not return endpoints, credentials or private binding
