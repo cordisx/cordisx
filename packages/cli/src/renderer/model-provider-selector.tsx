@@ -213,7 +213,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     ? copy.official
     : displayedProvider?.title ?? providerLabel
   const displayedModel = pendingModel ?? effectiveModel
-  const displayedModelId = displayedModel?.id
+  const displayedModelId = native.pendingModel ?? displayedModel?.id
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
   const menuProvider = native.pendingProviderId === undefined ? selected : pendingProvider
   const menuModels = menuProvider?.models

@@ -12,7 +12,10 @@ describe('catalog-backed reasoning selection', () => {
   it('carries native same-model reasoning through a pending catalog with missing metadata', async () => {
     const h = await harness(undefined, provider => provider === 'gateway' ? null : undefined)
     try {
-      composer(h.dom.window.document, null)
+      const fresh = composer(h.dom.window.document, null)
+      const props = (fresh.trigger as any).__reactFiber$test.return.memoizedProps
+      props.models[0].displayName = 'Model A'
+      props.modelOptions[0].model = props.models[0]
       await settle()
       expect(await h.transport.select({ providerId: 'gateway', model: 'MODEL-A' })).toBe('accepted')
       expect(await h.transport.selectReasoningEffort('low')).toBe('accepted')
