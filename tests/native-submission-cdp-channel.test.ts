@@ -92,6 +92,24 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('fences UI mutations during Agent selection and reads the acknowledged provider afterwards', async () => {
+    const h = await harness()
+    const scope = { ...h.draft, threadId: 'thread' }
+    h.setLive(scope)
+    try {
+      await h.channel.selectionRead({ scope, effective: { providerId: 'openai', model: 'native-model' } })
+      expect(h.authority.agentSelection.reserve('thread')).toBe(true)
+      expect(h.authority.agentSelection.reserve('thread')).toBe(false)
+      await expect(h.channel.selectionSelect({ scope, providerId: 'provider-b', model: 'model-b' })).rejects.toThrow()
+      h.authority.agentSelection.commit({ threadId: 'thread', providerId: 'provider-b', model: 'model-b' })
+      h.authority.agentSelection.release('thread')
+      expect(await h.channel.selectionRead({ scope, effective: { providerId: 'openai', model: 'native-model' } }))
+        .toMatchObject({ effective: { providerId: 'provider-b', model: 'model-b' }, revision: 2 })
+      expect(h.controller.commitSelection).not.toHaveBeenCalled()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
   it('keeps model connection management and environment operations available without admitting native sends', async () => {
     const command = vi.fn(async () => ({ status: 'applied' as const }))
     const environmentRead = vi.fn(() => ({

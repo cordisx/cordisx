@@ -300,6 +300,7 @@ try {
       'dist/assets/brand/cordisx-mark-animated-dark.svg',
       'dist/assets/launcher/native-provider-credential-helper.mjs',
       'dist/assets/launcher/native-app-server-intermediary.mjs',
+      'dist/assets/launcher/native-agent-models-mcp.mjs',
       'dist/assets/launcher/native-request-tracker.mjs',
       'node_modules/@cordisx/schemastery-ui/package.json',
       'node_modules/@cordisx/schemastery-ui/LICENSE',

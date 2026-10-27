@@ -112,6 +112,26 @@ async function harness(controller?: NativeSubmissionController) {
 }
 
 describe('native app-server intermediary', () => {
+  it('allows Agent selection only for a loaded idle thread behind the native mutation fence', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'initialize-agent-switch-fixture', method: 'echo/bytes', params: {} })
+      await h.read()
+      const switchThread = (threadId: string) =>
+        h.server.switchAgentThread({
+          threadId,
+          providerId: 'provider-b',
+          model: 'model-b',
+          configOverrides: {},
+        })
+      await expect(switchThread('agent-idle')).resolves.toBeUndefined()
+      for (const state of ['active', 'notLoaded', 'systemError', 'unknown']) {
+        await expect(switchThread(`agent-${state}`)).rejects.toThrow()
+      }
+    } finally {
+      await h.close()
+    }
+  })
   it('preserves offline Responses SSE and stateless tool history as opaque native payloads', async () => {
     const h = await harness()
     try {

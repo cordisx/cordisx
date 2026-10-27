@@ -2,11 +2,13 @@
 ':' // ; exec "${CORDISX_NATIVE_NODE_PATH:-${CORDISX_NATIVE_REAL_CODEX_PATH%%/Contents/Resources/*}/Contents/Resources/cua_node/bin/node}" "$0" "$@"
 import { spawn } from 'node:child_process'
 import net from 'node:net'
+import { fileURLToPath } from 'node:url'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
 const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
+const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
 // Native history and plugin catalogs can exceed the small private control-message budget.
 const maxNativeLineBytes = 64 * 1024 * 1024
@@ -19,10 +21,25 @@ for (
     'CORDISX_NATIVE_CONTROL_NONCE',
     'CORDISX_NATIVE_REAL_CODEX_PATH',
     'CORDISX_NATIVE_NODE_PATH',
+    'CORDISX_NATIVE_AGENT_MODELS_BINDING',
   ]
 ) delete process.env[key]
 
-const child = spawn(executable, process.argv.slice(2), { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
+const nativeArgs = process.argv.slice(2)
+if (agentModelsBinding && nativeArgs.includes('app-server')) {
+  nativeArgs.unshift(
+    '-c',
+    `mcp_servers.cordisx_models.command=${JSON.stringify(process.execPath)}`,
+    '-c',
+    `mcp_servers.cordisx_models.args=${
+      JSON.stringify([
+        fileURLToPath(new URL('./native-agent-models-mcp.mjs', import.meta.url)),
+        agentModelsBinding,
+      ])
+    }`,
+  )
+}
+const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
 const control = net.connect(socketPath)
 const controlCalls = new Map()
 const privateCalls = new Map()
@@ -524,6 +541,13 @@ readLines(control, line => {
   switching.add(message.threadId)
   void (async () => {
     try {
+      if (message.requireIdle === true) {
+        const before = await nativeCall('thread/read', { threadId: message.threadId, includeTurns: false })
+        if (before?.thread?.id !== message.threadId || before?.thread?.status?.type !== 'idle') {
+          await write(control, { id: message.id, ok: true, value: { status: 'rejected', reason: 'thread-not-idle' } })
+          return
+        }
+      }
       await nativeCall('thread/unsubscribe', { threadId: message.threadId })
       const result = await nativeCall('thread/resume', {
         threadId: message.threadId,

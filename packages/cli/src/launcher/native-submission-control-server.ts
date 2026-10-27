@@ -4,6 +4,7 @@ import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { NativeExistingThreadSwitch, NativeSubmissionController } from './native-submission-controller.js'
+import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 
 const MAX_LINE = 256 * 1024
 const TIMEOUT = 30_000
@@ -18,6 +19,14 @@ export interface NativeSubmissionControlServer {
   readonly socketPath: string
   readonly nonce: string
   readonly existingThread: NativeExistingThreadSwitch
+  switchAgentThread(
+    input: Readonly<{
+      threadId: string
+      providerId: string
+      model: string
+      configOverrides: Readonly<Record<string, unknown>>
+    }>,
+  ): Promise<void>
   isThreadIdle(threadId: string): Promise<boolean>
   bindController(controller: NativeSubmissionController): void
   close(): Promise<void>
@@ -234,6 +243,26 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     socketPath,
     nonce,
     existingThread,
+    async switchAgentThread(
+      input: Readonly<{
+        threadId: string
+        providerId: string
+        model: string
+        configOverrides: Readonly<Record<string, unknown>>
+      }>,
+    ) {
+      const result = await callPeer({
+        type: 'switch',
+        requireIdle: true,
+        threadId: input.threadId,
+        providerId: input.providerId,
+        model: input.model,
+        config: input.configOverrides,
+      })
+      if (record(result)?.status === 'rejected') {
+        throw new NativeAgentModelSelectionRejected('The target thread is not idle')
+      }
+    },
     async isThreadIdle(threadId: string) {
       return await callPeer({ type: 'idle', threadId }) === true
     },

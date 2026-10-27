@@ -84,6 +84,20 @@ reader.on('line', line => {
     process.stdout.write(`${line}\n`)
     return
   }
+  if (message.method === 'thread/read' && String(message.params?.threadId).startsWith('agent-')) {
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        result: {
+          thread: {
+            id: message.params.threadId,
+            status: { type: message.params.threadId.slice(6) },
+          },
+        },
+      }) + '\n',
+    )
+    return
+  }
   const unrelatedResumeErrors = {
     'managed-permission': { code: -32001, message: 'permission denied' },
     'managed-parameters': { code: -32602, message: 'invalid params' },
