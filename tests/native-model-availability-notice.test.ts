@@ -17,8 +17,8 @@ describe('native model availability notice', () => {
     }))
     expect(show).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'native.model-selection.unavailable',
-      type: 'error',
-      message: locale === 'en' ? 'CordisX model selection is unavailable' : 'CordisX 模型选择器暂不可用',
+      type: 'warning',
+      message: locale === 'en' ? 'Enhanced model switching is unavailable' : '增强模型切换暂不可用',
     }))
     stop()
     expect(dispose).toHaveBeenCalled()

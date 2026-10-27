@@ -116,6 +116,7 @@ export interface NativeSubmissionCdpAuthority {
 
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
 export function createNativeSubmissionCdpAuthority(options: {
+  readonly submissionAvailable?: boolean
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   catalogSubscribe?(listener: () => void): () => void
   isThreadIdle(threadId: string): Promise<boolean>
@@ -281,7 +282,10 @@ export function createNativeSubmissionCdpAuthority(options: {
       controller = value
     },
     async install(session, target) {
-      if (target.url !== 'app://-/index.html' || !controller || documents.has(target.id)) {
+      if (
+        target.url !== 'app://-/index.html' || (options.submissionAvailable !== false && !controller)
+        || documents.has(target.id)
+      ) {
         throw new Error('Invalid native channel owner')
       }
       const generation = randomUUID()
@@ -395,6 +399,7 @@ export function createNativeSubmissionCdpAuthority(options: {
             )
             return
           }
+          if (options.submissionAvailable === false) throw new Error('Enhanced native model switching unavailable')
           const scope = scopeOf(input?.scope)
           if (scope.targetId !== target.id || scope.rendererGeneration !== generation) {
             throw new Error('Wrong native owner')
@@ -510,7 +515,11 @@ export function createNativeSubmissionCdpAuthority(options: {
       },pending=new Map(),catalogListeners=new Set(),managementListeners=new Set();let disposed=false,catalogSequence=-1;
         globalThis.__cordisxCatalogManagementChanged=(owner,cursor)=>{if(owner!==generation||disposed)return;for(const listener of managementListeners){try{listener(cursor)}catch{}}};
         globalThis.__cordisxCatalogChanged=(owner,sequence)=>{if(owner!==generation||disposed||sequence<=catalogSequence)return;catalogSequence=sequence;for(const listener of catalogListeners){try{listener()}catch{}}};
-        let activate;globalThis.__cordisxNativeSubmissionReady=new Promise(resolve=>{activate=resolve});globalThis.__cordisxNativeSubmissionActivate=activate;
+        let activate;globalThis.__cordisxNativeSubmissionReady=new Promise(resolve=>{activate=resolve});${
+        options.submissionAvailable === false
+          ? 'activate(false);delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmitHook;'
+          : 'globalThis.__cordisxNativeSubmissionActivate=activate;'
+      }
         globalThis.__cordisxNativeProviderOwner=Object.freeze({targetId:${
         JSON.stringify(target.id)
       },rendererGeneration:generation});

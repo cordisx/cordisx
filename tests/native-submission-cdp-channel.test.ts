@@ -8,6 +8,7 @@ import type {
 } from '../packages/cli/src/launcher/native-submission-controller.js'
 
 async function harness(options: Readonly<{
+  submissionAvailable?: boolean
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
   catalogSubscribe?: (listener: () => void) => () => void
@@ -23,6 +24,7 @@ async function harness(options: Readonly<{
   let receive: (params: Record<string, any>) => void
   const idle = vi.fn(async () => true)
   const authority = createNativeSubmissionCdpAuthority({
+    ...(options.submissionAvailable === undefined ? {} : { submissionAvailable: options.submissionAvailable }),
     ...(options.management ? { management: options.management } : {}),
     ...(options.catalogSubscribe === undefined ? {} : { catalogSubscribe: options.catalogSubscribe }),
     catalog: async () =>
@@ -90,6 +92,51 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('keeps model connection management and environment operations available without admitting native sends', async () => {
+    const command = vi.fn(async () => ({ status: 'applied' as const }))
+    const environmentRead = vi.fn(() => ({
+      status: 'ok' as const,
+      entries: [],
+      applies: 'app-restart' as const,
+    }))
+    const h = await harness({
+      submissionAvailable: false,
+      management: {
+        snapshot: () => ({ epoch: 'fixture', sequence: 1, views: [], canCreateConnection: true }),
+        subscribe: () => () => {},
+        command,
+        environmentRead,
+      },
+    })
+    try {
+      expect(await h.world.__cordisxNativeSubmissionReady).toBe(false)
+      expect(h.world.__cordisxNativeSubmissionActivate).toBeUndefined()
+      expect(h.world.__cordisxNativeSubmitHook).toBeUndefined()
+      expect(await h.channel.catalogRead()).toMatchObject([{ providerId: 'provider-b' }])
+      expect(await h.channel.catalogManagementRead()).toMatchObject({ canCreateConnection: true })
+      expect(await h.channel.catalogManagementCommand({ operation: 'createConnection', settings: {} }))
+        .toEqual({ status: 'applied' })
+      expect(await h.channel.catalogEnvironmentRead()).toMatchObject({ status: 'ok' })
+      expect(command).toHaveBeenCalledWith(expect.anything(), expect.any(Function))
+      for (
+        const operation of [
+          'selectionRead',
+          'selectionSelect',
+          'submissionPrepare',
+          'submissionConfirm',
+          'submissionCancel',
+        ]
+      ) {
+        await expect(h.channel[operation]({ scope: h.draft })).rejects.toThrow('Native submission rejected')
+      }
+      expect(h.controller.prepareSubmission).not.toHaveBeenCalled()
+      expect(h.controller.commitSelection).not.toHaveBeenCalled()
+      expect(h.idle).not.toHaveBeenCalled()
+    } finally {
+      await h.installed.dispose()
+    }
+    await expect(h.channel.catalogManagementRead()).rejects.toThrow('unavailable')
+  })
   it('rejects an invalid reasoning effort before forwarding the action to the controller', async () => {
     const h = await harness()
     try {

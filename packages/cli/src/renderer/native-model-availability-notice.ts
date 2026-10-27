@@ -11,11 +11,11 @@ export function reportNativeModelSelectionUnavailable(document: Document, locale
   const chinese = locale.startsWith('zh')
   owner?.api.show({
     kind: 'native.model-selection.unavailable',
-    type: 'error',
-    message: chinese ? 'CordisX 模型选择器暂不可用' : 'CordisX model selection is unavailable',
+    type: 'warning',
+    message: chinese ? '增强模型切换暂不可用' : 'Enhanced model switching is unavailable',
     description: chinese
-      ? '当前窗口保留 Codex 原生选择器。自定义模型切换未接入，请查看启动诊断并更新 CordisX。'
-      : 'This window retains the native Codex selector. Custom model switching is unavailable; check startup diagnostics and update CordisX.',
+      ? '当前窗口保留 Codex 原生选择器和已有模型配置。连接管理仍可使用；当前窗口的增强切换需要更新适配。'
+      : 'This window retains the native Codex selector and existing model configuration. Connection management remains available; enhanced switching needs an adapter update.',
   })
   return () => owner?.dispose()
 }

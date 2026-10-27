@@ -439,7 +439,10 @@ export async function prepareNativeSubmissionBootstrap(
             options.cacheDirectory ?? defaultNativeSubmissionCacheDirectory(),
           ))
         } catch (error) {
-          throw new NativeSubmissionCompatibilityError(error)
+          // Catalog/configuration and credential delivery do not depend on rewriting
+          // the native submit function. Preserve them while disabling only takeover.
+          console.warn(`[cordisx] enhanced native model switching unavailable: ${String(error)}`)
+          discovered = { transforms: [] }
         }
         reportStage('native-submission-resource-analysis-ready')
         if (closePromise !== undefined) throw new Error('Native submission bootstrap was closed')
@@ -632,6 +635,7 @@ export async function prepareNativeSubmissionBootstrap(
           pluginCatalog = nativeModelProviderCatalog(activation, completeOptions.selectorIcons)
         }
         const cdp = createNativeSubmissionCdpAuthority({
+          submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {
             const subscriptions = [
               nativeManagement!.subscribe(listener),

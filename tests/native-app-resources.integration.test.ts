@@ -660,10 +660,10 @@ it.skipIf(process.platform !== 'darwin')(
   },
 )
 
-it.skipIf(process.platform !== 'darwin')(
-  'commits explicit provider bindings before returning launch credentials and excludes conflicted bindings',
-  async () => {
-    const f = await bundle()
+it.skipIf(process.platform !== 'darwin').each([false, true])(
+  'commits explicit provider bindings and returns credentials independently of native takeover (incompatible: %s)',
+  async incompatible => {
+    const f = await bundle(incompatible)
     const codexHome = path.join(f.contents, 'codex-home')
     await mkdir(codexHome)
     await writeFile(
@@ -744,6 +744,7 @@ it.skipIf(process.platform !== 'darwin')(
       },
     )
     try {
+      expect(composition.installation.transforms.length === 0).toBe(incompatible)
       const raw = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
       const ledger = await readFile(
         path.join(codexHome, 'apps/codex/profiles/fixture-sync/provider-sync/provider-profile-bindings.json'),
@@ -767,16 +768,30 @@ it.skipIf(process.platform !== 'darwin')(
 )
 
 it.skipIf(process.platform !== 'darwin')(
-  'rejects a truly incompatible App before starting credential or control services',
+  'keeps catalog management available for an incompatible App while native takeover remains disabled',
   async () => {
     const f = await bundle(true)
     const prepareNativeConnection = vi.fn()
-    await expect(createNativeSubmissionComposition(
+    const codexHome = path.join(f.contents, 'codex-home')
+    await mkdir(codexHome)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const composition = await createNativeSubmissionComposition(
       { nativeProviderIds: [], prepareNativeConnection },
       f.executable,
-      path.join(f.contents, 'codex-home'),
-    ))
-      .rejects.toThrow('Native capability submit-guard')
-    expect(prepareNativeConnection).not.toHaveBeenCalled()
+      codexHome,
+      { nativeModelDiscovery: false },
+    )
+    const installed = await installNativeChannel(composition)
+    try {
+      expect(composition.installation.transforms).toEqual([])
+      expect(composition.installation.accountCapability).toBeUndefined()
+      expect(await installed.channel.catalogManagementRead()).toMatchObject({ views: [] })
+      await expect(installed.channel.submissionPrepare({})).rejects.toThrow('Native submission rejected')
+      expect(prepareNativeConnection).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('enhanced native model switching unavailable'))
+    } finally {
+      await installed.dispose()
+      await composition.close()
+    }
   },
 )

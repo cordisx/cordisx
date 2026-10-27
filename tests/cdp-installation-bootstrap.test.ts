@@ -48,6 +48,29 @@ class GatedDocumentSession {
 }
 
 describe('production document bootstrap', () => {
+  it('loads the ordinary document for catalog-only native management without intercepting resources', async () => {
+    const session = new GatedDocumentSession()
+    const state = createDocumentInstallationState()
+    await installDocumentBootstrap({
+      session: session as unknown as CdpSession,
+      target: {
+        id: 'native',
+        type: 'page',
+        title: 'Codex',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: 'ws://127.0.0.1/native',
+      } as CdpTarget,
+      documentSource: 'future-production-source',
+      evaluationSource: 'current-production-source',
+      viteDevelopment: false,
+      loopbackModules: true,
+      nativeSubmission: { authority: {} as never, transforms: [] },
+    }, state)
+    expect(state.nativeInterception).toBeUndefined()
+    expect(session.calls.some(call => call.method === 'Fetch.enable')).toBe(false)
+    expect(session.calls.some(call => call.method === 'Fetch.fulfillRequest')).toBe(false)
+    expect(session.calls.some(call => call.method === 'Page.reload')).toBe(true)
+  })
   it('keeps the startup gate closed until native interception and the renderer are ready', async () => {
     const session = new GatedDocumentSession()
     const target = {

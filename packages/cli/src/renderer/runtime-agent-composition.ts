@@ -877,7 +877,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       const nativeReady = native.__cordisxNativeSubmissionReady === undefined
         ? false
         : await native.__cordisxNativeSubmissionReady
-      if (!nativeReady && document.location.href === 'app://-/index.html') {
+      if (
+        !nativeReady && native.__cordisxNativeProviderCommandChannel !== undefined
+        && document.location.href === 'app://-/index.html'
+      ) {
         runtimeScope.registrySubscriptions()!.push(reportNativeModelSelectionUnavailable(
           document,
           runtimeScope.i18nService?.getSnapshot().locale ?? 'en',

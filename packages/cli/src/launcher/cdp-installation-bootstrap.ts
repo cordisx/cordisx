@@ -84,7 +84,7 @@ async function bootstrapInstalledDocument(
     : undefined
   let nativeInterception: NativeResourceInterception | undefined
   try {
-    if (nativeSubmission !== undefined) {
+    if (nativeSubmission !== undefined && nativeSubmission.transforms.length > 0) {
       nativeInterception = await installNativeResourceInterception({
         session,
         target,
