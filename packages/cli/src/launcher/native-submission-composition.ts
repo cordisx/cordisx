@@ -16,6 +16,7 @@ import {
   type NativeSubmissionCdpAuthority,
 } from './native-submission-cdp-channel.js'
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
+import { startNativeAgentModelsServer } from './native-agent-models.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import { readNativeSubmissionResources } from './native-app-resources.js'
 import {
@@ -403,6 +404,10 @@ export async function prepareNativeSubmissionBootstrap(
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   let capabilities: ReturnType<typeof nativeSubmissionTransforms> | undefined
   const control = await startNativeSubmissionControlServer()
+  const agentModels = await startNativeAgentModelsServer().catch(async error => {
+    await control.close()
+    throw error
+  })
   let controller: NativeSubmissionController | undefined
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
   let managed: ManagedCatalogComposition | undefined
@@ -416,6 +421,7 @@ export async function prepareNativeSubmissionBootstrap(
   let closePromise: Promise<void> | undefined
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
+      await agentModels.close()
       dynamic?.dispose()
       nativeDiscovery?.dispose()
       management?.close?.()
@@ -439,6 +445,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_CONTROL_NONCE: control.nonce,
     CORDISX_NATIVE_REAL_CODEX_PATH: cli,
     CORDISX_NATIVE_NODE_PATH: node,
+    CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
   }
   return {
     environment,
@@ -652,6 +659,10 @@ export async function prepareNativeSubmissionBootstrap(
         if (pluginManagement === undefined) {
           pluginCatalog = nativeModelProviderCatalog(activation, completeOptions.selectorIcons)
         }
+        const catalog = combinedNativeModelProviderCatalog(
+          combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
+          () => nativeManagement!.catalog(),
+        )
         const cdp = createNativeSubmissionCdpAuthority({
           submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {
@@ -663,13 +674,7 @@ export async function prepareNativeSubmissionBootstrap(
             return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
           },
           management,
-          catalog: combinedNativeModelProviderCatalog(
-            combinedNativeModelProviderCatalog(
-              async () => managed?.catalog() ?? [],
-              pluginCatalog,
-            ),
-            () => nativeManagement!.catalog(),
-          ),
+          catalog,
           isThreadIdle: id => control.isThreadIdle(id),
           ...(completeOptions.defaultProviderId === undefined
             ? {}
@@ -699,6 +704,15 @@ export async function prepareNativeSubmissionBootstrap(
         })
         control.bindController(controller)
         cdp.bindController(controller)
+        agentModels.bind({
+          catalog,
+          controller,
+          ...cdp.agentSelection,
+          switchThread: async input => {
+            if (closePromise !== undefined) throw new Error('Native model tools were closed')
+            await control.switchAgentThread(input)
+          },
+        })
         reportStage('native-submission-controller-bound')
         return {
           installation: { authority: cdp, ...discovered },

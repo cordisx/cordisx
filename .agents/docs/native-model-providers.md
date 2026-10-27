@@ -410,6 +410,33 @@ interaction through DOM observation without waiting for catalog polling. Focus
 stays with the modal; queued menu focus restoration also checks current isolation.
 An actually removed or ambiguous Composer still retires the seat normally.
 
+## Agent access to configured providers
+
+Unreleased: the native submission composition adds a launch-scoped stdio MCP
+server named `cordisx_models`. `list_model_providers` projects the same admitted
+configured/plugin/managed provider catalog as the UI, with exact provider/model
+IDs and labels. It does not return endpoints, credentials or private binding
+tokens. Native OpenAI choices remain in the native model controls.
+
+`select_thread_model_provider` changes an existing conversation's provider and
+model only after an explicit user request. It validates the pair against the
+current catalog, retains the existing credential broker and requires an idle
+conversation already loaded in that app-server. The intermediary fences native
+mutations while checking that state and performing unsubscribe/resume. Busy,
+unloaded, unknown or concurrently selected conversations are rejected; the tool
+does not interrupt a turn or submit a message. A successful native acknowledgement
+commits the credential lease and updates the Host selection projection. An
+uncertain acknowledgement returns `reconciliation-required`, never an automatic
+retry or a claim that nothing changed.
+
+The MCP configuration applies to the launched app-server only; it does not edit
+user configuration or change global defaults. Its authenticated binding and
+socket are owner-only temporary resources removed on launcher disposal. The
+native `create_thread` and `send_message_to_thread` schemas are unchanged: they
+do not gain a provider parameter, and this tool does not choose a new task's
+provider before its first turn. This initial path supports switching to a
+catalogued CordisX provider; selecting native OpenAI remains a UI operation.
+
 ## Desktop Compatibility
 
 The app-server intermediary uses the selected Desktop app's bundled Node runtime,

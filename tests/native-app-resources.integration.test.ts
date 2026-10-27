@@ -2,6 +2,7 @@ import { createPackage } from '@electron/asar'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { connect } from 'node:net'
 import vm from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
@@ -311,6 +312,24 @@ it.skipIf(process.platform !== 'darwin')(
       expect(composition.environment.CORDISX_NATIVE_NODE_PATH).toBe(
         await realpath(path.join(f.contents, 'Resources/cua_node/bin/node')),
       )
+      const binding = JSON.parse(await readFile(composition.environment.CORDISX_NATIVE_AGENT_MODELS_BINDING!, 'utf8'))
+      const tools = await new Promise<any>((resolve, reject) => {
+        let buffer = ''
+        const socket = connect(
+          binding.socketPath,
+          () => socket.write(JSON.stringify({ token: binding.token, operation: 'list' }) + '\n'),
+        )
+        socket.setTimeout(3000, () => socket.destroy(new Error('Agent model catalog timeout')))
+        socket.on('error', reject)
+        socket.on('data', chunk => {
+          buffer += chunk
+        })
+        socket.on('end', () => {
+          resolve(JSON.parse(buffer))
+        })
+      })
+      expect(tools.ok).toBe(true)
+      expect(tools.value.providers).toContainEqual(expect.objectContaining({ providerId: 'plugin-provider' }))
       expect(prepareNativeConnection).toHaveBeenCalledWith('plugin-provider')
       const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
       const liveScope = () => ({ ...world.__cordisxNativeProviderOwner, navigationGeneration: 1 })

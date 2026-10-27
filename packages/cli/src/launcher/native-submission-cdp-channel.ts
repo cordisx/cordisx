@@ -110,6 +110,11 @@ interface DocumentOwner {
 export interface NativeSubmissionCdpAuthority {
   readonly selection: NativeSubmissionSelectionAuthority
   readonly runtime: NativeSubmissionRuntimeAuthority
+  readonly agentSelection: {
+    reserve(threadId: string): boolean
+    commit(input: Readonly<{ threadId: string; providerId: string; model: string }>): void
+    release(threadId: string): void
+  }
   bindController(controller: NativeSubmissionController): void
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(): Promise<void> }>
 }
@@ -141,6 +146,7 @@ export function createNativeSubmissionCdpAuthority(options: {
 }): NativeSubmissionCdpAuthority {
   const states = new Map<string, State>()
   const threadSelections = new Map<string, NativeProviderSelection>()
+  const agentSelections = new Set<string>()
   const documents = new Map<string, DocumentOwner>()
   if (options.defaultProviderId !== undefined && !text(options.defaultProviderId, 128)) {
     throw new Error('Invalid default native model provider')
@@ -277,6 +283,29 @@ export function createNativeSubmissionCdpAuthority(options: {
   return {
     selection,
     runtime,
+    agentSelection: {
+      reserve(threadId) {
+        if (
+          agentSelections.has(threadId)
+          || [...states.values()].some(state => state.scope.threadId === threadId && state.pending)
+        ) return false
+        agentSelections.add(threadId)
+        return true
+      },
+      commit(input) {
+        const selection = { providerId: input.providerId, model: input.model }
+        threadSelections.set(input.threadId, selection)
+        for (const state of states.values()) {
+          if (state.scope.threadId !== input.threadId) continue
+          state.effective = selection
+          delete state.pending
+          state.revision++
+        }
+      },
+      release(threadId) {
+        agentSelections.delete(threadId)
+      },
+    },
     bindController(value) {
       if (controller) throw new Error('Native controller already bound')
       controller = value
@@ -408,6 +437,9 @@ export function createNativeSubmissionCdpAuthority(options: {
           admitted = true
           const live = await liveScope(scope)
           if (!live || key(live) !== key(scope) || owner.disposed) throw new Error('Stale native document')
+          if (scope.threadId && agentSelections.has(scope.threadId) && envelope.operation !== 'selectionRead') {
+            throw new Error('Agent provider selection is in progress')
+          }
           let state = states.get(key(scope))
           if (envelope.operation === 'selectionRead') {
             const supplied = selectionOf(input?.effective)
