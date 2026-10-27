@@ -52,9 +52,11 @@ async function harness(controller?: NativeSubmissionController) {
       completeThreadResume,
     } as unknown as NativeSubmissionController,
   )
-  const child = spawn(process.execPath, [
-    path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs'),
-    path.resolve('tests/fixtures/native-intermediary-app-server.mjs'),
+  const intermediary = path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs')
+  const nativeArguments = [path.resolve('tests/fixtures/native-intermediary-app-server.mjs')]
+  const child = spawn(process.platform === 'win32' ? process.execPath : intermediary, [
+    ...(process.platform === 'win32' ? [intermediary] : []),
+    ...nativeArguments,
   ], {
     env: {
       ...process.env,
@@ -62,6 +64,7 @@ async function harness(controller?: NativeSubmissionController) {
       CORDISX_NATIVE_CONTROL_SOCKET: server.socketPath,
       CORDISX_NATIVE_CONTROL_NONCE: server.nonce,
       CORDISX_NATIVE_REAL_CODEX_PATH: process.execPath,
+      CORDISX_NATIVE_NODE_PATH: process.execPath,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

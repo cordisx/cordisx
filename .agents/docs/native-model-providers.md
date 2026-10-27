@@ -412,6 +412,12 @@ An actually removed or ambiguous Composer still retires the seat normally.
 
 ## Desktop Compatibility
 
+The app-server intermediary uses the selected Desktop app's bundled Node runtime,
+so the native app-tool peer identity checks retain the app's signed process chain.
+The launch shim replaces itself with that runtime and never changes the Host's
+Node or global `PATH`. A missing bundled runtime makes this composition unavailable;
+it does not fall back to a system Node or disable native peer authorization.
+
 Native submission admission reads the installed App's initial and primary
 JavaScript resources plus an optional shared resource without modifying or
 launching it. Desktop version/build

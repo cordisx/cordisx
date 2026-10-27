@@ -1,5 +1,5 @@
 import { createPackage } from '@electron/asar'
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
@@ -10,6 +10,7 @@ import {
   createNativeSubmissionComposition,
   prepareNativeSubmissionBootstrap,
   resolveBundledCodexCliPath,
+  resolveBundledCodexNodePath,
 } from '../packages/cli/src/launcher/native-submission-composition.js'
 import { readNativeSubmissionResources } from '../packages/cli/src/launcher/native-app-resources.js'
 import { providerSyncCredentialEnvironmentKey } from '../packages/cli/src/launcher/provider-profile-sync-codex.js'
@@ -31,7 +32,14 @@ async function bundle(incompatible = false, scripts = resources(), entryHtml?: s
   await mkdir(path.join(contents, 'MacOS'), { recursive: true })
   await mkdir(path.join(contents, 'Resources'))
   const executable = path.join(contents, 'MacOS/Fixture')
-  for (const file of [executable, path.join(contents, 'Resources/codex')]) {
+  await mkdir(path.join(contents, 'Resources/cua_node/bin'), { recursive: true })
+  for (
+    const file of [
+      executable,
+      path.join(contents, 'Resources/codex'),
+      path.join(contents, 'Resources/cua_node/bin/node'),
+    ]
+  ) {
     await writeFile(file, '#!/bin/sh\nexit 99\n')
     await chmod(file, 0o755)
   }
@@ -211,6 +219,18 @@ it('resolves the bundled CLI in both Desktop app layouts', async () => {
   expect(await resolveBundledCodexCliPath(contents)).toBe(await realpath(current))
 })
 
+it('requires an executable Node from the selected App instead of a system fallback', async () => {
+  const f = await bundle()
+  const node = path.join(f.contents, 'Resources/cua_node/bin/node')
+  expect(await resolveBundledCodexNodePath(f.contents)).toBe(await realpath(node))
+  await chmod(node, 0o600)
+  await expect(resolveBundledCodexNodePath(f.contents)).rejects.toThrow()
+  await rm(node)
+  await expect(resolveBundledCodexNodePath(f.contents)).rejects.toThrow('bundled intermediary Node runtime')
+  await symlink(process.execPath, node)
+  await expect(resolveBundledCodexNodePath(f.contents)).rejects.toThrow('inside the selected Desktop app')
+})
+
 it.skipIf(process.platform !== 'darwin')(
   'creates and cleans the real composition for an unknown App identity without executing its binaries',
   async () => {
@@ -287,6 +307,9 @@ it.skipIf(process.platform !== 'darwin')(
       expect(composition.installation.transforms).toHaveLength(2)
       expect(composition.environment.CORDISX_NATIVE_REAL_CODEX_PATH).toBe(
         await realpath(path.join(f.contents, 'Resources/codex')),
+      )
+      expect(composition.environment.CORDISX_NATIVE_NODE_PATH).toBe(
+        await realpath(path.join(f.contents, 'Resources/cua_node/bin/node')),
       )
       expect(prepareNativeConnection).toHaveBeenCalledWith('plugin-provider')
       const world: Record<string, any> = { crypto, setTimeout, clearTimeout }
