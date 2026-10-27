@@ -309,14 +309,19 @@ async function nativeSubmissionTransforms(contents: string, cacheDirectory: stri
   }
   const discovered = nativeSubmissionTransformAnalysisForApp(identity.appVersion, identity.buildNumber, resources)
   const captured = captureTransforms(discovered.transforms, resources)
-  const initial = resources.find(resource => resource.url.includes('/app-initial-'))!
-  let accountCapability: NativeAccountCapabilityDescriptor | undefined
-  try {
-    const syntax = 'syntaxByResource' in discovered ? discovered.syntaxByResource.get(initial) : undefined
-    accountCapability = syntax === undefined
-      ? discoverNativeAccountCapability(initial)
-      : discoverNativeAccountCapabilityFromSyntax(initial, syntax)
-  } catch { /* Account admission reports its own unavailable capability. */ }
+  const accounts = resources.flatMap(resource => {
+    try {
+      const syntax = 'syntaxByResource' in discovered ? discovered.syntaxByResource.get(resource) : undefined
+      return [
+        syntax === undefined
+          ? discoverNativeAccountCapability(resource)
+          : discoverNativeAccountCapabilityFromSyntax(resource, syntax),
+      ]
+    } catch {
+      return [] /* Account admission reports its own unavailable capability. */
+    }
+  })
+  const accountCapability = accounts.length === 1 ? accounts[0] : undefined
   const analysis: NativeSubmissionAnalysisCache = {
     schemaVersion: NATIVE_SUBMISSION_CACHE_SCHEMA,
     analyzerVersion: NATIVE_SUBMISSION_ANALYZER_VERSION,
