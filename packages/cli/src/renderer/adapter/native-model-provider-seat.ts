@@ -85,7 +85,7 @@ function supportsFastMode(model: Record<string, unknown> | undefined): boolean {
   })
 }
 
-function modelReasoningCapabilities(model: Record<string, unknown> | undefined) {
+export function nativeModelReasoningCapabilities(model: Record<string, unknown> | undefined) {
   if (model === undefined) return undefined
   const supported = Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : undefined
   if (supported === undefined) return undefined
@@ -187,7 +187,7 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
               supportsFastMode: supportsFastMode(metadata),
               ...(isModelReasoningEffort(defaultReasoningEffort) ? { defaultReasoningEffort } : {}),
               ...(() => {
-                const reasoningCapabilities = modelReasoningCapabilities(metadata)
+                const reasoningCapabilities = nativeModelReasoningCapabilities(metadata)
                 return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
               })(),
             }]
