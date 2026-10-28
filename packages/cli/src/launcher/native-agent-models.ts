@@ -29,6 +29,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     const catalog = await authority.catalog()
     if (operation === 'list') {
       return {
+        threadCreation: { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,

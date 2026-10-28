@@ -6,7 +6,7 @@ const bindingPath = process.argv[2]
 const tools = [{
   name: 'list_model_providers',
   description:
-    'List configured CordisX model providers and exact model IDs available in this app instance. This reuses the UI catalog and never returns credentials or changes defaults. Native OpenAI models remain in the native model tools.',
+    'List configured CordisX model providers, exact model IDs, and provider-aware task creation availability in this app instance. This reuses the UI catalog and never returns credentials or changes defaults. Native OpenAI models remain in the native model tools. Creating a user task whose first turn uses a specified provider is unavailable: native create_thread has no provider or deferred-first-turn input. Do not substitute a bootstrap message or an unregistered background thread.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {} },
 }, {
   name: 'select_thread_model_provider',
