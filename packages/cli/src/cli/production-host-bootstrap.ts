@@ -98,6 +98,12 @@ export async function prepareProductionHostBootstrap(
       ? undefined
       : await acquireCodexProfileLaunchLease(profile.userDataDir, { stdout })
     await adapter.prepareLaunch(plan)
+    const configured = await loadHomeConfig(configPath)
+    const configuredEnvironment = hostModelServiceEnvironment(
+      environment,
+      configured.environmentVariables,
+      plan.environment,
+    )
     if (
       input.prepareNativeSubmission
       && shouldEnableNativeSubmission({
@@ -110,7 +116,10 @@ export async function prepareProductionHostBootstrap(
         const cacheDirectory = (runtime.env ?? process.env).CORDISX_INTERNAL_NATIVE_SUBMISSION_CACHE_DIRECTORY
         nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(
           plan.executable,
-          cacheDirectory === undefined ? {} : { cacheDirectory },
+          {
+            ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
+            environment: configuredEnvironment,
+          },
         )
       } catch (error) {
         nativeSubmissionUnavailable = true
@@ -132,9 +141,8 @@ export async function prepareProductionHostBootstrap(
       stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
     }
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
-    const configured = await loadHomeConfig(configPath)
     const hostEnvironment = {
-      ...hostModelServiceEnvironment(environment, configured.environmentVariables, plan.environment),
+      ...configuredEnvironment,
       ...nativeSubmissionBootstrap?.environment,
     }
     const hiddenLaunch = mainInspector

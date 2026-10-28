@@ -345,6 +345,7 @@ export async function createNativeSubmissionComposition(
 ): Promise<NativeSubmissionComposition> {
   const bootstrap = await prepareNativeSubmissionBootstrap(desktopExecutable, {
     ...(options.cacheDirectory === undefined ? {} : { cacheDirectory: options.cacheDirectory }),
+    ...(options.nativeDiscoveryEnvironment === undefined ? {} : { environment: options.nativeDiscoveryEnvironment }),
   })
   try {
     return await bootstrap.complete(activation, codexHome, options)
@@ -390,7 +391,10 @@ export async function resolveBundledCodexNodePath(contents: string): Promise<str
 /** Start only the fail-closed native transport; compatibility discovery continues off the Host launch path. */
 export async function prepareNativeSubmissionBootstrap(
   desktopExecutable: string,
-  options: Readonly<{ cacheDirectory?: string }> = {},
+  options: Readonly<{
+    cacheDirectory?: string
+    environment?: Readonly<Record<string, string | undefined>>
+  }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   if (process.platform !== 'darwin') throw new Error('Native managed routing requires a macOS app bundle')
   const executable = await realpath(desktopExecutable)
@@ -441,6 +445,8 @@ export async function prepareNativeSubmissionBootstrap(
     })()
   const environment = {
     CODEX_CLI_PATH: nativeAppServerIntermediaryPath(),
+    // Dot must not open a second connection to the chat intermediary's control socket.
+    CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH: options.environment?.CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH || cli,
     CORDISX_NATIVE_CONTROL_SOCKET: control.socketPath,
     CORDISX_NATIVE_CONTROL_NONCE: control.nonce,
     CORDISX_NATIVE_REAL_CODEX_PATH: cli,
