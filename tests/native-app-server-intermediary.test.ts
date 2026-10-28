@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { startNativeSubmissionControlServer } from '../packages/cli/src/launcher/native-submission-control-server.js'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
+import { NativeAgentTaskRouting } from '../packages/cli/src/launcher/native-agent-task-routing.js'
 import { nextInput, request, responseEvents, responseSse } from './fixtures/deepseek-responses.js'
 import {
   harness as submissionHarness,
@@ -43,6 +44,10 @@ async function harness(controller?: NativeSubmissionController) {
       }
   )
   const completeThreadResume = vi.fn(async () => true)
+  const taskRouting = new NativeAgentTaskRouting(
+    { prepareThreadResume, completeThreadResume } as unknown as NativeSubmissionController,
+  )
+  server.bindTaskRouting(taskRouting)
   server.bindController(
     controller ?? {
       consumeMarkedRequest: consume,
@@ -96,6 +101,7 @@ async function harness(controller?: NativeSubmissionController) {
     authorize,
     prepareThreadResume,
     completeThreadResume,
+    taskRouting,
     read,
     send(value: unknown) {
       child.stdin.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`)
@@ -112,6 +118,77 @@ async function harness(controller?: NativeSubmissionController) {
 }
 
 describe('native app-server intermediary', () => {
+  it('forwards native task creation with exact call metadata and routes its unmarked first send once', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'ready-task', method: 'echo/bytes', params: {} })
+      await h.read()
+      const args = { prompt: 'Original first message', target: { type: 'projectless' } }
+      const receipt: any = await h.server.invokeTask({
+        callId: 'cordisx-task-exact-call',
+        sourceThreadId: 'source',
+        arguments: args,
+      })
+      expect(receipt.received).toEqual({
+        server: 'codex_app',
+        threadId: 'source',
+        tool: 'create_thread',
+        arguments: args,
+        _meta: { 'openai/toolCallId': 'cordisx-task-exact-call', 'openai/threadId': 'source' },
+      })
+      const route = await h.taskRouting.prepare({
+        callId: 'cordisx-task-exact-call',
+        sourceThreadId: 'source',
+        providerId: 'provider-b',
+        model: 'model-b',
+      })
+      h.send({
+        id: 'agent-create',
+        method: 'thread/start',
+        params: {
+          cwd: '/native/project',
+          projectId: 'native-project',
+          config: { 'cordisx.operation_token': route.token },
+        },
+      })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        cwd: '/native/project',
+        projectId: 'native-project',
+        modelProvider: 'provider-b',
+        model: 'model-b',
+      })
+      expect(h.completeThreadResume).toHaveBeenCalledWith({
+        threadId: 'source',
+        createdThreadId: 'created-thread',
+        resumeToken: 'resume-token-source',
+        succeeded: true,
+      })
+      h.send({
+        id: 'agent-first',
+        method: 'turn/start',
+        params: {
+          threadId: 'created-thread',
+          input: [{ type: 'text', text: 'Original first message' }],
+          approvalPolicy: 'on-request',
+          model: 'old',
+          config: { 'cordisx.operation_token': route.token },
+        },
+      })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        model: 'model-b',
+        approvalPolicy: 'on-request',
+        input: [{ type: 'text', text: 'Original first message' }],
+      })
+      h.send({
+        id: 'agent-next',
+        method: 'turn/start',
+        params: { threadId: 'created-thread', input: [], model: 'native-next' },
+      })
+      expect(JSON.parse(await h.read()).result.received.model).toBe('native-next')
+    } finally {
+      await h.close()
+    }
+  })
   it('allows Agent selection only for a loaded idle thread behind the native mutation fence', async () => {
     const h = await harness()
     try {

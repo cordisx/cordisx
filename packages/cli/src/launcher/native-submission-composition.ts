@@ -17,6 +17,9 @@ import {
 } from './native-submission-cdp-channel.js'
 import { startNativeSubmissionControlServer } from './native-submission-control-server.js'
 import { startNativeAgentModelsServer } from './native-agent-models.js'
+import { nativeAgentTaskTransforms } from './native-agent-task-transform.js'
+import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
+import { NativeAgentTasks } from './native-agent-tasks.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import { readNativeSubmissionResources } from './native-app-resources.js'
 import {
@@ -56,7 +59,7 @@ type NativeSubmissionActivation =
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 5
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 6
 const SHA256 = /^[a-f0-9]{64}$/u
 
 interface CachedNativeTransform {
@@ -138,7 +141,8 @@ function nativeSubmissionTransformAnalysisForApp(
 ): NativeSubmissionTransformAnalysis | Readonly<{ transforms: readonly NativeResourceTransform[] }> {
   try {
     const legacy = legacyNativeSubmissionResources(resources)
-    return legacy === undefined ? analyzeNativeSubmissionTransforms(resources) : { transforms: legacy }
+    const base = legacy === undefined ? analyzeNativeSubmissionTransforms(resources) : { transforms: legacy }
+    return { ...base, ...nativeAgentTaskTransforms(appVersion, buildNumber, resources, base.transforms) }
   } catch (error) {
     throw new Error(
       `Native submission incompatible with Codex Desktop ${appVersion} (${buildNumber}): ${
@@ -409,6 +413,8 @@ export async function prepareNativeSubmissionBootstrap(
     throw error
   })
   let controller: NativeSubmissionController | undefined
+  let taskRouting: NativeAgentTaskRouting | undefined
+  let agentTasks: NativeAgentTasks | undefined
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
@@ -422,6 +428,7 @@ export async function prepareNativeSubmissionBootstrap(
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
       await agentModels.close()
+      await taskRouting?.close()
       dynamic?.dispose()
       nativeDiscovery?.dispose()
       management?.close?.()
@@ -664,6 +671,7 @@ export async function prepareNativeSubmissionBootstrap(
           () => nativeManagement!.catalog(),
         )
         const cdp = createNativeSubmissionCdpAuthority({
+          taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {
             const subscriptions = [
@@ -703,10 +711,35 @@ export async function prepareNativeSubmissionBootstrap(
           },
         })
         control.bindController(controller)
+        taskRouting = new NativeAgentTaskRouting(
+          controller,
+          async selection =>
+            (await catalog()).some(provider =>
+              provider.providerId === selection.providerId
+              && provider.models.some(model => model.id === selection.model)
+            ),
+        )
+        control.bindTaskRouting(taskRouting)
+        agentTasks = new NativeAgentTasks({
+          directory: path.join(
+            completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
+            'apps',
+            'codex',
+            'profiles',
+            completeOptions.managedCatalog?.profileId ?? 'default',
+            'agent-task-intents',
+          ),
+          catalog,
+          routing: taskRouting,
+          available: () => cdp.taskCreationAvailable(),
+          invoke: input => control.invokeTask(input),
+        })
         cdp.bindController(controller)
         agentModels.bind({
           catalog,
           controller,
+          createTask: (input, metadata) => agentTasks!.create(input, metadata),
+          taskCreationAvailable: () => cdp.taskCreationAvailable(),
           ...cdp.agentSelection,
           switchThread: async input => {
             if (closePromise !== undefined) throw new Error('Native model tools were closed')

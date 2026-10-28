@@ -161,8 +161,9 @@ describe('Agent model-provider tools', () => {
       expect(advertised.map((tool: any) => tool.name)).toEqual([
         'list_model_providers',
         'select_thread_model_provider',
+        'create_thread_with_provider',
       ])
-      expect(advertised[0].description).toContain('first turn uses a specified provider is unavailable')
+      expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })
       expect(catalog.isError).toBe(false)
       expect(JSON.parse(catalog.content[0].text).threadCreation).toEqual({
@@ -185,6 +186,17 @@ describe('Agent model-provider tools', () => {
         socket.on('error', reject)
       })
       expect(stderr).toBe('')
+      const taskAuthority: NativeAgentModelsAuthority = f.authority
+      taskAuthority.createTask = vi.fn(async (_input: unknown, metadata: unknown) => ({ status: 'pending', metadata }))
+      const created = await request(5, 'tools/call', {
+        name: 'create_thread_with_provider',
+        arguments: { operationId: 'same-op' },
+        _meta: { 'openai/toolCallId': 'real-call', 'openai/threadId': 'source' },
+      })
+      expect(JSON.parse(created.content[0].text)).toMatchObject({
+        status: 'pending',
+        metadata: { 'openai/toolCallId': 'real-call' },
+      })
     } finally {
       child.stdin.end()
       if (child.exitCode === null) await once(child, 'exit')

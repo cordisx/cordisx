@@ -17,6 +17,8 @@ export interface NativeAgentModelsAuthority {
   reserve(threadId: string): boolean
   commit(input: Selection): void
   release(threadId: string): void
+  createTask?(input: unknown, metadata: unknown): Promise<unknown>
+  taskCreationAvailable?(): Promise<boolean>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -25,11 +27,14 @@ const text = (value: unknown, max = 512): value is string =>
 
 /** Uses the UI's admitted catalog and credential leases; tool callers never supply a connection or secret. */
 export function createNativeAgentModelsHandler(authority: NativeAgentModelsAuthority) {
-  return async (operation: unknown, input: unknown): Promise<unknown> => {
+  return async (operation: unknown, input: unknown, metadata?: unknown): Promise<unknown> => {
     const catalog = await authority.catalog()
+    if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
       return {
-        threadCreation: { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
+        threadCreation: await authority.taskCreationAvailable?.()
+          ? { status: 'available', tool: 'create_thread_with_provider' }
+          : { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,
@@ -97,7 +102,7 @@ export async function startNativeAgentModelsServer() {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
     socket.on('error', () => socket.destroy())
-    socket.setTimeout(30000, () => socket.destroy())
+    socket.setTimeout(45000, () => socket.destroy())
     let buffer = ''
     let started = false
     socket.setEncoding('utf8')
@@ -115,7 +120,7 @@ export async function startNativeAgentModelsServer() {
         try {
           const request = object(JSON.parse(buffer.slice(0, newline)))
           if (closed || !handler || request?.token !== token) throw new Error('unavailable')
-          const value = await handler(request.operation, request.input)
+          const value = await handler(request.operation, request.input, request.metadata)
           if (closed) throw new Error('unavailable')
           const response = JSON.stringify({ ok: true, value })
           if (Buffer.byteLength(response) > 8 * 1024 * 1024) throw new Error('too-large')

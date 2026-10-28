@@ -44,6 +44,8 @@ implementation of those contracts, not a second public specification.
 - [Host testing](testing.md): local test selection, CI groups, and test necessity.
 - [Provider-aware task creation assessment, 2026-10-28](history/agent-provider-task-creation-2026-10-28.md):
   unavailable native creation/registration seam, requirements and remaining acceptance gates.
+- [Agent creation with a configured provider](native-agent-task-creation.md):
+  experimental native task adapter, operation identity and retained acceptance gates.
 
 ## Understand runtime composition and delivery
 

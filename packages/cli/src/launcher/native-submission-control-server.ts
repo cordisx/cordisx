@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { NativeExistingThreadSwitch, NativeSubmissionController } from './native-submission-controller.js'
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
+import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 
 const MAX_LINE = 256 * 1024
 const TIMEOUT = 30_000
@@ -29,6 +30,8 @@ export interface NativeSubmissionControlServer {
   ): Promise<void>
   isThreadIdle(threadId: string): Promise<boolean>
   bindController(controller: NativeSubmissionController): void
+  bindTaskRouting(routing: NativeAgentTaskRouting): void
+  invokeTask(input: { callId: string; sourceThreadId: string; arguments: Record<string, unknown> }): Promise<unknown>
   close(): Promise<void>
 }
 
@@ -40,6 +43,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
   let peer: Socket | undefined
   let authenticated = false
   let controller: NativeSubmissionController | undefined
+  let taskRouting: NativeAgentTaskRouting | undefined
   let closed = false
   let closePromise: Promise<void> | undefined
   const pending = new Map<
@@ -175,26 +179,29 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       try {
         if (value.type === 'consume') {
           if (value.method !== 'thread/start' && value.method !== 'turn/start') throw new Error('Invalid native method')
-          const result = await controller.consumeMarkedRequest({
+          const request = {
             operationToken: value.token,
-            method: value.method,
+            method: value.method as 'thread/start' | 'turn/start',
             requestId: value.requestId,
             ...(typeof value.threadId === 'string' ? { threadId: value.threadId } : {}),
-          })
+          }
+          const result = await taskRouting?.consume(request) ?? await controller.consumeMarkedRequest(request)
           await write(socket, { id: value.id, ok: true, value: result })
         } else if (value.type === 'authorize') {
-          const result = await controller.authorizeMarkedRequest({
-            operationToken: value.token,
-            requestId: value.requestId,
-          })
+          const result = await taskRouting?.authorize(value.token, value.requestId)
+            ?? await controller.authorizeMarkedRequest({
+              operationToken: value.token,
+              requestId: value.requestId,
+            })
           await write(socket, { id: value.id, ok: true, value: result })
         } else if (value.type === 'complete' && typeof value.succeeded === 'boolean') {
-          await controller.completeMarkedRequest({
+          const completion = {
             operationToken: value.token,
             requestId: value.requestId,
             succeeded: value.succeeded,
             ...(typeof value.threadId === 'string' ? { boundThreadId: value.threadId } : {}),
-          })
+          }
+          if (!await taskRouting?.complete(completion)) await controller.completeMarkedRequest(completion)
           await write(socket, { id: value.id, ok: true })
         } else throw new Error('Unknown control command')
       } catch {
@@ -243,6 +250,13 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     socketPath,
     nonce,
     existingThread,
+    bindTaskRouting(value: NativeAgentTaskRouting) {
+      if (taskRouting) throw new Error('Native task routing already bound')
+      taskRouting = value
+    },
+    async invokeTask(input: { callId: string; sourceThreadId: string; arguments: Record<string, unknown> }) {
+      return await callPeer({ type: 'task-create', ...input })
+    },
     async switchAgentThread(
       input: Readonly<{
         threadId: string

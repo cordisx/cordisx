@@ -6,7 +6,7 @@ const bindingPath = process.argv[2]
 const tools = [{
   name: 'list_model_providers',
   description:
-    'List configured CordisX model providers, exact model IDs, and provider-aware task creation availability in this app instance. This reuses the UI catalog and never returns credentials or changes defaults. Native OpenAI models remain in the native model tools. Creating a user task whose first turn uses a specified provider is unavailable: native create_thread has no provider or deferred-first-turn input. Do not substitute a bootstrap message or an unregistered background thread.',
+    'List configured CordisX model providers, exact model IDs, and provider-aware task creation availability in this app instance. This reuses the UI catalog and never returns credentials or changes defaults. Native OpenAI models remain in the native model tools. Use create_thread_with_provider only when threadCreation is available. Do not substitute a bootstrap message or an unregistered background thread.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {} },
 }, {
   name: 'select_thread_model_provider',
@@ -22,9 +22,40 @@ const tools = [{
     },
     required: ['threadId', 'providerId', 'model'],
   },
+}, {
+  name: 'create_thread_with_provider',
+  description:
+    'Create a native user task whose first message uses an admitted CordisX provider/model, only when the user explicitly requests a new task and provider. Call list_model_providers first and require threadCreation available. Reuses native project/directory provisioning, permissions, sidebar registration and first send. Supports this app instance on the audited native build; remote/cloud targets are unavailable. Retain a unique operationId for the exact request. On timeout, pending, or reconciliation-required, reuse/read the same operationId; never repeat with a new ID automatically. Never supplies endpoints or secrets. Native create_thread remains unchanged.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      operationId: { type: 'string', minLength: 1, maxLength: 128 },
+      providerId: { type: 'string', minLength: 1, maxLength: 128 },
+      model: { type: 'string', minLength: 1, maxLength: 512 },
+      prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+      title: { type: 'string', minLength: 1, maxLength: 512 },
+      target: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          type: { enum: ['project', 'projectless'] },
+          projectId: { type: 'string' },
+          directoryName: { type: 'string' },
+          environment: {
+            type: 'object',
+            properties: { type: { enum: ['local', 'worktree'] }, startingState: { type: 'object' } },
+            additionalProperties: false,
+          },
+        },
+        required: ['type'],
+      },
+    },
+    required: ['operationId', 'providerId', 'model', 'prompt', 'target'],
+  },
 }]
 
-async function invoke(operation, input) {
+async function invoke(operation, input, metadata) {
   const binding = JSON.parse(await readFile(bindingPath, 'utf8'))
   if (binding.version !== 1 || typeof binding.socketPath !== 'string' || typeof binding.token !== 'string') {
     throw new Error('Native model tools unavailable')
@@ -40,10 +71,13 @@ async function invoke(operation, input) {
       socket.destroy()
       error ? reject(error) : resolve(value)
     }
-    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 30000)
+    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 45000)
     socket.on('error', () => finish(new Error('Native model tools unavailable')))
     socket.on('end', () => finish(new Error('Native selection acknowledgement unavailable')))
-    socket.on('connect', () => socket.write(JSON.stringify({ token: binding.token, operation, input }) + '\n'))
+    socket.on(
+      'connect',
+      () => socket.write(JSON.stringify({ token: binding.token, operation, input, metadata }) + '\n'),
+    )
     socket.setEncoding('utf8')
     socket.on('data', chunk => {
       buffer += chunk
@@ -97,9 +131,11 @@ reader.on('line', line => {
           ? 'list'
           : request.params?.name === 'select_thread_model_provider'
           ? 'select'
+          : request.params?.name === 'create_thread_with_provider'
+          ? 'create'
           : undefined
         if (operation === undefined) throw new Error('Unknown native model tool')
-        const value = await invoke(operation, request.params.arguments ?? {})
+        const value = await invoke(operation, request.params.arguments ?? {}, request.params._meta)
         result = {
           content: [{ type: 'text', text: JSON.stringify(value) }],
           isError: value?.status === 'rejected' || value?.status === 'reconciliation-required',

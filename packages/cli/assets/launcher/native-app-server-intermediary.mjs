@@ -54,6 +54,7 @@ let lifecycleUncertain = false
 const recoveringTurns = new Set()
 const cancelledRecovery = new Set()
 const firstTurns = new Map()
+const agentFirstTurns = new Map()
 const privatePrefix = `cordisx-private-${nonce}-`
 let sequence = 0
 let closed = false
@@ -93,6 +94,7 @@ function stop(reason = 'transport-closed') {
   cancelledRecovery.clear()
   lifecycleCalls.clear()
   firstTurns.clear()
+  agentFirstTurns.clear()
   control.destroy()
   process.stdin.destroy()
   child.stdin.destroy()
@@ -203,6 +205,16 @@ async function forward(line) {
     return
   }
   const params = object(message?.params)
+  if (
+    message?.method === 'turn/start' && agentFirstTurns.has(params?.threadId)
+    && params.config?.[marker] !== agentFirstTurns.get(params.threadId)
+  ) {
+    await write(process.stdout, {
+      id: message.id,
+      error: { code: -32000, message: 'Native task first turn association unavailable' },
+    })
+    return
+  }
   const config = object(params?.config)
   const managed = config !== undefined && Object.hasOwn(config, marker)
   if (message?.method === 'turn/interrupt' && typeof params?.threadId === 'string') {
@@ -301,8 +313,11 @@ async function forward(line) {
     }
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
-    desktopCalls.set(message.id, { token, method: message.method })
-    if (message.method === 'turn/start') firstTurns.delete(params.threadId)
+    desktopCalls.set(message.id, { token, method: message.method, agentTask: dispatch.agentTask === true })
+    if (message.method === 'turn/start') {
+      firstTurns.delete(params.threadId)
+      agentFirstTurns.delete(params.threadId)
+    }
     await write(child.stdin, JSON.stringify(message))
   } catch {
     desktopCalls.delete(message?.id)
@@ -500,6 +515,7 @@ readLines(child.stdout, line => {
     operation.method === 'thread/start' && message.error === undefined && typeof message.result?.thread?.id === 'string'
   ) {
     firstTurns.set(message.result.thread.id, operation.token)
+    if (operation.agentTask) agentFirstTurns.set(message.result.thread.id, operation.token)
   }
   void controlCall('complete', {
     token: operation.token,
@@ -519,6 +535,17 @@ readLines(control, line => {
     return
   }
   if (settle(controlCalls, message, true)) return
+  if (message.type === 'task-create' && typeof message.id === 'string') {
+    void nativeCall('mcpServer/tool/call', {
+      server: 'codex_app',
+      threadId: message.sourceThreadId,
+      tool: 'create_thread',
+      arguments: message.arguments,
+      _meta: { 'openai/toolCallId': message.callId, 'openai/threadId': message.sourceThreadId },
+    }).then(value => write(control, { id: message.id, ok: true, value }))
+      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+    return
+  }
   if (message.type === 'idle' && typeof message.id === 'string' && typeof message.threadId === 'string') {
     void nativeCall('thread/read', { threadId: message.threadId, includeTurns: false }).then(result => {
       const status = result?.thread?.status?.type

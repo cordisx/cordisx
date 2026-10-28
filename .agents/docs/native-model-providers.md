@@ -434,11 +434,14 @@ user configuration or change global defaults. Its authenticated binding and
 socket are owner-only temporary resources removed on launcher disposal. The
 native `create_thread` and `send_message_to_thread` schemas are unchanged: they
 do not gain a provider parameter, and this tool does not choose a new task's
-provider before its first turn. The catalog response explicitly reports
-`threadCreation: { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' }`.
-Agents must not substitute a bootstrap message or an unregistered backend thread
-for provider-aware task creation. The [2026-10-28 assessment](history/agent-provider-task-creation-2026-10-28.md)
-records the confirmed creation/registration gap and required operation ordering.
+provider before its first turn. The separate experimental
+[`create_thread_with_provider` tool](native-agent-task-creation.md) reuses native
+creation with an exact-source-checked task adapter. The catalog reports
+`threadCreation.status=available` only when that adapter is present; otherwise
+it reports `native-task-provider-creation-unavailable`. Agents must not substitute
+a bootstrap message or an unregistered backend thread. The
+[2026-10-28 assessment](history/agent-provider-task-creation-2026-10-28.md) retains
+the source investigation and adapter boundary.
 This initial path supports switching to a catalogued CordisX provider; selecting
 native OpenAI remains a UI operation.
 

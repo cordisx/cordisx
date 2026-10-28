@@ -40,6 +40,7 @@ export function readNativeSubmissionResources(contents: string): readonly Native
         ['sendRequest', 'turn/start', 'getAppServerVersion'],
         ['onSelectModel', 'onSelectModelOption', 'reasoningEffort'],
         ['accessInputs', 'readAccountInfo'],
+        ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
       ].some(keys => keys.every(key => source.includes(key)))
     ) {
       resources.push({ url: `app://-/assets/${path.basename(entry)}`, source })

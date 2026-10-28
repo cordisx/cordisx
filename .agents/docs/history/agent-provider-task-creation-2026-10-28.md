@@ -3,7 +3,11 @@
 This is a dated implementation assessment against Host main
 `45c22b696c712c749ee94c2446d5543ee8ff7508` (including #519, #521, #522 and beta.31 release preparation).
 The current reference is [native model providers](../native-model-providers.md).
-This change reports an unavailable capability; it does not implement task creation.
+The initial investigation reported an unavailable capability. The subsequent
+source implementation admits the audited creation adapter; current behavior is
+owned by [Agent creation with a configured provider](../native-agent-task-creation.md).
+Earlier unavailable findings below retain their dated context, not current
+implementation status. Real-App acceptance remains outstanding.
 
 ## Requirements and retained gates
 
