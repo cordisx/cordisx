@@ -71,6 +71,96 @@ documents thread creation and separate turn submission. It does not establish
 the Desktop app-tools registration behavior required here. A `thread/started`
 notification or `thread/list` entry alone cannot close that evidence gap.
 
+## Follow-up: protocol capability versus the missing adapter
+
+The initial exposed-tool assessment is insufficient to conclude that the
+underlying protocol cannot create a provider-bound thread. A second bounded
+read-only investigation checked existing generated protocol snapshots and the
+adopted Host seams, without opening the installed App archive or calling a live
+transport. The conclusions are distinct:
+
+| Layer                        | Evidence                                                                             | Conclusion                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Exposed app-tools input      | Available `create_thread`/`send_message_to_thread` schemas                           | Provider/config/deferred-submit inputs are absent from these tools                               |
+| Underlying app-server        | Existing generated `ThreadStartParams` snapshots                                     | `modelProvider` and private `config` are supported; provider-bound backend creation is possible  |
+| CordisX adapter              | Production marker/controller/CDP/renderer composition                                | Composer routing is implemented; app-tools creation correlation is not implemented               |
+| Native user-task transaction | No adopted create dispatcher or correlated app-tool-to-creation hook in Host sources | One supported transaction seam is still needed to preserve task registration before first submit |
+
+The offline snapshot retained from the 2026-10-27 diagnosis identifies
+`codex-cli 0.164.0-alpha.11.1`, App `26.1021.31345` build `21828`:
+
+- `ThreadStartParams` SHA-256
+  `e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428`
+  has `modelProvider`, `model`, `config`, `cwd`, `approvalPolicy` and `sandbox`.
+- `McpServerToolCallParams` SHA-256
+  `7039a7583a1cbf38e9e0f5fe6398ff3711acd4d654b81b0be562514087fce6ba`
+  accepts `server`, existing `threadId`, `tool`, `arguments` and `_meta`.
+- A retained `codex-cli 0.153.4` complete snapshot also has `projectId` on
+  `ThreadStartParams`, with an explicit durable-assignment description, and
+  `thread/metadata/update.projectId`. Its ThreadStartParams SHA-256 is
+  `25f490368ec6df52a2a3b82a5469d2413307eb93439121b309f415b5648eee7a`.
+  This older complete schema is not a current Desktop compatibility pin. The
+  newer snapshot's omission of project fields does not prove experimental
+  project support was removed or that native projectless registration works.
+
+The promising reusable path is a CordisX supplementary MCP tool forwarding a
+normal native `create_thread` via `mcpServer/tool/call`, retaining native context
+and registration. This alone still lacks provider binding:
+
+1. `NativeMcpRequestClient.request` already sends a correlated `mcp-request`
+   envelope through the existing renderer preload bridge. A native MCP tool
+   call can carry caller metadata without inventing another backend process.
+2. The bundled app-tools proxy extracts only known caller/thread/turn/call
+   identity keys from `_meta` into its `tools/call` envelope. It does not forward
+   arbitrary `_meta` as tool arguments or creation config. Adding a custom
+   provider token to `_meta` therefore does not reach native creation through
+   this proxy. Calling with an unsupported provider/config argument is not a
+   supported extension of `create_thread`.
+3. `ThreadStartParams` has no parent app-tool call id or parent turn id. Its
+   `serviceName` and `threadSource` are service/analytics classifications, not
+   contracts linking an app-tool request to a creation transaction. The first
+   input's `clientUserMessageId` is on `turn/start`, after thread/provider
+   creation. No evidence establishes that native app-tools carries a caller
+   id into one of these creation fields. Reusing them as a hidden channel would
+   require an unproved native change.
+4. Existing `draftConfigForward` discovery in `native-submission-structure.ts`
+   verifies that a renderer's `configOverrides` reaches creation `config`.
+   The `firstTurn` transform carries that same token forward. These are useful
+   existing seams **after** a token reaches the renderer operation. They do not
+   expose or call the native app-tool dispatcher that constructs that operation.
+5. `native-submission-cdp-channel.ts` revalidates a composer operation against
+   the exact live renderer/navigation scope. `native-submission-control-server.ts`
+   exposes existing-thread switch/read, not native user-task creation or adoption.
+   A new Agent tool cannot manufacture a draft scope or attach its lease to
+   whichever unrelated `thread/start` happens to arrive next.
+
+Direct `thread/start` could bind provider credentials and, on a compatible
+schema, persist project metadata. The current sources do not prove that this
+also performs Desktop projectless/worktree provisioning, saved-project lookup,
+caller task attachment, task status/notifications or sidebar registration.
+`thread/metadata/update`, a Host Session binding, and navigation each cover
+only their own part. A lower-level backend thread plus any one of those is
+insufficient evidence for the requested native user task.
+
+The concrete missing step is between **native `tools/call(create_thread)` and
+the renderer creation operation's `configOverrides`**, before `thread/start`.
+The smallest candidate interface is a native creation adapter hook that receives
+the authenticated caller/call identity and exact resolved target, accepts one
+opaque Host-private routing handle, and puts its verified config into that same
+creation operation. Existing CordisX marker/credential/first-turn logic can then
+do the rest while native code retains registration. The hook must return the
+native creation/registration receipt, including pending client task identity,
+and be fenced to that operation rather than a global pending preference.
+
+No such dispatcher/hook is currently adopted in CordisX sources. It might be
+possible to add an explicitly approved, source-verified native adapter through
+the existing resource interception architecture; the present evidence does not
+identify its actual native dispatcher shape or prove it safe. Implementing it
+now would mean guessing or adding a new private Desktop seam, outside the
+authorized existing boundary. This assessment does **not** claim that Codex's
+entire private implementation has no usable seam. It identifies exactly which
+new seam needs source evidence and admission before implementation can proceed.
+
 ## Smallest missing seam and future operation order
 
 The missing seam is a supported, correlated provider binding **inside the
