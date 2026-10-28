@@ -368,8 +368,10 @@ renderer-only next-Send draft. The current native selection and response remain
 unchanged, and completion or cancellation of the response does not apply the draft.
 The selector labels the next-Send choice separately from the current selection.
 Only a subsequent ordinary Send consumes the draft after scope, catalog, effort,
-and authoritative idle checks. Cross-provider Send retains confirmation; cancelling
-that confirmation retains the draft. Same-provider model/effort Send uses the existing
+and authoritative idle checks. Explicit selector choice followed by ordinary idle Send directly applies a
+cross-provider draft without an additional model confirmation. Native permissions
+and approvals remain unchanged. Busy Send uses the native default queue/steer
+action without consuming the draft. Same-provider model/effort Send uses the existing
 marked-request authorization without resuming the thread. Edit/retry, steer, queue,
 and previously queued messages do not consume the draft. Navigation, reload, and
 renderer disposal clear it; it is never transferred to another thread.

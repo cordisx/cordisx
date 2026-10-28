@@ -11,7 +11,6 @@ import { ProviderAction } from './model-provider-actions.js'
 import { modelProviderCopy } from './model-provider-copy.js'
 import { friendlyModelLabel } from './adapter/native-model-provider-seat.js'
 import { nativeModelProviderInteractionAllowed } from './adapter/native-model-provider-interaction.js'
-import { NativeProviderSendConfirmation } from './native-provider-send-confirmation.js'
 import { ProviderReasoningSlider } from './model-provider-reasoning.js'
 import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from './native-provider-selection-client.js'
 import css from './model-providers.css?inline'
@@ -190,8 +189,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
   const canInteract = () => !suspended && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
-    // React portal events bubble through this seat; its owned confirmation remains interactive.
-    if (event.target instanceof Element && event.target.closest('.cxmp-confirm')) return
     if (canInteract()) return
     event.preventDefault()
     event.stopPropagation()
@@ -526,13 +523,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
-      <NativeProviderSendConfirmation
-        transport={transport}
-        confirmation={native.confirmation}
-        locale={locale}
-        provider={displayedProviderLabel}
-        model={displayedModelLabel}
-      />
+
       {queued
         ? (
           <span className="cxmp-announcement" role="status">

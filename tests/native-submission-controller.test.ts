@@ -281,6 +281,24 @@ describe('native submission controller', () => {
     expect(fixture.disposed).toEqual(['unsafe-1'])
   })
 
+  it('applies an explicit send-only cross-provider draft directly with all runtime checks', async () => {
+    const h = harness({ scope: threadScope, pending: { ...pendingThread, sendOnly: true } })
+    const result = await h.controller.prepareSubmission(threadScope, { ...threadAction, reasoningEffort: 'high' })
+    expect(result).toMatchObject({
+      kind: 'allow-original',
+      projection: { effective: { providerId: 'provider-b', model: 'model-b' } },
+    })
+    expect(h.switchThread).toHaveBeenCalledOnce()
+    expect(h.runtimeRevalidate).toHaveBeenCalledWith(threadScope, true)
+    expect(h.commitEffective).toHaveBeenCalledOnce()
+  })
+  it('rejects explicit cross-provider Send when authority changes without switching', async () => {
+    const h = harness({ scope: threadScope, pending: { ...pendingThread, sendOnly: true }, runtimeValid: () => false })
+    expect((await h.controller.prepareSubmission(threadScope, threadAction)).kind).toBe('reject')
+    expect(h.switchThread).not.toHaveBeenCalled()
+    expect(h.commitEffective).not.toHaveBeenCalled()
+  })
+
   it('binds a same-provider next Send to a token without resuming and commits only after dispatch', async () => {
     const h = harness({
       scope: threadScope,

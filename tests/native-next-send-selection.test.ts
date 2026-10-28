@@ -39,19 +39,15 @@ async function clientHarness() {
       projection = { available: true, revision: projection.revision + 1, effective }
       return projection
     }),
-    submissionPrepare: vi.fn(async () => ({
-      status: 'confirm',
-      confirmationId: 'confirmation-token',
-      expectedSelectionRevision: projection.revision,
-    })),
-    submissionConfirm: vi.fn(async () => {
+    submissionPrepare: vi.fn(async () => {
       projection = {
         available: true,
         revision: projection.revision + 1,
         effective: { providerId: 'b', model: 'model-b' },
       }
-      return { status: 'allow-original', operationToken: 'operation-token-exact', projection }
+      return { status: 'allow-original' as const, operationToken: 'operation-token-exact', projection }
     }),
+    submissionConfirm: vi.fn(async () => ({ status: 'reject' as const, reason: 'not-used' })),
     submissionCancel: vi.fn(async () => {}),
   }
   const client = new NativeProviderSelectionClient(
@@ -77,15 +73,12 @@ async function clientHarness() {
     },
   }
 }
-async function confirmation(h: Awaited<ReturnType<typeof clientHarness>>) {
-  for (let i = 0; i < 20 && !h.client.confirmation(); i++) await Promise.resolve()
-  expect(h.client.confirmation()).toBeDefined()
-}
 describe('next-send draft admission', () => {
   it('retains preselection through completion and busy Send without any selection effects', async () => {
     const h = await clientHarness()
     expect(h.client.stageNextSend(target)).toBe(true)
-    expect(await h.client.submitHook(send)).toEqual({ allow: false })
+    vi.mocked(h.channel.submissionPrepare).mockResolvedValueOnce({ status: 'pass-through' })
+    expect(await h.client.submitHook(send)).toEqual({ allow: true })
     h.idle()
     await h.client.refresh()
     expect(h.client.snapshot().nextSend).toEqual(target)
@@ -93,7 +86,13 @@ describe('next-send draft admission', () => {
     h.client.dispose()
     expect(h.client.snapshot().nextSend).toBeUndefined()
   })
-  it.each([{ explicitAction: 'queue' }, { explicitAction: 'steer', response: true }, { edit: 0 }])(
+  it.each([
+    { explicitAction: 'queue' },
+    { explicitAction: 'steer', response: true },
+    { response: true, defaultAction: 'queue' },
+    { response: true, defaultAction: 'steer' },
+    { edit: 0 },
+  ])(
     'does not consume or block native action %j',
     async changes => {
       const h = await clientHarness()
@@ -104,33 +103,29 @@ describe('next-send draft admission', () => {
       expect(h.client.snapshot().nextSend).toEqual(target)
     },
   )
-  it('keeps cancelled confirmation as a renderer draft and clears Host pending before queue', async () => {
+  it('applies explicitly selected provider and effort without another confirmation', async () => {
     const h = await clientHarness()
     h.client.stageNextSend(target)
     h.idle()
-    const result = h.client.submitHook(send)
-    await confirmation(h)
-    expect(h.client.stageNextSend({ ...target, model: 'other' })).toBe(false)
-    expect(await h.client.submitHook(send)).toEqual({ allow: false })
-    h.client.confirmSubmission(false)
-    expect(await result).toEqual({ allow: false })
-    expect(h.client.snapshot().nextSend).toEqual(target)
-    expect(h.client.snapshot().pending).toBeUndefined()
+    expect(await h.client.submitHook(send)).toMatchObject({
+      allow: true,
+      operationToken: 'operation-token-exact',
+      reasoningEffort: 'high',
+    })
+    expect(h.client.confirmation()).toBeUndefined()
     expect(h.channel.submissionConfirm).not.toHaveBeenCalled()
-    vi.mocked(h.channel.submissionPrepare).mockResolvedValue({ status: 'pass-through' })
-    expect(await h.client.submitHook({ ...send, explicitAction: 'queue' })).toEqual({ allow: true })
+    expect(h.sync).toHaveBeenLastCalledWith({ providerId: 'b', model: 'model-b' }, 'high')
+    expect(h.client.snapshot().nextSend).toBeUndefined()
   })
-  it('confirms the captured provider and effort and projects a switch even if synchronization fails', async () => {
+  it('projects an applied provider even if synchronization rejects the subsequent Send', async () => {
     const h = await clientHarness()
     h.client.stageNextSend(target)
     h.idle()
     h.sync.mockRejectedValueOnce(new Error('native readback failed'))
-    const result = h.client.submitHook(send)
-    await confirmation(h)
-    h.client.confirmSubmission(true)
-    expect(await result).toEqual({ allow: false })
+    expect(await h.client.submitHook(send)).toEqual({ allow: false })
     expect(h.client.snapshot().effective).toEqual({ providerId: 'b', model: 'model-b' })
     expect(h.client.snapshot().nextSend).toBeUndefined()
+    expect(h.channel.submissionConfirm).not.toHaveBeenCalled()
   })
   it('revalidates membership before staging and retains an invalid draft without submitting', async () => {
     const h = await clientHarness()

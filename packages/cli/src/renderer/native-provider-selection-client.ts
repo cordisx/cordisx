@@ -81,7 +81,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
   ): Promise<
     | Readonly<{ status: 'pass-through' }>
     | Readonly<{ status: 'confirm'; confirmationId: string; expectedSelectionRevision: number }>
-    | Readonly<{ status: 'allow-original'; operationToken: string }>
+    | Readonly<{ status: 'allow-original'; operationToken: string; projection?: NativeProviderSelectionProjection }>
     | Readonly<{ status: 'reject'; reason: string }>
   >
   submissionConfirm(
@@ -279,7 +279,8 @@ export class NativeProviderSelectionClient {
     const before = this.authority()
     const intent = normalizeNativeSubmissionAction({ operationId: this.createId(), operationGeneration: 0 }, descriptor)
     if (intent.intent !== 'ordinary-send') return this.submitCurrent(descriptor)
-    if (!before.idle || this.submissionActive()) return { allow: false }
+    if (!before.idle) return this.submitCurrent(descriptor)
+    if (this.submissionActive()) return { allow: false }
     const lifetime = this.lifetimeGeneration
     const revision = this.projection.revision
     const current = () =>
@@ -463,7 +464,11 @@ export class NativeProviderSelectionClient {
         cancelId = token
         this.unsynchronized.add(before.scope.threadId)
         committed = result.projection
-      } else token = prepared.operationToken
+      } else {
+        token = prepared.operationToken
+        committed = prepared.projection
+        if (committed && before.scope.threadId) this.unsynchronized.add(before.scope.threadId)
+      }
       if (!validToken(token)) {
         this.notice('submission-rejected')
         return { allow: false }

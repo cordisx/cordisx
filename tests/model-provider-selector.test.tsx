@@ -246,8 +246,8 @@ describe('provider selection interaction', () => {
     const { update } = await setup('shared', true)
     await update({ nextSend: { providerId: 'first', model: 'shared', reasoningEffort: 'low' } })
     await click(modelTrigger)
-    expect(document.querySelector('.cxmp-next-send-label')?.textContent).toBe('Use on next Send')
-    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Use on next Send')
+    expect(document.querySelector('.cxmp-next-send-label')?.textContent).toBe('Use on Send after response')
+    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Use on Send after response')
     expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Current: first')
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
     await update({ selectionLocked: true })
@@ -405,7 +405,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('[role="status"]')).toBeNull()
   })
 
-  it('renders send-time confirmation with the selected pair and preserves transport errors', async () => {
+  it('does not add a model confirmation dialog or bypass an unrelated transport confirmation', async () => {
     const { update, confirmSubmission } = await setup()
     await update({
       pendingProviderId: 'second',
@@ -417,18 +417,8 @@ describe('provider selection interaction', () => {
         threadId: 't1',
       },
     })
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Switch model service and send?')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(confirmSubmission).not.toHaveBeenCalled()
-    const dialog = document.querySelector<HTMLElement>('.cxmp-confirm')!
-    dialog.getClientRects = () => [{ width: 100, height: 100 } as DOMRect] as unknown as DOMRectList
-    await click('.cxmp-confirm button[data-variant="primary"]')
-    expect(confirmSubmission).toHaveBeenCalledWith(true)
-    await update({ confirmation: undefined, submissionError: 'unsupported-submission-intent' })
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
-      'This action does not support switching model services yet.',
-    )
-    await update({ submissionError: undefined })
-    expect(document.querySelector('[role="alert"]')).toBeNull()
   })
 
   it('keeps a reasoning slider inside the model menu and shows two independent triggers', async () => {
