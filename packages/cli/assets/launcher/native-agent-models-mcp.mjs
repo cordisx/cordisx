@@ -135,7 +135,10 @@ reader.on('line', line => {
           ? 'create'
           : undefined
         if (operation === undefined) throw new Error('Unknown native model tool')
-        const value = await invoke(operation, request.params.arguments ?? {}, request.params._meta)
+        const value = await invoke(operation, request.params.arguments ?? {}, {
+          ...request.params._meta,
+          'cordisx/mcpRequestId': request.id,
+        })
         result = {
           content: [{ type: 'text', text: JSON.stringify(value) }],
           isError: value?.status === 'rejected' || value?.status === 'reconciliation-required',

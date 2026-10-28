@@ -44,6 +44,9 @@ export class NativeAgentTasks {
       : object(meta?.['x-codex-turn-metadata'])
     const sourceThreadId = turn?.thread_id ?? meta?.['openai/threadId']
     const sourceCallId = meta?.['openai/toolCallId'] ?? meta?.['openai/tool_call_id'] ?? meta?.callId
+      ?? (valid(turn?.turn_id) && ['string', 'number'].includes(typeof meta?.['cordisx/mcpRequestId'])
+        ? `${turn.turn_id}:${String(meta!['cordisx/mcpRequestId'])}`
+        : undefined)
     if (
       !value || !valid(sourceThreadId) || !valid(sourceCallId) || !valid(value.operationId, 128)
       || !valid(value.providerId, 128)

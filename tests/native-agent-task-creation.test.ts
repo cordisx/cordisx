@@ -76,6 +76,16 @@ describe('provider-aware native task operation', () => {
       reason: 'operation-conflict',
     })
   })
+  it('uses the executor turn and actual MCP request id when explicit tool-call metadata is absent', async () => {
+    const f = await fixture()
+    expect(
+      await f.tasks.create(input, {
+        'x-codex-turn-metadata': JSON.stringify({ thread_id: 'source', turn_id: 'turn' }),
+        'cordisx/mcpRequestId': 7,
+      }),
+    ).toMatchObject({ status: 'created' })
+    expect(f.authority.invoke).toHaveBeenCalledTimes(1)
+  })
   it('rejects unavailable adapters, catalog injection, invalid targets and missing caller metadata before native dispatch', async () => {
     const f = await fixture()
     for (
