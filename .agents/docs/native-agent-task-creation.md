@@ -20,6 +20,11 @@ dispatch; a timeout, restart, missing receipt or first-turn failure never
 automatically creates or sends again. A pending worktree result retains its
 native client task id. Pending/unknown operations require native inspection;
 changing the operation id is not recovery.
+After a successful native receipt is durably saved, completed routing/intent
+records retire while the real thread's credential binding remains. Pending or
+uncertain operations retain their live correlation, bounded to 128 per launch.
+The tool rejects `thinking`; reasoning selection is not part of this initial
+creation input and is never silently ignored.
 
 The supplementary tool calls native `mcpServer/tool/call` for `create_thread`
 on the existing app-server. It forwards an operation call id derived from the
@@ -50,3 +55,27 @@ retains the investigation and exact source provenance. Focused operation,
 credential, transform, stdio and intermediary fixtures cover the integration
 boundaries. They do not establish native UI acceptance or real model inference.
 No release, installation or live App validation is implied by this source work.
+
+## MCP endpoint source evidence
+
+The actual installed build-21828 CodexCLI executable has SHA-256
+`a04752e4d46a4d89e53e6f61c59c5349a638c8ce172ffbf391fd482b4d902a4e`.
+A read-only byte inspection confirmed its `mcpServer/tool/call` request name and
+five-field `McpServerToolCallParams` declaration. The retained same-version
+generated request schema accepts server/threadId/tool/arguments/`_meta`.
+
+The [official request dispatcher](https://github.com/openai/codex/blob/26ad281fd1ca712e4f0c7920a6273cf18c961b8a/codex-rs/app-server/src/message_processor.rs)
+routes that request to the MCP processor. Its
+[tool-call implementation](https://github.com/openai/codex/blob/26ad281fd1ca712e4f0c7920a6273cf18c961b8a/codex-rs/app-server/src/request_processors/mcp_processor.rs)
+preserves supplied metadata, adds the source thread id, and passes it to
+`thread.call_mcp_tool`. This public source revision is independent evidence,
+not an exact source identity for the installed binary. It also rejects direct
+input to native multi-agent-v2 spawned subagents; this entry targets user tasks.
+
+The installed bundled app-tools proxy (SHA-256 in the dated assessment) reads
+`openai/threadId`, `openai/turnId`, and `openai/toolCallId` from MCP `_meta` and
+places them in its native `tools/call` request. The native main pipe and renderer
+dispatchers preserve that call identity to the audited handler. Those source
+observations and protocol declarations establish the intended endpoint and
+metadata flow. No real endpoint invocation was performed; native execution,
+authorization and visible-registration acceptance remain unverified.

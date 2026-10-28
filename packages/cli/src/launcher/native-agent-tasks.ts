@@ -57,7 +57,7 @@ export class NativeAgentTasks {
       || value.prompt.length > 100_000 || value.prompt.includes('\0') || !object(value.target)
       || !validTarget(value.target) || (value.title !== undefined && !valid(value.title))
       || Object.keys(value).some(key =>
-        !['operationId', 'providerId', 'model', 'prompt', 'target', 'title', 'thinking'].includes(key)
+        !['operationId', 'providerId', 'model', 'prompt', 'target', 'title'].includes(key)
       )
     ) return { status: 'rejected', reason: 'invalid-creation' }
     const fingerprint = createHash('sha256').update(JSON.stringify([sourceThreadId, value])).digest('hex')
@@ -101,6 +101,7 @@ export class NativeAgentTasks {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { status: 'reconciliation-required' }
     }
     if (!await this.authority.available()) return { status: 'rejected', reason: 'native-task-adapter-unavailable' }
+    if (this.intents.size >= 128) return { status: 'rejected', reason: 'native-task-pending-limit' }
     const catalog = await this.authority.catalog()
     if (
       !catalog.some(provider =>
@@ -145,7 +146,13 @@ export class NativeAgentTasks {
     } catch {
       result = { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
     }
-    await writeFile(file, JSON.stringify({ fingerprint, callId, result }), { mode: 0o600 }).catch(() => undefined)
+    try {
+      await writeFile(file, JSON.stringify({ fingerprint, callId, result }), { mode: 0o600 })
+      if (object(result)?.status === 'created') {
+        this.authority.routing.retireCompleted(callId)
+        this.intents.delete(callId)
+      }
+    } catch { /* Retain the live operation while its durable acknowledgement remains uncertain. */ }
     return result
   }
 

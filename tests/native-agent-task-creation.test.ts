@@ -107,7 +107,10 @@ describe('provider-aware native task operation', () => {
   it('rejects unavailable adapters, catalog injection, invalid targets and missing caller metadata before native dispatch', async () => {
     const f = await fixture()
     for (
-      const value of [{ ...input, providerId: 'other' }, { ...input, target: { type: 'projectless', config: {} } }, {
+      const value of [{ ...input, thinking: 'high' }, { ...input, providerId: 'other' }, {
+        ...input,
+        target: { type: 'projectless', config: {} },
+      }, {
         ...input,
         endpoint: 'evil',
       }]
@@ -200,5 +203,57 @@ describe('provider-aware native task operation', () => {
       await f.routing.consume({ operationToken: route.token, method: 'turn/start', requestId: 2, threadId: 'created' }),
     ).toMatchObject({ kind: 'reject' })
     expect(f.controller.completeThreadResume).not.toHaveBeenCalled()
+  })
+  it('retires completed route records while keeping the acknowledged native credential binding', async () => {
+    const f = await fixture()
+    for (let index = 0; index < 130; index++) {
+      const callId = `call-${index}`
+      const route = await f.routing.prepare({
+        callId,
+        sourceThreadId: 'source',
+        providerId: 'configured',
+        model: 'model',
+      })
+      await f.routing.consume({ operationToken: route.token, method: 'thread/start', requestId: 1 })
+      await f.routing.authorize(route.token, 1)
+      await f.routing.complete({
+        operationToken: route.token,
+        requestId: 1,
+        succeeded: true,
+        boundThreadId: `created-${index}`,
+        providerId: 'configured',
+        model: 'model',
+      })
+      await f.routing.consume({
+        operationToken: route.token,
+        method: 'turn/start',
+        requestId: 2,
+        threadId: `created-${index}`,
+      })
+      await f.routing.authorize(route.token, 2)
+      await f.routing.complete({ operationToken: route.token, requestId: 2, succeeded: true })
+      f.routing.retireCompleted(callId)
+      expect(
+        await f.routing.consume({
+          operationToken: route.token,
+          method: 'turn/start',
+          requestId: 3,
+          threadId: `created-${index}`,
+        }),
+      ).toBeUndefined()
+    }
+    expect(f.controller.completeThreadResume).toHaveBeenCalledTimes(130)
+  })
+  it('releases completed live intents after durable results while retaining replay across 128 creations', async () => {
+    const f = await fixture()
+    for (let index = 0; index < 130; index++) {
+      expect(await f.tasks.create({ ...input, operationId: `op-${index}` }, metadata)).toMatchObject({
+        status: 'created',
+      })
+    }
+    expect(await f.tasks.create(input, metadata)).toMatchObject({ status: 'created' })
+    expect(f.authority.invoke).toHaveBeenCalledTimes(131)
+    expect(await f.tasks.create(input, metadata)).toMatchObject({ status: 'created' })
+    expect(f.authority.invoke).toHaveBeenCalledTimes(131)
   })
 })

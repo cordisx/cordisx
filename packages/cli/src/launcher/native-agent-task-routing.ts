@@ -28,6 +28,12 @@ export class NativeAgentTaskRouting {
   claimed(callId: string): boolean {
     return [...this.routes.values()].some(route => route.callId === callId && route.phase !== 'uncertain')
   }
+  /** The native thread retains its credential binding; only transient completed routing is retired. */
+  retireCompleted(callId: string): void {
+    for (const [token, route] of this.routes) {
+      if (route.callId === callId && route.phase === 'complete') this.routes.delete(token)
+    }
+  }
   constructor(
     private readonly controller: NativeSubmissionController,
     private readonly validate: (selection: { providerId: string; model: string }) => Promise<boolean> = async () =>
