@@ -23,7 +23,7 @@ const input = {
   prompt: 'Real first message',
   target: { type: 'projectless' },
 }
-const metadata = { 'openai/threadId': 'source', 'openai/toolCallId': 'actual-call' }
+const metadata = { 'openai/threadId': 'source', 'openai/turnId': 'source-turn', 'openai/toolCallId': 'actual-call' }
 async function fixture() {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-task-test-'))
   directories.push(directory)

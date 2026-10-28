@@ -547,7 +547,11 @@ readLines(control, line => {
       threadId: message.sourceThreadId,
       tool: 'create_thread',
       arguments: message.arguments,
-      _meta: { 'openai/toolCallId': message.callId, 'openai/threadId': message.sourceThreadId },
+      _meta: {
+        'openai/toolCallId': message.callId,
+        'openai/threadId': message.sourceThreadId,
+        'openai/turnId': message.sourceTurnId,
+      },
     }).then(value => write(control, { id: message.id, ok: true, value }))
       .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
     return

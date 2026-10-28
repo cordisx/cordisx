@@ -26,7 +26,9 @@ export class NativeAgentTasks {
       directory: string
       catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
       available(): Promise<boolean>
-      invoke(input: { callId: string; sourceThreadId: string; arguments: Record<string, unknown> }): Promise<unknown>
+      invoke(
+        input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
+      ): Promise<unknown>
       routing: NativeAgentTaskRouting
     },
   ) {}
@@ -43,12 +45,13 @@ export class NativeAgentTasks {
       })()
       : object(meta?.['x-codex-turn-metadata'])
     const sourceThreadId = turn?.thread_id ?? meta?.['openai/threadId']
+    const sourceTurnId = turn?.turn_id ?? meta?.['openai/turnId'] ?? meta?.['openai/turn_id']
     const sourceCallId = meta?.['openai/toolCallId'] ?? meta?.['openai/tool_call_id'] ?? meta?.callId
       ?? (valid(turn?.turn_id) && ['string', 'number'].includes(typeof meta?.['cordisx/mcpRequestId'])
         ? `${turn.turn_id}:${String(meta!['cordisx/mcpRequestId'])}`
         : undefined)
     if (
-      !value || !valid(sourceThreadId) || !valid(sourceCallId) || !valid(value.operationId, 128)
+      !value || !valid(sourceThreadId) || !valid(sourceTurnId) || !valid(sourceCallId) || !valid(value.operationId, 128)
       || !valid(value.providerId, 128)
       || !valid(value.model) || typeof value.prompt !== 'string' || value.prompt.length === 0
       || value.prompt.length > 100_000 || value.prompt.includes('\0') || !object(value.target)
@@ -65,7 +68,7 @@ export class NativeAgentTasks {
         : { status: 'rejected', reason: 'operation-conflict' }
     }
     this.fingerprints.set(key, fingerprint)
-    const run = this.run(key, fingerprint, sourceThreadId, sourceCallId, value)
+    const run = this.run(key, fingerprint, sourceThreadId, sourceTurnId, sourceCallId, value)
     this.active.set(key, run)
     try {
       return await run
@@ -79,6 +82,7 @@ export class NativeAgentTasks {
     key: string,
     fingerprint: string,
     sourceThreadId: string,
+    sourceTurnId: string,
     sourceCallId: string,
     value: Record<string, any>,
   ) {
@@ -125,7 +129,7 @@ export class NativeAgentTasks {
     })
     let result: unknown
     try {
-      const response = object(await this.authority.invoke({ callId, sourceThreadId, arguments: args }))
+      const response = object(await this.authority.invoke({ callId, sourceThreadId, sourceTurnId, arguments: args }))
       const item = response?.content?.find((item: any) => item.type === 'text')
       const native = nativeReceipt(item ? JSON.parse(item.text) : undefined)
       result = native && response?.isError !== true

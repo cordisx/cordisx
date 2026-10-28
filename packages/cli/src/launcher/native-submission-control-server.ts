@@ -31,7 +31,9 @@ export interface NativeSubmissionControlServer {
   isThreadIdle(threadId: string): Promise<boolean>
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
-  invokeTask(input: { callId: string; sourceThreadId: string; arguments: Record<string, unknown> }): Promise<unknown>
+  invokeTask(
+    input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
+  ): Promise<unknown>
   close(): Promise<void>
 }
 
@@ -256,7 +258,9 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (taskRouting) throw new Error('Native task routing already bound')
       taskRouting = value
     },
-    async invokeTask(input: { callId: string; sourceThreadId: string; arguments: Record<string, unknown> }) {
+    async invokeTask(
+      input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
+    ) {
       return await callPeer({ type: 'task-create', ...input })
     },
     async switchAgentThread(

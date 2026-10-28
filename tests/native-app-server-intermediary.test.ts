@@ -127,6 +127,7 @@ describe('native app-server intermediary', () => {
       const receipt: any = await h.server.invokeTask({
         callId: 'cordisx-task-exact-call',
         sourceThreadId: 'source',
+        sourceTurnId: 'source-turn',
         arguments: args,
       })
       expect(receipt.received).toEqual({
@@ -134,7 +135,11 @@ describe('native app-server intermediary', () => {
         threadId: 'source',
         tool: 'create_thread',
         arguments: args,
-        _meta: { 'openai/toolCallId': 'cordisx-task-exact-call', 'openai/threadId': 'source' },
+        _meta: {
+          'openai/toolCallId': 'cordisx-task-exact-call',
+          'openai/threadId': 'source',
+          'openai/turnId': 'source-turn',
+        },
       })
       const route = await h.taskRouting.prepare({
         callId: 'cordisx-task-exact-call',
