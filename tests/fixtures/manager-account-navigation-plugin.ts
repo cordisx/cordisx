@@ -5,15 +5,36 @@ import {
   CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
 } from '../../packages/cli/src/contracts.js'
 
-export const inject = ['pages', 'routes', 'slots']
+export const inject = ['pages', 'routes', 'slots', 'i18n']
 
 export function apply(ctx: Context): void {
+  ctx.i18n.define({
+    namespace: 'account-fixture',
+    locale: 'en',
+    default: true,
+    messages: {
+      'page.title': 'Account',
+      'page.description': 'Authentication details',
+      'route.title': 'Account',
+      'route.description': 'Open authentication details',
+    },
+  })
+  ctx.i18n.define({
+    namespace: 'account-fixture',
+    locale: 'zh-CN',
+    messages: {
+      'page.title': '账号',
+      'page.description': '认证详情',
+      'route.title': '账号',
+      'route.description': '打开认证详情',
+    },
+  })
   ctx.pages.register({
     $schema: CORDISX_PAGE_SCHEMA_V4,
     schemaVersion: 4,
     id: 'manager',
-    title: { key: 'page.title', fallback: 'Account' },
-    description: { key: 'page.description', fallback: 'Authentication details' },
+    title: { namespace: 'account-fixture', key: 'page.title', fallback: 'Account' },
+    description: { namespace: 'account-fixture', key: 'page.description', fallback: 'Authentication details' },
     icon: 'host:layers',
     chrome: 'standard',
   }, context => {
@@ -30,8 +51,8 @@ export function apply(ctx: Context): void {
     path: '/manager/extensions/account-fixture',
     outlet: 'manager.content',
     page: 'manager',
-    title: { key: 'route.title', fallback: 'Account' },
-    description: { key: 'route.description', fallback: 'Open authentication details' },
+    title: { namespace: 'account-fixture', key: 'route.title', fallback: 'Account' },
+    description: { namespace: 'account-fixture', key: 'route.description', fallback: 'Open authentication details' },
   })
   ctx.slots.register({
     $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
