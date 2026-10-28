@@ -127,7 +127,7 @@ export class NativeAgentTasks {
     try {
       const response = object(await this.authority.invoke({ callId, sourceThreadId, arguments: args }))
       const item = response?.content?.find((item: any) => item.type === 'text')
-      const native = object(item ? JSON.parse(item.text) : undefined)
+      const native = nativeReceipt(item ? JSON.parse(item.text) : undefined)
       result = native && response?.isError !== true
         ? {
           status: valid(native.threadId) && this.authority.routing.confirmed(callId, native.threadId)
@@ -169,6 +169,26 @@ export class NativeAgentTasks {
       model: String(intent.arguments.model),
     })
   }
+}
+
+/** Only native task identity and settlement state are returned; raw native payloads stay private. */
+function nativeReceipt(value: unknown): Record<string, any> | undefined {
+  const native = object(value)
+  if (!native) return undefined
+  const result: Record<string, any> = {}
+  for (
+    const field of ['threadId', 'clientThreadId', 'conversationId', 'hostId', 'projectlessOutputDirectory', 'status']
+  ) {
+    if (valid(native[field], field === 'projectlessOutputDirectory' ? 4096 : 512)) result[field] = native[field]
+  }
+  const first = object(native.firstTurn)
+  if (first && valid(first.status)) {
+    result.firstTurn = {
+      status: first.status,
+      ...(valid(first.turnId) ? { turnId: first.turnId } : {}),
+    }
+  }
+  return Object.keys(result).length ? result : undefined
 }
 
 function validTarget(target: Record<string, any>): boolean {

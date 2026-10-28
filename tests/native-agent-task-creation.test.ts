@@ -86,6 +86,24 @@ describe('provider-aware native task operation', () => {
     ).toMatchObject({ status: 'created' })
     expect(f.authority.invoke).toHaveBeenCalledTimes(1)
   })
+  it('projects only native task identities and settlement fields', async () => {
+    const f = await fixture()
+    f.authority.invoke.mockResolvedValue({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          threadId: 'actual-thread',
+          hostId: 'local',
+          config: { token: 'private' },
+          secret: 'private',
+        }),
+      }],
+    })
+    expect(await f.tasks.create(input, metadata)).toEqual({
+      status: 'created',
+      native: { threadId: 'actual-thread', hostId: 'local' },
+    })
+  })
   it('rejects unavailable adapters, catalog injection, invalid targets and missing caller metadata before native dispatch', async () => {
     const f = await fixture()
     for (
