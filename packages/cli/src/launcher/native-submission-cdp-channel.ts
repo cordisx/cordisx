@@ -116,11 +116,13 @@ export interface NativeSubmissionCdpAuthority {
     release(threadId: string): void
   }
   bindController(controller: NativeSubmissionController): void
+  taskCreationAvailable(): Promise<boolean>
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(): Promise<void> }>
 }
 
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
 export function createNativeSubmissionCdpAuthority(options: {
+  readonly taskClaim?: (input: unknown) => Promise<unknown>
   readonly submissionAvailable?: boolean
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   catalogSubscribe?(listener: () => void): () => void
@@ -283,6 +285,19 @@ export function createNativeSubmissionCdpAuthority(options: {
   return {
     selection,
     runtime,
+    async taskCreationAvailable() {
+      for (const owner of documents.values()) {
+        if (owner.disposed) continue
+        const response = await owner.session.send('Runtime.evaluate', {
+          expression:
+            `(async()=>{if(globalThis.__cordisxNativeAgentTask_initial!==true||globalThis.__cordisxNativeAgentTaskAdapter==null)return false;await import('app://-/assets/execution-94a643044336.js');return globalThis.__cordisxNativeAgentTask_execution===true})()`,
+          awaitPromise: true,
+          returnByValue: true,
+        }).catch(() => undefined)
+        if (record(response?.result)?.value === true) return true
+      }
+      return false
+    },
     agentSelection: {
       reserve(threadId) {
         if (
@@ -343,6 +358,12 @@ export function createNativeSubmissionCdpAuthority(options: {
           requestId = envelope.requestId
           if (active.has(requestId)) throw new Error('Duplicate native command')
           const input = record(envelope.input)
+          if (envelope.operation === 'agentTaskClaim') {
+            if (!options.taskClaim || input?.generation !== generation) throw new Error('Native task claim unavailable')
+            const value = await options.taskClaim(input.request)
+            await respond(requestId, value)
+            return
+          }
           if (
             envelope.operation === 'catalogManagementRead' || envelope.operation === 'catalogManagementCommand'
             || envelope.operation === 'catalogEnvironmentRead' || envelope.operation === 'catalogEnvironmentSave'
@@ -557,6 +578,11 @@ export function createNativeSubmissionCdpAuthority(options: {
       },rendererGeneration:generation});
         globalThis.${RECEIVER}=(owner,message)=>{if(owner!==generation)return;const p=pending.get(message.requestId);if(!p)return;pending.delete(message.requestId);clearTimeout(p.timer);message.ok?p.resolve(message.value):p.reject(new Error('Native submission rejected'))};
         const call=(operation,input)=>new Promise((resolve,reject)=>{if(disposed||pending.size>=16){reject(new Error('Native channel unavailable'));return}const requestId=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(requestId);reject(new Error('Native submission timed out'))},operation==='catalogManagementCommand'||operation==='catalogEnvironmentSave'||operation==='catalogManagementImport'?90000:30000);pending.set(requestId,{resolve,reject,timer});try{globalThis.${BINDING}(JSON.stringify({requestId,operation,input}))}catch(error){pending.delete(requestId);clearTimeout(timer);reject(error)}});
+        ${
+        options.taskClaim
+          ? `const taskHandles=new WeakSet();globalThis.__cordisxNativeAgentTaskAdapter={async claim(request){const value=await call('agentTaskClaim',{generation,request});if(value==null)return;const handle=Object.freeze(value);taskHandles.add(handle);return handle},owns:handle=>!disposed&&taskHandles.has(handle),dispose(){delete globalThis.__cordisxNativeAgentTaskAdapter}};`
+          : ''
+      }
         globalThis.__cordisxNativeProviderCommandChannel=Object.freeze({${
         options.catalogSubscribe === undefined
           ? ''
@@ -566,7 +592,7 @@ export function createNativeSubmissionCdpAuthority(options: {
           ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),catalogEnvironmentRead:()=>call('catalogEnvironmentRead',{generation}),catalogEnvironmentSave:entries=>call('catalogEnvironmentSave',{generation,entries}),catalogEnvironmentGenerate:request=>call('catalogEnvironmentGenerate',{generation,request}),catalogEnvironmentGenerateCancel:runId=>call('catalogEnvironmentGenerateCancel',{generation,runId}),catalogManagementPrepareExport:request=>call('catalogManagementPrepareExport',{generation,request}),catalogManagementExport:request=>call('catalogManagementExport',{generation,request}),catalogManagementPrepareImport:text=>call('catalogManagementPrepareImport',{generation,text}),catalogManagementImport:request=>call('catalogManagementImport',{generation,request}),"
           : ''
       }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
-        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
+        globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined
       let unsubscribeCatalog: (() => void) | undefined

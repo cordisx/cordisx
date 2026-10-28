@@ -42,6 +42,7 @@ describe('Agent model-provider tools', () => {
   it('projects only model identifiers and labels from the same admitted provider catalog', async () => {
     const f = fixture()
     expect(await f.handler('list', {})).toEqual({
+      threadCreation: { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
       providers: [{
         providerId: 'configured',
         title: 'Configured provider',
@@ -49,6 +50,21 @@ describe('Agent model-provider tools', () => {
       }],
     })
     expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
+  })
+  it('rejects unsupported task creation without preparing credentials or mutating a conversation', async () => {
+    const f = fixture()
+    expect(
+      await f.handler('create', {
+        providerId: 'configured',
+        model: 'shared-model',
+        prompt: 'First user message',
+        target: { type: 'projectless' },
+      }),
+    ).toEqual({ status: 'rejected', reason: 'invalid-selection' })
+    expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
+    expect(f.authority.switchThread).not.toHaveBeenCalled()
+    expect(f.authority.reserve).not.toHaveBeenCalled()
+    expect(f.authority.commit).not.toHaveBeenCalled()
   })
   it('rejects unknown provider/model pairs and connection injection before acquiring credentials', async () => {
     const f = fixture()
@@ -141,12 +157,19 @@ describe('Agent model-provider tools', () => {
     }
     try {
       expect((await request(1, 'initialize', { protocolVersion: '2024-11-05' })).capabilities).toEqual({ tools: {} })
-      expect((await request(2, 'tools/list', {})).tools.map((tool: any) => tool.name)).toEqual([
+      const advertised = (await request(2, 'tools/list', {})).tools
+      expect(advertised.map((tool: any) => tool.name)).toEqual([
         'list_model_providers',
         'select_thread_model_provider',
+        'create_thread_with_provider',
       ])
+      expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })
       expect(catalog.isError).toBe(false)
+      expect(JSON.parse(catalog.content[0].text).threadCreation).toEqual({
+        status: 'unavailable',
+        reason: 'native-task-provider-creation-unavailable',
+      })
       expect(catalog.content[0].text).not.toMatch(/never-project|private.invalid/)
       const selected = await request(4, 'tools/call', { name: 'select_thread_model_provider', arguments: target })
       expect(JSON.parse(selected.content[0].text)).toEqual({ status: 'selected', ...target })
@@ -163,6 +186,17 @@ describe('Agent model-provider tools', () => {
         socket.on('error', reject)
       })
       expect(stderr).toBe('')
+      const taskAuthority: NativeAgentModelsAuthority = f.authority
+      taskAuthority.createTask = vi.fn(async (_input: unknown, metadata: unknown) => ({ status: 'pending', metadata }))
+      const created = await request(5, 'tools/call', {
+        name: 'create_thread_with_provider',
+        arguments: { operationId: 'same-op' },
+        _meta: { 'openai/toolCallId': 'real-call', 'openai/threadId': 'source' },
+      })
+      expect(JSON.parse(created.content[0].text)).toMatchObject({
+        status: 'pending',
+        metadata: { 'openai/toolCallId': 'real-call' },
+      })
     } finally {
       child.stdin.end()
       if (child.exitCode === null) await once(child, 'exit')

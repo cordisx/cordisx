@@ -184,7 +184,7 @@ export interface NativeSubmissionController {
     input: Readonly<{ threadId: string; providerId: string; model: string }>,
   ): Promise<NativeThreadResumePreparation>
   completeThreadResume(
-    input: Readonly<{ threadId: string; resumeToken: string; succeeded: boolean }>,
+    input: Readonly<{ threadId: string; resumeToken: string; succeeded: boolean; createdThreadId?: string }>,
   ): Promise<boolean>
   cancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<boolean>
   releaseScope(scope: NativeSubmissionScope): Promise<void>
@@ -888,7 +888,11 @@ export function createNativeSubmissionController(
         await resume.credential.dispose()
         return !disposed
       }
-      await replaceBinding(resume)
+      if (input.createdThreadId !== undefined && !validText(input.createdThreadId, 512)) {
+        await resume.credential.dispose()
+        return false
+      }
+      await replaceBinding({ ...resume, threadId: input.createdThreadId ?? resume.threadId })
       return true
     },
     async cancel(input) {
