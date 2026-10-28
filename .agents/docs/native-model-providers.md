@@ -362,7 +362,7 @@ delivery gates. No provider API request is made by enabling the local-file flag.
 
 Provider changes prefer an exact model ID, then a unique explicit alias. An
 ambiguous or absent match opens the provider's model submenu; labels are never
-used to guess equivalence. Existing-thread provider changes require confirmation.
+used to guess equivalence. Existing-thread provider choices use the native guarded transition.
 During an active turn, provider, model, and reasoning choices are retained as a
 renderer-only next-Send draft. The current native selection and response remain
 unchanged, and completion or cancellation of the response does not apply the draft.
