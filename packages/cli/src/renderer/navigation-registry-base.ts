@@ -213,6 +213,11 @@ export class NavigationRegistryBase {
   protected routeError(record: RouteRecord): string | undefined {
     const history = this.history.snapshot()
     if (!history.available) return history.reason ?? 'Codex session history is unavailable'
+    return this.routeDeclarationError(record)
+  }
+
+  /** Manager owns its content history; native navigation still uses routeError. */
+  protected routeDeclarationError(record: RouteRecord): string | undefined {
     const view = record.candidateView
     const conflict = this.visibleRecords(view).find(other =>
       other !== record
