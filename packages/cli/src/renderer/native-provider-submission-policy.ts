@@ -69,6 +69,7 @@ export interface NormalizedNativeSubmissionAction {
 export interface PendingNativeProviderChange extends NativeProviderSelection {
   readonly threadId?: string
   readonly selectionGeneration: number
+  readonly sendOnly?: boolean
 }
 
 export interface PreparedNativeProviderChange {
@@ -101,7 +102,9 @@ export function decideNativeProviderSubmission(
   pending: PendingNativeProviderChange | undefined,
   action: NormalizedNativeSubmissionAction,
 ): NativeProviderSubmissionDecision {
-  if (pending === undefined || action.intent === 'non-submission') return { kind: 'pass-through' }
+  if (
+    pending === undefined || action.intent === 'non-submission' || pending.sendOnly && action.intent !== 'ordinary-send'
+  ) return { kind: 'pass-through' }
   if (action.intent === 'ordinary-send') return { kind: 'prepare-provider-change', prepared: { pending, action } }
   return { kind: 'reject', reason: 'unsupported-submission-intent' }
 }

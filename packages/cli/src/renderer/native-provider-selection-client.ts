@@ -20,6 +20,7 @@ export interface NativeProviderSelection {
 
 export interface PendingNativeProviderSelection extends NativeProviderSelection {
   readonly generation: number
+  readonly sendOnly?: boolean
 }
 
 export interface NativeProviderSelectionProjection {
@@ -27,6 +28,7 @@ export interface NativeProviderSelectionProjection {
   readonly revision: number
   readonly effective?: NativeProviderSelection
   readonly pending?: PendingNativeProviderSelection
+  readonly nextSend?: NativeProviderSelection & { readonly reasoningEffort?: ModelReasoningEffort }
   readonly draftPreference?: Readonly<{
     readonly providerId: string
     readonly generation: number
@@ -57,6 +59,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
       providerId: string
       model: string
       source?: 'user' | 'preference'
+      mode?: 'stage-send'
       expectedRevision?: number
     }>,
   ): Promise<
@@ -67,6 +70,9 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
       pending?: PendingNativeProviderSelection
     }>
   >
+  selectionDiscard(
+    input: Readonly<{ scope: NativeSubmissionScope; expectedRevision: number }>,
+  ): Promise<NativeProviderSelectionProjection>
   submissionPrepare(
     input: Readonly<{
       scope: NativeSubmissionScope
@@ -75,7 +81,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
   ): Promise<
     | Readonly<{ status: 'pass-through' }>
     | Readonly<{ status: 'confirm'; confirmationId: string; expectedSelectionRevision: number }>
-    | Readonly<{ status: 'allow-original'; operationToken: string }>
+    | Readonly<{ status: 'allow-original'; operationToken: string; projection?: NativeProviderSelectionProjection }>
     | Readonly<{ status: 'reject'; reason: string }>
   >
   submissionConfirm(
@@ -100,6 +106,7 @@ export interface MutableNativeSubmitAuthority {
   readonly scope: NativeSubmissionScope
   readonly idle: boolean
   readonly effective?: NativeProviderSelection
+  readonly reasoningEffort?: ModelReasoningEffort
 }
 
 export type NativeSubmitHookResult =
@@ -136,6 +143,10 @@ export class NativeProviderSelectionClient {
   private operationSequence = 0
   private admission: number | undefined
   private disposed = false
+  private nextSend: NativeProviderSelectionProjection['nextSend']
+  private nextSendActive = false
+  private draftEditGeneration = 0
+  private submittedEffort: ModelReasoningEffort | undefined
   private readonly unsynchronized = new Set<string>()
 
   constructor(
@@ -149,10 +160,28 @@ export class NativeProviderSelectionClient {
     private readonly createId: () => string = () => crypto.randomUUID(),
     private readonly pendingReasoning: (pending: PendingNativeProviderSelection) => ModelReasoningEffort | undefined =
       () => undefined,
+    private readonly validateNextSend: (
+      selection: NonNullable<NativeProviderSelectionProjection['nextSend']>,
+    ) => Promise<boolean> = async () => true,
   ) {}
 
-  snapshot = (): NativeProviderSelectionProjection => this.projection
-  submissionActive = (): boolean => this.admission !== undefined
+  snapshot = (): NativeProviderSelectionProjection => ({
+    ...this.projection,
+    ...(this.nextSend ? { nextSend: this.nextSend } : {}),
+  })
+  reserveDraftEdit = (): number => ++this.draftEditGeneration
+  stageNextSend(
+    target: NonNullable<NativeProviderSelectionProjection['nextSend']>,
+    generation = this.reserveDraftEdit(),
+  ): boolean {
+    if (
+      this.disposed || generation !== this.draftEditGeneration || this.submissionActive() || !this.projection.available
+    ) return false
+    this.nextSend = Object.freeze({ ...target })
+    this.emit()
+    return true
+  }
+  submissionActive = (): boolean => this.admission !== undefined || this.nextSendActive
   synchronizationActive = (): boolean => {
     const threadId = this.authority().scope.threadId
     return threadId !== undefined && this.unsynchronized.has(threadId)
@@ -169,6 +198,7 @@ export class NativeProviderSelectionClient {
     const scope = authority.scope
     const generation = ++this.projectionGeneration
     const synchronize = scope.threadId !== undefined && authority.idle && !this.submissionActive()
+      && this.projection.pending === undefined
     if (synchronize) this.unsynchronized.add(scope.threadId!)
     try {
       const next = await this.channel.selectionRead({
@@ -176,7 +206,7 @@ export class NativeProviderSelectionClient {
         ...(authority.effective === undefined ? {} : { effective: authority.effective }),
       })
       if (this.projectionCurrent(scope, generation, next.revision)) {
-        if (synchronize && next.effective) {
+        if (synchronize && next.effective && next.pending === undefined) {
           await this.synchronizeEffective(next.effective)
           if (!this.projectionCurrent(scope, generation, next.revision)) return
         }
@@ -194,7 +224,7 @@ export class NativeProviderSelectionClient {
     target: NativeProviderSelection,
     options: Readonly<{ source?: 'user' | 'preference'; expectedRevision?: number }> = {},
   ): Promise<'accepted' | 'unavailable'> {
-    if (this.disposed || !this.projection.available) return 'unavailable'
+    if (this.disposed || this.nextSendActive || !this.projection.available) return 'unavailable'
     this.confirmSubmission(false)
     const scope = this.authority().scope
     const generation = ++this.projectionGeneration
@@ -233,6 +263,8 @@ export class NativeProviderSelectionClient {
   }
 
   invalidateScope(): void {
+    this.nextSend = undefined
+    this.draftEditGeneration++
     this.lifetimeGeneration++
     this.projectionGeneration++
     this.confirmSubmission(false)
@@ -241,11 +273,114 @@ export class NativeProviderSelectionClient {
   }
 
   readonly submitHook = async (descriptor: NativeSubmissionOrchestratorDescriptor): Promise<NativeSubmitHookResult> => {
+    if (this.nextSendActive) return { allow: false }
+    const draft = this.nextSend
+    if (!draft) return this.submitCurrent(descriptor)
+    const before = this.authority()
+    const intent = normalizeNativeSubmissionAction({ operationId: this.createId(), operationGeneration: 0 }, descriptor)
+    if (intent.intent !== 'ordinary-send') return this.submitCurrent(descriptor)
+    if (!before.idle) return this.submitCurrent(descriptor)
+    if (this.submissionActive()) return { allow: false }
+    const lifetime = this.lifetimeGeneration
+    const revision = this.projection.revision
+    const current = () =>
+      this.scopeCurrent(before.scope, lifetime) && this.authority().idle
+      && this.nextSend === draft
+    this.draftEditGeneration++
+    this.nextSendActive = true
+    this.emit()
+    let stagedRevision: number | undefined
+    let released = false
+    let stagedPending = true
+    let nativeModelChanged = false
+    try {
+      if (!await this.validateNextSend(draft) || !current() || this.projection.revision !== revision) {
+        return { allow: false }
+      }
+      stagedRevision = revision + 1
+      const selected = await this.channel.selectionSelect({
+        scope: before.scope,
+        providerId: draft.providerId,
+        model: draft.model,
+        mode: 'stage-send',
+        expectedRevision: revision,
+      })
+      stagedRevision = selected.revision
+      stagedPending = selected.pending !== undefined
+      if (!current()) return { allow: false }
+      this.projectionGeneration++
+      this.replace({
+        available: true,
+        revision: selected.revision,
+        effective: selected.effective,
+        ...(selected.pending ? { pending: selected.pending } : {}),
+      })
+      this.submittedEffort = draft.reasoningEffort
+      if (selected.pending?.providerId === selected.effective.providerId) {
+        nativeModelChanged = true
+        if (before.scope.threadId) this.unsynchronized.add(before.scope.threadId)
+        await this.synchronizeEffective(draft, draft.reasoningEffort)
+        if (!current()) return { allow: false }
+        if (before.scope.threadId) this.unsynchronized.delete(before.scope.threadId)
+      }
+      const result = await this.submitCurrent(descriptor)
+      if (!this.scopeCurrent(before.scope, lifetime)) return { allow: false }
+      if (
+        result.allow
+        || this.projection.revision > (stagedRevision ?? revision) && this.projection.pending === undefined
+          && this.projection.effective?.providerId === draft.providerId
+          && this.projection.effective.model === draft.model
+      ) this.nextSend = undefined
+      released = result.allow
+      return result
+    } catch {
+      this.notice('submission-rejected')
+      return { allow: false }
+    } finally {
+      if (
+        !released && stagedPending && stagedRevision !== undefined
+        && (!this.scopeCurrent(before.scope, lifetime) || this.projection.pending !== undefined
+          || this.projection.revision < stagedRevision)
+      ) {
+        try {
+          const cleared = await this.channel.selectionDiscard({ scope: before.scope, expectedRevision: stagedRevision })
+          if (this.scopeCurrent(before.scope, lifetime)) {
+            this.projectionGeneration++
+            this.replace(cleared)
+          }
+        } catch {
+          this.notice('submission-rejected')
+        }
+        if (this.scopeCurrent(before.scope, lifetime)) await this.refresh()
+      }
+      if (!released && nativeModelChanged && before.effective && this.scopeCurrent(before.scope, lifetime)) {
+        try {
+          await this.synchronizeEffective(before.effective, before.reasoningEffort)
+          if (this.scopeCurrent(before.scope, lifetime) && before.scope.threadId) {
+            this.unsynchronized.delete(before.scope.threadId)
+          }
+        } catch {
+          this.notice('submission-rejected')
+        }
+      }
+      this.submittedEffort = undefined
+      this.nextSendActive = false
+      this.emit()
+    }
+  }
+
+  private readonly submitCurrent = async (
+    descriptor: NativeSubmissionOrchestratorDescriptor,
+  ): Promise<NativeSubmitHookResult> => {
     if (this.disposed) return { allow: false }
     const before = this.authority()
     const lifetime = this.lifetimeGeneration
     const projectionGeneration = this.projectionGeneration
-    const pending = this.projection.pending
+    const actionIntent =
+      normalizeNativeSubmissionAction({ operationId: this.createId(), operationGeneration: 0 }, descriptor).intent
+    const pending = this.projection.pending?.sendOnly && actionIntent !== 'ordinary-send'
+      ? undefined
+      : this.projection.pending
     if (before.scope.threadId && this.unsynchronized.has(before.scope.threadId)) {
       this.notice('submission-rejected')
       return { allow: false }
@@ -257,7 +392,7 @@ export class NativeProviderSelectionClient {
       descriptor,
     )
     const reasoningEffort = pending !== undefined && normalized.intent === 'ordinary-send'
-      ? this.pendingReasoning(pending)
+      ? this.submittedEffort ?? this.pendingReasoning(pending)
       : undefined
     const action = reasoningEffort === undefined ? normalized : { ...normalized, reasoningEffort }
     if (pending !== undefined && action.intent !== 'ordinary-send') {
@@ -284,7 +419,8 @@ export class NativeProviderSelectionClient {
           && (this.unsynchronized.has(before.scope.threadId) || projectionGeneration !== this.projectionGeneration)
         if (synchronizationChanged) this.notice('submission-rejected')
         return !synchronizationChanged && this.scopeCurrent(before.scope, lifetime)
-            && this.projection.pending === undefined
+            && (this.projection.pending === undefined
+              || this.projection.pending.sendOnly && action.intent !== 'ordinary-send')
           ? { allow: true }
           : { allow: false }
       }
@@ -328,7 +464,11 @@ export class NativeProviderSelectionClient {
         cancelId = token
         this.unsynchronized.add(before.scope.threadId)
         committed = result.projection
-      } else token = prepared.operationToken
+      } else {
+        token = prepared.operationToken
+        committed = prepared.projection
+        if (committed && before.scope.threadId) this.unsynchronized.add(before.scope.threadId)
+      }
       if (!validToken(token)) {
         this.notice('submission-rejected')
         return { allow: false }

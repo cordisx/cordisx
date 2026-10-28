@@ -98,6 +98,7 @@ const projection = (state: State) => ({
         providerId: state.pending.providerId,
         model: state.pending.model,
         generation: state.pending.selectionGeneration,
+        ...(state.pending.sendOnly ? { sendOnly: true } : {}),
       },
     }),
   ...(state.draftPreference === undefined ? {} : { draftPreference: state.draftPreference }),
@@ -456,6 +457,19 @@ export function createNativeSubmissionCdpAuthority(options: {
           }
           active.add(requestId)
           admitted = true
+          // Exact owned send-draft cleanup is safe after navigation; it never touches native state.
+          if (envelope.operation === 'selectionDiscard') {
+            const state = states.get(key(scope))
+            if (!state || input?.expectedRevision !== state.revision || state.pending && !state.pending.sendOnly) {
+              throw new Error('Stale selection discard')
+            }
+            if (state.pending) {
+              delete state.pending
+              state.revision++
+            }
+            await respond(requestId, projection(state))
+            return
+          }
           const live = await liveScope(scope)
           if (!live || key(live) !== key(scope) || owner.disposed) throw new Error('Stale native document')
           if (scope.threadId && agentSelections.has(scope.threadId) && envelope.operation !== 'selectionRead') {
@@ -479,6 +493,14 @@ export function createNativeSubmissionCdpAuthority(options: {
           } else if (envelope.operation === 'selectionSelect') {
             if (!state) throw new Error('Native selection not initialized')
             const selected = selectionOf(input)
+            const stageSend = input?.mode === 'stage-send'
+            if (input?.mode !== undefined && !stageSend) throw new Error('Invalid selection mode')
+            if (
+              stageSend
+              && (input?.expectedRevision !== state.revision || !await runtime.revalidate(scope, true))
+            ) {
+              throw new Error('Stale next-send selection')
+            }
             const source = input?.source ?? 'user'
             if (source !== 'user' && source !== 'preference') throw new Error('Invalid native selection source')
             if (
@@ -510,9 +532,18 @@ export function createNativeSubmissionCdpAuthority(options: {
               rememberedDraftProviderId = selected.providerId
               state.draftUserSelected = true
             }
+            if (
+              stageSend
+              && (input?.expectedRevision !== state.revision || !await runtime.revalidate(scope, true))
+            ) {
+              throw new Error('Stale next-send selection')
+            }
+            if (stageSend && input?.expectedRevision !== state.revision) {
+              throw new Error('Concurrent next-send selection')
+            }
             delete state.draftPreference
             state.revision++
-            if (selected.providerId === state.effective.providerId) {
+            if (!stageSend && selected.providerId === state.effective.providerId) {
               delete state.pending
               state.effective = selected
               if (scope.threadId) threadSelections.set(scope.threadId, selected)
@@ -520,8 +551,9 @@ export function createNativeSubmissionCdpAuthority(options: {
                 ...selected,
                 ...(scope.threadId === undefined ? {} : { threadId: scope.threadId }),
                 selectionGeneration: state.nextGeneration++,
+                ...(stageSend ? { sendOnly: true } : {}),
               }}
-            if (selected.providerId !== state.effective.providerId && scope.threadId !== undefined) {
+            if (!stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined) {
               const committed = await controller!.commitSelection(scope)
               if (committed.kind !== 'accepted') throw new Error('Native provider switch failed')
               await respond(requestId, { status: 'accepted', ...committed.projection })
@@ -591,7 +623,7 @@ export function createNativeSubmissionCdpAuthority(options: {
         options.management
           ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),catalogEnvironmentRead:()=>call('catalogEnvironmentRead',{generation}),catalogEnvironmentSave:entries=>call('catalogEnvironmentSave',{generation,entries}),catalogEnvironmentGenerate:request=>call('catalogEnvironmentGenerate',{generation,request}),catalogEnvironmentGenerateCancel:runId=>call('catalogEnvironmentGenerateCancel',{generation,runId}),catalogManagementPrepareExport:request=>call('catalogManagementPrepareExport',{generation,request}),catalogManagementExport:request=>call('catalogManagementExport',{generation,request}),catalogManagementPrepareImport:text=>call('catalogManagementPrepareImport',{generation,text}),catalogManagementImport:request=>call('catalogManagementImport',{generation,request}),"
           : ''
-      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
+      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionDiscard:input=>call('selectionDiscard',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined

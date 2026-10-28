@@ -47,6 +47,8 @@ export interface ProviderSelectionSnapshot {
   readonly reasoningEfforts?: readonly string[]
   readonly pendingReasoningEffort?: string
   readonly serviceTier?: 'priority' | null
+  readonly nextSend?: import('./native-provider-selection-client.js').NativeProviderSelectionProjection['nextSend']
+  readonly selectionLocked?: boolean
   readonly busy: boolean
   readonly pendingProviderId?: string
   readonly pendingModel?: string
@@ -194,10 +196,14 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const copy = modelProviderCopy(locale)
   const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
-  const pendingProvider = catalog.providers.find(provider => provider.providerId === native.pendingProviderId)
-  const pendingModel = pendingProvider?.models.find(model => model.id === native.pendingModel)
-    ?? (native.pendingProviderId === 'openai'
-      ? nativeModelsForProvider(native, 'openai')?.find(model => model.id === native.pendingModel)
+  const queued = native.nextSend
+  const pendingProviderId = queued?.providerId ?? native.pendingProviderId
+  const pendingModelId = queued?.model ?? native.pendingModel
+  const pendingEffort = queued?.reasoningEffort ?? native.pendingReasoningEffort
+  const pendingProvider = catalog.providers.find(provider => provider.providerId === pendingProviderId)
+  const pendingModel = pendingProvider?.models.find(model => model.id === pendingModelId)
+    ?? (pendingProviderId === 'openai'
+      ? nativeModelsForProvider(native, 'openai')?.find(model => model.id === pendingModelId)
       : undefined)
   const effectiveModel = selectedModel ?? (native.model === undefined
     ? undefined
@@ -208,14 +214,14 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       ? copy.official
       : native.providerLabel ?? copy.unknown)
   const displayedProvider = pendingProvider ?? selected
-  const displayedProviderId = native.pendingProviderId ?? native.modelProvider ?? 'openai'
+  const displayedProviderId = pendingProviderId ?? native.modelProvider ?? 'openai'
   const displayedProviderLabel = displayedProviderId === 'openai'
     ? copy.official
     : displayedProvider?.title ?? providerLabel
   const displayedModel = pendingModel ?? effectiveModel
-  const displayedModelId = native.pendingModel ?? displayedModel?.id
+  const displayedModelId = pendingModelId ?? displayedModel?.id
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
-  const menuProvider = native.pendingProviderId === undefined ? selected : pendingProvider
+  const menuProvider = pendingProviderId === undefined ? selected : pendingProvider
   const menuModels = menuProvider?.models
     ?? (displayedProviderId === 'openai'
       ? nativeModelsForProvider(native, 'openai')
@@ -270,7 +276,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     setProviderQuery('')
     setModelQuery('')
     setModelExpanded(false)
-  }, [open, native.modelProvider, native.pendingProviderId])
+  }, [open, native.modelProvider, pendingProviderId])
 
   useEffect(() => {
     if (!showModelSearch) setModelQuery('')
@@ -301,9 +307,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         setError(result === 'busy' ? copy.busy : copy.failed)
       } else {
         const current = transport.getSnapshot()
-        const selectedEffort = current.pendingProviderId === undefined
+        const selectedEffort = current.nextSend === undefined && current.pendingProviderId === undefined
           ? current.reasoningEffort
-          : current.pendingReasoningEffort
+          : current.nextSend?.reasoningEffort ?? current.pendingReasoningEffort
         setStatus(selectedEffort === effort ? copy.updated : copy.accepted)
       }
     } catch {
@@ -394,7 +400,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     if (!canInteract()) return
     if (registry.hasLiveSource()) return
     const preference = native.draftPreference
-    if (preference === undefined || native.threadId !== undefined || native.pendingProviderId !== undefined) return
+    if (preference === undefined || native.threadId !== undefined || pendingProviderId !== undefined) return
     const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
     if (attemptedDraftPreference.current === key) return
     const provider = preference.providerId === 'openai'
@@ -418,7 +424,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     native.draftPreference,
     native.nativeModelAssignments,
     native.nativeModels,
-    native.pendingProviderId,
+    pendingProviderId,
     native.threadId,
     registry,
     suspended,
@@ -426,10 +432,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   ])
 
   const choose = (provider: Pick<ModelProviderV1, 'providerId'>, model: ModelProviderModelV1) => {
-    if (native.busy) {
-      setError(copy.busy)
-      return
-    }
     void apply(provider, model)
   }
 
@@ -489,9 +491,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   )
   const showProviderSearch = providerRows.length > 5
   const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
-  const selectedReasoningEffort = native.pendingProviderId === undefined
+  const selectedReasoningEffort = pendingProviderId === undefined
     ? native.reasoningEffort
-    : native.pendingReasoningEffort
+    : pendingEffort
   // Model availability stays provider-scoped; reasoning metadata can still describe
   // the pending model before its provider switch has reached the native control.
   const reasoning = resolveTargetReasoning(
@@ -521,16 +523,27 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
+
+      {queued
+        ? (
+          <span className="cxmp-announcement" role="status">
+            {copy.nextSend}: {displayedProviderLabel} / {displayedModelLabel}. {copy.active}: {providerLabel} /{' '}
+            {selectedModelLabel}
+          </span>
+        )
+        : null}
       <button
         ref={providerTrigger}
         type="button"
         className="cxmp-trigger cxmp-provider-trigger"
         disabled={suspended}
         aria-label={`${copy.providers}: ${displayedProviderLabel}`}
-        title={displayedProviderLabel}
+        title={queued
+          ? `${copy.nextSend}: ${displayedProviderLabel}. ${copy.active}: ${providerLabel}`
+          : displayedProviderLabel}
         aria-haspopup="menu"
         aria-expanded={open === 'provider'}
-        data-pending={native.pendingProviderId !== undefined || undefined}
+        data-pending={pendingProviderId !== undefined || undefined}
         onClick={event => toggle('provider', event.currentTarget)}
         onKeyDown={event => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -574,8 +587,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         className="cxmp-trigger cxmp-model-trigger"
         disabled={suspended}
         data-cordisx-model-ready={native.available && displayedModel !== undefined && !switching ? 'true' : undefined}
-        aria-label={`${copy.models}: ${displayedModelLabel}`}
-        title={displayedModelLabel}
+        aria-label={`${queued ? copy.nextSend : copy.models}: ${displayedModelLabel}`}
+        title={queued
+          ? `${copy.nextSend}: ${displayedModelLabel}. ${copy.active}: ${selectedModelLabel}`
+          : displayedModelLabel}
         aria-haspopup="menu"
         aria-expanded={open === 'model'}
         onClick={event => toggle('model', event.currentTarget)}
@@ -623,9 +638,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
             </div>
           )
           : null}
-        {native.busy && open !== 'model'
-          ? <div className="cxmp-menu-heading" role="status">{copy.busy}</div>
-          : null}
         <div className={open === 'provider' ? 'cxmp-menu-scroll' : 'cxmp-model-menu-body'}>
           {!native.available ? <div className="cxmp-menu-heading" role="status">{copy.unavailable}</div> : null}
           {showInitialLoading ? <div className="cxmp-menu-heading" role="status">{copy.loading}</div> : null}
@@ -648,7 +660,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     key={row.key}
                     aria-checked={row.provider.providerId === displayedProviderId}
                     data-menu-initial={row.provider.providerId === displayedProviderId || undefined}
-                    disabled={!native.available || switching || native.busy || !row.usable}
+                    disabled={!native.available || switching || native.selectionLocked || !row.usable}
                     onClick={() => {
                       if (row.kind === 'native') {
                         if (native.model) choose(row.provider, { id: native.model, label: selectedModelLabel })
@@ -717,12 +729,12 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                           <ProviderReasoningSlider
                             key={JSON.stringify([
                               displayedProviderId,
-                              native.pendingModel ?? native.model,
+                              pendingModelId ?? native.model,
                               reasoningEfforts,
                             ])}
                             efforts={reasoningEfforts}
                             value={reasoningEffort}
-                            disabled={!native.available || (native.busy && !switching)}
+                            disabled={!native.available || (native.selectionLocked === true && !switching)}
                             pending={switching}
                             fast={fastMode}
                             label={copy.reasoningEffort}
@@ -772,11 +784,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                           className="cxmp-choice cxmp-model-choice"
                           role="menuitemradio"
                           aria-checked={model.id === displayedModelId}
-                          disabled={!modelExpanded || !native.available || switching || native.busy
+                          disabled={!modelExpanded || !native.available || switching || native.selectionLocked
                             || ('disabled' in model && model.disabled === true)}
                           onClick={() => {
                             const provider = menuProvider
-                              ?? (native.pendingProviderId === 'openai' ? officialProvider : nativeProvider)
+                              ?? (pendingProviderId === 'openai' ? officialProvider : nativeProvider)
                             if (provider) choose(provider, model)
                           }}
                         >

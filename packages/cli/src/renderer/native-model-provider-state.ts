@@ -55,3 +55,36 @@ export function patchNativeSelection(
     ...(error === undefined ? {} : { error }),
   }
 }
+
+export function nativeThreadBusy(thread: Record<string, unknown>): boolean | undefined {
+  const status = typeof thread.status === 'object' && thread.status !== null
+    ? (thread.status as Record<string, unknown>).type
+    : undefined
+  if (status === 'idle' || status === 'notLoaded' || status === 'systemError') return false
+  return status === 'active' ? true : undefined
+}
+
+export function nextSendSelectionFields(
+  projection: import('./native-provider-selection-client.js').NativeProviderSelectionProjection,
+  submissionActive: boolean,
+  synchronizationActive: boolean,
+  details: {
+    effort?: string | undefined
+    confirmation?: import('./native-provider-selection-client.js').NativeProviderSubmitConfirmation | undefined
+    error?: NativeSubmissionRejection | undefined
+  },
+) {
+  return {
+    selectionLocked: submissionActive || synchronizationActive,
+    ...(projection.nextSend ? { nextSend: projection.nextSend } : {}),
+    ...(projection.pending
+      ? {
+        pendingProviderId: projection.pending.providerId,
+        pendingModel: projection.pending.model,
+        ...(details.effort === undefined ? {} : { pendingReasoningEffort: details.effort }),
+      }
+      : {}),
+    ...(details.confirmation ? { confirmation: details.confirmation } : {}),
+    ...(details.error ? { submissionError: details.error } : {}),
+  }
+}

@@ -87,7 +87,13 @@ export interface NativeExistingThreadSwitch {
 
 export type NativeSubmissionPreparation =
   | Readonly<{ kind: 'pass-through' }>
-  | Readonly<{ kind: 'allow-original'; operationToken: string }>
+  | Readonly<
+    {
+      kind: 'allow-original'
+      operationToken: string
+      projection?: NativeSubmissionSelectionSnapshot & { available: boolean }
+    }
+  >
   | Readonly<{ kind: 'confirm'; confirmationId: string; selectionRevision: number }>
   | Readonly<{
     kind: 'reject'
@@ -467,6 +473,66 @@ export function createNativeSubmissionController(
     })
   }
 
+  const applyPreparedThreadSelection = async (prepared: PreparedBase): Promise<NativeSubmissionConfirmation> => {
+    const operation = await prepareOperation(prepared)
+    if (operation === undefined) return { kind: 'reject', reason: 'stale-operation' }
+    try {
+      if (
+        !await options.runtime.revalidate(prepared.scope, true) || !await validSelection(prepared.pending)
+        || disposed || !revalidateSelection(prepared)
+      ) {
+        throw new Error('native thread changed before switch')
+      }
+      await options.existingThread.switch({
+        scope: prepared.scope,
+        threadId: prepared.scope.threadId!,
+        providerId: prepared.pending.providerId,
+        model: prepared.pending.model,
+        configOverrides: operation.configOverrides,
+        serviceGeneration: operation.serviceGeneration,
+      })
+      // Resume already changed the live thread, even if its subsequent Send is cancelled.
+      await replaceBinding({
+        threadId: prepared.scope.threadId!,
+        selection: prepared.pending,
+        serviceGeneration: operation.serviceGeneration,
+        credential: operation.credential,
+      })
+      if (!revalidateSelection(prepared)) throw new Error('selection changed during native thread switch')
+      if (
+        !options.selection.commitEffective({
+          scope: prepared.scope,
+          expectedRevision: prepared.selectionRevision,
+          pendingGeneration: prepared.pending.selectionGeneration,
+          selection: prepared.pending,
+        })
+      ) throw new Error('native effective selection commit was stale')
+      const effective = options.selection.snapshot(prepared.scope)
+      if (
+        effective.effective.providerId !== prepared.pending.providerId
+        || effective.effective.model !== prepared.pending.model
+        || effective.pending !== undefined
+      ) throw new Error('native effective selection acknowledgement differed')
+      operation.selectionRevision = effective.revision
+      operation.selectionState = 'effective'
+      operation.expiresAt = now() + operationTtlMs
+      operations.set(operation.token, operation)
+      return {
+        kind: 'allow-original',
+        operationToken: operation.token,
+        projection: {
+          available: true,
+          revision: effective.revision,
+          effective: effective.effective,
+        },
+      }
+    } catch {
+      if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
+        await operation.credential.dispose()
+      }
+      return { kind: 'reject', reason: 'thread-switch-failed' }
+    }
+  }
   return {
     nativeManagedModelRoutingAvailable: false,
     async commitSelection(scope) {
@@ -581,11 +647,18 @@ export function createNativeSubmissionController(
         selectionRevision: snapshot.revision,
         expiresAt: now() + (scope.threadId === undefined ? operationTtlMs : confirmationTtlMs),
       }
-      if (scope.threadId === undefined) {
+      if (scope.threadId === undefined || decision.prepared.pending.providerId === snapshot.effective.providerId) {
+        if (scope.threadId !== undefined && !await options.runtime.revalidate(scope, true)) {
+          return { kind: 'reject', reason: 'stale-operation' }
+        }
         const operation = await prepareOperation(prepared)
         if (operation === undefined) return { kind: 'reject', reason: 'provider-preparation-failed' }
         operations.set(operation.token, operation)
         return { kind: 'allow-original', operationToken: operation.token }
+      }
+      if (decision.prepared.pending.sendOnly) {
+        const result = await applyPreparedThreadSelection(prepared)
+        return result.kind === 'allow-original' ? result : { kind: 'reject', reason: 'provider-preparation-failed' }
       }
       const confirmationId = createId()
       if (!validText(confirmationId, 256) || confirmationId.length < 16 || confirmations.has(confirmationId)) {
@@ -607,64 +680,7 @@ export function createNativeSubmissionController(
         || !revalidateSelection(confirmation)
         || !await options.runtime.revalidate(confirmation.scope, true)
       ) return { kind: 'reject', reason: 'stale-operation' }
-      const operation = await prepareOperation(confirmation)
-      if (operation === undefined) return { kind: 'reject', reason: 'stale-operation' }
-      try {
-        if (
-          !await options.runtime.revalidate(confirmation.scope, true) || !await validSelection(confirmation.pending)
-          || disposed || !revalidateSelection(confirmation)
-        ) {
-          throw new Error('native thread changed before switch')
-        }
-        await options.existingThread.switch({
-          scope: confirmation.scope,
-          threadId: confirmation.scope.threadId!,
-          providerId: confirmation.pending.providerId,
-          model: confirmation.pending.model,
-          configOverrides: operation.configOverrides,
-          serviceGeneration: operation.serviceGeneration,
-        })
-        // Resume already changed the live thread, even if its subsequent Send is cancelled.
-        await replaceBinding({
-          threadId: confirmation.scope.threadId!,
-          selection: confirmation.pending,
-          serviceGeneration: operation.serviceGeneration,
-          credential: operation.credential,
-        })
-        if (!revalidateSelection(confirmation)) throw new Error('selection changed during native thread switch')
-        if (
-          !options.selection.commitEffective({
-            scope: confirmation.scope,
-            expectedRevision: confirmation.selectionRevision,
-            pendingGeneration: confirmation.pending.selectionGeneration,
-            selection: confirmation.pending,
-          })
-        ) throw new Error('native effective selection commit was stale')
-        const effective = options.selection.snapshot(confirmation.scope)
-        if (
-          effective.effective.providerId !== confirmation.pending.providerId
-          || effective.effective.model !== confirmation.pending.model
-          || effective.pending !== undefined
-        ) throw new Error('native effective selection acknowledgement differed')
-        operation.selectionRevision = effective.revision
-        operation.selectionState = 'effective'
-        operation.expiresAt = now() + operationTtlMs
-        operations.set(operation.token, operation)
-        return {
-          kind: 'allow-original',
-          operationToken: operation.token,
-          projection: {
-            available: true,
-            revision: effective.revision,
-            effective: effective.effective,
-          },
-        }
-      } catch {
-        if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
-          await operation.credential.dispose()
-        }
-        return { kind: 'reject', reason: 'thread-switch-failed' }
-      }
+      return applyPreparedThreadSelection(confirmation)
     },
     async consumeMarkedRequest(request) {
       if (disposed) return { kind: 'reject', reason: 'unknown-token' }
