@@ -476,18 +476,23 @@ describe('native model provider transport', () => {
     dom.window.close()
   })
 
-  it('rejects provider selection while busy before native effects', async () => {
+  it('stages provider selection while busy without native effects', async () => {
     const { dom, requests, selectModel, transport, channel } = await harness()
     message(dom.window, {
       type: 'mcp-notification',
       hostId: 'local',
       message: { method: 'turn/started', params: { threadId: 'thread-1' } },
     })
-    expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('busy')
+    expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('accepted')
     expect(channel.selectionSelect).not.toHaveBeenCalled()
     expect(selectModel).not.toHaveBeenCalled()
     expect(requests.map(request => request.method)).toEqual(['thread/read', 'config/read'])
-    expect(transport.getSnapshot()).toMatchObject({ busy: true, modelProvider: 'provider-a', model: 'model-a' })
+    expect(transport.getSnapshot()).toMatchObject({
+      busy: true,
+      modelProvider: 'provider-a',
+      model: 'model-a',
+      nextSend: { providerId: 'provider-b', model: 'model-b' },
+    })
     transport.dispose()
     dom.window.close()
   })

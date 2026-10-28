@@ -281,6 +281,45 @@ describe('native submission controller', () => {
     expect(fixture.disposed).toEqual(['unsafe-1'])
   })
 
+  it('binds a same-provider next Send to a token without resuming and commits only after dispatch', async () => {
+    const h = harness({
+      scope: threadScope,
+      pending: { ...pendingThread, providerId: 'provider-a', model: 'model-next', sendOnly: true },
+    })
+    const prepared = await h.controller.prepareSubmission(threadScope, { ...threadAction, reasoningEffort: 'high' })
+    expect(prepared.kind).toBe('allow-original')
+    if (prepared.kind !== 'allow-original') throw new Error('not admitted')
+    expect(h.switchThread).not.toHaveBeenCalled()
+    expect(h.commitEffective).not.toHaveBeenCalled()
+    const request = {
+      method: 'turn/start' as const,
+      threadId: 'thread-1',
+      requestId,
+      operationToken: prepared.operationToken,
+    }
+    expect(await h.controller.consumeMarkedRequest(request)).toMatchObject({
+      kind: 'dispatch',
+      model: 'model-next',
+      reasoningEffort: 'high',
+    })
+    expect(await h.controller.authorizeMarkedRequest(request)).toBe(true)
+    await h.controller.completeMarkedRequest({ operationToken: prepared.operationToken, requestId, succeeded: true })
+    expect(h.commitEffective).toHaveBeenCalledOnce()
+    expect(h.switchThread).not.toHaveBeenCalled()
+  })
+
+  it.each(['queue', 'steer', 'edit-retry'] as const)(
+    'passes %s without consuming a send-only pending choice',
+    async intent => {
+      const h = harness({ scope: threadScope, pending: { ...pendingThread, sendOnly: true } })
+      expect(await h.controller.prepareSubmission(threadScope, { ...threadAction, intent })).toEqual({
+        kind: 'pass-through',
+      })
+      expect(h.prepare).not.toHaveBeenCalled()
+      expect(h.commitEffective).not.toHaveBeenCalled()
+    },
+  )
+
   it('passes every native action unchanged when no provider change is pending', async () => {
     const { controller, prepare } = harness()
     for (const intent of ['ordinary-send', 'steer', 'queue', 'edit-retry', 'unknown-submission'] as const) {

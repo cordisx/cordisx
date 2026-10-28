@@ -39,6 +39,10 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
     ...(hasPending ? { pending } : {}),
   }
   const channel = {
+    selectionDiscard: vi.fn(async () => {
+      projection = { available: true, revision: projection.revision + 1, effective: projection.effective }
+      return projection
+    }),
     selectionRead: vi.fn(async () => projection),
     selectionSelect: vi.fn<NativeProviderSelectionCommandChannel['selectionSelect']>(async input => ({
       status: 'accepted',

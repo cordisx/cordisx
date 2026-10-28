@@ -93,6 +93,16 @@ export async function harness(
     effective: { providerId: 'provider-a', model: 'model-a' },
   }
   const channel = {
+    catalogRead: vi.fn(
+      async () => [{ providerId: 'provider-a', models: [{ id: 'model-a' }, { id: 'model-b' }] }, {
+        providerId: 'provider-b',
+        models: [{ id: 'model-b' }],
+      }],
+    ),
+    selectionDiscard: vi.fn(async () => {
+      projection = { available: true, revision: projection.revision + 1, effective: projection.effective }
+      return projection
+    }),
     selectionRead: vi.fn<NativeProviderSelectionCommandChannel['selectionRead']>(async input => {
       if (input.effective && !projection.pending) {
         projection = { ...projection, effective: input.effective, revision: projection.revision + 1 }
@@ -102,13 +112,14 @@ export async function harness(
     selectionSelect: vi.fn<NativeProviderSelectionCommandChannel['selectionSelect']>(async input => {
       const existingThread = dom.window.document.querySelector('[data-above-composer-conversation-id]') !== null
       const sameProvider = input.providerId === projection.effective?.providerId
+      const immediate = existingThread && input.mode !== 'stage-send'
       projection = {
         available: true,
         revision: projection.revision + 1,
-        effective: existingThread || sameProvider
+        effective: immediate || sameProvider && input.mode !== 'stage-send'
           ? { providerId: input.providerId, model: input.model }
           : projection.effective!,
-        ...(existingThread || sameProvider
+        ...(immediate || sameProvider && input.mode !== 'stage-send'
           ? {}
           : { pending: { providerId: input.providerId, model: input.model, generation: projection.revision + 1 } }),
       }

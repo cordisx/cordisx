@@ -92,6 +92,50 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it.each(['provider-b', 'openai'])(
+    'stages %s only after authoritative idle, without native switch or effective mutation',
+    async providerId => {
+      const h = await harness()
+      const scope = { ...h.draft, threadId: 'thread' }
+      h.setLive(scope)
+      try {
+        const initial = await h.channel.selectionRead({
+          scope,
+          effective: { providerId: 'openai', model: 'native-model' },
+        })
+        h.idle.mockResolvedValueOnce(false)
+        await expect(
+          h.channel.selectionSelect({
+            scope,
+            providerId,
+            model: 'model-b',
+            mode: 'stage-send',
+            expectedRevision: initial.revision,
+          }),
+        ).rejects.toThrow()
+        const selected = await h.channel.selectionSelect({
+          scope,
+          providerId,
+          model: 'model-b',
+          mode: 'stage-send',
+          expectedRevision: initial.revision,
+        })
+        expect(selected).toMatchObject({
+          effective: { providerId: 'openai', model: 'native-model' },
+          pending: { providerId, model: 'model-b', sendOnly: true },
+        })
+        expect(h.controller.commitSelection).not.toHaveBeenCalled()
+        await expect(h.channel.selectionDiscard({ scope, expectedRevision: initial.revision })).rejects.toThrow()
+        expect(await h.channel.selectionDiscard({ scope, expectedRevision: selected.revision })).toMatchObject({
+          effective: { providerId: 'openai', model: 'native-model' },
+        })
+        expect(h.authority.selection.snapshot(scope).pending).toBeUndefined()
+      } finally {
+        await h.installed.dispose()
+      }
+    },
+  )
+
   it('fences UI mutations during Agent selection and reads the acknowledged provider afterwards', async () => {
     const h = await harness()
     const scope = { ...h.draft, threadId: 'thread' }

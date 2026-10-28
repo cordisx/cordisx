@@ -32,6 +32,7 @@ export async function setup(model = 'shared', busy = false, options?: {
     readonly id: string
     readonly label: string
     readonly aliases?: readonly string[]
+    readonly reasoningCapabilities?: ModelReasoningCapabilities
   }[]
   readonly secondDefaultModelId?: string
   readonly draft?: boolean

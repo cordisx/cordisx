@@ -363,7 +363,17 @@ delivery gates. No provider API request is made by enabling the local-file flag.
 Provider changes prefer an exact model ID, then a unique explicit alias. An
 ambiguous or absent match opens the provider's model submenu; labels are never
 used to guess equivalence. Existing-thread provider changes require confirmation.
-An active turn blocks switching and is not interrupted automatically. The Host
+During an active turn, provider, model, and reasoning choices are retained as a
+renderer-only next-Send draft. The current native selection and response remain
+unchanged, and completion or cancellation of the response does not apply the draft.
+The selector labels the next-Send choice separately from the current selection.
+Only a subsequent ordinary Send consumes the draft after scope, catalog, effort,
+and authoritative idle checks. Cross-provider Send retains confirmation; cancelling
+that confirmation retains the draft. Same-provider model/effort Send uses the existing
+marked-request authorization without resuming the thread. Edit/retry, steer, queue,
+and previously queued messages do not consume the draft. Navigation, reload, and
+renderer disposal clear it; it is never transferred to another thread.
+An active turn is not interrupted automatically. The Host
 does not create a replacement thread or automatically compact history.
 
 The capability-checked Codex adapter synchronizes the native composer selection and

@@ -581,7 +581,10 @@ export function createNativeSubmissionController(
         selectionRevision: snapshot.revision,
         expiresAt: now() + (scope.threadId === undefined ? operationTtlMs : confirmationTtlMs),
       }
-      if (scope.threadId === undefined) {
+      if (scope.threadId === undefined || decision.prepared.pending.providerId === snapshot.effective.providerId) {
+        if (scope.threadId !== undefined && !await options.runtime.revalidate(scope, true)) {
+          return { kind: 'reject', reason: 'stale-operation' }
+        }
         const operation = await prepareOperation(prepared)
         if (operation === undefined) return { kind: 'reject', reason: 'provider-preparation-failed' }
         operations.set(operation.token, operation)

@@ -221,7 +221,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('[data-provider-id="modelhub"]')?.getAttribute('aria-checked')).toBe('false')
   })
 
-  it('blocks model routing while busy and keeps plugin setup entries usable', async () => {
+  it('allows model preselection while busy and keeps plugin setup entries usable', async () => {
     const { registry, select } = await setup('shared', true)
     const action = vi.fn()
     await act(async () => {
@@ -234,12 +234,24 @@ describe('provider selection interaction', () => {
     })
     await click(providerTrigger)
     const choices = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
-    expect(choices.some(button => button.getAttribute('aria-checked') === 'true' && button.disabled)).toBe(true)
-    expect(choices.filter(button => button.getAttribute('aria-checked') === 'false').every(button => button.disabled))
-      .toBe(true)
+    expect(choices.filter(button => button.dataset.providerId !== 'openai').every(button => !button.disabled)).toBe(
+      true,
+    )
     await click('[aria-label="Set API key"]')
     expect(action).toHaveBeenCalledOnce()
     expect(select).not.toHaveBeenCalled()
+  })
+
+  it('labels next Send separately from the effective pair and locks selection only during admission', async () => {
+    const { update } = await setup('shared', true)
+    await update({ nextSend: { providerId: 'first', model: 'shared', reasoningEffort: 'low' } })
+    await click(modelTrigger)
+    expect(document.querySelector('.cxmp-next-send-label')?.textContent).toBe('Use on next Send')
+    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Use on next Send')
+    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Current: first')
+    expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
+    await update({ selectionLocked: true })
+    expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true)
   })
 
   it('reports provider action failures through owner notifications and keeps retry usable', async () => {
@@ -393,7 +405,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('[role="status"]')).toBeNull()
   })
 
-  it('does not render a send-time switch dialog and preserves standard transport errors', async () => {
+  it('renders send-time confirmation with the selected pair and preserves transport errors', async () => {
     const { update, confirmSubmission } = await setup()
     await update({
       pendingProviderId: 'second',
@@ -405,8 +417,10 @@ describe('provider selection interaction', () => {
         threadId: 't1',
       },
     })
-    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Switch model service and send?')
     expect(confirmSubmission).not.toHaveBeenCalled()
+    await click('.cxmp-confirm button[data-variant="primary"]')
+    expect(confirmSubmission).toHaveBeenCalledWith(true)
     await update({ confirmation: undefined, submissionError: 'unsupported-submission-intent' })
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
       'This action does not support switching model services yet.',
@@ -554,13 +568,13 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('[role="alert"]')).not.toBeNull()
   })
 
-  it('disables reasoning while busy and reflects authoritative readback', async () => {
+  it('allows reasoning preselection while busy and reflects authoritative readback', async () => {
     const { update } = await setup('shared', true)
     await click(modelTrigger)
     const menu = document.querySelector('.cxmp-menu')!
     expect(menu.querySelector('.cxmp-menu-heading')).toBeNull()
     expect(menu.textContent).not.toContain('Wait for the current response before switching')
-    expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
     await update({ busy: false, reasoningEffort: 'low' })
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('0')
     expect(document.querySelector('input[type="range"]')?.getAttribute('aria-valuetext')).toBe('Light')
