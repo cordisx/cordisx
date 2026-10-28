@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlatformProviderBrokerBindingV1 } from '@cordisx/protocol/platform-provider/v1'
 import { CapabilityRiskCatalog } from '../packages/cli/src/capability-risk-catalog.js'
 import {
@@ -439,13 +439,18 @@ export async function apply(ctx, input) {
       catalog: { catalogDigest: `sha256:${'c'.repeat(64)}`, bindings: [binding] },
     })
     let transportDisposed = false
+    const transportDispose = vi.fn().mockRejectedValueOnce(new Error('transport failed')).mockImplementation(
+      async () => {
+        transportDisposed = true
+      },
+    )
+    const drain = vi.fn().mockRejectedValueOnce(new Error('drain failed')).mockResolvedValue(undefined)
+    const dispose = vi.fn(async () => {})
     const broker = new HostBoundPlatformProviderBrokerV1(policy, {
       exchange: async () => ({}),
       subscribe: () => () => undefined,
       respond: async () => {},
-      dispose: async () => {
-        transportDisposed = true
-      },
+      dispose: transportDispose,
     })
     const adapter = {
       providerId: 'gateway-a',
@@ -473,10 +478,8 @@ export async function apply(ctx, input) {
       },
       approvals: { decide: async () => ({ ok: false, error: { code: 'unsupported', message: 'unsupported' } }) },
       subscribeLifecycle: () => ({ subscriptionId: 'ppls_test', unsubscribe() {} }),
-      async drain() {
-        throw new Error('drain failed')
-      },
-      async dispose() {},
+      drain,
+      dispose,
     } as never
     const connection = providerConnection({
       descriptor: {
@@ -516,8 +519,17 @@ export async function apply(ctx, input) {
         value: { models: [{ ref: { providerId: 'foreign', modelId: 'source-a' }, label: 'forged' }] },
       }) as never
     await expect(connection.listModels()).resolves.toMatchObject({ ok: false, error: { code: 'adapter-failure' } })
-    await expect(connection.close()).rejects.toThrow('drain failed')
+    await expect(connection.close()).rejects.toMatchObject({
+      errors: [expect.objectContaining({ message: 'drain failed' }), expect.any(AggregateError)],
+    })
+    expect(transportDisposed).toBe(false)
+    await Promise.all([connection.close(), connection.close()])
+    await connection.close()
+    expect(drain).toHaveBeenCalledTimes(2)
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(transportDispose).toHaveBeenCalledTimes(2)
     expect(transportDisposed).toBe(true)
+    await expect(connection.listModels()).resolves.toMatchObject({ ok: false })
     workspaces.dispose()
     expect(workspace.workspaceHandle).toMatch(/^ppw_/)
   })

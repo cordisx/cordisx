@@ -1,3 +1,4 @@
+import { RetryableCleanup } from '../providers/retryable-cleanup.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type {
   PluginLifecycleRuntime,
@@ -14,11 +15,19 @@ interface ProviderTransaction {
   finalize(): Promise<void>
 }
 
+interface ProviderRollback {
+  cleanup: RetryableCleanup
+  renderer: () => Promise<RuntimeCleanupObservation>
+  observation?: RuntimeCleanupObservation
+}
+
 /** Makes the Node provider Fleet a participant in the existing durable plugin transaction. */
 export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly mutations = new Map<string, PluginRuntimeMutation>()
   private readonly providers = new Map<string, ProviderTransaction>()
-  private readonly finalizeProgress = new Map<string, { renderer: boolean; provider: boolean }>()
+  private readonly finalizers = new Map<string, RetryableCleanup>()
+  private readonly rollbacks = new Map<string, ProviderRollback>()
+  private readonly directions = new Map<string, 'rollback' | 'finalize'>()
   private reconfigure: ((activation: CordisXPluginActivationRecordV1) => Promise<ProviderTransaction>) | undefined
 
   constructor(private readonly runtime: PluginLifecycleRuntime) {}
@@ -52,7 +61,18 @@ export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRu
     if (this.reconfigure !== undefined) {
       this.providers.set(transactionId, await this.reconfigure(mutation.candidate))
     }
-    this.finalizeProgress.set(transactionId, { renderer: false, provider: this.reconfigure === undefined })
+    const provider = this.providers.get(transactionId)
+    this.finalizers.set(
+      transactionId,
+      new RetryableCleanup([
+        async () => {
+          await this.runtime.finalize?.(transactionId)
+        },
+        async () => {
+          await provider?.finalize()
+        },
+      ], 'Plugin lifecycle participant finalize failed'),
+    )
     if (this.runtime.publish === undefined) throw new Error('plugin lifecycle publication is unavailable')
     return await this.runtime.publish(transactionId)
   }
@@ -63,46 +83,56 @@ export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRu
   }
 
   async finalize(transactionId: string): Promise<void> {
-    const progress = this.finalizeProgress.get(transactionId) ?? { renderer: false, provider: false }
-    const failures: unknown[] = []
-    if (!progress.renderer) {
-      try {
-        await this.runtime.finalize?.(transactionId)
-        progress.renderer = true
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-    if (!progress.provider) {
-      try {
-        await this.providers.get(transactionId)?.finalize()
-        progress.provider = true
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-    this.finalizeProgress.set(transactionId, progress)
-    if (failures.length > 0) throw new AggregateError(failures, 'Plugin lifecycle participant finalize failed')
+    if (this.directions.get(transactionId) === 'rollback') throw new Error('Provider plugin is rolling back')
+    this.directions.set(transactionId, 'finalize')
+    await this.finalizers.get(transactionId)?.run()
     this.clear(transactionId)
   }
 
   async rollback(transactionId: string): Promise<RuntimeCleanupObservation> {
-    let providerFailure: unknown
-    try {
-      await this.providers.get(transactionId)?.rollback()
-    } catch (error) {
-      providerFailure = error
-    }
     if (this.runtime.rollback === undefined) throw new Error('plugin lifecycle rollback is unavailable')
-    const observation = await this.runtime.rollback(transactionId)
-    this.clear(transactionId)
-    if (providerFailure !== undefined) throw providerFailure
-    return observation
+    return await this.rollbackParticipants(transactionId, async () => await this.runtime.rollback!(transactionId))
   }
 
   async recoverRollback(plan: Parameters<NonNullable<PluginLifecycleRuntime['recoverRollback']>>[0]) {
     if (this.runtime.recoverRollback === undefined) throw new Error('plugin lifecycle recovery is unavailable')
-    return await this.runtime.recoverRollback(plan)
+    return await this.rollbackParticipants(plan.transactionId, async () => await this.runtime.recoverRollback!(plan))
+  }
+
+  private async rollbackParticipants(
+    transactionId: string,
+    renderer: () => Promise<RuntimeCleanupObservation>,
+  ): Promise<RuntimeCleanupObservation> {
+    if (this.directions.get(transactionId) === 'finalize') throw new Error('Provider plugin is finalizing')
+    this.directions.set(transactionId, 'rollback')
+    let rollback = this.rollbacks.get(transactionId)
+    if (rollback === undefined) {
+      const provider = this.providers.get(transactionId)
+      const entry: ProviderRollback = {
+        renderer,
+        cleanup: new RetryableCleanup([
+          async () => {
+            await provider?.rollback()
+          },
+          async () => {
+            entry.observation = await entry.renderer()
+          },
+        ], 'Plugin lifecycle participant rollback failed'),
+      }
+      rollback = entry
+      this.rollbacks.set(transactionId, entry)
+    } else rollback.renderer = renderer
+    await rollback.cleanup.run()
+    this.clear(transactionId)
+    // Retain recent completed observations for repeated calls, never evict unfinished cleanup.
+    for (const [id, entry] of this.rollbacks) {
+      if (this.rollbacks.size <= 128) break
+      if (id !== transactionId && entry.cleanup.completed) {
+        this.rollbacks.delete(id)
+        this.directions.delete(id)
+      }
+    }
+    return rollback.observation!
   }
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
@@ -114,8 +144,9 @@ export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRu
   }
 
   async abort(transactionId: string): Promise<void> {
-    this.clear(transactionId)
+    if (this.providers.has(transactionId) || this.rollbacks.has(transactionId)) await this.rollback(transactionId)
     await this.runtime.abort(transactionId)
+    this.clear(transactionId)
   }
 
   async reload(input: Parameters<PluginLifecycleRuntime['reload']>[0]): Promise<void> {
@@ -129,6 +160,13 @@ export class PlatformProviderPluginLifecycleRuntime implements PluginLifecycleRu
   private clear(transactionId: string): void {
     this.mutations.delete(transactionId)
     this.providers.delete(transactionId)
-    this.finalizeProgress.delete(transactionId)
+    this.finalizers.delete(transactionId)
+    for (const id of this.directions.keys()) {
+      if (this.directions.size <= 128) break
+      if (
+        id !== transactionId && !this.providers.has(id) && !this.finalizers.has(id)
+        && (this.rollbacks.get(id)?.cleanup.completed ?? true)
+      ) this.directions.delete(id)
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { RetryableCleanup } from '../providers/retryable-cleanup.js'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -202,18 +203,18 @@ export class PlatformProviderServiceHostV1 {
             disposed: false,
           }
           prepared.push(record)
+          const cleanup = new RetryableCleanup([async () => {
+            record.disposed = true
+            if (publicationPromise === undefined) await record.connection.close()
+            else {
+              const activePublication = await publicationPromise
+              if (activePublication === undefined) await record.connection.close()
+              else await activePublication.disposeProvider(record.connection.providerId)
+            }
+          }], 'Platform provider registration cleanup failed')
           return Object.freeze({
             registration: projection,
-            dispose: async () => {
-              if (record.disposed) return
-              record.disposed = true
-              if (publicationPromise === undefined) await record.connection.close()
-              else {
-                const activePublication = await publicationPromise
-                if (activePublication === undefined) await record.connection.close()
-                else await activePublication.disposeProvider(record.connection.providerId)
-              }
-            },
+            dispose: async () => await cleanup.run(),
           })
         },
       },
@@ -266,20 +267,19 @@ export class PlatformProviderServiceHostV1 {
         }),
       )
       const published = active.filter(item => !item.disposed)
-      let disposed = false
+      const cleanup = new RetryableCleanup([
+        async () => {
+          controller.abort()
+          await activePublication.dispose()
+        },
+        () => {
+          workspaces.dispose()
+        },
+      ], 'Platform provider service cleanup failed')
       return {
         owner,
         registrations: published.map(item => immutable({ ...item.projection, state: 'active' as const })),
-        dispose: async () => {
-          if (disposed) return
-          disposed = true
-          controller.abort()
-          try {
-            await activePublication.dispose()
-          } finally {
-            workspaces.dispose()
-          }
-        },
+        dispose: async () => await cleanup.run(),
       }
     } catch (error) {
       controller.abort()

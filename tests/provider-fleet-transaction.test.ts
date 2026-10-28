@@ -1,3 +1,4 @@
+import { fleetReconfigurationTransaction } from '../packages/cli/src/providers/fleet-reconfiguration-transaction.js'
 import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -98,5 +99,55 @@ describe('Provider Fleet external preparation transaction', () => {
     expect(closeProviderGeneration).toHaveBeenCalledTimes(2)
     expect(fleet.providerStatuses()[0]?.generation).toBe('generation-alpha-2')
     await fleet.close()
+  })
+  it('coalesces concurrent rollback, restores once, and retries only failed cleanup participants', async () => {
+    let release!: () => void
+    const wait = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const dispose = vi.fn().mockRejectedValueOnce(new Error('registry failed')).mockResolvedValue(undefined)
+    const success = vi.fn(() => {})
+    const failure = vi.fn().mockImplementationOnce(() => {
+      throw new Error('subscription failed')
+    })
+      .mockResolvedValue(undefined)
+    const authority = vi.fn(async () => {
+      await wait
+      throw new Error('authority failed')
+    })
+    const restore = vi.fn()
+    const previous = {
+      registry: { dispose: async () => {} },
+      failures: new Map(),
+      names: new Map(),
+      lifecycleDisposers: new Map(),
+      providers: [],
+    }
+    const transaction = fleetReconfigurationTransaction({
+      generation: 'g2',
+      previous: previous as never,
+      replacement: {
+        ...previous,
+        registry: { dispose },
+        lifecycleDisposers: new Map([['ok', success], ['fail', failure]]),
+        providers: [{ providerId: 'main', providerGeneration: 'g2' }],
+      } as never,
+      restore,
+      closeProviderGeneration: authority,
+    })
+    const first = transaction.rollback(), second = transaction.rollback()
+    const results = Promise.allSettled([first, second])
+    release()
+    expect((await results).map(item => item.status)).toEqual(['rejected', 'rejected'])
+    expect(restore).toHaveBeenCalledOnce()
+    expect(authority).toHaveBeenCalledOnce()
+    authority.mockResolvedValue(undefined)
+    await transaction.rollback()
+    await transaction.rollback()
+    expect(dispose).toHaveBeenCalledTimes(2)
+    expect(success).toHaveBeenCalledOnce()
+    expect(failure).toHaveBeenCalledTimes(2)
+    expect(authority).toHaveBeenCalledTimes(2)
+    await expect(transaction.finalize()).rejects.toThrow('rolling back')
   })
 })

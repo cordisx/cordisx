@@ -112,4 +112,58 @@ describe('Platform provider plugin lifecycle participant', () => {
     expect(base.finalize).toHaveBeenCalledTimes(2)
     expect(providerFinalize).toHaveBeenCalledOnce()
   })
+  it('retains failed provider rollback through renderer recovery and does not repeat success', async () => {
+    const providerRollback = vi.fn().mockRejectedValueOnce(new Error('provider cleanup failed'))
+      .mockResolvedValue(undefined)
+    const base = runtime({ recoverRollback: vi.fn(async () => observation()) })
+    const participant = new PlatformProviderPluginLifecycleRuntime(base)
+    participant.connect(async () => ({ generation: 'g1', rollback: providerRollback, finalize: async () => {} }))
+    await participant.stage(mutation())
+    await participant.publish('transaction-1')
+    await expect(participant.rollback('transaction-1')).rejects.toThrow('participant rollback failed')
+    await expect(participant.recoverRollback({ transactionId: 'transaction-1' } as never))
+      .resolves.toEqual(observation())
+    await participant.rollback('transaction-1')
+    expect(providerRollback).toHaveBeenCalledTimes(2)
+    expect(base.rollback).toHaveBeenCalledOnce()
+    expect(base.recoverRollback).not.toHaveBeenCalled()
+  })
+
+  it('retries renderer recovery without repeating a successful provider rollback', async () => {
+    const providerRollback = vi.fn(async () => {})
+    const base = runtime({
+      rollback: vi.fn(async () => {
+        throw new Error('renderer lost transaction')
+      }),
+      recoverRollback: vi.fn(async () => observation()),
+    })
+    const participant = new PlatformProviderPluginLifecycleRuntime(base)
+    participant.connect(async () => ({ generation: 'g1', rollback: providerRollback, finalize: async () => {} }))
+    await participant.stage(mutation())
+    await participant.publish('transaction-1')
+    await expect(participant.rollback('transaction-1')).rejects.toThrow('participant rollback failed')
+    await participant.recoverRollback({ transactionId: 'transaction-1' } as never)
+    expect(providerRollback).toHaveBeenCalledOnce()
+    expect(base.recoverRollback).toHaveBeenCalledOnce()
+  })
+  it('joins concurrent finalize cleanup and rejects changing transaction direction', async () => {
+    let release!: () => void
+    const wait = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const providerFinalize = vi.fn(async () => {
+      await wait
+    })
+    const base = runtime()
+    const participant = new PlatformProviderPluginLifecycleRuntime(base)
+    participant.connect(async () => ({ generation: 'g1', rollback: async () => {}, finalize: providerFinalize }))
+    await participant.stage(mutation())
+    await participant.publish('transaction-1')
+    const first = participant.finalize('transaction-1'), second = participant.finalize('transaction-1')
+    await expect(participant.rollback('transaction-1')).rejects.toThrow('finalizing')
+    release()
+    await Promise.all([first, second])
+    expect(base.finalize).toHaveBeenCalledOnce()
+    expect(providerFinalize).toHaveBeenCalledOnce()
+  })
 })

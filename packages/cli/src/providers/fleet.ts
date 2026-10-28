@@ -1,3 +1,4 @@
+import { fleetCloseCleanup, type RetryableCleanup } from './retryable-cleanup.js'
 import { type FleetControlInput, FleetControlledAgentTurns } from './fleet-controlled-agent-turns.js'
 import { withFleetLease } from './fleet-provider-lease.js'
 import type { ChannelTaskDispatchResult } from '@cordisx/channel-runtime'
@@ -769,15 +770,15 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return await this.withSession(input.session, async adapter => await adapter.controlTurn(input))
   }
 
+  private closeCleanup: RetryableCleanup | undefined
+
   async close(): Promise<void> {
-    if (this.closed) return
-    await this.controlledTurns.dispose()
     this.closed = true
     this.pagination.clear()
-    for (const dispose of this.lifecycleDisposers.values()) dispose()
-    this.lifecycleDisposers.clear()
     this.lifecycleListeners.clear()
-    await this.registry.dispose()
+    this.closeCleanup ??= fleetCloseCleanup(this.controlledTurns, this.lifecycleDisposers.values(), this.registry)
+    await this.closeCleanup.run()
+    this.lifecycleDisposers.clear()
   }
 
   async withExactProviderGeneration<Value>(

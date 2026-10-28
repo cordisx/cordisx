@@ -1,3 +1,4 @@
+import { RetryableCleanup } from '../providers/retryable-cleanup.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import type { ProviderFleet } from '../providers/fleet.js'
 import type { PlatformProviderRuntimeServiceModuleAccess } from './packages/authority.js'
@@ -44,6 +45,8 @@ export class PlatformProviderServiceBatchRuntime implements PlatformProviderServ
   private serviceGeneration = 0
   private transactionTail: Promise<void> = Promise.resolve()
   private closed = false
+  private pendingCleanup: RetryableCleanup | undefined
+  private activeCleanup: RetryableCleanup | undefined
 
   constructor(
     private readonly options: {
@@ -72,9 +75,9 @@ export class PlatformProviderServiceBatchRuntime implements PlatformProviderServ
       release = resolve
     })
     await previousTransaction
-    if (this.closed) {
+    if (this.closed || this.pendingCleanup !== undefined) {
       release()
-      throw new Error('Platform provider service batch is closed')
+      throw new Error(this.closed ? 'Platform provider service batch is closed' : 'Provider cleanup requires recovery')
     }
     let prepared: ActivePlatformProviderServiceV1[] = []
     let transaction: Awaited<ReturnType<ProviderFleet['reconfigure']>>
@@ -109,55 +112,61 @@ export class PlatformProviderServiceBatchRuntime implements PlatformProviderServ
       throw error
     }
     const previous = this.active
-    let state: 'open' | 'rolled-back' | 'finalized' | 'failed' = 'open'
-    let terminalFailure: unknown
+    let direction: 'rollback' | 'finalize' | undefined
+    const rollback = new RetryableCleanup([
+      async () => await transaction.rollback(),
+      ...prepared.map(service => async () => await service.dispose()),
+    ], 'Platform provider service rollback cleanup failed')
+    const finalize = new RetryableCleanup([
+      async () => await transaction.finalize(),
+      ...previous.map(service => async () => await service.dispose()),
+    ], 'Platform provider service finalize cleanup failed')
+    const settle = async (cleanup: RetryableCleanup) => {
+      this.pendingCleanup = cleanup
+      try {
+        await cleanup.run()
+        if (this.pendingCleanup === cleanup) this.pendingCleanup = undefined
+      } finally {
+        // Release the queue on failure, but fence new transactions until explicit recovery.
+        release()
+      }
+    }
     return {
       generation: transaction.generation,
       rollback: async () => {
-        if (state !== 'open') return
-        state = 'rolled-back'
-        try {
-          await transaction.rollback()
-        } finally {
-          await Promise.allSettled(prepared.map(async service => await service.dispose()))
-          release()
-        }
+        if (direction === 'finalize') throw new Error('Provider services are finalizing')
+        if (rollback.completed) return
+        direction = 'rollback'
+        await settle(rollback)
       },
       finalize: async () => {
-        if (state === 'finalized' || state === 'rolled-back') return
-        if (state === 'failed') throw terminalFailure
+        if (direction === 'rollback') throw new Error('Provider services are rolling back')
+        if (finalize.completed) return
+        direction = 'finalize'
+        this.active = prepared
+        // Keep the existing bounded cleanup retry; never retry a business request.
         try {
-          let finalized = false
-          for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-              await transaction.finalize()
-              finalized = true
-              break
-            } catch (error) {
-              terminalFailure = error
-            }
-          }
-          if (!finalized) throw terminalFailure
-          await Promise.allSettled(previous.map(async service => await service.dispose()))
-          this.active = prepared
-          state = 'finalized'
-          release()
-        } catch (error) {
-          state = 'failed'
-          terminalFailure = error
-          release()
-          throw error
+          await settle(finalize)
+        } catch {
+          await settle(finalize)
         }
       },
     }
   }
 
   async close(): Promise<void> {
-    if (this.closed) return
     this.closed = true
     await this.transactionTail
-    const active = this.active
+    if (this.pendingCleanup !== undefined) {
+      const cleanup = this.pendingCleanup
+      await cleanup.run()
+      if (this.pendingCleanup === cleanup) this.pendingCleanup = undefined
+    }
+    this.activeCleanup ??= new RetryableCleanup(
+      this.active.map(service => async () => await service.dispose()),
+      'Platform provider service close failed',
+    )
+    await this.activeCleanup.run()
     this.active = []
-    await Promise.allSettled(active.map(async service => await service.dispose()))
   }
 }
