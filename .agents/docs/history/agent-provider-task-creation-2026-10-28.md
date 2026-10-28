@@ -76,8 +76,9 @@ notification or `thread/list` entry alone cannot close that evidence gap.
 The initial exposed-tool assessment is insufficient to conclude that the
 underlying protocol cannot create a provider-bound thread. A second bounded
 read-only investigation checked existing generated protocol snapshots and the
-adopted Host seams, without opening the installed App archive or calling a live
-transport. The conclusions are distinct:
+adopted Host seams. A subsequent read-only inspection of the installed archive
+then identified the actual creation dispatcher below. No live transport was
+called. The conclusions are distinct:
 
 | Layer                        | Evidence                                                                             | Conclusion                                                                                       |
 | ---------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
@@ -152,14 +153,132 @@ do the rest while native code retains registration. The hook must return the
 native creation/registration receipt, including pending client task identity,
 and be fenced to that operation rather than a global pending preference.
 
-No such dispatcher/hook is currently adopted in CordisX sources. It might be
-possible to add an explicitly approved, source-verified native adapter through
-the existing resource interception architecture; the present evidence does not
-identify its actual native dispatcher shape or prove it safe. Implementing it
-now would mean guessing or adding a new private Desktop seam, outside the
-authorized existing boundary. This assessment does **not** claim that Codex's
-entire private implementation has no usable seam. It identifies exactly which
-new seam needs source evidence and admission before implementation can proceed.
+No such dispatcher/hook is currently adopted in CordisX sources. The next audit
+identifies its actual native shape and the required contract extension. This
+assessment does **not** claim that Codex's entire private implementation has no
+usable seam.
+
+## Installed dispatcher audit
+
+After clarification that a bounded read-only installed-source inspection was
+permitted, the archive was read without extraction into the installation,
+execution, pipe calls, mutation or access to user conversations/configuration.
+The first inspected installation was the older `/Applications/Codex.app`,
+version `26.820.60940`, build `7119`; it is not evidence for current build 21828.
+Its resource is `webview/assets/app-initial-CmWKLN1D.js`, SHA-256
+`919f74f8443047cf6fda745a2e3bf1736cae3bcd9fed3fc261304894622cf9f5`.
+The native pipe resource is `.vite/build/main-BA_G1ClR.js`, SHA-256
+`51398c07cba29dc2d71d2505ef64ce13fd1ef84653338832058361a2d727ff27`.
+Names and zero-based character offsets below are observations of these exact
+bytes, not stable exports or instructions to invoke private functions:
+
+1. The native pipe `tools/call` parser retains arguments, namespace and
+   caller/call/thread/turn identity. Its dispatcher routes to renderer execution;
+   arbitrary `_meta` does not become creation options.
+2. Renderer `W9o` (offset 9028141) is the `create_thread` handler. Its closed
+   argument schema contains title/prompt/target/model/thinking. It resolves the
+   real native project, validates a requested model, and calls `yli` with the
+   actual source thread, prompt, resolved target and native delegation source.
+   The handler does not pass call identity, config, a routing handle or a
+   deferred-first-turn option into `yli`.
+3. `yli` (5073597) rejects a non-null config together with a delegated source
+   thread before any creation. It resolves native saved-project/worktree roots
+   and passes worktree targets to `xli`; other targets go to `bli`.
+4. `bli` (5075246) resolves native project/projectless cwd and output directories,
+   inherits permission selection from the source conversation, constructs the
+   actual first user input, then calls `GN`. It accepts `startWithoutFirstTurn`
+   internally, but `W9o`/`yli` never forward it. With a delegated source, its
+   first input is always the native delegation input. Calling that private helper
+   without a source would discard required caller/permission semantics.
+5. `xli` (5077077) resolves the native Git starting state, obtains permission and
+   creation options from `Tli` (5081408), and creates the native pending worktree
+   operation with a `clientThreadId`. This branch does not forward arbitrary
+   config from `yli`. `Tli` constructs config from native settings and optional
+   reasoning overrides, not from an app-tool routing handle.
+6. `GN` (5053313) calls the existing manager `startConversation` with native
+   config and runtime options. `startConversation` (1479382) defers the started
+   notification while saving project assignment and binding a client task id,
+   notifies conversation callbacks, sets the owner stream and broadcasts the
+   snapshot. It then executes the first turn. `beforeFirstTurn` is an internal
+   callback option on this manager path, but is not forwarded by `W9o`/`yli`/`bli`.
+   Native sidebar manual order is retained through the final `vLn` call.
+
+This confirms an explicit delegated-config restriction, not merely an omitted
+tool parameter. It also confirms that the full native manager path, rather than
+`thread/start` alone, owns the registration work required by the user.
+
+A reliable implementation can reuse that native path **if** a new bounded
+creation adapter contract is admitted. It must extend the authenticated
+app-tool handler to resolve one operation routing handle by the real call
+identity, carry it through both local/projectless and pending-worktree branches,
+merge verified provider config at the existing native create operation, and
+retain registration plus first-turn acknowledgement/uncertainty callbacks.
+The provider handle must be separated from arbitrary caller config so the
+delegated-config restriction continues to reject untrusted overrides. It must
+also retain source-thread permissions and native delegation input.
+
+That requires an additive, exact-source-verified renderer resource adapter for
+these private functions, or an upstream native hook supplying the same contract.
+The existing CordisX resource interception architecture can host such an adapter
+without editing installed bytes, but it does not currently expose this contract.
+Bypassing the guard, invoking `bli` with a fabricated source, attaching a handle
+to the next global create, or intercepting arbitrary app-tool arguments would
+cross the stated boundary. The minimum user decision is whether to authorize
+and admit this specific new native creation adapter; the feature cannot be
+honestly completed using only the already adopted seams.
+
+### Current build 21828 readback
+
+The current `/Applications/ChatGPT.app` identifies version `26.1021.31345`, build
+`21828`. The same bounded read-only audit checked its actual dispatcher rather
+than extrapolating the old installation:
+
+- `webview/assets/execution-94a643044336.js`: SHA-256
+  `f1a35f5a2b7397024aae8fdfc154bbb86cc6fd17c08c78811f8c41d54cc28a9b`.
+- `webview/assets/app-initial-feb30b196d11.js`: SHA-256
+  `8f4e5fe65617413cabf689afbfc04bc6c24f73a5c0b57d7d0de443942343bd55`.
+- `.vite/build/main-0FVbxCQU.js`: SHA-256
+  `fad45aa7d81de6fe166704e8879e3b7cbfc85151e72df7946853336c7cbc5a3c`.
+
+Its `create_thread` handler `wp` (execution offset 88600) calls the native
+creation helper with source thread, target, actual input, `parentTurnId` and
+`rootTurnId`. It maps a native queued worktree to `clientThreadId`; ordinary
+creation returns the real thread only after both creation and first turn are
+accepted, preserving partial/unknown runtime results otherwise.
+
+The native helper `ius` (initial offset 8966177) still rejects config on
+delegated creation before resolving the target. Its service-name override is
+also restricted to local root tasks outside worktrees, so it cannot act as a
+delegated provider handle. The local/projectless helper `aus` (8968873) retains
+native output-directory provisioning and source permission selection, then
+calls `hpo`/`ous`. `ous` (8971470) uses the native manager's real creation inputs,
+client-thread attachment and settlement callbacks. The worktree helper `sus`
+(8972242) prepares the native pending worktree and its creation options. Both
+branches retain native delegation input; neither receives provider config from
+the app-tool handler. Native title/project/sidebar updates run after an actual
+created receipt, including the settlement path.
+
+The current manager's `Kdn` transaction (3207447) already has creation,
+first-turn preparation, current-operation checks, dispatch and settlement
+callbacks. The missing adapter should retain those real outcomes rather than
+introduce a second optimistic task ledger or infer success from a backend id.
+The native pipe also contains signed `taskWorkspace/prepare`, `taskProject/list`
+and `taskProject/assign` operations. They establish scoped context/assignment,
+not a new task-plus-first-turn endpoint, and are not adopted CordisX APIs. A
+signature and project assignment alone do not establish all creation callbacks
+or sidebar/task ownership.
+
+The newer parent/root turn fields improve provenance but do not identify one
+creation call: one turn can request several tasks. The `wp` handler does not
+pass the unique native app-tool `callId` into `ius`; a parent-turn-based pending
+provider slot would therefore race. The specific extension required on this
+build is authenticated **callId + routing handle** forwarding through the native
+handler and both creation branches into the existing create config and first
+turn, with the native transaction's actual settlement callbacks. CordisX's
+credential broker and intermediary can consume the handle, but its current
+adapters cannot insert it at that boundary. This is a concrete new native
+adapter contract/admission requirement, not an inference from a missing tool
+schema. No installed bytes were modified and none of these functions was run.
 
 ## Smallest missing seam and future operation order
 
