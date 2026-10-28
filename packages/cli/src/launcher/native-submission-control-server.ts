@@ -200,6 +200,8 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
             requestId: value.requestId,
             succeeded: value.succeeded,
             ...(typeof value.threadId === 'string' ? { boundThreadId: value.threadId } : {}),
+            ...(typeof value.providerId === 'string' ? { providerId: value.providerId } : {}),
+            ...(typeof value.model === 'string' ? { model: value.model } : {}),
           }
           if (!await taskRouting?.complete(completion)) await controller.completeMarkedRequest(completion)
           await write(socket, { id: value.id, ok: true })

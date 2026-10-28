@@ -142,7 +142,14 @@ describe('provider-aware native task operation', () => {
     const start = { operationToken: route.token, method: 'thread/start' as const, requestId: 1 }
     expect(await f.routing.consume(start)).toMatchObject({ agentTask: true, providerId: 'configured' })
     expect(await f.routing.authorize(route.token, 1)).toBe(true)
-    await f.routing.complete({ operationToken: route.token, requestId: 1, succeeded: true, boundThreadId: 'created' })
+    await f.routing.complete({
+      operationToken: route.token,
+      requestId: 1,
+      succeeded: true,
+      boundThreadId: 'created',
+      providerId: 'configured',
+      model: 'model',
+    })
     expect(f.controller.completeThreadResume).toHaveBeenCalledWith({
       threadId: 'source',
       createdThreadId: 'created',
@@ -170,5 +177,28 @@ describe('provider-aware native task operation', () => {
       expect(() => applyAgentTaskEdits(anchors + '\n' + anchors, kind)).toThrow()
     }
     expect(() => parseNativeSource('async function claim(){return {token:"opaque"}}')).not.toThrow()
+  })
+  it('blocks first submission when native creation acknowledges a different provider or model', async () => {
+    const f = await fixture()
+    const route = await f.routing.prepare({
+      callId: 'call',
+      sourceThreadId: 'source',
+      providerId: 'configured',
+      model: 'model',
+    })
+    await f.routing.consume({ operationToken: route.token, method: 'thread/start', requestId: 1 })
+    await f.routing.authorize(route.token, 1)
+    await f.routing.complete({
+      operationToken: route.token,
+      requestId: 1,
+      succeeded: true,
+      boundThreadId: 'created',
+      providerId: 'other',
+      model: 'model',
+    })
+    expect(
+      await f.routing.consume({ operationToken: route.token, method: 'turn/start', requestId: 2, threadId: 'created' }),
+    ).toMatchObject({ kind: 'reject' })
+    expect(f.controller.completeThreadResume).not.toHaveBeenCalled()
   })
 })

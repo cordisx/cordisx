@@ -100,6 +100,8 @@ export class NativeAgentTaskRouting {
     requestId: string | number
     succeeded: boolean
     boundThreadId?: string
+    providerId?: string
+    model?: string
   }): Promise<boolean> {
     const route = this.routes.get(input.operationToken)
     if (!route) return false
@@ -109,6 +111,10 @@ export class NativeAgentTaskRouting {
       return true
     }
     if (route.phase === 'start' && valid(input.boundThreadId)) {
+      if (input.providerId !== route.providerId || input.model !== route.model) {
+        route.phase = 'uncertain'
+        return true
+      }
       route.threadId = input.boundThreadId
       // Native credentials are bound to the returned id, not the calling task.
       const committed = await this.controller.completeThreadResume({

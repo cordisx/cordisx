@@ -170,6 +170,9 @@ reader.on('line', line => {
           },
           received: message.params,
           method: message.method,
+          ...(message.method === 'thread/start'
+            ? { modelProvider: message.params.modelProvider, model: message.params.model }
+            : {}),
           leakedControlEnvironment: Object.keys(process.env).filter(key =>
             key.startsWith('CORDISX_NATIVE_') || key === 'CODEX_CLI_PATH'
           ),

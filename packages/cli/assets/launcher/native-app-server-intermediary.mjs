@@ -522,6 +522,12 @@ readLines(child.stdout, line => {
     requestId: message.id,
     succeeded: message.error === undefined,
     ...(typeof message.result?.thread?.id === 'string' ? { threadId: message.result.thread.id } : {}),
+    ...(operation.agentTask && operation.method === 'thread/start'
+      ? {
+        providerId: message.result?.modelProvider ?? message.result?.thread?.modelProvider,
+        model: message.result?.model ?? message.result?.thread?.model,
+      }
+      : {}),
   }).then(() => write(process.stdout, line)).catch(stop)
 })
 
