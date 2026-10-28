@@ -151,13 +151,25 @@ Each independent `user-data-dir` is reserved by an adjacent
 launcher PID, its process start time, a random token, and the canonical profile
 path in a version-2 record; release verifies the token before removing the directory. A lock whose
 recorded launcher identity is gone (the PID is absent or has a different start
-time) is reclaimed automatically only after the process table shows no live
+time in a recognized format) is reclaimed automatically only after the process table shows no live
 command line using that `--user-data-dir`. On macOS and Linux, acquisition,
 inspection, reclaim, owner publication, failure cleanup and release all hold
 the same canonical-profile kernel mutex, `<profile>.cordisx-launch-mutex`.
 Never delete or rename that mutex, even after release. It is independent of
 CordisX home, app/profile names, and foreground/background launch mode.
 Other platforms fail closed without a kernel backend.
+
+Launcher process tables and supervisor PID checks collect ps start times with
+child-local LC_ALL=C, independent of the terminal or Dock launch locale. They
+compare complete calendar/time fields and retain PID-reuse protection. Existing
+C records and the confirmed Darwin zh_CN weekday/month format remain readable
+without rewriting locks or state. A live PID with an unsupported or invalid old
+timestamp is unknown, not evidence of an exited owner; stop/reclaim must fail
+closed. Exit older owners normally and relaunch with the fixed CLI instead of
+removing their locks. This identity fix does not establish sleep/wake recovery
+or guarantee that renderer cleanup completes after a connection timeout. The
+existing local-time identity still assumes the same timezone; changes to TZ or
+the system timezone require a separate identity migration, not a locale workaround.
 
 Version-1 locks are not automatically migrated: older reclaimers do not honor
 the mutex and may already have inspected the stale record. Stop all older

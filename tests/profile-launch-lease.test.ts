@@ -211,12 +211,12 @@ describe('Codex profile launch lease', () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-reused-pid-lease-test-'))
     const profile = path.join(directory, 'profile')
     await mkdir(profile)
-    await writeLock(profile, { pid: process.pid, processStartedAt: 'not this process' })
+    await writeLock(profile, { pid: process.pid, processStartedAt: 'Mon Jan  1 00:00:00 2001' })
     const reports: string[] = []
     const lease = await acquireCodexProfileLaunchLease(profile, { stdout: line => reports.push(line) })
     try {
       expect(reports).toHaveLength(1)
-      expect(reports[0]).toContain(`exited launcher process ${process.pid} (started not this process)`)
+      expect(reports[0]).toContain(`exited launcher process ${process.pid} (started Mon Jan  1 00:00:00 2001)`)
     } finally {
       await lease.release()
     }
@@ -264,6 +264,19 @@ describe('Codex profile launch lease', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
+  it('preserves an unsupported legacy timestamp for a live PID instead of reclaiming it', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-legacy-locale-lease-'))
+    const profile = path.join(directory, 'profile')
+    await mkdir(profile)
+    const lock = await writeLock(profile, { pid: process.pid, processStartedAt: 'unsupported locale' })
+    try {
+      await expect(acquireCodexProfileLaunchLease(profile)).rejects.toThrow('could not be verified')
+      expect(await readFile(path.join(lock, 'owner.json'), 'utf8')).toContain('stale-token')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('retries release after ownership verification fails', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-release-test-'))
     const profile = path.join(directory, 'profile')
@@ -284,7 +297,8 @@ describe('recorded process identity', () => {
     const startedAt = liveProcessStartedAt(process.pid)
     expect(startedAt).toBeDefined()
     expect(recordedProcessStatus(process.pid, startedAt!)).toBe('alive')
-    expect(recordedProcessStatus(process.pid, 'another start time')).toBe('dead')
+    expect(recordedProcessStatus(process.pid, 'Mon Jan  1 00:00:00 2001')).toBe('dead')
+    expect(recordedProcessStatus(process.pid, 'unrecognized legacy locale')).toBe('unknown')
     expect(recordedProcessStatus(NEVER_A_PID, startedAt!)).toBe('dead')
   })
 

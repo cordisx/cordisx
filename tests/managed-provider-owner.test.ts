@@ -218,7 +218,7 @@ describe('Host-owned managed Provider credentials', () => {
     expect(await readFile(path.join(lock, 'owner.json'), 'utf8')).toContain(startedAt!)
 
     await rm(lock, { recursive: true })
-    await ownerLock(options.homeDir, process.pid, 'different-process-start')
+    await ownerLock(options.homeDir, process.pid, 'Mon Jan  1 00:00:00 2001')
     const recovered = await ManagedProviderOwner.open(options)
     owners.push(recovered)
     expect(JSON.parse(await readFile(path.join(lock, 'owner.json'), 'utf8')).pid).toBe(process.pid)

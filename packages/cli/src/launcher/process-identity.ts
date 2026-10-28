@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
+import { compareProcessStartTimes, processIdentityEnvironment } from './process-start-identity.js'
 
 export interface ProcessIdentity {
   readonly pid: number
@@ -40,6 +41,7 @@ export function processTable(): readonly ProcessIdentity[] {
   return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], {
     encoding: 'utf8',
     maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+    env: processIdentityEnvironment(),
   })
     .split('\n')
     .flatMap(line => {
@@ -89,7 +91,7 @@ export function recordedProcessStatus(pid: number, startedAt: string): RecordedP
   }
   const current = table.find(item => item.pid === pid)
   if (current === undefined) return 'dead'
-  return current.startedAt === startedAt ? 'alive' : 'dead'
+  return compareProcessStartTimes(current.startedAt, startedAt)
 }
 
 function containsUnparsedUserDataDir(command: string, directory: string): boolean {

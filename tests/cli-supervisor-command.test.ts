@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,6 +23,31 @@ const cliVersion = JSON.parse(
 ) as { readonly version: string }
 
 describe('supervisor management commands', () => {
+  it('does not signal a live PID or remove its state when legacy identity is uncertain', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-legacy-locale-'))
+    const paths = supervisorPaths(root, 'codex', 'default')
+    await writeSupervisorState(paths, {
+      schemaVersion: 1,
+      appId: 'codex',
+      profileId: 'default',
+      phase: 'ready',
+      pid: process.pid,
+      processStartedAt: 'unsupported locale',
+      instanceToken: 'a'.repeat(32),
+      createdAt: new Date().toISOString(),
+      version: cliVersion.version,
+      effectiveConfig: 'old',
+    })
+    try {
+      await expect(runSupervisorCommand(parseCordisXCli(['stop']), {
+        env: { CORDISX_HOME: root },
+      })).rejects.toThrow('unable to verify the CordisX supervisor process identity')
+      expect((await readSupervisorState(paths))?.processStartedAt).toBe('unsupported locale')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('emits stable status JSON and marks a stale starting record failed instead of trusting its PID', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-supervisor-command-'))
     const output: string[] = []
@@ -46,7 +71,7 @@ describe('supervisor management commands', () => {
       profileId: 'default',
       phase: 'ready',
       pid: process.pid,
-      processStartedAt: 'reused pid',
+      processStartedAt: 'Mon Jan  1 00:00:00 2001',
       instanceToken: 'a'.repeat(32),
       createdAt: new Date().toISOString(),
       version: cliVersion.version,

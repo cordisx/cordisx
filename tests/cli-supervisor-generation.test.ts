@@ -128,7 +128,7 @@ describe('supervisor readiness generation', () => {
       profileId: 'default',
       phase: 'starting',
       pid: process.pid,
-      processStartedAt: 'not this process',
+      processStartedAt: 'Mon Jan  1 00:00:00 2001',
       instanceToken: 'a'.repeat(64),
       createdAt: new Date().toISOString(),
       version: 'old',

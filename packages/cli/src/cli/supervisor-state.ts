@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
 import path from 'node:path'
+import { compareProcessStartTimes, processIdentityEnvironment } from '../launcher/process-start-identity.js'
 
 export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
 
@@ -212,6 +213,7 @@ export async function processStartIdentity(pid: number): Promise<string | undefi
       execFile(
         'ps',
         ['-o', 'lstart=', '-p', String(pid)],
+        { env: processIdentityEnvironment() },
         (error, stdout) => error === null ? resolve(stdout.trim()) : reject(error),
       )
     })
@@ -237,7 +239,7 @@ export async function processIdentityStatus(pid: number, startedAt: string): Pro
   }
   const current = await processStartIdentity(pid)
   if (current === undefined) return 'unknown'
-  return current === startedAt ? 'alive' : 'dead'
+  return compareProcessStartTimes(current, startedAt)
 }
 
 export async function stateFileIsPrivate(paths: SupervisorPaths): Promise<boolean> {
