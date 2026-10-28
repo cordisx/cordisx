@@ -419,6 +419,8 @@ describe('provider selection interaction', () => {
     })
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Switch model service and send?')
     expect(confirmSubmission).not.toHaveBeenCalled()
+    const dialog = document.querySelector<HTMLElement>('.cxmp-confirm')!
+    dialog.getClientRects = () => [{ width: 100, height: 100 } as DOMRect] as unknown as DOMRectList
     await click('.cxmp-confirm button[data-variant="primary"]')
     expect(confirmSubmission).toHaveBeenCalledWith(true)
     await update({ confirmation: undefined, submissionError: 'unsupported-submission-intent' })

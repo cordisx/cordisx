@@ -190,6 +190,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
   const canInteract = () => !suspended && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
+    // React portal events bubble through this seat; its owned confirmation remains interactive.
+    if (event.target instanceof Element && event.target.closest('.cxmp-confirm')) return
     if (canInteract()) return
     event.preventDefault()
     event.stopPropagation()
