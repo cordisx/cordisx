@@ -22,8 +22,12 @@ export function agentTaskEdits(kind: 'initial' | 'execution'): readonly (readonl
       ],
       ['case dl:b=await wp({scope:e,parentTurnId:', 'case dl:b=await wp({scope:e,cordisxCallId:h.callId,parentTurnId:'],
       [
+        'sourceThreadId:s}){let c=Kp.safeParse(t);',
+        'sourceThreadId:s}){const __cxArguments=t;let c=Kp.safeParse(t);',
+      ],
+      [
         'a?.throwIfAborted();let d=await sa({scope:e,turnTrigger:`app_tool_create_thread`,',
-        `a?.throwIfAborted();let __cxTask=await globalThis.${marker}?.claim({callId:__cxCallId,sourceThreadId:s,arguments:t,hostId:u});if(typeof __cxCallId==='string'&&__cxCallId.startsWith('cordisx-task-')&&__cxTask===void 0)throw Error('Native task routing unavailable');let d=await sa({scope:e,__cordisxTask:__cxTask,turnTrigger:\`app_tool_create_thread\`,`,
+        `a?.throwIfAborted();let __cxTask=await globalThis.${marker}?.claim({callId:__cxCallId,sourceThreadId:s,arguments:__cxArguments,hostId:u});if(typeof __cxCallId==='string'&&__cxCallId.startsWith('cordisx-task-')&&__cxTask===void 0)throw Error('Native task routing unavailable');let d=await sa({scope:e,__cordisxTask:__cxTask,turnTrigger:\`app_tool_create_thread\`,`,
       ],
     ]
   }

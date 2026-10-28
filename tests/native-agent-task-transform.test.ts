@@ -46,13 +46,13 @@ describe('audited task creation adapter composition', () => {
     })
   })
   it('keeps uncorrelated ordinary creation unchanged and rejects a correlated call without its admitted claim', async () => {
-    const request = agentTaskEdits('execution')[2]![0]
+    const request = agentTaskEdits('execution')[3]![0]
     const source = `${
       agentTaskEdits('execution')[0]![0]
-    }rootTurnId:r,getAvailableModels:i,signal:a,sourceHostId:o,sourceThreadId:s}){let c={data:{model:'native',prompt:'input'}},u='local';${request}model:c.data.model,prompt:c.data.prompt});return d;}
+    }rootTurnId:r,getAvailableModels:i,signal:a,sourceHostId:o,sourceThreadId:s}){let c=Kp.safeParse(t);let u='local';${request}model:c.data.model,prompt:c.data.prompt});return d;}
     async function dispatch(){let b;switch(0){${agentTaskEdits('execution')[1]![0]}0});break;}};globalThis.wp=wp;`
     const sa = vi.fn(async (input: unknown) => input)
-    const world: Record<string, any> = { sa }
+    const world: Record<string, any> = { sa, Kp: { safeParse: () => ({ data: { model: 'native', prompt: 'input' } }) } }
     runInNewContext(applyAgentTaskEdits(source, 'execution'), world)
     expect(await world.wp({ argumentsValue: {}, sourceThreadId: 'source' })).toMatchObject({
       model: 'native',
@@ -61,5 +61,28 @@ describe('audited task creation adapter composition', () => {
     await expect(world.wp({ cordisxCallId: 'cordisx-task-actual', argumentsValue: {}, sourceThreadId: 'source' }))
       .rejects.toThrow('Native task routing unavailable')
     expect(sa).toHaveBeenCalledTimes(1)
+  })
+  it('claims the original creation arguments when the native dispatcher shadows t with its target', async () => {
+    const edits = agentTaskEdits('execution')
+    const source = `${
+      edits[0]![0]
+    }rootTurnId:r,getAvailableModels:i,signal:a,sourceHostId:o,sourceThreadId:s}){let c=Kp.safeParse(t);try{let t=c.data.target;let l=Fp(e,t),u='local';${
+      edits[3]![0]
+    }prompt:c.data.prompt,target:l});return d;}catch(e){throw e;}}
+    async function dispatch(){let b;switch(0){${edits[1]![0]}0});break;}};globalThis.wp=wp;`
+    const input = { prompt: 'original', target: { type: 'projectless', directoryName: 'test' }, title: 'original' }
+    const handle = { token: 'opaque-task-token', model: 'provider-model' }
+    const claim = vi.fn(async () => handle)
+    const world: Record<string, any> = {
+      Kp: { safeParse: (value: unknown) => ({ data: value }) },
+      Fp: (_: unknown, value: unknown) => value,
+      sa: vi.fn(async (value: unknown) => value),
+      __cordisxNativeAgentTaskAdapter: { claim },
+    }
+    runInNewContext(applyAgentTaskEdits(source, 'execution'), world)
+    expect(await world.wp({ argumentsValue: input, cordisxCallId: 'cordisx-task-actual', sourceThreadId: 'source' }))
+      .toMatchObject({ __cordisxTask: handle, prompt: input.prompt, target: input.target })
+    expect(claim.mock.calls[0]?.[0]).toMatchObject({ arguments: input, sourceThreadId: 'source', hostId: 'local' })
+    expect(claim.mock.calls[0]?.[0].arguments).toBe(input)
   })
 })
