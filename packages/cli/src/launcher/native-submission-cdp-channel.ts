@@ -290,7 +290,8 @@ export function createNativeSubmissionCdpAuthority(options: {
         if (owner.disposed) continue
         const response = await owner.session.send('Runtime.evaluate', {
           expression:
-            'globalThis.__cordisxNativeAgentTask_initial===true&&globalThis.__cordisxNativeAgentTaskAdapter!=null',
+            `(async()=>{if(globalThis.__cordisxNativeAgentTask_initial!==true||globalThis.__cordisxNativeAgentTaskAdapter==null)return false;await import('app://-/assets/execution-94a643044336.js');return globalThis.__cordisxNativeAgentTask_execution===true})()`,
+          awaitPromise: true,
           returnByValue: true,
         }).catch(() => undefined)
         if (record(response?.result)?.value === true) return true
