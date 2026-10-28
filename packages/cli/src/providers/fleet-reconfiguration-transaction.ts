@@ -1,3 +1,4 @@
+import { RetryableCleanup } from './retryable-cleanup.js'
 import type { CordisXPlatformDiagnostic } from '../contracts.js'
 import type { ProviderAdapterRegistry } from '../renderer/provider-registry.js'
 import type { ProviderConnection } from './contracts.js'
@@ -19,62 +20,43 @@ export function fleetReconfigurationTransaction(input: {
     provider: { readonly providerId: string; readonly providerGeneration: string },
   ) => Promise<void>
 }) {
-  let state: 'open' | 'rolled-back' | 'finalized' = 'open'
-  let previousRegistryDisposed = false
-  const previousLifecycleDisposers = new Set(input.previous.lifecycleDisposers.values())
+  let direction: 'rollback' | 'finalize' | undefined
+  const cleanup = (state: FleetGenerationState, message: string, providers = state.providers) =>
+    new RetryableCleanup([
+      async () => await state.registry.dispose(),
+      ...[...state.lifecycleDisposers].map(([key, dispose]) => async () => {
+        await dispose()
+        if (state.lifecycleDisposers.get(key) === dispose) state.lifecycleDisposers.delete(key)
+      }),
+      ...providers.map(provider => async () => {
+        await input.closeProviderGeneration?.(provider)
+      }),
+    ], message)
+  const replacement = cleanup(input.replacement, 'Provider Fleet rollback cleanup failed')
   const currentGenerations = new Set(
     input.replacement.providers.map(item => `${item.providerId}\0${item.providerGeneration}`),
   )
-  const previousProviders = new Map(
-    input.previous.providers
-      .filter(provider => !currentGenerations.has(`${provider.providerId}\0${provider.providerGeneration}`))
-      .map(provider => [`${provider.providerId}\0${provider.providerGeneration}`, provider]),
+  const previous = cleanup(
+    input.previous,
+    'Provider Fleet finalize cleanup failed',
+    input.previous.providers.filter(provider =>
+      !currentGenerations.has(`${provider.providerId}\0${provider.providerGeneration}`)
+    ),
   )
   return {
     generation: input.generation,
     rollback: async () => {
-      if (state !== 'open') return
-      state = 'rolled-back'
-      input.restore(input.previous)
-      const failures: unknown[] = []
-      await input.replacement.registry.dispose().catch(error => failures.push(error))
-      for (const dispose of input.replacement.lifecycleDisposers.values()) {
-        try {
-          dispose()
-        } catch (error) {
-          failures.push(error)
-        }
+      if (direction === 'finalize') throw new Error('Provider Fleet is finalizing')
+      if (direction === undefined) {
+        direction = 'rollback'
+        input.restore(input.previous)
       }
-      for (const provider of input.replacement.providers) {
-        await input.closeProviderGeneration?.(provider).catch(error => failures.push(error))
-      }
-      if (failures.length > 0) throw new AggregateError(failures, 'Provider Fleet rollback cleanup failed')
+      await replacement.run()
     },
     finalize: async () => {
-      if (state === 'finalized' || state === 'rolled-back') return
-      const failures: unknown[] = []
-      if (!previousRegistryDisposed) {
-        await input.previous.registry.dispose()
-          .then(() => {
-            previousRegistryDisposed = true
-          })
-          .catch(error => failures.push(error))
-      }
-      for (const dispose of [...previousLifecycleDisposers]) {
-        try {
-          dispose()
-          previousLifecycleDisposers.delete(dispose)
-        } catch (error) {
-          failures.push(error)
-        }
-      }
-      for (const [key, provider] of previousProviders) {
-        await input.closeProviderGeneration?.(provider)
-          .then(() => previousProviders.delete(key))
-          .catch(error => failures.push(error))
-      }
-      if (failures.length > 0) throw new AggregateError(failures, 'Provider Fleet finalize cleanup failed')
-      state = 'finalized'
+      if (direction === 'rollback') throw new Error('Provider Fleet is rolling back')
+      direction = 'finalize'
+      await previous.run()
     },
   }
 }

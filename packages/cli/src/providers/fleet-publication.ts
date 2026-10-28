@@ -1,3 +1,4 @@
+import { RetryableCleanup } from './retryable-cleanup.js'
 import type { ProviderAdapterRegistration, ProviderAdapterRegistry } from '../renderer/provider-registry.js'
 import type { ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 
@@ -56,34 +57,44 @@ export async function publishProviderConnections(input: {
     input.names.set(providerId, entry.displayName)
   }
 
-  const removeByProviderId = new Map(input.entries.map(entry => [
-    entry.connection.providerId,
-    async () => await input.registry.removeProvider(entry.connection.providerId, entry.connection.generation),
-  ]))
-  let disposed = false
+  const removals = new Map(input.entries.map(entry => {
+    const { providerId, generation } = entry.connection
+    const disposeLifecycle = nextLifecycleDisposers.get(providerId)
+    const cleanup = new RetryableCleanup([
+      async () => {
+        if (input.lifecycleDisposers.get(providerId) === disposeLifecycle) {
+          await disposeLifecycle?.()
+          input.lifecycleDisposers.delete(providerId)
+        }
+      },
+      async () => {
+        await input.registry.removeProvider(providerId, generation)
+      },
+    ], 'Provider publication cleanup failed')
+    return [providerId, cleanup] as const
+  }))
   const disposeProvider = async (providerId: string): Promise<boolean> => {
-    const remove = removeByProviderId.get(providerId)
-    if (remove === undefined) return false
-    removeByProviderId.delete(providerId)
-    const generation = input.entries.find(entry => entry.connection.providerId === providerId)?.connection.generation
-    const current = input.registry.snapshots().some(item =>
-      item.state === 'active' && item.providerId === providerId && item.generation === generation
-    )
-    if (!current) return false
-    input.lifecycleDisposers.get(providerId)?.()
-    input.lifecycleDisposers.delete(providerId)
-    const removed = await remove()
-    if (!removed) return false
-    input.names.delete(providerId)
+    const cleanup = removals.get(providerId)
+    if (cleanup === undefined) return false
+    await cleanup.run()
+    removals.delete(providerId)
+    const generation = input.entries.find(entry => entry.connection.providerId === providerId)!.connection.generation
+    const current = input.registry.snapshots().find(item => item.providerId === providerId && item.state === 'active')
+    if (current === undefined || current.generation === generation) {
+      input.lifecycleDisposers.delete(providerId)
+      input.names.delete(providerId)
+    }
     return true
   }
+  const cleanup = new RetryableCleanup(
+    [...removals.keys()].map(providerId => async () => {
+      await disposeProvider(providerId)
+    }),
+    'Provider publications cleanup failed',
+  )
   return {
     generation: input.entries.map(entry => entry.connection.generation).sort().join(','),
     disposeProvider,
-    dispose: async () => {
-      if (disposed) return
-      disposed = true
-      await Promise.all([...removeByProviderId.keys()].map(disposeProvider))
-    },
+    dispose: async () => await cleanup.run(),
   }
 }

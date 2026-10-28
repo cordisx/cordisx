@@ -1,3 +1,4 @@
+import { RetryableCleanup } from '../providers/retryable-cleanup.js'
 import type {
   PlatformProviderAdapterV1,
   PlatformProviderDefinitionV1,
@@ -77,8 +78,13 @@ export function providerConnection(input: {
   const { adapter, broker, descriptor, mapping, workspaces } = input
   const projection = new PlatformProviderProjection(adapter.providerId, mapping, workspaces)
   const operations = new Set(descriptor.operations)
-  const supports = (operation: PlatformProviderOperationV1): boolean => operations.has(operation)
   let closed = false
+  const supports = (operation: PlatformProviderOperationV1): boolean => !closed && operations.has(operation)
+  const cleanup = new RetryableCleanup([
+    async () => await adapter.drain(),
+    async () => await adapter.dispose('host-disposed'),
+    async () => await broker.dispose(),
+  ], 'Platform provider connection cleanup failed')
   let lifecycleSequence = 0
   return {
     providerId: adapter.providerId,
@@ -294,25 +300,8 @@ export function providerConnection(input: {
       return () => subscription.unsubscribe()
     },
     close: async () => {
-      if (closed) return
       closed = true
-      let failure: unknown
-      try {
-        await adapter.drain()
-      } catch (error) {
-        failure = error
-      }
-      try {
-        await adapter.dispose('host-disposed')
-      } catch (error) {
-        failure ??= error
-      }
-      try {
-        await broker.dispose()
-      } catch (error) {
-        failure ??= error
-      }
-      if (failure !== undefined) throw failure
+      await cleanup.run()
     },
   }
 }

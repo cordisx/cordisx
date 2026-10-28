@@ -131,8 +131,12 @@ export async function apply(ctx, input) {
     expect(await models()).toEqual(['model-2'])
     const rolledBackGeneration = fleet.providerStatuses()[0]!.generation
     expect(rolledBackGeneration).not.toBe(firstGeneration)
-    await rollback.rollback()
+    closeProviderGeneration.mockRejectedValueOnce(new Error('rollback authority failed'))
+    await expect(rollback.rollback()).rejects.toThrow('rollback cleanup failed')
     expect(await models()).toEqual(['model-1'])
+    await expect(batch.reconfigure(fleet, [])).rejects.toThrow('requires recovery')
+    await rollback.rollback()
+    await rollback.rollback()
     const replacement = await batch.reconfigure(fleet, [])
     closeProviderGeneration.mockRejectedValueOnce(new Error('first cleanup attempt failed'))
     await expect(replacement.finalize()).resolves.toBeUndefined()
@@ -204,4 +208,46 @@ it('serializes unsettled Fleet transactions and fences close against later work'
   await close
   await expect(batch.reconfigure(fleet, [])).rejects.toThrow('batch is closed')
   await fleet.close()
+})
+
+it('fences new batches after failed rollback and close retries the retained provider cleanup', async () => {
+  const batch = new PlatformProviderServiceBatchRuntime({
+    configurations: new HostPlatformProviderConfigurationRegistryV1(),
+    brokers: {} as never,
+    candidates: async () => [],
+  })
+  const rollback = vi.fn().mockRejectedValueOnce(new Error('authority failed')).mockResolvedValue(undefined)
+  const fleet = { reconfigure: async () => ({ generation: 'g2', rollback, finalize: async () => {} }) } as never
+  const transaction = await batch.reconfigure(fleet, [])
+  await expect(transaction.rollback()).rejects.toThrow('rollback cleanup failed')
+  await expect(batch.reconfigure(fleet, [])).rejects.toThrow('requires recovery')
+  await batch.close()
+  await transaction.rollback()
+  expect(rollback).toHaveBeenCalledTimes(2)
+})
+
+it('does not release a concurrent rollback early and exposes persistent cleanup failures', async () => {
+  const batch = new PlatformProviderServiceBatchRuntime({
+    configurations: new HostPlatformProviderConfigurationRegistryV1(),
+    brokers: {} as never,
+    candidates: async () => [],
+  })
+  let release!: () => void
+  const wait = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const rollback = vi.fn(async () => {
+    await wait
+    throw new Error('authority failed')
+  })
+  const fleet = { reconfigure: async () => ({ generation: 'g2', rollback, finalize: async () => {} }) } as never
+  const transaction = await batch.reconfigure(fleet, [])
+  const first = transaction.rollback(), second = transaction.rollback()
+  const results = Promise.allSettled([first, second])
+  release()
+  expect((await results).map(item => item.status)).toEqual(['rejected', 'rejected'])
+  expect(rollback).toHaveBeenCalledOnce()
+  await expect(batch.close()).rejects.toThrow('rollback cleanup failed')
+  await expect(batch.close()).rejects.toThrow('rollback cleanup failed')
+  expect(rollback).toHaveBeenCalledTimes(3)
 })

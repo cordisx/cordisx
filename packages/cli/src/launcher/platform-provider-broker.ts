@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { RetryableCleanup } from '../providers/retryable-cleanup.js'
 import type {
   PlatformProviderBrokerBindingV1,
   PlatformProviderBrokerDeclarationV1,
@@ -145,6 +146,7 @@ export class HostBoundPlatformProviderBrokerV1 implements PlatformProviderBroker
   private readonly pending = new Map<string, PlatformProviderBrokerEventV1>()
   private sequence = 0
   private disposed = false
+  private cleanup: RetryableCleanup | undefined
   readonly #transport: HostPlatformProviderBrokerTransportV1
 
   constructor(
@@ -262,11 +264,15 @@ export class HostBoundPlatformProviderBrokerV1 implements PlatformProviderBroker
   }
 
   async dispose(): Promise<void> {
-    if (this.disposed) return
     this.disposed = true
-    for (const dispose of this.subscriptions.values()) dispose()
-    this.subscriptions.clear()
     this.pending.clear()
-    await this.#transport.dispose()
+    this.cleanup ??= new RetryableCleanup([
+      ...[...this.subscriptions.values()].map(dispose => async () => {
+        await dispose()
+      }),
+      async () => await this.#transport.dispose(),
+    ], 'Platform provider broker cleanup failed')
+    await this.cleanup.run()
+    this.subscriptions.clear()
   }
 }
