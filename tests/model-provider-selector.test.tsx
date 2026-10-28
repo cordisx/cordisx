@@ -242,13 +242,14 @@ describe('provider selection interaction', () => {
     expect(select).not.toHaveBeenCalled()
   })
 
-  it('labels next Send separately from the effective pair and locks selection only during admission', async () => {
+  it('keeps next Send status accessible without visible captions and locks only during admission', async () => {
     const { update } = await setup('shared', true)
     await update({ nextSend: { providerId: 'first', model: 'shared', reasoningEffort: 'low' } })
     await click(modelTrigger)
-    expect(document.querySelector('.cxmp-next-send-label')?.textContent).toBe('Use on Send after response')
-    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Use on Send after response')
-    expect(document.querySelector('.cxmp-menu-heading')?.textContent).toContain('Current: first')
+    expect(document.querySelector('.cxmp-next-send-label')).toBeNull()
+    expect(document.querySelector('.cxmp-menu-heading')).toBeNull()
+    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Use on Send after response')
+    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Current: first')
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
     await update({ selectionLocked: true })
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true)

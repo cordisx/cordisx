@@ -602,7 +602,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           }
         }}
       >
-        {queued ? <span className="cxmp-next-send-label">{copy.nextSend}</span> : null}
         <span className="cxmp-model-label">{displayedModelLabel}</span>
         <span className="cxmp-model-separator" aria-hidden="true" />
         <span className="cxmp-effort-label">{copy.reasoningEffortLabel(reasoningEffort)}</span>
@@ -636,16 +635,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           ? (
             <div className={error ? 'cxmp-menu-heading cxmp-error' : 'cxmp-menu-heading'}>
               {visibleMenuFeedback}
-            </div>
-          )
-          : null}
-        {queued || native.busy && open !== 'model'
-          ? (
-            <div className="cxmp-menu-heading" role="status">
-              {copy.nextSend}
-              {queued
-                ? `: ${displayedProviderLabel} / ${displayedModelLabel}. ${copy.active}: ${providerLabel} / ${selectedModelLabel}`
-                : ''}
             </div>
           )
           : null}
