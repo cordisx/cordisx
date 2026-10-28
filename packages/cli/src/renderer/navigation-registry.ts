@@ -562,7 +562,9 @@ export class NavigationRegistry extends NavigationRegistryRouting {
   snapshot(view?: PluginGenerationView): NavigationSnapshot {
     const nextMetadataProjectionSites = new Map<string, string>()
     const routes = this.visibleRecords(view).map((record): RouteSnapshot => {
-      const error = this.routeError(record)
+      const error = record.definition.outlet === 'manager.content'
+        ? this.routeDeclarationError(record)
+        : this.routeError(record)
       const pointAccess =
         this.access?.decision(record.owner, record.definition.outlet, 'outlet', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }

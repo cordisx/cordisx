@@ -31,6 +31,7 @@ import {
   type CordisXPluginActivationRecordV1,
 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
+import { CodexRouterHistoryAdapter } from '../packages/cli/src/renderer/codex-router-history.js'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 
@@ -244,12 +245,16 @@ describe('Manager Settings navigation core', () => {
     expect(compareManagerSettingsNavigationItems(sorted[0]!, sorted[1]!)).toBeLessThan(0)
   })
 
-  it('resolves the strict Manager route/page contract and rejects invalid or unresolved dependencies', async () => {
+  it.each([true, false])('resolves strict Manager dependencies with native history available=%s', async available => {
     const contexts = new HostContextStore()
     contexts.replace({ enabled: false })
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), contexts)
+    const historyDom = new JSDOM('<body><div id="root"></div></body>')
+    const history = available
+      ? new TestCodexRouteHistory()
+      : new CodexRouterHistoryAdapter(historyDom.window as unknown as Window)
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history, contexts)
 
     navigation.register('demo', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
@@ -262,6 +267,7 @@ describe('Manager Settings navigation core', () => {
       description: { key: 'route.description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'ready')?.valid).toBe(false)
 
     const dom = new JSDOM('<body><main id="manager"></main></body>')
     const previousWindow = globalThis.window
@@ -307,6 +313,11 @@ describe('Manager Settings navigation core', () => {
         page: { qualifiedId: 'demo:ready' },
       },
     })
+    expect(navigation.snapshot().routes.find(route => route.id === 'ready')).toMatchObject({ valid: true })
+    if (!available) {
+      expect(() => navigation.deepLink('demo', { id: 'ready' })).toThrow(/navigator is unavailable/)
+      await expect(navigation.navigate('demo', { id: 'ready' })).rejects.toThrow(/navigator is unavailable/)
+    }
     const managerBody = dom.window.document.createElement('section')
     dom.window.document.body.append(managerBody)
     let managedMount: ReturnType<typeof navigation.mountManagerContent> | undefined
@@ -423,6 +434,7 @@ describe('Manager Settings navigation core', () => {
       description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'missing-icon')).toMatchObject({ state: 'invalid' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'missing-icon')?.valid).toBe(false)
 
     pages.register('demo', {
       $schema: CORDISX_PAGE_SCHEMA_V3,
@@ -444,6 +456,7 @@ describe('Manager Settings navigation core', () => {
       description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'body')).toMatchObject({ state: 'invalid' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'body')?.valid).toBe(false)
 
     navigation.register('demo', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
@@ -456,6 +469,7 @@ describe('Manager Settings navigation core', () => {
       description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'root')).toMatchObject({ state: 'invalid' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'root')?.valid).toBe(false)
 
     navigation.register('demo', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
@@ -469,12 +483,66 @@ describe('Manager Settings navigation core', () => {
       when: { key: 'enabled', equals: true },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'when')).toMatchObject({ state: 'pending' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'when')?.valid).toBe(false)
+
+    navigation.register('demo', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'foreign-page',
+      path: '/manager/extensions/foreign',
+      outlet: 'manager.content',
+      page: 'other:ready',
+      title: { key: 'title' },
+      description: { key: 'description' },
+    })
+    expect(navigation.managerSettingsNavigationRoute('demo', 'foreign-page')).toMatchObject({ state: 'invalid' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'foreign-page')?.valid).toBe(false)
+
+    const conflicting = navigation.register('demo', {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'conflict',
+      path: '/manager/extensions/demo',
+      outlet: 'manager.content',
+      page: 'ready',
+      title: { key: 'title' },
+      description: { key: 'description' },
+    })
+    expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'invalid' })
+    expect(navigation.snapshot().routes.find(route => route.id === 'ready')?.valid).toBe(false)
+    conflicting()
+
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'global',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+      },
+      controller,
+      path => path.startsWith('/main/'),
+    )
+    navigation.register('demo', {
+      id: 'native',
+      path: '/main/demo',
+      outlet: 'main',
+      page: 'ready',
+    })
+    expect(navigation.snapshot().routes.find(route => route.id === 'native')?.valid).toBe(available)
+    if (!available) {
+      await expect(navigation.navigate('demo', { id: 'native' })).rejects.toThrow(/navigator is unavailable/)
+      expect(() => navigation.deepLink('demo', { id: 'native' })).toThrow(/navigator is unavailable/)
+    }
 
     await navigation.dispose()
     await new Promise(resolve => setImmediate(resolve))
     pages.dispose()
     outlets.dispose()
     contexts.dispose()
+    history.dispose()
+    historyDom.window.close()
     Object.assign(globalThis, { window: previousWindow, document: previousDocument })
     dom.window.close()
   })
