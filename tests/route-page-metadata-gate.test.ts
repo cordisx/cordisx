@@ -66,6 +66,8 @@ const expectedRegistrations = [
   'tests/fixtures/generation-base-plugin.ts|route|generation-base',
   'tests/fixtures/lifecycle-smoke-update/index.ts|page|overview',
   'tests/fixtures/lifecycle-smoke-update/index.ts|route|overview',
+  'tests/fixtures/manager-account-navigation-plugin.ts|page|manager',
+  'tests/fixtures/manager-account-navigation-plugin.ts|route|manager',
   'tests/fixtures/navigation-collection-plugin.ts|page|new-room',
   'tests/fixtures/navigation-collection-plugin.ts|page|room',
   'tests/fixtures/navigation-collection-plugin.ts|route|new-room',
@@ -229,11 +231,14 @@ describe('bundled route/page product metadata gate', () => {
     expect(items.map(item => `${item.file}|${item.kind}|${item.id}`).sort()).toEqual([...expectedRegistrations].sort())
   })
 
-  it('requires complete route-v2/page-v3 product metadata and real en plus zh catalogs', async () => {
+  it('requires complete route-v2/page-v3-or-v4 metadata and real en plus zh catalogs', async () => {
     const { items, sources } = await bundledRegistrations()
     for (const item of items) {
-      const expectedSchema = item.kind === 'page' ? 'CORDISX_PAGE_SCHEMA_V3' : 'CORDISX_ROUTE_SCHEMA_V2'
-      const expectedVersion = item.kind === 'page' ? '3' : '2'
+      const pageV4 = item.kind === 'page' && item.schemaExpression === 'CORDISX_PAGE_SCHEMA_V4'
+      const expectedSchema = item.kind === 'page'
+        ? pageV4 ? 'CORDISX_PAGE_SCHEMA_V4' : 'CORDISX_PAGE_SCHEMA_V3'
+        : 'CORDISX_ROUTE_SCHEMA_V2'
+      const expectedVersion = item.kind === 'page' ? pageV4 ? '4' : '3' : '2'
       expect.soft(
         item.schemaExpression,
         `${item.file}:${item.line} ${item.kind} ${item.id} uses the wrong protocol schema`,
@@ -252,7 +257,7 @@ describe('bundled route/page product metadata gate', () => {
       if (item.kind === 'page') {
         expect.soft(
           item.fields.has('localeNamespace'),
-          `${item.file}:${item.line} page.v3 ${item.id} retains legacy localeNamespace`,
+          `${item.file}:${item.line} page ${item.id} retains legacy localeNamespace`,
         ).toBe(false)
       }
       const source = sources.get(item.file)!
