@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { once } from 'node:events'
 import { expect, it } from 'vitest'
 import { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import { waitForChromeDebugPort } from './fixtures/chrome-debug-port.js'
 
 const executable = process.env.CHROME_PATH ?? process.env.RESTRICTED_CHROME_EXECUTABLE
 it.skipIf(!executable)(
@@ -48,17 +49,19 @@ it.skipIf(!executable)(
         '--no-default-browser-check',
         '--disable-background-networking',
         'about:blank',
-      ], { stdio: 'ignore' })
-      let port = 0
-      for (let attempt = 0; attempt < 200; attempt++) {
-        try {
-          port = Number((await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
-          break
-        } catch {
-          await new Promise(resolve => setTimeout(resolve, 50))
-        }
-      }
-      expect(port).toBeGreaterThan(0)
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      let stderr = ''
+      chrome.stderr?.on('data', data => {
+        stderr = (stderr + String(data)).slice(-4096)
+      })
+      chrome.on('error', error => {
+        stderr = (stderr + error.message).slice(-4096)
+      })
+      const port = await waitForChromeDebugPort(
+        chrome,
+        () => readFile(join(profile, 'DevToolsActivePort'), 'utf8'),
+        () => stderr,
+      )
       const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as {
         type: string
         webSocketDebuggerUrl: string
