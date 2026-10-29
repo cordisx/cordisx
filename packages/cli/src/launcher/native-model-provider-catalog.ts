@@ -46,11 +46,18 @@ function projectProvider(
   selectorIcons?: ModelSelectorIconOverrides,
 ): NativeModelProviderCatalogEntry {
   const connection = session.value
-  const models = new Map<string, { label: string; aliases: string[] }>()
+  const models = new Map<
+    string,
+    { label: string; aliases: string[]; reasoningCapabilities?: ModelReasoningCapabilities }
+  >()
   for (const alias of connection.models.aliases) {
     const current = models.get(alias.gatewayModelId)
     if (current === undefined) {
-      models.set(alias.gatewayModelId, { label: alias.alias, aliases: [alias.alias] })
+      models.set(alias.gatewayModelId, {
+        label: alias.alias,
+        aliases: [alias.alias],
+        ...(alias.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: alias.reasoningCapabilities }),
+      })
     } else if (!current.aliases.includes(alias.alias)) current.aliases.push(alias.alias)
   }
   const defaultModelId = connection.models.aliases.find(alias => alias.alias === connection.models.defaultAlias)
@@ -75,6 +82,7 @@ function projectProvider(
         id,
         label: model.label,
         aliases: Object.freeze([...model.aliases]),
+        ...(model.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: model.reasoningCapabilities }),
         ...(selectorIcons?.models[providerId]?.[id] === undefined
           ? {}
           : { selectorBrand: selectorIcons.models[providerId]![id] }),

@@ -37,6 +37,25 @@ describe('catalog-backed reasoning selection', () => {
     }
   })
 
+  it('stages a declared effort without a default when the active effort is incompatible', async () => {
+    const h = await harness(undefined, provider => provider === 'gateway' ? { efforts: ['low', 'medium'] } : undefined)
+    try {
+      composer(h.dom.window.document, null)
+      await settle()
+      expect(await h.transport.select({ providerId: 'gateway', model: 'different-model' })).toBe('accepted')
+      expect(await h.transport.selectReasoningEffort('medium')).toBe('accepted')
+      expect(await h.transport.selectReasoningEffort('high')).toBe('unavailable')
+      h.channel.submissionPrepare.mockResolvedValueOnce({
+        status: 'allow-original',
+        operationToken: 'draft-operation-token',
+      })
+      expect(await hook()(descriptor)).toMatchObject({ allow: true, reasoningEffort: 'medium' })
+    } finally {
+      h.transport.dispose()
+      h.dom.window.close()
+    }
+  })
+
   it('stages draft effort without changing the effective native model, then carries it on first Send', async () => {
     const h = await harness(undefined, provider => provider === 'deepseek' ? capabilities : undefined)
     try {

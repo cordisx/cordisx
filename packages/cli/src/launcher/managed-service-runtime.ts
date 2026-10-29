@@ -1,3 +1,4 @@
+import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
@@ -203,6 +204,12 @@ export class ManagedServiceRuntime {
         aliases: published.projection.catalog.routes.map(route => ({
           alias: route.alias,
           gatewayModelId: route.gatewayModelId,
+          ...(() => {
+            const reasoningCapabilities = parseModelReasoningCapabilities(
+              'reasoningCapabilities' in route ? route.reasoningCapabilities : undefined,
+            )
+            return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
+          })(),
         })),
       },
     })

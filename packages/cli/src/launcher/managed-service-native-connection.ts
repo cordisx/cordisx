@@ -1,3 +1,4 @@
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import type { ManagedServiceBindingV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ManagedServiceRuntime } from './managed-service-runtime.js'
 
@@ -15,7 +16,11 @@ export interface NativeManagedGatewayConnection {
   readonly models: {
     readonly generation: string
     readonly defaultAlias: string
-    readonly aliases: readonly { readonly alias: string; readonly gatewayModelId: string }[]
+    readonly aliases: readonly {
+      readonly alias: string
+      readonly gatewayModelId: string
+      readonly reasoningCapabilities?: ModelReasoningCapabilities
+    }[]
   }
   readonly cleanup: { readonly authorityId: string }
 }
@@ -69,7 +74,11 @@ export function createNativeManagedGatewayConnection(input: {
     input.models.aliases.length === 0
     || new Set(input.models.aliases.map(item => item.alias)).size !== input.models.aliases.length
     || !input.models.aliases.some(item => item.alias === input.models.defaultAlias)
-    || input.models.aliases.some(item => !catalogText(item.alias, 256) || !catalogText(item.gatewayModelId, 512))
+    || input.models.aliases.some(item =>
+      !catalogText(item.alias, 256) || !catalogText(item.gatewayModelId, 512)
+      || item.reasoningCapabilities !== undefined
+        && parseModelReasoningCapabilities(item.reasoningCapabilities) === undefined
+    )
   ) throw new Error('selected managed service model snapshot is invalid')
   let disposed = false
   return Object.freeze({

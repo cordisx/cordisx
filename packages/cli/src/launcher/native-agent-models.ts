@@ -38,7 +38,13 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,
-          models: provider.models.map(model => ({ id: model.id, label: model.label })),
+          models: provider.models.map(model => ({
+            id: model.id,
+            label: model.label,
+            ...(model.reasoningCapabilities === undefined
+              ? {}
+              : { reasoningCapabilities: model.reasoningCapabilities }),
+          })),
         })),
       }
     }
