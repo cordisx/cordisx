@@ -33,8 +33,8 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== '0.1.0-beta.7') {
-  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.7')
+if (expectedProtocolSpec !== '0.1.0-beta.8') {
+  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.8')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined

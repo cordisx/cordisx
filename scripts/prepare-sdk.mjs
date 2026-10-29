@@ -110,8 +110,8 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-if (protocolSpec !== '0.1.0-beta.7') {
-  throw new Error('Host SDK must consume @cordisx/protocol@0.1.0-beta.7')
+if (protocolSpec !== '0.1.0-beta.8') {
+  throw new Error('Host SDK must consume @cordisx/protocol@0.1.0-beta.8')
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')
 const protocolManifest = await verifyPackage(protocolSource)
