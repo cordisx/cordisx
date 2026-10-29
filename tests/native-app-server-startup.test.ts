@@ -1,3 +1,6 @@
+import { nativeCliInvocation } from '../packages/cli/assets/launcher/native-cli-invocation.mjs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import path from 'node:path'
@@ -26,6 +29,22 @@ function cliProbe(args: readonly string[], environment: NodeJS.ProcessEnv = {}) 
 }
 
 describe('native CLI entry and startup lifetime', () => {
+  it.each([
+    [['app-server'], 'app-server-stdio'],
+    [['app-server', '--listen', 'stdio://', '--analytics-default-enabled'], 'app-server-stdio'],
+    [['-c', 'model="app-server"', 'app-server', '--startup-client-info', '{"name":"--help"}'], 'app-server-stdio'],
+    [['app-server', '--config=example="generate-ts"'], 'app-server-stdio'],
+    [['app-server', '--print-startup-config'], 'startup-config'],
+    [['app-server', 'generate-json-schema'], 'app-server-tool'],
+    [['app-server', 'generate-ts'], 'app-server-tool'],
+    [['app-server', '--listen', 'ws://127.0.0.1:1234'], 'other-cli'],
+    [['app-server', '--listen', 'off'], 'other-cli'],
+    [['exec', 'app-server'], 'other-cli'],
+    [['--config', 'app-server'], 'other-cli'],
+  ])('classifies actual CLI grammar without treating option values as commands', (args, expected) => {
+    expect(nativeCliInvocation(args)).toBe(expected)
+  })
+
   it.each([['--version'], ['app-server', '--help']])(
     'preserves ordinary CLI bytes, arguments and exit code without private control: %j',
     async (...arguments_: string[]) => {
@@ -54,39 +73,47 @@ describe('native CLI entry and startup lifetime', () => {
     const [code, signal] = await once(child, 'close')
     expect({ code, signal }).toEqual({ code: null, signal: 'SIGTERM' })
   })
-  it('keeps ordinary CLI probes outside the occupied app-server control connection', async () => {
-    const events: DiagnosticEvent[] = []
-    await withDiagnostics({ emit: event => events.push(event) }, async () => {
-      const h = await harness()
-      try {
-        h.send({ id: 'connected', method: 'echo/bytes', params: {} })
-        await h.read()
-        const probe = spawn(path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs'), [
-          '-e',
-          'process.stdout.write("fixture-version\\n")',
-        ], {
-          env: {
-            ...process.env,
-            CORDISX_NATIVE_NODE_PATH: process.execPath,
-            CORDISX_NATIVE_REAL_CODEX_PATH: process.execPath,
-            CORDISX_NATIVE_CONTROL_SOCKET: h.server.socketPath,
-            CORDISX_NATIVE_CONTROL_NONCE: h.server.nonce,
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        })
-        let output = ''
-        probe.stdout.on('data', chunk => output += String(chunk))
-        const [code] = await once(probe, 'close')
-        expect(code).toBe(0)
-        expect(output).toBe('fixture-version\n')
-        expect(events.filter(event => event.event === 'native-control-peer-rejected')).toHaveLength(0)
-        h.send({ id: 'still-connected', method: 'echo/bytes', params: {} })
-        await h.read()
-      } finally {
-        await h.close()
-      }
-    })
-  })
+  it.skipIf(process.platform === 'win32').each([['--version'], ['app-server', '--print-startup-config']])(
+    'keeps ordinary CLI probes outside the occupied app-server control connection: %j',
+    async (...extraArgs: string[]) => {
+      const events: DiagnosticEvent[] = []
+      await withDiagnostics({ emit: event => events.push(event) }, async () => {
+        const h = await harness()
+        try {
+          h.send({ id: 'connected', method: 'echo/bytes', params: {} })
+          await h.read()
+          const toolRoot = await mkdtemp(path.join(os.tmpdir(), 'cx-cli-tool-'))
+          const tool = path.join(toolRoot, 'cli')
+          await writeFile(tool, "#!/bin/sh\nprintf 'fixture-version\\n'\n", { mode: 0o700 })
+          const probe = spawn(
+            path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs'),
+            extraArgs,
+            {
+              env: {
+                ...process.env,
+                CORDISX_NATIVE_NODE_PATH: process.execPath,
+                CORDISX_NATIVE_REAL_CODEX_PATH: tool,
+                CORDISX_NATIVE_CONTROL_SOCKET: h.server.socketPath,
+                CORDISX_NATIVE_CONTROL_NONCE: h.server.nonce,
+              },
+              stdio: ['ignore', 'pipe', 'pipe'],
+            },
+          )
+          let output = ''
+          probe.stdout.on('data', chunk => output += String(chunk))
+          const [code] = await once(probe, 'close')
+          await rm(toolRoot, { recursive: true, force: true })
+          expect(code).toBe(0)
+          expect(output).toBe('fixture-version\n')
+          expect(events.filter(event => event.event === 'native-control-peer-rejected')).toHaveLength(0)
+          h.send({ id: 'still-connected', method: 'echo/bytes', params: {} })
+          await h.read()
+        } finally {
+          await h.close()
+        }
+      })
+    },
+  )
   it('records initialize, desktop EOF and actual child exit separately without payloads', async () => {
     const events: DiagnosticEvent[] = []
     const h = await withDiagnostics({ emit: event => events.push(event) }, () => harness())

@@ -115,7 +115,7 @@ const nativeLifecycle = (phase, details = {}) => {
   // Fixed metadata only. stderr preserves terminal ordering if the existing control socket is already closed.
   const event = {
     event: 'model-native-lifecycle',
-    method: 'app-server',
+    method: 'app-server-stdio',
     requestRef: nativeInvocationId,
     sourcePid: process.pid,
     childPid: child.pid,
@@ -265,14 +265,15 @@ void ready.catch(() => undefined)
 child.once('spawn', () => nativeLifecycle('child-spawned'))
 control.once('connect', () => {
   nativeLifecycle('control-connected')
-  void controlCall('hello', { nonce, sourcePid: process.pid, parentPid: process.ppid }).then(value => {
-    nativeLifecycle('control-authenticated')
-    authenticate.resolve(value)
-  }, error => {
-    nativeLifecycle('control-authentication-failed')
-    authenticate.reject(error)
-    stop()
-  })
+  void controlCall('hello', { nonce, sourcePid: process.pid, parentPid: process.ppid, method: 'app-server-stdio' })
+    .then(value => {
+      nativeLifecycle('control-authenticated')
+      authenticate.resolve(value)
+    }, error => {
+      nativeLifecycle('control-authentication-failed')
+      authenticate.reject(error)
+      stop()
+    })
 })
 control.on('error', error => {
   nativeLifecycle('control-error', { errorCode: nativeErrorCode(error) })

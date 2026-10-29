@@ -1,4 +1,4 @@
-import { bindDiagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticError } from '../diagnostics/context.js'
 import { projectDiagnostic } from '../diagnostics/journal.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, realpath, rm } from 'node:fs/promises'
@@ -169,6 +169,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
           requestRef: peerRef,
           sourcePid: processId(value.sourcePid),
           parentPid: processId(value.parentPid),
+          method: value.method === 'app-server-stdio' ? value.method : 'unknown',
         })
         clearTimeout(authTimer)
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
@@ -281,6 +282,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
                 : 'unknown',
               verified: authenticated,
               ready: controller !== undefined,
+              ...diagnosticError(error),
             })
             socket.destroy()
           })

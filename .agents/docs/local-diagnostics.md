@@ -32,7 +32,8 @@ and control authentication/closure. Opaque invocation/peer references and source
 join these observations. Fixed metadata on the existing stderr path retains the first
 closing stage and initialization/exit snapshot when the control connection is already
 closing. An exit code of zero alone does not prove initialization succeeded. Ordinary
-CLI calls, including version and help probes, pass through to the real CLI without
+CLI calls, including version/help probes, startup configuration checks and schema tooling,
+pass through to the real CLI without
 reserving the app-server's single private control connection.
 
 ## Retention and bounds

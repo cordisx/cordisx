@@ -1,10 +1,10 @@
 #!/bin/sh
 ':' // ; exec "${CORDISX_NATIVE_NODE_PATH:-${CORDISX_NATIVE_REAL_CODEX_PATH%%/Contents/Resources/*}/Contents/Resources/cua_node/bin/node}" "$0" "$@"
 import { spawn } from 'node:child_process'
+import { nativeCliInvocation } from './native-cli-invocation.mjs'
 
 const args = process.argv.slice(2)
-const appServer = args.includes('app-server')
-  && !args.some(argument => ['--help', '-h', '--version', '-V'].includes(argument))
+const appServer = nativeCliInvocation(args) === 'app-server-stdio'
 if (appServer) {
   await import('./native-app-server-protocol.mjs')
 } else {

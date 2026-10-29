@@ -52,10 +52,10 @@ export async function harness(controller?: NativeSubmissionController) {
       completeThreadResume,
     } as unknown as NativeSubmissionController,
   )
-  const intermediary = path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs')
+  const intermediary = path.resolve('packages/cli/assets/launcher/native-app-server-protocol.mjs')
   const nativeArguments = [path.resolve('tests/fixtures/native-intermediary-app-server.mjs'), 'app-server']
-  const child = spawn(process.platform === 'win32' ? process.execPath : intermediary, [
-    ...(process.platform === 'win32' ? [intermediary] : []),
+  const child = spawn(process.execPath, [
+    intermediary,
     ...nativeArguments,
   ], {
     env: {
