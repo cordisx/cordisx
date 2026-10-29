@@ -72,6 +72,20 @@ describe('Agent model-provider tools', () => {
     })
     expect(JSON.stringify(result)).not.toMatch(/never-project|private.invalid|endpoint|secret/)
     expect(f.authority.reserve).not.toHaveBeenCalled()
+    f.authority.catalog.mockResolvedValueOnce(
+      [{
+        providerId: 'configured',
+        pluginId: 'host',
+        models: [{
+          id: 'shared-model',
+          label: 'Shared model',
+          aliases: [],
+          reasoningCapabilities: { efforts: ['low'], secret: 'never-project' },
+        }],
+      }] as any,
+    )
+    const malformed = await f.handler('list', {})
+    expect(JSON.stringify(malformed)).not.toMatch(/never-project|reasoningCapabilities/)
   })
   it('rejects unsupported task creation without preparing credentials or mutating a conversation', async () => {
     const f = fixture()

@@ -1,3 +1,4 @@
+import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
@@ -41,9 +42,10 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
           models: provider.models.map(model => ({
             id: model.id,
             label: model.label,
-            ...(model.reasoningCapabilities === undefined
-              ? {}
-              : { reasoningCapabilities: model.reasoningCapabilities }),
+            ...(() => {
+              const reasoningCapabilities = parseModelReasoningCapabilities(model.reasoningCapabilities)
+              return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
+            })(),
           })),
         })),
       }
