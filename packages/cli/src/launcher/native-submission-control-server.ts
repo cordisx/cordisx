@@ -17,6 +17,21 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 const requestId = (value: unknown): value is string | number =>
   (typeof value === 'string' && valid(value)) || (typeof value === 'number' && Number.isSafeInteger(value))
+const processId = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+function rejectionReason(error: unknown): string {
+  const reasons: Readonly<Record<string, string>> = {
+    'Invalid control id': 'invalid-id',
+    'Unauthenticated response': 'unauthenticated-response',
+    'Unknown control response': 'unknown-response',
+    'Unauthenticated diagnostic': 'unauthenticated-diagnostic',
+    'Invalid control authentication': 'invalid-authentication',
+    'Control unavailable': 'control-unavailable',
+    'Invalid native thread': 'invalid-thread',
+    'Invalid native request id': 'invalid-request-id',
+  }
+  return error instanceof Error ? reasons[error.message] ?? 'protocol-validation' : 'protocol-validation'
+}
 
 export interface NativeSubmissionControlServer {
   readonly socketPath: string
@@ -149,7 +164,12 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (value.type === 'hello') {
         if (authenticated || value.nonce !== nonce) throw new Error('Invalid control authentication')
         authenticated = true
-        diagnostic({ event: 'native-control-peer-authenticated', requestRef: peerRef })
+        diagnostic({
+          event: 'native-control-peer-authenticated',
+          requestRef: peerRef,
+          sourcePid: processId(value.sourcePid),
+          parentPid: processId(value.parentPid),
+        })
         clearTimeout(authTimer)
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
         return
@@ -248,8 +268,20 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
-          void handle(value).catch(() => {
-            diagnostic({ event: 'native-control-message-rejected', requestRef: peerRef, reason: 'protocol-validation' })
+          void handle(value).catch(error => {
+            diagnostic({
+              event: 'native-control-message-rejected',
+              requestRef: peerRef,
+              reason: rejectionReason(error),
+              phase: typeof value.type === 'string'
+                  && ['hello', 'diagnostic', 'resume', 'resume-complete', 'consume', 'authorize', 'complete'].includes(
+                    value.type,
+                  )
+                ? value.type
+                : 'unknown',
+              verified: authenticated,
+              ready: controller !== undefined,
+            })
             socket.destroy()
           })
         } catch {

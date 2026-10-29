@@ -265,7 +265,7 @@ void ready.catch(() => undefined)
 child.once('spawn', () => nativeLifecycle('child-spawned'))
 control.once('connect', () => {
   nativeLifecycle('control-connected')
-  void controlCall('hello', { nonce }).then(value => {
+  void controlCall('hello', { nonce, sourcePid: process.pid, parentPid: process.ppid }).then(value => {
     nativeLifecycle('control-authenticated')
     authenticate.resolve(value)
   }, error => {

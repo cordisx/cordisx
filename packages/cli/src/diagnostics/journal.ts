@@ -19,6 +19,7 @@ const NUMBERS = new Set([
   'hostPid',
   'sourcePid',
   'childPid',
+  'parentPid',
   'debugPort',
   'exitCode',
   'statusCode',
