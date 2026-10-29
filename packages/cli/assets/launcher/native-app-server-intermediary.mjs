@@ -61,21 +61,28 @@ let sequence = 0
 let closed = false
 let inputQueue = Promise.resolve()
 let droppedDiagnostics = 0
+let pendingDiagnostics = 0
 const turnDiagnostics = new NativeTurnDiagnostics(event => {
-  if (!closed && !control.destroyed && control.writableLength < 256 * 1024) {
+  if (!closed && !control.destroyed && control.writableLength < 256 * 1024 && pendingDiagnostics < 256) {
+    pendingDiagnostics++
     void ready.then(async () => {
+      if (closed || control.destroyed || control.writableLength >= 256 * 1024) {
+        droppedDiagnostics++
+        return
+      }
       if (droppedDiagnostics) {
+        const dropped = droppedDiagnostics
+        droppedDiagnostics = 0
         await write(control, {
           type: 'diagnostic',
           id: `diagnostic-${++sequence}`,
           event: 'model-evidence-gap',
           reason: 'control-backpressure',
-          dropped: droppedDiagnostics,
+          dropped,
         })
-        droppedDiagnostics = 0
       }
       await write(control, { type: 'diagnostic', id: `diagnostic-${++sequence}`, ...event })
-    }).catch(() => undefined)
+    }).catch(() => undefined).finally(() => pendingDiagnostics--)
   } else if (!closed) droppedDiagnostics++
 })
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
