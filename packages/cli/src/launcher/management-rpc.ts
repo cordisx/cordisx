@@ -1,3 +1,5 @@
+import type { ModelExportRequest } from '../cli/model-export-parse.js'
+import type { CliModelExportResult } from './model-catalog/cli-export.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { connect, createServer, type Server, type Socket } from 'node:net'
@@ -18,6 +20,7 @@ const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
+  | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
   | { readonly kind: 'refresh-catalog'; readonly sourceUrl?: string }
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
@@ -103,6 +106,7 @@ export function parsePluginManagementRpcRequest(
   if (
     ![
       'query',
+      'model-export',
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
@@ -119,6 +123,7 @@ export async function handlePluginManagementRpcRequest(
   request: PluginManagementRpcRequest,
 ): Promise<unknown> {
   const operation = request.operation
+  if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
   if (operation.kind === 'query') return await service.query()
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
   if (operation.kind === 'query-catalog') return await service.queryCatalog(operation.query)
@@ -178,6 +183,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly generation: string
   readonly processStartedAt: string
   readonly service: PluginManagementService
+  readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
@@ -204,7 +210,12 @@ export async function startPluginManagementRpcServer(input: {
           respond(socket, {
             requestId,
             ok: true,
-            value: await handlePluginManagementRpcRequest(input.service, request),
+            value: request.operation.kind === 'model-export'
+              ? await (input.modelExport?.(request.operation.request)
+                ?? Promise.reject(
+                  new Error('Model export unavailable; this runtime needs compatible native catalog support'),
+                ))
+              : await handlePluginManagementRpcRequest(input.service, request),
           })
         } catch (error) {
           respond(socket, {

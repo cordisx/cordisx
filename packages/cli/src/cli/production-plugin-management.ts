@@ -1,3 +1,6 @@
+import type { NativeSubmissionComposition } from '../launcher/native-submission-composition.js'
+import type { ModelExportRequest } from './model-export-parse.js'
+import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import { openPluginManagementService } from '../management/service.js'
 import {
@@ -19,6 +22,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly runtimeGeneration: string
   readonly token: string
   readonly coordinator: PluginLifecycleCoordinator
+  readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -40,6 +44,7 @@ export async function openProductionPluginManagementComposition(input: {
       generation: input.runtimeGeneration,
       processStartedAt,
       service,
+      ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     })
   } catch (error) {
     service.close()
@@ -52,6 +57,7 @@ export async function openProductionPluginManagementComposition(input: {
       profileId: input.profileId,
       generation: input.runtimeGeneration,
       service,
+      ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
     async close(): Promise<void> {
       if (closed) return
@@ -62,5 +68,14 @@ export async function openProductionPluginManagementComposition(input: {
         service.close()
       }
     },
+  }
+}
+
+/** Resolve the live composition at request time, including late bootstrap completion. */
+export function nativeCatalogExport(current: () => NativeSubmissionComposition | undefined) {
+  return async (request: ModelExportRequest): Promise<CliModelExportResult> => {
+    const composition = current()
+    if (!composition?.modelExport) throw new Error('Model export catalog unavailable in this runtime')
+    return composition.modelExport(request)
   }
 }

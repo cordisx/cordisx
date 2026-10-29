@@ -7,6 +7,7 @@ export const HELP = `Usage:
   cordisx doctor
   cordisx feedback <collect|inspect|export> [options]
   cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
+  cordisx model export [options]
   cordisx plugin <command> [options]
   cordisx source <command> [options]
 
@@ -22,6 +23,7 @@ Options:
   --write-config           Enable plugin saves to an explicit dev --config file
   --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
+  model export --help      Show portable model service export commands
   plugin --help            Show plugin management commands
   source --help            Show source management commands
   feedback --help          Show local, privacy-filtered feedback commands

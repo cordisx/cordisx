@@ -27,6 +27,8 @@ implementation of those contracts, not a second public specification.
 | [startup-qa.zh-CN](startup-qa.zh-CN.md)                     | Guide     | Simplified Chinese startup troubleshooting                              |
 | [user-experience-qa](user-experience-qa.md)                 | Guide     | Evidence-backed usage questions, pitfalls, and practical tradeoffs      |
 
+- [Export model services from the CLI](model-service-cli-export.md): portable service/model selection, private output, and target Manager import.
+
 ## Develop and inspect plugins
 
 | Document                                              | Type                   | Use it for                                                                                            |

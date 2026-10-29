@@ -1,6 +1,6 @@
 ---
 name: cordisx
-description: Route and complete CordisX user requests from one goal-oriented entry point. Use for installation, startup, configuration, Marketplace sources, installing or managing plugins, current CordisX documentation, experience-based Q&A, and creating, updating, debugging, or verifying a CordisX plugin. Select the relevant bundled guidance without asking the user to choose a lower-level Skill.
+description: Route and complete CordisX user requests from one goal-oriented entry point. Use for installation, startup, configuration, portable model-service export, Marketplace sources, installing or managing plugins, current CordisX documentation, experience-based Q&A, and creating, updating, debugging, or verifying a CordisX plugin. Select the relevant bundled guidance without asking the user to choose a lower-level Skill.
 ---
 
 # CordisX
@@ -18,6 +18,10 @@ The bundled revision and owning source for this entry are recorded in
   plugin management, current or version-specific behavior, commands,
   compatibility, architecture, or public contracts, read
   [cordisx-docs](../cordisx-docs/SKILL.md).
+- For CLI model-service export or transfer, read the
+  [export guide's AI operation](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/model-service-cli-export.md#ai-operation)
+  before final export: handle the preparation's `choice-required` A/B response,
+  honor the user's explicit include/exclude decision, and report missing values.
 - For practical experience, known pitfalls, contextual tradeoffs, and
   evidence-backed workarounds, read
   [cordisx-qa](../cordisx-qa/SKILL.md).

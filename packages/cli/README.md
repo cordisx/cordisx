@@ -66,3 +66,10 @@ and [CLI/distribution contract](https://github.com/cordisx/cordisx/blob/main/.ag
 The scoped Host form architecture and the reproducible official TDesign Web
 Components subset are documented in the
 [Host-owned form system](https://github.com/cordisx/cordisx/blob/main/.agents/docs/host-form-system.md).
+
+## Export model services
+
+Use `cordisx model export --help` for portable service/model export and
+`cordisx model export --list` for IDs. See the
+[CLI export guide](https://github.com/cordisx/cordisx/blob/main/.agents/docs/model-service-cli-export.md)
+for private file output, offline limits and target Manager Import instructions.
