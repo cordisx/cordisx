@@ -23,6 +23,7 @@ describe('private local diagnostic journal', () => {
     withDiagnostics(first, () => {
       for (let count = 0; count < 8; count++) diagnostic({ event: 'launch-failed', count })
     })
+    second.emit({ event: 'runtime-generation', generation: 'test-generation', hostVersion: '1.2.3' })
     second.emit({ event: 'model-failed', provider: 'example', model: 'test-model' })
     await Promise.all([first.close(), second.close()])
     const names = await readdir(directory)
@@ -39,6 +40,10 @@ describe('private local diagnostic journal', () => {
     const result = await readJournal(directory, { from: start - 1, until: now, maxBytes: 65536 })
     expect(result.text.match(/launch-failed/gu)).toHaveLength(8)
     expect(result.text).toContain('model-failed')
+    expect(JSON.parse(result.text.split('\n').find(line => line.includes('model-failed'))!)).toMatchObject({
+      generation: 'test-generation',
+      hostVersion: '1.2.3',
+    })
     expect(result.truncated).toBe(false)
     now += 5000
     await maintainJournal(directory, now)

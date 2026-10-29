@@ -1,4 +1,4 @@
-import { diagnostic, diagnosticRef } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -108,6 +108,7 @@ export async function createSupervisorRuntime(
   readonly mainInspector: boolean
   readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
 }> {
+  const emitDiagnostic = bindDiagnostic()
   const home = environment.CORDISX_SUPERVISOR_HOME
   const app = environment.CORDISX_SUPERVISOR_APP
   const profile = environment.CORDISX_SUPERVISOR_PROFILE
@@ -157,7 +158,12 @@ export async function createSupervisorRuntime(
   ): void => {
     if (resolveStartupNavigation === undefined) return
     resolveStartupNavigation(handoff)
-    logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'startup-handoff-resolved' }, { hostPid })
+    logHostLifecycle(
+      line => process.stdout.write(`${line}\n`),
+      { event: 'startup-handoff-resolved' },
+      { hostPid },
+      emitDiagnostic,
+    )
     resolveStartupNavigation = undefined
     rejectStartupNavigation = undefined
   }
@@ -202,7 +208,12 @@ export async function createSupervisorRuntime(
         socketPath: supervisorPaths(home, app, profile).socket,
         token,
         stop: () => {
-          logHostLifecycle(line => process.stdout.write(`${line}\n`), { event: 'supervisor-stop-requested' })
+          logHostLifecycle(
+            line => process.stdout.write(`${line}\n`),
+            { event: 'supervisor-stop-requested' },
+            {},
+            emitDiagnostic,
+          )
           process.kill(process.pid, 'SIGTERM')
         },
         readPresentation: async () => {

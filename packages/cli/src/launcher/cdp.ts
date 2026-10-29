@@ -1,4 +1,4 @@
-import { diagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
@@ -169,6 +169,7 @@ export interface WatchInjectionOptions {
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
+  const diagnostic = bindDiagnostic()
   if (options.nativeSubmission !== undefined && options.launcherOwnedNativeTarget !== true) {
     throw new Error('Native submission requires a launcher-owned target')
   }

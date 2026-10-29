@@ -1,4 +1,4 @@
-import { diagnostic, diagnosticRef } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -209,6 +209,7 @@ class Handle implements NativeResourceInterception {
 export async function installNativeResourceInterception(
   options: NativeResourceInterceptionOptions,
 ): Promise<NativeResourceInterception> {
+  const diagnostic = bindDiagnostic()
   const timeoutMs = options.timeoutMs ?? CDP_REQUEST_TIMEOUT_MS
   const transforms = new Map(options.transforms.map(transform => [transform.url, transform]))
   const requiredUrls = new Set(

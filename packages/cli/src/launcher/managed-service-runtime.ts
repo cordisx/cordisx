@@ -1,3 +1,4 @@
+import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
   ManagedServiceDefinitionV1,
@@ -6,7 +7,11 @@ import type {
   ManagedServiceRegistrationHandleV1,
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { diagnosticError, managedServiceDiagnostic } from './managed-service-diagnostics.js'
+import {
+  bindManagedServiceDiagnostics,
+  diagnosticError,
+  managedServiceDiagnostic,
+} from './managed-service-diagnostics.js'
 import { spawn as nodeSpawn } from 'node:child_process'
 import { findFreeLoopbackPort } from './process.js'
 import { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
@@ -88,6 +93,7 @@ export class ManagedServiceRuntime {
   private readonly spawn: typeof nodeSpawn
   private readonly findFreePort: () => Promise<number>
   private readonly failuresBeforeUnhealthy: number
+  private readonly emitDiagnostic = bindDiagnostic()
   private readonly records = new Map<string, ManagedServiceRecord>()
   private readonly registrations = new Map<string, ManagedServiceRecord>()
   private readonly pendingRegistrations = new Map<string, Promise<ManagedServiceRecord>>()
@@ -238,6 +244,7 @@ export class ManagedServiceRuntime {
   }
 
   private registrationHandle(record: ManagedServiceRecord): ManagedServiceRegistrationHandleV1 {
+    bindManagedServiceDiagnostics(record, this.emitDiagnostic)
     return createManagedServiceRegistrationHandle(record, {
       inspect: async () => this.projection(record),
       authenticate: async (action, signal) => await this.authenticate(record, action, signal),

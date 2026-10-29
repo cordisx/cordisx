@@ -1,4 +1,4 @@
-import { diagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 
 type LifecycleEvent =
@@ -17,8 +17,9 @@ export function logHostLifecycle(
   stdout: (line: string) => void,
   event: LifecycleEvent,
   context: { readonly hostPid?: number | undefined; readonly ready?: boolean } = {},
+  emit = diagnostic,
 ): void {
-  diagnostic({ ...context, ...event })
+  emit({ ...context, ...event })
   stdout(`[cordisx-lifecycle] ${JSON.stringify({ at: Date.now(), launcherPid: process.pid, ...context, ...event })}`)
 }
 
@@ -27,11 +28,12 @@ export function observeHostExit(
   stdout: (line: string) => void,
   ready: () => boolean,
 ): () => void {
+  const emit = bindDiagnostic()
   const onExit = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
-    logHostLifecycle(stdout, { event: 'host-exit', exitCode, signal }, { hostPid: child.pid, ready: ready() })
+    logHostLifecycle(stdout, { event: 'host-exit', exitCode, signal }, { hostPid: child.pid, ready: ready() }, emit)
   }
   const onError = (): void => {
-    logHostLifecycle(stdout, { event: 'host-process-error' }, { hostPid: child.pid, ready: ready() })
+    logHostLifecycle(stdout, { event: 'host-process-error' }, { hostPid: child.pid, ready: ready() }, emit)
   }
   if (child.exitCode !== null || child.signalCode !== null) onExit(child.exitCode, child.signalCode)
   else child.once('exit', onExit)

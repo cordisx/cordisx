@@ -479,7 +479,11 @@ export async function collectFeedback(
         dataMode: selection.dataMode,
       },
       selection: {
-        launchId: state === undefined ? null : feedbackReference(bundleKey, 'launch', state.instanceToken),
+        launchId: invocation.launch !== undefined
+          ? feedbackReference(bundleKey, 'launch', invocation.launch)
+          : state === undefined
+          ? null
+          : feedbackReference(bundleKey, 'launch', state.instanceToken),
         from: iso(from),
         until: iso(until),
         correlationConfidence: structured.text ? 'partial' : logExcerpt === undefined ? 'none' : 'partial',
