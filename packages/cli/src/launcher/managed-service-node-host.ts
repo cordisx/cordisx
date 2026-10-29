@@ -41,7 +41,15 @@ interface ModuleState {
   readonly controller: AbortController
 }
 
+export interface ManagedServiceNodeActivationGroup extends Omit<ManagedServiceNodeActivation, 'groups'> {
+  readonly pluginIds: readonly string[]
+  readonly activeLoopbackPorts: readonly number[]
+  readonly exclusiveServiceKeys: readonly string[]
+}
+
 export interface ManagedServiceNodeActivation {
+  /** Internal dependency-component cleanup boundaries, never renderer capabilities. */
+  readonly groups?: readonly ManagedServiceNodeActivationGroup[]
   readonly hostGeneration: string
   readonly authorities: readonly ManagedServiceContextAuthorityV1[]
   readonly sources: readonly ManagedServiceNodeSourceBinding[]
@@ -189,17 +197,16 @@ export class ManagedServiceNodeHost {
         }
       }
       this.validateDependencies(states, providers)
-      const groups = isolateStartupFailures
-        ? managedServiceStartupGroups(
-          states,
-          state => `${state.access.pluginIdentity.source}\u0000${state.access.pluginIdentity.pluginId}`,
-          state =>
-            injectionNames(state.module!.apply).flatMap(name => {
-              const provider = providers.get(name)
-              return provider === undefined ? [] : [provider.module]
-            }),
-        )
-        : [states]
+      const groups = managedServiceStartupGroups(
+        states,
+        state => `${state.access.pluginIdentity.source}\u0000${state.access.pluginIdentity.pluginId}`,
+        state =>
+          injectionNames(state.module!.apply).flatMap(name => {
+            const provider = providers.get(name)
+            return provider === undefined ? [] : [provider.module]
+          }),
+      )
+      const groupDisposals = new Map<readonly ModuleState[], () => Promise<void>>()
       const failed = new Set<ModuleState>()
       const pendingGroups = groups.map(async group => {
         const groupProviders = new Map([...providers].filter(([, provider]) => group.includes(provider.module)))
@@ -217,6 +224,7 @@ export class ManagedServiceNodeHost {
           })()
           return groupDisposal
         }
+        groupDisposals.set(group, disposeGroup)
         cleanup.push(disposeGroup)
         const startBatch = async (batch: readonly ModuleState[]): Promise<void> => {
           const operations = batch.map(state => this.startModule(rootContext, state, groupProviders, groupCleanup))
@@ -321,32 +329,78 @@ export class ManagedServiceNodeHost {
       }
 
       const runtime = this.runtime
-      const nativeSessions = new Set<NativeManagedGatewayConnectionSession>()
-      cleanup.push(() => {
-        for (const session of nativeSessions) session.dispose()
-        nativeSessions.clear()
+      let remainingGroups = groups.length
+      const activations = groups.map(group => {
+        const pluginIds = Object.freeze([...new Set(group.map(state => state.access.pluginIdentity.pluginId))])
+        const nativeSessions = new Set<NativeManagedGatewayConnectionSession>()
+        let groupDisposal: Promise<void> | undefined
+        const disposeActivation = (): Promise<void> => {
+          groupDisposal ??= (async () => {
+            for (const session of nativeSessions) session.dispose()
+            nativeSessions.clear()
+            try {
+              await groupDisposals.get(group)!()
+            } finally {
+              remainingGroups -= 1
+              if (remainingGroups === 0) await rootContext.fiber.dispose()
+            }
+          })()
+          return groupDisposal
+        }
+        const value: ManagedServiceNodeActivationGroup = Object.freeze({
+          pluginIds,
+          get exclusiveServiceKeys() {
+            return runtime.exclusiveServiceKeys(pluginIds)
+          },
+          get activeLoopbackPorts() {
+            return runtime.activeLoopbackPorts(pluginIds)
+          },
+          hostGeneration: group[0]?.access.hostGeneration ?? randomUUID(),
+          authorities: Object.freeze(group.filter(state => !failed.has(state)).map(state => state.binding.authority)),
+          sources: Object.freeze(sources.filter(source => pluginIds.includes(source.pluginId))),
+          get nativeProviderIds() {
+            return runtime.listNativeProviderIds(pluginIds)
+          },
+          subscribeNativeProviders: (listener: () => void) => runtime.subscribeNativeProviders(listener),
+          prepareNativeConnection: (providerId: string) => {
+            if (
+              !PROVIDER_ID.test(providerId) || groupDisposal !== undefined
+              || !runtime.listNativeProviderIds(pluginIds).includes(providerId)
+            ) {
+              throw new Error('native managed gateway provider is unavailable')
+            }
+            const session = runtime.preparePublishedNativeConnection(providerId)
+            nativeSessions.add(session)
+            return Object.freeze({
+              value: session.value,
+              dispose: () => {
+                nativeSessions.delete(session)
+                session.dispose()
+              },
+            })
+          },
+          dispose: disposeActivation,
+        })
+        return value
+      })
+      cleanup.push(async () => {
+        await Promise.all(activations.map(group => group.dispose()))
       })
       return Object.freeze({
+        groups: Object.freeze(activations),
         hostGeneration: accesses[0]?.hostGeneration ?? randomUUID(),
-        authorities: Object.freeze(states.filter(state => !failed.has(state)).map(state => state.binding.authority)),
+        authorities: Object.freeze(activations.flatMap(group => group.authorities)),
         sources: Object.freeze(sources),
         get nativeProviderIds() {
-          return runtime.listNativeProviderIds()
+          return activations.flatMap(group => group.nativeProviderIds)
         },
         subscribeNativeProviders: (listener: () => void) => runtime.subscribeNativeProviders(listener),
         prepareNativeConnection: (providerId: string) => {
-          if (!PROVIDER_ID.test(providerId) || cleanupPromise !== undefined) {
+          const group = activations.find(group => group.nativeProviderIds.includes(providerId))
+          if (group === undefined || cleanupPromise !== undefined) {
             throw new Error('native managed gateway provider is unavailable')
           }
-          const session = this.runtime.preparePublishedNativeConnection(providerId)
-          nativeSessions.add(session)
-          return Object.freeze({
-            value: session.value,
-            dispose: () => {
-              nativeSessions.delete(session)
-              session.dispose()
-            },
-          })
+          return group.prepareNativeConnection(providerId)
         },
         dispose,
       })

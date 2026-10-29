@@ -1,4 +1,3 @@
-import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
@@ -20,8 +19,7 @@ import type {
   NativeManagedGatewayConnectionRequest,
   NativeManagedGatewayConnectionSession,
 } from './managed-service-native-connection.js'
-import { createNativeManagedGatewayConnection } from './managed-service-native-connection.js'
-import { ManagedNativeProviderPublications } from './managed-service-native-publications.js'
+import { ManagedServiceRuntimeNative } from './managed-service-runtime-native.js'
 import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js'
 import {
   createManagedServiceActivationBinding,
@@ -62,6 +60,9 @@ export type {
 
 export interface ManagedServiceRuntimeOptions {
   readonly homeDir: string
+  /** Active prior-generation endpoints must never be borrowed by a candidate. */
+  readonly reservedLoopbackPorts?: readonly number[]
+  readonly reservedServiceKeys?: readonly string[]
   readonly schemas?: ManagedServiceSchemaRegistry
   readonly resolveSecret?: (input: {
     readonly owner: ManagedServiceOwnerV1
@@ -98,8 +99,7 @@ export class ManagedServiceRuntime {
   private readonly records = new Map<string, ManagedServiceRecord>()
   private readonly registrations = new Map<string, ManagedServiceRecord>()
   private readonly pendingRegistrations = new Map<string, Promise<ManagedServiceRecord>>()
-  private readonly nativeAuthorities = new Map<string, ManagedServiceRecord>()
-  private readonly nativePublications = new ManagedNativeProviderPublications()
+  private readonly native = new ManagedServiceRuntimeNative(this.registrations)
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
 
@@ -111,6 +111,7 @@ export class ManagedServiceRuntime {
     this.process = new ManagedServiceRuntimeProcess({
       fetch: this.fetch,
       spawn: this.spawn,
+      ...(options.reservedLoopbackPorts === undefined ? {} : { reservedLoopbackPorts: options.reservedLoopbackPorts }),
       ...(options.childTerminationTimeouts === undefined
         ? {}
         : { childTerminationTimeouts: options.childTerminationTimeouts }),
@@ -140,6 +141,12 @@ export class ManagedServiceRuntime {
           ...(this.options.projectEnvironment === undefined
             ? {}
             : { projectEnvironment: this.options.projectEnvironment }),
+          ...(this.options.reservedLoopbackPorts === undefined
+            ? {}
+            : { reservedLoopbackPorts: this.options.reservedLoopbackPorts }),
+          ...(this.options.reservedServiceKeys === undefined
+            ? {}
+            : { reservedServiceKeys: this.options.reservedServiceKeys }),
           records: this.records,
           registrations: this.registrations,
           pendingRegistrations: this.pendingRegistrations,
@@ -152,66 +159,36 @@ export class ManagedServiceRuntime {
     })
   }
 
-  prepareNativeConnection(
-    request: NativeManagedGatewayConnectionRequest,
-  ): NativeManagedGatewayConnectionSession {
-    const record = this.registrations.get(request.binding.registrationHandle)
-    if (
-      record === undefined || !managedBindingCurrent(request.binding, record.binding, record.disposed)
-      || record.state !== 'ready'
-      || record.origin === undefined
-    ) throw new Error('selected managed service connection is unavailable or stale')
-    const declaredOrigin = record.definition.compositionOrigins?.find(origin => origin.id === request.compositionOrigin)
-    const authentication = record.definition.httpAuthentication
-    const token = authentication.mode === 'authorization-header' ? record.secrets.get(authentication.slot) : undefined
-    if (declaredOrigin === undefined || (authentication.mode === 'authorization-header' && token === undefined)) {
-      throw new Error('selected managed service connection is incomplete')
-    }
-    const authorityId = managedHandle('msn')
-    this.nativeAuthorities.set(authorityId, record)
-    return createNativeManagedGatewayConnection({
-      pluginId: record.binding.identity.pluginId,
-      serviceId: record.binding.identity.serviceId,
-      serviceGeneration: record.binding.serviceGeneration,
-      origin: record.origin,
-      apiPath: declaredOrigin.path,
-      ...(token === undefined ? {} : { token }),
-      models: request.models,
-      authorityId,
-      dispose: () => {
-        if (this.nativeAuthorities.get(authorityId) === record) this.nativeAuthorities.delete(authorityId)
-      },
-    })
+  prepareNativeConnection(request: NativeManagedGatewayConnectionRequest): NativeManagedGatewayConnectionSession {
+    return this.native.prepareNativeConnection(request)
   }
 
-  listNativeProviderIds(): readonly string[] {
-    return this.nativePublications.listProviderIds()
+  listNativeProviderIds(pluginIds?: readonly string[]): readonly string[] {
+    return this.native.listNativeProviderIds(pluginIds)
   }
 
   subscribeNativeProviders(listener: () => void): () => void {
-    return this.nativePublications.subscribe(listener)
+    return this.native.subscribeNativeProviders(listener)
   }
 
   preparePublishedNativeConnection(providerId: string): NativeManagedGatewayConnectionSession {
-    const published = this.nativePublications.resolve(providerId)
-    if (published === undefined) throw new Error('native managed gateway provider is unavailable')
-    return this.prepareNativeConnection({
-      binding: published.record.binding,
-      compositionOrigin: published.projection.compositionOrigin,
-      models: {
-        generation: published.projection.catalog.generation,
-        defaultAlias: published.projection.catalog.defaultAlias,
-        aliases: published.projection.catalog.routes.map(route => ({
-          alias: route.alias,
-          gatewayModelId: route.gatewayModelId,
-          ...(() => {
-            const reasoningCapabilities = parseModelReasoningCapabilities(
-              'reasoningCapabilities' in route ? route.reasoningCapabilities : undefined,
-            )
-            return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }
-          })(),
-        })),
-      },
+    return this.native.preparePublishedNativeConnection(providerId)
+  }
+
+  exclusiveServiceKeys(pluginIds: readonly string[]): readonly string[] {
+    return [...this.records.values()].flatMap(record =>
+      record.disposed || !pluginIds.includes(record.access.owner.pluginId)
+        || record.definition.discovery.kind === 'host-assigned-loopback'
+        ? []
+        : [`${record.access.owner.pluginId}\u0000${record.definition.serviceId}`]
+    )
+  }
+
+  activeLoopbackPorts(pluginIds: readonly string[]): readonly number[] {
+    return [...this.records.values()].flatMap(record => {
+      if (record.disposed || !pluginIds.includes(record.access.owner.pluginId)) return []
+      if (record.definition.discovery.kind === 'fixed-loopback') return [record.definition.discovery.port]
+      return record.origin === undefined ? [] : [Number(new URL(record.origin).port)]
     })
   }
 
@@ -257,7 +234,7 @@ export class ManagedServiceRuntime {
       authenticate: async (action, signal) => await this.authenticate(record, action, signal),
       ensureReady: async options => await this.ensureReady(record, options),
       restart: async signal => await this.restart(record, signal),
-      publishNativeProvider: async (input, signal) => this.nativePublications.publish(record, input, signal),
+      publishNativeProvider: async (input, signal) => this.native.publications.publish(record, input, signal),
       dispose: () => this.disposeRecord(record),
     })
   }
@@ -773,7 +750,7 @@ export class ManagedServiceRuntime {
 
   private revokeRuntimeState(record: ManagedServiceRecord): void {
     this.stopHealthMonitoring(record)
-    this.nativePublications.revoke(record)
+    this.native.publications.revoke(record)
     for (const [leaseHandle, lease] of record.leases) lease.client.leases.delete(leaseHandle)
     record.leases.clear()
     record.invocations.clear()
@@ -781,8 +758,8 @@ export class ManagedServiceRuntime {
     record.origin = undefined
     record.authorizationHandle = undefined
     record.assignedPort = undefined
-    for (const [authorityId, owner] of this.nativeAuthorities) {
-      if (owner === record) this.nativeAuthorities.delete(authorityId)
+    for (const [authorityId, owner] of this.native.authorities) {
+      if (owner === record) this.native.authorities.delete(authorityId)
     }
   }
 

@@ -108,8 +108,7 @@ import {
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 import { managedBackendRuntimeServiceAccess } from '../launcher/packages/managed-backend-service-access.js'
-import { ManagedServiceRuntime } from '../launcher/managed-service-runtime.js'
-import { ManagedServiceNodeHost } from '../launcher/managed-service-node-host.js'
+import { activateManagedServiceCandidate } from '../launcher/managed-service-candidate.js'
 import { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
 import {
   agentHistoryHost,
@@ -245,7 +244,10 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         if (invocation.options.dryRun) return undefined
         const plugins = await loadPluginComposition(lifecycleStore, activation)
         const accesses = await Promise.all(plugins.flatMap(plugin => {
-          if (!plugin.enabled || plugin.package === undefined || plugin.manifest?.schemaVersion !== 14) return []
+          if (
+            !plugin.enabled || !options.pluginIds.includes(plugin.id) || plugin.package === undefined
+            || plugin.manifest?.schemaVersion !== 14
+          ) return []
           return plugin.manifest.services.flatMap(service =>
             service.kind === 'managed-backend'
               ? [managedBackendRuntimeServiceAccess(
@@ -263,20 +265,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           )
         }))
         if (accesses.length === 0) return undefined
-        const host = new ManagedServiceNodeHost(
-          new ManagedServiceRuntime({
-            homeDir: rootFromConfigPath(configPath),
-            environment: runtime.env ?? process.env,
-          }),
-          selection.profileId,
-          lifecycleGeneration,
-        )
-        try {
-          return await host.replace(accesses, options)
-        } catch (error) {
-          await host.dispose().catch(() => undefined)
-          throw error
-        }
+        return await activateManagedServiceCandidate(accesses, {
+          homeDir: rootFromConfigPath(configPath),
+          environment: runtime.env ?? process.env,
+          profileId: selection.profileId,
+          runtimeGeneration: lifecycleGeneration,
+          ...options,
+        })
       },
     })
     const lifecycleTransactionRuntime = managedServiceLifecycleRuntime

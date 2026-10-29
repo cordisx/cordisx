@@ -193,8 +193,12 @@ export class ManagedNativeProviderPublications {
     }
   }
 
-  listProviderIds(): readonly string[] {
-    return Object.freeze([...this.providers.keys()].sort())
+  listProviderIds(pluginIds?: readonly string[]): readonly string[] {
+    return Object.freeze(
+      [...this.providers].flatMap(([id, state]) =>
+        pluginIds === undefined || pluginIds.includes(state.projection.owner.pluginId) ? [id] : []
+      ).sort(),
+    )
   }
 
   subscribe(listener: () => void): () => void {

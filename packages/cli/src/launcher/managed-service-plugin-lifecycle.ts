@@ -9,6 +9,12 @@ import type {
   RuntimePublicationObservation,
   RuntimeReadinessObservation,
 } from './plugin-lifecycle-model.js'
+import {
+  managedServiceFleetActivation,
+  type ManagedServiceFleetLease,
+  managedServiceLeases,
+  unchangedManagedServiceLease,
+} from './managed-service-fleet.js'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import {
   createManagedServiceUIBridgeHandler,
@@ -28,6 +34,7 @@ interface ManagedServiceOwnerRoute {
 }
 
 interface ManagedServiceFleet {
+  readonly leases: readonly ManagedServiceFleetLease[]
   readonly activation: ManagedServiceNodeActivation | undefined
   readonly routes: ReadonlyMap<string, ManagedServiceOwnerRoute>
 }
@@ -45,7 +52,12 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly runtimeGeneration: string
   readonly activate: (
     activation: CordisXPluginActivationRecordV1,
-    options: { readonly isolateStartupFailures: boolean },
+    options: {
+      readonly isolateStartupFailures: boolean
+      readonly pluginIds: readonly string[]
+      readonly reservedLoopbackPorts?: readonly number[]
+      readonly reservedServiceKeys?: readonly string[]
+    },
   ) => Promise<ManagedServiceNodeActivation | undefined>
   readonly createToken?: () => string
 }
@@ -130,14 +142,14 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation> {
-    if (this.transactions.has(mutation.transactionId)) {
+    if (this.transactions.size > 0) {
       throw new Error('managed service lifecycle transaction already exists')
     }
     const previous = this.requireActive()
     let activationFailure: unknown
     const candidate = await this.createFleet(mutation.candidate, previous).catch(error => {
       activationFailure = error
-      return { activation: undefined, routes: new Map() }
+      return { activation: undefined, leases: [], routes: new Map() }
     })
     const newCapabilities = [...candidate.routes.values()].flatMap(route =>
       previous.routes.has(route.key) ? [] : [{ ...route.owner, token: route.token }]
@@ -185,7 +197,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   async finalize(transactionId: string): Promise<void> {
     const transaction = this.transaction(transactionId)
     await this.runtime.finalize?.(transactionId)
-    await this.disposeFleet(transaction.previous)
+    await this.disposeFleet(transaction.previous, transaction.candidate)
     for (const route of transaction.previous.routes.values()) {
       if (!transaction.candidate.routes.has(route.key) && this.routesByToken.get(route.token) === route) {
         this.routesByToken.delete(route.token)
@@ -218,7 +230,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.changedNativeProviders()
     transaction.published = true
     await this.runtime.commit(transactionId)
-    await this.disposeFleet(transaction.previous)
+    await this.disposeFleet(transaction.previous, transaction.candidate)
     this.transactions.delete(transactionId)
   }
 
@@ -245,7 +257,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     }
     this.transactions.clear()
     this.routesByToken.clear()
-    await Promise.allSettled([...fleets].map(async fleet => await this.disposeFleet(fleet)))
+    const routes = new Set([...fleets].flatMap(fleet => [...fleet.routes.values()]))
+    const groups = new Set([...fleets].flatMap(fleet => fleet.leases.map(lease => lease.activation)))
+    await Promise.allSettled([...routes].map(async route => await route.handler.dispose()))
+    await Promise.allSettled([...groups].map(async group => await group.dispose()))
     this.active = undefined
     this.changedNativeProviders()
     this.nativeProviderListeners.clear()
@@ -255,8 +270,30 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     record: CordisXPluginActivationRecordV1,
     previous?: ManagedServiceFleet,
   ): Promise<ManagedServiceFleet> {
-    const activation = await this.options.activate(record, { isolateStartupFailures: previous === undefined })
-    if (activation === undefined) return { activation: undefined, routes: new Map() }
+    const retained = previous?.leases.filter(lease => unchangedManagedServiceLease(lease, record)) ?? []
+    for (const lease of previous?.leases ?? []) {
+      if (retained.includes(lease)) continue
+      if (lease.plugins.some(plugin => unchangedManagedServiceLease({ ...lease, plugins: [plugin] }, record))) {
+        throw new Error('managed service update requires restart: dependency component contains an unchanged owner')
+      }
+    }
+    const retainedIds = new Set(retained.flatMap(lease => lease.activation.pluginIds))
+    const changed = {
+      ...record,
+      plugins: record.plugins.filter(plugin => plugin.enabled && !retainedIds.has(plugin.id)),
+    }
+    const activated = changed.plugins.length === 0 ? undefined : await this.options.activate(record, {
+      pluginIds: changed.plugins.map(plugin => plugin.id),
+      isolateStartupFailures: previous === undefined,
+      ...(previous === undefined ? {} : {
+        reservedLoopbackPorts: previous.leases.flatMap(lease => lease.activation.activeLoopbackPorts),
+        reservedServiceKeys: previous.leases.flatMap(lease => lease.activation.exclusiveServiceKeys),
+      }),
+    })
+    const created = managedServiceLeases(activated, changed)
+    const leases = [...retained, ...created]
+    const activation = managedServiceFleetActivation(leases)
+    if (activation === undefined) return { activation: undefined, leases, routes: new Map() }
     const routes = new Map<string, ManagedServiceOwnerRoute>()
     const readNativeProviders = nativeModelProviderCatalog(activation)
     const sourcesByOwner = new Map<string, typeof activation.sources>()
@@ -269,7 +306,12 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     try {
       for (const [key, sources] of sourcesByOwner) {
         const owner = { pluginId: sources[0]!.pluginId, pluginGeneration: sources[0]!.pluginGeneration }
-        const token = previous?.routes.get(key)?.token ?? this.uniqueToken()
+        const existing = previous?.routes.get(key)
+        if (existing !== undefined && retainedIds.has(owner.pluginId)) {
+          routes.set(key, existing)
+          continue
+        }
+        const token = this.uniqueToken()
         const handler = createManagedServiceUIBridgeHandler({
           token,
           profileId: this.options.profileId,
@@ -279,10 +321,14 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         })
         routes.set(key, { key, token, owner, handler })
       }
-      return { activation, routes }
+      void activation.nativeProviderIds // Reject cross-component provider collisions before publication.
+      return { activation, leases, routes }
     } catch (error) {
-      await Promise.allSettled([...routes.values()].map(async route => await route.handler.dispose()))
-      await activation.dispose().catch(() => undefined)
+      await Promise.allSettled(
+        [...routes.values()].filter(route => previous?.routes.get(route.key) !== route)
+          .map(async route => await route.handler.dispose()),
+      )
+      await Promise.allSettled(created.map(async lease => await lease.activation.dispose()))
       throw error
     }
   }
@@ -337,13 +383,21 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       this.active = transaction.previous
       this.changedNativeProviders()
     }
-    await this.disposeFleet(transaction.candidate)
+    await this.disposeFleet(transaction.candidate, transaction.previous)
     this.transactions.delete(transactionId)
   }
 
-  private async disposeFleet(fleet: ManagedServiceFleet): Promise<void> {
-    await Promise.allSettled([...fleet.routes.values()].map(async route => await route.handler.dispose()))
-    await fleet.activation?.dispose()
+  private async disposeFleet(fleet: ManagedServiceFleet, retained?: ManagedServiceFleet): Promise<void> {
+    await Promise.allSettled(
+      [...fleet.routes.values()]
+        .filter(route => retained?.routes.get(route.key) !== route)
+        .map(async route => await route.handler.dispose()),
+    )
+    const borrowed = new Set(retained?.leases.map(lease => lease.activation))
+    await Promise.all(
+      fleet.leases.filter(lease => !borrowed.has(lease.activation))
+        .map(async lease => await lease.activation.dispose()),
+    )
   }
 
   private requireActive(): ManagedServiceFleet {

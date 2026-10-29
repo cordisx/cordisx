@@ -26,6 +26,7 @@ const MAX_PORT_FILE_BYTES = 32
 
 export interface ManagedServiceRuntimeProcessOptions {
   readonly fetch: typeof globalThis.fetch
+  readonly reservedLoopbackPorts?: readonly number[]
   readonly spawn: typeof nodeSpawn
   readonly childTerminationTimeouts?: ManagedServiceChildTerminationTimeouts
   readonly invalidateExitedChild: (record: ManagedServiceRecord, child: ChildProcess) => void
@@ -34,6 +35,12 @@ export interface ManagedServiceRuntimeProcessOptions {
 export class ManagedServiceRuntimeProcess {
   private readonly lastHealth = new WeakMap<ManagedServiceRecord, string>()
   constructor(private readonly options: ManagedServiceRuntimeProcessOptions) {}
+
+  private assertAvailableEndpoint(port: number): void {
+    if (this.options.reservedLoopbackPorts?.includes(port)) {
+      throw new Error('managed service update requires restart: prior generation holds the exclusive endpoint')
+    }
+  }
 
   async writeConfiguration(record: ManagedServiceRecord): Promise<string | undefined> {
     const configuration = record.definition.configuration
@@ -66,6 +73,7 @@ export class ManagedServiceRuntimeProcess {
     if (record.definition.discovery.kind === 'fixed-loopback') port = record.definition.discovery.port
     if (record.definition.discovery.kind === 'restricted-port-file') port = await this.readRestrictedPort(record)
     if (port === undefined) return undefined
+    this.assertAvailableEndpoint(port)
     const origin = `http://127.0.0.1:${port}`
     return await this.healthy(record, origin, signal).catch(() => false) ? origin : undefined
   }
@@ -81,6 +89,7 @@ export class ManagedServiceRuntimeProcess {
       : record.definition.discovery.kind === 'fixed-loopback'
       ? record.definition.discovery.port
       : undefined
+    if (port !== undefined) this.assertAvailableEndpoint(port)
     const executable = await this.resolveExecutable(record, record.definition.launch.executable)
     const arguments_ = record.definition.launch.arguments.map(argument => {
       if (typeof argument === 'string') return argument
@@ -138,6 +147,7 @@ export class ManagedServiceRuntimeProcess {
       if (child.exitCode !== null || child.signalCode !== null) throw failure('process-exited', child)
       const discoveredPort = port ?? await this.readRestrictedPort(record)
       if (discoveredPort !== undefined) {
+        this.assertAvailableEndpoint(discoveredPort)
         const origin = `http://127.0.0.1:${discoveredPort}`
         const remaining = Math.max(1, Math.ceil(deadline - performance.now()))
         if (
