@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.34",
+  "version": "0.1.0-beta.35",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -101,7 +101,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "0.1.0-beta.7",
+    "@cordisx/protocol": "0.1.0-beta.8",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
