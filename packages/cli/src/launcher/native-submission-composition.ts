@@ -1,4 +1,7 @@
 import { diagnostic } from '../diagnostics/context.js'
+import { loadHomeConfig } from '../config/home-config.js'
+import { type CliModelExportResult, exportCliModelCatalog } from './model-catalog/cli-export.js'
+import type { ModelExportRequest } from '../cli/model-export-parse.js'
 import { constants } from 'node:fs'
 import { access, chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -87,6 +90,7 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
   readonly environment: Readonly<Record<string, string>>
   close(): Promise<void>
@@ -764,6 +768,14 @@ export async function prepareNativeSubmissionBootstrap(
         })
         reportStage('native-submission-controller-bound')
         return {
+          async modelExport(request) {
+            if (closePromise !== undefined || !management || !managed || !completeOptions.managedCatalog) {
+              throw new Error('Model export catalog unavailable')
+            }
+            const home = await loadHomeConfig(path.join(completeOptions.managedCatalog.homeDir, 'config.json'))
+            if (closePromise !== undefined) throw new Error('Model export catalog retired')
+            return exportCliModelCatalog(management, request, home.environmentVariables)
+          },
           installation: { authority: cdp, ...discovered },
           environment: Object.freeze({ ...environment, ...providerSyncEnvironment }),
           close,

@@ -1,3 +1,4 @@
+import { runModelExportCommand } from './model-export-command.js'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import {
   ensureHomeConfig,
@@ -121,6 +122,10 @@ export async function prepareCliCommand(
     return
   }
   const parsedInvocation = parseCordisXCli(argv)
+  if (parsedInvocation.action === 'model-export') {
+    await runModelExportCommand(parsedInvocation, runtime)
+    return
+  }
   if (parsedInvocation.action === 'feedback') {
     await runFeedbackCommand(parsedInvocation, runtime)
     return

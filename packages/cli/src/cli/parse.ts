@@ -1,3 +1,4 @@
+import { type ModelExportInvocation, parseModelExport } from './model-export-parse.js'
 import { type CordisXManagementInvocation, parseManagementCli } from './management-parse.js'
 import { CordisXCliParseError } from './parse-error.js'
 
@@ -19,6 +20,7 @@ export type CordisXCliAction =
   | 'dev'
   | 'feedback'
   | 'management'
+  | 'model-export'
 export type CordisXDataMode = 'shared' | 'host-isolated'
 
 export interface CordisXLauncherOptions {
@@ -114,6 +116,7 @@ export interface CordisXFeedbackInvocation {
 
 export type CordisXCliInvocation =
   | CordisXHelpInvocation
+  | ModelExportInvocation
   | CordisXLaunchInvocation
   | CordisXRunInvocation
   | CordisXManagedInvocation
@@ -536,6 +539,7 @@ function parseFeedbackCli(argv: readonly string[]): CordisXFeedbackInvocation {
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
+  if (argv[0] === 'model') return parseModelExport(argv)
   if (argv[0] === 'feedback') return parseFeedbackCli(argv)
   if (argv[0] === 'plugin' || argv[0] === 'source') return parseManagementCli(argv)
   const boundary = argv.indexOf('--')

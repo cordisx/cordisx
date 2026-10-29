@@ -12,6 +12,9 @@ This document owns the settled product-distribution contract. Runtime internals
 remain in `architecture.md`; normative plugin schemas remain in
 `cordisx-protocol`; catalog entries remain in the marketplace repository.
 
+See [CLI model-service export](model-service-cli-export.md) for `cordisx model export`,
+portable selection, output privacy and target Manager import.
+
 ## Command model
 
 The stable grammar is:
