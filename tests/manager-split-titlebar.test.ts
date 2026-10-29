@@ -91,6 +91,29 @@ describe('26.924 split-tab Manager titlebar seat', () => {
     expect(f.document.body.innerHTML).toBe(before)
   })
 
+  it('admits only the measured 26.1023 compact split seam on full-bleed pages', () => {
+    const f = fixture()
+    const header = f.element('header')
+    header.setAttribute('data-app-shell-header-layout', 'full-bleed')
+    header.parentElement!.setAttribute('data-app-shell-compact-page-gutter', 'true')
+    header.parentElement!.setAttribute('data-app-shell-header-placement', 'titlebar')
+    const title = f.element('[data-app-shell-main-titlebar]')
+    const slot = f.element('[data-app-shell-titlebar-slot="main"]')
+    const obstacle = f.document.createElement('div')
+    obstacle.dataset.appShellHeaderObstacle = 'true'
+    slot.replaceWith(obstacle)
+    obstacle.append(slot)
+    f.setRect('[data-app-shell-titlebar-slot="main"]', f.rect(290, 0, 550.5625, 44))
+    expect(resolveManagerSplitTitlebarSeat(f.document)?.slot).toBe(slot)
+    expect(captureManagerTitlebarLease(f.document, 'split', f.pane)?.seat.provenance).toBe('split')
+    f.setRect('[data-app-shell-titlebar-slot="main"]', f.rect(290, 0, 545.5625, 44))
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
+    f.setRect('[data-app-shell-titlebar-slot="main"]', f.rect(290, 0, 550.5625, 44))
+    header.parentElement!.removeAttribute('data-app-shell-compact-page-gutter')
+    expect(resolveManagerSplitTitlebarSeat(f.document)).toBeUndefined()
+    expect(title.contains(obstacle)).toBe(true)
+  })
+
   it('rejects ambiguous native tab identity or a title span that intersects the right strip', () => {
     const f = fixture()
     f.element('[role="tab"]').setAttribute('aria-selected', 'false')
