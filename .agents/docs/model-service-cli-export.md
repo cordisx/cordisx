@@ -45,7 +45,18 @@ be migrated as portable service configuration.
 ## Values and file output
 
 Values are omitted by default. The export retains variable names so they can be
-completed on the target machine. Explicitly include saved user environment values:
+completed on the target machine. When values are missing, stderr prominently lists
+the variable names and says services depending on them cannot be used on the target
+until those values are completed. The export still succeeds without prompting.
+
+For a default export with missing values, stderr also prints a copyable
+`--include-values` command preserving the selected profile, services/models or
+`--all`. Stdout output remains `--output -`; file output uses a different
+`<original-path>.with-values` file and never automatically adds `--force`.
+Choose another path if that file exists, or explicitly add `--force` if replacing
+that regular file is intended. Re-export is a suggestion, not an automatic action.
+
+Explicitly include saved user environment values:
 
 ```sh
 cordisx model export --service codex-config:gateway --include-values --output ./models-private.txt
@@ -59,6 +70,11 @@ tokens, login sessions, secret headers or managed tokens. Inline credentials
 become empty target variable placeholders. The existing portable contract also
 supports saved variable descriptions and generator scripts; review scripts before
 sharing the file or running a generator on the target.
+
+Even with `--include-values`, unavailable or disabled values and inline-token
+placeholders remain missing. The warning still lists those names and requires
+completing them on the target; this flag does not guarantee a ready-to-use service.
+No missing-variable/re-export warning is added when there are no variable dependencies.
 
 Files are atomically published with mode `0600`. The parent directory must exist.
 Existing files are refused unless `--force` explicitly requests replacement of a
@@ -109,3 +125,49 @@ not truncate a catalog to fit a successful response.
    Manager's model list. Confirm the imported variables are enabled and available
    before using a service. Follow any restart requirement shown for environment
    changes. Install and log in to nonportable provider plugins separately.
+
+## AI operation
+
+This is the AI-facing procedure for `cordisx` and its Docs route. Check installed
+`cordisx model export --help` before using version-sensitive commands.
+
+- Use the read-only `--list` inventory to select service/model IDs. Identify variable
+  dependencies from an authorized default value-free export and its stderr warnings
+  (or the formal export-preparation surface when available). Do not read credential
+  files, tokens or databases to discover or fill values, and do not expose values
+  while inspecting dependencies.
+- Before a value-bearing export, tell the user the required variable names, that
+  values are excluded by default and must be completed on the target, and that
+  `--include-values` includes only saved, enabled, referenced user variables in
+  **unencrypted** portable text. Ask whether to include those values. Use the flag
+  only after an explicit user choice; honor an already explicit choice in the
+  current session without asking again. Without that choice, keep the default
+  value-free export and clearly report the missing names and target completion.
+- Preserve the selected profile and exact service/model selection when following
+  the printed re-export suggestion. Use a new output path or explicitly requested
+  replacement; do not automatically overwrite the prior export. Ordinary CLI
+  invocation itself remains noninteractive.
+- After either mode, inspect stderr. Even an explicitly approved `--include-values`
+  export can still lack disabled/unavailable values or inline-token placeholders.
+  List those missing names and target completion steps; do not describe the service
+  as ready to use. Aiden/TraeX and other managed login sessions cannot be included;
+  install the provider plugin and log in on the target.
+
+Example after the user requested an export and a default export reported `TEST_KEY`:
+
+> AI: This selection needs `TEST_KEY`. The current export contains its name without
+> its value, so it must be filled on the target before use. Include the saved,
+> enabled value in an unencrypted export file, or keep the value-free file?
+>
+> User: Include the saved value.
+
+After that explicit choice, an example command is:
+
+```sh
+cordisx model export --profile work --service codex-config:gateway --model exact-model-id --include-values --output ./models-with-values.txt
+```
+
+If it still reports `TEST_KEY` missing, tell the user to fill `TEST_KEY` in the target
+Manager Import dialog. Do not fetch a substitute from the shell, login state or
+credential files. This choice does not grant other permissions or bypass native
+approval controls.

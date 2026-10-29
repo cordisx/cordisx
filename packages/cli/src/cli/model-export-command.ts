@@ -44,6 +44,19 @@ export async function writeModelExport(file: string, text: string, force: boolea
   }
 }
 
+function shellArgument(value: string): string {
+  return /^[A-Za-z0-9_./:-]+$/u.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'"
+}
+
+function exportWithValuesCommand(invocation: ModelExportInvocation, profileId: string, file?: string): string {
+  const args = ['cordisx', 'model', 'export', '--profile', profileId]
+  if (invocation.all) args.push('--all')
+  for (const service of invocation.services) args.push('--service', service)
+  for (const model of invocation.modelIds) args.push('--model', model)
+  args.push('--include-values', '--output', file === undefined ? '-' : `${file}.with-values`)
+  return args.map(shellArgument).join(' ')
+}
+
 export async function runModelExportCommand(
   invocation: ModelExportInvocation,
   runtime: CordisXCliRuntime,
@@ -125,12 +138,29 @@ export async function runModelExportCommand(
   stderr.write(`Exported ${result.services} service(s), ${result.models} model(s) to ${file ?? 'stdout'}.\n`)
   if (invocation.includeValues) {
     stderr.write(
-      'UNENCRYPTED portable text: saved user environment values may be included. Store and share privately.\n',
+      'UNENCRYPTED portable text: --include-values includes only saved, enabled user variables referenced by these services. Store and share privately.\n',
     )
   }
   stderr.write('Copy the complete portable text into the target CordisX Manager > Model services > Import.\n')
   if (result.missingVariables.length) {
-    stderr.write(`Complete these variables in the target Import dialog: ${result.missingVariables.join(', ')}.\n`)
+    stderr.write(
+      `[cordisx] WARNING: Variable values ${
+        invocation.includeValues ? 'are still missing after --include-values' : 'were not included'
+      }: ${result.missingVariables.join(', ')}.\n`
+        + 'The target machine cannot use services requiring these variables until their values are completed in the target Import dialog.\n',
+    )
+    if (!invocation.includeValues) {
+      stderr.write('To re-export the same profile and selection with saved values, run:\n')
+      stderr.write(`${exportWithValuesCommand(invocation, profileId, file)}\n`)
+      if (file !== undefined) {
+        stderr.write(
+          'This uses a different output file. If it already exists, choose another path or explicitly add --force to replace a regular file. The original export is not overwritten.\n',
+        )
+      }
+      stderr.write(
+        '--include-values includes only saved, enabled user variables referenced by these services. The portable text is UNENCRYPTED; values unavailable there still need completing on the target.\n',
+      )
+    }
   }
   stderr.write(
     'Review and confirm Import, then verify the imported service names and exact model IDs in the model list. Plugin-managed services require installing their plugin and logging in on the target machine.\n',

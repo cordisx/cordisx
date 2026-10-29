@@ -38,7 +38,10 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
-async function fixture(options: { inline?: boolean; unsupported?: boolean; count?: number; large?: boolean } = {}) {
+async function fixture(
+  options: { inline?: boolean; unsupported?: boolean; count?: number; large?: boolean; withoutVariables?: boolean } =
+    {},
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-model-export-'))
   roots.push(root)
   const codexHome = path.join(root, 'codex')
@@ -89,12 +92,36 @@ async function fixture(options: { inline?: boolean; unsupported?: boolean; count
     await runCordisXCli(['model', 'export', ...args], runtime)
     return stdout.join('\n')
   }
-  return { root, configPath, codexHome, env, stdout, stderr, runtime, run, models }
+  return {
+    root,
+    configPath,
+    codexHome,
+    env,
+    stdout,
+    stderr,
+    runtime,
+    run,
+    models,
+    withoutVariables: options.withoutVariables,
+  }
 }
 
 async function active(f: Awaited<ReturnType<typeof fixture>>, unsupported = false) {
   const native = await NativeCatalogManagement.open({
-    load: () => codexConfigModelProviders(f.codexHome, { gateway: 'models.json' }),
+    load: async () => {
+      const projection = await codexConfigModelProviders(f.codexHome, { gateway: 'models.json' })
+      return f.withoutVariables
+        ? {
+          ...projection,
+          portableEnvironment: new Map(),
+          portableConnections: new Map(
+            [...projection.portableConnections ?? []].map((
+              [id, connection],
+            ) => [id, { endpoint: connection.endpoint, protocol: connection.protocol, auth: connection.auth }]),
+          ),
+        }
+        : projection
+    },
   })
   const managed = await ManagedCatalogComposition.open({ homeDir: f.root, profileId: 'work', responsesAvailable: true })
   closes.push(() => managed.close())
@@ -215,7 +242,16 @@ describe('CLI portable model export', () => {
     expect(await readFile(f.configPath, 'utf8')).toBe(before)
     expect(await readdir(f.root)).not.toContain('state')
     expect(f.stderr.join('')).toContain('Manager > Model services > Import')
-    expect(f.stderr.join('')).toContain('TEST_KEY')
+    expect(f.stderr.join('')).toContain('WARNING: Variable values were not included: TEST_KEY')
+    expect(f.stderr.join('')).toContain('cannot use services requiring these variables')
+    expect(f.stderr.join('')).toContain(
+      'cordisx model export --profile work --service codex-config:gateway --model model-1 --include-values --output -',
+    )
+    expect(f.stderr.join('')).toContain('only saved, enabled user variables referenced by these services')
+    expect(f.stderr.join('')).toContain('UNENCRYPTED')
+    for (const secret of ['saved-user-value', 'PROCESS_ENV_VALUE', 'SECRET_HEADER']) {
+      expect(f.stderr.join('')).not.toContain(secret)
+    }
     expect(f.stdout).toHaveLength(1)
   })
 
@@ -225,11 +261,18 @@ describe('CLI portable model export', () => {
       environment: [{ name: 'TEST_KEY', value: 'saved-user-value' }],
     })
     expect(f.stderr.join('')).toContain('UNENCRYPTED')
+    expect(f.stderr.join('')).not.toContain('WARNING: Variable values')
+    expect(f.stderr.join('')).not.toContain('To re-export')
     const inline = await fixture({ inline: true })
     const bundle = decoded(await inline.run(['--service', 'codex-config:gateway', '--include-values']))
     expect(JSON.stringify(bundle)).not.toContain('INLINE_PRIVATE_TOKEN')
     expect(bundle).toMatchObject({ environment: [{ value: '' }] })
-    expect(inline.stderr.join('')).toContain('CORDISX_MODEL_SERVICE_KEY')
+    expect(inline.stderr.join('')).toContain(
+      'WARNING: Variable values are still missing after --include-values: CORDISX_MODEL_SERVICE_KEY',
+    )
+    expect(inline.stderr.join('')).toContain('cannot use services requiring these variables')
+    expect(inline.stderr.join('')).not.toContain('To re-export')
+    expect(inline.stderr.join('')).not.toContain('INLINE_PRIVATE_TOKEN')
   })
 
   it('uses the production RPC service for complete lists and native plus managed --all exports', async () => {
@@ -244,6 +287,7 @@ describe('CLI portable model export', () => {
     expect(JSON.stringify(result)).not.toContain('saved-user-value')
     expect(modelExport).toHaveBeenCalledTimes(2)
     expect(f.stderr.join('')).not.toContain('Offline')
+    expect(f.stderr.join('')).toContain('cordisx model export --profile work --all --include-values --output -')
     const managedId = list.services.find((service: any) => service.title === 'Managed').bindingRef
     expect(decoded(await f.run(['--service', managedId, '--include-values']))).toMatchObject({
       environment: [{ value: 'saved-user-value' }],
@@ -332,6 +376,8 @@ describe('CLI portable model export', () => {
     const bundle = decoded(await f.run(['--service', 'codex-config:gateway', '--include-values']))
     expect(bundle).toMatchObject({ environment: [{ name: 'TEST_KEY', value: '' }] })
     expect(JSON.stringify(bundle)).not.toContain('PROCESS_ENV_VALUE')
+    expect(f.stderr.join('')).toContain('WARNING: Variable values are still missing after --include-values: TEST_KEY')
+    expect(f.stderr.join('')).not.toContain('disabled-secret')
   })
 
   it('rejects partial authority output and bundle connection overflow', async () => {
@@ -408,6 +454,61 @@ describe('CLI portable model export', () => {
     await expect(f.run(['--service', 'codex-config:gateway'])).rejects.toThrow('Model export unavailable')
     expect(f.stdout).toEqual([])
     expect(f.stderr.join('')).not.toContain('Exported')
+  })
+
+  it('prints a runnable same-selection retry into a new private file without overwriting the original', async () => {
+    const f = await fixture()
+    const file = path.join(f.root, "models '$(printf unsafe)' private.txt")
+    await f.run([
+      '--profile',
+      'work',
+      '--service',
+      'codex-config:gateway',
+      '--model',
+      'model-1',
+      '--output',
+      file,
+      '--force',
+    ])
+    const original = await readFile(file, 'utf8')
+    const command = f.stderr.join('').split('\n').find(line => line.startsWith('cordisx model export '))!
+    expect(command).toContain('--profile work --service codex-config:gateway --model model-1 --include-values --output')
+    expect(command).not.toContain('--force')
+    expect(f.stderr.join('')).toContain('different output file')
+    expect(f.stderr.join('')).toContain('explicitly add --force')
+    expect(f.stdout).toEqual([])
+    const retry = spawnSync('/bin/sh', [
+      '-c',
+      'cordisx() { exec "$CORDISX_TEST_NODE" "$CORDISX_TEST_CLI" "$@"; }\n' + command,
+    ], {
+      env: {
+        ...process.env,
+        ...f.env,
+        CORDISX_TEST_NODE: process.execPath,
+        CORDISX_TEST_CLI: path.resolve('packages/cli/dist/src/cli.js'),
+      },
+      encoding: 'utf8',
+    })
+    expect(retry.status, retry.stderr).toBe(0)
+    expect(retry.stdout).toBe('')
+    expect(await readFile(file, 'utf8')).toBe(original)
+    expect(decoded(await readFile(`${file}.with-values`, 'utf8'))).toMatchObject({
+      environment: [{ value: 'saved-user-value' }],
+      connections: [{ models: [{ id: 'model-1' }] }],
+    })
+    expect((await lstat(`${file}.with-values`)).mode & 0o777).toBe(0o600)
+    expect(retry.stderr).not.toContain('WARNING: Variable values')
+  })
+
+  it('adds no missing-variable warning or retry suggestion for a portable bundle without variables', async () => {
+    const f = await fixture({ withoutVariables: true })
+    await active(f)
+    const bundle = decoded(await f.run(['--service', 'codex-config:gateway']))
+    expect(bundle.version).toBe(1)
+    expect(f.stdout).toHaveLength(1)
+    expect(f.stderr.join('')).not.toContain('WARNING: Variable values')
+    expect(f.stderr.join('')).not.toContain('--include-values')
+    expect(f.stderr.join('')).not.toContain('To re-export')
   })
 
   it('binds the export callback through production run assembly without starting a native process', async () => {
