@@ -253,4 +253,33 @@ describe('managed service plugin lifecycle participant', () => {
     unsubscribeNativeChanges()
     await runtime.dispose()
   })
+  it('rejects a coupled component update before recreating an unchanged service owner', async () => {
+    const first = activation(1, 'aiden-old')
+    const partner = { ...first.plugins[0]!, id: 'partner', moduleGeneration: 'partner-old' }
+    const previous = { ...first, plugins: [...first.plugins, partner] }
+    const old = fleet('aiden-old', 'authenticated')
+    const activate = vi.fn(async () => old.value)
+    const base = new BaseRuntime()
+    const runtime = new ManagedServicePluginLifecycleRuntime({
+      runtime: base,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      activate,
+    })
+    await runtime.initialize(previous)
+    const candidate = { ...activation(2, 'aiden-new'), plugins: [...activation(2, 'aiden-new').plugins, partner] }
+    await expect(runtime.stage({
+      transactionId: 'coupled-update',
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'aiden',
+      affectedPluginIds: ['aiden'],
+    })).rejects.toThrow('dependency component contains an unchanged owner')
+    expect(activate).toHaveBeenCalledOnce()
+    await runtime.rollback('coupled-update')
+    expect(old.dispose).not.toHaveBeenCalled()
+    await runtime.dispose()
+    expect(old.dispose).toHaveBeenCalledOnce()
+  })
 })

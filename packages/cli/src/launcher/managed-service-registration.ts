@@ -12,6 +12,8 @@ export async function registerManagedService(input: {
   readonly revision: `sha256:${string}`
   readonly schemas: ManagedServiceSchemaRegistry
   readonly homeDir: string
+  readonly reservedLoopbackPorts?: readonly number[]
+  readonly reservedServiceKeys?: readonly string[]
   readonly environment?: NodeJS.ProcessEnv
   readonly projectEnvironment?: (input: {
     readonly owner: ManagedServiceOwnerV1
@@ -25,6 +27,14 @@ export async function registerManagedService(input: {
 }): Promise<ManagedServiceRecord> {
   const { access, definition, revision } = input
   await input.schemas.validateDefinition(definition)
+  if (
+    (definition.discovery.kind === 'fixed-loopback'
+      && input.reservedLoopbackPorts?.includes(definition.discovery.port))
+    || (definition.discovery.kind !== 'host-assigned-loopback'
+      && input.reservedServiceKeys?.includes(`${access.owner.pluginId}\u0000${definition.serviceId}`))
+  ) {
+    throw new Error('managed service update requires restart: prior generation holds the exclusive endpoint')
+  }
   if (definition.serviceId !== access.declaration.id) throw new Error('managed service definition id mismatch')
   if (!/^sha256:[a-f0-9]{64}$/.test(revision)) throw new Error('managed service revision is invalid')
   if (!access.owner.sourceDigest.startsWith('sha256:')) throw new Error('managed service source digest is invalid')

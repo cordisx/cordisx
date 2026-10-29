@@ -56,6 +56,31 @@ while claiming a plugin hot reload. A runtime ABI mismatch fails staging and
 reports that a compatible CordisX runtime is required; it does not silently
 apply an app restart.
 
+## Managed backend replacement
+
+The launcher retains unchanged managed backend dependency components during a
+package transaction. A component includes every service of a plugin and the
+connected Node context-service providers and consumers. Candidate activation
+loads the full selected package tuple for dependency validation, then starts
+only changed components. Unchanged components keep their process ownership,
+registration and source bindings, native sessions, and UI subscriptions. Commit
+cleanup releases only retired components; rollback releases only candidate
+components. Closing the owning launcher releases each retained component once.
+
+A component that also contains an unchanged owner cannot be partially replaced;
+the operation fails before starting it and reports that a restart is required.
+The Host does not silently enlarge the accepted affected closure.
+
+The current managed-service contract has no reversible quiesce and resume
+operation for an exclusive endpoint. A candidate fixed-loopback service cannot
+borrow or launch against a prior-generation endpoint. Replacing the same
+fixed-loopback or restricted-port-file service is rejected before its
+registration starts authentication or process preparation, with `update
+requires restart`. The prior active services remain available. This failure
+neither queues a next-start installation nor authorizes the Host to restart a
+Codex window or terminate a borrowed process. A service using an independently
+assigned loopback endpoint may stage alongside the old generation.
+
 ## Package source and immutable store
 
 An `inspect-source` request contains one validated
