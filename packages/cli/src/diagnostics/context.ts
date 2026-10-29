@@ -103,3 +103,11 @@ export function bindDiagnostic(): (event: DiagnosticEvent) => void {
     } catch { /* Best effort observer. */ }
   }
 }
+
+/** Restore the owning log context when an existing launch callback crosses an event boundary. */
+export function bindDiagnosticContext<Args extends unknown[], Result>(
+  operation: (...args: Args) => Result,
+): (...args: Args) => Result {
+  const sink = context.getStore()
+  return (...args) => sink ? context.run(sink, () => operation(...args)) : operation(...args)
+}

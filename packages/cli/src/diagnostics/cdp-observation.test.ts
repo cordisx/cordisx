@@ -20,7 +20,9 @@ it('records HTTP rejection of the existing CDP handshake without collecting head
         () => CdpSession.connect(`ws://127.0.0.1:${address.port}/`),
       ),
     ).rejects.toThrow('Unexpected server response: 500')
-    expect(events).toContainEqual({ event: 'cdp-handshake-failed', phase: 'connect', statusCode: 500 })
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'cdp-handshake-failed', phase: 'connect', statusCode: 500 }),
+    )
     expect(JSON.stringify(events)).not.toContain('PRIVATE')
   } finally {
     server.closeAllConnections()

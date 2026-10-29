@@ -1,4 +1,4 @@
-import { bindDiagnostic, diagnostic, diagnosticRef } from '../diagnostics/context.js'
+import { bindDiagnostic, bindDiagnosticContext, diagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -280,7 +280,7 @@ export async function createSupervisorRuntime(
       throw error
     }
   }
-  return {
+  const runtime: Awaited<ReturnType<typeof createSupervisorRuntime>> = {
     mainInspector: selectedHome !== undefined,
     ...(startupNavigation === undefined ? {} : { startupNavigation }),
     async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
@@ -401,5 +401,10 @@ export async function createSupervisorRuntime(
       await releaseStartupOperation?.().catch(() => undefined)
       releaseStartupOperation = undefined
     },
+  }
+  return {
+    ...runtime,
+    markHostLaunched: bindDiagnosticContext(runtime.markHostLaunched),
+    markReady: bindDiagnosticContext(runtime.markReady),
   }
 }

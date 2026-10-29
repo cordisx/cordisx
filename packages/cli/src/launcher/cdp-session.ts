@@ -1,4 +1,4 @@
-import { bindDiagnostic, diagnosticId } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticId, diagnosticRef } from '../diagnostics/context.js'
 import WebSocket from 'ws'
 
 export const CDP_REQUEST_TIMEOUT_MS = 5_000
@@ -47,7 +47,11 @@ export class CdpSession {
   }>()
   private readonly eventListeners = new Map<string, Set<(params: Record<string, unknown>) => void>>()
 
-  private constructor(private readonly socket: WebSocket) {
+  private constructor(
+    private readonly socket: WebSocket,
+    private readonly endpoint: { resourceRef: string; debugPort: number | undefined },
+  ) {
+    this.emitDiagnostic({ event: 'cdp-connected', requestRef: this.connectionRef, ...endpoint })
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as CdpResponse
       if (message.method !== undefined) {
@@ -61,7 +65,12 @@ export class CdpSession {
       else callback.resolve(message.result ?? {})
     })
     socket.on('close', () => {
-      this.emitDiagnostic({ event: 'cdp-connection-closed', requestRef: this.connectionRef, count: this.pending.size })
+      this.emitDiagnostic({
+        event: 'cdp-connection-closed',
+        requestRef: this.connectionRef,
+        ...this.endpoint,
+        count: this.pending.size,
+      })
       this.closed = true
       for (const callback of this.pending.values()) callback.reject(new Error('CDP connection closed'))
       this.pending.clear()
@@ -70,19 +79,24 @@ export class CdpSession {
 
   static async connect(url: string): Promise<CdpSession> {
     const emit = bindDiagnostic()
+    const address = new URL(url)
+    const endpoint = {
+      resourceRef: diagnosticRef(address.pathname.split('/').at(-1) ?? ''),
+      debugPort: address.port ? Number(address.port) : undefined,
+    }
     const socket = new WebSocket(url, { handshakeTimeout: 5_000 })
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve)
       socket.once('error', reject)
       socket.once('unexpected-response', (_request, response) => {
         // Inspect no headers or body. This is the existing handshake, not another connection.
-        emit({ event: 'cdp-handshake-failed', phase: 'connect', statusCode: response.statusCode })
+        emit({ event: 'cdp-handshake-failed', phase: 'connect', ...endpoint, statusCode: response.statusCode })
         response.resume()
         reject(new Error(`Unexpected server response: ${String(response.statusCode)}`))
         socket.terminate()
       })
     })
-    return new CdpSession(socket)
+    return new CdpSession(socket, endpoint)
   }
 
   send(
@@ -97,7 +111,13 @@ export class CdpSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        this.emitDiagnostic({ event: 'cdp-request-deadline', requestRef: this.connectionRef, method, timeoutMs })
+        this.emitDiagnostic({
+          event: 'cdp-request-deadline',
+          requestRef: this.connectionRef,
+          ...this.endpoint,
+          method,
+          timeoutMs,
+        })
         reject(new Error(`CDP request timed out: ${method}`))
       }, timeoutMs)
       this.pending.set(id, {

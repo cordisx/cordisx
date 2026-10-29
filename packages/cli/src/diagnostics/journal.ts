@@ -17,6 +17,7 @@ const NUMBERS = new Set([
   'deadline',
   'pid',
   'hostPid',
+  'debugPort',
   'exitCode',
   'statusCode',
   'count',

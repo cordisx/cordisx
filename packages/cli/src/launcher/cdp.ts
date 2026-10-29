@@ -1,4 +1,4 @@
-import { bindDiagnostic, diagnosticError } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticError, diagnosticRef } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
@@ -463,6 +463,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ? 'production'
               : undefined
             watcherStage = 'installation'
+            diagnostic({
+              event: 'cdp-target-admitted',
+              phase: 'installation',
+              resourceRef: diagnosticRef(target.id),
+              debugPort: options.port,
+              state: startupSeed?.id === target.id ? 'owned-startup-seed' : 'native-document',
+            })
             startupStage('renderer-install-start')
             const activateStartupDocument = startupSeed?.id === target.id && pendingStartupNavigation !== undefined
               ? async (identifier: string): Promise<void> => {
