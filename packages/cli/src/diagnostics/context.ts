@@ -68,7 +68,7 @@ function classifyDiagnosticError(
     if (error.message.startsWith('CDP request timed out:')) {
       return { errorCode: 'CDP_DEADLINE', errorClass: 'local-cdp' }
     }
-    const http = /^Unexpected server response: ([1-5][0-9]{2})$/u.exec(error.message)
+    const http = /^(?:Unexpected server response: |CDP target list returned HTTP )([1-5][0-9]{2})$/u.exec(error.message)
     if (http) return { errorCode: 'HTTP_RESPONSE', errorClass: 'http-response', statusCode: Number(http[1]) }
   }
   const candidate = error !== null && typeof error === 'object' ? (error as { code?: unknown }).code : undefined

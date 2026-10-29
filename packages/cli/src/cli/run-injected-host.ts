@@ -1,4 +1,4 @@
-import { bindDiagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
@@ -212,6 +212,7 @@ export async function runInjectedHost(input: {
     if (input.prelaunchedHost === undefined) {
       const hidden = input.hiddenUntilReady === true
       const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
+      diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector === true, verified: mainInspector })
       if (hidden && !mainInspector) throw new Error('Hidden Host launch requires an owned main inspector')
       input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
       const hiddenLaunch = hidden

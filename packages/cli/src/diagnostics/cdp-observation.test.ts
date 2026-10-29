@@ -1,7 +1,8 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { WebSocketServer } from 'ws'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { watchAndInject } from '../launcher/cdp.js'
 import { CdpSession } from '../launcher/cdp-session.js'
 import { diagnosticError, type DiagnosticEvent, withDiagnostics } from './context.js'
 
@@ -68,4 +69,31 @@ it('classifies bounded nested protocol failures without persisting arbitrary err
     },
   })
   expect(diagnosticError(hostile)).toEqual({ errorCode: 'unknown', errorClass: 'unknown' })
+})
+it('records changed retry failures and recovery on the production watcher without retaining response content', async () => {
+  const events: DiagnosticEvent[] = []
+  const abort = new AbortController()
+  let calls = 0
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = vi.fn(async () => {
+    calls++
+    if (calls < 4) return new Response('PRIVATE_RESPONSE', { status: calls === 3 ? 503 : 500 })
+    abort.abort()
+    return new Response('[]', { status: 200 })
+  }) as typeof fetch
+  try {
+    await withDiagnostics(
+      { emit: event => events.push(event) },
+      () => watchAndInject({ port: 43123, source: 'unused', signal: abort.signal }),
+    )
+    expect(events.filter(event => event.event === 'watcher-retry')).toEqual([
+      expect.objectContaining({ phase: 'target-list', statusCode: 500, count: 1 }),
+      expect.objectContaining({ phase: 'target-list', statusCode: 503, count: 3 }),
+    ])
+    expect(events).toContainEqual(expect.objectContaining({ event: 'watcher-recovered', count: 3 }))
+    expect(JSON.stringify(events)).not.toContain('PRIVATE')
+  } finally {
+    abort.abort()
+    globalThis.fetch = originalFetch
+  }
 })

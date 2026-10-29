@@ -314,6 +314,8 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     )
   }
   let watcherFailure: unknown
+  let retryCount = 0
+  let retryFingerprint: string | undefined
   let readinessFailure:
     | Readonly<{ error: unknown; attemptedReloadTarget: 'Vite' | 'production' | undefined }>
     | undefined
@@ -510,6 +512,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             beginReadiness(target, attemptedReloadTarget)
           }
         })
+        if (retryCount > 0) {
+          diagnostic({ event: 'watcher-recovered', phase: watcherStage, count: retryCount })
+          retryCount = 0
+          retryFingerprint = undefined
+        }
       } catch (error) {
         if (options.signal.aborted) {
           if (error instanceof support.CdpInstallationAbortedError) break
@@ -522,6 +529,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               error instanceof Error ? error.message : String(error)
             }`,
           )
+        }
+        const detail = diagnosticError(error)
+        const fingerprint = `${watcherStage}:${detail.errorCode}:${detail.statusCode ?? ''}`
+        retryCount++
+        if (fingerprint !== retryFingerprint) {
+          diagnostic({ event: 'watcher-retry', phase: watcherStage, count: retryCount, ...detail })
+          retryFingerprint = fingerprint
         }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
       }
@@ -538,6 +552,14 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     watcherFailure = error
     lifecycle('watcher-failed')
   } finally {
+    if (retryCount > 0) {
+      diagnostic({
+        event: 'watcher-retry-stopped',
+        phase: watcherStage,
+        count: retryCount,
+        aborted: options.signal.aborted,
+      })
+    }
     await Promise.allSettled([...readinessOperations])
     if (watcherFailure === undefined && readinessFailure !== undefined) {
       watcherStage = 'readiness'
