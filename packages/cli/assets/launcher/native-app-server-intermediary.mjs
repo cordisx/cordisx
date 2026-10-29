@@ -62,7 +62,7 @@ let closed = false
 let inputQueue = Promise.resolve()
 let droppedDiagnostics = 0
 let pendingDiagnostics = 0
-const turnDiagnostics = new NativeTurnDiagnostics(event => {
+const emitDiagnostic = event => {
   if (!closed && !control.destroyed && control.writableLength < 256 * 1024 && pendingDiagnostics < 256) {
     pendingDiagnostics++
     void ready.then(async () => {
@@ -84,7 +84,54 @@ const turnDiagnostics = new NativeTurnDiagnostics(event => {
       await write(control, { type: 'diagnostic', id: `diagnostic-${++sequence}`, ...event })
     }).catch(() => undefined).finally(() => pendingDiagnostics--)
   } else if (!closed) droppedDiagnostics++
-})
+}
+const turnDiagnostics = new NativeTurnDiagnostics(emitDiagnostic)
+const nativeStartedAt = performance.now()
+let nativeObservation = 0
+let initializeRequestId
+let initialized = false
+let firstClosingPhase
+let nativeExitCode
+let nativeExitSignal
+const nativeLifecycle = (phase, details = {}) => {
+  if (
+    firstClosingPhase === undefined
+    && [
+      'desktop-input-ended',
+      'child-exited',
+      'child-spawn-failed',
+      'child-input-error',
+      'desktop-output-error',
+      'control-closed',
+      'control-error',
+      'control-authentication-failed',
+    ].includes(phase)
+  ) firstClosingPhase = phase
+  if (phase === 'initialize-response') initialized = details.verified === true
+  if (phase === 'child-exited') {
+    nativeExitCode = details.exitCode
+    nativeExitSignal = details.signal
+  }
+  // Fixed metadata only. stderr preserves terminal ordering if the existing control socket is already closed.
+  const event = {
+    event: 'model-native-lifecycle',
+    phase,
+    count: ++nativeObservation,
+    elapsedMs: Math.round(performance.now() - nativeStartedAt),
+    state: firstClosingPhase === undefined ? initialized ? 'initialized' : 'starting' : 'closing',
+    reason: firstClosingPhase ?? 'none',
+    verified: initialized,
+    exitCode: nativeExitCode,
+    signal: nativeExitSignal,
+    ...details,
+  }
+  try {
+    process.stderr.write(`[cordisx-native] ${JSON.stringify(event)}\n`, () => {})
+    emitDiagnostic(event)
+  } catch { /* Observation never controls native transport. */ }
+}
+const nativeErrorCode = error =>
+  ['ENOENT', 'EACCES', 'EPERM', 'EPIPE', 'ECONNRESET', 'ECONNREFUSED'].includes(error?.code) ? error.code : 'unknown'
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.test(value)
 const lifecyclePending = threadId => lifecycleUncertain || [...lifecycleCalls.values()].includes(threadId)
@@ -96,7 +143,12 @@ const write = (stream, value) =>
     }
     if (stream === child.stdin) {
       try {
-        turnDiagnostics.issued(typeof value === 'string' ? JSON.parse(value) : value)
+        const message = typeof value === 'string' ? JSON.parse(value) : value
+        if (message?.method === 'initialize') {
+          initializeRequestId = message.id
+          nativeLifecycle('initialize-issued')
+        }
+        turnDiagnostics.issued(message)
       } catch {}
     }
     stream.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`, error =>
@@ -206,21 +258,41 @@ const ready = new Promise((resolve, reject) => {
 })
 // A rejected readiness promise must also be observed when no desktop request is queued.
 void ready.catch(() => undefined)
+child.once('spawn', () => nativeLifecycle('child-spawned', { pid: child.pid }))
 control.once('connect', () => {
-  void controlCall('hello', { nonce }).then(authenticate.resolve, error => {
+  nativeLifecycle('control-connected')
+  void controlCall('hello', { nonce }).then(value => {
+    nativeLifecycle('control-authenticated')
+    authenticate.resolve(value)
+  }, error => {
+    nativeLifecycle('control-authentication-failed')
     authenticate.reject(error)
     stop()
   })
 })
-control.on('error', () => {
+control.on('error', error => {
+  nativeLifecycle('control-error', { errorCode: nativeErrorCode(error) })
   authenticate.reject(new Error('Native control unavailable'))
   stop()
 })
-control.on('close', stop)
-child.on('error', stop)
-child.stdin.on('error', stop)
-process.stdout.on('error', stop)
+control.on('close', () => {
+  nativeLifecycle('control-closed')
+  stop()
+})
+child.on('error', error => {
+  nativeLifecycle('child-spawn-failed', { errorCode: nativeErrorCode(error) })
+  stop(error)
+})
+child.stdin.on('error', error => {
+  nativeLifecycle('child-input-error', { errorCode: nativeErrorCode(error) })
+  stop(error)
+})
+process.stdout.on('error', error => {
+  nativeLifecycle('desktop-output-error', { errorCode: nativeErrorCode(error) })
+  stop(error)
+})
 child.on('exit', (code, signal) => {
+  nativeLifecycle('child-exited', { exitCode: code, signal: signal ?? undefined })
   process.exitCode = code ?? (signal ? 1 : 0)
   stop()
 })
@@ -511,6 +583,7 @@ readLines(process.stdin, line => {
   }).catch(stop)
 })
 process.stdin.once('end', () => {
+  nativeLifecycle('desktop-input-ended')
   void inputQueue.finally(() => child.stdin.end())
 })
 
@@ -521,6 +594,10 @@ readLines(child.stdout, line => {
   } catch {
     void write(process.stdout, line).catch(stop)
     return
+  }
+  if (initializeRequestId !== undefined && message.id === initializeRequestId && message.method === undefined) {
+    nativeLifecycle('initialize-response', { verified: message.error === undefined })
+    initializeRequestId = undefined
   }
   turnDiagnostics.received(message)
   if (settle(privateCalls, message, false)) return

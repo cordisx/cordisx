@@ -74,6 +74,7 @@ async function harness(controller?: NativeSubmissionController) {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
+  const closed = once(child, 'close')
   let buffer = ''
   let stderr = ''
   const output: string[] = []
@@ -104,21 +105,63 @@ async function harness(controller?: NativeSubmissionController) {
     completeThreadResume,
     taskRouting,
     read,
+    startupEvents: () =>
+      stderr.trim().split('\n').filter(Boolean).map(line => {
+        expect(line.startsWith('[cordisx-native] ')).toBe(true)
+        const event = JSON.parse(line.slice('[cordisx-native] '.length)) as DiagnosticEvent
+        expect(
+          Object.keys(event).every(key =>
+            [
+              'event',
+              'phase',
+              'count',
+              'elapsedMs',
+              'pid',
+              'exitCode',
+              'signal',
+              'verified',
+              'errorCode',
+              'state',
+              'reason',
+            ].includes(key)
+          ),
+        ).toBe(true)
+        return event
+      }),
     send(value: unknown) {
       child.stdin.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`)
     },
     async close() {
       if (child.exitCode === null && child.signalCode === null) {
         child.stdin.end()
-        await once(child, 'exit')
       }
+      await closed
       await server.close()
-      expect(stderr).toBe('')
+      expect(stderr.trim().split('\n').filter(Boolean).every(line => line.startsWith('[cordisx-native] '))).toBe(true)
     },
   }
 }
 
 describe('native app-server intermediary', () => {
+  it('records initialize, desktop EOF and actual child exit separately without payloads', async () => {
+    const events: DiagnosticEvent[] = []
+    const h = await withDiagnostics({ emit: event => events.push(event) }, () => harness())
+    try {
+      h.send({ id: 'PRIVATE_INITIALIZE_ID', method: 'initialize', params: { input: 'PRIVATE_PAYLOAD' } })
+      await h.read()
+    } finally {
+      await h.close()
+    }
+    const metadata = h.startupEvents()
+    const phases = metadata.map(event => event.phase)
+    expect(phases).toContain('control-authenticated')
+    expect(phases.indexOf('initialize-issued')).toBeLessThan(phases.indexOf('initialize-response'))
+    expect(phases.indexOf('desktop-input-ended')).toBeLessThan(phases.indexOf('child-exited'))
+    expect(metadata).toContainEqual(expect.objectContaining({ phase: 'child-exited', exitCode: 0 }))
+    expect(metadata.at(-1)).toMatchObject({ reason: 'desktop-input-ended', exitCode: 0, verified: true })
+    expect(events).toContainEqual(expect.objectContaining({ event: 'native-control-peer-authenticated' }))
+    expect(JSON.stringify({ metadata, events })).not.toMatch(/PRIVATE/u)
+  })
   it('records request metadata over the existing authenticated control channel while preserving opaque input', async () => {
     const events: DiagnosticEvent[] = []
     await withDiagnostics({ emit: event => events.push(event) }, async () => {

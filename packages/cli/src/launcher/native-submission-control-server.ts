@@ -102,10 +102,12 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
   }
   const server = createServer(socket => {
     if (closed || peer !== undefined) {
+      diagnostic({ event: 'native-control-peer-rejected', reason: closed ? 'disposed' : 'peer-already-connected' })
       socket.destroy()
       return
     }
     peer = socket
+    diagnostic({ event: 'native-control-peer-connected' })
     let buffer = ''
     let active = 0
     const activeIds = new Set<string>()
@@ -113,6 +115,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     socket.setEncoding('utf8')
     socket.on('error', () => socket.destroy())
     socket.on('close', () => {
+      diagnostic({ event: 'native-control-peer-closed', verified: authenticated, aborted: closed })
       clearTimeout(authTimer)
       if (peer === socket) {
         peer = undefined
@@ -141,6 +144,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (value.type === 'hello') {
         if (authenticated || value.nonce !== nonce) throw new Error('Invalid control authentication')
         authenticated = true
+        diagnostic({ event: 'native-control-peer-authenticated' })
         clearTimeout(authTimer)
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
         return
@@ -239,7 +243,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
-          void handle(value).catch(() => socket.destroy())
+          void handle(value).catch(() => {
+            diagnostic({ event: 'native-control-message-rejected', reason: 'protocol-validation' })
+            socket.destroy()
+          })
         } catch {
           socket.destroy()
           return
