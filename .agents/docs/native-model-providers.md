@@ -412,7 +412,12 @@ Native controls remain available when the adapter is unsupported, its audited
 composer seat cannot be found, or the replacement cannot represent the current
 selection. Disposal restores native visibility and removes owned React roots,
 portals, subscriptions, timers and action signals. Reasoning controls remain
-reachable alongside model selection.
+reachable alongside model selection. Managed publications retain optional exact
+route reasoning capabilities through the catalog and expose them to the safe
+model-list tool. Missing discovery metadata remains unknown; the Host does not
+infer new choices from model names or reasoning output. Capability metadata is
+validated and covered by the publication catalog digest. See the
+[managed-service contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/managed-service/README.md#managed-native-provider-reasoning-capabilities).
 
 Modal background isolation (`inert`, `aria-hidden`, or a visible modal dialog)
 does not retire an otherwise valid Composer seat. The replacement remains

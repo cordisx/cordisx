@@ -87,6 +87,73 @@ describe('managed native provider publications', () => {
     expect(Object.isFrozen(publications.resolve('synthetic/provider'))).toBe(true)
   })
 
+  it('preserves and fences reasoning metadata with a capability-sensitive digest', () => {
+    const value = catalog()
+    const reasoningCapabilities = { efforts: ['low', 'high'] as const, defaultEffort: 'high' as const }
+    const routes = value.routes.map(route => ({ ...route, reasoningCapabilities }))
+    const sorted = [...routes].sort((a, b) =>
+      Buffer.compare(
+        Buffer.from(JSON.stringify([a.alias, a.gatewayModelId])),
+        Buffer.from(JSON.stringify([b.alias, b.gatewayModelId])),
+      )
+    )
+    const digest = `sha256:${
+      createHash('sha256').update(
+        JSON.stringify([
+          value.generation,
+          value.defaultAlias,
+          sorted.map(route => [route.alias, route.gatewayModelId, route.reasoningCapabilities]),
+        ]),
+      ).digest('hex')
+    }` as const
+    const input = { providerId: 'gateway', compositionOrigin: 'api', catalog: { ...value, routes, digest } }
+    const result = new ManagedNativeProviderPublications().publish(record(), input)
+    expect(result.status).toBe('accepted')
+    if (result.status !== 'accepted') throw new Error('publication was rejected')
+    const published = result.publication.publication.catalog.routes[0] as typeof routes[number]
+    expect(published.reasoningCapabilities).toEqual(reasoningCapabilities)
+    expect(Object.isFrozen(published.reasoningCapabilities.efforts)).toBe(true)
+    expect(
+      new ManagedNativeProviderPublications().publish(record(), {
+        ...input,
+        catalog: { ...input.catalog, digest: value.digest },
+      }),
+    ).toMatchObject({ status: 'rejected', diagnostic: { code: 'invalid-catalog' } })
+    for (
+      const invalid of [
+        { efforts: [] },
+        { efforts: ['high', 'low'] },
+        { efforts: ['low', 'low'] },
+        { efforts: ['low'], defaultEffort: 'high' },
+        { efforts: ['extreme'] },
+        { efforts: ['low'], endpoint: 'forbidden' },
+      ]
+    ) {
+      const invalidRoutes = routes.map(route => ({ ...route, reasoningCapabilities: invalid }))
+      const invalidSorted = [...invalidRoutes].sort((a, b) =>
+        Buffer.compare(
+          Buffer.from(JSON.stringify([a.alias, a.gatewayModelId])),
+          Buffer.from(JSON.stringify([b.alias, b.gatewayModelId])),
+        )
+      )
+      const invalidDigest = `sha256:${
+        createHash('sha256').update(
+          JSON.stringify([
+            value.generation,
+            value.defaultAlias,
+            invalidSorted.map(route => [route.alias, route.gatewayModelId, invalid]),
+          ]),
+        ).digest('hex')
+      }`
+      expect(
+        new ManagedNativeProviderPublications().publish(
+          record(),
+          malformed({ ...input, catalog: { ...input.catalog, routes: invalidRoutes, digest: invalidDigest } }),
+        ),
+      ).toMatchObject({ status: 'rejected', diagnostic: { code: 'invalid-catalog' } })
+    }
+  })
+
   it('rejects unknown authority fields at every input boundary', () => {
     const catalogValue = catalog()
     const invalidInputs = [

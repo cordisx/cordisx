@@ -90,6 +90,31 @@ describe('native model provider catalog projection', () => {
     expect(dispose).toHaveBeenCalledTimes(4)
   })
 
+  it('carries only declared reasoning metadata from managed routes into the safe selector catalog', async () => {
+    const capabilities = { efforts: ['low', 'high'] as const, defaultEffort: 'high' as const }
+    const dispose = vi.fn()
+    const activation = {
+      nativeProviderIds: ['gateway'],
+      prepareNativeConnection() {
+        const result = connection('gateway', dispose)
+        return {
+          ...result,
+          value: {
+            ...result.value,
+            models: {
+              ...result.value.models,
+              aliases: [{ alias: 'shared', gatewayModelId: 'shared-model', reasoningCapabilities: capabilities }],
+            },
+          },
+        }
+      },
+    } as unknown as ManagedServiceNodeActivation
+    const [provider] = await nativeModelProviderCatalog(activation)()
+    expect(provider?.models[0]?.reasoningCapabilities).toEqual(capabilities)
+    expect(JSON.stringify(provider)).not.toMatch(/token|endpoint|authority/)
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
   it('omits unavailable or malformed providers without retaining their sessions', async () => {
     const dispose = vi.fn()
     const activation = {

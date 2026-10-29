@@ -33,7 +33,7 @@ export function ProviderReasoningSlider({ efforts, value, disabled, pending, fas
   const thumbX = `calc(${visualProgress * 100}% + ${thumbOffset}px)`
   const fillX = visualProgress === 1 ? '100%' : `calc(${thumbX} + 12px)`
   const activeMark = maximum === 0 ? 0 : Math.round(visualProgress * maximum)
-  const unavailable = disabled || efforts.length < 2 || !efforts.includes(value ?? '')
+  const unavailable = disabled || efforts.length < 2
   const hot = !unavailable && !pending && fast
   const particlesEnabled = !unavailable && !pending && (fast || activeMark >= efforts.length - 2)
   const peak = visualProgress === 1

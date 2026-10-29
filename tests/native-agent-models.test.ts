@@ -51,6 +51,42 @@ describe('Agent model-provider tools', () => {
     })
     expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
   })
+  it('discloses catalog reasoning choices without endpoint or credential metadata', async () => {
+    const f = fixture()
+    f.authority.catalog.mockResolvedValueOnce([{
+      providerId: 'configured',
+      pluginId: 'host',
+      title: 'Configured provider',
+      endpoint: 'https://private.invalid',
+      secret: 'never-project',
+      models: [{
+        id: 'shared-model',
+        label: 'Shared model',
+        aliases: [],
+        reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'high' },
+      }],
+    }] as any)
+    const result = await f.handler('list', {})
+    expect(result).toMatchObject({
+      providers: [{ models: [{ reasoningCapabilities: { efforts: ['low', 'high'], defaultEffort: 'high' } }] }],
+    })
+    expect(JSON.stringify(result)).not.toMatch(/never-project|private.invalid|endpoint|secret/)
+    expect(f.authority.reserve).not.toHaveBeenCalled()
+    f.authority.catalog.mockResolvedValueOnce(
+      [{
+        providerId: 'configured',
+        pluginId: 'host',
+        models: [{
+          id: 'shared-model',
+          label: 'Shared model',
+          aliases: [],
+          reasoningCapabilities: { efforts: ['low'], secret: 'never-project' },
+        }],
+      }] as any,
+    )
+    const malformed = await f.handler('list', {})
+    expect(JSON.stringify(malformed)).not.toMatch(/never-project|reasoningCapabilities/)
+  })
   it('rejects unsupported task creation without preparing credentials or mutating a conversation', async () => {
     const f = fixture()
     expect(

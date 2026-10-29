@@ -48,7 +48,7 @@ function renderSlider(props: Partial<React.ComponentProps<typeof ProviderReasoni
     root!.render(
       <ProviderReasoningSlider
         efforts={props.efforts ?? ['low', 'high']}
-        value={props.value ?? 'high'}
+        value={Object.hasOwn(props, 'value') ? props.value : 'high'}
         disabled={props.disabled ?? false}
         pending={props.pending ?? false}
         fast={props.fast ?? false}
@@ -83,6 +83,16 @@ describe('ProviderReasoningSlider', () => {
     expect(slider.getAttribute('aria-valuetext')).toBe('low')
     renderSlider({ efforts: ['medium', 'high'], value: 'high' })
     expect(document.querySelector('input')?.getAttribute('aria-valuetext')).toBe('high')
+  })
+
+  it.each([undefined, 'unknown'])('allows choosing a declared effort when the current value is %s', async value => {
+    const { slider, reasoning, commit } = renderSlider({ value, efforts: ['low', 'high'] })
+    expect(slider.disabled).toBe(false)
+    await act(async () => {
+      reasoning.dispatchEvent(pointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 290 }))
+      reasoning.dispatchEvent(pointerEvent('pointerup', { bubbles: true, clientX: 290 }))
+    })
+    expect(commit).toHaveBeenCalledWith('high')
   })
 
   it('does not submit a draft after the control becomes pending', async () => {

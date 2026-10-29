@@ -6,6 +6,7 @@ import type {
   ManagedNativeProviderPublicationResultV1,
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { createHash } from 'node:crypto'
+import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import type { ManagedServiceRecord } from './managed-service-runtime-record.js'
 
 interface PublicationState {
@@ -48,9 +49,16 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
 
     const aliases = new Set<string>()
     const gatewayModelIds = new Set<string>()
-    const projectedRoutes: { alias: string; gatewayModelId: string }[] = []
+    const projectedRoutes: {
+      alias: string
+      gatewayModelId: string
+      reasoningCapabilities?: ModelReasoningCapabilities
+    }[] = []
     for (const route of routes) {
-      if (!exactObject(route, ['alias', 'gatewayModelId'])) return undefined
+      if (
+        !exactObject(route, ['alias', 'gatewayModelId'])
+        && !exactObject(route, ['alias', 'gatewayModelId', 'reasoningCapabilities'])
+      ) return undefined
       const { alias, gatewayModelId } = route
       if (
         typeof alias !== 'string' || alias.length === 0
@@ -59,7 +67,20 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
       ) return undefined
       aliases.add(alias)
       gatewayModelIds.add(gatewayModelId)
-      projectedRoutes.push({ alias, gatewayModelId })
+      const reasoningCapabilities = route.reasoningCapabilities === undefined
+        ? undefined
+        : parseModelReasoningCapabilities(route.reasoningCapabilities)
+      if (route.reasoningCapabilities !== undefined && reasoningCapabilities === undefined) return undefined
+      const rawEfforts = (route.reasoningCapabilities as { efforts?: unknown } | undefined)?.efforts
+      if (
+        reasoningCapabilities !== undefined
+        && JSON.stringify(rawEfforts) !== JSON.stringify(reasoningCapabilities.efforts)
+      ) return undefined
+      projectedRoutes.push({
+        alias,
+        gatewayModelId,
+        ...(reasoningCapabilities === undefined ? {} : { reasoningCapabilities }),
+      })
     }
     if (!aliases.has(defaultAlias)) return undefined
 
@@ -74,7 +95,13 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
         JSON.stringify([
           generation,
           defaultAlias,
-          canonicalRoutes.map(route => [route.alias, route.gatewayModelId]),
+          canonicalRoutes.map(
+            route => [
+              route.alias,
+              route.gatewayModelId,
+              ...(route.reasoningCapabilities === undefined ? [] : [route.reasoningCapabilities]),
+            ],
+          ),
         ]),
       ).digest('hex')
     }`
@@ -88,6 +115,7 @@ function catalogProjection(value: unknown): ManagedNativeProviderCatalogV1 | und
         Object.freeze({
           alias: route.alias,
           gatewayModelId: route.gatewayModelId,
+          ...(route.reasoningCapabilities === undefined ? {} : { reasoningCapabilities: route.reasoningCapabilities }),
         })
       )),
     })
