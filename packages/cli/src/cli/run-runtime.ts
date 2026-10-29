@@ -37,6 +37,8 @@ export interface CordisXCliRuntime {
   readonly stderr?: Writable
   /** Repository-only seam until the shared management service is composed. */
   readonly internalOpenPluginManagementService?: OpenManagementCommandService
+  /** Test-only stdout terminal capability for the model-export A/B prompt. */
+  readonly internalModelExportStdoutIsTTY?: boolean
   /** Test-only confirmation seam. It confirms a mutation, never plugin permissions. */
   readonly internalManagementConfirm?: (prompt: string) => boolean | Promise<boolean>
   /** Test-only cancellation seam for long-lived `cordisx logs --follow`. */

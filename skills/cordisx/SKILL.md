@@ -20,8 +20,8 @@ The bundled revision and owning source for this entry are recorded in
   [cordisx-docs](../cordisx-docs/SKILL.md).
 - For CLI model-service export or transfer, read the
   [export guide's AI operation](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/model-service-cli-export.md#ai-operation)
-  before choosing whether to include variable values; use its confirmation and
-  missing-variable handling instructions.
+  before final export: handle the preparation's `choice-required` A/B response,
+  honor the user's explicit include/exclude decision, and report missing values.
 - For practical experience, known pitfalls, contextual tradeoffs, and
   evidence-backed workarounds, read
   [cordisx-qa](../cordisx-qa/SKILL.md).

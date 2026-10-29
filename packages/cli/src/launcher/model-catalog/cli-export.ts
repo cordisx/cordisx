@@ -20,6 +20,7 @@ export interface CliExportAuthority {
   export?(request: CatalogTransferExportRequest, authorized: () => boolean): Promise<CatalogTransferExportResult>
 }
 export type CliModelExportResult =
+  | { readonly kind: 'choice-required'; readonly variables: readonly string[] }
   | {
     readonly kind: 'list'
     readonly complete: boolean
@@ -48,8 +49,16 @@ export async function exportCliModelCatalog(
 ): Promise<CliModelExportResult> {
   if (
     !raw || typeof raw !== 'object'
-    || Object.keys(raw).some(key => !['list', 'all', 'services', 'modelIds', 'includeValues'].includes(key))
-    || typeof raw.list !== 'boolean' || typeof raw.all !== 'boolean' || typeof raw.includeValues !== 'boolean'
+    || Object.keys(raw).some(key =>
+      !['list', 'all', 'services', 'modelIds', 'includeValues', 'expectedVariables'].includes(key)
+    )
+    || typeof raw.list !== 'boolean' || typeof raw.all !== 'boolean'
+    || raw.includeValues !== undefined && typeof raw.includeValues !== 'boolean'
+    || raw.expectedVariables !== undefined
+      && (!Array.isArray(raw.expectedVariables)
+        || raw.expectedVariables.some(name =>
+          typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name)
+        ))
     || !Array.isArray(raw.services) || !Array.isArray(raw.modelIds)
     || [...raw.services, ...raw.modelIds].some(id =>
       typeof id !== 'string' || !id || id.length > 512 || /[\0\r\n]/u.test(id)
@@ -114,6 +123,15 @@ export async function exportCliModelCatalog(
   if (!prepared || prepared.status !== 'ok') {
     throw new Error(`Model export preparation rejected: ${prepared?.code ?? 'unavailable'}`)
   }
+  const variableNames = prepared.variables.map(variable => variable.sourceName)
+  if (request.includeValues === undefined && variableNames.length) {
+    return { kind: 'choice-required', variables: variableNames }
+  }
+  if (
+    request.expectedVariables !== undefined
+    && (request.expectedVariables.length !== variableNames.length
+      || variableNames.some(name => !request.expectedVariables!.includes(name)))
+  ) throw new Error('Variable dependencies changed; run export again to choose the current selection')
   // Preparation can contain inline/private credential values. Only named user variables
   // saved in the Home configuration are eligible for the CLI's opt-in value export.
   const variables = prepared.variables.map(variable => {
@@ -129,7 +147,7 @@ export async function exportCliModelCatalog(
   const result = await authority.export?.({
     selections,
     variables,
-    includeValues: request.includeValues && variables.length > 0,
+    includeValues: request.includeValues === true && variables.length > 0,
   }, () => true)
   if (!result || result.status !== 'ok') {
     throw new Error(

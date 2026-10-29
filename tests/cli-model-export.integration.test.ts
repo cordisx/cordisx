@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Writable } from 'node:stream'
+import { PassThrough, Writable } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDefaultHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
@@ -213,6 +213,8 @@ describe('CLI portable model export', () => {
         ['--all', '--force'],
         ['--service', 'x', '--service', 'x'],
         ['--all=true'],
+        ['--service', 'x', '--include-values', '--exclude-values'],
+        ['--list', '--exclude-values'],
         ['--all', '--profile', '../bad'],
         ['--all', '--', '--host'],
       ]
@@ -222,7 +224,15 @@ describe('CLI portable model export', () => {
   it('exports a real offline portable config without values, credentials or writes to the source', async () => {
     const f = await fixture()
     const before = await readFile(f.configPath, 'utf8')
-    const result = await f.run(['--service', 'codex-config:gateway', '--model', 'model-1', '--profile', 'work'])
+    const result = await f.run([
+      '--exclude-values',
+      '--service',
+      'codex-config:gateway',
+      '--model',
+      'model-1',
+      '--profile',
+      'work',
+    ])
     const bundle = decoded(result)
     expect(bundle).toMatchObject({
       version: 2,
@@ -244,11 +254,6 @@ describe('CLI portable model export', () => {
     expect(f.stderr.join('')).toContain('Manager > Model services > Import')
     expect(f.stderr.join('')).toContain('WARNING: Variable values were not included: TEST_KEY')
     expect(f.stderr.join('')).toContain('cannot use services requiring these variables')
-    expect(f.stderr.join('')).toContain(
-      'cordisx model export --profile work --service codex-config:gateway --model model-1 --include-values --output -',
-    )
-    expect(f.stderr.join('')).toContain('only saved, enabled user variables referenced by these services')
-    expect(f.stderr.join('')).toContain('UNENCRYPTED')
     for (const secret of ['saved-user-value', 'PROCESS_ENV_VALUE', 'SECRET_HEADER']) {
       expect(f.stderr.join('')).not.toContain(secret)
     }
@@ -268,7 +273,7 @@ describe('CLI portable model export', () => {
     expect(JSON.stringify(bundle)).not.toContain('INLINE_PRIVATE_TOKEN')
     expect(bundle).toMatchObject({ environment: [{ value: '' }] })
     expect(inline.stderr.join('')).toContain(
-      'WARNING: Variable values are still missing after --include-values: CORDISX_MODEL_SERVICE_KEY',
+      'WARNING: Variable values are still missing after including saved values: CORDISX_MODEL_SERVICE_KEY',
     )
     expect(inline.stderr.join('')).toContain('cannot use services requiring these variables')
     expect(inline.stderr.join('')).not.toContain('To re-export')
@@ -281,13 +286,12 @@ describe('CLI portable model export', () => {
     const list = JSON.parse(await f.run(['--list']))
     expect(list.complete).toBe(true)
     expect(list.services).toHaveLength(2)
-    const result = decoded(await f.run(['--all']))
+    const result = decoded(await f.run(['--exclude-values', '--all']))
     expect(result.connections).toHaveLength(2)
     expect(result.connections.flatMap(connection => connection.models)).toHaveLength(3)
     expect(JSON.stringify(result)).not.toContain('saved-user-value')
     expect(modelExport).toHaveBeenCalledTimes(2)
     expect(f.stderr.join('')).not.toContain('Offline')
-    expect(f.stderr.join('')).toContain('cordisx model export --profile work --all --include-values --output -')
     const managedId = list.services.find((service: any) => service.title === 'Managed').bindingRef
     expect(decoded(await f.run(['--service', managedId, '--include-values']))).toMatchObject({
       environment: [{ value: 'saved-user-value' }],
@@ -299,7 +303,7 @@ describe('CLI portable model export', () => {
     const f = await fixture()
     await active(f, true)
     const file = path.join(f.root, 'export.txt')
-    await expect(f.run(['--all', '--output', file])).rejects.toThrow(/not portable.*Aiden\/TraeX/u)
+    await expect(f.run(['--exclude-values', '--all', '--output', file])).rejects.toThrow(/not portable.*Aiden\/TraeX/u)
     expect(f.stdout).toEqual([])
     await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(f.stderr.join('')).not.toContain('Exported')
@@ -316,17 +320,26 @@ describe('CLI portable model export', () => {
   it('publishes 0600 files atomically, refuses overwrite/symlinks and cleans temporary files', async () => {
     const f = await fixture()
     const file = path.join(f.root, 'models.txt')
-    await f.run(['--service', 'codex-config:gateway', '--output', file])
+    await f.run(['--exclude-values', '--service', 'codex-config:gateway', '--output', file])
     expect(f.stdout).toEqual([])
     expect((await lstat(file)).mode & 0o777).toBe(0o600)
     expect(decoded(await readFile(file, 'utf8')).connections).toHaveLength(1)
     expect(f.stderr.join('')).toContain(file)
     const original = await readFile(file, 'utf8')
-    await expect(f.run(['--service', 'codex-config:gateway', '--output', file])).rejects.toThrow(
+    await expect(f.run(['--exclude-values', '--service', 'codex-config:gateway', '--output', file])).rejects.toThrow(
       'Output already exists',
     )
     expect(await readFile(file, 'utf8')).toBe(original)
-    await f.run(['--service', 'codex-config:gateway', '--model', 'model-0', '--output', file, '--force'])
+    await f.run([
+      '--exclude-values',
+      '--service',
+      'codex-config:gateway',
+      '--model',
+      'model-0',
+      '--output',
+      file,
+      '--force',
+    ])
     expect(decoded(await readFile(file, 'utf8')).connections[0]!.models).toHaveLength(1)
     const alias = path.join(f.root, 'alias.txt')
     await symlink(file, alias)
@@ -354,10 +367,11 @@ describe('CLI portable model export', () => {
 
   it('refuses runtime local endpoints and oversized portable bundles before publishing', async () => {
     const f = await fixture({ unsupported: true })
-    await expect(f.run(['--service', 'codex-config:gateway'])).rejects.toThrow('not portable')
+    await expect(f.run(['--exclude-values', '--service', 'codex-config:gateway'])).rejects.toThrow('not portable')
     const large = await fixture({ count: 900, large: true })
     const file = path.join(large.root, 'large.txt')
-    await expect(large.run(['--service', 'codex-config:gateway', '--output', file])).rejects.toThrow(/too-large/u)
+    await expect(large.run(['--exclude-values', '--service', 'codex-config:gateway', '--output', file])).rejects
+      .toThrow(/too-large/u)
     await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(large.stdout).toEqual([])
   })
@@ -376,7 +390,9 @@ describe('CLI portable model export', () => {
     const bundle = decoded(await f.run(['--service', 'codex-config:gateway', '--include-values']))
     expect(bundle).toMatchObject({ environment: [{ name: 'TEST_KEY', value: '' }] })
     expect(JSON.stringify(bundle)).not.toContain('PROCESS_ENV_VALUE')
-    expect(f.stderr.join('')).toContain('WARNING: Variable values are still missing after --include-values: TEST_KEY')
+    expect(f.stderr.join('')).toContain(
+      'WARNING: Variable values are still missing after including saved values: TEST_KEY',
+    )
     expect(f.stderr.join('')).not.toContain('disabled-secret')
   })
 
@@ -451,53 +467,11 @@ describe('CLI portable model export', () => {
       processStartedAt: await processStartIdentity(process.pid),
     })
     closes.push(() => composition.close())
-    await expect(f.run(['--service', 'codex-config:gateway'])).rejects.toThrow('Model export unavailable')
+    await expect(f.run(['--exclude-values', '--service', 'codex-config:gateway'])).rejects.toThrow(
+      'Model export unavailable',
+    )
     expect(f.stdout).toEqual([])
     expect(f.stderr.join('')).not.toContain('Exported')
-  })
-
-  it('prints a runnable same-selection retry into a new private file without overwriting the original', async () => {
-    const f = await fixture()
-    const file = path.join(f.root, "models '$(printf unsafe)' private.txt")
-    await f.run([
-      '--profile',
-      'work',
-      '--service',
-      'codex-config:gateway',
-      '--model',
-      'model-1',
-      '--output',
-      file,
-      '--force',
-    ])
-    const original = await readFile(file, 'utf8')
-    const command = f.stderr.join('').split('\n').find(line => line.startsWith('cordisx model export '))!
-    expect(command).toContain('--profile work --service codex-config:gateway --model model-1 --include-values --output')
-    expect(command).not.toContain('--force')
-    expect(f.stderr.join('')).toContain('different output file')
-    expect(f.stderr.join('')).toContain('explicitly add --force')
-    expect(f.stdout).toEqual([])
-    const retry = spawnSync('/bin/sh', [
-      '-c',
-      'cordisx() { exec "$CORDISX_TEST_NODE" "$CORDISX_TEST_CLI" "$@"; }\n' + command,
-    ], {
-      env: {
-        ...process.env,
-        ...f.env,
-        CORDISX_TEST_NODE: process.execPath,
-        CORDISX_TEST_CLI: path.resolve('packages/cli/dist/src/cli.js'),
-      },
-      encoding: 'utf8',
-    })
-    expect(retry.status, retry.stderr).toBe(0)
-    expect(retry.stdout).toBe('')
-    expect(await readFile(file, 'utf8')).toBe(original)
-    expect(decoded(await readFile(`${file}.with-values`, 'utf8'))).toMatchObject({
-      environment: [{ value: 'saved-user-value' }],
-      connections: [{ models: [{ id: 'model-1' }] }],
-    })
-    expect((await lstat(`${file}.with-values`)).mode & 0o777).toBe(0o600)
-    expect(retry.stderr).not.toContain('WARNING: Variable values')
   })
 
   it('adds no missing-variable warning or retry suggestion for a portable bundle without variables', async () => {
@@ -509,6 +483,147 @@ describe('CLI portable model export', () => {
     expect(f.stderr.join('')).not.toContain('WARNING: Variable values')
     expect(f.stderr.join('')).not.toContain('--include-values')
     expect(f.stderr.join('')).not.toContain('To re-export')
+  })
+
+  it('returns safe structured choice-required without generating portable text or touching the output file', async () => {
+    const f = await fixture()
+    const { base } = await active(f)
+    const generate = vi.spyOn(base, 'export')
+    const file = path.join(f.root, 'choice.txt')
+    await expect(runCordisXCli(['model', 'export', '--service', 'codex-config:gateway', '--output', file], f.runtime))
+      .rejects.toMatchObject({ code: 'choice-required', exitCode: 2 })
+    const choice = JSON.parse(f.stderr.join(''))
+    expect(choice).toMatchObject({
+      status: 'choice-required',
+      profileId: 'work',
+      variables: ['TEST_KEY'],
+      choices: [{ key: 'A', flag: '--include-values' }, { key: 'B', flag: '--exclude-values' }],
+    })
+    expect(f.stdout).toEqual([])
+    expect(generate).not.toHaveBeenCalled()
+    await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const secret of ['saved-user-value', 'PROCESS_ENV_VALUE', 'SECRET_HEADER']) {
+      expect(f.stderr.join('')).not.toContain(secret)
+    }
+  })
+
+  it.each(['A', 'B'])(
+    'asks before output and generates exactly one final export after terminal choice %s',
+    async choice => {
+      const f = await fixture()
+      const { base } = await active(f)
+      const generate = vi.spyOn(base, 'export')
+      const input = new PassThrough()
+      Object.defineProperty(input, 'isTTY', { value: true })
+      const file = path.join(f.root, 'choice.txt')
+      const pending = runCordisXCli([
+        'model',
+        'export',
+        '--service',
+        'codex-config:gateway',
+        '--model',
+        'model-1',
+        '--output',
+        file,
+      ], { ...f.runtime, stdin: input, internalModelExportStdoutIsTTY: true })
+      await vi.waitFor(() => expect(f.stderr.join('')).toContain('Choose A or B'))
+      expect(generate).not.toHaveBeenCalled()
+      expect(f.stdout).toEqual([])
+      await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+      input.end(`${choice}\n`)
+      await pending
+      expect(generate).toHaveBeenCalledOnce()
+      const bundle = decoded(await readFile(file, 'utf8'))
+      expect(bundle).toMatchObject({
+        environment: [choice === 'A' ? { name: 'TEST_KEY', value: 'saved-user-value' } : { name: 'TEST_KEY' }],
+        connections: [{ models: [{ id: 'model-1' }] }],
+      })
+      if (choice === 'B') expect(JSON.stringify(bundle)).not.toContain('saved-user-value')
+      expect(f.stderr.join('')).toContain('UNENCRYPTED')
+      expect(f.stderr.join('')).not.toContain('saved-user-value')
+      expect((await readdir(f.root)).filter(name => name.endsWith('.with-values'))).toEqual([])
+      expect(f.stdout).toEqual([])
+    },
+  )
+
+  it('rejects changed variable dependencies after a terminal choice before final generation', async () => {
+    const f = await fixture()
+    const { base } = await active(f)
+    const prepare = base.prepareExport.bind(base)
+    let changed = false
+    vi.spyOn(base, 'prepareExport').mockImplementation((request, authorized) => {
+      const result = prepare(request, authorized)
+      return changed && result.status === 'ok'
+        ? { ...result, variables: result.variables.map(variable => ({ ...variable, sourceName: 'CHANGED_KEY' })) }
+        : result
+    })
+    const generate = vi.spyOn(base, 'export')
+    const input = new PassThrough()
+    Object.defineProperty(input, 'isTTY', { value: true })
+    const file = path.join(f.root, 'changed.txt')
+    const pending = runCordisXCli(['model', 'export', '--service', 'codex-config:gateway', '--output', file], {
+      ...f.runtime,
+      stdin: input,
+      internalModelExportStdoutIsTTY: true,
+    }).then(() => undefined, error => error)
+    await vi.waitFor(() => expect(f.stderr.join('')).toContain('Choose A or B'))
+    changed = true
+    input.end('A\n')
+    expect((await pending).message).toContain('Variable dependencies changed')
+    expect(generate).not.toHaveBeenCalled()
+    expect(f.stdout).toEqual([])
+    await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['--include-values', '--exclude-values'])(
+    'respects explicit %s without a terminal prompt and keeps stdout portable',
+    async flag => {
+      const f = await fixture()
+      const input = new PassThrough()
+      Object.defineProperty(input, 'isTTY', { value: true })
+      await runCordisXCli(['model', 'export', '--service', 'codex-config:gateway', flag, '--output', '-'], {
+        ...f.runtime,
+        stdin: input,
+        internalModelExportStdoutIsTTY: true,
+      })
+      expect(f.stdout).toHaveLength(1)
+      expect(decoded(f.stdout[0]!).connections).toHaveLength(1)
+      expect(f.stderr.join('')).not.toContain('Choose A or B')
+      input.destroy()
+    },
+  )
+
+  it.each(['Q\n', '', 'yes\n'])('cancels safely on cancellation, EOF or invalid input %j', async answer => {
+    const f = await fixture()
+    const input = new PassThrough()
+    Object.defineProperty(input, 'isTTY', { value: true })
+    const file = path.join(f.root, 'cancel.txt')
+    const pending = runCordisXCli(['model', 'export', '--service', 'codex-config:gateway', '--output', file], {
+      ...f.runtime,
+      stdin: input,
+      internalModelExportStdoutIsTTY: true,
+    }).then(() => undefined, error => error)
+    await vi.waitFor(() => expect(f.stderr.join('')).toContain('Choose A or B'))
+    input.end(answer)
+    expect(await pending).toMatchObject({ code: answer === 'yes\n' ? 'invalid-choice' : 'cancelled' })
+    expect(f.stdout).toEqual([])
+    await expect(lstat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not wait on a terminal stdin when stdout is a pipe', async () => {
+    const f = await fixture()
+    const input = new PassThrough()
+    Object.defineProperty(input, 'isTTY', { value: true })
+    await expect(
+      runCordisXCli(['model', 'export', '--service', 'codex-config:gateway'], {
+        ...f.runtime,
+        stdin: input,
+        internalModelExportStdoutIsTTY: false,
+      }),
+    ).rejects.toMatchObject({ code: 'choice-required' })
+    expect(JSON.parse(f.stderr.join('')).status).toBe('choice-required')
+    expect(f.stdout).toEqual([])
+    input.destroy()
   })
 
   it('binds the export callback through production run assembly without starting a native process', async () => {
@@ -533,7 +648,7 @@ describe('CLI portable model export', () => {
         close,
       }),
       internalRunInjectedHost: async () => {
-        const result = decoded(await f.run(['--all']))
+        const result = decoded(await f.run(['--exclude-values', '--all']))
         expect(result.connections[0]!.models).toHaveLength(2)
         expect(modelExport).toHaveBeenCalledOnce()
       },
@@ -547,7 +662,14 @@ describe('CLI portable model export', () => {
   it('keeps packaged CLI stdout machine-readable and errors nonzero on stderr', async () => {
     const f = await fixture()
     const cli = path.resolve('packages/cli/dist/src/cli.js')
-    const result = spawnSync(process.execPath, [cli, 'model', 'export', '--service', 'codex-config:gateway'], {
+    const result = spawnSync(process.execPath, [
+      cli,
+      'model',
+      'export',
+      '--exclude-values',
+      '--service',
+      'codex-config:gateway',
+    ], {
       env: { ...process.env, ...f.env },
       encoding: 'utf8',
     })
@@ -561,5 +683,18 @@ describe('CLI portable model export', () => {
     expect(failed.status).not.toBe(0)
     expect(failed.stdout).toBe('')
     expect(failed.stderr).toContain('incomplete')
+    const choice = spawnSync(process.execPath, [
+      cli,
+      'model',
+      'export',
+      '--service',
+      'codex-config:gateway',
+      '--output',
+      path.join(f.root, 'not-created.txt'),
+    ], { env: { ...process.env, ...f.env }, encoding: 'utf8' })
+    expect(choice.status).toBe(2)
+    expect(choice.stdout).toBe('')
+    expect(JSON.parse(choice.stderr.split('\n').find(line => line.startsWith('{'))!).status).toBe('choice-required')
+    await expect(lstat(path.join(f.root, 'not-created.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

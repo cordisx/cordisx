@@ -1,11 +1,14 @@
 #!/usr/bin/env node
+import { ModelExportChoiceError } from './cli/model-export-choice.js'
 import { runCordisXCli } from './cli/run.js'
 import { CordisXManagementCommandError } from './cli/management-command.js'
 
 const argv = process.argv.slice(2)
 
 runCordisXCli(argv).catch((error) => {
-  if (!(error instanceof CordisXManagementCommandError && error.reported)) {
+  if (
+    !((error instanceof CordisXManagementCommandError || error instanceof ModelExportChoiceError) && error.reported)
+  ) {
     const message = error instanceof Error ? error.message : String(error)
     const machineJson = (argv[0] === 'plugin' || argv[0] === 'source' || argv[0] === 'feedback')
       && argv.includes('--json')
@@ -20,5 +23,7 @@ runCordisXCli(argv).catch((error) => {
       console.error(`[cordisx] ${message}`)
     }
   }
-  process.exitCode = error instanceof CordisXManagementCommandError ? error.exitCode : 1
+  process.exitCode = (error instanceof CordisXManagementCommandError || error instanceof ModelExportChoiceError)
+    ? error.exitCode
+    : 1
 })

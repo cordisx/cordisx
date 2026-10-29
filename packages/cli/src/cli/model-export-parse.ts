@@ -5,7 +5,8 @@ export interface ModelExportRequest {
   readonly all: boolean
   readonly services: readonly string[]
   readonly modelIds: readonly string[]
-  readonly includeValues: boolean
+  readonly includeValues?: boolean
+  readonly expectedVariables?: readonly string[]
 }
 export interface ModelExportInvocation extends ModelExportRequest {
   readonly action: 'model-export'
@@ -26,11 +27,15 @@ Options:
   --all               Export the complete current catalog; rejects nonportable services
   --service ID        Binding ID or unambiguous provider ID from --list (repeatable)
   --model ID          Exact model ID (repeatable; requires exactly one --service)
-  --include-values    Include only saved user environment values; UNENCRYPTED
+  --include-values    Choose A: saved, enabled, referenced user values; UNENCRYPTED
+  --exclude-values    Choose B: omit values; complete them on the target
   --output PATH|-     Private atomic file, or portable text on stdout (default: -)
   --force             Replace an existing regular output file
   -h, --help          Show this help
 
+With variable dependencies and no explicit value flag, interactive terminals ask A/B
+before any final output. Noninteractive/AI calls return choice-required on stderr,
+write no output/file, and require --include-values or --exclude-values after a choice.
 Without an active compatible runtime, only explicit codex-config: service selections
 are exportable offline. --list then describes an incomplete, config-only inventory.
 Plugin-managed services such as Aiden/TraeX cannot be transferred: install their
@@ -47,14 +52,13 @@ export function parseModelExport(argv: readonly string[]): ModelExportInvocation
       all: false,
       services: [],
       modelIds: [],
-      includeValues: false,
       force: false,
     }
   }
   if (argv[1] !== 'export') {
     throw new CordisXCliParseError('unexpected-positional', 'model requires export; use model export --help')
   }
-  const flags = new Set(['--list', '--all', '--include-values', '--force', '--help', '-h'])
+  const flags = new Set(['--list', '--all', '--include-values', '--exclude-values', '--force', '--help', '-h'])
   const values = new Set(['--profile', '--output', '--service', '--model'])
   const seen = new Map<string, string[]>()
   for (let i = 2; i < argv.length; i++) {
@@ -97,8 +101,15 @@ export function parseModelExport(argv: readonly string[]): ModelExportInvocation
       'choose --list, --all, or --service; --model requires exactly one --service',
     )
   }
-  if (list && (output !== undefined || seen.has('--include-values') || seen.has('--force') || modelIds.length > 0)) {
+  if (
+    list
+    && (output !== undefined || seen.has('--include-values') || seen.has('--exclude-values') || seen.has('--force')
+      || modelIds.length > 0)
+  ) {
     throw new CordisXCliParseError('conflicting-options', '--list accepts only --profile')
+  }
+  if (seen.has('--include-values') && seen.has('--exclude-values')) {
+    throw new CordisXCliParseError('conflicting-options', '--include-values and --exclude-values cannot be combined')
   }
   if (seen.has('--force') && (output === undefined || output === '-')) {
     throw new CordisXCliParseError('conflicting-options', '--force requires an output file')
@@ -113,7 +124,9 @@ export function parseModelExport(argv: readonly string[]): ModelExportInvocation
     all,
     services,
     modelIds,
-    includeValues: seen.has('--include-values'),
+    ...(seen.has('--include-values') || seen.has('--exclude-values')
+      ? { includeValues: seen.has('--include-values') }
+      : {}),
     force: seen.has('--force'),
     ...(profile === undefined ? {} : { profile }),
     ...(output === undefined ? {} : { output }),

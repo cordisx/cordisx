@@ -1,173 +1,181 @@
 # Export model services from the CLI
 
-Status: implemented in source; use `cordisx model export --help` to confirm that
-an installed release includes this command. This guide does not establish a
-release or installation.
+Status: implemented in source; check `cordisx model export --help` to confirm the
+installed release supports these commands. This guide does not establish a release
+or installation.
 
-The CLI uses the same bounded `cordisx-models-v1/v2/v3` portable text as the
-Manager's model-service Export and Import actions. It exports selected service
-configuration and exact model membership, not an account backup or database dump.
+The CLI uses the same bounded `cordisx-models-v1/v2/v3` portable text as Manager
+Export/Import. It exports selected service configuration and exact model membership,
+not account login state or a database backup.
 
-## Choose a profile, service and models
+## Select services and models
 
-List an existing profile's current services and exact model IDs:
+List an existing profile's services and exact model IDs:
 
 ```sh
 cordisx model export --list --profile work
 ```
 
-The JSON contains `bindingRef`, `providerId`, `title`, `exportable` and `models`.
-Use the binding reference to avoid ambiguous provider IDs. Export a whole service,
-or repeat `--model` to choose exact members of one service:
+The JSON includes `bindingRef`, `providerId`, `title`, `exportable` and `models`.
+Use a binding reference to avoid ambiguous provider IDs. Export one service or
+select exact models of one service:
 
 ```sh
 cordisx model export --profile work --service codex-config:gateway --output ./models.txt
 cordisx model export --profile work --service codex-config:gateway --model exact-model-id --output ./one-model.txt
 ```
 
-Repeat `--service` to export several complete services. `--model` requires exactly
-one service. Omitting `--profile` selects the configured Codex default profile;
-unknown profiles fail and are never created by export.
+Repeat `--service` for several complete services; repeat `--model` for models of
+exactly one service. Omit `--profile` for the configured Codex default. Unknown
+profiles fail and are never created by export.
 
-With an active compatible CordisX runtime, export its complete current catalog:
+With an active compatible runtime, `--all` selects the complete current catalog:
 
 ```sh
 cordisx model export --profile work --all --output ./models.txt
 ```
 
-`--all` refuses the entire operation if any service is nonportable. There is no
-partial-success output. Use `--list` and select individual exportable services
-when the catalog also contains plugin-managed connections. Aiden, TraeX and other
-managed login connections require installing the relevant plugin and logging in
-on the target machine; their opaque tokens and local runtime endpoints cannot
-be migrated as portable service configuration.
+The entire operation is refused if any service is nonportable; there is no partial
+success. Select exportable services individually when necessary. Aiden/TraeX and
+other managed login connections need their plugin installed and login performed on
+the target. Their opaque tokens and local runtime endpoints cannot be transferred.
 
-## Values and file output
+## Choose variable values before export
 
-Values are omitted by default. The export retains variable names so they can be
-completed on the target machine. When values are missing, stderr prominently lists
-the variable names and says services depending on them cannot be used on the target
-until those values are completed. The export still succeeds without prompting.
+If selected services depend on variables and neither value flag was specified,
+a terminal with both stdin and stdout connected to a TTY shows the variable names
+and asks **before generating portable text or writing any file**:
 
-For a default export with missing values, stderr also prints a copyable
-`--include-values` command preserving the selected profile, services/models or
-`--all`. Stdout output remains `--output -`; file output uses a different
-`<original-path>.with-values` file and never automatically adds `--force`.
-Choose another path if that file exists, or explicitly add `--force` if replacing
-that regular file is intended. Re-export is a suggestion, not an automatic action.
-
-Explicitly include saved user environment values:
-
-```sh
-cordisx model export --service codex-config:gateway --include-values --output ./models-private.txt
+```text
+Variable dependencies: TEST_KEY
+A) Include saved, enabled, referenced user values in UNENCRYPTED portable text;
+   unavailable values still need completing on the target.
+B) Omit values; complete them on the target before using dependent services.
+Choose A or B (Q to cancel):
 ```
 
-This text is compressed, **not encrypted**. `--include-values` only includes
-enabled user variables saved in CordisX Home configuration and referenced by the
-selected services. It does not resolve process environment variables, read account
-credential files, execute credential commands/generators, or export inline bearer
-tokens, login sessions, secret headers or managed tokens. Inline credentials
-become empty target variable placeholders. The existing portable contract also
-supports saved variable descriptions and generator scripts; review scripts before
-sharing the file or running a generator on the target.
+A includes eligible saved values. B omits values and retains names for target
+completion. The selection produces one final export at the requested destination.
+Q, EOF and invalid input cancel without producing an export. Services with no
+variable dependencies do not trigger a question.
 
-Even with `--include-values`, unavailable or disabled values and inline-token
-placeholders remain missing. The warning still lists those names and requires
-completing them on the target; this flag does not guarantee a ready-to-use service.
-No missing-variable/re-export warning is added when there are no variable dependencies.
-
-Files are atomically published with mode `0600`. The parent directory must exist.
-Existing files are refused unless `--force` explicitly requests replacement of a
-regular file. Symlinks and directories are refused.
-
-Omit `--output`, or specify `--output -`, to write only portable text to stdout:
+An explicit value flag records a decision and skips the question, even in a TTY:
 
 ```sh
-cordisx model export --service codex-config:gateway --output - | pbcopy
+cordisx model export --profile work --service codex-config:gateway --include-values --output ./models-private.txt
+cordisx model export --profile work --service codex-config:gateway --exclude-values --output ./models.txt
 ```
 
-Operation and import instructions go to stderr. Prefer `--output PATH` to shell
-redirection when saving values, since shell redirection controls its own file
-permissions and overwrite behavior. Rejected, unsupported, oversized or empty
-selections exit nonzero without publishing a partial export.
+The flags are mutually exclusive. B and `--exclude-values` require completing
+missing values on the target before using dependent services. A and
+`--include-values` include **only enabled user variables saved in CordisX Home
+configuration and referenced by the selected services**. Text is compressed,
+**not encrypted**. No process environment resolution, account credential-file
+reads, credential-command/generator execution, login sessions, inline/managed
+tokens or secret headers are included. Inline credentials become empty target
+variable placeholders. The portable contract can retain saved descriptions and
+generator scripts; review scripts before sharing or running them on the target.
+
+Even after A or `--include-values`, disabled/unavailable values and inline-token
+placeholders can still be missing. Stderr lists those names and explains that
+dependent services cannot be used until they are completed on the target. An
+explicit value choice does not guarantee a ready-to-use service.
+
+## Noninteractive calls and stdout
+
+If either stdin or stdout is not a TTY, variable-dependent export without a value
+flag exits **2**, writes a `status: "choice-required"` JSON record on stderr, and
+produces no portable text or file. The record includes variable names, A/B flag
+choices, profile and selection; it contains no values. Choose before invoking the
+final export with `--include-values` or `--exclude-values`. Tools must not wait for
+terminal input or infer consent from lack of a reply.
+
+Both explicit flags support pipes. For example, after choosing B:
+
+```sh
+cordisx model export --service codex-config:gateway --exclude-values --output - | pbcopy
+```
+
+Omit `--output`, or use `--output -`, for only final portable text on stdout.
+Questions, choice-required records, operation status and Import guidance go to
+stderr. A no-variable selection exports without asking in either mode.
+
+Files are atomically published with mode `0600`; the parent directory must exist.
+Existing files require explicit `--force` to replace a regular file. Symlinks and
+directories are refused. Prefer `--output PATH` to shell redirection for saving
+values, since the shell controls its own file permissions and overwrite behavior.
+Rejected, cancelled, unsupported or oversized operations do not publish partial
+exports. An unconfirmed choice never writes a value-free intermediate file.
 
 ## Active and offline availability
 
-An active matching profile uses its authenticated management RPC and actual
-catalog authority. A rejected or unavailable live operation fails; it does not
-silently fall back to a stale inactive snapshot. A runtime without this command's
-catalog support needs a compatible installed release.
+An active matching profile uses authenticated management RPC and the actual
+catalog authority. A live rejection/failure does not fall back to a stale inactive
+snapshot. A runtime without compatible catalog support needs a matching release.
 
-Without an active matching runtime, `--list` reports `complete: false` and covers
-only the selected profile's local Codex configuration/catalog files. Explicit
-`--service codex-config:ID` selections can be exported offline. Managed services,
-plugin connections and live discovery are unavailable in this path, so `--all`
-is refused. Offline export never starts Codex, app-server, discovery or login.
-It uses `CODEX_HOME` (or the ordinary `.codex` directory) for shared profiles and
-the profile's existing `codex-home` directory for host-isolated profiles.
-Missing or invalid catalog sources fail. No account credential file is needed.
+Without an active matching runtime, `--list` reports `complete: false`, covering
+only selected-profile local Codex configuration/catalog files. Explicit
+`--service codex-config:ID` selections work offline; managed/plugin services and
+live discovery are unavailable, and `--all` is refused. The same variable-choice
+rules apply. No Codex, app-server, discovery or login process is started. Shared
+profiles use `CODEX_HOME` or ordinary `.codex`; host-isolated profiles use their
+existing `codex-home`. Missing/invalid catalog sources fail. No account credential
+file is needed.
 
-The portable format limits a bundle to 24 services and 10,000 models per service,
-with additional decoded/encoded byte limits. If a large catalog is rejected,
-select fewer services or exact models and export separate files. The CLI does
-not truncate a catalog to fit a successful response.
+Portable bounds are 24 services, 10,000 models per service and additional
+encoded/decoded byte limits. If too large, select fewer services or exact models
+and export separate files. The CLI does not truncate a successful response.
 
 ## Import on the target machine
 
-1. Copy the complete file/text privately to the target machine. For example, on
-   macOS, `pbcopy < ./models.txt` copies a saved export to the clipboard.
-2. Open the target CordisX Manager, go to **Model services**, select **Import**,
-   and paste the complete portable text.
-3. Review service/model selection and fill in the missing environment variables
-   listed by the CLI and Import dialog. Confirm Import. There is no CLI import
-   command.
-4. Check that the expected service titles and exact model IDs appear in the
-   Manager's model list. Confirm the imported variables are enabled and available
-   before using a service. Follow any restart requirement shown for environment
-   changes. Install and log in to nonportable provider plugins separately.
+1. Copy the complete final text/file privately to the target. On macOS,
+   `pbcopy < ./models.txt` copies a saved export.
+2. Open target **CordisX Manager > Model services > Import** and paste the text.
+3. Review the selection, fill the missing variables named by stderr/Import, and
+   confirm. There is no CLI import command.
+4. Verify expected service titles and exact model IDs in the model list. Confirm
+   required variables are enabled/available, follow any displayed restart requirement,
+   and install/login to nonportable provider plugins separately.
 
 ## AI operation
 
-This is the AI-facing procedure for `cordisx` and its Docs route. Check installed
-`cordisx model export --help` before using version-sensitive commands.
+The shipped `cordisx` Skill routes here. Check installed help first. For AI/tool
+operation, use a non-TTY command channel; do not allocate a pseudo-terminal to wait
+for a console answer.
 
-- Use the read-only `--list` inventory to select service/model IDs. Identify variable
-  dependencies from an authorized default value-free export and its stderr warnings
-  (or the formal export-preparation surface when available). Do not read credential
-  files, tokens or databases to discover or fill values, and do not expose values
-  while inspecting dependencies.
-- Before a value-bearing export, tell the user the required variable names, that
-  values are excluded by default and must be completed on the target, and that
-  `--include-values` includes only saved, enabled, referenced user variables in
-  **unencrypted** portable text. Ask whether to include those values. Use the flag
-  only after an explicit user choice; honor an already explicit choice in the
-  current session without asking again. Without that choice, keep the default
-  value-free export and clearly report the missing names and target completion.
-- Preserve the selected profile and exact service/model selection when following
-  the printed re-export suggestion. Use a new output path or explicitly requested
-  replacement; do not automatically overwrite the prior export. Ordinary CLI
-  invocation itself remains noninteractive.
-- After either mode, inspect stderr. Even an explicitly approved `--include-values`
-  export can still lack disabled/unavailable values or inline-token placeholders.
-  List those missing names and target completion steps; do not describe the service
-  as ready to use. Aiden/TraeX and other managed login sessions cannot be included;
-  install the provider plugin and log in on the target.
+- Use read-only `--list` to choose IDs. A call for the selection without a value flag
+  returns structured `choice-required` variable names before final generation or
+  file publication. This is preparation, not an exported artifact. Use that record
+  or a formal export-preparation surface to identify dependencies; never inspect
+  credential files, tokens, databases or shell values to fill them.
+- Explain the variable names and A/B choices to the user: A includes only saved,
+  enabled, referenced values in unencrypted text; B omits values and needs target
+  completion. Ask A or B before a final variable-dependent export. Do not add
+  `--include-values` without an explicit choice. Honor an already explicit choice
+  in the current session without asking again: A maps to `--include-values`, B to
+  `--exclude-values`. Neither choice grants unrelated permissions or bypasses native
+  approval controls.
+- Run the same profile/service/model selection and intended output with the chosen
+  flag. Do not create an intermediate value-free file or ask for a second export.
+  If the preparation's variable dependencies change before an interactive choice is
+  applied, the operation fails and requires reviewing the current selection again.
+- Inspect final stderr even after A. List residual missing variable names and target
+  completion steps; do not claim the service is ready to use. Aiden/TraeX login state
+  is not included: the target needs the provider plugin and login.
 
-Example after the user requested an export and a default export reported `TEST_KEY`:
+Example after preparation reports `TEST_KEY`:
 
-> AI: This selection needs `TEST_KEY`. The current export contains its name without
-> its value, so it must be filled on the target before use. Include the saved,
-> enabled value in an unencrypted export file, or keep the value-free file?
+> AI: This export needs `TEST_KEY`. Choose A to include its saved, enabled value in
+> unencrypted text, or B to omit it and fill it on the target before use.
 >
-> User: Include the saved value.
+> User: B, leave the value out.
 
-After that explicit choice, an example command is:
+Perform the final export once, without another confirmation:
 
 ```sh
-cordisx model export --profile work --service codex-config:gateway --model exact-model-id --include-values --output ./models-with-values.txt
+cordisx model export --profile work --service codex-config:gateway --model exact-model-id --exclude-values --output ./models.txt
 ```
 
-If it still reports `TEST_KEY` missing, tell the user to fill `TEST_KEY` in the target
-Manager Import dialog. Do not fetch a substitute from the shell, login state or
-credential files. This choice does not grant other permissions or bypass native
-approval controls.
+If the user instead chooses A, use `--include-values` for that same selection and
+destination. If `TEST_KEY` is still missing, tell the user to fill it in target
+Manager Import; do not fetch a substitute from login state or credential files.
