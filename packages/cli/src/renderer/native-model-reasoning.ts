@@ -54,7 +54,11 @@ export function resolveTargetReasoning(
   const native = models.find(model => model.id === target.model)
     ?? (equivalent.length === 1 ? equivalent[0] : undefined)
   const capabilities = catalog ?? native?.reasoningCapabilities
-  const effort = resolveModelReasoningEffort(capabilities, currentEffort) ?? native?.defaultReasoningEffort
+  const nativeDefault =
+    capabilities === undefined || capabilities.efforts.some(effort => effort === native?.defaultReasoningEffort)
+      ? native?.defaultReasoningEffort
+      : undefined
+  const effort = resolveModelReasoningEffort(capabilities, currentEffort) ?? nativeDefault
   return {
     ...(effort === undefined ? {} : { effort }),
     efforts: capabilities?.efforts ?? [],

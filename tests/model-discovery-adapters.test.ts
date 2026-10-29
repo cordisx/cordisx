@@ -182,6 +182,15 @@ describe('discovery contracts', () => {
     )).toEqual({ efforts: [], catalogBacked: false })
   })
 
+  it('does not carry an unsupported native default into a provider-declared effort set', () => {
+    expect(resolveTargetReasoning(
+      { providerId: 'gateway', model: 'model' },
+      'high',
+      [{ id: 'model', defaultReasoningEffort: 'high' }],
+      () => ({ efforts: ['low', 'medium'] }),
+    )).toEqual({ efforts: ['low', 'medium'], catalogBacked: true })
+  })
+
   it('does not resolve credentials on an ineligible connection', async () => {
     const owner = connection({ endpoint: 'https://proxy.test' })
     await expect(deepSeekDiscoveryAdapter().discover(owner, new AbortController().signal)).rejects.toThrow(
