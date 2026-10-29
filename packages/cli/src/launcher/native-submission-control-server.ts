@@ -1,4 +1,4 @@
-import { bindDiagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticError } from '../diagnostics/context.js'
 import { projectDiagnostic } from '../diagnostics/journal.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, realpath, rm } from 'node:fs/promises'
@@ -17,6 +17,21 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 const requestId = (value: unknown): value is string | number =>
   (typeof value === 'string' && valid(value)) || (typeof value === 'number' && Number.isSafeInteger(value))
+const processId = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined
+function rejectionReason(error: unknown): string {
+  const reasons: Readonly<Record<string, string>> = {
+    'Invalid control id': 'invalid-id',
+    'Unauthenticated response': 'unauthenticated-response',
+    'Unknown control response': 'unknown-response',
+    'Unauthenticated diagnostic': 'unauthenticated-diagnostic',
+    'Invalid control authentication': 'invalid-authentication',
+    'Control unavailable': 'control-unavailable',
+    'Invalid native thread': 'invalid-thread',
+    'Invalid native request id': 'invalid-request-id',
+  }
+  return error instanceof Error ? reasons[error.message] ?? 'protocol-validation' : 'protocol-validation'
+}
 
 export interface NativeSubmissionControlServer {
   readonly socketPath: string
@@ -101,11 +116,18 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     },
   }
   const server = createServer(socket => {
+    const peerRef = randomUUID()
     if (closed || peer !== undefined) {
+      diagnostic({
+        event: 'native-control-peer-rejected',
+        requestRef: peerRef,
+        reason: closed ? 'disposed' : 'peer-already-connected',
+      })
       socket.destroy()
       return
     }
     peer = socket
+    diagnostic({ event: 'native-control-peer-connected', requestRef: peerRef })
     let buffer = ''
     let active = 0
     const activeIds = new Set<string>()
@@ -113,6 +135,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     socket.setEncoding('utf8')
     socket.on('error', () => socket.destroy())
     socket.on('close', () => {
+      diagnostic({ event: 'native-control-peer-closed', requestRef: peerRef, verified: authenticated, aborted: closed })
       clearTimeout(authTimer)
       if (peer === socket) {
         peer = undefined
@@ -134,13 +157,20 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (value.type === 'diagnostic') {
         if (!authenticated) throw new Error('Unauthenticated diagnostic')
         if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
-          diagnostic(projectDiagnostic(value as { event: string }) as { event: string })
+          diagnostic({ ...projectDiagnostic(value as { event: string }), event: value.event, serviceRef: peerRef })
         }
         return
       }
       if (value.type === 'hello') {
         if (authenticated || value.nonce !== nonce) throw new Error('Invalid control authentication')
         authenticated = true
+        diagnostic({
+          event: 'native-control-peer-authenticated',
+          requestRef: peerRef,
+          sourcePid: processId(value.sourcePid),
+          parentPid: processId(value.parentPid),
+          method: value.method === 'app-server-stdio' ? value.method : 'unknown',
+        })
         clearTimeout(authTimer)
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
         return
@@ -239,7 +269,23 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
-          void handle(value).catch(() => socket.destroy())
+          void handle(value).catch(error => {
+            diagnostic({
+              event: 'native-control-message-rejected',
+              requestRef: peerRef,
+              reason: rejectionReason(error),
+              phase: typeof value.type === 'string'
+                  && ['hello', 'diagnostic', 'resume', 'resume-complete', 'consume', 'authorize', 'complete'].includes(
+                    value.type,
+                  )
+                ? value.type
+                : 'unknown',
+              verified: authenticated,
+              ready: controller !== undefined,
+              ...diagnosticError(error),
+            })
+            socket.destroy()
+          })
         } catch {
           socket.destroy()
           return
