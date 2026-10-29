@@ -12,9 +12,10 @@ time, CordisX version, discovered Host version (or `unknown`), phase/deadline tr
 resource validation/injection/acknowledgement, cancellation, service ownership/health/exit
 and cleanup. Service health logs retain changes and errors rather than every successful poll.
 
-The cold-launch wait is 180 seconds, independent of service startup, CDP injection,
-shutdown and integrity checks. An explicit user retry starts a fresh bounded wait;
-recovery-window heartbeat messages cannot extend it indefinitely. A deadline is recorded
+The automatic cold-launch work budget is 180 seconds, independent of service startup,
+CDP injection, shutdown and integrity checks. An explicit user retry starts a fresh
+bounded attempt. A verified live recovery window pauses active work time while waiting
+for the user; a stale heartbeat or ordinary retry-progress heartbeat cannot renew the budget. A deadline is recorded
 before generation-fenced cancellation. Cancellation observations do not establish why a
 resource was originally late; use the preceding stage/resource events.
 

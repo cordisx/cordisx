@@ -68,14 +68,14 @@ it('rejects a late ready publication and records the terminal deadline before ca
   ).rejects.toThrow('timed out waiting')
   expect(events).toContainEqual(expect.objectContaining({ event: 'startup-deadline', elapsedMs: 180001 }))
 })
-it('does not let repeated waiting-for-user heartbeats silently renew the bounded launch', async () => {
+it('does not let unchanged retry-progress heartbeats silently renew the bounded launch', async () => {
   const { paths, state } = await fixture()
   let now = 0
   await writeSupervisorState(paths, {
     ...state,
     hostPid: process.pid,
     hostProcessStartedAt: state.processStartedAt,
-    startupRecovery: { updatedAt: Date.now(), waitingForUser: true, attempt: 1 },
+    startupRecovery: { updatedAt: Date.now(), waitingForUser: false, attempt: 1 },
   })
   await expect(waitForState(paths, 180000, state.instanceToken, undefined, {
     now: () => now,
@@ -83,4 +83,28 @@ it('does not let repeated waiting-for-user heartbeats silently renew the bounded
       now += 61000
     },
   })).rejects.toThrow('timed out waiting')
+})
+
+it('pauses active work time only for the identity-verified live user recovery window', async () => {
+  const { paths, state } = await fixture(), events: DiagnosticEvent[] = []
+  let now = 0
+  await writeSupervisorState(paths, {
+    ...state,
+    hostPid: process.pid,
+    hostProcessStartedAt: state.processStartedAt,
+    startupRecovery: { updatedAt: Date.now(), waitingForUser: true, attempt: 0 },
+  })
+  const ready = await withDiagnostics(
+    { emit: event => events.push(event) },
+    () =>
+      waitForState(paths, 180000, state.instanceToken, undefined, {
+        now: () => now,
+        wait: async () => {
+          now = 200001
+          await writeSupervisorState(paths, { ...state, phase: 'ready' })
+        },
+      }),
+  )
+  expect(ready?.phase).toBe('ready')
+  expect(events).toContainEqual(expect.objectContaining({ event: 'startup-user-wait-end', elapsedMs: 200001 }))
 })

@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnosticId } from '../diagnostics/context.js'
 import WebSocket from 'ws'
 
 export const CDP_REQUEST_TIMEOUT_MS = 5_000
@@ -36,6 +37,8 @@ interface CdpResponse {
 }
 
 export class CdpSession {
+  private readonly emitDiagnostic = bindDiagnostic()
+  private readonly connectionRef = diagnosticId()
   private nextId = 1
   private closed = false
   private readonly pending = new Map<number, {
@@ -58,6 +61,7 @@ export class CdpSession {
       else callback.resolve(message.result ?? {})
     })
     socket.on('close', () => {
+      this.emitDiagnostic({ event: 'cdp-connection-closed', requestRef: this.connectionRef, count: this.pending.size })
       this.closed = true
       for (const callback of this.pending.values()) callback.reject(new Error('CDP connection closed'))
       this.pending.clear()
@@ -65,10 +69,18 @@ export class CdpSession {
   }
 
   static async connect(url: string): Promise<CdpSession> {
+    const emit = bindDiagnostic()
     const socket = new WebSocket(url, { handshakeTimeout: 5_000 })
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve)
       socket.once('error', reject)
+      socket.once('unexpected-response', (_request, response) => {
+        // Inspect no headers or body. This is the existing handshake, not another connection.
+        emit({ event: 'cdp-handshake-failed', phase: 'connect', statusCode: response.statusCode })
+        response.resume()
+        reject(new Error(`Unexpected server response: ${String(response.statusCode)}`))
+        socket.terminate()
+      })
     })
     return new CdpSession(socket)
   }
@@ -85,6 +97,7 @@ export class CdpSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
+        this.emitDiagnostic({ event: 'cdp-request-deadline', requestRef: this.connectionRef, method, timeoutMs })
         reject(new Error(`CDP request timed out: ${method}`))
       }, timeoutMs)
       this.pending.set(id, {

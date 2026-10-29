@@ -1,4 +1,4 @@
-import { bindDiagnostic } from '../diagnostics/context.js'
+import { bindDiagnostic, diagnosticError } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
@@ -522,6 +522,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       await delay(750, options.signal)
     }
   } catch (error) {
+    diagnostic({
+      event: 'watcher-error',
+      phase: watcherStage,
+      aborted: options.signal.aborted,
+      ...diagnosticError(error),
+    })
     watcherFailure = error
     lifecycle('watcher-failed')
   } finally {

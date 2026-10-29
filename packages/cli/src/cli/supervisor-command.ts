@@ -221,6 +221,7 @@ export async function waitForState(
   let hostPublished = false
   let generationPublished = false
   let lastRecovery = 0
+  let userWaitStarted: number | undefined
   while (true) {
     const state = await readMutableSupervisorState(paths)
     if (state && !generationPublished) {
@@ -243,6 +244,11 @@ export async function waitForState(
       })
       await onHostLaunched?.(state, 'host-launched')
     }
+    if (state?.phase === 'ready' && userWaitStarted !== undefined) {
+      deadline += clock.now() - userWaitStarted
+      diagnostic({ event: 'startup-user-wait-end', elapsedMs: Math.round(clock.now() - userWaitStarted) })
+      userWaitStarted = undefined
+    }
     if (state?.phase === 'ready' && clock.now() >= deadline) {
       diagnostic({ event: 'startup-deadline', timeoutMs, deadline, elapsedMs: Math.round(clock.now() - started) })
       throw new Error('timed out waiting for CordisX renderer readiness')
@@ -258,6 +264,8 @@ export async function waitForState(
     if (state?.phase === 'failed') {
       throw new Error(state.failure ?? 'CordisX background supervisor failed before readiness')
     }
+    let waitingForUser = false
+    let retried = false
     if (state !== undefined) {
       const identity = await processIdentityStatus(state.pid, state.processStartedAt)
       if (identity === 'unknown') throw new Error('unable to verify the CordisX supervisor process identity')
@@ -272,7 +280,14 @@ export async function waitForState(
         ) {
           throw new Error('Owning startup recovery window process exited')
         }
-        if (recovery.updatedAt !== lastRecovery && !recovery.waitingForUser) {
+        waitingForUser = recovery.waitingForUser
+        if (waitingForUser && userWaitStarted === undefined) {
+          userWaitStarted = clock.now()
+          diagnostic({ event: 'startup-user-wait-start' })
+        }
+        if (recovery.updatedAt !== lastRecovery && !waitingForUser) {
+          userWaitStarted = undefined
+          retried = true
           deadline = clock.now() + timeoutMs
           diagnostic({
             event: 'startup-user-retry',
@@ -286,11 +301,16 @@ export async function waitForState(
         }
       }
     }
-    if (clock.now() >= deadline) {
+    if (!waitingForUser && userWaitStarted !== undefined) {
+      deadline += clock.now() - userWaitStarted
+      diagnostic({ event: 'startup-user-wait-end', elapsedMs: Math.round(clock.now() - userWaitStarted) })
+      userWaitStarted = undefined
+    }
+    if (!waitingForUser && clock.now() >= deadline) {
       diagnostic({ event: 'startup-deadline', timeoutMs, deadline, elapsedMs: Math.round(clock.now() - started) })
       throw new Error('timed out waiting for CordisX renderer readiness')
     }
-    await clock.wait()
+    if (!retried) await clock.wait()
   }
 }
 

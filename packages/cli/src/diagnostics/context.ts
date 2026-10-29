@@ -50,16 +50,36 @@ export function diagnosticId(): string {
 }
 
 /** No error messages/stacks: even innocent-looking provider errors can contain prompts or credentials. */
-export function diagnosticError(error: unknown): { errorCode: string; errorClass: string } {
-  const cause = error instanceof Error ? error.cause : undefined
-  const code = (value: unknown): string | undefined => {
-    if (value === null || typeof value !== 'object') return undefined
-    const candidate = (value as { code?: unknown }).code
-    return typeof candidate === 'string' && ERROR_CODES.has(candidate)
-      ? candidate
-      : undefined
+export function diagnosticError(error: unknown): { errorCode: string; errorClass: string; statusCode?: number } {
+  try {
+    return classifyDiagnosticError(error, 0)
+  } catch {
+    return { errorCode: 'unknown', errorClass: 'unknown' }
   }
-  const errorCode = code(error) ?? code(cause) ?? 'unknown'
+}
+function classifyDiagnosticError(
+  error: unknown,
+  depth: number,
+): { errorCode: string; errorClass: string; statusCode?: number } {
+  if (error instanceof Error) {
+    if (error.message === 'CDP connection closed' || error.message === 'CDP connection is closed') {
+      return { errorCode: 'CDP_CLOSED', errorClass: 'local-cdp' }
+    }
+    if (error.message.startsWith('CDP request timed out:')) {
+      return { errorCode: 'CDP_DEADLINE', errorClass: 'local-cdp' }
+    }
+    const http = /^Unexpected server response: ([1-5][0-9]{2})$/u.exec(error.message)
+    if (http) return { errorCode: 'HTTP_RESPONSE', errorClass: 'http-response', statusCode: Number(http[1]) }
+  }
+  const candidate = error !== null && typeof error === 'object' ? (error as { code?: unknown }).code : undefined
+  const errorCode = typeof candidate === 'string' && ERROR_CODES.has(candidate) ? candidate : 'unknown'
+  if (errorCode === 'unknown' && depth < 2 && error instanceof Error) {
+    const nested = error instanceof AggregateError ? error.errors.slice(0, 8) as unknown[] : [error.cause]
+    for (const value of nested) {
+      const detail = classifyDiagnosticError(value, depth + 1)
+      if (detail.errorCode !== 'unknown') return detail
+    }
+  }
   const errorClass = ['ENOTFOUND', 'EAI_AGAIN'].includes(errorCode)
     ? 'dns'
     : ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(errorCode)
