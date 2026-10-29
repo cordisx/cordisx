@@ -46,7 +46,9 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   if (
     headers.length !== 1 || header === undefined
     || header.parentElement?.getAttribute('data-app-shell-unified-tab-strip') !== 'true'
-    || !['default', 'thread-edge-scroll'].includes(header.getAttribute('data-app-shell-header-layout') ?? '')
+    || !['default', 'thread-edge-scroll', 'full-bleed'].includes(
+      header.getAttribute('data-app-shell-header-layout') ?? '',
+    )
   ) return undefined
   const anchors = [...document.querySelectorAll<HTMLElement>(
     '[data-app-shell-main-content-layout][data-app-shell-workspace-layout="split"]',
@@ -79,12 +81,26 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
     || headerRect.height < 40 || headerRect.height > 48
     || !near(anchorRect.top, headerRect.bottom) || anchorRect.width < 320
     || !near(titleRect.left, startRect.right) || !near(titleRect.left, slotRect.left)
-    || !near(titleRect.right, slotRect.right) || !near(titleRect.top, headerRect.top)
-    || !near(slotRect.left, anchorRect.left) || !near(slotRect.right, anchorRect.right)
+    || !near(titleRect.top, headerRect.top)
+    || !near(slotRect.left, anchorRect.left)
     || !near(slotRect.top, headerRect.top) || !near(slotRect.height, headerRect.height)
     || endRect.width <= 64 || !near(endRect.right, headerRect.right)
-    || endRect.left < slotRect.right - 2 || endRect.left > slotRect.right + 8
   ) return undefined
+
+  // 26.1023 keeps a 6px inset inside the left title and a 4px seam
+  // before its right tab strip. The measured left pane remains the owner.
+  const compact = header.parentElement?.getAttribute('data-app-shell-compact-page-gutter') === 'true'
+    && header.parentElement?.getAttribute('data-app-shell-header-placement') === 'titlebar'
+    && slot.parentElement?.getAttribute('data-app-shell-header-obstacle') === 'true'
+    && slot.parentElement.parentElement === title
+    && near(titleRect.right, anchorRect.right)
+    && near(titleRect.right - slotRect.right, 6)
+    && near(endRect.left - titleRect.right, 4)
+  const legacy = near(titleRect.right, slotRect.right) && near(slotRect.right, anchorRect.right)
+    && endRect.left >= slotRect.right - 2 && endRect.left <= slotRect.right + 8
+  if (!compact && (!legacy || header.getAttribute('data-app-shell-header-layout') === 'full-bleed')) {
+    return undefined
+  }
 
   const controllers = [...header.querySelectorAll<HTMLElement>(
     '[data-app-shell-tab-controller="right"][data-tab-id]',
