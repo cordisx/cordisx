@@ -27,6 +27,14 @@ existing Host path exposes them. HTTP authority requests record status and safe 
 codes, but cannot reliably identify the model inside an opaque request body. Logs do not
 promise to identify every external failure's cause.
 
+Native startup records distinguish initialization, Desktop input EOF, actual child exit,
+and control authentication/closure. Opaque invocation/peer references and source/child PIDs
+join these observations. Fixed metadata on the existing stderr path retains the first
+closing stage and initialization/exit snapshot when the control connection is already
+closing. An exit code of zero alone does not prove initialization succeeded. Ordinary
+CLI calls, including version and help probes, pass through to the real CLI without
+reserving the app-server's single private control connection.
+
 ## Retention and bounds
 
 Maintenance runs at startup, every minute while running, and on normal close. Shards seal

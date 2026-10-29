@@ -101,13 +101,18 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     },
   }
   const server = createServer(socket => {
+    const peerRef = randomUUID()
     if (closed || peer !== undefined) {
-      diagnostic({ event: 'native-control-peer-rejected', reason: closed ? 'disposed' : 'peer-already-connected' })
+      diagnostic({
+        event: 'native-control-peer-rejected',
+        requestRef: peerRef,
+        reason: closed ? 'disposed' : 'peer-already-connected',
+      })
       socket.destroy()
       return
     }
     peer = socket
-    diagnostic({ event: 'native-control-peer-connected' })
+    diagnostic({ event: 'native-control-peer-connected', requestRef: peerRef })
     let buffer = ''
     let active = 0
     const activeIds = new Set<string>()
@@ -115,7 +120,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     socket.setEncoding('utf8')
     socket.on('error', () => socket.destroy())
     socket.on('close', () => {
-      diagnostic({ event: 'native-control-peer-closed', verified: authenticated, aborted: closed })
+      diagnostic({ event: 'native-control-peer-closed', requestRef: peerRef, verified: authenticated, aborted: closed })
       clearTimeout(authTimer)
       if (peer === socket) {
         peer = undefined
@@ -137,14 +142,14 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (value.type === 'diagnostic') {
         if (!authenticated) throw new Error('Unauthenticated diagnostic')
         if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
-          diagnostic(projectDiagnostic(value as { event: string }) as { event: string })
+          diagnostic({ ...projectDiagnostic(value as { event: string }), event: value.event, serviceRef: peerRef })
         }
         return
       }
       if (value.type === 'hello') {
         if (authenticated || value.nonce !== nonce) throw new Error('Invalid control authentication')
         authenticated = true
-        diagnostic({ event: 'native-control-peer-authenticated' })
+        diagnostic({ event: 'native-control-peer-authenticated', requestRef: peerRef })
         clearTimeout(authTimer)
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
         return
@@ -244,7 +249,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
           void handle(value).catch(() => {
-            diagnostic({ event: 'native-control-message-rejected', reason: 'protocol-validation' })
+            diagnostic({ event: 'native-control-message-rejected', requestRef: peerRef, reason: 'protocol-validation' })
             socket.destroy()
           })
         } catch {
