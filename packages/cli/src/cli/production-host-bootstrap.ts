@@ -1,3 +1,4 @@
+import { diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
@@ -137,6 +138,7 @@ export async function prepareProductionHostBootstrap(
       }
     }
     const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
+    diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector, verified: mainInspector })
     if (input.mainInspector && !mainInspector) {
       stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
     }

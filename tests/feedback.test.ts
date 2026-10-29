@@ -1,3 +1,4 @@
+import { journalDirectory, LocalJournal } from '../packages/cli/src/diagnostics/journal.js'
 import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,6 +32,40 @@ function config(): unknown {
 }
 
 describe('CordisX feedback', () => {
+  it('exports a time-filtered compressed 72-hour journal using the production feedback path', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-feedback-journal-'))
+    try {
+      await writeFile(path.join(root, 'config.json'), JSON.stringify(config()))
+      const at = Date.now() - 71 * 60 * 60 * 1000
+      const writer = new LocalJournal({
+        directory: journalDirectory(root, 'codex', 'default'),
+        version: 'test',
+        now: () => at,
+      })
+      writer.emit({ event: 'model-failed', reason: 'native-upstream-error' })
+      await writer.close()
+      const output = path.join(root, 'bundle')
+      await runCordisXCli(['feedback', 'collect', '--since', '3d', '--output', output], {
+        env: { CORDISX_HOME: root },
+        stdout: () => {},
+      })
+      const manifest = await inspectFeedbackBundle(output)
+      expect(manifest.limits.lookbackSeconds).toBe(259200)
+      expect(manifest.artifacts).toContainEqual(
+        expect.objectContaining({ path: 'diagnostics/journal.jsonl', status: 'present' }),
+      )
+      expect(await readFile(path.join(output, 'diagnostics/journal.jsonl'), 'utf8')).toContain('model-failed')
+      const schema = JSON.parse(
+        await readFile(path.join(process.cwd(), 'packages/cli/assets/feedback/feedback-manifest.schema.json'), 'utf8'),
+      )
+      const ajv = new Ajv2020({ strict: false })
+      addFormats(ajv)
+      expect(ajv.compile(schema)(manifest)).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('redacts secrets, URLs, and paths centrally', () => {
     const result = redactFeedbackText(
       'Authorization: Bearer abcdefghijklmnopqrstuvwxyz https://example.test/a?token=x /Users/alice/project',

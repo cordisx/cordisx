@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
@@ -121,6 +122,7 @@ export async function runInjectedHost(input: {
   readonly hiddenUntilReady?: boolean
   readonly startupNavigation?: WatchInjectionOptions['startupNavigation']
 }): Promise<void> {
+  const emitDiagnostic = bindDiagnostic()
   const controller = new AbortController()
   let rendererIsReady = false
   let launched = input.prelaunchedHost?.child
@@ -129,7 +131,7 @@ export async function runInjectedHost(input: {
     : observeHostExit(launched, input.stdout, () => rendererIsReady)
   const hostPid = (): number | undefined => input.prelaunchedHost?.hostPid ?? launched?.pid
   const lifecycle = (event: Parameters<typeof logHostLifecycle>[1]): void =>
-    logHostLifecycle(input.stdout, event, { hostPid: hostPid(), ready: rendererIsReady })
+    logHostLifecycle(input.stdout, event, { hostPid: hostPid(), ready: rendererIsReady }, emitDiagnostic)
   const stop = (signal: 'SIGINT' | 'SIGTERM'): void => {
     lifecycle({ event: 'launcher-signal', signal })
     controller.abort()
@@ -210,6 +212,7 @@ export async function runInjectedHost(input: {
     if (input.prelaunchedHost === undefined) {
       const hidden = input.hiddenUntilReady === true
       const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
+      diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector === true, verified: mainInspector })
       if (hidden && !mainInspector) throw new Error('Hidden Host launch requires an owned main inspector')
       input.stdout(`[cordisx] launching ${input.executable} with CDP 127.0.0.1:${input.debugPort}`)
       const hiddenLaunch = hidden

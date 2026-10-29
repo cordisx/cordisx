@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnosticError, diagnosticRef } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
@@ -168,6 +169,7 @@ export interface WatchInjectionOptions {
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
+  const diagnostic = bindDiagnostic()
   if (options.nativeSubmission !== undefined && options.launcherOwnedNativeTarget !== true) {
     throw new Error('Native submission requires a launcher-owned target')
   }
@@ -190,9 +192,18 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   let startupNavigation: StartupNavigationHandoff | undefined
   let startupNavigationPending = startupNavigation !== undefined
   const startupStages = new Set<string>()
+  let priorStage: string | undefined
+  let priorStageAt = performance.now()
   const startupStage = (stage: string): void => {
     if (startupStages.has(stage)) return
     startupStages.add(stage)
+    const now = performance.now()
+    if (priorStage) {
+      diagnostic({ event: 'startup-stage-end', phase: priorStage, elapsedMs: Math.round(now - priorStageAt) })
+    }
+    diagnostic({ event: 'startup-stage-start', phase: stage })
+    priorStage = stage
+    priorStageAt = now
     options.onStatus?.(stage)
   }
   const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port)
@@ -303,6 +314,8 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     )
   }
   let watcherFailure: unknown
+  let retryCount = 0
+  let retryFingerprint: string | undefined
   let readinessFailure:
     | Readonly<{ error: unknown; attemptedReloadTarget: 'Vite' | 'production' | undefined }>
     | undefined
@@ -335,6 +348,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     | 'installation'
     | 'readiness' = 'poll'
   const lifecycle = (event: 'watcher-failed' | 'watcher-cleanup-started'): void => {
+    diagnostic({ event, phase: watcherStage, aborted: options.signal.aborted, count: installed.size })
     options.onStatus?.(`lifecycle ${
       JSON.stringify({
         event,
@@ -451,6 +465,13 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ? 'production'
               : undefined
             watcherStage = 'installation'
+            diagnostic({
+              event: 'cdp-target-admitted',
+              phase: 'installation',
+              resourceRef: diagnosticRef(target.id),
+              debugPort: options.port,
+              state: startupSeed?.id === target.id ? 'owned-startup-seed' : 'native-document',
+            })
             startupStage('renderer-install-start')
             const activateStartupDocument = startupSeed?.id === target.id && pendingStartupNavigation !== undefined
               ? async (identifier: string): Promise<void> => {
@@ -491,6 +512,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             beginReadiness(target, attemptedReloadTarget)
           }
         })
+        if (retryCount > 0) {
+          diagnostic({ event: 'watcher-recovered', phase: watcherStage, count: retryCount })
+          retryCount = 0
+          retryFingerprint = undefined
+        }
       } catch (error) {
         if (options.signal.aborted) {
           if (error instanceof support.CdpInstallationAbortedError) break
@@ -504,15 +530,36 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             }`,
           )
         }
+        const detail = diagnosticError(error)
+        const fingerprint = `${watcherStage}:${detail.errorCode}:${detail.statusCode ?? ''}`
+        retryCount++
+        if (fingerprint !== retryFingerprint) {
+          diagnostic({ event: 'watcher-retry', phase: watcherStage, count: retryCount, ...detail })
+          retryFingerprint = fingerprint
+        }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
       }
       watcherStage = 'poll'
       await delay(750, options.signal)
     }
   } catch (error) {
+    diagnostic({
+      event: 'watcher-error',
+      phase: watcherStage,
+      aborted: options.signal.aborted,
+      ...diagnosticError(error),
+    })
     watcherFailure = error
     lifecycle('watcher-failed')
   } finally {
+    if (retryCount > 0) {
+      diagnostic({
+        event: 'watcher-retry-stopped',
+        phase: watcherStage,
+        count: retryCount,
+        aborted: options.signal.aborted,
+      })
+    }
     await Promise.allSettled([...readinessOperations])
     if (watcherFailure === undefined && readinessFailure !== undefined) {
       watcherStage = 'readiness'

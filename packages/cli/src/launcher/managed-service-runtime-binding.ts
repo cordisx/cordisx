@@ -130,6 +130,10 @@ export function createManagedServiceActivationBinding(input: {
         await Promise.allSettled([...pendingRegistrations])
         await input.disposeRecords(owned)
       })()
+      const current = disposal
+      void current.catch(() => {
+        if (disposal === current) disposal = undefined
+      })
       return disposal
     },
   })

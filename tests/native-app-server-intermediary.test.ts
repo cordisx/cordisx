@@ -1,3 +1,4 @@
+import { type DiagnosticEvent, withDiagnostics } from '../packages/cli/src/diagnostics/context.js'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import path from 'node:path'
@@ -118,6 +119,26 @@ async function harness(controller?: NativeSubmissionController) {
 }
 
 describe('native app-server intermediary', () => {
+  it('records request metadata over the existing authenticated control channel while preserving opaque input', async () => {
+    const events: DiagnosticEvent[] = []
+    await withDiagnostics({ emit: event => events.push(event) }, async () => {
+      const h = await harness()
+      try {
+        h.send({
+          id: 91,
+          method: 'turn/start',
+          params: { threadId: 'private-thread', model: 'example-model', input: [{ text: 'PRIVATE_INPUT_MARKER' }] },
+        })
+        expect(await h.read()).toContain('PRIVATE_INPUT_MARKER')
+        await vi.waitFor(() => expect(events.some(event => event.event === 'model-issued')).toBe(true))
+        expect(events).toContainEqual(expect.objectContaining({ event: 'model-queued', model: 'example-model' }))
+        expect(JSON.stringify(events)).not.toMatch(/PRIVATE_INPUT_MARKER|private-thread/u)
+      } finally {
+        await h.close()
+      }
+    })
+  })
+
   it('forwards native task creation with exact call metadata and routes its unmarked first send once', async () => {
     const h = await harness()
     try {

@@ -1,3 +1,5 @@
+import { bindDiagnostic } from '../diagnostics/context.js'
+import { projectDiagnostic } from '../diagnostics/journal.js'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
@@ -39,6 +41,7 @@ export interface NativeSubmissionControlServer {
 
 /** Private launch-scoped transport. No renderer-supplied scope crosses this boundary. */
 export async function startNativeSubmissionControlServer(): Promise<NativeSubmissionControlServer> {
+  const diagnostic = bindDiagnostic()
   const directory = await mkdtemp(path.join(await realpath(tmpdir()), 'cx-native-'))
   const socketPath = path.join(directory, 'control.sock')
   const nonce = randomBytes(32).toString('hex')
@@ -126,6 +129,13 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         pending.delete(value.id)
         clearTimeout(item.timer)
         value.ok ? item.resolve(value.value) : item.reject(new Error('Native switch rejected'))
+        return
+      }
+      if (value.type === 'diagnostic') {
+        if (!authenticated) throw new Error('Unauthenticated diagnostic')
+        if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
+          diagnostic(projectDiagnostic(value as { event: string }) as { event: string })
+        }
         return
       }
       if (value.type === 'hello') {

@@ -302,6 +302,7 @@ try {
       'dist/assets/launcher/native-app-server-intermediary.mjs',
       'dist/assets/launcher/native-agent-models-mcp.mjs',
       'dist/assets/launcher/native-request-tracker.mjs',
+      'dist/assets/launcher/native-turn-diagnostics.mjs',
       'node_modules/@cordisx/schemastery-ui/package.json',
       'node_modules/@cordisx/schemastery-ui/LICENSE',
       'node_modules/@cordisx/schemastery-ui/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',

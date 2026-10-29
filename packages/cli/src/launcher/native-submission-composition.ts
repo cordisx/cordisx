@@ -1,3 +1,4 @@
+import { diagnostic } from '../diagnostics/context.js'
 import { constants } from 'node:fs'
 import { access, chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -464,8 +465,17 @@ export async function prepareNativeSubmissionBootstrap(
     environment,
     complete(activation, codexHome, completeOptions = {}) {
       completion ??= (async () => {
+        let priorStageAt = performance.now()
+        let priorStage: string | undefined
         const reportStage = (stage: NativeSubmissionCompletionStage): void => {
           try {
+            const now = performance.now()
+            if (priorStage) {
+              diagnostic({ event: 'startup-stage-end', phase: priorStage, elapsedMs: Math.round(now - priorStageAt) })
+            }
+            diagnostic({ event: 'startup-stage-start', phase: stage })
+            priorStage = stage
+            priorStageAt = now
             completeOptions.onStage?.(stage)
           } catch { /* Diagnostics must not change native submission startup. */ }
         }

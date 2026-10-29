@@ -1,3 +1,4 @@
+import { diagnosticError, managedServiceDiagnostic } from './managed-service-diagnostics.js'
 import type { ManagedServiceDefinitionV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ChildProcess, spawn as nodeSpawn } from 'node:child_process'
 import { constants } from 'node:fs'
@@ -31,6 +32,7 @@ export interface ManagedServiceRuntimeProcessOptions {
 }
 
 export class ManagedServiceRuntimeProcess {
+  private readonly lastHealth = new WeakMap<ManagedServiceRecord, string>()
   constructor(private readonly options: ManagedServiceRuntimeProcessOptions) {}
 
   async writeConfiguration(record: ManagedServiceRecord): Promise<string | undefined> {
@@ -118,6 +120,11 @@ export class ManagedServiceRuntimeProcess {
       throw failure('spawn-error')
     }
     record.child = child
+    managedServiceDiagnostic(record, 'managed-service-spawn', {
+      pid: child.pid,
+      timeoutMs,
+      deadline: Date.now() + timeoutMs,
+    })
     let childError: Error | undefined
     child.on('error', error => {
       childError = error
@@ -170,15 +177,31 @@ export class ManagedServiceRuntimeProcess {
     signal?: AbortSignal,
     timeoutMs = record.definition.health.timeoutMs,
   ): Promise<boolean> {
-    const timeout = AbortSignal.timeout(timeoutMs)
-    const response = await this.options.fetch(new URL(record.definition.health.path, origin), {
-      method: 'GET',
-      headers: this.authorizationHeaders(record),
-      signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
-    })
-    const healthy = response.ok
-    await readManagedResponseBody(response, MAX_HEALTH_BODY_BYTES)
-    return healthy
+    const report = (state: string, fields: Record<string, string | number> = {}): void => {
+      if (this.lastHealth.get(record) === state) return
+      this.lastHealth.set(record, state)
+      managedServiceDiagnostic(
+        record,
+        state === 'healthy' ? 'managed-service-health-ready' : 'managed-service-health-error',
+        { reason: state, ...fields },
+      )
+    }
+    try {
+      const timeout = AbortSignal.timeout(timeoutMs)
+      const response = await this.options.fetch(new URL(record.definition.health.path, origin), {
+        method: 'GET',
+        headers: this.authorizationHeaders(record),
+        signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
+      })
+      const healthy = response.ok
+      await readManagedResponseBody(response, MAX_HEALTH_BODY_BYTES)
+      report(healthy ? 'healthy' : 'http-error', { statusCode: response.status })
+      return healthy
+    } catch (error) {
+      const detail = diagnosticError(error)
+      report(signal?.aborted ? 'cancelled' : detail.errorClass, detail)
+      throw error
+    }
   }
 
   async ensureServiceHome(record: ManagedServiceRecord): Promise<void> {

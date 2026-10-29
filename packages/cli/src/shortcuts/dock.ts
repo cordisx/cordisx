@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import { connect, createConnection } from 'node:net'
 import { chmod, lstat, open, realpath, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -252,7 +253,8 @@ type MainAgentStage =
   | 'cover-connect'
   | 'cover-connected'
 
-function mainAgentStage(hostPid: number, startedAt: number, stage: MainAgentStage): void {
+function mainAgentStage(hostPid: number, startedAt: number, stage: MainAgentStage, emit = diagnostic): void {
+  emit({ event: 'main-agent-stage', hostPid, phase: stage, elapsedMs: Date.now() - startedAt })
   console.error(
     '[cordisx-startup]',
     JSON.stringify({
@@ -296,6 +298,7 @@ export async function installHostMainAgents(input: {
   onStartupRecovery?: (waiting: boolean) => Promise<void>
   dock?: { readonly scope: DockScope; readonly token: string }
 }): Promise<HostMainAgentController> {
+  const emitDiagnostic = bindDiagnostic()
   const matched = /^ws:\/\/127\.0\.0\.1:(\d+)\/[a-f0-9-]+$/u.exec(input.inspectorUrl)
   if (!matched || !await hasMatchingProcessIdentity(input.hostPid, input.hostStartedAt)) {
     throw new Error('Owned Host main inspector identity mismatch')
@@ -323,13 +326,13 @@ export async function installHostMainAgents(input: {
   try {
     session = await CdpSession.connect(input.inspectorUrl)
     stage = 'inspector-connected'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     await session.send('Debugger.enable')
     stage = 'debugger-enabled'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     const removeStartupBreakpoint = await installOneShotStartupBreakpoint(session)
     stage = 'breakpoint-installed'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     const paused = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         remove()
@@ -344,7 +347,7 @@ export async function installHostMainAgents(input: {
     await session.send('Runtime.runIfWaitingForDebugger')
     const pausedEvent = await paused
     stage = 'startup-paused'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     const frame = (pausedEvent.callFrames as readonly { callFrameId?: unknown }[] | undefined)?.[0]
     if (typeof frame?.callFrameId !== 'string') throw new Error('Owned Host pause frame is unavailable')
     if (input.hostCwd !== undefined) {
@@ -361,27 +364,27 @@ export async function installHostMainAgents(input: {
       }
     }
     stage = 'navigation-install'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     await installStartupNavigation(session, frame.callFrameId, {
       pid: input.hostPid,
       generation: input.readyInstanceToken,
     })
     stage = 'navigation-installed'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     stage = 'breakpoint-remove'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     await removeStartupBreakpoint()
     stage = 'breakpoint-removed'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     stage = 'debugger-resume'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     await session.send('Debugger.resume')
     stage = 'debugger-resumed'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     // Electron exposes the inspector before its application entry module is
     // loaded. Wait for the main module rather than racing Node bootstrap.
     stage = 'main-module-wait'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     const moduleDeadline = Date.now() + 10_000
     let moduleReady = false
     while (!moduleReady && Date.now() < moduleDeadline) {
@@ -394,9 +397,9 @@ export async function installHostMainAgents(input: {
     }
     if (!moduleReady) throw new Error('Owned Host main module did not initialize')
     stage = 'main-module-ready'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     stage = 'cover-connect'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     startup = await connectStartupCover(
       session,
       { pid: input.hostPid, generation: input.readyInstanceToken },
@@ -404,7 +407,7 @@ export async function installHostMainAgents(input: {
       input.onStartupRecovery,
     )
     stage = 'cover-connected'
-    mainAgentStage(input.hostPid, startedAt, stage)
+    mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
     if (input.dock) {
       // All code and arguments are selected by the owning launcher. No socket
       // request can provide JavaScript, a module path, or an image path.
@@ -435,6 +438,13 @@ export async function installHostMainAgents(input: {
       }
     }
   } catch (error) {
+    emitDiagnostic({
+      event: 'main-agent-failed',
+      hostPid: input.hostPid,
+      phase: stage,
+      elapsedMs: Date.now() - startedAt,
+      reason: mainAgentFailure(error),
+    })
     console.error(
       '[cordisx-startup]',
       JSON.stringify({

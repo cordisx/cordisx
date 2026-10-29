@@ -1,3 +1,4 @@
+import { bindDiagnostic } from '../diagnostics/context.js'
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -82,6 +83,7 @@ export async function connectStartupCover(
   port: number,
   onRecovery?: (waiting: boolean) => Promise<void>,
 ): Promise<StartupCoverController> {
+  const emitDiagnostic = bindDiagnostic()
   const call = async (method: string, proof?: unknown): Promise<Held> =>
     await evaluate(
       main,
@@ -101,6 +103,7 @@ export async function connectStartupCover(
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   if (!held) throw new Error('Owned startup navigation deadline')
+  emitDiagnostic({ event: 'loading-shown', hostPid: owner.pid })
   console.error(
     '[cordisx-startup]',
     JSON.stringify({ event: 'loading-shown', at: held.loadingShownAt, hostPid: owner.pid }),
@@ -122,7 +125,16 @@ export async function connectStartupCover(
   const timing = observeStartupTiming(
     page,
     owner.pid,
-    value => console.error('[cordisx-startup]', JSON.stringify(value)),
+    value => {
+      emitDiagnostic({
+        event: typeof value.event === 'string' ? value.event : 'readiness-phase',
+        hostPid: owner.pid,
+        phase: typeof value.phase === 'string' ? value.phase : undefined,
+        state: typeof value.status === 'string' ? value.status : undefined,
+        elapsedMs: typeof value.durationMs === 'number' ? value.durationMs : undefined,
+      })
+      console.error('[cordisx-startup]', JSON.stringify(value))
+    },
   )
   let identifier: string | undefined
   const lifetime = new AbortController()
@@ -174,6 +186,7 @@ export async function connectStartupCover(
         activated = false
         throw error
       }
+      emitDiagnostic({ event: 'app-navigation', hostPid: owner.pid })
       console.error(
         '[cordisx-startup]',
         JSON.stringify({ event: 'app-navigation', at: Date.now(), hostPid: owner.pid }),
@@ -219,6 +232,7 @@ export async function connectStartupCover(
       }
       try {
         check()
+        emitDiagnostic({ event: 'composition-installed', hostPid: owner.pid })
         console.error(
           '[cordisx-startup]',
           JSON.stringify({ event: 'composition-installed', at: Date.now(), hostPid: owner.pid }),
@@ -237,6 +251,7 @@ export async function connectStartupCover(
               check() /* A controlled reload may retire this execution context. */
             }
             if (result?.released) {
+              emitDiagnostic({ event: 'usable-released', hostPid: owner.pid })
               check()
               // The startup registration must not cover an ordinary later reload.
               await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })

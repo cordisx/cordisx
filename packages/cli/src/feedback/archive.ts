@@ -166,7 +166,7 @@ function selection(value: unknown): boolean {
 function limits(value: unknown): boolean {
   const item = record(value)
   return item !== undefined && exactKeys(item, ['lookbackSeconds', 'maxBytes', 'maxEvents', 'collectionTimeoutMs'])
-    && integer(item.lookbackSeconds, 1, 86400) && integer(item.maxBytes, 1, MAX_BUNDLE_BYTES)
+    && integer(item.lookbackSeconds, 1, 259200) && integer(item.maxBytes, 1, MAX_BUNDLE_BYTES)
     && integer(item.maxEvents, 1, 10000) && integer(item.collectionTimeoutMs, 1, 30000)
 }
 

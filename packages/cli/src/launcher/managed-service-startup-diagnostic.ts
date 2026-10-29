@@ -1,3 +1,5 @@
+import { diagnostic as emitStartup, diagnosticRef } from '../diagnostics/context.js'
+
 export interface ManagedServiceStartupDiagnostic {
   readonly pluginId: string
   readonly serviceId: string
@@ -32,6 +34,14 @@ export function diagnoseManagedServiceStartup(
 // Do not serialize child output, Error messages, arguments, paths or environment.
 export function reportManagedServiceStartup(diagnostic: ManagedServiceStartupDiagnostic): void {
   try {
+    const { pluginId, serviceId, ...detail } = diagnostic
+    // Local structured journal uses opaque plugin/service identifiers.
+    emitStartup({
+      ...detail,
+      event: 'managed-service-startup-failed',
+      pluginRef: diagnosticRef(pluginId),
+      serviceRef: diagnosticRef(serviceId),
+    })
     process.stderr.write(`[cordisx-managed-service] ${JSON.stringify(diagnostic)}\n`)
   } catch {
     // Logging is best effort, including when the launcher output has closed.

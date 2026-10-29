@@ -1,3 +1,9 @@
+import {
+  createPluginHttpRequestObserver,
+  diagnosticError,
+  finishPluginHttpRequest,
+  observePluginHttpResponse,
+} from './plugin-http-request-observation.js'
 import { guardPluginHttpPublication } from './plugin-http-publication.js'
 import { guardedLegacyWork, LocalWorkSettlementCustody } from './local-work-settlement-custody.js'
 import { LocalWorkSettlementLifetimes } from './local-work-settlement-lifetime.js'
@@ -114,6 +120,7 @@ export class PluginHttpAuthority {
   private issued = 0
   private readonly forgotten = new Map<string, number>()
   private readonly keychain: LauncherKeychainBackend | undefined
+  private readonly observeRequest = createPluginHttpRequestObserver()
   private readonly transport: typeof fetch
   private disposed = false
   private readonly custody: LocalWorkSettlementCustody | undefined
@@ -876,6 +883,9 @@ export class PluginHttpAuthority {
         headers[name] = value
       }
     }
+    let outcome = 'failed', statusCode: number | undefined
+    const report = this.observeRequest(grant.principal.identity.pluginId)
+    report('http-request-queued')
     const abort = new AbortController()
     grant.requests.set(operationId, abort)
     let expired = false
@@ -923,6 +933,7 @@ export class PluginHttpAuthority {
         || this.grants.get(grant.connection.id) !== grant
         || (grant.localFence && !grant.localFence())
       ) return fail(expired ? 'deadline-exceeded' : 'aborted')
+      report('http-request-issued')
       const response = await this.transport(url, {
         method: String(input.method),
         headers,
@@ -931,26 +942,9 @@ export class PluginHttpAuthority {
         signal: abort.signal,
         ...(input.body === undefined ? {} : { body: input.body as string }),
       })
-      if (response.status >= 300 && response.status < 400) {
-        await response.body?.cancel()
-        return fail('redirect-denied')
-      }
-      const reader = response.body?.getReader()
-      const chunks: Uint8Array[] = []
-      let bytes = 0
-      if (reader !== undefined) {
-        while (true) {
-          const next = await reader.read()
-          if (next.done) break
-          bytes += next.value.byteLength
-          if (bytes > 1_048_576) {
-            await reader.cancel()
-            abort.abort()
-            return fail('response-too-large')
-          }
-          chunks.push(next.value)
-        }
-      }
+      statusCode = response.status
+      const observed = await observePluginHttpResponse(response, abort, report)
+      if (observed.status !== 'accepted') return observed
       if (!await matchesAccount()) {
         await this.retire(grant.connection.id, grant)
         return fail('credential-unavailable')
@@ -960,14 +954,18 @@ export class PluginHttpAuthority {
         || this.grants.get(grant.connection.id) !== grant
         || (grant.localFence && !grant.localFence())
       ) return fail(expired ? 'deadline-exceeded' : 'aborted')
-      return accepted({
-        statusCode: response.status,
-        contentType: response.headers.get('content-type'),
-        body: Buffer.concat(chunks).toString('utf8'),
-      })
-    } catch {
+      outcome = response.ok ? 'completed' : 'http-error'
+      return observed
+    } catch (error) {
+      report('http-request-error', diagnosticError(error))
       return fail(expired ? 'deadline-exceeded' : abort.signal.aborted ? 'aborted' : 'network-error')
     } finally {
+      finishPluginHttpRequest(report, {
+        expired,
+        aborted: abort.signal.aborted,
+        outcome,
+        ...(statusCode === undefined ? {} : { statusCode }),
+      })
       clearTimeout(deadline)
       clearInterval(fence)
       grant.requests.delete(operationId)
