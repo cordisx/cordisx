@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { fileURLToPath } from 'node:url'
+import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
@@ -59,6 +60,24 @@ const privatePrefix = `cordisx-private-${nonce}-`
 let sequence = 0
 let closed = false
 let inputQueue = Promise.resolve()
+let droppedDiagnostics = 0
+const turnDiagnostics = new NativeTurnDiagnostics(event => {
+  if (!closed && !control.destroyed && control.writableLength < 256 * 1024) {
+    void ready.then(async () => {
+      if (droppedDiagnostics) {
+        await write(control, {
+          type: 'diagnostic',
+          id: `diagnostic-${++sequence}`,
+          event: 'model-evidence-gap',
+          reason: 'control-backpressure',
+          dropped: droppedDiagnostics,
+        })
+        droppedDiagnostics = 0
+      }
+      await write(control, { type: 'diagnostic', id: `diagnostic-${++sequence}`, ...event })
+    }).catch(() => undefined)
+  } else if (!closed) droppedDiagnostics++
+})
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.test(value)
 const lifecyclePending = threadId => lifecycleUncertain || [...lifecycleCalls.values()].includes(threadId)
@@ -67,6 +86,11 @@ const write = (stream, value) =>
     if (stream.destroyed) {
       reject(new Error('Native transport is closed'))
       return
+    }
+    if (stream === child.stdin) {
+      try {
+        turnDiagnostics.issued(typeof value === 'string' ? JSON.parse(value) : value)
+      } catch {}
     }
     stream.write(`${typeof value === 'string' ? value : JSON.stringify(value)}\n`, error =>
       error ? reject(error) : resolve())
@@ -81,6 +105,7 @@ function rejectAll(calls) {
 }
 function stop(reason = 'transport-closed') {
   if (closed) return
+  turnDiagnostics.close()
   closed = true
   if (typeof reason === 'string' && reason !== 'transport-closed') {
     process.stderr.write(`[cordisx] Native intermediary stopped: ${reason}\n`)
@@ -282,6 +307,7 @@ async function forward(line) {
       dispatch?.kind !== 'dispatch' || typeof dispatch.model !== 'string' || typeof dispatch.providerId !== 'string'
     ) throw new Error('Managed request rejected')
     admitted = true
+    turnDiagnostics.selected(message.id, dispatch)
     const nextConfig = { ...config }
     delete nextConfig[marker]
     if (message.method === 'thread/start') {
@@ -469,6 +495,9 @@ async function recoverUnloadedTurn(id, params, failureLine) {
 }
 
 readLines(process.stdin, line => {
+  try {
+    turnDiagnostics.queued(JSON.parse(line))
+  } catch {}
   inputQueue = inputQueue.then(async () => {
     await ready
     await forward(line)
@@ -486,6 +515,7 @@ readLines(child.stdout, line => {
     void write(process.stdout, line).catch(stop)
     return
   }
+  turnDiagnostics.received(message)
   if (settle(privateCalls, message, false)) return
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return

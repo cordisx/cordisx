@@ -1,3 +1,4 @@
+import { diagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -196,6 +197,7 @@ export async function createSupervisorRuntime(
     try {
       await rm(tokenFile, { force: true })
       supervisorToken = token
+      diagnostic({ event: 'supervisor-generation', supervisorGeneration: diagnosticRef(token) })
       control = await startSupervisorControlServer({
         socketPath: supervisorPaths(home, app, profile).socket,
         token,

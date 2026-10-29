@@ -1,3 +1,4 @@
+import { diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 
 type LifecycleEvent =
@@ -17,6 +18,7 @@ export function logHostLifecycle(
   event: LifecycleEvent,
   context: { readonly hostPid?: number | undefined; readonly ready?: boolean } = {},
 ): void {
+  diagnostic({ ...context, ...event })
   stdout(`[cordisx-lifecycle] ${JSON.stringify({ at: Date.now(), launcherPid: process.pid, ...context, ...event })}`)
 }
 

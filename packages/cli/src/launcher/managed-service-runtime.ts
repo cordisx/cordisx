@@ -6,6 +6,7 @@ import type {
   ManagedServiceRegistrationHandleV1,
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { diagnosticError, managedServiceDiagnostic } from './managed-service-diagnostics.js'
 import { spawn as nodeSpawn } from 'node:child_process'
 import { findFreeLoopbackPort } from './process.js'
 import { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
@@ -363,6 +364,8 @@ export class ManagedServiceRuntime {
   }
 
   private async prepare(record: ManagedServiceRecord, signal: AbortSignal): Promise<ManagedServiceControlResultV1> {
+    const started = performance.now()
+    managedServiceDiagnostic(record, 'managed-service-preparation-start')
     record.state = 'preparing'
     record.health = 'starting'
     record.diagnostic = undefined
@@ -401,8 +404,13 @@ export class ManagedServiceRuntime {
       record.state = 'ready'
       record.health = 'ready'
       this.startHealthMonitoring(record)
+      managedServiceDiagnostic(record, 'managed-service-ready', { elapsedMs: Math.round(performance.now() - started) })
       return { status: 'ready', projection: this.projection(record) }
     } catch (error) {
+      managedServiceDiagnostic(record, signal.aborted ? 'managed-service-cancelled' : 'managed-service-failed', {
+        elapsedMs: Math.round(performance.now() - started),
+        ...diagnosticError(error),
+      })
       if (!signal.aborted && !(error instanceof BorrowedServiceUnavailableError)) {
         diagnoseManagedServiceStartup(
           {
@@ -599,6 +607,11 @@ export class ManagedServiceRuntime {
     record: ManagedServiceRecord,
     child: NonNullable<ManagedServiceRecord['child']>,
   ): void {
+    managedServiceDiagnostic(record, 'managed-service-exit', {
+      pid: child.pid,
+      exitCode: child.exitCode,
+      signal: child.signalCode ?? undefined,
+    })
     if (record.child !== child || record.disposed) return
     const preparing = record.state === 'preparing'
     record.child = undefined
@@ -662,6 +675,7 @@ export class ManagedServiceRuntime {
       record.health = 'unhealthy'
       record.state = 'failed'
       record.diagnostic = managedDiagnostic('health-check-failed', true)
+      managedServiceDiagnostic(record, 'managed-service-health-failed')
       this.revokeRuntimeState(record)
       await this.stopOwned(record).catch(() => undefined)
       return
@@ -760,9 +774,16 @@ export class ManagedServiceRuntime {
 
   private async stopOwned(record: ManagedServiceRecord): Promise<void> {
     const child = record.child
-    record.child = undefined
     if (child === undefined || record.processOwnership !== 'host-owned') return
-    await terminateManagedServiceChild(child, this.options.childTerminationTimeouts)
+    managedServiceDiagnostic(record, 'managed-service-cleanup-start', { pid: child.pid })
+    try {
+      await terminateManagedServiceChild(child, this.options.childTerminationTimeouts)
+      if (record.child === child) record.child = undefined
+      managedServiceDiagnostic(record, 'managed-service-cleanup-complete', { pid: child.pid })
+    } catch (error) {
+      managedServiceDiagnostic(record, 'managed-service-cleanup-failed', { pid: child.pid, ...diagnosticError(error) })
+      throw error
+    }
   }
 
   private disposeRecord(record: ManagedServiceRecord): Promise<ManagedServiceControlResultV1> {
@@ -771,6 +792,9 @@ export class ManagedServiceRuntime {
     record.lifecycle.abort(new Error('managed service disposed'))
     const disposal = this.disposeRecordNow(record)
     record.disposal = disposal
+    void disposal.catch(() => {
+      if (record.disposal === disposal) record.disposal = undefined
+    })
     return disposal
   }
 
@@ -795,6 +819,11 @@ export class ManagedServiceRuntime {
     record.state = 'disposed'
     record.health = 'stopped'
     record.diagnostic = managedDiagnostic('disposed', false)
+    // Keep failed owned children reachable for an explicit cleanup retry. Never delete their generation files early.
+    if (record.child !== undefined) {
+      if (failures.length === 1) throw failures[0]
+      throw new AggregateError(failures, 'managed service owned child cleanup incomplete')
+    }
     if (this.records.get(managedIdentityKey(record.binding.identity)) === record) {
       this.records.delete(managedIdentityKey(record.binding.identity))
     }

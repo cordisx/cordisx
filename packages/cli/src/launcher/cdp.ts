@@ -1,3 +1,4 @@
+import { diagnostic } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
@@ -190,9 +191,18 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   let startupNavigation: StartupNavigationHandoff | undefined
   let startupNavigationPending = startupNavigation !== undefined
   const startupStages = new Set<string>()
+  let priorStage: string | undefined
+  let priorStageAt = performance.now()
   const startupStage = (stage: string): void => {
     if (startupStages.has(stage)) return
     startupStages.add(stage)
+    const now = performance.now()
+    if (priorStage) {
+      diagnostic({ event: 'startup-stage-end', phase: priorStage, elapsedMs: Math.round(now - priorStageAt) })
+    }
+    diagnostic({ event: 'startup-stage-start', phase: stage })
+    priorStage = stage
+    priorStageAt = now
     options.onStatus?.(stage)
   }
   const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port)
@@ -335,6 +345,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     | 'installation'
     | 'readiness' = 'poll'
   const lifecycle = (event: 'watcher-failed' | 'watcher-cleanup-started'): void => {
+    diagnostic({ event, phase: watcherStage, aborted: options.signal.aborted, count: installed.size })
     options.onStatus?.(`lifecycle ${
       JSON.stringify({
         event,

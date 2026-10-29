@@ -1,7 +1,9 @@
+import { diagnostic, diagnosticError, diagnosticId, diagnosticRef, withDiagnostics } from '../diagnostics/context.js'
+import { journalDirectory, LocalJournal, readJournal } from '../diagnostics/journal.js'
 import { fileURLToPath } from 'node:url'
 import { launchFingerprint } from './launch-fingerprint.js'
 import { randomBytes } from 'node:crypto'
-import { chmod, open, readFile, realpath, writeFile } from 'node:fs/promises'
+import { open, readFile, realpath, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
@@ -32,7 +34,7 @@ import { scheduleShortcutPresentation } from './shortcut-presentation-worker.js'
 const VERSION = await resolveOwningPackageVersion(import.meta.url, 'cordisx')
 const RETRY_DELAY = 50
 /** Product launch budget; deliberately independent from shutdown escalation. */
-export const RENDERER_READINESS_TIMEOUT_MS = 60_000
+export const RENDERER_READINESS_TIMEOUT_MS = 180_000
 const SUPERVISOR_STOP_TIMEOUT_MS = 30_000
 
 type ManagedAction = 'start' | 'status' | 'logs' | 'stop' | 'restart'
@@ -200,6 +202,12 @@ export async function waitForState(
       phase: StartupPhase,
     ) => void | Promise<void>),
   expectedInstanceToken?: string,
+  clock: { readonly now: () => number; readonly wait: () => Promise<void> } = {
+    now: () => performance.now(),
+    wait: async () => {
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+    },
+  },
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
   const onHostLaunched = typeof onHostLaunchedOrInstanceToken === 'function'
     ? onHostLaunchedOrInstanceToken
@@ -207,11 +215,18 @@ export async function waitForState(
   const instanceToken = typeof onHostLaunchedOrInstanceToken === 'string'
     ? onHostLaunchedOrInstanceToken
     : expectedInstanceToken
-  let deadline = Date.now() + timeoutMs
+  const started = clock.now()
+  let deadline = clock.now() + timeoutMs
+  diagnostic({ event: 'startup-wait-start', timeoutMs, deadline: Date.now() + Math.max(0, deadline - clock.now()) })
   let hostPublished = false
+  let generationPublished = false
   let lastRecovery = 0
   while (true) {
     const state = await readMutableSupervisorState(paths)
+    if (state && !generationPublished) {
+      diagnostic({ event: 'supervisor-generation', supervisorGeneration: diagnosticRef(state.instanceToken) })
+      generationPublished = true
+    }
     if (instanceToken !== undefined) {
       if (state === undefined) throw new Error('CordisX background supervisor state was stopped or removed')
       if (state.instanceToken !== instanceToken) {
@@ -221,9 +236,25 @@ export async function waitForState(
     if (state?.phase === 'stopping') throw new Error('CordisX background supervisor is stopping')
     if (!hostPublished && state?.hostPid !== undefined && state.hostProcessStartedAt !== undefined) {
       hostPublished = true
+      diagnostic({
+        event: 'startup-host-launched',
+        hostPid: state.hostPid,
+        elapsedMs: Math.round(clock.now() - started),
+      })
       await onHostLaunched?.(state, 'host-launched')
     }
-    if (state?.phase === 'ready') return state
+    if (state?.phase === 'ready' && clock.now() >= deadline) {
+      diagnostic({ event: 'startup-deadline', timeoutMs, deadline, elapsedMs: Math.round(clock.now() - started) })
+      throw new Error('timed out waiting for CordisX renderer readiness')
+    }
+    if (state?.phase === 'ready') {
+      diagnostic({
+        event: 'startup-ready',
+        elapsedMs: Math.round(clock.now() - started),
+        deadline: Date.now() + Math.max(0, deadline - clock.now()),
+      })
+      return state
+    }
     if (state?.phase === 'failed') {
       throw new Error(state.failure ?? 'CordisX background supervisor failed before readiness')
     }
@@ -241,15 +272,25 @@ export async function waitForState(
         ) {
           throw new Error('Owning startup recovery window process exited')
         }
-        if (recovery.waitingForUser || recovery.updatedAt !== lastRecovery) deadline = Date.now() + timeoutMs
+        if (recovery.updatedAt !== lastRecovery && !recovery.waitingForUser) {
+          deadline = clock.now() + timeoutMs
+          diagnostic({
+            event: 'startup-user-retry',
+            timeoutMs,
+            deadline: Date.now() + Math.max(0, deadline - clock.now()),
+          })
+        }
         if (recovery.updatedAt !== lastRecovery) {
           await onHostLaunched?.(state, recovery.waitingForUser ? 'waiting-for-user' : 'retrying')
           lastRecovery = recovery.updatedAt
         }
       }
     }
-    if (Date.now() >= deadline) throw new Error('timed out waiting for CordisX renderer readiness')
-    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+    if (clock.now() >= deadline) {
+      diagnostic({ event: 'startup-deadline', timeoutMs, deadline, elapsedMs: Math.round(clock.now() - started) })
+      throw new Error('timed out waiting for CordisX renderer readiness')
+    }
+    await clock.wait()
   }
 }
 
@@ -310,22 +351,40 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
   }
 }
 
-async function followLog(paths: ReturnType<typeof supervisorPaths>, runtime: CordisXCliRuntime): Promise<void> {
+async function followLog(
+  paths: ReturnType<typeof supervisorPaths>,
+  runtime: CordisXCliRuntime,
+  directory: string,
+): Promise<void> {
   const stdout = runtime.stdout ?? console.log
   let offset = 0
+  const seen = new Map<string, number>()
+  let from = Date.now() - 72 * 60 * 60 * 1000
   while (!runtime.internalSignal?.aborted) {
-    try {
-      const contents = await readFile(paths.log, 'utf8')
-      if (contents.length < offset) offset = 0
-      if (contents.length > offset) {
-        const appended = contents.slice(offset)
-        offset = contents.length
-        for (const line of appended.split(/\r?\n/u)) if (line !== '') stdout(line)
+    const journal = await readJournal(directory, { from, until: Date.now(), maxBytes: 512 * 1024 })
+    if (journal.text) {
+      for (const line of journal.text.trimEnd().split('\n')) {
+        if (seen.has(line)) continue
+        const at = (JSON.parse(line) as { at?: number }).at ?? from
+        seen.set(line, at)
+        stdout(line)
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    await new Promise(resolve => setTimeout(resolve, 100))
+      const latest = Math.max(from, ...seen.values())
+      from = Math.max(from, latest - 1000)
+      for (const [line, at] of seen) if (at < from) seen.delete(line)
+      if (journal.truncated) stdout('[cordisx] diagnostic-evidence-gap: log view reached its export bound')
+    } else {try {
+        const contents = await readFile(paths.log, 'utf8')
+        if (contents.length < offset) offset = 0
+        if (contents.length > offset) {
+          const appended = contents.slice(offset)
+          offset = contents.length
+          for (const line of appended.split(/\r?\n/u)) if (line !== '') stdout(line)
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }}
+    await new Promise(resolve => setTimeout(resolve, journal.text ? 1000 : 100))
   }
 }
 
@@ -419,6 +478,32 @@ export async function runSupervisorCommand(
   if (!isManaged(invocation)) throw new Error('not a supervisor command')
   if (invocation.createShortcut) await preflightShortcut(invocation, runtime.cwd ?? process.cwd())
   const target = await selectionFor(invocation, runtime)
+  if (['status', 'logs'].includes(invocation.action)) {
+    return await runSelectedSupervisorCommand(invocation, runtime, target, onState)
+  }
+  const launchId = diagnosticId()
+  const journal = new LocalJournal({
+    directory: journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+    version: VERSION,
+    launchId,
+  })
+  try {
+    return await withDiagnostics(
+      journal,
+      () => runSelectedSupervisorCommand(invocation, runtime, target, onState, launchId),
+    )
+  } finally {
+    await journal.close()
+  }
+}
+
+async function runSelectedSupervisorCommand(
+  invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>,
+  runtime: CordisXCliRuntime,
+  target: Awaited<ReturnType<typeof selectionFor>>,
+  onState?: (ready: ReadyLaunchResult, phase: StartupPhase) => void | Promise<void>,
+  launchId?: string,
+): Promise<ReadyLaunchResult | undefined> {
   const paths = supervisorPaths(path.dirname(target.configPath), target.appId, target.selection.profileId)
   const json = invocation.options.json
   const initialState = await readSupervisorStateResult(paths)
@@ -461,11 +546,19 @@ export async function runSupervisorCommand(
   if (invocation.action === 'logs') {
     if (invocation.follow === true) {
       if (json) throw new Error('--json and --follow cannot be combined')
-      await followLog(paths, runtime)
+      await followLog(
+        paths,
+        runtime,
+        journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+      )
       return
     }
     try {
-      output(runtime, await readFile(paths.log, 'utf8'), json)
+      const journal = await readJournal(
+        journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+        { from: Date.now() - 72 * 60 * 60 * 1000, until: Date.now(), maxBytes: 512 * 1024 },
+      )
+      output(runtime, journal.text || await readFile(paths.log, 'utf8'), json)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') output(runtime, '', json)
       else throw error
@@ -523,6 +616,7 @@ export async function runSupervisorCommand(
       state = undefined
     }
     if (state !== undefined) {
+      diagnostic({ event: 'supervisor-reused', supervisorGeneration: diagnosticRef(state.instanceToken) })
       if (state.version !== VERSION || state.effectiveConfig !== target.fingerprint) {
         throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
       }
@@ -540,8 +634,8 @@ export async function runSupervisorCommand(
       await onState?.(result, 'ready')
       return await finishReady(invocation, runtime, result)
     }
-    const log = await open(paths.log, 'a', 0o600)
-    await chmod(paths.log, 0o600)
+    // Persist only the structured allowlisted journal. Legacy raw logs remain readable, never appended.
+    const log = await open(os.devNull, 'a')
     const instanceToken = randomBytes(32).toString('hex')
     await writeFile(paths.bootstrapToken, instanceToken, { mode: 0o600 })
     const args = [fileURLToPath(new URL('../cli.js', import.meta.url)), ...childArgs(invocation)]
@@ -552,6 +646,7 @@ export async function runSupervisorCommand(
     } = target.environment
     const childEnvironment = {
       ...launchEnvironment,
+      CORDISX_DIAGNOSTIC_LAUNCH_ID: launchId,
       CORDISX_SUPERVISOR_HOME: path.dirname(target.configPath),
       CORDISX_SUPERVISOR_APP: target.appId,
       CORDISX_SUPERVISOR_PROFILE: target.selection.profileId,
@@ -609,6 +704,7 @@ export async function runSupervisorCommand(
       if (observedReady === undefined) throw new Error('background supervisor exited before readiness')
       ready = observedReady
     } catch (error) {
+      diagnostic({ event: 'startup-cancel-cleanup-start', reason: 'readiness-wait-failed', ...diagnosticError(error) })
       const observed = await readSupervisorState(paths)
       if (observed !== undefined && observed.instanceToken === instanceToken && observed.phase !== 'failed') {
         const requested = await requestSupervisorStop(paths.socket, observed.instanceToken)
@@ -627,6 +723,7 @@ export async function runSupervisorCommand(
       } finally {
         await releaseFailureOperation()
       }
+      diagnostic({ event: 'startup-cancel-cleanup-complete', reason: 'readiness-wait-failed' })
       throw error
     }
     const result = { state: ready, target }

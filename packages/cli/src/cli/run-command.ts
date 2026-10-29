@@ -1,3 +1,4 @@
+import { recordRuntimeGeneration, runWithLaunchDiagnostics } from './launch-diagnostics.js'
 import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import path from 'node:path'
 import {
@@ -136,7 +137,7 @@ import {
   createRendererLifecycleProjection,
   type RendererComposition,
 } from './renderer-composition.js'
-import { prepareCliCommand } from './run-command-dispatch.js'
+import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createRendererChannelComposition } from './renderer-channel-composition.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -152,8 +153,10 @@ export {
 } from './production-plugin-management.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
-  const prepared = await prepareCliCommand(argv, runtime)
-  if (prepared === undefined) return
+  await runWithLaunchDiagnostics(argv, runtime, runPreparedCordisXCli)
+}
+
+async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: CordisXCliRuntime): Promise<void> {
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const supervisorRuntime = await createSupervisorRuntime(environment)
   const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
@@ -225,6 +228,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       policy.key.profileId === selection.profileId
     )
     const lifecycleGeneration = randomBytes(16).toString('hex')
+    await recordRuntimeGeneration(lifecycleGeneration, plan?.executable)
     const lifecycleStore = new PluginActivationStore(
       rootFromConfigPath(configPath),
       selection.profileId,

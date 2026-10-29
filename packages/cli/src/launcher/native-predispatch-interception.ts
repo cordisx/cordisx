@@ -1,3 +1,4 @@
+import { diagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -215,6 +216,18 @@ export async function installNativeResourceInterception(
       transform.url
     ),
   )
+  const diagnosticStarted = performance.now()
+  diagnostic({ event: 'resource-interception-start', timeoutMs, deadline: Date.now() + timeoutMs })
+  const resourceDiagnostic = (event: string, item: NativeResourceEvidence, reason?: string): void => {
+    diagnostic({
+      event,
+      resourceRef: diagnosticRef(item.url),
+      state: item.state,
+      required: requiredUrls.has(item.url),
+      elapsedMs: Math.round(performance.now() - diagnosticStarted),
+      reason,
+    })
+  }
   const evidence = new Map<string, NativeResourceEvidence>(options.transforms.map(transform => [
     transform.url,
     {
@@ -240,6 +253,12 @@ export async function installNativeResourceInterception(
   }
   const publish = (status: NativeResourceInterceptionStatus): void => {
     state.status = status
+    diagnostic({
+      event: 'resource-interception-state',
+      state: status,
+      elapsedMs: Math.round(performance.now() - diagnosticStarted),
+      aborted: options.signal?.aborted ?? false,
+    })
     if (status === 'active') state.topLevelLoadPending = false
     options.onStatusChange?.(status, [...evidence.values()])
   }
@@ -320,6 +339,16 @@ export async function installNativeResourceInterception(
   const unavailable = (item: NativeResourceEvidence, reason: string): void => {
     item.state = 'unavailable'
     item.reason = reason
+    const category = reason.includes('aborted')
+      ? 'cancelled'
+      : reason.includes('timeout')
+      ? 'observation-deadline'
+      : reason.includes('pin mismatch')
+      ? 'integrity-mismatch'
+      : reason.includes('acknowledgement')
+      ? 'ack-deadline'
+      : 'operation-failed'
+    resourceDiagnostic('resource-unavailable', item, category)
     if (state.status === 'active') publish('unavailable')
   }
 
@@ -360,7 +389,10 @@ export async function installNativeResourceInterception(
       throw new Error('native resource interception was disposed during acknowledgement')
     }
     if (!acknowledged) unavailable(item, 'native resource execution acknowledgement was not observed')
-    else item.state = 'acknowledged'
+    else {
+      item.state = 'acknowledged'
+      resourceDiagnostic('resource-acknowledged', item)
+    }
   }
 
   const acknowledgeDocument = async (generation: number): Promise<void> => {
@@ -418,11 +450,13 @@ export async function installNativeResourceInterception(
       const response = await options.session.send('Fetch.getResponseBody', { requestId: event.requestId }, timeoutMs)
       const original = decodeBody(response)
       item.observedSha256 = digest(original)
+      resourceDiagnostic('resource-observed', item)
       if (item.observedSha256 !== transform.sha256) {
         unavailable(item, `native resource pin mismatch: ${item.observedSha256}`)
         await continueOriginal(event.requestId)
         return
       }
+      resourceDiagnostic('resource-validated', item)
       const result = transform.transform(original.toString('utf8'))
       if (result.anchorMatches !== 1) {
         throw new Error(`native resource transform anchor count was ${result.anchorMatches}`)
@@ -445,6 +479,7 @@ export async function installNativeResourceInterception(
         body: transformed.toString('base64'),
       })
       item.state = 'fulfilled'
+      resourceDiagnostic('resource-injected', item)
     } catch (error) {
       if (item.state !== 'unavailable') unavailable(item, message(error))
       await continueOriginal(event.requestId).catch(() => undefined)

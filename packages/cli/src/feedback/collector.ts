@@ -1,3 +1,4 @@
+import { journalDirectory, readJournal } from '../diagnostics/journal.js'
 import { randomBytes } from 'node:crypto'
 import { lstat, open, readFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -33,7 +34,7 @@ import { inspectFeedbackBundle, makePrivateStage, publishPrivateStage, writePriv
 import { feedbackReference, redactFeedbackText } from './redaction.js'
 
 const DEFAULT_LOOKBACK_SECONDS = 15 * 60
-const MAX_LOOKBACK_SECONDS = 24 * 60 * 60
+const MAX_LOOKBACK_SECONDS = 72 * 60 * 60
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 const MAX_BYTES = 10 * 1024 * 1024
 const MAX_LOG_BYTES = 512 * 1024
@@ -229,7 +230,7 @@ export async function collectFeedback(
   if (invocation.feedbackAction !== 'collect') throw new Error('feedback collection requires collect')
   const now = Date.now()
   const lookbackSeconds = invocation.since === undefined ? DEFAULT_LOOKBACK_SECONDS : parseDuration(invocation.since)
-  if (lookbackSeconds > MAX_LOOKBACK_SECONDS) throw new Error('feedback lookback exceeds 24 hours')
+  if (lookbackSeconds > MAX_LOOKBACK_SECONDS) throw new Error('feedback lookback exceeds 72 hours')
   const from = invocation.from === undefined ? now - lookbackSeconds * 1000 : parseTime(invocation.from, '--from')
   const until = invocation.until === undefined ? now : parseTime(invocation.until, '--until')
   if (from > until || until > now + 60_000) throw new Error('feedback time range is invalid')
@@ -257,7 +258,9 @@ export async function collectFeedback(
   })
   const paths = supervisorPaths(homeDir, selection.appId, selection.profileId)
   const state = await readSupervisorStateSafely(paths.state)
-  if (invocation.launch !== undefined) throw new Error('launch_selection_unsupported_without_structured_ledger')
+  if (invocation.launch !== undefined && !/^[a-f0-9-]{36}$/u.test(invocation.launch)) {
+    throw new Error('invalid_structured_launch_id')
+  }
   const bundleKey = randomBytes(32)
   const bundleId = `fb_${randomBytes(12).toString('hex')}`
   const timestamp = new Date(now).toISOString().replace(/[:.]/gu, '-')
@@ -387,7 +390,28 @@ export async function collectFeedback(
     ))
     const reservedBytes = 16 * 1024
     const logBudget = Math.max(1, Math.min(MAX_LOG_BYTES, maxBytes - reservedBytes))
-    const logExcerpt = await readBoundedRegularText(paths.log, logBudget)
+    const structured = await readJournal(journalDirectory(homeDir, selection.appId, selection.profileId), {
+      from,
+      until,
+      maxBytes: logBudget,
+      ...(invocation.launch === undefined ? {} : { launchId: invocation.launch }),
+    })
+    if (structured.text) {
+      const sanitized = redactFeedbackText(structured.text, [homeDir, process.cwd()])
+      redactionCounts.push(sanitized.counts)
+      artifacts.push(
+        addArtifact(await writePrivateFile(stage, 'diagnostics/journal.jsonl', sanitized.text), {
+          purpose: 'time-filtered local structured journal including compressed shards',
+          evidenceType: 'product_log',
+          status: structured.truncated ? 'truncated' : 'present',
+          redactions: total(sanitized.counts),
+        }),
+      )
+    } else missing.push({ field: 'structured_journal', status: 'missing', reason: 'no_events_in_selected_range' })
+    const logExcerpt = await readBoundedRegularText(
+      paths.log,
+      Math.max(1, logBudget - Buffer.byteLength(structured.text)),
+    )
     let logText = ''
     if (logExcerpt === undefined) {
       missing.push({ field: 'host_log', status: 'missing', reason: 'not_found' })
@@ -458,7 +482,7 @@ export async function collectFeedback(
         launchId: state === undefined ? null : feedbackReference(bundleKey, 'launch', state.instanceToken),
         from: iso(from),
         until: iso(until),
-        correlationConfidence: logExcerpt === undefined ? 'none' : 'partial',
+        correlationConfidence: structured.text ? 'partial' : logExcerpt === undefined ? 'none' : 'partial',
         disposition: legacyDisposition(logText, state?.phase),
         cdpPort: null,
       },
@@ -467,9 +491,14 @@ export async function collectFeedback(
       exclusions: EXCLUSIONS.map(category => ({ category, reason: 'excluded_by_feedback_policy' })),
       missing,
       redactions: { total: total(counts), byCategory: counts },
-      warnings: logExcerpt === undefined
-        ? []
-        : [{ code: 'legacy_partial_correlation', message: 'host.log has no structured launch ledger' }],
+      warnings: [
+        ...(logExcerpt === undefined
+          ? []
+          : [{ code: 'legacy_partial_correlation', message: 'host.log has no structured launch ledger' }]),
+        ...(structured.truncated
+          ? [{ code: 'journal_truncated', message: 'Journal export reached bounds or contained unreadable evidence' }]
+          : []),
+      ],
     }
     const manifestSource = json(manifest)
     await writePrivateFile(stage, 'manifest.json', manifestSource)
