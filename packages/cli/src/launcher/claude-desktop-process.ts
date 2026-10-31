@@ -36,9 +36,20 @@ export function claudeProfileRoot(cordisxHomeDir: string, profileId: string): st
   return path.join(cordisxHomeDir, 'apps', 'claude', 'profiles', profileId)
 }
 
-/** The directory Claude Desktop uses as its third-party data directory. */
+/**
+ * The directory Claude Desktop uses as its third-party data directory.
+ *
+ * Claude reads its third-party setup from `<userData>-3p` unless `userData`
+ * already ends in `-3p`, so the launcher names the folder that way and passes
+ * it as `--user-data-dir`. (Signed builds ignore `CLAUDE_USER_DATA_DIR` and
+ * fall back to the user's own data folder, so it is never used.)
+ */
 export function claudeProfileDataDir(cordisxHomeDir: string, profileId: string): string {
-  return path.join(claudeProfileRoot(cordisxHomeDir, profileId), 'data')
+  return path.join(claudeProfileRoot(cordisxHomeDir, profileId), 'data-3p')
+}
+
+export function claudeLaunchArgs(dataDir: string): readonly string[] {
+  return [`--user-data-dir=${dataDir}`]
 }
 
 function pidFile(cordisxHomeDir: string, profileId: string): string {
@@ -61,15 +72,8 @@ export async function runningClaudeProfile(
   }
   if (!Number.isSafeInteger(pid) || pid <= 1) return undefined
   try {
-    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command='])
-    if (!stdout.includes('Claude.app/Contents/MacOS/Claude')) return undefined
-  } catch {
-    return undefined
-  }
-  try {
-    const { stdout } = await execFileAsync('ps', ['eww', '-p', String(pid), '-o', 'command='])
-    const dataDir = claudeProfileDataDir(cordisxHomeDir, profileId)
-    if (!stdout.includes(`CLAUDE_USER_DATA_DIR=${dataDir}`)) return undefined
+    const { stdout } = await execFileAsync('ps', ['-ww', '-p', String(pid), '-o', 'command='])
+    if (!stdout.includes(claudeLaunchArgs(claudeProfileDataDir(cordisxHomeDir, profileId))[0]!)) return undefined
   } catch {
     return undefined
   }
@@ -79,9 +83,8 @@ export async function runningClaudeProfile(
 /**
  * Starts Claude Desktop on a CordisX-owned data directory and records its pid.
  *
- * `CLAUDE_USER_DATA_DIR` makes the app use `dataDir` itself as its third-party
- * directory. Debug and network-override switches are never passed: the app
- * refuses to start with them.
+ * Only `--user-data-dir` is passed: the app refuses to start with debugging or
+ * network-override switches.
  */
 export async function launchClaudeDesktop(input: {
   readonly executable: string
@@ -93,8 +96,9 @@ export async function launchClaudeDesktop(input: {
   await mkdir(dataDir, { recursive: true, mode: 0o700 })
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(input.environment)) if (value !== undefined) env[key] = value
-  env.CLAUDE_USER_DATA_DIR = dataDir
-  const child = spawn(input.executable, [], { env, detached: true, stdio: 'ignore' })
+  // An inherited CLAUDE_USER_DATA_DIR sends a signed build back to the user's own data folder.
+  delete env.CLAUDE_USER_DATA_DIR
+  const child = spawn(input.executable, [...claudeLaunchArgs(dataDir)], { env, detached: true, stdio: 'ignore' })
   const pid = await new Promise<number>((resolve, reject) => {
     child.once('error', reject)
     child.once('spawn', () => child.pid === undefined ? reject(new Error('Claude exposed no pid')) : resolve(child.pid))
@@ -110,14 +114,22 @@ export async function stopClaudeDesktop(cordisxHomeDir: string, profileId: strin
     await rm(pidFile(cordisxHomeDir, profileId), { force: true })
     return false
   }
-  process.kill(pid, 'SIGTERM')
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    try {
-      process.kill(pid, 0)
-    } catch {
-      break
+  const exited = async (timeoutMs: number): Promise<boolean> => {
+    for (let waited = 0; waited < timeoutMs; waited += 200) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      try {
+        process.kill(pid, 0)
+      } catch {
+        return true
+      }
     }
+    return false
+  }
+  // Claude Desktop saves its windows and sessions on SIGTERM, which can take several seconds.
+  process.kill(pid, 'SIGTERM')
+  if (!await exited(20_000)) {
+    process.kill(pid, 'SIGKILL')
+    if (!await exited(5_000)) throw new Error(`Claude (pid ${pid}) did not exit`)
   }
   await rm(pidFile(cordisxHomeDir, profileId), { force: true })
   return true

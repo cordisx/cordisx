@@ -41,6 +41,7 @@ import { combinedNativeModelProviderCatalog } from './native-model-provider-cata
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
+import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
@@ -702,7 +703,21 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        const homeConfigPath = completeOptions.managedCatalog === undefined
+          ? undefined
+          : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
         const cdp = createNativeSubmissionCdpAuthority({
+          ...(homeConfigPath === undefined ? {} : {
+            modelServices: {
+              read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
+              save: async request => {
+                const parsed = parseModelServicesSaveRequest(request)
+                return parsed === undefined
+                  ? { status: 'rejected', code: 'invalid' }
+                  : await saveModelServices(homeConfigPath, parsed)
+              },
+            },
+          }),
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {

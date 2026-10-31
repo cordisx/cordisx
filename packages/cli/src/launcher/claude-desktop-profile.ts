@@ -9,8 +9,8 @@ import { claudeSpeaks, modelServicesOf, modelsForApp, servicesForApp } from './m
  *
  * Claude Desktop reads its third-party inference setup from
  * `<data>/configLibrary/<uuid>.json`, picked by `appliedId` in `_meta.json`.
- * The launcher points the app at `<data>` with `CLAUDE_USER_DATA_DIR`, so the
- * app treats it as its third-party directory directly.
+ * The launcher passes `<data>` as `--user-data-dir`; its name ends in `-3p`,
+ * so the app treats it as its third-party directory directly.
  *
  * Credentials never land in these files: each entry uses the app's
  * `helper-script` credential kind, and the helper prints the key from the

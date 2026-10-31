@@ -217,6 +217,13 @@ async function poll($: EngineInterface): Promise<void> {
   }
 }
 
+async function hostsClaudeSessions($: EngineInterface): Promise<boolean> {
+  const tools = await $.tool.list()
+  return ['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__list_sessions'].every(name =>
+    tools.some(tool => tool.name === name)
+  )
+}
+
 async function askCodex($: EngineInterface, operation: string, args: Record<string, unknown>): Promise<string> {
   const answered = await post($, '/codex', { operation, args })
   return answered.ok
@@ -229,7 +236,9 @@ export const register: Register = on => {
     for (const tool of CODEX_TOOLS) {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
     }
-    $.clock.every(POLL_MS, () => void poll($))
+    // Only a session Claude Desktop hosts has the session tools a Codex request
+    // needs; a terminal or headless session must not claim one it cannot answer.
+    if (await hostsClaudeSessions($)) $.clock.every(POLL_MS, () => void poll($))
     return next(e)
   })
 
