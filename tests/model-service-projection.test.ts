@@ -8,6 +8,7 @@ import {
   buildClaudeConfigLibrary,
   mergeDeclaredIntoCodexProjection,
   modelServicesOf,
+  projectModelServicesBeforeLaunch,
   projectModelServicesToCodex,
   projectModelServicesToClaude,
   readClaudeProviderCatalog,
@@ -174,7 +175,7 @@ describe('model-service provider declarations', () => {
       ],
       providerIds: new Set(['sub2tok', 'handwritten']),
       providerWireApis: new Map<'sub2tok' | 'handwritten', 'responses' | 'chat-completions'>([
-        ['sub2tok', 'chat-completions'],
+        ['sub2tok', 'responses'],
         ['handwritten', 'responses'],
       ]),
       diagnostics: [],
@@ -223,5 +224,24 @@ describe('model-service provider declarations', () => {
     expect(catalog[0]!.applied).toBe(true)
     // The library document's inline key never reaches the catalog.
     expect(JSON.stringify(catalog)).not.toContain('secret')
+  })
+
+  it('reports what a launch did with --provider before the host starts', async () => {
+    const lines: string[] = []
+    const stdout = (line: string) => lines.push(line)
+    await projectModelServicesBeforeLaunch({ providers: [], codexHome: await codexHome(), selectedId: 'x', stdout })
+    expect(lines).toEqual(['[cordisx] --provider x: no model service is declared in the CordisX configuration'])
+
+    lines.length = 0
+    const root = await codexHome()
+    const config = configWith([dualProtocol])
+    await projectModelServicesBeforeLaunch({ providers: config.providers, codexHome: root, selectedId: 'sub2tok', stdout })
+    expect(lines).toEqual(['[cordisx] model service sub2tok is the launch default'])
+    const written = parse(await readFile(path.join(root, 'config.toml'), 'utf8')) as { model_provider: string }
+    expect(written.model_provider).toBe('sub2tok')
+  })
+
+  it('rejects a wire API override, since Codex only loads responses', () => {
+    expect(() => configWith([{ ...dualProtocol, wireApi: 'chat' }])).toThrow(/wireApi is not supported/)
   })
 })

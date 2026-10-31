@@ -20,9 +20,9 @@ import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
-import { loadHomeConfig, type HomeConfig } from '../config/home-config.js'
+import { loadHomeConfig } from '../config/home-config.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
-import { modelServicesOf, projectModelServicesToCodex } from '../launcher/model-service-projection.js'
+import { codexHomeOfPlan, projectModelServicesBeforeLaunch } from '../launcher/model-service-projection.js'
 
 export interface ProductionHostBootstrap {
   readonly plan?: ResolvedLaunchPlan
@@ -32,45 +32,6 @@ export interface ProductionHostBootstrap {
   readonly nativeSubmissionBootstrap?: NativeSubmissionBootstrap
   readonly nativeSubmissionUnavailable?: true
   readonly prelaunchedHost?: Readonly<{ child: ChildProcess; hostPid: number; inspectorUrl?: Promise<string> }>
-}
-
-/**
- * Projects `model-service` provider declarations into the Codex home this launch
- * reads. A failed projection never blocks startup: it is reported and the host
- * starts with whatever configuration it already had.
- */
-async function projectModelServicesForLaunch(
-  configured: HomeConfig,
-  plan: ResolvedLaunchPlan,
-  stdout: (line: string) => void,
-  selectedId?: string,
-): Promise<void> {
-  const declared = modelServicesOf(configured.providers)
-  if (declared.length === 0) {
-    if (selectedId !== undefined) {
-      stdout(`[cordisx] --provider ${selectedId}: no model service is declared in the CordisX configuration`)
-    }
-    return
-  }
-  const codexHome = plan.sharedDataRoots.find(root => root.name === 'CODEX_HOME')?.path
-    ?? plan.isolatedDataRoots.find(root => root.name === 'CODEX_HOME')?.path
-  if (codexHome === undefined) return
-  try {
-    const result = await projectModelServicesToCodex(
-      configured.providers,
-      codexHome,
-      selectedId === undefined ? {} : { selectedId },
-    )
-    for (const diagnostic of result.diagnostics) {
-      stdout(`[cordisx] model service ${diagnostic.providerId}: ${diagnostic.code}`)
-    }
-    if (selectedId !== undefined && result.selectedProviderId !== selectedId) {
-      const reachable = result.providerIds.length === 0 ? 'none' : result.providerIds.join(', ')
-      stdout(`[cordisx] --provider ${selectedId}: not available for Codex (declared: ${reachable})`)
-    }
-  } catch (error) {
-    stdout(`[cordisx] model service projection skipped: ${String(error)}`)
-  }
 }
 
 /** Resolve and reserve shared CLI/App launch inputs before compatibility analysis. */
@@ -185,7 +146,12 @@ export async function prepareProductionHostBootstrap(
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
     // Model-service declarations become the provider entries this host reads at
     // startup, so the projection must land before the process starts.
-    await projectModelServicesForLaunch(configured, plan, stdout, invocation.options.provider)
+    await projectModelServicesBeforeLaunch({
+      providers: configured.providers,
+      codexHome: codexHomeOfPlan(plan),
+      selectedId: invocation.options.provider,
+      stdout,
+    })
     const hostEnvironment = {
       ...configuredEnvironment,
       ...nativeSubmissionBootstrap?.environment,

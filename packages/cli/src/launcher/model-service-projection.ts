@@ -1,12 +1,9 @@
-import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { HomeConfigApp, HomeConfigModelServiceProvider, HomeConfigProvider } from '../config/home-config.js'
 import type { CodexConfigModelProviderProjection } from './codex-config-model-providers.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
-import {
-  applyCodexProviderTargetPlans,
-  readCodexProviderTarget,
-} from './provider-profile-sync-codex-target.js'
+import { applyCodexProviderTargetPlans, readCodexProviderTarget } from './provider-profile-sync-codex-target.js'
 
 /**
  * Projects `model-service` provider declarations into each app's own native
@@ -16,10 +13,12 @@ import {
 
 export const MODEL_SERVICE_PROTOCOLS = ['anthropic-messages', 'openai-responses'] as const
 
-/** Codex reads Responses; every other wire API is exposed as `chat-completions`. */
-export function codexWireApiFor(provider: HomeConfigModelServiceProvider): 'responses' | 'chat-completions' {
-  return provider.wireApi === 'chat' ? 'chat-completions' : 'responses'
-}
+/**
+ * Codex only loads `wire_api = "responses"`: `chat` was retired and any other
+ * value makes the whole config.toml fail to load. A declaration therefore
+ * reaches Codex only when it speaks `openai-responses`.
+ */
+const CODEX_WIRE_API = 'responses' as const
 
 /** Claude Code speaks Anthropic Messages only. */
 export function claudeSpeaks(provider: HomeConfigModelServiceProvider): boolean {
@@ -70,7 +69,7 @@ export function mergeDeclaredIntoCodexProjection(
   if (declared.length === 0) return projection
   const declaredIds = new Set(declared.map(provider => provider.id))
   const wireApis = new Map(projection.providerWireApis)
-  for (const provider of declared) wireApis.set(provider.id, codexWireApiFor(provider))
+  for (const provider of declared) wireApis.set(provider.id, CODEX_WIRE_API)
   const ids = new Set([...projection.providerIds].filter(id => !declaredIds.has(id)))
   for (const provider of declared) ids.add(provider.id)
   return Object.freeze({
@@ -171,6 +170,71 @@ function selectedService(
   return applicable.find(provider => provider.id === selectedId)
 }
 
+/** The Codex home a resolved launch plan reads: the user's own, or an isolated one. */
+export function codexHomeOfPlan(plan: {
+  readonly sharedDataRoots: readonly { readonly name: string; readonly path: string }[]
+  readonly isolatedDataRoots: readonly { readonly name: string; readonly path: string }[]
+}): string | undefined {
+  return plan.sharedDataRoots.find(root => root.name === 'CODEX_HOME')?.path
+    ?? plan.isolatedDataRoots.find(root => root.name === 'CODEX_HOME')?.path
+}
+
+/**
+ * Projects declarations into the Codex home a launch is about to read. Every
+ * launch path calls this right before it starts the host, and awaits it, so the
+ * host reads the projected file. A failed projection never blocks startup: it
+ * is reported and the host starts with the configuration it already had.
+ */
+export async function projectModelServicesBeforeLaunch(input: {
+  readonly providers: readonly HomeConfigProvider[]
+  readonly codexHome: string | undefined
+  readonly selectedId?: string | undefined
+  readonly stdout: (line: string) => void
+}): Promise<void> {
+  const { selectedId, stdout } = input
+  if (modelServicesOf(input.providers).length === 0) {
+    if (selectedId !== undefined) {
+      stdout(`[cordisx] --provider ${selectedId}: no model service is declared in the CordisX configuration`)
+    }
+    return
+  }
+  if (input.codexHome === undefined) return
+  try {
+    const result = await projectModelServicesToCodex(
+      input.providers,
+      input.codexHome,
+      selectedId === undefined ? {} : { selectedId },
+    )
+    for (const diagnostic of result.diagnostics) {
+      stdout(`[cordisx] model service ${diagnostic.providerId}: ${diagnostic.code}`)
+    }
+    if (selectedId !== undefined && result.selectedProviderId !== selectedId) {
+      const reachable = result.providerIds.length === 0 ? 'none' : result.providerIds.join(', ')
+      stdout(`[cordisx] --provider ${selectedId}: not available for Codex (declared: ${reachable})`)
+    } else if (result.selectedProviderId !== undefined) {
+      stdout(`[cordisx] model service ${result.selectedProviderId} is the launch default`)
+    }
+  } catch (error) {
+    stdout(`[cordisx] model service projection skipped: ${String(error)}`)
+  }
+}
+
+/** The `beforeHostLaunch` hook a launch path hands to the host runner. */
+export function modelServiceLaunchHook(
+  config: { readonly providers: readonly HomeConfigProvider[] },
+  codexHome: string | undefined,
+  options: { readonly provider?: string | undefined },
+  stdout: (line: string) => void,
+): () => Promise<void> {
+  return async () =>
+    await projectModelServicesBeforeLaunch({
+      providers: config.providers,
+      codexHome,
+      selectedId: options.provider,
+      stdout,
+    })
+}
+
 /**
  * Writes every enabled `model-service` declaration into `codexHome/config.toml`.
  *
@@ -216,19 +280,22 @@ export async function projectModelServicesToCodex(
   const base = snapshot ?? { raw: '', revision: '', config: {}, tables: new Map() }
   let raw: string
   try {
-    raw = applyCodexProviderTargetPlans(base as NonNullable<typeof snapshot>, applicable.map(provider => ({
-      localProviderId: provider.id,
-      apply: ['display', 'routing'] as const,
-      desired: {
-        display: { name: provider.displayName },
-        routing: {
-          base_url: provider.baseUrl,
-          wire_api: codexWireApiFor(provider),
-          env_key: provider.apiKeyEnv,
-          requires_openai_auth: false,
+    raw = applyCodexProviderTargetPlans(
+      base as NonNullable<typeof snapshot>,
+      applicable.map(provider => ({
+        localProviderId: provider.id,
+        apply: ['display', 'routing'] as const,
+        desired: {
+          display: { name: provider.displayName },
+          routing: {
+            base_url: provider.baseUrl,
+            wire_api: CODEX_WIRE_API,
+            env_key: provider.apiKeyEnv,
+            requires_openai_auth: false,
+          },
         },
-      },
-    })))
+      })),
+    )
   } catch {
     diagnostics.push({ appId: 'codex', providerId: '*', code: 'codex-config-unwritable' })
     return Object.freeze({ appId: 'codex', providerIds: Object.freeze([]), diagnostics: Object.freeze(diagnostics) })
@@ -272,13 +339,15 @@ export function buildClaudeConfigLibrary(
 ): { readonly entries: readonly ClaudeConfigLibraryEntry[]; readonly meta: { readonly appliedId: string | null } } {
   const entries = servicesForApp(providers, 'claude')
     .filter(provider => modelsForApp(provider, 'claude').length > 0)
-    .map(provider => Object.freeze({
-      id: provider.id,
-      name: provider.displayName,
-      baseUrl: provider.baseUrl,
-      apiKeyEnv: provider.apiKeyEnv,
-      models: Object.freeze([...modelsForApp(provider, 'claude')]),
-    }))
+    .map(provider =>
+      Object.freeze({
+        id: provider.id,
+        name: provider.displayName,
+        baseUrl: provider.baseUrl,
+        apiKeyEnv: provider.apiKeyEnv,
+        models: Object.freeze([...modelsForApp(provider, 'claude')]),
+      })
+    )
   return Object.freeze({ entries: Object.freeze(entries), meta: { appliedId: entries[0]?.id ?? null } })
 }
 
@@ -321,9 +390,10 @@ export async function readClaudeProviderCatalog(
 ): Promise<readonly ClaudeProviderCatalogEntry[]> {
   const library = path.join(applicationSupportDir, 'configLibrary')
   const meta = await readJson(path.join(library, '_meta.json'))
-  const appliedId = meta !== null && typeof meta === 'object' && typeof (meta as { appliedId?: unknown }).appliedId === 'string'
-    ? (meta as { appliedId: string }).appliedId
-    : undefined
+  const appliedId =
+    meta !== null && typeof meta === 'object' && typeof (meta as { appliedId?: unknown }).appliedId === 'string'
+      ? (meta as { appliedId: string }).appliedId
+      : undefined
   const entries = meta !== null && typeof meta === 'object' && Array.isArray((meta as { entries?: unknown }).entries)
     ? (meta as { entries: Array<{ id?: unknown; name?: unknown }> }).entries
     : []
@@ -408,6 +478,3 @@ export function projectableApps(
   const target = provider.appliesTo ?? Object.keys(apps)
   return Object.freeze(target.filter(appId => Object.hasOwn(apps, appId)))
 }
-
-
-

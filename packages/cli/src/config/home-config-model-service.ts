@@ -14,8 +14,6 @@ export interface HomeConfigModelServiceProvider {
   readonly models?: Readonly<Record<string, readonly string[]>>
   /** App ids this service is projected into. Omitted means every app it has a protocol for. */
   readonly appliesTo?: readonly string[]
-  /** Codex `wire_api` override for providers that are not Responses-native. */
-  readonly wireApi?: 'responses' | 'chat'
   readonly enabled?: boolean
   readonly timeoutMs?: number
 }
@@ -98,7 +96,6 @@ export function parseModelServiceProvider(
     'protocols',
     'models',
     'appliesTo',
-    'wireApi',
     'enabled',
     'timeoutMs',
   ], label)
@@ -123,9 +120,6 @@ export function parseModelServiceProvider(
       return app
     }))
   }
-  if (provider.wireApi !== undefined && provider.wireApi !== 'responses' && provider.wireApi !== 'chat') {
-    throw new Error(`${label}.wireApi must be responses or chat`)
-  }
   if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') {
     throw new Error(`${label}.enabled must be a boolean`)
   }
@@ -141,7 +135,6 @@ export function parseModelServiceProvider(
     protocols: Object.freeze(protocols),
     ...(models === undefined ? {} : { models }),
     ...(appliesTo === undefined ? {} : { appliesTo }),
-    ...(provider.wireApi === undefined ? {} : { wireApi: provider.wireApi }),
     ...(provider.enabled === undefined ? {} : { enabled: provider.enabled }),
     ...(provider.timeoutMs === undefined ? {} : { timeoutMs: provider.timeoutMs as number }),
   })
