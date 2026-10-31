@@ -199,6 +199,9 @@ async function poll($: EngineInterface): Promise<void> {
   if (polling) return
   polling = true
   try {
+    // Claude's session tools connect after the session starts; until they do,
+    // this session cannot answer a Codex request and must not claim one.
+    if (!await hostsClaudeSessions($)) return
     const next = await post($, '/claude/poll', { sessionId: await $.session.id() })
     const request = (next.ok ? next.value : undefined) as
       | { id?: string; operation?: string; args?: Record<string, unknown> }
@@ -238,9 +241,7 @@ export const register: Register = on => {
     for (const tool of CODEX_TOOLS) {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
     }
-    // Only a session Claude Desktop hosts has the session tools a Codex request
-    // needs; a terminal or headless session must not claim one it cannot answer.
-    if (await hostsClaudeSessions($)) $.clock.every(POLL_MS, () => void poll($))
+    $.clock.every(POLL_MS, () => void poll($))
     return next(e)
   })
 
