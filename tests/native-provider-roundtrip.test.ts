@@ -110,6 +110,13 @@ describe('native provider roundtrip', () => {
         })
       )
       const outbound = h.transport.select({ providerId: 'deepseek', model: 'shared' })
+      expect(await h.transport.select({ providerId: 'provider-a', model: 'shared' })).toBe('busy')
+      // A still-running switch cannot be superseded by another mutation in its scope.
+      // Navigation retires that scope and permits a choice in the new Composer owner.
+      composer(h.dom.window.document, 'other-thread', 'shared')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      composer(h.dom.window.document, 'thread', 'shared')
+      await new Promise(resolve => setTimeout(resolve, 0))
       expect(await h.transport.select({ providerId: 'provider-a', model: 'shared' })).toBe('accepted')
       finish({ status: 'accepted', revision: 1, effective: { providerId: 'deepseek', model: 'shared' } })
       expect(await outbound).toBe('unavailable')
