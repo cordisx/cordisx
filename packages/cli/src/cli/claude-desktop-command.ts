@@ -10,7 +10,7 @@ import {
   runningClaudeProfile,
   stopClaudeDesktop,
 } from '../launcher/claude-desktop-process.js'
-import { claudeBridgePluginDir, ensureClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
+import { assembleClaudeProfilePlugin, ensureClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
 import { writeClaudeDesktopBinding } from '../launcher/claude-host-sessions.js'
 import {
   CLAUDE_DEFAULT_PERMISSION_MODE,
@@ -126,7 +126,7 @@ export async function runClaudeDesktopCommand(
     `[cordisx] claude/${profileId} default permission mode: ${CLAUDE_DEFAULT_PERMISSION_MODE}`
       + (bypassAccounts.length === 0 ? ' (offered from the next launch)' : ''),
   )
-  const bridge = await claudeBridgePluginDir()
+  const bridge = await assembleClaudeProfilePlugin(claudeProfileRoot(cordisxHomeDir, profileId))
   const hostEnvironment = {
     ...hostModelServiceEnvironment(environment, config.environmentVariables),
     // Claude Desktop passes its own environment to the Claude Code sessions it
@@ -134,6 +134,8 @@ export async function runClaudeDesktopCommand(
     CLAUDE_CODE_PLUGIN_DIRS: bridge,
     CORDISX_HOME: cordisxHomeDir,
     CLAUDE_CODE_MANAGED_SETTINGS_PATH: managedSettings,
+    // How the bridge plugin runs this CLI to start Codex when the person allowed it.
+    CORDISX_CLI: JSON.stringify([process.execPath, ...process.execArgv, process.argv[1] ?? '']),
   }
   const pid = await launchClaudeDesktop({ executable, cordisxHomeDir, profileId, environment: hostEnvironment })
   stdout(`[cordisx] launched claude/${profileId} (pid ${pid})`)

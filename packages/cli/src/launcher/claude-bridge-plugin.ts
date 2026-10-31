@@ -1,6 +1,7 @@
-import { access, chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bundledSkillSourceDir, CORDISX_BUNDLED_SKILL_NAMES } from './builtin-skill.js'
 
 /**
  * The CordisX bridge plugin shipped with the CLI. Claude Desktop passes its own
@@ -10,6 +11,25 @@ import { fileURLToPath } from 'node:url'
 export async function claudeBridgePluginDir(): Promise<string> {
   const directory = fileURLToPath(new URL('../../assets/claude-bridge', import.meta.url))
   await access(path.join(directory, '.claude-plugin', 'plugin.json'))
+  return directory
+}
+
+/**
+ * The plugin a CordisX-launched Claude profile loads: the bridge plus the
+ * bundled CordisX Skills, the same ones a Codex launch deploys. It is rebuilt
+ * in the profile on every launch, so the person's own Claude never sees it.
+ */
+export async function assembleClaudeProfilePlugin(profileRoot: string): Promise<string> {
+  const directory = path.join(profileRoot, 'cordisx-plugin')
+  await rm(directory, { recursive: true, force: true })
+  await cp(await claudeBridgePluginDir(), directory, {
+    recursive: true,
+    // The engine writes its type declarations beside a mod it loads.
+    filter: source => !source.includes(`${path.sep}.claude-plugin${path.sep}types`),
+  })
+  for (const skill of CORDISX_BUNDLED_SKILL_NAMES) {
+    await cp(await bundledSkillSourceDir(skill), path.join(directory, 'skills', skill), { recursive: true })
+  }
   return directory
 }
 

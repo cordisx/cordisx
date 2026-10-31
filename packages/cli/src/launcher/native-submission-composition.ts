@@ -789,6 +789,15 @@ export async function prepareNativeSubmissionBootstrap(
           agentBridge = await startAgentBridge({
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
             codex: { nativeRequest: (method, params) => control.nativeRequest(method, params), catalog },
+            codexProfileId: completeOptions.managedCatalog.profileId,
+            // Starts Claude, when the person allowed it, as `cordisx start claude` would.
+            launchClaude: async ({ homeDir, profileId, providerId }) => {
+              const { runClaudeDesktopCommand } = await import('../cli/claude-desktop-command.js')
+              await runClaudeDesktopCommand(
+                { action: 'start', profile: profileId, options: { dryRun: false, ...(providerId === undefined ? {} : { provider: providerId }) } },
+                { env: { ...process.env, CORDISX_HOME: homeDir }, stdout: () => undefined },
+              )
+            },
           }).catch(error => {
             console.warn(`[cordisx] agent bridge unavailable: ${String(error)}`)
             return undefined

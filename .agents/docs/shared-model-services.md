@@ -135,6 +135,41 @@ Why this route: Claude Desktop accepts no debugging switch, reads
 tools to runs nobody opened, so nothing inside the app can start a session
 unattended. Its own CLI import is the one entry it offers.
 
+### When the other app is closed
+
+Both directions answer the same way, at once, instead of failing or waiting:
+
+```json
+{ "status": "needs-confirmation", "reason": "claude-not-running",
+  "question": "Claude Desktop is not running. Start it?", "howToContinue": "…" }
+```
+
+(`codex-not-running` from Claude.) The agent asks the person; on a yes it
+calls again with `launch`:
+
+- `"once"` starts the app for this call.
+- `"always"` starts it and remembers the answer, so later calls start it
+  without asking. The answers live in `~/.cordisx/apps/claude/bridge-launch.json`
+  and `~/.cordisx/apps/codex/bridge-launch.json`.
+- `"ask"` forgets a remembered `"always"`.
+
+Claude is started by the Codex launch as `cordisx start claude <profile>`
+would, on the profile it last ran. Codex is started by the Claude plugin with
+`$.process.run`, as `cordisx start codex <profile>` on the profile recorded in
+`~/.cordisx/run/codex-launch.json`, using the CLI named in `CORDISX_CLI`, which
+`cordisx start claude` sets. Background `start` needs a built CordisX (an
+install or `npm run build`); a source checkout run through `tsx` cannot spawn
+its supervisor. Reading Claude sessions needs only the profile's files, so
+`list_sessions` and `read_session` for Claude answer while Claude is closed.
+
+### Skills
+
+`cordisx start claude` assembles the profile's plugin in
+`<profile>/cordisx-plugin` on every launch: the bridge plus the bundled CordisX
+Skills that a Codex launch deploys (`cordisx`, `cordisx-docs`, `cordisx-qa`,
+`cordisx-plugin-development`, `cordisx-feedback`). Claude lists them as
+`cordisx:<name>` in that profile's sessions only.
+
 Codex runs CordisX's tools without a per-call prompt: the launch passes
 `mcp_servers.cordisx_models.default_tools_approval_mode="approve"`. The Codex
 side needs a running CordisX Codex launch.

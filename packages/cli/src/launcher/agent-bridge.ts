@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { createClaudeHostSessions } from './claude-host-sessions.js'
+import { type ClaudeHostSessionsInput, createClaudeHostSessions } from './claude-host-sessions.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 
@@ -56,6 +56,10 @@ export const isBridgeApp = (value: unknown): value is BridgeApp =>
   typeof value === 'string' && (BRIDGE_APPS as readonly string[]).includes(value)
 export const isBridgeOperation = (value: unknown): value is BridgeOperation =>
   typeof value === 'string' && (BRIDGE_OPERATIONS as readonly string[]).includes(value)
+
+export function codexLaunchRecordPath(cordisxHomeDir: string): string {
+  return path.join(cordisxHomeDir, 'run', 'codex-launch.json')
+}
 
 export function agentBridgeBindingPath(cordisxHomeDir: string): string {
   return path.join(cordisxHomeDir, 'run', 'agent-bridge.json')
@@ -263,6 +267,10 @@ export async function startAgentBridge(input: {
   /** The launch environment, where a model service key may be set. */
   readonly environment?: Readonly<Record<string, string | undefined>>
   readonly processList?: () => Promise<string>
+  readonly runningClaudePid?: ClaudeHostSessionsInput['runningPid']
+  readonly launchClaude?: ClaudeHostSessionsInput['launchClaude']
+  /** The Codex profile this launch runs, recorded so Claude can start it again. */
+  readonly codexProfileId?: string
 }): Promise<AgentBridge> {
   const runDir = path.join(input.cordisxHomeDir, 'run')
   await mkdir(runDir, { recursive: true, mode: 0o700 })
@@ -275,6 +283,8 @@ export async function startAgentBridge(input: {
     ...(input.homedir === undefined ? {} : { homedir: input.homedir }),
     secret: name => configuredSecret(input.cordisxHomeDir, input.environment ?? process.env, name),
     ...(input.processList === undefined ? {} : { processList: input.processList }),
+    ...(input.runningClaudePid === undefined ? {} : { runningPid: input.runningClaudePid }),
+    ...(input.launchClaude === undefined ? {} : { launchClaude: input.launchClaude }),
     viaPlugin: (operation, args, target) => callClaude(operation, args, target),
   })
   const queue: ClaudeRequest[] = []
@@ -358,6 +368,14 @@ export async function startAgentBridge(input: {
   const binding: AgentBridgeBinding = Object.freeze({ version: 1, socketPath, token })
   await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 })
   await chmod(bindingPath, 0o600)
+  if (input.codexProfileId !== undefined) {
+    // Kept after this launch ends: it tells the Claude plugin which profile to start.
+    await writeFile(
+      codexLaunchRecordPath(input.cordisxHomeDir),
+      `${JSON.stringify({ version: 1, homeDir: input.cordisxHomeDir, profileId: input.codexProfileId })}\n`,
+      { mode: 0o600 },
+    )
+  }
 
   return Object.freeze({
     binding,

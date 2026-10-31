@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  claudeLaunchPreferencePath,
   claudeProfileCli,
   resumes,
   claudeTranscript,
@@ -108,6 +109,7 @@ describe('Claude sessions driven from the host', () => {
     const sessions = createClaudeHostSessions({
       cordisxHomeDir,
       homedir,
+      runningPid: async () => -1,
       secret: async name => name === 'SUB2TOK_KEY' ? 'sk-test' : undefined,
     })
 
@@ -134,7 +136,12 @@ describe('Claude sessions driven from the host', () => {
 
   it('refuses to start without the model service key', async () => {
     const { cordisxHomeDir, homedir } = await launched()
-    const sessions = createClaudeHostSessions({ cordisxHomeDir, homedir, secret: async () => undefined })
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      runningPid: async () => -1,
+      secret: async () => undefined,
+    })
     await expect(sessions('start_session', { prompt: 'x' })).rejects.toThrow(/SUB2TOK_KEY/)
     expect(await sessions('start_session', { prompt: 'x', cwd: 'relative' })).toEqual({
       status: 'rejected',
@@ -158,6 +165,7 @@ describe('Claude sessions driven from the host', () => {
       cordisxHomeDir,
       homedir,
       secret: async () => 'sk-test',
+      runningPid: async () => -1,
       processList: async () => open,
       viaPlugin: async (operation, args, target) => {
         forwarded.push([operation, args, target])
@@ -192,3 +200,50 @@ async function realpathOf(directory: string): Promise<string> {
   const { realpath } = await import('node:fs/promises')
   return await realpath(directory)
 }
+
+describe('a closed Claude', () => {
+  it('asks first, starts on "once" or "always", and remembers "always"', async () => {
+    const cordisxHomeDir = await temporary()
+    const homedir = await temporary()
+    const dataDir = path.join(cordisxHomeDir, 'data-3p')
+    const record = path.join(cordisxHomeDir, 'turn')
+    await fakeCli(dataDir, '2.1.309', record)
+    const launches: unknown[] = []
+    const pidFile = path.join(cordisxHomeDir, 'apps', 'claude', 'profiles', 'e2e', 'claude.pid')
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      secret: async () => 'sk-test',
+      processList: async () => '',
+      launchClaude: async request => {
+        launches.push(request)
+        await writeClaudeDesktopBinding(cordisxHomeDir, { version: 1, profileId: 'e2e', homeDir: cordisxHomeDir, dataDir })
+        await mkdir(path.dirname(pidFile), { recursive: true })
+      },
+    })
+
+    const asked = await sessions('start_session', { prompt: 'x' }) as Record<string, string>
+    expect(asked).toEqual(expect.objectContaining({ status: 'needs-confirmation', reason: 'claude-not-running' }))
+    expect(launches).toEqual([])
+
+    // The fake launch leaves no running process, so the wait ends in an error; it did launch.
+    await expect(sessions('start_session', { prompt: 'x', launch: 'always' })).rejects.toThrow(/did not start/)
+    expect(launches).toEqual([{ homeDir: cordisxHomeDir, profileId: 'default' }])
+    expect(JSON.parse(await readFile(claudeLaunchPreferencePath(cordisxHomeDir), 'utf8'))).toEqual({ launch: 'always' })
+
+    await sessions('start_session', { prompt: 'x', launch: 'ask' })
+    expect(JSON.parse(await readFile(claudeLaunchPreferencePath(cordisxHomeDir), 'utf8'))).toEqual({ launch: 'ask' })
+  }, 80_000)
+
+  it('reads a closed profile from its files without asking', async () => {
+    const cordisxHomeDir = await temporary()
+    await writeClaudeDesktopBinding(cordisxHomeDir, {
+      version: 1,
+      profileId: 'e2e',
+      homeDir: cordisxHomeDir,
+      dataDir: path.join(cordisxHomeDir, 'data-3p'),
+    })
+    const sessions = createClaudeHostSessions({ cordisxHomeDir, homedir: await temporary(), secret: async () => undefined })
+    expect(await sessions('list_sessions', {})).toEqual({ running: false, sessions: [] })
+  })
+})

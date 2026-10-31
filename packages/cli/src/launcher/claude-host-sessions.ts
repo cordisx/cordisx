@@ -50,6 +50,45 @@ export async function writeClaudeDesktopBinding(cordisxHomeDir: string, binding:
 
 export const claudeSessionLink = (cliSessionId: string): string => `claude://resume?session=${cliSessionId}`
 
+/** Whether the bridge may start Claude itself: `always` once the person said so, else it asks. */
+export type ClaudeLaunchPreference = 'ask' | 'always'
+export const CLAUDE_LAUNCH_CHOICES = ['once', 'always', 'ask'] as const
+
+export function claudeLaunchPreferencePath(cordisxHomeDir: string): string {
+  return path.join(cordisxHomeDir, 'apps', 'claude', 'bridge-launch.json')
+}
+
+export async function readClaudeLaunchPreference(cordisxHomeDir: string): Promise<ClaudeLaunchPreference> {
+  return (await readJson(claudeLaunchPreferencePath(cordisxHomeDir)))?.launch === 'always' ? 'always' : 'ask'
+}
+
+export async function writeClaudeLaunchPreference(
+  cordisxHomeDir: string,
+  launch: ClaudeLaunchPreference,
+): Promise<void> {
+  const file = claudeLaunchPreferencePath(cordisxHomeDir)
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
+  await writeFile(file, `${JSON.stringify({ launch })}\n`, { mode: 0o600 })
+}
+
+/**
+ * What an agent hears when the target app is closed and nobody said it may be
+ * started. The Claude plugin answers the same shape for Codex.
+ */
+export function appLaunchQuestion(app: 'codex' | 'claude') {
+  const name = app === 'codex' ? 'Codex Desktop' : 'Claude Desktop'
+  return Object.freeze({
+    status: 'needs-confirmation',
+    reason: `${app}-not-running`,
+    question: `${name} is not running. Start it?`,
+    howToContinue:
+      `Ask the user, in their language, whether to start ${name}. If they agree, call this tool again with the same arguments plus launch "once" (start it this time) or "always" (start it automatically from now on, without asking). Do not retry without their answer.`,
+  })
+}
+const CLAUDE_LAUNCH_QUESTION = appLaunchQuestion('claude')
+
+const LAUNCH_WAIT_MS = 30_000
+
 const MAX_TRANSCRIPT_CHARS = 60_000
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
 
@@ -216,8 +255,14 @@ export interface ClaudeHostSessionsInput {
   readonly homedir?: string
   /** Resolves a model service key by variable name: the launch environment, then the CordisX config. */
   readonly secret: (name: string) => Promise<string | undefined>
+  /** The pid of the app running a profile, if it runs. */
+  readonly runningPid?: (homeDir: string, profileId: string) => Promise<number | undefined>
   /** The command lines of running processes; a session the app has open shows its id there. */
   readonly processList?: () => Promise<string>
+  /** Starts Claude on a profile as `cordisx start claude` does; absent, Claude is never started here. */
+  readonly launchClaude?: (
+    request: { readonly homeDir: string; readonly profileId: string; readonly providerId?: string },
+  ) => Promise<void>
   /** Answers through a Claude session's plugin, for a session the app is running right now. */
   readonly viaPlugin?: (operation: 'send_message', args: Record<string, unknown>, target: string) => Promise<unknown>
 }
@@ -226,13 +271,37 @@ export interface ClaudeHostSessionsInput {
 export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
   const homedir = input.homedir ?? os.homedir()
 
-  async function profile() {
+  async function profile(): Promise<{ binding?: ClaudeDesktopBinding; pid?: number }> {
     const binding = await readJson(claudeDesktopBindingPath(input.cordisxHomeDir)) as ClaudeDesktopBinding | undefined
-    if (binding?.version !== 1 || typeof binding.dataDir !== 'string' || typeof binding.profileId !== 'string') {
-      throw new Error('Claude was not started by CordisX; run `cordisx start claude` first')
+    if (binding?.version !== 1 || typeof binding.dataDir !== 'string' || typeof binding.profileId !== 'string') return {}
+    const pid = await (input.runningPid ?? runningClaudeProfile)(binding.homeDir ?? input.cordisxHomeDir, binding.profileId)
+    return pid === undefined ? { binding } : { binding, pid }
+  }
+
+  /**
+   * The running profile, starting Claude when the person allowed it: this
+   * call (`launch: "once" | "always"`, the latter remembered) or an
+   * earlier "always". Otherwise the agent gets a question to ask, at once.
+   */
+  async function running(args: Record<string, unknown>): Promise<ClaudeDesktopBinding | ReturnType<typeof appLaunchQuestion>> {
+    const current = await profile()
+    if (current.binding !== undefined && current.pid !== undefined) return current.binding
+    const choice = args.launch
+    if (choice === 'always' || choice === 'ask') await writeClaudeLaunchPreference(input.cordisxHomeDir, choice)
+    const allowed = choice === 'once' || choice === 'always'
+      || (choice !== 'ask' && await readClaudeLaunchPreference(input.cordisxHomeDir) === 'always')
+    if (!allowed || input.launchClaude === undefined) return CLAUDE_LAUNCH_QUESTION
+    await input.launchClaude({
+      homeDir: current.binding?.homeDir ?? input.cordisxHomeDir,
+      profileId: current.binding?.profileId ?? 'default',
+      ...(current.binding?.provider === undefined ? {} : { providerId: current.binding.provider.id }),
+    })
+    for (const deadline = Date.now() + LAUNCH_WAIT_MS; Date.now() < deadline;) {
+      const started = await profile()
+      if (started.binding !== undefined && started.pid !== undefined) return started.binding
+      await new Promise(resolve => setTimeout(resolve, 500))
     }
-    const pid = await runningClaudeProfile(binding.homeDir ?? input.cordisxHomeDir, binding.profileId)
-    return { binding, pid }
+    throw new Error('Claude Desktop did not start within 30 seconds')
   }
 
   async function findRecord(dataDir: string, sessionId: string): Promise<SessionRecord | undefined> {
@@ -287,9 +356,12 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     })
   }
 
-  return async (operation: unknown, rawArgs: unknown): Promise<unknown> => {
-    const args = object(rawArgs) ?? {}
-    const { binding, pid } = await profile()
+  async function read(
+    operation: 'list_sessions' | 'read_session',
+    args: Record<string, unknown>,
+    binding: ClaudeDesktopBinding,
+    running: boolean,
+  ): Promise<unknown> {
     if (operation === 'list_sessions') {
       const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit as number, 1), 50) : 20
       const search = text(args.searchTerm, 256)?.toLowerCase()
@@ -298,21 +370,35 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
         .filter(record => search === undefined || record.title.toLowerCase().includes(search))
         .slice(0, limit)
         .map(record => ({ ...record, link: claudeSessionLink(record.cliSessionId) }))
-      return { running: pid !== undefined, sessions }
+      return { running, sessions }
     }
-    if (operation === 'read_session') {
-      const sessionId = text(args.sessionId)
-      if (sessionId === undefined) return { status: 'rejected', reason: 'sessionId-required' }
-      const record = await findRecord(binding.dataDir, sessionId)
-      const cliSessionId = record?.cliSessionId ?? sessionId.replace(/^local_/u, '')
-      const file = await findClaudeTranscript(homedir, cliSessionId)
-      if (record === undefined && file === undefined) return { status: 'rejected', reason: 'session-not-found' }
-      return {
-        ...(record ?? { sessionId: `local_${cliSessionId}`, cliSessionId }),
-        link: claudeSessionLink(cliSessionId),
-        transcript: file === undefined ? [] : claudeTranscript(await readFile(file, 'utf8')),
-      }
+    const sessionId = text(args.sessionId)
+    if (sessionId === undefined) return { status: 'rejected', reason: 'sessionId-required' }
+    const record = await findRecord(binding.dataDir, sessionId)
+    const cliSessionId = record?.cliSessionId ?? sessionId.replace(/^local_/u, '')
+    const file = await findClaudeTranscript(homedir, cliSessionId)
+    if (record === undefined && file === undefined) return { status: 'rejected', reason: 'session-not-found' }
+    return {
+      ...(record ?? { sessionId: `local_${cliSessionId}`, cliSessionId }),
+      link: claudeSessionLink(cliSessionId),
+      transcript: file === undefined ? [] : claudeTranscript(await readFile(file, 'utf8')),
     }
+  }
+
+  return async (operation: unknown, rawArgs: unknown): Promise<unknown> => {
+    const args = object(rawArgs) ?? {}
+    if (operation === 'list_sessions' || operation === 'read_session') {
+      // Reading needs only the profile's files, not the app.
+      const current = await profile()
+      const binding = current.binding ?? await running(args)
+      if (!('version' in binding)) return binding
+      return await read(operation, args, binding, current.pid !== undefined || current.binding === undefined)
+    }
+    if (operation !== 'start_session' && operation !== 'send_message') {
+      return { status: 'rejected', reason: 'unknown-operation' }
+    }
+    const binding = await running(args)
+    if (!('version' in binding)) return binding
     if (operation === 'start_session') {
       const prompt = text(args.prompt, 100_000)
       if (prompt === undefined) return { status: 'rejected', reason: 'prompt-required' }
@@ -328,35 +414,32 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
         note: 'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it.',
       }
     }
-    if (operation === 'send_message') {
-      const sessionId = text(args.sessionId)
-      const prompt = text(args.prompt, 100_000)
-      if (sessionId === undefined || prompt === undefined) {
-        return { status: 'rejected', reason: 'sessionId-and-prompt-required' }
-      }
-      const record = await findRecord(binding.dataDir, sessionId)
-      if (record === undefined) return { status: 'rejected', reason: 'session-not-found' }
-      // An open session belongs to the app's own process; a second writer would fork its transcript.
-      if (resumes(await (input.processList ?? liveCliSessions)(), record.cliSessionId)) {
-        if (input.viaPlugin === undefined) return { status: 'rejected', reason: 'session-open-in-claude' }
-        // The open session's own plugin submits it there, as the next turn.
-        return await input.viaPlugin(
-          'send_message',
-          { sessionId: record.sessionId, cliSessionId: record.cliSessionId, prompt },
-          record.cliSessionId,
-        )
-      }
-      await runTurn({
-        binding,
-        cliSessionId: record.cliSessionId,
-        resume: true,
-        prompt,
-        cwd: record.cwd ?? homedir,
-        ...(record.model === undefined ? {} : { model: record.model }),
-      })
-      return { status: 'sent', sessionId: record.sessionId, link: claudeSessionLink(record.cliSessionId) }
+    const sessionId = text(args.sessionId)
+    const prompt = text(args.prompt, 100_000)
+    if (sessionId === undefined || prompt === undefined) {
+      return { status: 'rejected', reason: 'sessionId-and-prompt-required' }
     }
-    return { status: 'rejected', reason: 'unknown-operation' }
+    const record = await findRecord(binding.dataDir, sessionId)
+    if (record === undefined) return { status: 'rejected', reason: 'session-not-found' }
+    // An open session belongs to the app's own process; a second writer would fork its transcript.
+    if (resumes(await (input.processList ?? liveCliSessions)(), record.cliSessionId)) {
+      if (input.viaPlugin === undefined) return { status: 'rejected', reason: 'session-open-in-claude' }
+      // The open session's own plugin submits it there, as the next turn.
+      return await input.viaPlugin(
+        'send_message',
+        { sessionId: record.sessionId, cliSessionId: record.cliSessionId, prompt },
+        record.cliSessionId,
+      )
+    }
+    await runTurn({
+      binding,
+      cliSessionId: record.cliSessionId,
+      resume: true,
+      prompt,
+      cwd: record.cwd ?? homedir,
+      ...(record.model === undefined ? {} : { model: record.model }),
+    })
+    return { status: 'sent', sessionId: record.sessionId, link: claudeSessionLink(record.cliSessionId) }
   }
 }
 

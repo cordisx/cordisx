@@ -163,6 +163,17 @@ describe('agent bridge transport', () => {
     bridge = undefined
   })
 
+  it('records the Codex profile it runs so Claude can start it again', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
+    bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex(), codexProfileId: 'work' })
+    await bridge.close()
+    expect(JSON.parse(await readFile(path.join(home, 'run', 'codex-launch.json'), 'utf8'))).toEqual({
+      version: 1,
+      homeDir: home,
+      profileId: 'work',
+    })
+  })
+
   it('writes an owner-only binding and refuses a request without its token', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
@@ -179,7 +190,11 @@ describe('agent bridge transport', () => {
   it('answers Claude requests from the launched profile without any Claude session', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
-    await expect(bridge.call('claude', 'list_sessions', {})).rejects.toThrow(/cordisx start claude/)
+    // Never launched and not allowed to start it: the agent gets a question, at once.
+    expect(await bridge.call('claude', 'list_sessions', {})).toEqual(expect.objectContaining({
+      status: 'needs-confirmation',
+      reason: 'claude-not-running',
+    }))
 
     const { dataDir } = await claudeProfile(home)
     expect(await bridge.call('claude', 'list_sessions', {})).toEqual({
@@ -199,6 +214,7 @@ describe('agent bridge transport', () => {
       cordisxHomeDir: home,
       codex: fakeCodex(),
       processList: async () => `claude --resume ${CLI_ID}\n`,
+      runningClaudePid: async () => -1,
     })
     await claudeProfile(home)
     const message = { sessionId: `local_${CLI_ID}`, prompt: 'hi' }

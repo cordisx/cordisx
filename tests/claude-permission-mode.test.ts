@@ -77,3 +77,22 @@ describe('Claude bypass preferences', () => {
     expect(await readFile(path.join(dataDir, 'claude_desktop_config.json'), 'utf8')).toBe('{"preferences":{}}')
   })
 })
+
+describe('Claude profile plugin', () => {
+  it('carries the bridge and the bundled CordisX Skills', async () => {
+    const { assembleClaudeProfilePlugin } = await import('../packages/cli/src/launcher/claude-bridge-plugin.js')
+    const { CORDISX_BUNDLED_SKILL_NAMES } = await import('../packages/cli/src/launcher/builtin-skill.js')
+    const root = await temporary()
+    const directory = await assembleClaudeProfilePlugin(root)
+    expect(directory).toBe(path.join(root, 'cordisx-plugin'))
+    expect((await readJson(path.join(directory, '.claude-plugin', 'plugin.json'))).name).toBe('cordisx')
+    await readFile(path.join(directory, 'hooks', 'register.ts'), 'utf8')
+    for (const skill of CORDISX_BUNDLED_SKILL_NAMES) {
+      expect(await readFile(path.join(directory, 'skills', skill, 'SKILL.md'), 'utf8')).toMatch(/^---\nname: /u)
+    }
+    // Rebuilt on every launch.
+    await writeFile(path.join(directory, 'stale.txt'), 'x')
+    await assembleClaudeProfilePlugin(root)
+    await expect(readFile(path.join(directory, 'stale.txt'), 'utf8')).rejects.toThrow()
+  })
+})

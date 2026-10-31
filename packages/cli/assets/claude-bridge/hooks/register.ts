@@ -23,6 +23,8 @@ interface BridgeReply {
   readonly ok: boolean
   readonly value?: unknown
   readonly error?: string
+  /** No CordisX Codex launch is answering: Codex is closed. */
+  readonly unreachable?: boolean
 }
 
 const POLL_MS = 1500
@@ -31,6 +33,13 @@ const CLAUDE_LINK = /claude:\/\/[^\s"]+/u
 
 const APPS = ['codex', 'claude'] as const
 const APP = { enum: APPS, description: 'The app whose conversations to use: "codex" or "claude".' }
+const LAUNCH = {
+  enum: ['once', 'always', 'ask'],
+  description:
+    'Only after the user answered a needs-confirmation result: "once" starts the app this time, "always" also from now on without asking, "ask" goes back to asking.',
+}
+/** How long a started Codex gets to bring its agent bridge up. */
+const CODEX_START_MS = 90_000
 
 /** One set of tool names for every app CordisX connects; `app` names the target. */
 const SESSION_TOOLS = [
@@ -45,6 +54,7 @@ const SESSION_TOOLS = [
         app: APP,
         limit: { type: 'integer', minimum: 1, maximum: 50 },
         searchTerm: { type: 'string', maxLength: 256 },
+        launch: LAUNCH,
       },
       required: ['app'],
     },
@@ -60,6 +70,7 @@ const SESSION_TOOLS = [
         app: APP,
         sessionId: { type: 'string', minLength: 1, maxLength: 512 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
+        launch: LAUNCH,
       },
       required: ['app', 'sessionId'],
     },
@@ -78,6 +89,7 @@ const SESSION_TOOLS = [
         cwd: { type: 'string', minLength: 1, maxLength: 4096 },
         providerId: { type: 'string', minLength: 1, maxLength: 128 },
         model: { type: 'string', minLength: 1, maxLength: 512 },
+        launch: LAUNCH,
       },
       required: ['app', 'prompt'],
     },
@@ -93,6 +105,7 @@ const SESSION_TOOLS = [
         app: APP,
         sessionId: { type: 'string', minLength: 1, maxLength: 512 },
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+        launch: LAUNCH,
       },
       required: ['app', 'sessionId', 'prompt'],
     },
@@ -102,7 +115,7 @@ const SESSION_TOOLS = [
 let polling = false
 
 async function readBinding($: EngineInterface): Promise<Binding | undefined> {
-  const home = await $.env.get('CORDISX_HOME') ?? `${await $.env.get('HOME') ?? ''}/.cordisx`
+  const home = await cordisxHome($)
   try {
     const value = JSON.parse(await $.fs.read(`${home}/run/agent-bridge.json`)) as Partial<Binding>
     return typeof value.socketPath === 'string' && typeof value.token === 'string'
@@ -115,7 +128,9 @@ async function readBinding($: EngineInterface): Promise<Binding | undefined> {
 
 async function post($: EngineInterface, route: string, body: unknown): Promise<BridgeReply> {
   const binding = await readBinding($)
-  if (binding === undefined) return { ok: false, error: 'CordisX is not running Codex (no agent bridge found)' }
+  if (binding === undefined) {
+    return { ok: false, unreachable: true, error: 'CordisX is not running Codex (no agent bridge found)' }
+  }
   try {
     const response = await $.http.fetch(`http://cordisx${route}`, {
       method: 'POST',
@@ -125,7 +140,7 @@ async function post($: EngineInterface, route: string, body: unknown): Promise<B
     })
     return JSON.parse(response.text) as BridgeReply
   } catch {
-    return { ok: false, error: 'The CordisX agent bridge is not reachable' }
+    return { ok: false, unreachable: true, error: 'The CordisX agent bridge is not reachable' }
   }
 }
 
@@ -239,7 +254,8 @@ async function runSessionTool($: EngineInterface, operation: string, input: Reco
   if (app === 'claude') {
     // The bridge drives Claude from outside the app, so a new session needs no
     // "start the session?" prompt; without a bridge, Claude's own tools answer.
-    const bridged = await post($, '/sessions', { app, operation, args })
+    const { launch: _launch, ...request } = args
+    const bridged = await post($, '/sessions', { app, operation, args: request })
     if (bridged.ok) return JSON.stringify(bridged.value, null, 2)
     try {
       return JSON.stringify(await answer($, operation, args), null, 2)
@@ -248,10 +264,66 @@ async function runSessionTool($: EngineInterface, operation: string, input: Reco
     }
   }
   if (app !== 'codex') return `app must be one of ${APPS.join(', ')}`
-  const answered = await post($, '/sessions', { app, operation, args })
+  const { launch, ...request } = args
+  let answered = await post($, '/sessions', { app, operation, args: request })
+  if (!answered.ok && answered.unreachable === true) {
+    const started = await startCodex($, launch)
+    if (started !== true) return JSON.stringify(started, null, 2)
+    answered = await post($, '/sessions', { app, operation, args: request })
+  }
   return answered.ok
     ? JSON.stringify(answered.value, null, 2)
     : `Codex is unavailable: ${answered.error ?? 'unknown error'}`
+}
+
+async function cordisxHome($: EngineInterface): Promise<string> {
+  return await $.env.get('CORDISX_HOME') ?? `${await $.env.get('HOME') ?? ''}/.cordisx`
+}
+
+/**
+ * Starts the CordisX Codex launch this home last ran, when the person allowed
+ * it: this call (`launch: "once" | "always"`, the latter remembered) or an
+ * earlier "always". Otherwise the same question the Codex side asks about
+ * Claude, at once.
+ */
+async function startCodex($: EngineInterface, launch: unknown): Promise<true | Record<string, string>> {
+  const home = await cordisxHome($)
+  const preference = `${home}/apps/codex/bridge-launch.json`
+  if (launch === 'always' || launch === 'ask') {
+    await $.fs.write(preference, `${JSON.stringify({ launch })}\n`)
+  }
+  let remembered = false
+  try {
+    remembered = (JSON.parse(await $.fs.read(preference)) as { launch?: unknown }).launch === 'always'
+  } catch { /* never answered */ }
+  const allowed = launch === 'once' || launch === 'always' || (launch !== 'ask' && remembered)
+  if (!allowed) {
+    return {
+      status: 'needs-confirmation',
+      reason: 'codex-not-running',
+      question: 'Codex Desktop is not running. Start it?',
+      howToContinue:
+        'Ask the user, in their language, whether to start Codex Desktop. If they agree, call this tool again with the same arguments plus launch "once" (start it this time) or "always" (start it automatically from now on, without asking). Do not retry without their answer.',
+    }
+  }
+  let cli: string[] = []
+  try {
+    cli = JSON.parse(await $.env.get('CORDISX_CLI') ?? '[]') as string[]
+  } catch { /* not launched by CordisX */ }
+  let target = { homeDir: home, profileId: 'default' }
+  try {
+    target = { ...target, ...JSON.parse(await $.fs.read(`${home}/run/codex-launch.json`)) as typeof target }
+  } catch { /* Codex never ran with the bridge; its default profile */ }
+  const argv = cli.length > 0 ? [...cli, 'start', 'codex', target.profileId] : ['cordisx', 'start', 'codex', target.profileId]
+  const started = await $.process.run(argv, { env: { CORDISX_HOME: target.homeDir }, timeoutMs: CODEX_START_MS })
+  if (started.exitCode !== 0) {
+    return { status: 'failed', reason: 'codex-start-failed', detail: started.stderr.slice(-2000) }
+  }
+  for (const deadline = Date.now() + CODEX_START_MS; Date.now() < deadline;) {
+    if ((await post($, '/sessions', { app: 'codex', operation: 'list_sessions', args: { limit: 1 } })).ok) return true
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  return { status: 'failed', reason: 'codex-bridge-not-ready' }
 }
 
 export const register: Register = on => {

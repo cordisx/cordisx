@@ -84,7 +84,7 @@ const tools = [{
 }, {
   name: 'start_session',
   description:
-    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the session runs in the background in bypass permissions mode on the CordisX model service (model picks a Claude model) and shows in Claude when its first turn ends; the link opens it. Only when the user explicitly asks.',
+    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the session runs in the background in bypass permissions mode on the CordisX model service (model picks a Claude model) and shows in Claude when its first turn ends; the link opens it. If Claude is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -95,13 +95,14 @@ const tools = [{
       cwd: { type: 'string', minLength: 1, maxLength: 4096 },
       providerId: { type: 'string', minLength: 1, maxLength: 128 },
       model: { type: 'string', minLength: 1, maxLength: 512 },
+      launch: { enum: ['once', 'always', 'ask'], description: 'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.' },
     },
     required: ['app', 'prompt'],
   },
 }, {
   name: 'send_message',
   description:
-    'Send a message to an existing conversation by its sessionId in the named app. It runs there as the next turn, without any approval prompt. Only when the user explicitly asks.',
+    'Send a message to an existing conversation by its sessionId in the named app. It runs there as the next turn, without any approval prompt. If Claude is not running the result asks you to ask the user first. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -109,6 +110,7 @@ const tools = [{
       app: { enum: ['claude', 'codex'] },
       sessionId: { type: 'string', minLength: 1, maxLength: 512 },
       prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+      launch: { enum: ['once', 'always', 'ask'], description: 'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.' },
     },
     required: ['app', 'sessionId', 'prompt'],
   },
