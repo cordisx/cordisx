@@ -1,6 +1,7 @@
 import { type ModelExportInvocation, parseModelExport } from './model-export-parse.js'
 import { type CordisXManagementInvocation, parseManagementCli } from './management-parse.js'
 import { CordisXCliParseError } from './parse-error.js'
+import { parseTerminalCli, type TerminalInvocation } from './terminal-parse.js'
 
 export { CordisXCliParseError, type CordisXCliParseErrorCode } from './parse-error.js'
 
@@ -21,6 +22,7 @@ export type CordisXCliAction =
   | 'feedback'
   | 'management'
   | 'model-export'
+  | 'terminal'
 export type CordisXDataMode = 'shared' | 'host-isolated'
 
 export interface CordisXLauncherOptions {
@@ -117,6 +119,7 @@ export interface CordisXFeedbackInvocation {
 export type CordisXCliInvocation =
   | CordisXHelpInvocation
   | ModelExportInvocation
+  | TerminalInvocation
   | CordisXLaunchInvocation
   | CordisXRunInvocation
   | CordisXManagedInvocation
@@ -539,6 +542,7 @@ function parseFeedbackCli(argv: readonly string[]): CordisXFeedbackInvocation {
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
+  if (argv[0] === 'cli') return parseTerminalCli(argv)
   if (argv[0] === 'model') return parseModelExport(argv)
   if (argv[0] === 'feedback') return parseFeedbackCli(argv)
   if (argv[0] === 'plugin' || argv[0] === 'source') return parseManagementCli(argv)

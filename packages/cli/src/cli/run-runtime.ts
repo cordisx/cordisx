@@ -16,6 +16,8 @@ import type { OpenManagementCommandService } from './management-command.js'
 import type { runInjectedHost } from './run-injected-host.js'
 
 export interface CordisXCliRuntime {
+  /** Test-only spawn seam; production inherits terminal stdio without a shell. */
+  readonly internalSpawnTerminal?: typeof import('node:child_process').spawn
   /** Test-only app installation destination. */
   readonly internalAppOutput?: import('../app-launcher/runtime-install.js').AppCommandOutputOptions
   /** Test-only exact-path replacement for `/usr/bin/open`. */

@@ -1,5 +1,10 @@
 import type { ModelExportRequest } from '../cli/model-export-parse.js'
 import type { CliModelExportResult } from './model-catalog/cli-export.js'
+import {
+  parseTerminalProviderRequest,
+  type TerminalProviderRequest,
+  type TerminalProviderResult,
+} from './terminal-provider.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { connect, createServer, type Server, type Socket } from 'node:net'
@@ -21,6 +26,7 @@ const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
   | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
+  | { readonly kind: 'terminal-provider'; readonly request: TerminalProviderRequest }
   | { readonly kind: 'refresh-catalog'; readonly sourceUrl?: string }
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
@@ -107,6 +113,7 @@ export function parsePluginManagementRpcRequest(
     ![
       'query',
       'model-export',
+      'terminal-provider',
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
@@ -115,6 +122,7 @@ export function parsePluginManagementRpcRequest(
       'migrate-legacy-sources',
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
+  if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   return request as unknown as PluginManagementRpcRequest
 }
 
@@ -123,6 +131,7 @@ export async function handlePluginManagementRpcRequest(
   request: PluginManagementRpcRequest,
 ): Promise<unknown> {
   const operation = request.operation
+  if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
   if (operation.kind === 'query') return await service.query()
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
@@ -184,6 +193,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly processStartedAt: string
   readonly service: PluginManagementService
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
+  readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
@@ -210,7 +220,10 @@ export async function startPluginManagementRpcServer(input: {
           respond(socket, {
             requestId,
             ok: true,
-            value: request.operation.kind === 'model-export'
+            value: request.operation.kind === 'terminal-provider'
+              ? await (input.terminalProvider?.(request.operation.request)
+                ?? Promise.reject(new Error('Terminal provider unavailable; update the running CordisX Host')))
+              : request.operation.kind === 'model-export'
               ? await (input.modelExport?.(request.operation.request)
                 ?? Promise.reject(
                   new Error('Model export unavailable; this runtime needs compatible native catalog support'),
