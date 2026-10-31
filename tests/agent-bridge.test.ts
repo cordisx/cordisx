@@ -59,17 +59,17 @@ function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: strin
 describe('Codex side of the agent bridge', () => {
   it('lists threads with clickable codex links', async () => {
     const codex = fakeCodex()
-    const listed = await createCodexBridgeHandler(codex)('list_threads', { limit: 5 }) as {
-      threads: Array<{ threadId: string; title: string; link: string }>
+    const listed = await createCodexBridgeHandler(codex)('list_sessions', { limit: 5 }) as {
+      sessions: Array<{ sessionId: string; title: string; link: string }>
     }
     expect(codex.calls[0]).toEqual({ method: 'thread/list', params: { limit: 5 } })
-    expect(listed.threads).toEqual([
-      expect.objectContaining({ threadId: 't1', title: 'Fix the build', link: 'codex://threads/t1' }),
+    expect(listed.sessions).toEqual([
+      expect.objectContaining({ sessionId: 't1', title: 'Fix the build', link: 'codex://threads/t1' }),
     ])
   })
 
   it('reads a thread into a bounded transcript', async () => {
-    const read = await createCodexBridgeHandler(fakeCodex())('read_thread', { threadId: 't1' }) as {
+    const read = await createCodexBridgeHandler(fakeCodex())('read_session', { sessionId: 't1' }) as {
       transcript: Array<{ role: string; text: string }>
     }
     expect(read.transcript).toEqual([
@@ -84,9 +84,9 @@ describe('Codex side of the agent bridge', () => {
   it('starts a thread on a declared provider and refuses one outside the catalog', async () => {
     const codex = fakeCodex()
     const handler = createCodexBridgeHandler(codex, '/home/u')
-    const started = await handler('start_thread', { prompt: 'build it', providerId: 'deepseek' })
+    const started = await handler('start_session', { prompt: 'build it', providerId: 'deepseek' })
     expect(started).toEqual(
-      expect.objectContaining({ status: 'started', threadId: 'new-thread', link: 'codex://threads/new-thread' }),
+      expect.objectContaining({ status: 'started', sessionId: 'new-thread', link: 'codex://threads/new-thread' }),
     )
     expect(codex.calls.map(call => call.method)).toEqual(['thread/start', 'turn/start'])
     expect(codex.calls[0]!.params).toEqual({ cwd: '/home/u', modelProvider: 'deepseek', model: 'deepseek-chat' })
@@ -94,11 +94,11 @@ describe('Codex side of the agent bridge', () => {
       threadId: 'new-thread',
       input: [{ type: 'text', text: 'build it', text_elements: [] }],
     })
-    expect(await handler('start_thread', { prompt: 'x', providerId: 'nope' })).toEqual({
+    expect(await handler('start_session', { prompt: 'x', providerId: 'nope' })).toEqual({
       status: 'rejected',
       reason: 'provider-not-configured',
     })
-    expect(await handler('start_thread', { prompt: 'x', cwd: 'relative' })).toEqual({
+    expect(await handler('start_session', { prompt: 'x', cwd: 'relative' })).toEqual({
       status: 'rejected',
       reason: 'cwd-must-be-absolute',
     })
@@ -106,7 +106,7 @@ describe('Codex side of the agent bridge', () => {
 
   it('resumes an unloaded thread before sending to it', async () => {
     const codex = fakeCodex()
-    await createCodexBridgeHandler(codex)('send_message', { threadId: 'cold', prompt: 'next' })
+    await createCodexBridgeHandler(codex)('send_message', { sessionId: 'cold', prompt: 'next' })
     expect(codex.calls.map(call => call.method)).toEqual(['thread/read', 'thread/resume', 'turn/start'])
   })
 })
@@ -147,18 +147,18 @@ describe('agent bridge transport', () => {
     }
     expect(binding.socketPath).toBe(bridge.binding.socketPath)
     expect((await stat(path.join(home, 'run', 'agent-bridge.json'))).mode & 0o777).toBe(0o600)
-    expect((await post(bridge, '/codex', { operation: 'list_threads' }, 'wrong')).status).toBe(403)
-    const listed = await post(bridge, '/codex', { operation: 'list_threads', args: {} })
+    expect((await post(bridge, '/sessions', { app: 'codex', operation: 'list_sessions' }, 'wrong')).status).toBe(403)
+    const listed = await post(bridge, '/sessions', { app: 'codex', operation: 'list_sessions', args: {} })
     expect(listed.body.ok).toBe(true)
   })
 
   it('hands a Codex agent request to one polling Claude session and returns its answer', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
-    await expect(bridge.callClaude('list_sessions', {})).rejects.toThrow(/No Claude Code session is connected/)
+    await expect(bridge.call('claude', 'list_sessions', {})).rejects.toThrow(/No Claude Code session is connected/)
 
     await post(bridge, '/claude/poll', { sessionId: 'local_a' })
-    const pending = bridge.callClaude('list_sessions', { limit: 3 })
+    const pending = bridge.call('claude', 'list_sessions', { limit: 3 })
     const first = await post(bridge, '/claude/poll', { sessionId: 'local_a' })
     const claimed = first.body.value as { id: string; operation: string; args: unknown }
     expect(claimed).toEqual(expect.objectContaining({ operation: 'list_sessions', args: { limit: 3 } }))
@@ -168,8 +168,8 @@ describe('agent bridge transport', () => {
     await expect(pending).resolves.toEqual({ sessions: ['x'] })
   })
 
-  it('routes the Codex agent tools to the bridge through the agent-models handler', async () => {
-    const seen: Array<[string, unknown]> = []
+  it('routes the generic session tools to the named app through the agent-models handler', async () => {
+    const seen: Array<[string, string, unknown]> = []
     const handler = createNativeAgentModelsHandler({
       catalog: async () => [],
       controller: {} as never,
@@ -177,13 +177,19 @@ describe('agent bridge transport', () => {
       reserve: () => true,
       commit: () => undefined,
       release: () => undefined,
-      claude: async (operation, input) => {
-        seen.push([operation, input])
+      sessions: async (app, operation, input) => {
+        seen.push([app, operation, input])
         return { sessions: [] }
       },
     })
-    expect(await handler('claude:list_sessions', { limit: 2 })).toEqual({ status: 'ok', value: { sessions: [] } })
-    expect(seen).toEqual([['list_sessions', { limit: 2 }]])
-    expect(await handler('claude:rm_rf', {})).toEqual({ status: 'rejected', reason: 'invalid-selection' })
+    expect(await handler('session:list_sessions', { app: 'claude', limit: 2 })).toEqual({
+      status: 'ok',
+      value: { sessions: [] },
+    })
+    expect(seen).toEqual([['claude', 'list_sessions', { limit: 2 }]])
+    expect(await handler('session:list_sessions', { app: 'zcode' })).toEqual(expect.objectContaining({
+      status: 'rejected',
+    }))
+    expect(await handler('session:rm_rf', {})).toEqual({ status: 'rejected', reason: 'invalid-selection' })
   })
 })

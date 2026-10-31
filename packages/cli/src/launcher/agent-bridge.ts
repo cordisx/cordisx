@@ -10,11 +10,13 @@ import type { NativeBridgeMethod } from './native-submission-control-server.js'
  * The CordisX agent bridge: one owner-only HTTP endpoint on a Unix socket that
  * lets Codex Desktop and Claude Desktop act on each other's conversations.
  *
- * - Claude -> Codex: the CordisX plugin in Claude Code sessions calls `/codex`,
- *   and the bridge runs the request on the Codex desktop's own app-server, so
- *   threads it reads or starts are the ones the Codex window shows.
- * - Codex -> Claude: a Codex agent's CordisX tool calls `callClaude`; the
- *   request waits in a queue until a Claude Code session's plugin polls
+ * Both apps get the same four tools (`list_sessions`, `read_session`,
+ * `start_session`, `send_message`) with an `app` argument naming the target,
+ * so a new app is a new `app` value rather than new tool names.
+ *
+ * - `app: "codex"` runs on the Codex desktop's own app-server, so threads it
+ *   reads or starts are the ones the Codex window shows.
+ * - `app: "claude"` waits in a queue until a Claude Code session's plugin polls
  *   `/claude/poll`, runs it with Claude's own session tools, and posts
  *   `/claude/result`.
  *
@@ -40,7 +42,18 @@ export class AgentBridgeClaudeUnavailable extends Error {
 const MAX_BODY = 1024 * 1024
 const MAX_TRANSCRIPT_CHARS = 60_000
 const CLAUDE_LIVE_MS = 8_000
-const CLAUDE_TIMEOUT_MS = 90_000
+/** Long enough for the person to answer Claude's "start the session?" prompt. */
+const CLAUDE_TIMEOUT_MS = 170_000
+
+export const BRIDGE_APPS = ['codex', 'claude'] as const
+export type BridgeApp = typeof BRIDGE_APPS[number]
+export const BRIDGE_OPERATIONS = ['list_sessions', 'read_session', 'start_session', 'send_message'] as const
+export type BridgeOperation = typeof BRIDGE_OPERATIONS[number]
+
+export const isBridgeApp = (value: unknown): value is BridgeApp =>
+  typeof value === 'string' && (BRIDGE_APPS as readonly string[]).includes(value)
+export const isBridgeOperation = (value: unknown): value is BridgeOperation =>
+  typeof value === 'string' && (BRIDGE_OPERATIONS as readonly string[]).includes(value)
 
 export function agentBridgeBindingPath(cordisxHomeDir: string): string {
   return path.join(cordisxHomeDir, 'run', 'agent-bridge.json')
@@ -57,7 +70,7 @@ function threadSummary(value: unknown) {
   const thread = object(value) ?? {}
   const id = text(thread.id) ?? ''
   return {
-    threadId: id,
+    sessionId: id,
     title: text(thread.name, 1024) ?? text(thread.preview, 1024) ?? '',
     cwd: typeof thread.cwd === 'string' ? thread.cwd : undefined,
     modelProvider: typeof thread.modelProvider === 'string' ? thread.modelProvider : undefined,
@@ -99,7 +112,7 @@ export function threadTranscript(value: unknown): readonly { role: string; text:
   return kept.reverse()
 }
 
-/** Validated Claude -> Codex operations. Each maps onto the allowlisted native methods only. */
+/** Validated operations on Codex. Each maps onto the allowlisted native methods only. */
 export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homedir = os.homedir()) {
   const startTurn = async (threadId: string, prompt: string) => {
     const started = object(
@@ -112,7 +125,7 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
   }
   return async (operation: unknown, input: unknown): Promise<unknown> => {
     const args = object(input) ?? {}
-    if (operation === 'list_threads') {
+    if (operation === 'list_sessions') {
       const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit as number, 1), 50) : 20
       const listed = object(
         await codex.nativeRequest('thread/list', {
@@ -122,17 +135,17 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
         }),
       )
       return {
-        threads: (Array.isArray(listed?.data) ? listed.data : []).map(threadSummary),
+        sessions: (Array.isArray(listed?.data) ? listed.data : []).map(threadSummary),
         ...(typeof listed?.nextCursor === 'string' ? { nextCursor: listed.nextCursor } : {}),
       }
     }
-    if (operation === 'read_thread') {
-      const threadId = text(args.threadId)
-      if (threadId === undefined) return { status: 'rejected', reason: 'threadId-required' }
+    if (operation === 'read_session') {
+      const threadId = text(args.sessionId)
+      if (threadId === undefined) return { status: 'rejected', reason: 'sessionId-required' }
       const read = object(await codex.nativeRequest('thread/read', { threadId, includeTurns: true }))
       return { ...threadSummary(read?.thread), transcript: threadTranscript(read?.thread) }
     }
-    if (operation === 'start_thread') {
+    if (operation === 'start_session') {
       const prompt = text(args.prompt, 100_000)
       if (prompt === undefined) return { status: 'rejected', reason: 'prompt-required' }
       const providerId = text(args.providerId, 128)
@@ -159,7 +172,7 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
       const turnId = await startTurn(threadId, prompt)
       return {
         status: 'started',
-        threadId,
+        sessionId: threadId,
         ...(turnId === undefined ? {} : { turnId }),
         modelProvider: started?.modelProvider,
         model: started?.model,
@@ -167,17 +180,22 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
       }
     }
     if (operation === 'send_message') {
-      const threadId = text(args.threadId)
+      const threadId = text(args.sessionId)
       const prompt = text(args.prompt, 100_000)
       if (threadId === undefined || prompt === undefined) {
-        return { status: 'rejected', reason: 'threadId-and-prompt-required' }
+        return { status: 'rejected', reason: 'sessionId-and-prompt-required' }
       }
       const read = object(await codex.nativeRequest('thread/read', { threadId, includeTurns: false }))
       const status = object(object(read?.thread)?.status)?.type
       if (status === 'active') return { status: 'rejected', reason: 'thread-busy' }
       if (status === 'notLoaded') await codex.nativeRequest('thread/resume', { threadId })
       const turnId = await startTurn(threadId, prompt)
-      return { status: 'sent', threadId, ...(turnId === undefined ? {} : { turnId }), link: codexThreadLink(threadId) }
+      return {
+        status: 'sent',
+        sessionId: threadId,
+        ...(turnId === undefined ? {} : { turnId }),
+        link: codexThreadLink(threadId),
+      }
     }
     return { status: 'rejected', reason: 'unknown-operation' }
   }
@@ -195,8 +213,8 @@ interface ClaudeRequest {
 
 export interface AgentBridge {
   readonly binding: AgentBridgeBinding
-  /** Codex -> Claude: queue one operation for a live Claude Code session's plugin. */
-  callClaude(operation: string, args: unknown): Promise<unknown>
+  /** One operation on the named app: Codex directly, Claude through a polling session. */
+  call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown>
   claudeLive(): boolean
   close(): Promise<void>
 }
@@ -232,6 +250,34 @@ export async function startAgentBridge(input: {
   let lastPollAt = 0
   let closed = false
 
+  async function callClaude(operation: BridgeOperation, args: unknown): Promise<unknown> {
+    if (closed) throw new AgentBridgeClaudeUnavailable('The CordisX agent bridge is closed')
+    if (Date.now() - lastPollAt >= CLAUDE_LIVE_MS) {
+      throw new AgentBridgeClaudeUnavailable(
+        'No Claude Code session is connected. Start Claude with `cordisx start claude` and open any Code session.',
+      )
+    }
+    return await new Promise<unknown>((resolve, reject) => {
+      const id = randomUUID()
+      const timer = setTimeout(() => {
+        const index = queue.findIndex(item => item.id === id)
+        if (index >= 0) queue.splice(index, 1)
+        reject(
+          new AgentBridgeClaudeUnavailable(
+            operation === 'start_session'
+              ? 'Claude is waiting for the person to allow the new session; approve it in Claude and try again'
+              : 'Claude did not answer the request in time',
+          ),
+        )
+      }, CLAUDE_TIMEOUT_MS)
+      queue.push({ id, operation, args, resolve, reject, timer })
+    })
+  }
+
+  async function call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown> {
+    return app === 'codex' ? await codexHandler(operation, args) : await callClaude(operation, args)
+  }
+
   const server = createServer((request, response) => {
     void (async () => {
       try {
@@ -240,8 +286,12 @@ export async function startAgentBridge(input: {
           return
         }
         const body = object(await readBody(request)) ?? {}
-        if (request.url === '/codex') {
-          reply(response, 200, { ok: true, value: await codexHandler(body.operation, body.args) })
+        if (request.url === '/sessions') {
+          if (!isBridgeApp(body.app) || !isBridgeOperation(body.operation)) {
+            reply(response, 400, { ok: false, error: 'app and operation must be known values' })
+            return
+          }
+          reply(response, 200, { ok: true, value: await call(body.app, body.operation, body.args) })
         } else if (request.url === '/claude/poll') {
           lastPollAt = Date.now()
           const sessionId = text(body.sessionId) ?? 'unknown'
@@ -282,23 +332,7 @@ export async function startAgentBridge(input: {
   return Object.freeze({
     binding,
     claudeLive: () => Date.now() - lastPollAt < CLAUDE_LIVE_MS,
-    async callClaude(operation: string, args: unknown): Promise<unknown> {
-      if (closed) throw new AgentBridgeClaudeUnavailable('The CordisX agent bridge is closed')
-      if (Date.now() - lastPollAt >= CLAUDE_LIVE_MS) {
-        throw new AgentBridgeClaudeUnavailable(
-          'No Claude Code session is connected. Start Claude with `cordisx start claude` and open any Code session.',
-        )
-      }
-      return await new Promise<unknown>((resolve, reject) => {
-        const id = randomUUID()
-        const timer = setTimeout(() => {
-          const index = queue.findIndex(item => item.id === id)
-          if (index >= 0) queue.splice(index, 1)
-          reject(new AgentBridgeClaudeUnavailable('Claude did not answer the request in time'))
-        }, CLAUDE_TIMEOUT_MS)
-        queue.push({ id, operation, args, resolve, reject, timer })
-      })
-    },
+    call,
     async close() {
       if (closed) return
       closed = true

@@ -37,9 +37,9 @@ if (agentModelsBinding && nativeArgs.includes('app-server')) {
         agentModelsBinding,
       ])
     }`,
-    // Claude bridge requests wait for a Claude Code session to answer.
+    // Cross-app session tools can wait for the person to approve a new Claude session.
     '-c',
-    'mcp_servers.cordisx_models.tool_timeout_sec=120',
+    'mcp_servers.cordisx_models.tool_timeout_sec=200',
   )
 }
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })

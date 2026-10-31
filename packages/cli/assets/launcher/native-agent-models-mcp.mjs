@@ -54,61 +54,66 @@ const tools = [{
     required: ['operationId', 'providerId', 'model', 'prompt', 'target'],
   },
 }, {
-  name: 'claude_list_sessions',
+  name: 'list_sessions',
   description:
-    'List the Claude Code sessions in the Claude Desktop app that CordisX started (most recent first): title, working directory, and a claude:// link the user can click to open each one. Requires Claude Desktop launched with `cordisx start claude` and at least one open Code session; otherwise reports unavailable.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } },
-  },
-}, {
-  name: 'claude_read_session',
-  description:
-    'Read the recent transcript of one Claude Desktop Code session by its local_… session id (from claude_list_sessions), plus its link. Read-only.',
+    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. Claude needs Claude Desktop launched with `cordisx start claude` and an open Code session.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      sessionId: { type: 'string', minLength: 1, maxLength: 128 },
+      app: { enum: ['claude', 'codex'] },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+      searchTerm: { type: 'string', maxLength: 256 },
+    },
+    required: ['app'],
+  },
+}, {
+  name: 'read_session',
+  description:
+    'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      sessionId: { type: 'string', minLength: 1, maxLength: 512 },
       limit: { type: 'integer', minimum: 1, maximum: 200 },
     },
-    required: ['sessionId'],
+    required: ['app', 'sessionId'],
   },
 }, {
-  name: 'claude_start_session',
+  name: 'start_session',
   description:
-    'Start a new Claude Code session in Claude Desktop for a task the user asked to hand to Claude, and return its session id and a claude:// link. The prompt is the full brief; Claude starts on it at once. Only when the user explicitly asks for work in Claude.',
+    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the person must allow the new session in the Claude window; the call waits for that. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      title: { type: 'string', minLength: 1, maxLength: 120 },
+      app: { enum: ['claude', 'codex'] },
       prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+      title: { type: 'string', minLength: 1, maxLength: 120 },
       cwd: { type: 'string', minLength: 1, maxLength: 4096 },
+      providerId: { type: 'string', minLength: 1, maxLength: 128 },
+      model: { type: 'string', minLength: 1, maxLength: 512 },
     },
-    required: ['title', 'prompt'],
+    required: ['app', 'prompt'],
   },
 }, {
-  name: 'claude_send_message',
+  name: 'send_message',
   description:
-    'Send a message to an existing Claude Desktop Code session by its local_… session id. It arrives there as a user turn labelled as coming from Codex. Only when the user explicitly asks.',
+    'Send a message to an existing conversation by its sessionId in the named app. It runs there as the next turn, without any approval prompt. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      sessionId: { type: 'string', minLength: 1, maxLength: 128 },
-      message: { type: 'string', minLength: 1, maxLength: 100000 },
+      app: { enum: ['claude', 'codex'] },
+      sessionId: { type: 'string', minLength: 1, maxLength: 512 },
+      prompt: { type: 'string', minLength: 1, maxLength: 100000 },
     },
-    required: ['sessionId', 'message'],
+    required: ['app', 'sessionId', 'prompt'],
   },
 }]
-const claudeTools = new Set([
-  'claude_list_sessions',
-  'claude_read_session',
-  'claude_start_session',
-  'claude_send_message',
-])
+const sessionTools = new Set(['list_sessions', 'read_session', 'start_session', 'send_message'])
 
 async function invoke(operation, input, metadata) {
   const binding = JSON.parse(await readFile(bindingPath, 'utf8'))
@@ -126,7 +131,7 @@ async function invoke(operation, input, metadata) {
       socket.destroy()
       error ? reject(error) : resolve(value)
     }
-    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 100000)
+    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 190000)
     socket.on('error', () => finish(new Error('Native model tools unavailable')))
     socket.on('end', () => finish(new Error('Native selection acknowledgement unavailable')))
     socket.on(
@@ -182,8 +187,8 @@ reader.on('line', line => {
       else if (request.method === 'resources/list') result = { resources: [] }
       else if (request.method === 'resources/templates/list') result = { resourceTemplates: [] }
       else if (request.method === 'tools/call') {
-        const operation = claudeTools.has(request.params?.name)
-          ? `claude:${request.params.name.slice('claude_'.length)}`
+        const operation = sessionTools.has(request.params?.name)
+          ? `session:${request.params.name}`
           : request.params?.name === 'list_model_providers'
           ? 'list'
           : request.params?.name === 'select_thread_model_provider'

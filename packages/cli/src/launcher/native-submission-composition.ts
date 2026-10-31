@@ -797,9 +797,9 @@ export async function prepareNativeSubmissionBootstrap(
         agentModels.bind({
           catalog,
           controller,
-          claude: async (operation, input) => {
+          sessions: async (app, operation, input) => {
             if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
-            return await agentBridge.callClaude(operation, input)
+            return await agentBridge.call(app, operation, input)
           },
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),

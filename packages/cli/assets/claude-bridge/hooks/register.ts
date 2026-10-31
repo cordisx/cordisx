@@ -28,67 +28,72 @@ const POLL_MS = 1500
 const SESSION_ID = /local_[0-9a-f-]{36}/u
 const CLAUDE_LINK = /claude:\/\/[^\s"]+/u
 
-/** Claude session tools that change state; each needs an allow rule, or Claude asks the person. */
-const WRITE_TOOLS = ['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__send_message'] as const
-const ALLOW_HINT = 'Start Claude with `cordisx start claude`; it allows these tools in ~/.claude/settings.json.'
+const APPS = ['codex', 'claude'] as const
+const APP = { enum: APPS, description: 'The app whose conversations to use: "codex" or "claude".' }
 
-const CODEX_TOOLS = [
+/** One set of tool names for every app CordisX connects; `app` names the target. */
+const SESSION_TOOLS = [
   {
-    name: 'codex_list_threads',
-    operation: 'list_threads',
+    name: 'list_sessions',
     description:
-      'List conversations (threads) in the Codex Desktop app that CordisX runs: title, folder, model provider, status, and a codex:// link the user can click to open each one. Use when the user asks what Codex is working on. Requires Codex launched with `cordisx start`.',
+      'List conversations in an app CordisX connects (`app`: "codex" for Codex Desktop threads, "claude" for Claude Desktop Code sessions), most recent first, each with a link the user can click to open it. Read-only.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        app: APP,
         limit: { type: 'integer', minimum: 1, maximum: 50 },
         searchTerm: { type: 'string', maxLength: 256 },
       },
+      required: ['app'],
     },
   },
   {
-    name: 'codex_read_thread',
-    operation: 'read_thread',
+    name: 'read_session',
     description:
-      'Read one Codex Desktop conversation by thread id (from codex_list_threads): its status and recent messages, plans, and commands. Read-only.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      properties: { threadId: { type: 'string', minLength: 1, maxLength: 512 } },
-      required: ['threadId'],
-    },
-  },
-  {
-    name: 'codex_start_thread',
-    operation: 'start_thread',
-    description:
-      'Start a new conversation in Codex Desktop for a task the user asked to hand to Codex; Codex begins on the prompt at once and the conversation appears in the Codex window. Optionally pick one of the model providers CordisX configured (providerId, model). Returns the thread id and a codex:// link. Only when the user explicitly asks for work in Codex.',
+      'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        app: APP,
+        sessionId: { type: 'string', minLength: 1, maxLength: 512 },
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+      },
+      required: ['app', 'sessionId'],
+    },
+  },
+  {
+    name: 'start_session',
+    description:
+      'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. For Codex, providerId and model pick one of the model services CordisX configured. Only when the user explicitly asks.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        app: APP,
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+        title: { type: 'string', minLength: 1, maxLength: 120 },
         cwd: { type: 'string', minLength: 1, maxLength: 4096 },
         providerId: { type: 'string', minLength: 1, maxLength: 128 },
         model: { type: 'string', minLength: 1, maxLength: 512 },
       },
-      required: ['prompt'],
+      required: ['app', 'prompt'],
     },
   },
   {
-    name: 'codex_send_message',
-    operation: 'send_message',
+    name: 'send_message',
     description:
-      'Send a follow-up message to an existing, idle Codex Desktop conversation by thread id. Only when the user explicitly asks.',
+      'Send a message to an existing conversation by its sessionId in the named app; it runs there as the next turn. Only when the user explicitly asks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        threadId: { type: 'string', minLength: 1, maxLength: 512 },
+        app: APP,
+        sessionId: { type: 'string', minLength: 1, maxLength: 512 },
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
       },
-      required: ['threadId', 'prompt'],
+      required: ['app', 'sessionId', 'prompt'],
     },
   },
 ] as const
@@ -133,12 +138,6 @@ function limitOf(args: Record<string, unknown>, fallback: number): number {
 }
 
 /** Runs one Codex -> Claude request with Claude Desktop's own session tools. */
-async function requireAllowed($: EngineInterface, tool: (typeof WRITE_TOOLS)[number]): Promise<void> {
-  const verdict = await $.tool.check({ tool, input: {} })
-  // A dialog in a session nobody may be watching would hold the request until it times out.
-  if (verdict.decision !== 'allow') throw new Error(`Claude needs permission for ${tool}. ${ALLOW_HINT}`)
-}
-
 async function answer($: EngineInterface, operation: string, args: Record<string, unknown>): Promise<unknown> {
   if (operation === 'list_sessions') {
     const current = await $.tool.call({ tool: 'mcp__ccd_session_mgmt__get_session', session_id: 'self' })
@@ -162,7 +161,6 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     return { session: textOf(details), transcript }
   }
   if (operation === 'start_session') {
-    await requireAllowed($, 'mcp__ccd_session__start_session')
     const started = await $.tool.call({
       tool: 'mcp__ccd_session__start_session',
       initiation: 'user_asked',
@@ -184,11 +182,10 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     return { status: 'started', sessionId, ...(link === undefined ? {} : { link }) }
   }
   if (operation === 'send_message') {
-    await requireAllowed($, 'mcp__ccd_session_mgmt__send_message')
     const sent = await $.tool.call({
       tool: 'mcp__ccd_session_mgmt__send_message',
       session_id: String(args.sessionId ?? ''),
-      message: String(args.message ?? ''),
+      message: String(args.prompt ?? args.message ?? ''),
     })
     return { status: 'sent', result: textOf(sent) }
   }
@@ -229,8 +226,18 @@ async function hostsClaudeSessions($: EngineInterface): Promise<boolean> {
   )
 }
 
-async function askCodex($: EngineInterface, operation: string, args: Record<string, unknown>): Promise<string> {
-  const answered = await post($, '/codex', { operation, args })
+/** Runs one session tool: Codex through the agent bridge, Claude with this app's own session tools. */
+async function runSessionTool($: EngineInterface, operation: string, input: Record<string, unknown>): Promise<string> {
+  const { app, ...args } = input
+  if (app === 'claude') {
+    try {
+      return JSON.stringify(await answer($, operation, args), null, 2)
+    } catch (error) {
+      return `Claude could not do it: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  if (app !== 'codex') return `app must be one of ${APPS.join(', ')}`
+  const answered = await post($, '/sessions', { app, operation, args })
   return answered.ok
     ? JSON.stringify(answered.value, null, 2)
     : `Codex is unavailable: ${answered.error ?? 'unknown error'}`
@@ -238,17 +245,17 @@ async function askCodex($: EngineInterface, operation: string, args: Record<stri
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    for (const tool of CODEX_TOOLS) {
+    for (const tool of SESSION_TOOLS) {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
     }
     $.clock.every(POLL_MS, () => void poll($))
     return next(e)
   })
 
-  for (const tool of CODEX_TOOLS) {
+  for (const tool of SESSION_TOOLS) {
     on('tool.call', { tool: `mcp__cordisx__${tool.name}` }, async ($, e) => {
       const { tool: _tool, tool_use_id: _id, ...args } = e as Record<string, unknown>
-      return { result: await askCodex($, tool.operation, args) }
+      return { result: await runSessionTool($, tool.name, args) }
     })
   }
 }

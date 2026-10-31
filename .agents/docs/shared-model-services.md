@@ -86,27 +86,29 @@ SIGKILL.
 A Codex launch starts the agent bridge: an owner-only HTTP endpoint on
 `~/.cordisx/run/agent-bridge.sock`, with its token in `agent-bridge.json`.
 
-- **Claude → Codex.** Claude Code sessions in a CordisX-launched Claude profile
-  load the bundled plugin (`assets/claude-bridge`) through
-  `CLAUDE_CODE_PLUGIN_DIRS`. It registers `codex_list_threads`,
-  `codex_read_thread`, `codex_start_thread` (optionally on a declared provider),
-  and `codex_send_message`. The bridge runs them on the Codex desktop's own
-  app-server through the intermediary's `native-request` control message,
-  which allows only `thread/list`, `thread/read`, `thread/start`,
-  `thread/resume`, `turn/start`, and `turn/interrupt`. Threads it starts show
-  in the Codex sidebar. Results carry `codex://threads/<id>` links.
-- **Codex → Claude.** The `cordisx_models` MCP server gives Codex agents
-  `claude_list_sessions`, `claude_read_session`, `claude_start_session`, and
-  `claude_send_message`. A request waits in the bridge queue until a Claude
-  Code session's plugin polls for it and answers with Claude's own session
-  tools. Only sessions that have those tools poll. A session it starts is
-  detached so it is the user's own, and results carry `claude://` links.
-  Claude asks the person before `mcp__ccd_session__start_session` and
-  `mcp__ccd_session_mgmt__send_message`, and a plugin cannot answer that
-  dialog, so `cordisx start claude` adds both to `permissions.allow` in
-  `~/.claude/settings.json` before it launches the app, keeping every other
-  setting. If those rules are missing anyway, the bridge refuses the request
-  at once instead of waiting on a dialog.
+Both apps get the same four tools, named the same in each:
+`list_sessions`, `read_session`, `start_session`, and `send_message`, each with
+an `app` argument (`"codex"` or `"claude"`). A new app is a new `app` value,
+not new tool names. Results carry `codex://` or `claude://` links.
+
+- **`app: "codex"`** runs on the Codex desktop's own app-server through the
+  intermediary's `native-request` control message, which allows only
+  `thread/list`, `thread/read`, `thread/start`, `thread/resume`, `turn/start`,
+  and `turn/interrupt`. Threads it starts show in the Codex sidebar;
+  `start_session` can pick a declared provider and model.
+- **`app: "claude"`** from Codex waits in the bridge queue until a Claude Code
+  session's plugin (`assets/claude-bridge`, loaded through
+  `CLAUDE_CODE_PLUGIN_DIRS`) polls for it and answers with Claude's own session
+  tools. A session polls once Claude's session tools are connected. From
+  Claude, the plugin calls those tools directly. A session it starts is
+  detached so it is the user's own.
+
+Claude Desktop asks the person to allow every new session ("Allow Claude to
+start the session?"), whoever requests it; a settings allow rule does not
+change that. `start_session` with `app: "claude"` therefore shows that prompt
+in the answering session and waits for it (up to about three minutes).
+`send_message` needs no approval. `cordisx start claude` still adds both tools
+to `permissions.allow` in `~/.claude/settings.json`.
 
 The Codex side needs a running CordisX Codex launch; the Codex → Claude side
 needs at least one open Code session in the CordisX-launched Claude. Each side
