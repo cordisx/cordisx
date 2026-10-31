@@ -67,7 +67,7 @@ export function nativeThreadBusy(thread: Record<string, unknown>): boolean | und
 export function nextSendSelectionFields(
   projection: import('./native-provider-selection-client.js').NativeProviderSelectionProjection,
   submissionActive: boolean,
-  synchronizationActive: boolean,
+  selectionActive: boolean,
   details: {
     effort?: string | undefined
     confirmation?: import('./native-provider-selection-client.js').NativeProviderSubmitConfirmation | undefined
@@ -75,7 +75,7 @@ export function nextSendSelectionFields(
   },
 ) {
   return {
-    selectionLocked: submissionActive || synchronizationActive,
+    selectionLocked: submissionActive || selectionActive,
     ...(projection.nextSend ? { nextSend: projection.nextSend } : {}),
     ...(projection.pending
       ? {

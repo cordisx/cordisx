@@ -286,7 +286,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     'accepted' | 'busy' | 'unavailable'
   > {
     if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
-    if (this.selectionClient.submissionActive()) return 'busy'
+    if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
     if (options === undefined && (this.turnBusy || this.selectionClient.snapshot().nextSend !== undefined)) {
       const navigation = this.navigationGeneration
       const threadId = this.state.threadId
@@ -977,11 +977,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         ? { nativeModelAssignments: [...this.nativeModelAssignments.values()] }
         : {}),
       providerLabel: next.modelProvider === undefined ? undefined : this.providerNames.get(next.modelProvider),
-      busy: next.busy || this.selectionClient.synchronizationActive(),
+      busy: next.busy || this.selectionClient.selectionActive(),
       ...nextSendSelectionFields(
         projection,
         this.selectionClient.submissionActive(),
-        this.selectionClient.synchronizationActive(),
+        this.selectionClient.selectionActive(),
         { effort: pendingReasoning?.effort, confirmation, error: this.submissionError },
       ),
     })

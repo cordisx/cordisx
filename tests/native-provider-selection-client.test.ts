@@ -293,6 +293,100 @@ describe('native provider selection client', () => {
     await expect(h.client.submitHook(action)).resolves.toEqual({ allow: true })
   })
 
+  it('keeps the Send fence after a failed refresh while allowing a subsequent provider selection', async () => {
+    const h = await harness(false, true)
+    h.synchronizeEffective.mockRejectedValueOnce(new Error('control not ready'))
+    await h.client.refresh()
+    expect(h.client.snapshot()).toMatchObject({ available: true, effective: { providerId: 'a', model: 'a-model' } })
+    expect(h.client.selectionActive()).toBe(false)
+    expect(h.client.synchronizationActive()).toBe(true)
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: false })
+    await expect(h.client.select({ providerId: 'b', model: 'b-model' })).resolves.toBe('accepted')
+    expect(h.client.synchronizationActive()).toBe(false)
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: true })
+  })
+
+  it('locks an in-flight native acknowledgement but permits retry after it fails', async () => {
+    const h = await harness(false, true)
+    const acknowledgement = deferred<void>()
+    h.synchronizeEffective.mockImplementationOnce(async () => {
+      await acknowledgement.promise
+      throw new Error('control did not acknowledge')
+    })
+    const first = h.client.select({ providerId: 'b', model: 'b-model' })
+    await Promise.resolve()
+    expect(h.client.selectionActive()).toBe(true)
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: false })
+    expect(h.channel.submissionPrepare).not.toHaveBeenCalled()
+    await expect(h.client.select({ providerId: 'c', model: 'c-model' })).resolves.toBe('unavailable')
+    expect(h.channel.selectionSelect).toHaveBeenCalledTimes(1)
+    acknowledgement.resolve()
+    await expect(first).resolves.toBe('unavailable')
+    expect(h.client.selectionActive()).toBe(false)
+    expect(h.client.synchronizationActive()).toBe(true)
+    await expect(h.client.select({ providerId: 'c', model: 'c-model' })).resolves.toBe('accepted')
+    expect(h.client.synchronizationActive()).toBe(false)
+  })
+
+  it('rejects commands after an authoritative selection read fails', async () => {
+    const h = await harness(false, true)
+    h.channel.selectionRead.mockRejectedValueOnce(new Error('renderer owner no longer admitted'))
+    await h.client.refresh()
+    expect(h.client.snapshot().available).toBe(false)
+    expect(h.client.selectionActive()).toBe(false)
+    expect(h.client.synchronizationActive()).toBe(true)
+    await expect(h.client.select({ providerId: 'b', model: 'b-model' })).resolves.toBe('unavailable')
+    expect(h.channel.selectionSelect).not.toHaveBeenCalled()
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: false })
+  })
+
+  it('blocks Send before the Host acknowledges an in-flight provider selection', async () => {
+    const h = await harness(false, true)
+    const selected = deferred<Awaited<ReturnType<NativeProviderSelectionCommandChannel['selectionSelect']>>>()
+    h.channel.selectionSelect.mockReturnValueOnce(selected.promise)
+    const select = h.client.select({ providerId: 'b', model: 'b-model' })
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: false })
+    expect(h.channel.submissionPrepare).not.toHaveBeenCalled()
+    selected.resolve({ status: 'accepted', revision: 3, effective: { providerId: 'b', model: 'b-model' } })
+    await expect(select).resolves.toBe('accepted')
+    await expect(h.client.submitHook(descriptor)).resolves.toEqual({ allow: true })
+  })
+
+  it('does not synchronize a projection after its notification changes the renderer scope', async () => {
+    const h = await harness(false, true)
+    let moved = false
+    h.client.subscribe(() => {
+      if (moved || h.client.snapshot().effective?.providerId !== 'b') return
+      moved = true
+      h.setAuthority({ scope: { ...scope, navigationGeneration: 2, threadId: 'thread-2' }, idle: true })
+      h.client.invalidateScope()
+    })
+    h.synchronizeEffective.mockClear()
+    await expect(h.client.select({ providerId: 'b', model: 'b-model' })).resolves.toBe('unavailable')
+    expect(h.synchronizeEffective).not.toHaveBeenCalled()
+    expect(h.client.selectionActive()).toBe(false)
+    expect(h.client.snapshot().available).toBe(false)
+  })
+
+  it('keeps overlapping selection reads locked until all native acknowledgements finish', async () => {
+    const h = await harness(false, true)
+    const first = deferred<void>()
+    const second = deferred<void>()
+    h.synchronizeEffective.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+    const a = h.client.refresh()
+    await Promise.resolve()
+    const b = h.client.refresh()
+    await Promise.resolve()
+    first.resolve()
+    await a
+    expect(h.client.selectionActive()).toBe(true)
+    expect(h.client.synchronizationActive()).toBe(true)
+    second.resolve()
+    await b
+    expect(h.client.selectionActive()).toBe(false)
+    expect(h.client.synchronizationActive()).toBe(false)
+  })
+
   it('fences Send before the asynchronous selection read returns', async () => {
     const h = await harness(false, true)
     const read = deferred<NativeProviderSelectionProjection>()

@@ -476,6 +476,37 @@ describe('native model provider transport', () => {
     dom.window.close()
   })
 
+  it('unlocks provider switching after a failed native acknowledgement while continuing to fence Send', async () => {
+    const { dom, transport, channel, selectModel } = await harness()
+    try {
+      selectModel.mockRejectedValueOnce(new Error('native control not ready'))
+      expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('unavailable')
+      expect(transport.getSnapshot()).toMatchObject({
+        available: true,
+        busy: false,
+        selectionLocked: false,
+        modelProvider: 'provider-b',
+      })
+      const hook = (globalThis as any).__cordisxNativeSubmitHook
+      await expect(hook({ target: 'local', thread: 'thread-1', response: false, promptOverride: false }))
+        .resolves.toEqual({ allow: false })
+      expect(channel.submissionPrepare).not.toHaveBeenCalled()
+      expect(await transport.select({ providerId: 'provider-a', model: 'model-a' })).toBe('accepted')
+      expect(transport.getSnapshot()).toMatchObject({
+        busy: false,
+        selectionLocked: false,
+        modelProvider: 'provider-a',
+      })
+      expect((globalThis as any).__cordisxNativeSubmissionAuthority.snapshot().idle).toBe(true)
+      channel.submissionPrepare.mockResolvedValueOnce({ status: 'pass-through' })
+      await expect(hook({ target: 'local', thread: 'thread-1', response: false, promptOverride: false }))
+        .resolves.toEqual({ allow: true })
+    } finally {
+      transport.dispose()
+      dom.window.close()
+    }
+  })
+
   it('stages provider selection while busy without native effects', async () => {
     const { dom, requests, selectModel, transport, channel } = await harness()
     message(dom.window, {

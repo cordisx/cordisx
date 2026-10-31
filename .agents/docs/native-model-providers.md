@@ -407,6 +407,12 @@ tables.
 Only an accepted native operation changes the selected Provider shown to users.
 Failed transitions attempt to restore the prior effective session/configuration;
 failed recovery disables the replacement instead of claiming success.
+When the Host acknowledges a selection but the native Composer model callback
+fails, the selector retains that authoritative selection and allows another
+explicit provider choice after the operation finishes. Send remains blocked
+until the native control successfully acknowledges an authoritative selection.
+An in-flight selection or synchronization still locks conflicting selector
+actions; a completed synchronization failure does not keep that action lock.
 
 Native controls remain available when the adapter is unsupported, its audited
 composer seat cannot be found, or the replacement cannot represent the current

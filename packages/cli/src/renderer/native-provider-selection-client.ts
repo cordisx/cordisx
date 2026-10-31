@@ -148,6 +148,8 @@ export class NativeProviderSelectionClient {
   private draftEditGeneration = 0
   private submittedEffort: ModelReasoningEffort | undefined
   private readonly unsynchronized = new Set<string>()
+  // A failed acknowledgement keeps Send fenced, but is no longer an in-flight selector operation.
+  private readonly selectionOperations = new Set<{ readonly scope: NativeSubmissionScope }>()
 
   constructor(
     private readonly channel: NativeProviderSelectionCommandChannel,
@@ -186,6 +188,10 @@ export class NativeProviderSelectionClient {
     const threadId = this.authority().scope.threadId
     return threadId !== undefined && this.unsynchronized.has(threadId)
   }
+  selectionActive = (): boolean => {
+    const scope = this.authority().scope
+    return [...this.selectionOperations].some(operation => sameScope(operation.scope, scope))
+  }
   confirmation = (): NativeProviderSubmitConfirmation | undefined => this.waiter?.confirmation
   subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
@@ -196,27 +202,42 @@ export class NativeProviderSelectionClient {
     if (this.disposed) return
     const authority = this.authority()
     const scope = authority.scope
+    const operation = { scope }
     const generation = ++this.projectionGeneration
     const synchronize = scope.threadId !== undefined && authority.idle && !this.submissionActive()
       && this.projection.pending === undefined
-    if (synchronize) this.unsynchronized.add(scope.threadId!)
+    if (synchronize) {
+      this.unsynchronized.add(scope.threadId!)
+      this.selectionOperations.add(operation)
+      this.emit()
+    }
     try {
       const next = await this.channel.selectionRead({
         scope,
         ...(authority.effective === undefined ? {} : { effective: authority.effective }),
       })
       if (this.projectionCurrent(scope, generation, next.revision)) {
+        this.replace(next)
+        if (!this.projectionCurrent(scope, generation, next.revision)) return
         if (synchronize && next.effective && next.pending === undefined) {
-          await this.synchronizeEffective(next.effective)
+          try {
+            await this.synchronizeEffective(next.effective)
+          } catch {
+            // Keep the authoritative choice available for retry, but continue fencing Send.
+            if (this.projectionCurrent(scope, generation, next.revision)) this.notice('submission-rejected')
+            return
+          }
           if (!this.projectionCurrent(scope, generation, next.revision)) return
         }
         if (synchronize && next.available) this.unsynchronized.delete(scope.threadId!)
-        this.replace(next)
       }
     } catch {
       if (this.projectionCurrent(scope, generation, this.projection.revision)) {
         this.replace({ available: false, revision: this.projection.revision })
       }
+    } finally {
+      this.selectionOperations.delete(operation)
+      this.emit()
     }
   }
 
@@ -224,10 +245,15 @@ export class NativeProviderSelectionClient {
     target: NativeProviderSelection,
     options: Readonly<{ source?: 'user' | 'preference'; expectedRevision?: number }> = {},
   ): Promise<'accepted' | 'unavailable'> {
-    if (this.disposed || this.nextSendActive || !this.projection.available) return 'unavailable'
+    if (this.disposed || this.nextSendActive || this.selectionActive() || !this.projection.available) {
+      return 'unavailable'
+    }
     this.confirmSubmission(false)
     const scope = this.authority().scope
+    const operation = { scope }
     const generation = ++this.projectionGeneration
+    this.selectionOperations.add(operation)
+    this.emit()
     try {
       const result = await this.channel.selectionSelect({ scope, ...target, ...options })
       if (!this.projectionCurrent(scope, generation, result.revision)) return 'unavailable'
@@ -237,6 +263,7 @@ export class NativeProviderSelectionClient {
         effective: result.effective,
         ...(result.pending === undefined ? {} : { pending: result.pending }),
       })
+      if (!this.projectionCurrent(scope, generation, result.revision)) return 'unavailable'
       if (scope.threadId !== undefined && result.pending === undefined) {
         this.unsynchronized.add(scope.threadId)
         try {
@@ -251,6 +278,9 @@ export class NativeProviderSelectionClient {
       return 'accepted'
     } catch {
       return 'unavailable'
+    } finally {
+      this.selectionOperations.delete(operation)
+      this.emit()
     }
   }
 
@@ -381,7 +411,7 @@ export class NativeProviderSelectionClient {
     const pending = this.projection.pending?.sendOnly && actionIntent !== 'ordinary-send'
       ? undefined
       : this.projection.pending
-    if (before.scope.threadId && this.unsynchronized.has(before.scope.threadId)) {
+    if (this.selectionActive() || before.scope.threadId && this.unsynchronized.has(before.scope.threadId)) {
       this.notice('submission-rejected')
       return { allow: false }
     }
