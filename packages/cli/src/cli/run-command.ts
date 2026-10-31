@@ -143,6 +143,7 @@ import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import {
   nativeCatalogExport,
+  nativeTerminalProvider,
   openProductionPluginManagementComposition,
   type ProductionPluginManagementComposition,
 } from './production-plugin-management.js'
@@ -745,6 +746,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
@@ -900,6 +902,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost

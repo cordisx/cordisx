@@ -2,6 +2,11 @@ import { diagnostic } from '../diagnostics/context.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { type CliModelExportResult, exportCliModelCatalog } from './model-catalog/cli-export.js'
 import type { ModelExportRequest } from '../cli/model-export-parse.js'
+import {
+  createTerminalProviderAuthority,
+  type TerminalProviderRequest,
+  type TerminalProviderResult,
+} from './terminal-provider.js'
 import { constants } from 'node:fs'
 import { access, chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -90,6 +95,7 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
   readonly environment: Readonly<Record<string, string>>
@@ -425,6 +431,7 @@ export async function prepareNativeSubmissionBootstrap(
   let taskRouting: NativeAgentTaskRouting | undefined
   let agentTasks: NativeAgentTasks | undefined
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
+  let terminalProviders: ReturnType<typeof createTerminalProviderAuthority> | undefined
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
@@ -445,6 +452,7 @@ export async function prepareNativeSubmissionBootstrap(
         await controller?.dispose()
       } finally {
         try {
+          terminalProviders?.close()
           await credentials?.close()
         } finally {
           try {
@@ -690,6 +698,12 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        terminalProviders = createTerminalProviderAuthority({
+          catalog,
+          owns: id => managed?.owns(id) === true || hasPluginProvider(id),
+          resolve: resolveConnection,
+          credentials,
+        })
         const cdp = createNativeSubmissionCdpAuthority({
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           submissionAvailable: discovered.transforms.length > 0,
@@ -768,6 +782,7 @@ export async function prepareNativeSubmissionBootstrap(
         })
         reportStage('native-submission-controller-bound')
         return {
+          terminalProvider: request => terminalProviders!.request(request),
           async modelExport(request) {
             if (closePromise !== undefined || !management || !managed || !completeOptions.managedCatalog) {
               throw new Error('Model export catalog unavailable')

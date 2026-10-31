@@ -28,6 +28,7 @@ implementation of those contracts, not a second public specification.
 | [user-experience-qa](user-experience-qa.md)                 | Guide     | Evidence-backed usage questions, pitfalls, and practical tradeoffs      |
 
 - [Export model services from the CLI](model-service-cli-export.md): portable service/model selection, private output, and target Manager import.
+- [Use Codex CLI with CordisX model services](terminal-model-services.md): original terminal interaction, launch-time provider selection, and per-run instructions.
 
 ## Develop and inspect plugins
 
