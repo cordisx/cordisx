@@ -198,6 +198,10 @@ describe('Agent model-provider tools', () => {
         'list_model_providers',
         'select_thread_model_provider',
         'create_thread_with_provider',
+        'claude_list_sessions',
+        'claude_read_session',
+        'claude_start_session',
+        'claude_send_message',
       ])
       expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })
