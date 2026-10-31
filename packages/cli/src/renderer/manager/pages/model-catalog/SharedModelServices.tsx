@@ -130,7 +130,7 @@ function serviceSchema(locale: string, draft: Draft, creating: boolean) {
           ),
       }
       : {}),
-    apiKey: Schema.string().max(16_384).default('').role('secret')
+    apiKey: Schema.string().max(16_384).default('').role('password')
       .extra(
         'extra',
         field(t('catalog.sharedServiceKey'), 'host:key', creating ? undefined : t('catalog.sharedServiceKeyKeep')),
@@ -299,10 +299,11 @@ export function SharedModelServices({ client, locale }: {
                   <Button
                     tag="button"
                     variant="text"
+                    aria-label={`${t('catalog.sharedServiceEdit')} ${service.displayName}`}
                     onClick={() =>
                       setEditing({ id: service.id })}
                   >
-                    {t('catalog.sharedServiceEdit')}
+                    {t('catalog.sharedServiceEditShort')}
                   </Button>
                   <Button
                     tag="button"

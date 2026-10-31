@@ -180,6 +180,7 @@ export const MODEL_CATALOG_COPY = {
   'catalog.sharedServiceAdd': { en: 'Add shared service', 'zh-CN': '添加跨应用服务' },
   'catalog.sharedServiceEdit': { en: 'Edit shared service', 'zh-CN': '编辑跨应用服务' },
   'catalog.sharedServiceDelete': { en: 'Delete', 'zh-CN': '删除' },
+  'catalog.sharedServiceEditShort': { en: 'Edit', 'zh-CN': '编辑' },
   'catalog.sharedServiceId': { en: 'Service ID', 'zh-CN': '服务 ID' },
   'catalog.sharedServiceForCodex': { en: 'Use in Codex (OpenAI Responses)', 'zh-CN': '用于 Codex（OpenAI Responses）' },
   'catalog.sharedServiceForClaude': {

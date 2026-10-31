@@ -95,6 +95,8 @@ function declaration(
   }
 }
 
+/** Names `modelServiceKeyEnv` gives; only these are removed with their service. */
+const OWNED_KEY_ENV = /^CORDISX_MODEL_SERVICE_[A-Z0-9_]+_KEY$/u
 const PROTOCOLS = new Set(['anthropic-messages', 'openai-responses'])
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -173,6 +175,11 @@ export async function saveModelServices(
           ? environmentVariables.map(item => item.name === name ? entry : item)
           : [...environmentVariables, entry]
       }
+      // A key this page stored for a service that is now gone has no reader left.
+      const referenced = new Set(declarations.map(item => item.apiKeyEnv as string))
+      environmentVariables = environmentVariables.filter(item =>
+        !OWNED_KEY_ENV.test(item.name) || referenced.has(item.name)
+      )
       // Full validation of the edited document before it is written.
       return parseHomeConfig({
         ...current,

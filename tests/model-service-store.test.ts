@@ -94,6 +94,20 @@ describe('model service store', () => {
     expect(stored.environmentVariables).toEqual([])
   })
 
+  it('removes a key it stored when its service is deleted, and keeps keys it does not own', async () => {
+    const configPath = await home({
+      environmentVariables: [{ name: 'MY_OWN_KEY', value: 'mine', enabled: true }],
+    })
+    const first = await readModelServices(configPath, {}) as { revision: string }
+    const added = await saveModelServices(configPath, {
+      expectedRevision: first.revision,
+      services: [{ ...input, apiKey: 'sk-secret' }],
+    }) as { revision: string }
+    await saveModelServices(configPath, { expectedRevision: added.revision, services: [] })
+    const stored = JSON.parse(await readFile(configPath, 'utf8')) as { environmentVariables: Array<{ name: string }> }
+    expect(stored.environmentVariables.map(entry => entry.name)).toEqual(['MY_OWN_KEY'])
+  })
+
   it('refuses a stale revision and an invalid service without writing', async () => {
     const configPath = await home()
     expect(await saveModelServices(configPath, { expectedRevision: 'stale', services: [input] })).toEqual({
