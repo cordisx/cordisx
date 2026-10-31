@@ -12,7 +12,7 @@ import {
   seedClaudeDesktopProfile,
 } from '../packages/cli/src/launcher/claude-desktop-profile.js'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
-import { missingClaudeBridgePermissions } from '../packages/cli/src/launcher/claude-bridge-plugin.js'
+import { ensureClaudeBridgePermissions } from '../packages/cli/src/launcher/claude-bridge-plugin.js'
 
 const run = promisify(execFile)
 
@@ -146,17 +146,30 @@ describe('Claude Desktop profile seeding', () => {
     }))
   })
 
-  it('reports the bridge permission rules the user has not allowed yet', async () => {
+  it('adds the bridge allow rules once and keeps every other setting', async () => {
     const homedir = await dataDir()
-    expect(await missingClaudeBridgePermissions(homedir)).toEqual([
-      'mcp__ccd_session__start_session',
-      'mcp__ccd_session_mgmt__send_message',
-    ])
-    await mkdir(path.join(homedir, '.claude'), { recursive: true })
+    const file = path.join(homedir, '.claude', 'settings.json')
+    expect(await ensureClaudeBridgePermissions(homedir)).toEqual({
+      added: ['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__send_message'],
+    })
     await writeFile(
-      path.join(homedir, '.claude', 'settings.json'),
-      JSON.stringify({ permissions: { allow: ['Bash(ls)', 'mcp__ccd_session__start_session'] } }),
+      file,
+      JSON.stringify({
+        env: { A: '1' },
+        permissions: { allow: ['Bash(ls)', 'mcp__ccd_session__start_session'], deny: ['WebFetch'] },
+      }),
     )
-    expect(await missingClaudeBridgePermissions(homedir)).toEqual(['mcp__ccd_session_mgmt__send_message'])
+    expect(await ensureClaudeBridgePermissions(homedir)).toEqual({ added: ['mcp__ccd_session_mgmt__send_message'] })
+    expect(await json(file)).toEqual({
+      env: { A: '1' },
+      permissions: {
+        allow: ['Bash(ls)', 'mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__send_message'],
+        deny: ['WebFetch'],
+      },
+    })
+    expect(await ensureClaudeBridgePermissions(homedir)).toEqual({ added: [] })
+    await writeFile(file, '{ not json')
+    expect(await ensureClaudeBridgePermissions(homedir)).toEqual({ added: [], skipped: 'settings-unreadable' })
+    expect(await readFile(file, 'utf8')).toBe('{ not json')
   })
 })

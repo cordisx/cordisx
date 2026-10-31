@@ -101,12 +101,12 @@ A Codex launch starts the agent bridge: an owner-only HTTP endpoint on
   Code session's plugin polls for it and answers with Claude's own session
   tools. Only sessions that have those tools poll. A session it starts is
   detached so it is the user's own, and results carry `claude://` links.
-  Starting and messaging sessions need allow rules: Claude asks the person
-  for those tools, and a plugin cannot answer that dialog. Add
-  `mcp__ccd_session__start_session` and `mcp__ccd_session_mgmt__send_message`
-  to `permissions.allow` in `~/.claude/settings.json`; `cordisx start claude`
-  prints the missing ones, and the bridge refuses the request at once with
-  the same instructions instead of waiting on a dialog.
+  Claude asks the person before `mcp__ccd_session__start_session` and
+  `mcp__ccd_session_mgmt__send_message`, and a plugin cannot answer that
+  dialog, so `cordisx start claude` adds both to `permissions.allow` in
+  `~/.claude/settings.json` before it launches the app, keeping every other
+  setting. If those rules are missing anyway, the bridge refuses the request
+  at once instead of waiting on a dialog.
 
 The Codex side needs a running CordisX Codex launch; the Codex → Claude side
 needs at least one open Code session in the CordisX-launched Claude. Each side

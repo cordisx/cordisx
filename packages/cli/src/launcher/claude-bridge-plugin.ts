@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -19,17 +19,41 @@ export const CLAUDE_BRIDGE_PERMISSIONS = [
   'mcp__ccd_session_mgmt__send_message',
 ] as const
 
-/** The bridge rules the user's Claude settings do not allow yet. Reads only; settings stay the user's. */
-export async function missingClaudeBridgePermissions(homedir: string): Promise<readonly string[]> {
-  let allow: unknown
+/**
+ * Adds the bridge's allow rules to `~/.claude/settings.json` so Codex requests
+ * never wait on a dialog. Every other setting is kept as written; a file that
+ * is not valid JSON is left alone and reported instead of overwritten.
+ */
+export async function ensureClaudeBridgePermissions(
+  homedir: string,
+): Promise<{ readonly added: readonly string[]; readonly skipped?: 'settings-unreadable' }> {
+  const directory = path.join(homedir, '.claude')
+  const file = path.join(directory, 'settings.json')
+  let settings: Record<string, unknown> = {}
+  let mode = 0o600
   try {
-    const settings = JSON.parse(await readFile(path.join(homedir, '.claude', 'settings.json'), 'utf8')) as {
-      permissions?: { allow?: unknown }
+    const raw = await readFile(file, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { added: [], skipped: 'settings-unreadable' }
     }
-    allow = settings.permissions?.allow
-  } catch {
-    allow = undefined
+    settings = parsed as Record<string, unknown>
+    mode = (await stat(file)).mode & 0o777
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { added: [], skipped: 'settings-unreadable' }
   }
-  const rules = Array.isArray(allow) ? allow.filter((rule): rule is string => typeof rule === 'string') : []
-  return CLAUDE_BRIDGE_PERMISSIONS.filter(rule => !rules.includes(rule))
+  const permissions = settings.permissions !== null && typeof settings.permissions === 'object'
+      && !Array.isArray(settings.permissions)
+    ? settings.permissions as Record<string, unknown>
+    : {}
+  const allow = Array.isArray(permissions.allow) ? [...permissions.allow as unknown[]] : []
+  const added = CLAUDE_BRIDGE_PERMISSIONS.filter(rule => !allow.includes(rule))
+  if (added.length === 0) return { added }
+  const next = { ...settings, permissions: { ...permissions, allow: [...allow, ...added] } }
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const temporary = `${file}.cordisx-${process.pid}.tmp`
+  await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode })
+  await chmod(temporary, mode)
+  await rename(temporary, file)
+  return { added }
 }

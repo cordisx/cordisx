@@ -9,7 +9,7 @@ import {
   runningClaudeProfile,
   stopClaudeDesktop,
 } from '../launcher/claude-desktop-process.js'
-import { claudeBridgePluginDir, missingClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
+import { claudeBridgePluginDir, ensureClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import type { CordisXLauncherOptions } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
@@ -83,13 +83,12 @@ export async function runClaudeDesktopCommand(
     stdout(`[cordisx] would launch ${executable} with data ${dataDir}`)
     return
   }
-  const missing = await missingClaudeBridgePermissions(runtime.homedir ?? os.homedir())
-  if (missing.length > 0) {
-    stdout(
-      `[cordisx] for Codex to start or message Claude sessions, add to "permissions.allow" in ~/.claude/settings.json: ${
-        missing.map(rule => JSON.stringify(rule)).join(', ')
-      }`,
-    )
+  // Codex starts and messages Claude sessions through tools Claude otherwise asks the person about.
+  const permissions = await ensureClaudeBridgePermissions(runtime.homedir ?? os.homedir())
+  if (permissions.added.length > 0) {
+    stdout(`[cordisx] allowed Claude bridge tools in ~/.claude/settings.json: ${permissions.added.join(', ')}`)
+  } else if (permissions.skipped !== undefined) {
+    stdout('[cordisx] ~/.claude/settings.json is not valid JSON; Claude bridge permissions were not added')
   }
   const bridge = await claudeBridgePluginDir()
   const hostEnvironment = {

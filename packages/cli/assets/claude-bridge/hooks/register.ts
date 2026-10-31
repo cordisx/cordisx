@@ -30,8 +30,7 @@ const CLAUDE_LINK = /claude:\/\/[^\s"]+/u
 
 /** Claude session tools that change state; each needs an allow rule, or Claude asks the person. */
 const WRITE_TOOLS = ['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__send_message'] as const
-const ALLOW_HINT = 'Add these to "permissions.allow" in ~/.claude/settings.json and restart Claude: '
-  + WRITE_TOOLS.join(', ')
+const ALLOW_HINT = 'Start Claude with `cordisx start claude`; it allows these tools in ~/.claude/settings.json.'
 
 const CODEX_TOOLS = [
   {
