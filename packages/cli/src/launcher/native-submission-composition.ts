@@ -39,11 +39,13 @@ import type { NativeAccountCapabilityDescriptor } from '../native-account-capabi
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
+import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
 import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-catalog-discovery.js'
 import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
+import type { HomeConfigProvider } from '../config/home-config.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
 import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
@@ -120,6 +122,8 @@ interface NativeSubmissionCatalogOptions {
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
   readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
+  /** `model-service` declarations, merged into the catalog read from `config.toml`. */
+  readonly declaredProviders?: readonly HomeConfigProvider[]
 }
 export type NativeSubmissionCompletionStage =
   | 'native-submission-completion-start'
@@ -627,6 +631,11 @@ export async function prepareNativeSubmissionBootstrap(
                 ? {}
                 : { selectorIcons: completeOptions.selectorIcons }),
             })
+          }
+          // The selector lists the native tables and the CordisX declarations together:
+          // a declaration is the entry the user manages, its native copy the projection.
+          if (completeOptions.declaredProviders !== undefined) {
+            projection = mergeDeclaredIntoCodexProjection(projection, completeOptions.declaredProviders)
           }
           const diagnostic = JSON.stringify(projection.diagnostics)
           if (diagnostic !== lastDiagnostic && projection.diagnostics.length > 0) {

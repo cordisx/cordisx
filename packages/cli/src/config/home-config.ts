@@ -19,6 +19,13 @@ import {
 } from './home-config-marketplace.js'
 import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-provider-schema.js'
 import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
+import {
+  type HomeConfigModelServiceProvider,
+  type HomeConfigProviderProtocol,
+  parseModelServiceProvider,
+} from './home-config-model-service.js'
+
+export type { HomeConfigModelServiceProvider, HomeConfigProviderProtocol } from './home-config-model-service.js'
 
 export { redactedHomeConfig } from './home-config-profile-private.js'
 
@@ -96,7 +103,8 @@ export interface HomeConfigPluginService {
   readonly profiles: Readonly<Record<string, HomeConfigPluginServiceProfile>>
 }
 
-export interface HomeConfigProvider {
+/** Launcher-owned gateway process; declares and runs a CLIProxyAPI connection. */
+export interface HomeConfigCliProxyProvider {
   readonly id: string
   readonly kind: 'cli-proxy-api'
   readonly displayName: string
@@ -107,6 +115,8 @@ export interface HomeConfigProvider {
   readonly enabled?: boolean
   readonly timeoutMs?: number
 }
+
+export type HomeConfigProvider = HomeConfigCliProxyProvider | HomeConfigModelServiceProvider
 export interface HomeConfigProfile {
   readonly displayName: string
   readonly dataMode: HomeDataMode
@@ -396,6 +406,9 @@ function parsePluginProfile(value: unknown, label: string): HomeConfigPluginProf
 function parseProvider(value: unknown, index: number): HomeConfigProvider {
   const label = `config.providers[${index}]`
   const provider = record(value, label)
+  const id = nonEmptyString(provider.id, `${label}.id`)
+  if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
+  if (provider.kind === 'model-service') return parseModelServiceProvider(provider, label, { record, rejectUnknownKeys, nonEmptyString })
   rejectUnknownKeys(provider, [
     'id',
     'kind',
@@ -407,9 +420,9 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
     'enabled',
     'timeoutMs',
   ], label)
-  const id = nonEmptyString(provider.id, `${label}.id`)
-  if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
-  if (provider.kind !== 'cli-proxy-api') throw new Error(`${label}.kind must be cli-proxy-api`)
+  if (provider.kind !== 'cli-proxy-api') {
+    throw new Error(`${label}.kind must be cli-proxy-api or model-service`)
+  }
   const displayName = nonEmptyString(provider.displayName, `${label}.displayName`)
   const baseUrl = nonEmptyString(provider.baseUrl, `${label}.baseUrl`)
   const apiKeyEnv = nonEmptyString(provider.apiKeyEnv, `${label}.apiKeyEnv`)

@@ -378,6 +378,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       plan?.environment,
       undefined,
       currentHomeConfig.environmentVariables,
+      currentHomeConfig.providers,
     )
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined

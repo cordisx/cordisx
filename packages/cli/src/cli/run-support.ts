@@ -494,6 +494,7 @@ export async function runDevelopment(
             undefined,
             runtime.internalNativeSubmissionLegacyLockRecovery,
             homeConfig.environmentVariables,
+            homeConfig.providers,
           ),
         )
         managedServiceProjection = await createNativeViteManagedServiceProjection({
