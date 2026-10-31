@@ -408,7 +408,9 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   const provider = record(value, label)
   const id = nonEmptyString(provider.id, `${label}.id`)
   if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
-  if (provider.kind === 'model-service') return parseModelServiceProvider(provider, label, { record, rejectUnknownKeys, nonEmptyString })
+  if (provider.kind === 'model-service') {
+    return parseModelServiceProvider(provider, label, { record, rejectUnknownKeys, nonEmptyString })
+  }
   rejectUnknownKeys(provider, [
     'id',
     'kind',

@@ -5,13 +5,10 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'smol-toml'
 import { parseHomeConfig } from '../packages/cli/src/config/home-config.js'
 import {
-  buildClaudeConfigLibrary,
   mergeDeclaredIntoCodexProjection,
   modelServicesOf,
   projectModelServicesBeforeLaunch,
   projectModelServicesToCodex,
-  projectModelServicesToClaude,
-  readClaudeProviderCatalog,
   servicesForApp,
 } from '../packages/cli/src/launcher/model-service-projection.js'
 
@@ -141,30 +138,6 @@ describe('model-service provider declarations', () => {
     expect(result.providerIds).toEqual(['sub2tok'])
   })
 
-  it('builds and writes the Claude configuration library with one applied entry', async () => {
-    const config = configWith([dualProtocol, { ...dualProtocol, id: 'second' }])
-    expect(buildClaudeConfigLibrary(config.providers).meta.appliedId).toBe('sub2tok')
-
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-claude-library-'))
-    const result = await projectModelServicesToClaude(config.providers, root)
-    expect(result.providerIds).toEqual(['sub2tok', 'second'])
-
-    const meta = JSON.parse(await readFile(path.join(root, 'configLibrary', '_meta.json'), 'utf8')) as {
-      appliedId: string
-      entries: Array<{ id: string; name: string }>
-    }
-    expect(meta.appliedId).toBe('sub2tok')
-    expect(meta.entries.map(entry => entry.id)).toEqual(['sub2tok', 'second'])
-
-    const entry = JSON.parse(await readFile(path.join(root, 'configLibrary', 'sub2tok.json'), 'utf8')) as Record<
-      string,
-      unknown
-    >
-    expect(entry.inferenceGatewayBaseUrl).toBe('https://api.sub2tok.com')
-    expect(entry.inferenceGatewayApiKeyEnv).toBe('SUB2TOK_API_KEY')
-    expect(entry.inferenceProvider).toBe('gateway')
-  })
-
   it('merges declarations into the catalog read from config.toml, declaration first', () => {
     const config = configWith([dualProtocol])
     // A native table left behind by an earlier projection, plus one the user wrote by hand.
@@ -201,31 +174,6 @@ describe('model-service provider declarations', () => {
     expect(merged).toBe(native)
   })
 
-  it('reads Claude providers from both the declarations and the library on disk', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-claude-catalog-'))
-    await mkdir(path.join(root, 'configLibrary'), { recursive: true })
-    await writeFile(
-      path.join(root, 'configLibrary', '_meta.json'),
-      JSON.stringify({ appliedId: 'sub2tok', entries: [{ id: 'sub2tok', name: 'old' }, { id: 'by-hand', name: 'By hand' }] }),
-    )
-    await writeFile(
-      path.join(root, 'configLibrary', 'by-hand.json'),
-      JSON.stringify({ inferenceGatewayBaseUrl: 'https://hand.example.com', inferenceGatewayApiKey: 'secret' }),
-    )
-
-    const config = configWith([dualProtocol])
-    const catalog = await readClaudeProviderCatalog(config.providers, root)
-    expect(catalog.map(entry => [entry.providerId, entry.source])).toEqual([
-      ['sub2tok', 'declared'],
-      ['by-hand', 'library'],
-    ])
-    expect(catalog[0]!.models).toEqual(['claude-opus-5-5'])
-    expect(catalog[1]!.baseUrl).toBe('https://hand.example.com')
-    expect(catalog[0]!.applied).toBe(true)
-    // The library document's inline key never reaches the catalog.
-    expect(JSON.stringify(catalog)).not.toContain('secret')
-  })
-
   it('reports what a launch did with --provider before the host starts', async () => {
     const lines: string[] = []
     const stdout = (line: string) => lines.push(line)
@@ -235,7 +183,12 @@ describe('model-service provider declarations', () => {
     lines.length = 0
     const root = await codexHome()
     const config = configWith([dualProtocol])
-    await projectModelServicesBeforeLaunch({ providers: config.providers, codexHome: root, selectedId: 'sub2tok', stdout })
+    await projectModelServicesBeforeLaunch({
+      providers: config.providers,
+      codexHome: root,
+      selectedId: 'sub2tok',
+      stdout,
+    })
     expect(lines).toEqual(['[cordisx] model service sub2tok is the launch default'])
     const written = parse(await readFile(path.join(root, 'config.toml'), 'utf8')) as { model_provider: string }
     expect(written.model_provider).toBe('sub2tok')

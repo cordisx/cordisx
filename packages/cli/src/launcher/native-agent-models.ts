@@ -8,6 +8,18 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import type { NativeSubmissionController } from './native-submission-controller.js'
 
 type Selection = Readonly<{ threadId: string; providerId: string; model: string }>
+export const CLAUDE_BRIDGE_OPERATIONS = [
+  'list_sessions',
+  'read_session',
+  'start_session',
+  'send_message',
+] as const
+export type ClaudeBridgeOperation = typeof CLAUDE_BRIDGE_OPERATIONS[number]
+const claudeOperation = (value: unknown): ClaudeBridgeOperation | undefined =>
+  typeof value === 'string' && value.startsWith('claude:')
+    && (CLAUDE_BRIDGE_OPERATIONS as readonly string[]).includes(value.slice('claude:'.length))
+    ? value.slice('claude:'.length) as ClaudeBridgeOperation
+    : undefined
 export class NativeAgentModelSelectionRejected extends Error {
   readonly reason = 'thread-not-idle'
 }
@@ -19,6 +31,8 @@ export interface NativeAgentModelsAuthority {
   commit(input: Selection): void
   release(threadId: string): void
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
+  /** Codex -> Claude Desktop through the CordisX agent bridge. */
+  claude?(operation: ClaudeBridgeOperation, input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -29,6 +43,15 @@ const text = (value: unknown, max = 512): value is string =>
 /** Uses the UI's admitted catalog and credential leases; tool callers never supply a connection or secret. */
 export function createNativeAgentModelsHandler(authority: NativeAgentModelsAuthority) {
   return async (operation: unknown, input: unknown, metadata?: unknown): Promise<unknown> => {
+    const claude = claudeOperation(operation)
+    if (claude !== undefined) {
+      if (authority.claude === undefined) return { status: 'unavailable', reason: 'claude-bridge-unavailable' }
+      try {
+        return { status: 'ok', value: await authority.claude(claude, input ?? {}) }
+      } catch (error) {
+        return { status: 'unavailable', reason: error instanceof Error ? error.message : 'claude-unavailable' }
+      }
+    }
     const catalog = await authority.catalog()
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
@@ -110,7 +133,8 @@ export async function startNativeAgentModelsServer() {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
     socket.on('error', () => socket.destroy())
-    socket.setTimeout(45000, () => socket.destroy())
+    // A Claude request can wait in the agent bridge queue for up to 90 seconds.
+    socket.setTimeout(100000, () => socket.destroy())
     let buffer = ''
     let started = false
     socket.setEncoding('utf8')

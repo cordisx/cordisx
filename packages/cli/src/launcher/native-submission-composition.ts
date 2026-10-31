@@ -40,6 +40,7 @@ import { legacyNativeSubmissionResources } from './native-submission-legacy-reso
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
+import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
@@ -438,8 +439,10 @@ export async function prepareNativeSubmissionBootstrap(
   let pluginCatalog: () => Promise<readonly NativeModelProviderCatalogEntry[]> = async () => []
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
+  let agentBridge: AgentBridge | undefined
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
+      await agentBridge?.close()
       await agentModels.close()
       await taskRouting?.close()
       dynamic?.dispose()
@@ -764,9 +767,25 @@ export async function prepareNativeSubmissionBootstrap(
           invoke: input => control.invokeTask(input),
         })
         cdp.bindController(controller)
+        if (completeOptions.managedCatalog !== undefined) {
+          // The agent bridge lets Claude Code sessions read and start threads in this
+          // app-server, and lets this app's agents reach Claude. Failing to start it
+          // only leaves the cross-app tools unavailable.
+          agentBridge = await startAgentBridge({
+            cordisxHomeDir: completeOptions.managedCatalog.homeDir,
+            codex: { nativeRequest: (method, params) => control.nativeRequest(method, params), catalog },
+          }).catch(error => {
+            console.warn(`[cordisx] agent bridge unavailable: ${String(error)}`)
+            return undefined
+          })
+        }
         agentModels.bind({
           catalog,
           controller,
+          claude: async (operation, input) => {
+            if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
+            return await agentBridge.callClaude(operation, input)
+          },
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
           ...cdp.agentSelection,
