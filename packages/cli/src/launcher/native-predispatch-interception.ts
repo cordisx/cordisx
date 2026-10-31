@@ -34,6 +34,8 @@ export interface NativeResourceTransformResult {
 }
 
 export interface NativeResourceTransform {
+  /** Host-discovered module used by the supplementary native task capability. */
+  readonly taskExecutionUrl?: string
   readonly url: string
   readonly sha256: string
   readonly transform: (source: string) => NativeResourceTransformResult

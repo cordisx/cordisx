@@ -28,7 +28,7 @@ creation input and is never silently ignored.
 
 The supplementary tool calls native `mcpServer/tool/call` for `create_thread`
 on the existing app-server. It forwards an operation call id derived from the
-executor's actual call identity. The exact-source-checked renderer handler
+executor's actual call identity. The source-checked renderer handler
 claims a Host-private handle for that call, source thread and arguments. A
 renderer-branded handle passes through the original local/projectless and
 worktree helpers. Ordinary delegated config remains rejected.
@@ -42,13 +42,24 @@ callbacks, sidebar updates and settlement results. The tool reports `created`
 only with both a native registration/first-send receipt and matching Host route
 confirmation; an isolated backend id is insufficient.
 
-Initial admission is restricted to Desktop version `26.1021.31345`, build
-`21828`, and the exact initial/execution resource hashes in
-`native-agent-task-transform.ts`. Structural anchor counts additionally reject
-missing or ambiguous shapes. The task edits compose with existing submission
+Admission discovers the native dispatcher and creation helpers by their syntax
+and semantic input fields, independently of minified names, resource filenames,
+and Desktop version strings. Missing or ambiguous dispatch, native delegated-config
+guards, local/worktree helpers, or first-turn seams disable this capability only.
+Each resulting transform remains bound to the exact discovered resource bytes;
+source changes between discovery and interception are rejected. The Host retains
+the discovered execution module URL, verifies the matching renderer marker, and
+loads that module before advertising creation availability. The task edits compose with existing submission
 transforms on one resource, with generation-scoped CDP claim authority and
 cleanup fences. Source drift or unavailable native bridges disables this
 capability without changing native `create_thread` or global defaults.
+
+Read-only source composition and offline replay of Desktop `26.1023.51421`
+(build `22530`) verify the current dispatcher and helper routing. Synthetic
+regressions cover renamed bindings/assets, original arguments with shadowed
+target locals, concurrent call identity, guard rejection and dynamic module
+availability. These checks do not establish real native sidebar registration
+or first-provider inference.
 
 The [dated creation assessment](history/agent-provider-task-creation-2026-10-28.md)
 retains the investigation and exact source provenance. Focused operation,

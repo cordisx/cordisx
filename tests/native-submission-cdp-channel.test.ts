@@ -8,6 +8,8 @@ import type {
 } from '../packages/cli/src/launcher/native-submission-controller.js'
 
 async function harness(options: Readonly<{
+  taskExecutionUrl?: string
+  evaluate?: (expression: string) => unknown
   submissionAvailable?: boolean
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
@@ -24,6 +26,7 @@ async function harness(options: Readonly<{
   let receive: (params: Record<string, any>) => void
   const idle = vi.fn(async () => true)
   const authority = createNativeSubmissionCdpAuthority({
+    ...(options.taskExecutionUrl === undefined ? {} : { taskExecutionUrl: options.taskExecutionUrl }),
     ...(options.submissionAvailable === undefined ? {} : { submissionAvailable: options.submissionAvailable }),
     ...(options.management ? { management: options.management } : {}),
     ...(options.catalogSubscribe === undefined ? {} : { catalogSubscribe: options.catalogSubscribe }),
@@ -49,6 +52,9 @@ async function harness(options: Readonly<{
       }
       if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' }
       if (method === 'Runtime.evaluate') {
+        if (params.expression.includes('__cordisxNativeAgentTask_initial')) {
+          return { result: { value: await options.evaluate?.(params.expression) ?? false } }
+        }
         if (params.expression === 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()') {
           return { result: { value: { scope: live } } }
         }
@@ -92,6 +98,38 @@ async function harness(options: Readonly<{
 }
 
 describe('native submission document authority', () => {
+  it('requires native task markers and imports only the Host-discovered execution module', async () => {
+    const url = 'app://-/assets/renamed-execution.js'
+    const native: Record<string, any> = {}
+    const imported: string[] = []
+    const h = await harness({
+      taskExecutionUrl: url,
+      evaluate: expression =>
+        vm.runInNewContext(expression.replace('await import(url)', 'await load(url)'), {
+          ...native,
+          load: async (loaded: string) => {
+            imported.push(loaded)
+          },
+        }),
+    })
+    try {
+      expect(await h.authority.taskCreationAvailable()).toBe(false)
+      native.__cordisxNativeAgentTask_initial = true
+      expect(await h.authority.taskCreationAvailable()).toBe(false)
+      native.__cordisxNativeAgentTaskAdapter = {}
+      native.__cordisxNativeAgentTaskExecutionUrl = 'app://-/assets/unrelated.js'
+      expect(await h.authority.taskCreationAvailable()).toBe(false)
+      expect(imported).toEqual([])
+      native.__cordisxNativeAgentTaskExecutionUrl = url
+      expect(await h.authority.taskCreationAvailable()).toBe(false)
+      native.__cordisxNativeAgentTask_execution = true
+      expect(await h.authority.taskCreationAvailable()).toBe(true)
+      expect(imported).toEqual([url, url])
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it.each(['provider-b', 'openai'])(
     'stages %s only after authoritative idle, without native switch or effective mutation',
     async providerId => {

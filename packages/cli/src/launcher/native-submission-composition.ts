@@ -63,10 +63,11 @@ type NativeSubmissionActivation =
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 7
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 8
 const SHA256 = /^[a-f0-9]{64}$/u
 
 interface CachedNativeTransform {
+  readonly taskExecutionUrl?: string
   readonly url: string
   readonly sha256: string
   readonly source: string
@@ -147,7 +148,16 @@ function nativeSubmissionTransformAnalysisForApp(
   try {
     const legacy = legacyNativeSubmissionResources(resources)
     const base = legacy === undefined ? analyzeNativeSubmissionTransforms(resources) : { transforms: legacy }
-    return { ...base, ...nativeAgentTaskTransforms(appVersion, buildNumber, resources, base.transforms) }
+    return {
+      ...base,
+      ...nativeAgentTaskTransforms(
+        appVersion,
+        buildNumber,
+        resources,
+        base.transforms,
+        'syntaxByResource' in base ? base.syntaxByResource : undefined,
+      ),
+    }
   } catch (error) {
     throw new Error(
       `Native submission incompatible with Codex Desktop ${appVersion} (${buildNumber}): ${
@@ -195,6 +205,8 @@ function validCachedTransform(
     && transform.acknowledgementExpression.length > 0
     && typeof transform.fenceExpression === 'string'
     && transform.fenceExpression.length > 0
+    && (transform.taskExecutionUrl === undefined
+      || resources.some(resource => resource.url === transform.taskExecutionUrl))
     && typeof transform.requiredForDocumentReady === 'boolean'
 }
 
@@ -216,6 +228,7 @@ function materializeCachedTransforms(
       url: record.url,
       sha256: record.sha256,
       requiredForDocumentReady: record.requiredForDocumentReady,
+      ...(record.taskExecutionUrl === undefined ? {} : { taskExecutionUrl: record.taskExecutionUrl }),
       transform: (observed: string) => {
         if (digest(observed) !== record.sha256) {
           throw new Error(`Native resource changed after capability discovery: ${record.url}`)
@@ -290,6 +303,7 @@ function captureTransforms(
       acknowledgementExpression: result.acknowledgementExpression,
       fenceExpression: result.fenceExpression,
       requiredForDocumentReady: transform.requiredForDocumentReady !== false,
+      ...(transform.taskExecutionUrl === undefined ? {} : { taskExecutionUrl: transform.taskExecutionUrl }),
     }
   })
 }
@@ -690,8 +704,10 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        const taskExecutionUrl = discovered.transforms.find(transform => transform.taskExecutionUrl)?.taskExecutionUrl
         const cdp = createNativeSubmissionCdpAuthority({
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
+          ...(taskExecutionUrl === undefined ? {} : { taskExecutionUrl }),
           submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {
             const subscriptions = [

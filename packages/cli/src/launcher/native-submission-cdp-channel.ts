@@ -123,6 +123,7 @@ export interface NativeSubmissionCdpAuthority {
 
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
 export function createNativeSubmissionCdpAuthority(options: {
+  readonly taskExecutionUrl?: string
   readonly taskClaim?: (input: unknown) => Promise<unknown>
   readonly submissionAvailable?: boolean
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
@@ -291,7 +292,9 @@ export function createNativeSubmissionCdpAuthority(options: {
         if (owner.disposed) continue
         const response = await owner.session.send('Runtime.evaluate', {
           expression:
-            `(async()=>{if(globalThis.__cordisxNativeAgentTask_initial!==true||globalThis.__cordisxNativeAgentTaskAdapter==null)return false;await import('app://-/assets/execution-94a643044336.js');return globalThis.__cordisxNativeAgentTask_execution===true})()`,
+            `(async()=>{if(globalThis.__cordisxNativeAgentTask_initial!==true||globalThis.__cordisxNativeAgentTaskAdapter==null)return false;const url=${
+              JSON.stringify(options.taskExecutionUrl)
+            };if(typeof url!=='string'||globalThis.__cordisxNativeAgentTaskExecutionUrl!==url)return false;await import(url);return globalThis.__cordisxNativeAgentTask_execution===true})()`,
           awaitPromise: true,
           returnByValue: true,
         }).catch(() => undefined)

@@ -1,88 +1,188 @@
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
-import { agentTaskEdits, applyAgentTaskEdits } from '../packages/cli/src/launcher/native-agent-task-transform.js'
+import {
+  applyAgentTaskStructure,
+  nativeAgentTaskTransforms,
+} from '../packages/cli/src/launcher/native-agent-task-transform.js'
+import { taskExecutionSource, taskInitialSource } from './fixtures/native-agent-task-source.js'
 
-// Minimal executable audited dispatcher anchors. No native code/credentials or App is run.
-const initial = `
-async function ius({scope:e,config:i,sourceThreadId:f,target:m,title:b,startWithoutFirstTurn:x=!1,onBeforeWorktreeCreate:S}){if(i!=null&&f!=null)throw Error('guard');
-let T,D,r;
-if(m.type==='worktree')return sus({scope:e,attachments:T?.attachments,input:x?[]:D,responseItems:r});
-return aus({scope:e,attachments:T?.attachments,config:i,input:D,rest:1});}
-async function aus({scope:e,config:n,model:l,thinking:_,threadSource:v,turnTrigger:y,parentTurnId:b,rootTurnId:x,title:S}){let C,w,T,E,D,O=Er;
-let d='original',A={type:\`text\`,text:d,text_elements:[]},j=fus(l,_),M=null;
-return {collaborationMode:j,config:M==null?n:{...n,...M},projectAssignment:D,cwd:'resolved'};}
-async function sus({scope:e,model:o,thinking:g,title:x,workspaceRoots:S,onBeforeWorktreeCreate:C}){let w=m==null?{}:{};
-let T={configOverrides:{permission:'native'}},r=[];T.responseItems=r;let E=await lus(e,i,u,h);return T;}
-function first(n){let de='created',xe='message',D=[];return {request:{threadId:de,clientUserMessageId:xe,disabledPluginIds:D,model:'native'}};}
-globalThis.ius=ius;globalThis.aus=aus;globalThis.sus=sus;globalThis.first=first;`
+function world() {
+  const handle = { token: 'opaque-operation-token', model: 'provider-model' }
+  const start = vi.fn(async (request: unknown) => request), queue = vi.fn(async (request: unknown) => request)
+  const value: Record<string, any> = {
+    start,
+    queue,
+    parse: (value: unknown) => value,
+    state: {},
+    collaboration: (model: string, thinking: string) => ({ settings: { model, thinking } }),
+    inputs: async ({ model, thinking }: any) => ({
+      collaborationMode: { settings: { model, thinking } },
+      configOverrides: { permissions: 'native' },
+    }),
+    __cordisxNativeAgentTaskAdapter: { owns: (value: unknown) => value === handle, claim: vi.fn(async () => handle) },
+  }
+  runInNewContext(
+    applyAgentTaskStructure(taskInitialSource, 'initial').replace('export {create as nativeCreate};', ''),
+    value,
+  )
+  return { value, handle, start, queue }
+}
+describe('structural native task creation', () => {
+  it('keeps native guards, local and worktree helpers, and first-turn identity', async () => {
+    const { value, handle, start, queue } = world()
+    await expect(value.create({ config: { unsafe: 1 }, sourceThreadId: 'source', target: {} })).rejects.toThrow(
+      'delegated',
+    )
+    await expect(value.create({ __cordisxTask: { ...handle }, target: {} })).rejects.toThrow('Invalid native')
+    await value.create({ __cordisxTask: handle, target: { type: 'projectless' }, model: 'native', prompt: 'prompt' })
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collaborationMode: { settings: { model: 'provider-model', thinking: undefined } },
+        config: { 'cordisx.operation_token': handle.token },
+      }),
+    )
+    await value.create({ __cordisxTask: handle, target: { type: 'worktree' }, model: 'native', prompt: 'prompt' })
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startConversationParamsInput: {
+          collaborationMode: { settings: { model: 'provider-model', thinking: undefined } },
+          configOverrides: { permissions: 'native', 'cordisx.operation_token': handle.token },
+        },
+      }),
+    )
+    const executeTurnStart = vi.fn(async (_id: string, request: unknown) => request)
+    await value.first({}, { executeTurnStart }, { config: { 'cordisx.operation_token': handle.token } }, {})
+    expect(executeTurnStart).toHaveBeenCalledWith(
+      'created',
+      expect.objectContaining({
+        request: expect.objectContaining({ config: { 'cordisx.operation_token': handle.token } }),
+      }),
+    )
+  })
+  it('joins actual dispatcher metadata to original arguments despite target shadowing', async () => {
+    const { value, handle } = world()
+    runInNewContext(applyAgentTaskStructure(taskExecutionSource, 'execution').replace(/import[^;]+;/, ''), value)
+    const args = { target: { type: 'projectless' }, model: 'native', prompt: 'original' }
+    await value.dispatch({ callId: 'cordisx-task-actual', arguments: args })
+    expect(value.__cordisxNativeAgentTaskAdapter.claim).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: 'cordisx-task-actual', arguments: args, sourceThreadId: 'source' }),
+    )
+    value.__cordisxNativeAgentTaskAdapter.claim.mockResolvedValueOnce(undefined)
+    await expect(value.dispatch({ callId: 'cordisx-task-actual', arguments: args })).rejects.toThrow(
+      'routing unavailable',
+    )
+    expect(handle.model).toBe('provider-model')
+  })
+  it('runs renamed bindings and relocated assets across version strings', async () => {
+    const renamedInitial = taskInitialSource.replaceAll('model:model', 'model:chosen').replaceAll(
+      'collaboration(model,',
+      'collaboration(chosen,',
+    ).replaceAll('initial.js', 'new-entry.js').replace(/\s+/g, ' ')
+    const renamedExecution = taskExecutionSource.replace('./initial.js', './new-entry.js').replace(/\s+/g, ' ')
+    const resources = [{ url: 'app://-/assets/new-entry.js', source: renamedInitial }, {
+      url: 'app://-/assets/new-dispatch.js',
+      source: renamedExecution,
+    }]
+    const result = nativeAgentTaskTransforms('future', 'unknown', resources, [])
+    expect(result.available).toBe(true)
+    expect(result.transforms.every(t => t.taskExecutionUrl === resources[1]!.url)).toBe(true)
+    const { value, handle } = world()
+    runInNewContext(
+      result.transforms[0]!.transform(renamedInitial).source.replace('export {create as nativeCreate};', ''),
+      value,
+    )
+    runInNewContext(result.transforms[1]!.transform(renamedExecution).source.replace(/import[^;]+;/, ''), value)
+    const created = await value.dispatch({
+      callId: 'cordisx-task-renamed',
+      arguments: { target: { type: 'projectless' }, model: 'native', prompt: 'original' },
+    })
+    expect(created.config['cordisx.operation_token']).toBe(handle.token)
+    expect(created.collaborationMode.settings.model).toBe(handle.model)
+    const executeTurnStart = vi.fn(async (_: string, request: unknown) => request)
+    await value.first({}, { executeTurnStart }, created, {})
+    expect(executeTurnStart).toHaveBeenCalledWith(
+      'created',
+      expect.objectContaining({
+        request: expect.objectContaining({ config: { 'cordisx.operation_token': handle.token } }),
+      }),
+    )
+  })
 
-describe('audited task creation adapter composition', () => {
-  it('retains delegated-config rejection and applies only a branded task handle to local and worktree inputs', async () => {
-    const handle = { token: 'opaque-operation-token', model: 'provider-model' }
-    const world: Record<string, any> = {
-      Er: 'local',
-      fus: (model: string) => ({ settings: { model } }),
-      m: null,
-      i: 0,
-      u: 0,
-      h: 0,
-      lus: async () => ({}),
-      __cordisxNativeAgentTaskAdapter: { owns: (value: unknown) => value === handle },
-    }
-    runInNewContext(applyAgentTaskEdits(initial, 'initial'), world)
-    await expect(world.ius({ config: { unsafe: 1 }, sourceThreadId: 'source', target: {} })).rejects.toThrow('guard')
-    await expect(world.ius({ __cordisxTask: { ...handle }, target: {} })).rejects.toThrow('Invalid native task handle')
-    expect(await world.aus({ model: 'old', __cordisxTask: handle })).toMatchObject({
-      cwd: 'resolved',
-      collaborationMode: { settings: { model: 'provider-model' } },
-      config: { 'cordisx.operation_token': handle.token },
+  it('leaves ordinary native creation unchanged without a correlated handle', async () => {
+    const { value, start } = world()
+    value.__cordisxNativeAgentTaskAdapter.claim.mockResolvedValue(undefined)
+    runInNewContext(applyAgentTaskStructure(taskExecutionSource, 'execution').replace(/import[^;]+;/, ''), value)
+    await value.dispatch({
+      callId: 'ordinary',
+      arguments: { target: { type: 'projectless' }, model: 'native', prompt: 'original' },
     })
-    expect(await world.sus({ __cordisxTask: handle })).toMatchObject({
-      configOverrides: { permission: 'native', 'cordisx.operation_token': handle.token },
-      collaborationMode: { settings: { model: 'provider-model' } },
-    })
-    expect(world.first({ config: { 'cordisx.operation_token': handle.token } }).request.config).toEqual({
-      'cordisx.operation_token': handle.token,
-    })
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collaborationMode: { settings: { model: 'native', thinking: undefined } },
+        config: undefined,
+      }),
+    )
   })
-  it('keeps uncorrelated ordinary creation unchanged and rejects a correlated call without its admitted claim', async () => {
-    const request = agentTaskEdits('execution')[3]![0]
-    const source = `${
-      agentTaskEdits('execution')[0]![0]
-    }rootTurnId:r,getAvailableModels:i,signal:a,sourceHostId:o,sourceThreadId:s}){let c=Kp.safeParse(t);let u='local';${request}model:c.data.model,prompt:c.data.prompt});return d;}
-    async function dispatch(){let b;switch(0){${agentTaskEdits('execution')[1]![0]}0});break;}};globalThis.wp=wp;`
-    const sa = vi.fn(async (input: unknown) => input)
-    const world: Record<string, any> = { sa, Kp: { safeParse: () => ({ data: { model: 'native', prompt: 'input' } }) } }
-    runInNewContext(applyAgentTaskEdits(source, 'execution'), world)
-    expect(await world.wp({ argumentsValue: {}, sourceThreadId: 'source' })).toMatchObject({
-      model: 'native',
-      prompt: 'input',
-    })
-    await expect(world.wp({ cordisxCallId: 'cordisx-task-actual', argumentsValue: {}, sourceThreadId: 'source' }))
-      .rejects.toThrow('Native task routing unavailable')
-    expect(sa).toHaveBeenCalledTimes(1)
-  })
-  it('claims the original creation arguments when the native dispatcher shadows t with its target', async () => {
-    const edits = agentTaskEdits('execution')
-    const source = `${
-      edits[0]![0]
-    }rootTurnId:r,getAvailableModels:i,signal:a,sourceHostId:o,sourceThreadId:s}){let c=Kp.safeParse(t);try{let t=c.data.target;let l=Fp(e,t),u='local';${
-      edits[3]![0]
-    }prompt:c.data.prompt,target:l});return d;}catch(e){throw e;}}
-    async function dispatch(){let b;switch(0){${edits[1]![0]}0});break;}};globalThis.wp=wp;`
-    const input = { prompt: 'original', target: { type: 'projectless', directoryName: 'test' }, title: 'original' }
-    const handle = { token: 'opaque-task-token', model: 'provider-model' }
-    const claim = vi.fn(async () => handle)
-    const world: Record<string, any> = {
-      Kp: { safeParse: (value: unknown) => ({ data: value }) },
-      Fp: (_: unknown, value: unknown) => value,
-      sa: vi.fn(async (value: unknown) => value),
-      __cordisxNativeAgentTaskAdapter: { claim },
+  it('keeps concurrent native calls scoped to each original call identity', async () => {
+    const { value } = world()
+    const handles = new Map([['cordisx-task-first', { token: 'first-token', model: 'first-model' }], [
+      'cordisx-task-second',
+      { token: 'second-token', model: 'second-model' },
+    ]])
+    value.__cordisxNativeAgentTaskAdapter.owns = (h: unknown) => [...handles.values()].includes(h as any)
+    value.__cordisxNativeAgentTaskAdapter.claim = async (request: any) => {
+      await new Promise(resolve => setTimeout(resolve, request.callId.endsWith('first') ? 5 : 0))
+      return handles.get(request.callId)
     }
-    runInNewContext(applyAgentTaskEdits(source, 'execution'), world)
-    expect(await world.wp({ argumentsValue: input, cordisxCallId: 'cordisx-task-actual', sourceThreadId: 'source' }))
-      .toMatchObject({ __cordisxTask: handle, prompt: input.prompt, target: input.target })
-    expect(claim.mock.calls[0]?.[0]).toMatchObject({ arguments: input, sourceThreadId: 'source', hostId: 'local' })
-    expect(claim.mock.calls[0]?.[0].arguments).toBe(input)
+    runInNewContext(applyAgentTaskStructure(taskExecutionSource, 'execution').replace(/import[^;]+;/, ''), value)
+    const results = await Promise.all(
+      [...handles].map(([callId]) =>
+        value.dispatch({ callId, arguments: { target: { type: 'projectless' }, prompt: callId, model: 'native' } })
+      ),
+    )
+    expect(results.map(r => r.config['cordisx.operation_token'])).toEqual(['first-token', 'second-token'])
+    expect(results.map(r => r.collaborationMode.settings.model)).toEqual(['first-model', 'second-model'])
+  })
+
+  it('fails only creation when structures are absent, ambiguous or prior composition is invalid', () => {
+    const resources = [{ url: 'app://-/assets/initial.js', source: taskInitialSource }, {
+      url: 'app://-/assets/execution.js',
+      source: taskExecutionSource,
+    }]
+    const base = [{
+      url: resources[0]!.url,
+      sha256: 'base',
+      transform: () => {
+        throw Error('base failure')
+      },
+    }]
+    expect(nativeAgentTaskTransforms('future', 'unknown', resources, base)).toEqual({
+      available: false,
+      transforms: base,
+    })
+    expect(
+      nativeAgentTaskTransforms('future', 'unknown', [...resources, {
+        ...resources[1]!,
+        url: 'app://-/assets/duplicate.js',
+      }], []).available,
+    ).toBe(false)
+    expect(
+      nativeAgentTaskTransforms('future', 'unknown', [{
+        ...resources[0]!,
+        source: taskInitialSource.replace('settings!=null&&source!=null', 'settings!=null'),
+      }, resources[1]!], []).available,
+    ).toBe(false)
+    expect(
+      nativeAgentTaskTransforms('future', 'unknown', [resources[0]!, {
+        ...resources[1]!,
+        source: taskExecutionSource.replace('nativeCreate as create', 'unrelated as create'),
+      }], []).available,
+    ).toBe(false)
+    expect(
+      nativeAgentTaskTransforms('future', 'unknown', [{
+        ...resources[0]!,
+        source: taskInitialSource.replace('disabledPluginIds:[],', 'disabledPluginIds:[],config:unrelatedConfig,'),
+      }, resources[1]!], []).available,
+    ).toBe(false)
   })
 })
