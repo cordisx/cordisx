@@ -105,21 +105,36 @@ not new tool names. Results carry `codex://` or `claude://` links.
   `thread/list`, `thread/read`, `thread/start`, `thread/resume`, `turn/start`,
   and `turn/interrupt`. Threads it starts show in the Codex sidebar;
   `start_session` can pick a declared provider and model.
-- **`app: "claude"`** from Codex waits in the bridge queue until a Claude Code
-  session's plugin (`assets/claude-bridge`, loaded through
-  `CLAUDE_CODE_PLUGIN_DIRS`) polls for it and answers with Claude's own session
-  tools. A session polls once Claude's session tools are connected. From
-  Claude, the plugin calls those tools directly. A session it starts is
-  detached so it is the user's own.
+- **`app: "claude"`** runs on the profile `cordisx start claude` launched
+  (recorded in `~/.cordisx/run/claude-desktop.json`) with no Claude session
+  open and no prompt:
+  - `list_sessions` and `read_session` read the profile's session records
+    (`claude-code-sessions/<account>/<org>/local_*.json`) and the CLI
+    transcripts in `~/.claude/projects`.
+  - `start_session` runs the turn with the Claude Code CLI that Claude Desktop
+    installed (the profile's, else the person's own Claude data folder's), in
+    bypass mode, on the profile's model service (`ANTHROPIC_BASE_URL` and
+    `ANTHROPIC_AUTH_TOKEN` in the child's environment only), with a session id
+    chosen up front. When the turn ends, CordisX sends
+    `claude://resume?session=<id>` to that profile's process by pid (an Apple
+    Event, never to whichever Claude the system would pick), and Claude
+    imports it as `local_<id>`. The link is returned at once.
+  - `send_message` to a session the app is not running resumes it the same
+    way (`--resume`). A session the app has open (a Claude Code process with
+    `--resume=<id>`) gets the message from its own CordisX plugin
+    (`assets/claude-bridge`, loaded through `CLAUDE_CODE_PLUGIN_DIRS`), which
+    claims requests addressed to it and submits them with `$.prompt.submit`.
 
-Claude Desktop asks the person to allow every new session ("Allow Claude to
-start the session?"), whoever requests it; a settings allow rule does not
-change that. `start_session` with `app: "claude"` therefore shows that prompt
-in the answering session and waits for it (up to about three minutes).
-`send_message` needs no approval. `cordisx start claude` still adds both tools
-to `permissions.allow` in `~/.claude/settings.json`.
+From Claude, the plugin's tools send `app: "claude"` through the bridge too, so
+starting a Claude session from Claude skips the "Allow Claude to start the
+session?" dialog; without a bridge they fall back to Claude's own session
+tools.
 
-The Codex side needs a running CordisX Codex launch; the Codex → Claude side
-needs at least one open Code session in the CordisX-launched Claude. Each side
-reports the other as unavailable otherwise. Codex asks the user to approve the
-first CordisX tool call in a conversation, as for any MCP tool.
+Why this route: Claude Desktop accepts no debugging switch, reads
+`scheduled-tasks.json` only at startup, and refuses its session and routine
+tools to runs nobody opened, so nothing inside the app can start a session
+unattended. Its own CLI import is the one entry it offers.
+
+Codex runs CordisX's tools without a per-call prompt: the launch passes
+`mcp_servers.cordisx_models.default_tools_approval_mode="approve"`. The Codex
+side needs a running CordisX Codex launch.

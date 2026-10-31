@@ -37,9 +37,12 @@ if (agentModelsBinding && nativeArgs.includes('app-server')) {
         agentModelsBinding,
       ])
     }`,
-    // Cross-app session tools can wait for the person to approve a new Claude session.
+    // A message to an open Claude session waits for that session to take it.
     '-c',
-    'mcp_servers.cordisx_models.tool_timeout_sec=200',
+    'mcp_servers.cordisx_models.tool_timeout_sec=90',
+    // CordisX's own tools run without a per-call prompt; the agent still acts only when asked.
+    '-c',
+    'mcp_servers.cordisx_models.default_tools_approval_mode="approve"',
   )
 }
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })

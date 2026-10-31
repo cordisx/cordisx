@@ -6,8 +6,9 @@ import type { EngineInterface, Register } from 'claude-code'
  *
  * - Claude -> Codex: registers `codex_*` tools; each one asks the CordisX agent
  *   bridge, which runs it on the Codex desktop's own app-server.
- * - Codex -> Claude: polls the bridge for requests a Codex agent queued and
- *   answers them with Claude Desktop's own session tools.
+ * - Codex -> Claude: the bridge drives Claude from outside the app; it queues
+ *   only a message for a session the app has open, which this plugin polls
+ *   for and sends with Claude Desktop's own session tools.
  *
  * The bridge's socket and token come from `<CORDISX_HOME>/run/agent-bridge.json`,
  * written by a running CordisX Codex launch. Without it the tools say so.
@@ -182,10 +183,16 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     return { status: 'started', sessionId, ...(link === undefined ? {} : { link }) }
   }
   if (operation === 'send_message') {
+    const prompt = String(args.prompt ?? args.message ?? '')
+    // Claude refuses a session's message to itself; a prompt this session submits is its next turn.
+    if (args.cliSessionId === await $.session.id()) {
+      await $.prompt.submit({ text: prompt })
+      return { status: 'sent', sessionId: args.sessionId }
+    }
     const sent = await $.tool.call({
       tool: 'mcp__ccd_session_mgmt__send_message',
       session_id: String(args.sessionId ?? ''),
-      message: String(args.prompt ?? args.message ?? ''),
+      message: prompt,
     })
     return { status: 'sent', result: textOf(sent) }
   }
@@ -230,6 +237,10 @@ async function hostsClaudeSessions($: EngineInterface): Promise<boolean> {
 async function runSessionTool($: EngineInterface, operation: string, input: Record<string, unknown>): Promise<string> {
   const { app, ...args } = input
   if (app === 'claude') {
+    // The bridge drives Claude from outside the app, so a new session needs no
+    // "start the session?" prompt; without a bridge, Claude's own tools answer.
+    const bridged = await post($, '/sessions', { app, operation, args })
+    if (bridged.ok) return JSON.stringify(bridged.value, null, 2)
     try {
       return JSON.stringify(await answer($, operation, args), null, 2)
     } catch (error) {

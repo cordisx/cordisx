@@ -1,5 +1,5 @@
 import { request } from 'node:http'
-import { mkdtemp, readFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -11,6 +11,30 @@ import {
   threadTranscript,
 } from '../packages/cli/src/launcher/agent-bridge.js'
 import { createNativeAgentModelsHandler } from '../packages/cli/src/launcher/native-agent-models.js'
+
+const CLI_ID = '0b5c8a52-6c6a-4a1c-b982-51a43c159cba'
+
+/** A launched Claude profile with one Code session record, as `cordisx start claude` leaves it. */
+async function claudeProfile(home: string): Promise<{ dataDir: string }> {
+  const dataDir = path.join(home, 'apps', 'claude', 'profiles', 'e2e', 'data-3p')
+  const sessions = path.join(dataDir, 'claude-code-sessions', 'account', 'org')
+  await mkdir(sessions, { recursive: true })
+  await writeFile(path.join(sessions, `local_${CLI_ID}.json`), JSON.stringify({
+    sessionId: `local_${CLI_ID}`,
+    cliSessionId: CLI_ID,
+    title: 'Tidy README',
+    cwd: '/work',
+    lastActivityAt: 5,
+  }))
+  await mkdir(path.join(home, 'run'), { recursive: true })
+  await writeFile(path.join(home, 'run', 'claude-desktop.json'), JSON.stringify({
+    version: 1,
+    profileId: 'e2e',
+    homeDir: home,
+    dataDir,
+  }))
+  return { dataDir }
+}
 
 function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: string; params: unknown }> } {
   const calls: Array<{ method: string; params: unknown }> = []
@@ -152,20 +176,48 @@ describe('agent bridge transport', () => {
     expect(listed.body.ok).toBe(true)
   })
 
-  it('hands a Codex agent request to one polling Claude session and returns its answer', async () => {
+  it('answers Claude requests from the launched profile without any Claude session', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
-    await expect(bridge.call('claude', 'list_sessions', {})).rejects.toThrow(/No Claude Code session is connected/)
+    await expect(bridge.call('claude', 'list_sessions', {})).rejects.toThrow(/cordisx start claude/)
 
-    await post(bridge, '/claude/poll', { sessionId: 'local_a' })
-    const pending = bridge.call('claude', 'list_sessions', { limit: 3 })
-    const first = await post(bridge, '/claude/poll', { sessionId: 'local_a' })
+    const { dataDir } = await claudeProfile(home)
+    expect(await bridge.call('claude', 'list_sessions', {})).toEqual({
+      running: false,
+      sessions: [expect.objectContaining({
+        sessionId: `local_${CLI_ID}`,
+        title: 'Tidy README',
+        link: `claude://resume?session=${CLI_ID}`,
+      })],
+    })
+    expect(dataDir).toContain('data-3p')
+  })
+
+  it('hands a message for a session Claude has open to that session alone', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
+    bridge = await startAgentBridge({
+      cordisxHomeDir: home,
+      codex: fakeCodex(),
+      processList: async () => `claude --resume ${CLI_ID}\n`,
+    })
+    await claudeProfile(home)
+    const message = { sessionId: `local_${CLI_ID}`, prompt: 'hi' }
+    // Another session polling does not make this one reachable.
+    await post(bridge, '/claude/poll', { sessionId: 'other' })
+    await expect(bridge.call('claude', 'send_message', message)).rejects.toThrow(/plugin is not connected/)
+
+    await post(bridge, '/claude/poll', { sessionId: CLI_ID })
+    const pending = bridge.call('claude', 'send_message', message)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect((await post(bridge, '/claude/poll', { sessionId: 'other' })).body.value).toEqual({})
+    const first = await post(bridge, '/claude/poll', { sessionId: CLI_ID })
     const claimed = first.body.value as { id: string; operation: string; args: unknown }
-    expect(claimed).toEqual(expect.objectContaining({ operation: 'list_sessions', args: { limit: 3 } }))
-    // A second session does not get the same request.
-    expect((await post(bridge, '/claude/poll', { sessionId: 'local_b' })).body.value).toEqual({})
-    await post(bridge, '/claude/result', { id: claimed.id, ok: true, value: { sessions: ['x'] } })
-    await expect(pending).resolves.toEqual({ sessions: ['x'] })
+    expect(claimed).toEqual(expect.objectContaining({
+      operation: 'send_message',
+      args: { ...message, cliSessionId: CLI_ID },
+    }))
+    await post(bridge, '/claude/result', { id: claimed.id, ok: true, value: { status: 'sent' } })
+    await expect(pending).resolves.toEqual({ status: 'sent' })
   })
 
   it('routes the generic session tools to the named app through the agent-models handler', async () => {

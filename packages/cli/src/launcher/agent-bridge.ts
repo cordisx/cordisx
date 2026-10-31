@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { createClaudeHostSessions } from './claude-host-sessions.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 
@@ -16,9 +17,11 @@ import type { NativeBridgeMethod } from './native-submission-control-server.js'
  *
  * - `app: "codex"` runs on the Codex desktop's own app-server, so threads it
  *   reads or starts are the ones the Codex window shows.
- * - `app: "claude"` waits in a queue until a Claude Code session's plugin polls
- *   `/claude/poll`, runs it with Claude's own session tools, and posts
- *   `/claude/result`.
+ * - `app: "claude"` runs here, on the Claude profile `cordisx start claude`
+ *   launched, with no Claude session open (see claude-host-sessions.ts). Only a
+ *   message to a session the app has open right now waits in a queue until a
+ *   Claude Code session's plugin polls `/claude/poll`, sends it with Claude's
+ *   own session tools, and posts `/claude/result`.
  *
  * The socket and its token live in `<CORDISX_HOME>/run`, readable only by the
  * user. Requests carry the token; nothing here accepts an endpoint or secret.
@@ -42,8 +45,7 @@ export class AgentBridgeClaudeUnavailable extends Error {
 const MAX_BODY = 1024 * 1024
 const MAX_TRANSCRIPT_CHARS = 60_000
 const CLAUDE_LIVE_MS = 8_000
-/** Long enough for the person to answer Claude's "start the session?" prompt. */
-const CLAUDE_TIMEOUT_MS = 170_000
+const CLAUDE_TIMEOUT_MS = 60_000
 
 export const BRIDGE_APPS = ['codex', 'claude'] as const
 export type BridgeApp = typeof BRIDGE_APPS[number]
@@ -205,6 +207,8 @@ interface ClaudeRequest {
   readonly id: string
   readonly operation: string
   readonly args: unknown
+  /** The one Claude session (its CLI session id) that may claim the request. */
+  readonly target: string
   claimedBy?: string
   readonly resolve: (value: unknown) => void
   readonly reject: (error: Error) => void
@@ -217,6 +221,23 @@ export interface AgentBridge {
   call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown>
   claudeLive(): boolean
   close(): Promise<void>
+}
+
+/** A model service key: the launch environment first, then the CordisX config's environment variables. */
+async function configuredSecret(
+  cordisxHomeDir: string,
+  environment: Readonly<Record<string, string | undefined>>,
+  name: string,
+): Promise<string | undefined> {
+  if (environment[name]) return environment[name]
+  try {
+    const config = object(JSON.parse(await readFile(path.join(cordisxHomeDir, 'config.json'), 'utf8')))
+    const entries = Array.isArray(config?.environmentVariables) ? config.environmentVariables : []
+    const entry = entries.map(object).find(item => item?.name === name && item.enabled !== false)
+    return text(entry?.value, 16_384)
+  } catch {
+    return undefined
+  }
 }
 
 async function readBody(request: IncomingMessage): Promise<unknown> {
@@ -239,6 +260,9 @@ export async function startAgentBridge(input: {
   readonly cordisxHomeDir: string
   readonly codex: AgentBridgeCodexAuthority
   readonly homedir?: string
+  /** The launch environment, where a model service key may be set. */
+  readonly environment?: Readonly<Record<string, string | undefined>>
+  readonly processList?: () => Promise<string>
 }): Promise<AgentBridge> {
   const runDir = path.join(input.cordisxHomeDir, 'run')
   await mkdir(runDir, { recursive: true, mode: 0o700 })
@@ -246,15 +270,23 @@ export async function startAgentBridge(input: {
   const bindingPath = agentBridgeBindingPath(input.cordisxHomeDir)
   const token = randomBytes(32).toString('hex')
   const codexHandler = createCodexBridgeHandler(input.codex, input.homedir)
+  const claudeHandler = createClaudeHostSessions({
+    cordisxHomeDir: input.cordisxHomeDir,
+    ...(input.homedir === undefined ? {} : { homedir: input.homedir }),
+    secret: name => configuredSecret(input.cordisxHomeDir, input.environment ?? process.env, name),
+    ...(input.processList === undefined ? {} : { processList: input.processList }),
+    viaPlugin: (operation, args, target) => callClaude(operation, args, target),
+  })
   const queue: ClaudeRequest[] = []
-  let lastPollAt = 0
+  const lastPollAt = new Map<string, number>()
   let closed = false
 
-  async function callClaude(operation: BridgeOperation, args: unknown): Promise<unknown> {
+  /** Hands a request to one open Claude session's plugin, which answers it from inside that session. */
+  async function callClaude(operation: BridgeOperation, args: unknown, target: string): Promise<unknown> {
     if (closed) throw new AgentBridgeClaudeUnavailable('The CordisX agent bridge is closed')
-    if (Date.now() - lastPollAt >= CLAUDE_LIVE_MS) {
+    if (Date.now() - (lastPollAt.get(target) ?? 0) >= CLAUDE_LIVE_MS) {
       throw new AgentBridgeClaudeUnavailable(
-        'No Claude Code session is connected. Start Claude with `cordisx start claude` and open any Code session.',
+        'This Claude session is open in Claude but its CordisX plugin is not connected, so it cannot take the message; send it from Claude, or close the session and try again.',
       )
     }
     return await new Promise<unknown>((resolve, reject) => {
@@ -264,18 +296,16 @@ export async function startAgentBridge(input: {
         if (index >= 0) queue.splice(index, 1)
         reject(
           new AgentBridgeClaudeUnavailable(
-            operation === 'start_session'
-              ? 'Claude is waiting for the person to allow the new session; approve it in Claude and try again'
-              : 'Claude did not answer the request in time',
+            'Claude did not answer the request in time',
           ),
         )
       }, CLAUDE_TIMEOUT_MS)
-      queue.push({ id, operation, args, resolve, reject, timer })
+      queue.push({ id, operation, args, target, resolve, reject, timer })
     })
   }
 
   async function call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown> {
-    return app === 'codex' ? await codexHandler(operation, args) : await callClaude(operation, args)
+    return app === 'codex' ? await codexHandler(operation, args) : await claudeHandler(operation, args)
   }
 
   const server = createServer((request, response) => {
@@ -293,9 +323,9 @@ export async function startAgentBridge(input: {
           }
           reply(response, 200, { ok: true, value: await call(body.app, body.operation, body.args) })
         } else if (request.url === '/claude/poll') {
-          lastPollAt = Date.now()
           const sessionId = text(body.sessionId) ?? 'unknown'
-          const next = queue.find(item => item.claimedBy === undefined)
+          lastPollAt.set(sessionId, Date.now())
+          const next = queue.find(item => item.claimedBy === undefined && item.target === sessionId)
           if (next !== undefined) next.claimedBy = sessionId
           reply(response, 200, {
             ok: true,
@@ -331,7 +361,7 @@ export async function startAgentBridge(input: {
 
   return Object.freeze({
     binding,
-    claudeLive: () => Date.now() - lastPollAt < CLAUDE_LIVE_MS,
+    claudeLive: () => [...lastPollAt.values()].some(at => Date.now() - at < CLAUDE_LIVE_MS),
     call,
     async close() {
       if (closed) return

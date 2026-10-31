@@ -56,7 +56,7 @@ const tools = [{
 }, {
   name: 'list_sessions',
   description:
-    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. Claude needs Claude Desktop launched with `cordisx start claude` and an open Code session.',
+    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. Claude needs Claude Desktop launched with `cordisx start claude`; no Claude session has to be open.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -84,7 +84,7 @@ const tools = [{
 }, {
   name: 'start_session',
   description:
-    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the person must allow the new session in the Claude window; the call waits for that. Only when the user explicitly asks.',
+    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the session runs in the background in bypass permissions mode on the CordisX model service (model picks a Claude model) and shows in Claude when its first turn ends; the link opens it. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -131,7 +131,7 @@ async function invoke(operation, input, metadata) {
       socket.destroy()
       error ? reject(error) : resolve(value)
     }
-    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 190000)
+    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 85000)
     socket.on('error', () => finish(new Error('Native model tools unavailable')))
     socket.on('end', () => finish(new Error('Native selection acknowledgement unavailable')))
     socket.on(

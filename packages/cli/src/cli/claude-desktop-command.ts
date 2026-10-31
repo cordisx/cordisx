@@ -11,6 +11,7 @@ import {
   stopClaudeDesktop,
 } from '../launcher/claude-desktop-process.js'
 import { claudeBridgePluginDir, ensureClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
+import { writeClaudeDesktopBinding } from '../launcher/claude-host-sessions.js'
 import {
   CLAUDE_DEFAULT_PERMISSION_MODE,
   enableClaudeBypassMode,
@@ -78,6 +79,25 @@ export async function runClaudeDesktopCommand(
   } else {
     stdout(`[cordisx] claude/${profileId} provider: ${seeded.appliedProviderId ?? 'kept from Claude settings'}`)
   }
+
+  // The agent bridge drives this profile's sessions from outside the app.
+  const applied = config.providers.find(provider => provider.id === seeded.appliedProviderId)
+  await writeClaudeDesktopBinding(cordisxHomeDir, {
+    version: 1,
+    profileId,
+    homeDir: cordisxHomeDir,
+    dataDir,
+    ...(applied?.kind === 'model-service'
+      ? {
+        provider: {
+          id: applied.id,
+          baseUrl: applied.baseUrl,
+          apiKeyEnv: applied.apiKeyEnv,
+          ...(applied.models?.claude?.[0] === undefined ? {} : { model: applied.models.claude[0] }),
+        },
+      }
+      : {}),
+  })
 
   const running = await runningClaudeProfile(cordisxHomeDir, profileId)
   if (running !== undefined) {

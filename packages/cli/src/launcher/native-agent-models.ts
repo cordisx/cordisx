@@ -136,8 +136,8 @@ export async function startNativeAgentModelsServer() {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
     socket.on('error', () => socket.destroy())
-    // A Claude request can wait in the agent bridge queue while the person approves it.
-    socket.setTimeout(200000, () => socket.destroy())
+    // A message to an open Claude session waits in the agent bridge queue for that session.
+    socket.setTimeout(90000, () => socket.destroy())
     let buffer = ''
     let started = false
     socket.setEncoding('utf8')
