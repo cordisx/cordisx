@@ -37,6 +37,12 @@ if (agentModelsBinding && nativeArgs.includes('app-server')) {
         agentModelsBinding,
       ])
     }`,
+    // A message to an open Claude session waits for that session to take it.
+    '-c',
+    'mcp_servers.cordisx_models.tool_timeout_sec=90',
+    // CordisX's own tools run without a per-call prompt; the agent still acts only when asked.
+    '-c',
+    'mcp_servers.cordisx_models.default_tools_approval_mode="approve"',
   )
 }
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
@@ -651,6 +657,14 @@ readLines(child.stdout, line => {
 })
 
 const switching = new Set()
+const BRIDGE_NATIVE_METHODS = new Set([
+  'thread/list',
+  'thread/read',
+  'thread/start',
+  'thread/resume',
+  'turn/start',
+  'turn/interrupt',
+])
 readLines(control, line => {
   let message
   try {
@@ -672,6 +686,19 @@ readLines(control, line => {
         'openai/turnId': message.sourceTurnId,
       },
     }).then(value => write(control, { id: message.id, ok: true, value }))
+      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+    return
+  }
+  // The CordisX agent bridge reads and starts threads in this same app-server, so
+  // the desktop sees them. Only these methods cross; the Host validates params.
+  if (message.type === 'native-request' && typeof message.id === 'string') {
+    const params = object(message.params)
+    if (!BRIDGE_NATIVE_METHODS.has(message.method) || params === undefined) {
+      void write(control, { id: message.id, ok: false }).catch(stop)
+      return
+    }
+    void nativeCall(message.method, params)
+      .then(value => write(control, { id: message.id, ok: true, value }))
       .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
     return
   }

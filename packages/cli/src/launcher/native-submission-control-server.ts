@@ -33,6 +33,14 @@ function rejectionReason(error: unknown): string {
   return error instanceof Error ? reasons[error.message] ?? 'protocol-validation' : 'protocol-validation'
 }
 
+export type NativeBridgeMethod =
+  | 'thread/list'
+  | 'thread/read'
+  | 'thread/start'
+  | 'thread/resume'
+  | 'turn/start'
+  | 'turn/interrupt'
+
 export interface NativeSubmissionControlServer {
   readonly socketPath: string
   readonly nonce: string
@@ -46,6 +54,8 @@ export interface NativeSubmissionControlServer {
     }>,
   ): Promise<void>
   isThreadIdle(threadId: string): Promise<boolean>
+  /** One allowlisted method on the desktop's own app-server; see `native-app-server-protocol.mjs`. */
+  nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
   invokeTask(
@@ -341,6 +351,9 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     },
     async isThreadIdle(threadId: string) {
       return await callPeer({ type: 'idle', threadId }) === true
+    },
+    async nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>) {
+      return await callPeer({ type: 'native-request', method, params })
     },
     bindController(value: NativeSubmissionController) {
       if (controller) throw new Error('Native controller already bound')

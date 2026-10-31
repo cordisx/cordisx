@@ -27,6 +27,7 @@ import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
 import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
 import { useModelTransfer } from './model-catalog/useModelTransfer.js'
+import { SharedModelServices } from './model-catalog/SharedModelServices.js'
 import {
   type ModelServicesSecondaryPage,
   modelServicesSecondaryPage,
@@ -254,6 +255,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
           aria-busy={refreshing}
           data-empty-layout={noConnections ? 'hero' : undefined}
         >
+          {transfer.exporting ? null : <SharedModelServices client={client} locale={locale} />}
           {transfer.exporting || state.entries.length === 0
             ? null
             : (

@@ -8,6 +8,15 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import type { NativeSubmissionController } from './native-submission-controller.js'
 
 type Selection = Readonly<{ threadId: string; providerId: string; model: string }>
+const SESSION_APPS = ['codex', 'claude'] as const
+const SESSION_OPERATIONS = ['list_sessions', 'read_session', 'start_session', 'send_message'] as const
+export type SessionApp = typeof SESSION_APPS[number]
+export type SessionOperation = typeof SESSION_OPERATIONS[number]
+const sessionOperation = (value: unknown): SessionOperation | undefined =>
+  typeof value === 'string' && value.startsWith('session:')
+    && (SESSION_OPERATIONS as readonly string[]).includes(value.slice('session:'.length))
+    ? value.slice('session:'.length) as SessionOperation
+    : undefined
 export class NativeAgentModelSelectionRejected extends Error {
   readonly reason = 'thread-not-idle'
 }
@@ -19,6 +28,8 @@ export interface NativeAgentModelsAuthority {
   commit(input: Selection): void
   release(threadId: string): void
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
+  /** Cross-app session tools through the CordisX agent bridge; `app` names the target. */
+  sessions?(app: SessionApp, operation: SessionOperation, input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -29,6 +40,21 @@ const text = (value: unknown, max = 512): value is string =>
 /** Uses the UI's admitted catalog and credential leases; tool callers never supply a connection or secret. */
 export function createNativeAgentModelsHandler(authority: NativeAgentModelsAuthority) {
   return async (operation: unknown, input: unknown, metadata?: unknown): Promise<unknown> => {
+    const session = sessionOperation(operation)
+    if (session !== undefined) {
+      const args = object(input) ?? {}
+      const app = args.app
+      if (typeof app !== 'string' || !(SESSION_APPS as readonly string[]).includes(app)) {
+        return { status: 'rejected', reason: `app must be one of ${SESSION_APPS.join(', ')}` }
+      }
+      if (authority.sessions === undefined) return { status: 'unavailable', reason: 'agent-bridge-unavailable' }
+      const { app: _app, ...rest } = args
+      try {
+        return { status: 'ok', value: await authority.sessions(app as SessionApp, session, rest) }
+      } catch (error) {
+        return { status: 'unavailable', reason: error instanceof Error ? error.message : 'unavailable' }
+      }
+    }
     const catalog = await authority.catalog()
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
@@ -110,7 +136,8 @@ export async function startNativeAgentModelsServer() {
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
     socket.on('error', () => socket.destroy())
-    socket.setTimeout(45000, () => socket.destroy())
+    // A message to an open Claude session waits in the agent bridge queue for that session.
+    socket.setTimeout(90000, () => socket.destroy())
     let buffer = ''
     let started = false
     socket.setEncoding('utf8')

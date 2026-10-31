@@ -53,7 +53,77 @@ const tools = [{
     },
     required: ['operationId', 'providerId', 'model', 'prompt', 'target'],
   },
+}, {
+  name: 'list_sessions',
+  description:
+    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. Claude needs Claude Desktop launched with `cordisx start claude`; no Claude session has to be open.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+      searchTerm: { type: 'string', maxLength: 256 },
+    },
+    required: ['app'],
+  },
+}, {
+  name: 'read_session',
+  description:
+    'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      sessionId: { type: 'string', minLength: 1, maxLength: 512 },
+      limit: { type: 'integer', minimum: 1, maximum: 200 },
+    },
+    required: ['app', 'sessionId'],
+  },
+}, {
+  name: 'start_session',
+  description:
+    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the session runs in the background in bypass permissions mode on the CordisX model service (model picks a Claude model) and shows in Claude when its first turn ends; the link opens it. If Claude is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+      title: { type: 'string', minLength: 1, maxLength: 120 },
+      cwd: { type: 'string', minLength: 1, maxLength: 4096 },
+      providerId: { type: 'string', minLength: 1, maxLength: 128 },
+      model: { type: 'string', minLength: 1, maxLength: 512 },
+      launch: {
+        enum: ['once', 'always', 'ask'],
+        description:
+          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+      },
+    },
+    required: ['app', 'prompt'],
+  },
+}, {
+  name: 'send_message',
+  description:
+    'Send a message to an existing conversation by its sessionId in the named app. It runs there as the next turn, without any approval prompt. If Claude is not running the result asks you to ask the user first. Only when the user explicitly asks.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      sessionId: { type: 'string', minLength: 1, maxLength: 512 },
+      prompt: { type: 'string', minLength: 1, maxLength: 100000 },
+      launch: {
+        enum: ['once', 'always', 'ask'],
+        description:
+          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+      },
+    },
+    required: ['app', 'sessionId', 'prompt'],
+  },
 }]
+const sessionTools = new Set(['list_sessions', 'read_session', 'start_session', 'send_message'])
 
 async function invoke(operation, input, metadata) {
   const binding = JSON.parse(await readFile(bindingPath, 'utf8'))
@@ -71,7 +141,7 @@ async function invoke(operation, input, metadata) {
       socket.destroy()
       error ? reject(error) : resolve(value)
     }
-    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 45000)
+    const timer = setTimeout(() => finish(new Error('Native selection acknowledgement unavailable')), 85000)
     socket.on('error', () => finish(new Error('Native model tools unavailable')))
     socket.on('end', () => finish(new Error('Native selection acknowledgement unavailable')))
     socket.on(
@@ -127,7 +197,9 @@ reader.on('line', line => {
       else if (request.method === 'resources/list') result = { resources: [] }
       else if (request.method === 'resources/templates/list') result = { resourceTemplates: [] }
       else if (request.method === 'tools/call') {
-        const operation = request.params?.name === 'list_model_providers'
+        const operation = sessionTools.has(request.params?.name)
+          ? `session:${request.params.name}`
+          : request.params?.name === 'list_model_providers'
           ? 'list'
           : request.params?.name === 'select_thread_model_provider'
           ? 'select'
@@ -141,7 +213,8 @@ reader.on('line', line => {
         })
         result = {
           content: [{ type: 'text', text: JSON.stringify(value) }],
-          isError: value?.status === 'rejected' || value?.status === 'reconciliation-required',
+          isError: value?.status === 'rejected' || value?.status === 'reconciliation-required'
+            || value?.status === 'unavailable',
         }
       } else {
         process.stdout.write(

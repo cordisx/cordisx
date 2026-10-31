@@ -93,6 +93,7 @@ implementation of those contracts, not a second public specification.
 | [publisher-grants](publisher-grants.md)               | Reference              | Device-bound PublisherGrant authority, persistence, and optional registry                              |
 | [multi-provider-sessions](multi-provider-sessions.md) | Reference              | Provider Fleet, structured identities, independent connections, and CLIProxyAPI                        |
 | [native-model-providers](native-model-providers.md)   | Experimental reference | Managed native providers, Model services settings, composer selection, and plugin supplemental actions |
+| [shared-model-services](shared-model-services.md)     | Experimental reference | Model services declared once for Codex and Claude, `cordisx start claude`, and the Codex–Claude bridge |
 | [agent-events](agent-events.md)                       | Reference              | Session/Agent events, messaging, permissions, and private adapter boundary                             |
 | [native-agent-context](native-agent-context.md)       | Reference              | Native definition delivery, resume, event correlation, and evidence boundaries                         |
 

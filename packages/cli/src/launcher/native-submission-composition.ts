@@ -39,11 +39,15 @@ import type { NativeAccountCapabilityDescriptor } from '../native-account-capabi
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
 import { combinedNativeModelProviderCatalog } from './native-model-provider-catalog.js'
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
+import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
+import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
+import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
 import { CompositeCatalogManagement, NativeCatalogManagement } from './model-catalog/native-catalog-management.js'
 import { NativeConfigCatalogDiscovery } from './model-catalog/native-config-catalog-discovery.js'
 import type { HomeConfigProviderBinding } from '../config/home-config-model-catalogs.js'
+import type { HomeConfigProvider } from '../config/home-config.js'
 import { providerSyncCredentialEnvironmentKey, syncCodexProviderProfile } from './provider-profile-sync-codex.js'
 import type { ProviderSyncBindingDefinition } from './provider-profile-sync-contracts.js'
 import type { ManagedServiceNativeActivation } from './managed-service-plugin-lifecycle.js'
@@ -120,6 +124,8 @@ interface NativeSubmissionCatalogOptions {
   readonly managedCatalog?: Omit<Parameters<typeof ManagedCatalogComposition.open>[0], 'responsesAvailable'>
   readonly nativeDiscoveryEnvironment?: Readonly<Record<string, string | undefined>>
   readonly providerBindings?: readonly HomeConfigProviderBinding[]
+  /** `model-service` declarations, merged into the catalog read from `config.toml`. */
+  readonly declaredProviders?: readonly HomeConfigProvider[]
 }
 export type NativeSubmissionCompletionStage =
   | 'native-submission-completion-start'
@@ -434,8 +440,10 @@ export async function prepareNativeSubmissionBootstrap(
   let pluginCatalog: () => Promise<readonly NativeModelProviderCatalogEntry[]> = async () => []
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
+  let agentBridge: AgentBridge | undefined
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
+      await agentBridge?.close()
       await agentModels.close()
       await taskRouting?.close()
       dynamic?.dispose()
@@ -628,6 +636,11 @@ export async function prepareNativeSubmissionBootstrap(
                 : { selectorIcons: completeOptions.selectorIcons }),
             })
           }
+          // The selector lists the native tables and the CordisX declarations together:
+          // a declaration is the entry the user manages, its native copy the projection.
+          if (completeOptions.declaredProviders !== undefined) {
+            projection = mergeDeclaredIntoCodexProjection(projection, completeOptions.declaredProviders)
+          }
           const diagnostic = JSON.stringify(projection.diagnostics)
           if (diagnostic !== lastDiagnostic && projection.diagnostics.length > 0) {
             console.warn(
@@ -690,7 +703,21 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        const homeConfigPath = completeOptions.managedCatalog === undefined
+          ? undefined
+          : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
         const cdp = createNativeSubmissionCdpAuthority({
+          ...(homeConfigPath === undefined ? {} : {
+            modelServices: {
+              read: () => readModelServices(homeConfigPath, completeOptions.nativeDiscoveryEnvironment ?? process.env),
+              save: async request => {
+                const parsed = parseModelServicesSaveRequest(request)
+                return parsed === undefined
+                  ? { status: 'rejected', code: 'invalid' }
+                  : await saveModelServices(homeConfigPath, parsed)
+              },
+            },
+          }),
           taskClaim: input => agentTasks?.claim(input) ?? Promise.resolve(undefined),
           submissionAvailable: discovered.transforms.length > 0,
           catalogSubscribe: (listener: () => void) => {
@@ -755,9 +782,38 @@ export async function prepareNativeSubmissionBootstrap(
           invoke: input => control.invokeTask(input),
         })
         cdp.bindController(controller)
+        if (completeOptions.managedCatalog !== undefined) {
+          // The agent bridge lets Claude Code sessions read and start threads in this
+          // app-server, and lets this app's agents reach Claude. Failing to start it
+          // only leaves the cross-app tools unavailable.
+          agentBridge = await startAgentBridge({
+            cordisxHomeDir: completeOptions.managedCatalog.homeDir,
+            codex: { nativeRequest: (method, params) => control.nativeRequest(method, params), catalog },
+            codexProfileId: completeOptions.managedCatalog.profileId,
+            // Starts Claude, when the person allowed it, as `cordisx start claude` would.
+            launchClaude: async ({ homeDir, profileId, providerId }) => {
+              const { runClaudeDesktopCommand } = await import('../cli/claude-desktop-command.js')
+              await runClaudeDesktopCommand(
+                {
+                  action: 'start',
+                  profile: profileId,
+                  options: { dryRun: false, ...(providerId === undefined ? {} : { provider: providerId }) },
+                },
+                { env: { ...process.env, CORDISX_HOME: homeDir }, stdout: () => undefined },
+              )
+            },
+          }).catch(error => {
+            console.warn(`[cordisx] agent bridge unavailable: ${String(error)}`)
+            return undefined
+          })
+        }
         agentModels.bind({
           catalog,
           controller,
+          sessions: async (app, operation, input) => {
+            if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
+            return await agentBridge.call(app, operation, input)
+          },
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
           ...cdp.agentSelection,
