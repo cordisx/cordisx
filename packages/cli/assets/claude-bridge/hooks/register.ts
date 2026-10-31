@@ -28,15 +28,10 @@ const POLL_MS = 1500
 const SESSION_ID = /local_[0-9a-f-]{36}/u
 const CLAUDE_LINK = /claude:\/\/[^\s"]+/u
 
-/** Claude's session tools a bridge request may call without a dialog, and only from this plugin. */
-const BRIDGE_SESSION_TOOLS = new Set([
-  'mcp__ccd_session_mgmt__list_sessions',
-  'mcp__ccd_session_mgmt__get_session',
-  'mcp__ccd_session_mgmt__list_events',
-  'mcp__ccd_session__start_session',
-  'mcp__ccd_session_mgmt__detach_session',
-  'mcp__ccd_session_mgmt__send_message',
-])
+/** Claude session tools that change state; each needs an allow rule, or Claude asks the person. */
+const WRITE_TOOLS = ['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__send_message'] as const
+const ALLOW_HINT = 'Add these to "permissions.allow" in ~/.claude/settings.json and restart Claude: '
+  + WRITE_TOOLS.join(', ')
 
 const CODEX_TOOLS = [
   {
@@ -139,6 +134,12 @@ function limitOf(args: Record<string, unknown>, fallback: number): number {
 }
 
 /** Runs one Codex -> Claude request with Claude Desktop's own session tools. */
+async function requireAllowed($: EngineInterface, tool: (typeof WRITE_TOOLS)[number]): Promise<void> {
+  const verdict = await $.tool.check({ tool, input: {} })
+  // A dialog in a session nobody may be watching would hold the request until it times out.
+  if (verdict.decision !== 'allow') throw new Error(`Claude needs permission for ${tool}. ${ALLOW_HINT}`)
+}
+
 async function answer($: EngineInterface, operation: string, args: Record<string, unknown>): Promise<unknown> {
   if (operation === 'list_sessions') {
     const current = await $.tool.call({ tool: 'mcp__ccd_session_mgmt__get_session', session_id: 'self' })
@@ -162,6 +163,7 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     return { session: textOf(details), transcript }
   }
   if (operation === 'start_session') {
+    await requireAllowed($, 'mcp__ccd_session__start_session')
     const started = await $.tool.call({
       tool: 'mcp__ccd_session__start_session',
       initiation: 'user_asked',
@@ -183,6 +185,7 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     return { status: 'started', sessionId, ...(link === undefined ? {} : { link }) }
   }
   if (operation === 'send_message') {
+    await requireAllowed($, 'mcp__ccd_session_mgmt__send_message')
     const sent = await $.tool.call({
       tool: 'mcp__ccd_session_mgmt__send_message',
       session_id: String(args.sessionId ?? ''),
@@ -248,11 +251,4 @@ export const register: Register = on => {
       return { result: await askCodex($, tool.operation, args) }
     })
   }
-
-  // Only this plugin's own bridge calls skip the dialog; the model's calls to the
-  // same tools still go through the session's normal permission decision.
-  on('tool.check', ($, e, next) =>
-    BRIDGE_SESSION_TOOLS.has(e.tool) && next.origin.plugin === $.plugin.name
-      ? { decision: 'allow', reason: 'CordisX agent bridge request' }
-      : next(e))
 }

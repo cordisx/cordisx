@@ -1,3 +1,4 @@
+import os from 'node:os'
 import path from 'node:path'
 import { ensureHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import { seedClaudeDesktopProfile } from '../launcher/claude-desktop-profile.js'
@@ -8,7 +9,7 @@ import {
   runningClaudeProfile,
   stopClaudeDesktop,
 } from '../launcher/claude-desktop-process.js'
-import { claudeBridgePluginDir } from '../launcher/claude-bridge-plugin.js'
+import { claudeBridgePluginDir, missingClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import type { CordisXLauncherOptions } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
@@ -81,6 +82,14 @@ export async function runClaudeDesktopCommand(
   if (invocation.options.dryRun) {
     stdout(`[cordisx] would launch ${executable} with data ${dataDir}`)
     return
+  }
+  const missing = await missingClaudeBridgePermissions(runtime.homedir ?? os.homedir())
+  if (missing.length > 0) {
+    stdout(
+      `[cordisx] for Codex to start or message Claude sessions, add to "permissions.allow" in ~/.claude/settings.json: ${
+        missing.map(rule => JSON.stringify(rule)).join(', ')
+      }`,
+    )
   }
   const bridge = await claudeBridgePluginDir()
   const hostEnvironment = {

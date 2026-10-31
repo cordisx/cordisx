@@ -12,6 +12,7 @@ import {
   seedClaudeDesktopProfile,
 } from '../packages/cli/src/launcher/claude-desktop-profile.js'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
+import { missingClaudeBridgePermissions } from '../packages/cli/src/launcher/claude-bridge-plugin.js'
 
 const run = promisify(execFile)
 
@@ -143,5 +144,19 @@ describe('Claude Desktop profile seeding', () => {
       profile: 'work',
       options: expect.objectContaining({ provider: 'sub2tok' }),
     }))
+  })
+
+  it('reports the bridge permission rules the user has not allowed yet', async () => {
+    const homedir = await dataDir()
+    expect(await missingClaudeBridgePermissions(homedir)).toEqual([
+      'mcp__ccd_session__start_session',
+      'mcp__ccd_session_mgmt__send_message',
+    ])
+    await mkdir(path.join(homedir, '.claude'), { recursive: true })
+    await writeFile(
+      path.join(homedir, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { allow: ['Bash(ls)', 'mcp__ccd_session__start_session'] } }),
+    )
+    expect(await missingClaudeBridgePermissions(homedir)).toEqual(['mcp__ccd_session_mgmt__send_message'])
   })
 })

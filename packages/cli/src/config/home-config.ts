@@ -19,11 +19,7 @@ import {
 } from './home-config-marketplace.js'
 import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-provider-schema.js'
 import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
-import {
-  type HomeConfigModelServiceProvider,
-  type HomeConfigProviderProtocol,
-  parseModelServiceProvider,
-} from './home-config-model-service.js'
+import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from './home-config-model-service.js'
 
 export type { HomeConfigModelServiceProvider, HomeConfigProviderProtocol } from './home-config-model-service.js'
 
