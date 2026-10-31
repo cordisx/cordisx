@@ -20,10 +20,13 @@ describe('Claude managed settings', () => {
     const root = await temporary()
     const systemDir = path.join(root, 'system')
     await mkdir(systemDir)
-    await writeFile(path.join(systemDir, 'managed-settings.json'), JSON.stringify({
-      hooks: {},
-      permissions: { deny: ['Bash(rm:*)'], defaultMode: 'plan' },
-    }))
+    await writeFile(
+      path.join(systemDir, 'managed-settings.json'),
+      JSON.stringify({
+        hooks: {},
+        permissions: { deny: ['Bash(rm:*)'], defaultMode: 'plan' },
+      }),
+    )
     await writeFile(path.join(systemDir, 'managed-mcp.json'), '{"mcpServers":{}}')
 
     const directory = await writeClaudeManagedSettings({ profileRoot: path.join(root, 'profile'), systemDir })
@@ -53,10 +56,13 @@ describe('Claude bypass preferences', () => {
     const dataDir = await temporary()
     await mkdir(path.join(dataDir, 'claude-code-sessions', 'account-a', 'org'), { recursive: true })
     await writeFile(path.join(dataDir, 'config.json'), JSON.stringify({ lastKnownAccountUuid: 'account-b' }))
-    await writeFile(path.join(dataDir, 'claude_desktop_config.json'), JSON.stringify({
-      deploymentMode: '3p',
-      preferences: { sidebarMode: 'epitaxy', bypassPermissionsGateByAccount: { 'account-a': false, other: false } },
-    }))
+    await writeFile(
+      path.join(dataDir, 'claude_desktop_config.json'),
+      JSON.stringify({
+        deploymentMode: '3p',
+        preferences: { sidebarMode: 'epitaxy', bypassPermissionsGateByAccount: { 'account-a': false, other: false } },
+      }),
+    )
 
     expect(await enableClaudeBypassMode(dataDir)).toEqual(['account-a', 'account-b'])
     expect(await readJson(path.join(dataDir, 'claude_desktop_config.json'))).toEqual({

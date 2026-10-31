@@ -794,7 +794,11 @@ export async function prepareNativeSubmissionBootstrap(
             launchClaude: async ({ homeDir, profileId, providerId }) => {
               const { runClaudeDesktopCommand } = await import('../cli/claude-desktop-command.js')
               await runClaudeDesktopCommand(
-                { action: 'start', profile: profileId, options: { dryRun: false, ...(providerId === undefined ? {} : { provider: providerId }) } },
+                {
+                  action: 'start',
+                  profile: profileId,
+                  options: { dryRun: false, ...(providerId === undefined ? {} : { provider: providerId }) },
+                },
                 { env: { ...process.env, CORDISX_HOME: homeDir }, stdout: () => undefined },
               )
             },

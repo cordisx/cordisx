@@ -314,7 +314,9 @@ async function startCodex($: EngineInterface, launch: unknown): Promise<true | R
   try {
     target = { ...target, ...JSON.parse(await $.fs.read(`${home}/run/codex-launch.json`)) as typeof target }
   } catch { /* Codex never ran with the bridge; its default profile */ }
-  const argv = cli.length > 0 ? [...cli, 'start', 'codex', target.profileId] : ['cordisx', 'start', 'codex', target.profileId]
+  const argv = cli.length > 0
+    ? [...cli, 'start', 'codex', target.profileId]
+    : ['cordisx', 'start', 'codex', target.profileId]
   const started = await $.process.run(argv, { env: { CORDISX_HOME: target.homeDir }, timeoutMs: CODEX_START_MS })
   if (started.exitCode !== 0) {
     return { status: 'failed', reason: 'codex-start-failed', detail: started.stderr.slice(-2000) }

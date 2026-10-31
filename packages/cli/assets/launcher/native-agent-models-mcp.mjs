@@ -95,7 +95,11 @@ const tools = [{
       cwd: { type: 'string', minLength: 1, maxLength: 4096 },
       providerId: { type: 'string', minLength: 1, maxLength: 128 },
       model: { type: 'string', minLength: 1, maxLength: 512 },
-      launch: { enum: ['once', 'always', 'ask'], description: 'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.' },
+      launch: {
+        enum: ['once', 'always', 'ask'],
+        description:
+          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+      },
     },
     required: ['app', 'prompt'],
   },
@@ -110,7 +114,11 @@ const tools = [{
       app: { enum: ['claude', 'codex'] },
       sessionId: { type: 'string', minLength: 1, maxLength: 512 },
       prompt: { type: 'string', minLength: 1, maxLength: 100000 },
-      launch: { enum: ['once', 'always', 'ask'], description: 'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.' },
+      launch: {
+        enum: ['once', 'always', 'ask'],
+        description:
+          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+      },
     },
     required: ['app', 'sessionId', 'prompt'],
   },

@@ -5,10 +5,10 @@ import { describe, expect, it } from 'vitest'
 import {
   claudeLaunchPreferencePath,
   claudeProfileCli,
-  resumes,
   claudeTranscript,
   createClaudeHostSessions,
   findClaudeTranscript,
+  resumes,
   writeClaudeDesktopBinding,
 } from '../packages/cli/src/launcher/claude-host-sessions.js'
 
@@ -23,14 +23,17 @@ async function fakeCli(dataDir: string, version: string, record: string): Promis
   const directory = path.join(dataDir, 'claude-code', version, 'build', 'claude.app', 'Contents', 'MacOS')
   await mkdir(directory, { recursive: true })
   const binary = path.join(directory, 'claude')
-  await writeFile(binary, [
-    '#!/bin/sh',
-    `out=${JSON.stringify(record)}`,
-    'printf "%s\\n" "$@" > "$out.args"',
-    'cat > "$out.stdin"',
-    'printf "%s\\n%s\\n" "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" > "$out.gateway"',
-    'pwd > "$out.cwd"',
-  ].join('\n'))
+  await writeFile(
+    binary,
+    [
+      '#!/bin/sh',
+      `out=${JSON.stringify(record)}`,
+      'printf "%s\\n" "$@" > "$out.args"',
+      'cat > "$out.stdin"',
+      'printf "%s\\n%s\\n" "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" > "$out.gateway"',
+      'pwd > "$out.cwd"',
+    ].join('\n'),
+  )
   await chmod(binary, 0o755)
   return binary
 }
@@ -99,7 +102,12 @@ describe('Claude sessions driven from the host', () => {
       profileId: 'e2e',
       homeDir: cordisxHomeDir,
       dataDir,
-      provider: { id: 'sub2tok', baseUrl: 'https://api.sub2tok.com', apiKeyEnv: 'SUB2TOK_KEY', model: 'claude-opus-5-5' },
+      provider: {
+        id: 'sub2tok',
+        baseUrl: 'https://api.sub2tok.com',
+        apiKeyEnv: 'SUB2TOK_KEY',
+        model: 'claude-opus-5-5',
+      },
     })
     return { cordisxHomeDir, homedir, dataDir, record }
   }
@@ -113,7 +121,10 @@ describe('Claude sessions driven from the host', () => {
       secret: async name => name === 'SUB2TOK_KEY' ? 'sk-test' : undefined,
     })
 
-    const started = await sessions('start_session', { prompt: 'Tidy the README', cwd: homedir }) as Record<string, string>
+    const started = await sessions('start_session', { prompt: 'Tidy the README', cwd: homedir }) as Record<
+      string,
+      string
+    >
 
     expect(started).toEqual(expect.objectContaining({ status: 'started' }))
     expect(started.sessionId).toBe(`local_${started.cliSessionId}`)
@@ -153,12 +164,15 @@ describe('Claude sessions driven from the host', () => {
     const { cordisxHomeDir, homedir, dataDir, record } = await launched()
     const folder = path.join(dataDir, 'claude-code-sessions', 'account', 'org')
     await mkdir(folder, { recursive: true })
-    await writeFile(path.join(folder, `local_${CLI_ID}.json`), JSON.stringify({
-      sessionId: `local_${CLI_ID}`,
-      cliSessionId: CLI_ID,
-      cwd: homedir,
-      model: 'claude-sonnet-5-5',
-    }))
+    await writeFile(
+      path.join(folder, `local_${CLI_ID}.json`),
+      JSON.stringify({
+        sessionId: `local_${CLI_ID}`,
+        cliSessionId: CLI_ID,
+        cwd: homedir,
+        model: 'claude-sonnet-5-5',
+      }),
+    )
     let open = ''
     const forwarded: unknown[] = []
     const sessions = createClaudeHostSessions({
@@ -217,7 +231,12 @@ describe('a closed Claude', () => {
       processList: async () => '',
       launchClaude: async request => {
         launches.push(request)
-        await writeClaudeDesktopBinding(cordisxHomeDir, { version: 1, profileId: 'e2e', homeDir: cordisxHomeDir, dataDir })
+        await writeClaudeDesktopBinding(cordisxHomeDir, {
+          version: 1,
+          profileId: 'e2e',
+          homeDir: cordisxHomeDir,
+          dataDir,
+        })
         await mkdir(path.dirname(pidFile), { recursive: true })
       },
     })
@@ -243,7 +262,11 @@ describe('a closed Claude', () => {
       homeDir: cordisxHomeDir,
       dataDir: path.join(cordisxHomeDir, 'data-3p'),
     })
-    const sessions = createClaudeHostSessions({ cordisxHomeDir, homedir: await temporary(), secret: async () => undefined })
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir: await temporary(),
+      secret: async () => undefined,
+    })
     expect(await sessions('list_sessions', {})).toEqual({ running: false, sessions: [] })
   })
 })

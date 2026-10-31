@@ -19,20 +19,26 @@ async function claudeProfile(home: string): Promise<{ dataDir: string }> {
   const dataDir = path.join(home, 'apps', 'claude', 'profiles', 'e2e', 'data-3p')
   const sessions = path.join(dataDir, 'claude-code-sessions', 'account', 'org')
   await mkdir(sessions, { recursive: true })
-  await writeFile(path.join(sessions, `local_${CLI_ID}.json`), JSON.stringify({
-    sessionId: `local_${CLI_ID}`,
-    cliSessionId: CLI_ID,
-    title: 'Tidy README',
-    cwd: '/work',
-    lastActivityAt: 5,
-  }))
+  await writeFile(
+    path.join(sessions, `local_${CLI_ID}.json`),
+    JSON.stringify({
+      sessionId: `local_${CLI_ID}`,
+      cliSessionId: CLI_ID,
+      title: 'Tidy README',
+      cwd: '/work',
+      lastActivityAt: 5,
+    }),
+  )
   await mkdir(path.join(home, 'run'), { recursive: true })
-  await writeFile(path.join(home, 'run', 'claude-desktop.json'), JSON.stringify({
-    version: 1,
-    profileId: 'e2e',
-    homeDir: home,
-    dataDir,
-  }))
+  await writeFile(
+    path.join(home, 'run', 'claude-desktop.json'),
+    JSON.stringify({
+      version: 1,
+      profileId: 'e2e',
+      homeDir: home,
+      dataDir,
+    }),
+  )
   return { dataDir }
 }
 

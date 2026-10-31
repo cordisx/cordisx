@@ -212,7 +212,8 @@ export async function claudeProfileCli(dataDir: string, homedir = os.homedir()):
 async function newestCli(dataDir: string): Promise<string | undefined> {
   const versions = await directories(path.join(dataDir, 'claude-code'))
   const ordered = [...versions].sort((left, right) =>
-    path.basename(right).localeCompare(path.basename(left), undefined, { numeric: true }))
+    path.basename(right).localeCompare(path.basename(left), undefined, { numeric: true })
+  )
   for (const version of ordered) {
     for (const build of await directories(version)) {
       const binary = path.join(build, 'claude.app', 'Contents', 'MacOS', 'claude')
@@ -273,8 +274,13 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
 
   async function profile(): Promise<{ binding?: ClaudeDesktopBinding; pid?: number }> {
     const binding = await readJson(claudeDesktopBindingPath(input.cordisxHomeDir)) as ClaudeDesktopBinding | undefined
-    if (binding?.version !== 1 || typeof binding.dataDir !== 'string' || typeof binding.profileId !== 'string') return {}
-    const pid = await (input.runningPid ?? runningClaudeProfile)(binding.homeDir ?? input.cordisxHomeDir, binding.profileId)
+    if (binding?.version !== 1 || typeof binding.dataDir !== 'string' || typeof binding.profileId !== 'string') {
+      return {}
+    }
+    const pid = await (input.runningPid ?? runningClaudeProfile)(
+      binding.homeDir ?? input.cordisxHomeDir,
+      binding.profileId,
+    )
     return pid === undefined ? { binding } : { binding, pid }
   }
 
@@ -283,7 +289,9 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
    * call (`launch: "once" | "always"`, the latter remembered) or an
    * earlier "always". Otherwise the agent gets a question to ask, at once.
    */
-  async function running(args: Record<string, unknown>): Promise<ClaudeDesktopBinding | ReturnType<typeof appLaunchQuestion>> {
+  async function running(
+    args: Record<string, unknown>,
+  ): Promise<ClaudeDesktopBinding | ReturnType<typeof appLaunchQuestion>> {
     const current = await profile()
     if (current.binding !== undefined && current.pid !== undefined) return current.binding
     const choice = args.launch
@@ -319,7 +327,9 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     readonly model?: string
   }): Promise<void> {
     const cli = await claudeProfileCli(options.binding.dataDir, homedir)
-    if (cli === undefined) throw new Error('Claude Desktop has not installed Claude Code yet; open one Code session in Claude once')
+    if (cli === undefined) {
+      throw new Error('Claude Desktop has not installed Claude Code yet; open one Code session in Claude once')
+    }
     const provider = options.binding.provider
     const key = provider === undefined ? undefined : await input.secret(provider.apiKeyEnv)
     if (provider !== undefined && key === undefined) {
@@ -411,7 +421,8 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
         sessionId: `local_${cliSessionId}`,
         cliSessionId,
         link: claudeSessionLink(cliSessionId),
-        note: 'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it.',
+        note:
+          'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it.',
       }
     }
     const sessionId = text(args.sessionId)

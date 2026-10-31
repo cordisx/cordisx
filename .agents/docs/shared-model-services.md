@@ -140,8 +140,12 @@ unattended. Its own CLI import is the one entry it offers.
 Both directions answer the same way, at once, instead of failing or waiting:
 
 ```json
-{ "status": "needs-confirmation", "reason": "claude-not-running",
-  "question": "Claude Desktop is not running. Start it?", "howToContinue": "…" }
+{
+  "status": "needs-confirmation",
+  "reason": "claude-not-running",
+  "question": "Claude Desktop is not running. Start it?",
+  "howToContinue": "…"
+}
 ```
 
 (`codex-not-running` from Claude.) The agent asks the person; on a yes it
