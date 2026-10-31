@@ -4,12 +4,18 @@ import { ensureHomeConfig, resolveHomeConfigPath } from '../config/home-config.j
 import { seedClaudeDesktopProfile } from '../launcher/claude-desktop-profile.js'
 import {
   claudeProfileDataDir,
+  claudeProfileRoot,
   launchClaudeDesktop,
   resolveClaudeExecutable,
   runningClaudeProfile,
   stopClaudeDesktop,
 } from '../launcher/claude-desktop-process.js'
 import { claudeBridgePluginDir, ensureClaudeBridgePermissions } from '../launcher/claude-bridge-plugin.js'
+import {
+  CLAUDE_DEFAULT_PERMISSION_MODE,
+  enableClaudeBypassMode,
+  writeClaudeManagedSettings,
+} from '../launcher/claude-permission-mode.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import type { CordisXLauncherOptions } from './parse.js'
 import type { CordisXCliRuntime } from './run-support.js'
@@ -90,6 +96,16 @@ export async function runClaudeDesktopCommand(
   } else if (permissions.skipped !== undefined) {
     stdout('[cordisx] ~/.claude/settings.json is not valid JSON; Claude bridge permissions were not added')
   }
+  // Sessions start in bypass mode: the managed default names it, and the
+  // profile's preferences offer it (the app is closed, so they can be written).
+  const managedSettings = await writeClaudeManagedSettings({
+    profileRoot: claudeProfileRoot(cordisxHomeDir, profileId),
+  })
+  const bypassAccounts = await enableClaudeBypassMode(dataDir)
+  stdout(
+    `[cordisx] claude/${profileId} default permission mode: ${CLAUDE_DEFAULT_PERMISSION_MODE}`
+      + (bypassAccounts.length === 0 ? ' (offered from the next launch)' : ''),
+  )
   const bridge = await claudeBridgePluginDir()
   const hostEnvironment = {
     ...hostModelServiceEnvironment(environment, config.environmentVariables),
@@ -97,6 +113,7 @@ export async function runClaudeDesktopCommand(
     // starts, so the bridge loads in this profile's sessions and nowhere else.
     CLAUDE_CODE_PLUGIN_DIRS: bridge,
     CORDISX_HOME: cordisxHomeDir,
+    CLAUDE_CODE_MANAGED_SETTINGS_PATH: managedSettings,
   }
   const pid = await launchClaudeDesktop({ executable, cordisxHomeDir, profileId, environment: hostEnvironment })
   stdout(`[cordisx] launched claude/${profileId} (pid ${pid})`)

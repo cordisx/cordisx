@@ -78,6 +78,15 @@ helper in the profile prints the variable `apiKeyEnv` names. `_meta.json`
 Entries the user adds in Claude's own settings, and their applied choice on a
 plain relaunch, are kept. `--provider` makes a declaration the applied one.
 
+Sessions default to bypass permissions mode. Each launch writes
+`<profile>/managed/managed-settings.json` (the machine's own managed settings
+with `permissions.defaultMode: "bypassPermissions"`) and points
+`CLAUDE_CODE_MANAGED_SETTINGS_PATH` at it, for this app only. Claude offers
+bypass only to accounts it is enabled for, so the launcher also sets
+`bypassPermissionsGateByAccount` and `bypassPermissionsOptInByAccount` in the
+profile's `claude_desktop_config.json` for every account the profile has used;
+a profile never opened before gets them on its second launch.
+
 `stop` sends SIGTERM and waits up to 20 seconds for the app to save, then
 SIGKILL.
 
