@@ -554,9 +554,31 @@ export function createNativeSubmissionCdpAuthority(options: {
                 ...(stageSend ? { sendOnly: true } : {}),
               }}
             if (!stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined) {
+              const revision = state.revision
               const committed = await controller!.commitSelection(scope)
-              if (committed.kind !== 'accepted') throw new Error('Native provider switch failed')
-              await respond(requestId, { status: 'accepted', ...committed.projection })
+              if (committed.kind === 'accepted') {
+                await respond(requestId, { status: 'accepted', ...committed.projection })
+              } else {
+                // Keep the explicit choice; ordinary Send retries the native transition without another prompt.
+                if (
+                  committed.reason !== 'thread-switch-failed' || state.revision !== revision
+                  || state.pending?.providerId !== selected.providerId || state.pending.model !== selected.model
+                  || !await runtime.revalidate(scope, true) || owner.disposed
+                ) throw new Error('Stale native provider switch')
+                const latestCatalog = await options.catalog()
+                const liveAfterFailure = await runtime.revalidate(scope, true)
+                if (
+                  !liveAfterFailure || state.revision !== revision || owner.disposed
+                  || selected.providerId !== 'openai'
+                    && !latestCatalog.some(provider =>
+                      provider.providerId === selected.providerId
+                      && provider.models.some(model => model.id === selected.model)
+                    )
+                ) throw new Error('Native provider selection unavailable')
+                state.pending = { ...state.pending!, sendOnly: true }
+                state.revision++
+                await respond(requestId, { status: 'accepted', ...projection(state) })
+              }
             } else await respond(requestId, { status: 'accepted', ...projection(state) })
           } else if (envelope.operation === 'submissionPrepare') {
             const result = await controller!.prepareSubmission(scope, actionOf(input?.action))

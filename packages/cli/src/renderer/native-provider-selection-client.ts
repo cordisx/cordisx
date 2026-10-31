@@ -271,8 +271,8 @@ export class NativeProviderSelectionClient {
           if (!this.projectionCurrent(scope, generation, result.revision)) return 'unavailable'
           this.unsynchronized.delete(scope.threadId)
         } catch {
-          this.notice('submission-rejected')
-          return 'unavailable'
+          // The Host accepted this choice. Retry Composer synchronization on Send.
+          return this.projectionCurrent(scope, generation, result.revision) ? 'accepted' : 'unavailable'
         }
       }
       return 'accepted'
@@ -403,7 +403,7 @@ export class NativeProviderSelectionClient {
     descriptor: NativeSubmissionOrchestratorDescriptor,
   ): Promise<NativeSubmitHookResult> => {
     if (this.disposed) return { allow: false }
-    const before = this.authority()
+    let before = this.authority()
     const lifetime = this.lifetimeGeneration
     const projectionGeneration = this.projectionGeneration
     const actionIntent =
@@ -411,9 +411,21 @@ export class NativeProviderSelectionClient {
     const pending = this.projection.pending?.sendOnly && actionIntent !== 'ordinary-send'
       ? undefined
       : this.projection.pending
-    if (this.selectionActive() || before.scope.threadId && this.unsynchronized.has(before.scope.threadId)) {
+    if (this.selectionActive()) {
       this.notice('submission-rejected')
       return { allow: false }
+    }
+    if (before.scope.threadId && this.unsynchronized.has(before.scope.threadId) && pending === undefined) {
+      if (
+        actionIntent !== 'ordinary-send' || !before.idle || this.submissionActive()
+        || !await this.retrySynchronization(before.scope)
+        || !this.scopeCurrent(before.scope, lifetime) || projectionGeneration !== this.projectionGeneration
+        || this.selectionActive()
+      ) {
+        this.notice('submission-rejected')
+        return { allow: false }
+      }
+      before = this.authority()
     }
     if (pending !== undefined && this.admission !== undefined) return { allow: false }
     const sequence = ++this.operationSequence
@@ -554,6 +566,31 @@ export class NativeProviderSelectionClient {
     this.invalidateScope()
     this.disposed = true
     this.listeners.clear()
+  }
+
+  private async retrySynchronization(scope: NativeSubmissionScope): Promise<boolean> {
+    const effective = this.projection.effective
+    if (!this.projection.available || effective === undefined || scope.threadId === undefined) return false
+    const generation = this.projectionGeneration
+    const revision = this.projection.revision
+    const operation = { scope }
+    this.selectionOperations.add(operation)
+    this.emit()
+    try {
+      if (!this.projectionCurrent(scope, generation, revision) || !this.authority().idle) return false
+      await this.synchronizeEffective(effective)
+      if (
+        !this.projectionCurrent(scope, generation, revision) || !this.authority().idle
+        || this.projection.pending !== undefined
+      ) return false
+      this.unsynchronized.delete(scope.threadId)
+      return true
+    } catch {
+      return false
+    } finally {
+      this.selectionOperations.delete(operation)
+      this.emit()
+    }
   }
 
   private projectionCurrent(scope: NativeSubmissionScope, generation: number, revision: number): boolean {

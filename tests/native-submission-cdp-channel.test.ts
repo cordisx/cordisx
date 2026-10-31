@@ -723,6 +723,58 @@ describe('native submission document authority', () => {
     expect(commitSelection).toHaveBeenCalledWith(scope)
     await h.installed.dispose()
   })
+
+  it('retains a failed native transition for ordinary Send and permits selecting the prior provider', async () => {
+    const h = await harness()
+    const scope = { ...h.draft, threadId: 'thread' }
+    h.setLive(scope)
+    vi.mocked(h.controller.commitSelection).mockResolvedValueOnce({ kind: 'reject', reason: 'thread-switch-failed' })
+    const effective = { providerId: 'provider-a', model: 'model-a' }
+    try {
+      await h.channel.selectionRead({ scope, effective })
+      await expect(h.channel.selectionSelect({ scope, providerId: 'provider-b', model: 'model-b' }))
+        .resolves.toMatchObject({
+          status: 'accepted',
+          effective,
+          pending: { providerId: 'provider-b', model: 'model-b', sendOnly: true },
+        })
+      expect(h.authority.selection.snapshot(scope).pending).toMatchObject({ providerId: 'provider-b', sendOnly: true })
+      await expect(h.channel.selectionSelect({ scope, ...effective })).resolves.toMatchObject({
+        status: 'accepted',
+        effective,
+      })
+      expect(h.authority.selection.snapshot(scope).pending).toBeUndefined()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('does not acknowledge a retained target after its catalog membership disappears', async () => {
+    let present = true
+    const h = await harness({
+      catalog: () =>
+        present
+          ? [{
+            providerId: 'provider-b',
+            pluginId: 'plugin-b',
+            label: 'Provider B',
+            models: [{ id: 'model-b', label: 'Model B' }],
+          }]
+          : [],
+    })
+    const scope = { ...h.draft, threadId: 'thread' }
+    h.setLive(scope)
+    vi.mocked(h.controller.commitSelection).mockImplementationOnce(async () => {
+      present = false
+      return { kind: 'reject', reason: 'thread-switch-failed' }
+    })
+    try {
+      await h.channel.selectionRead({ scope, effective: { providerId: 'provider-a', model: 'model-a' } })
+      await expect(h.channel.selectionSelect({ scope, providerId: 'provider-b', model: 'model-b' })).rejects.toThrow()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
   it('resolves only the original draft or the exact returned thread at its next navigation', async () => {
     const h = await harness()
     try {
