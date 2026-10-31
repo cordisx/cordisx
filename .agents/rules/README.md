@@ -13,6 +13,11 @@
   development. Reuse matching CI evidence for complete delivery requirements;
   do not duplicate a running full CI job locally. Dependency revision differences
   require compatibility assessment, not automatic alignment or full local runs.
+  Do not run the full local suite (`npx vitest run`, about 20 minutes) by
+  default: run the tests for the files a change touches plus typecheck and lint,
+  say that the full suite was not run, and run it later only when the change is
+  broad or high-risk or the person asks. Run any long check in the background
+  and say what is running; never block silently on it.
 - Retain complete evidence for release/Mono integration and high-risk runtime
   changes. Each new or expanded heavy test must cover a concrete regression that
   a cheaper layer cannot detect; review duplicate setup and coverage.
