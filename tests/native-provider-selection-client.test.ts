@@ -266,6 +266,8 @@ describe('native provider selection client', () => {
 
   it('blocks later native submissions when a committed model cannot synchronize', async () => {
     const h = await harness(true, true)
+    const locked: boolean[] = []
+    h.client.subscribe(() => locked.push(h.client.submissionActive()))
     h.channel.submissionPrepare.mockResolvedValueOnce({
       status: 'confirm',
       confirmationId: 'confirmation-token',
@@ -280,6 +282,8 @@ describe('native provider selection client', () => {
     await expect(h.client.submitHook(action)).resolves.toEqual({ allow: false })
     expect(h.channel.submissionPrepare).toHaveBeenCalledTimes(1)
     expect(h.channel.submissionCancel).toHaveBeenCalledWith({ scope: { ...scope, threadId: 'thread-1' }, id: token })
+    expect(locked).toContain(true)
+    expect(locked.at(-1)).toBe(false)
   })
 
   it('recovers a failed synchronization from a fresh authoritative projection', async () => {

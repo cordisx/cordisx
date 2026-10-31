@@ -542,7 +542,10 @@ export class NativeProviderSelectionClient {
     } finally {
       // The successful path has no await after its last mutable-state check.
       if (cancelId !== undefined) await this.cancelQuietly(before.scope, cancelId)
-      if (this.admission === sequence) this.admission = undefined
+      if (this.admission === sequence) {
+        this.admission = undefined
+        this.emit()
+      }
     }
   }
 
