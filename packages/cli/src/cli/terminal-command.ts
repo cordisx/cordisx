@@ -68,6 +68,21 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   const stdout = runtime.stdout ?? console.log
   if (invocation.help) return stdout(TERMINAL_HELP)
   const environment = { ...runtime.env ?? process.env }
+  // A terminal launched by an agent inside the App is a new CLI instance, not
+  // the App's native app-server intermediary or supervisor child.
+  for (const key of Object.keys(environment)) {
+    if (
+      key.startsWith('CORDISX_SUPERVISOR_') || key.startsWith('CORDISX_NATIVE_')
+      || key === 'CORDISX_DOCK_ENTRY' || key === 'CORDISX_DOCK_RECORD'
+      || [
+        'CODEX_CLI_PATH',
+        'CODEX_THREAD_ID',
+        'CODEX_SESSION_ID',
+        'CODEX_TOOL_CALL_ID',
+        'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+      ].includes(key)
+    ) delete environment[key]
+  }
   const cwd = runtime.cwd ?? process.cwd()
   let instructionsFile: string | undefined
   if (invocation.instructionsFile) {
@@ -160,7 +175,11 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     const abort = () => {
       if (child?.exitCode === null) child.kill('SIGTERM')
     }
-    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
+    // The foreground terminal delivers SIGINT to the child too. Let Codex decide
+    // whether Ctrl-C interrupts a turn or exits; do not turn it into SIGTERM.
+    const interrupt = () => undefined
+    process.on('SIGINT', interrupt)
+    const signals = ['SIGTERM', 'SIGHUP'] as const
     for (const signal of signals) process.on(signal, abort)
     runtime.internalSignal?.addEventListener('abort', abort, { once: true })
     if (runtime.internalSignal?.aborted) abort()
@@ -172,6 +191,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       if (failure) throw failure
       if (code !== 0) throw Object.assign(new Error(`Codex CLI exited with status ${code}`), { exitCode: code })
     } finally {
+      process.off('SIGINT', interrupt)
       for (const signal of signals) process.off(signal, abort)
       runtime.internalSignal?.removeEventListener('abort', abort)
     }

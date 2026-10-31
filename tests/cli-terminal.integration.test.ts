@@ -3,6 +3,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { parse as parseToml } from 'smol-toml'
+import { EventEmitter } from 'node:events'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
@@ -33,16 +34,45 @@ it('runs ordinary native Codex commands without a Host or CordisX config', async
   const missing = path.join(f.root, 'missing-home')
   const received: string[][] = []
   await runCordisXCli(['cli', '--', '--version'], {
-    env: { ...f.env, CORDISX_HOME: missing },
+    env: {
+      ...f.env,
+      CORDISX_HOME: missing,
+      CORDISX_NATIVE_CONTROL_NONCE: 'old-app',
+      CORDISX_SUPERVISOR_HOME: '/old-app',
+      CODEX_THREAD_ID: 'old-thread',
+      CODEX_CLI_PATH: '/old-intermediary',
+    },
     internalSpawnTerminal: ((executable: string, args: string[], options: object) => {
       received.push(args)
       expect(executable).toBe('codex')
       expect(options).toMatchObject({ stdio: 'inherit', shell: false })
+      for (
+        const key of ['CORDISX_NATIVE_CONTROL_NONCE', 'CORDISX_SUPERVISOR_HOME', 'CODEX_THREAD_ID', 'CODEX_CLI_PATH']
+      ) {
+        expect((options as any).env).not.toHaveProperty(key)
+      }
       return spawn(process.execPath, ['-e', 'process.exit(0)'])
     }) as typeof spawn,
   })
   expect(received).toEqual([['--version']])
   await expect(readFile(path.join(missing, 'config.json'))).rejects.toThrow()
+})
+
+it('leaves foreground Ctrl-C semantics to the original Codex CLI', async () => {
+  const f = await fixture()
+  const child = Object.assign(new EventEmitter(), { exitCode: null, kill: vi.fn() })
+  const run = runCordisXCli(['cli'], {
+    env: f.env,
+    internalSpawnTerminal: (() => {
+      setImmediate(() => {
+        process.emit('SIGINT')
+        child.emit('exit', 0, null)
+      })
+      return child
+    }) as unknown as typeof spawn,
+  })
+  await run
+  expect(child.kill).not.toHaveBeenCalled()
 })
 
 it('uses the production management socket, real credential helper and original terminal spawn boundary', async () => {
