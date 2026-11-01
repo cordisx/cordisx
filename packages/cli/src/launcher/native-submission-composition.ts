@@ -40,6 +40,7 @@ import { combinedNativeModelProviderCatalog } from './native-model-provider-cata
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
+import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
 import { ManagedCatalogComposition } from './model-catalog/managed-catalog-composition.js'
@@ -596,6 +597,10 @@ export async function prepareNativeSubmissionBootstrap(
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
             codex: { nativeRequest: (method, params) => control.nativeRequest(method, params), catalog },
             codexProfileId: completeOptions.managedCatalog.profileId,
+            // Recorded for `integration_status`: which service this launch was started on.
+            ...(completeOptions.defaultProviderId === undefined
+              ? {}
+              : { codexModelServiceId: completeOptions.defaultProviderId }),
             // Starts Claude, when the person allowed it, as `cordisx start claude` would.
             launchClaude: async ({ homeDir, profileId, providerId }) => {
               const { runClaudeDesktopCommand } = await import('../cli/claude-desktop-command.js')
@@ -620,6 +625,14 @@ export async function prepareNativeSubmissionBootstrap(
             if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
             return await agentBridge.call(app, operation, input)
           },
+          // Answers even without a bridge: the report names that as the problem rather than failing.
+          integrationStatus: async input =>
+            agentBridge === undefined
+              ? await createIntegrationStatus({
+                cordisxHomeDir: completeOptions.managedCatalog!.homeDir,
+                caller: 'codex',
+              })(input)
+              : await agentBridge.status(input),
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
           ...cdp.agentSelection,

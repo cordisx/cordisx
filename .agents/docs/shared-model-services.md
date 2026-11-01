@@ -198,10 +198,54 @@ Claude is started by the Codex launch as `cordisx start claude <profile>`
 would, on the profile it last ran. Codex is started by the Claude plugin with
 `$.process.run`, as `cordisx start codex <profile>` on the profile recorded in
 `~/.cordisx/run/codex-launch.json`, using the CLI named in `CORDISX_CLI`, which
-`cordisx start claude` sets. Background `start` needs a built CordisX (an
-install or `npm run build`); a source checkout run through `tsx` cannot spawn
-its supervisor. Reading Claude sessions needs only the profile's files, so
+`cordisx start claude` sets. Background `start` supports both a built
+CordisX and a source checkout run through `tsx`: the source entry forwards
+its loader arguments to the supervisor. Reading Claude sessions needs only the profile's files, so
 `list_sessions` and `read_session` for Claude answer while Claude is closed.
+
+### Checking the integration (`integration_status`)
+
+Both apps' agents get one more tool with the same name, schema and result,
+`integration_status`, registered beside the session tools. It takes no
+argument but an optional `app` (whose side to report as `self`; the default is
+the app asking) and is read-only and fast: it starts nothing, runs no turn and
+writes no file. On Codex it goes through the same launch-scoped endpoint and
+authorization as the session tools; on Claude the plugin sends it to the same
+token-guarded bridge (`POST /status`) and, when no bridge answers, assembles the
+same shape from the profile files it can read — Claude's own side and the
+declared model services. It reports Codex process state as `unknown` when
+this fallback cannot probe it; an unanswered bridge never proves the App is closed.
+The fallback reports `unavailable`, keeps the requested `self`/`other` perspective,
+and checks native Claude session tool availability rather than assuming it.
+
+The result reports, each with a `status`, a stable `reason` and a `remedy`
+whenever it is not `ok`:
+
+- **`self` / `other`** — for each app: its profile, whether it is running (the
+  process is checked, not a stale pid or binding file), the model service it
+  was launched on and whether the config still declares it, and its side of the
+  bridge. Codex's liveness comes from the supervisor state its launch writes;
+  Claude's from `runningClaudeProfile`. Codex distinguishes `unreachable`
+  (running, no bridge answer — restart the launch) from `not-running`.
+- **`modelServices`** — every `model-service` declaration with the models each
+  app can actually use (`usable` says whether the protocol, `appliesTo`, the
+  enabled flag and a non-empty model list all agree) and `keySet`: whether the
+  key variable resolves in the launch environment or `environmentVariables`.
+  The key's value is never read into the report.
+- **`plugins`** — whether the Claude profile's assembled plugin directory
+  exists, whether an open Claude session's plugin is polling (the same proof a
+  queued message requires, so it means its session tools connected), and
+  whether the Codex app-server answers a one-thread read. Bridge and native
+  app-server probes have a 1.5-second deadline each; the Claude plugin caps its
+  status request at 3.5 seconds.
+- **`problems`** and a top-level `status` (`ok`, `degraded`, `unavailable`) —
+  the flattened list of everything not working, so an agent can act instead of
+  re-deriving it.
+
+The report reuses what already exists — `cordisx status`'s supervisor state,
+`runningClaudeProfile`, the binding files, `loadHomeConfig` — rather than
+adding probes. It never contacts a model service: a declared key that is
+missing is reported, never tested.
 
 ### Skills
 

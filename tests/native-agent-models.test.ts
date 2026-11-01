@@ -39,6 +39,21 @@ function fixture() {
 const target = { threadId: 'target-thread', providerId: 'configured', model: 'shared-model' }
 
 describe('Agent model-provider tools', () => {
+  it('routes status without resolving credentials or mutating a conversation', async () => {
+    const f = fixture()
+    const integrationStatus = vi.fn(async () => ({ version: 1, app: 'claude', status: 'degraded' }))
+    const handler = createNativeAgentModelsHandler({ ...f.authority, integrationStatus })
+    expect(await handler('integration_status', { app: 'claude' })).toEqual({
+      status: 'ok',
+      value: { version: 1, app: 'claude', status: 'degraded' },
+    })
+    expect(integrationStatus).toHaveBeenCalledWith({ app: 'claude' })
+    expect(f.authority.catalog).not.toHaveBeenCalled()
+    expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
+    expect(await handler('integration_status', { app: 'invalid' })).toMatchObject({ status: 'rejected' })
+    expect(integrationStatus).toHaveBeenCalledTimes(1)
+  })
+
   it('projects only model identifiers and labels from the same admitted provider catalog', async () => {
     const f = fixture()
     expect(await f.handler('list', {})).toEqual({
@@ -202,6 +217,7 @@ describe('Agent model-provider tools', () => {
         'read_session',
         'start_session',
         'send_message',
+        'integration_status',
       ])
       expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })

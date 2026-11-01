@@ -30,6 +30,8 @@ export interface NativeAgentModelsAuthority {
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
   /** Cross-app session tools through the CordisX agent bridge; `app` names the target. */
   sessions?(app: SessionApp, operation: SessionOperation, input: unknown): Promise<unknown>
+  /** The read-only integration report. Reads files and probes; never launches or writes. */
+  integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -54,6 +56,16 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       } catch (error) {
         return { status: 'unavailable', reason: error instanceof Error ? error.message : 'unavailable' }
       }
+    }
+    if (operation === 'integration_status') {
+      const args = object(input) ?? {}
+      if (args.app !== undefined && !(SESSION_APPS as readonly unknown[]).includes(args.app)) {
+        return { status: 'rejected', reason: `app must be one of ${SESSION_APPS.join(', ')}` }
+      }
+      if (authority.integrationStatus === undefined) {
+        return { status: 'unavailable', reason: 'integration-status-unavailable' }
+      }
+      return { status: 'ok', value: await authority.integrationStatus(args) }
     }
     const catalog = await authority.catalog()
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)

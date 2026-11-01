@@ -52,7 +52,8 @@ export function claudeLaunchArgs(dataDir: string): readonly string[] {
   return [`--user-data-dir=${dataDir}`]
 }
 
-function pidFile(cordisxHomeDir: string, profileId: string): string {
+/** The pid `cordisx start claude` recorded; it outlives the process and is never trusted alone. */
+export function claudeProfilePidPath(cordisxHomeDir: string, profileId: string): string {
   return path.join(claudeProfileRoot(cordisxHomeDir, profileId), 'claude.pid')
 }
 
@@ -66,7 +67,7 @@ export async function runningClaudeProfile(
 ): Promise<number | undefined> {
   let pid: number
   try {
-    pid = Number.parseInt((await readFile(pidFile(cordisxHomeDir, profileId), 'utf8')).trim(), 10)
+    pid = Number.parseInt((await readFile(claudeProfilePidPath(cordisxHomeDir, profileId), 'utf8')).trim(), 10)
   } catch {
     return undefined
   }
@@ -104,14 +105,14 @@ export async function launchClaudeDesktop(input: {
     child.once('spawn', () => child.pid === undefined ? reject(new Error('Claude exposed no pid')) : resolve(child.pid))
   })
   child.unref()
-  await writeFile(pidFile(input.cordisxHomeDir, input.profileId), `${pid}\n`, { mode: 0o600 })
+  await writeFile(claudeProfilePidPath(input.cordisxHomeDir, input.profileId), `${pid}\n`, { mode: 0o600 })
   return pid
 }
 
 export async function stopClaudeDesktop(cordisxHomeDir: string, profileId: string): Promise<boolean> {
   const pid = await runningClaudeProfile(cordisxHomeDir, profileId)
   if (pid === undefined) {
-    await rm(pidFile(cordisxHomeDir, profileId), { force: true })
+    await rm(claudeProfilePidPath(cordisxHomeDir, profileId), { force: true })
     return false
   }
   const exited = async (timeoutMs: number): Promise<boolean> => {
@@ -131,6 +132,6 @@ export async function stopClaudeDesktop(cordisxHomeDir: string, profileId: strin
     process.kill(pid, 'SIGKILL')
     if (!await exited(5_000)) throw new Error(`Claude (pid ${pid}) did not exit`)
   }
-  await rm(pidFile(cordisxHomeDir, profileId), { force: true })
+  await rm(claudeProfilePidPath(cordisxHomeDir, profileId), { force: true })
   return true
 }
