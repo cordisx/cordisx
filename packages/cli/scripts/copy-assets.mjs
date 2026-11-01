@@ -96,10 +96,7 @@ async function bindBuiltinAdapter(directory) {
         file,
         source.replace(
           /(['"])@cordisx\/codex-adapter(?:\/([^'"]+))?\1/gu,
-          (_all, quote, subpath) =>
-            `${quote}${target.startsWith('.') ? target : `./${target}`}/${
-              subpath ? `${subpath}.js` : 'adapter.mjs'
-            }${quote}`,
+          (_all, quote) => `${quote}${target.startsWith('.') ? target : `./${target}`}/adapter.mjs${quote}`,
         ),
       )
     }

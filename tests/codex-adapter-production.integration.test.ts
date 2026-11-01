@@ -91,4 +91,9 @@ it('uses an independent npm artifact through compiled production analysis, parti
     'utf8',
   )
   expect(compiled).not.toContain("from '@cordisx/codex-adapter'")
+  const shim = await readFile(
+    new URL('../packages/cli/dist/src/launcher/native-source-structure.js', import.meta.url),
+    'utf8',
+  )
+  expect(shim).toContain('codex-adapter/adapter.mjs')
 })
