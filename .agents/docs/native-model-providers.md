@@ -503,6 +503,10 @@ and unify model/effort menu selection. Both menu contracts retain awaited native
 update completion; an incomplete or ambiguous owner still fails closed.
 Model-update callbacks are resolved within their owning function, so unrelated
 minified bindings with the same spelling do not reject a compatible resource.
+Final dispatch also supports locally bound synchronous request factories. Native
+workspace checks and request construction remain lazy, execute once per call,
+and retain both ordinary and extension dispatch paths. The adapter recognizes
+these structures rather than pinning support to a Desktop build number.
 Desktop may create a thread and reconstruct its first turn in the main process
 rather than the intercepted renderer. The draft carries its admitted Send token
 in native client metadata as well as config. The intermediary validates that
