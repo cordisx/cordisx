@@ -30,7 +30,7 @@ export function readNativeSubmissionResources(contents: string): readonly Native
     // Only capability-bearing modules need the heavier syntax analysis. A dependency
     // graph can include unrelated tool/browser bundles with thousands of chunks.
     if (
-      entries.includes(entry) || [
+      entries.includes(entry) || /^\/webview\/assets\/app-shared-[^/]+\.js$/u.test(entry) || [
         ['submitTarget', 'options', 'openingPromptForHistory'],
         ['context', 'configOverrides', 'requiresThreadReferences'],
         ['configOverrides', 'threadStartKind', 'requiresThreadReferences'],
@@ -40,6 +40,7 @@ export function readNativeSubmissionResources(contents: string): readonly Native
         ['sendRequest', 'turn/start', 'getAppServerVersion'],
         ['onSelectModel', 'onSelectModelOption', 'reasoningEffort'],
         ['accessInputs', 'readAccountInfo'],
+        ['accountInfo', 'readAccountInfo'],
         ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
       ].some(keys => keys.every(key => source.includes(key)))
     ) {
