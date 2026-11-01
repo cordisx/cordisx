@@ -197,10 +197,12 @@ describe('React Marketplace source controls', () => {
         shadows.get(dialog)!.querySelector<HTMLButtonElement>('[data-action=confirm]')!.click()
         await new Promise(resolve => fixture.dom.window.setTimeout(resolve, 0))
       })
-      expect(reloadSource).toHaveBeenCalledExactlyOnceWith(OFFICIAL_MARKETPLACE_SOURCE)
+      await vi.waitFor(() => expect(reloadSource).toHaveBeenCalledExactlyOnceWith(OFFICIAL_MARKETPLACE_SOURCE))
       expect(fixture.document.querySelector('.cxr-page > [role="status"]')).toBeNull()
-      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Plugin management action failed')
-      expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Source refresh failed')
+      await vi.waitFor(() => {
+        expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Plugin management action failed')
+        expect(fixture.document.querySelector('.cxn-card')?.textContent).toContain('Source refresh failed')
+      })
     } finally {
       await act(async () => disposeDialogs())
       await act(async () => disposeNotifications())

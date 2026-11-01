@@ -110,6 +110,12 @@ function initialEdits(plan: TaskSource): void {
       JSON.stringify(taskToken)
     }:${taskHandle}.token})`,
   )
+  const priorMetadata = properties(localRequest).get('responsesapiClientMetadata')
+  const taskMetadata = `(${taskHandle}===void 0?${priorMetadata ? plan.text(priorMetadata) : 'void 0'}:{...(${
+    priorMetadata ? plan.text(priorMetadata) : 'void 0'
+  }),${JSON.stringify(taskToken)}:${taskHandle}.token})`
+  if (priorMetadata) plan.replace(priorMetadata, taskMetadata)
+  else plan.addProperty(localRequest, `responsesapiClientMetadata:${taskMetadata}`)
   const worktreeFn = plan.declaration(worktree.callee.name)
   const worktreeInput = plan.parameter(worktreeFn, [
     'model',
@@ -131,6 +137,8 @@ function initialEdits(plan: TaskSource): void {
   plan.replace(
     queuedInput,
     `(${taskHandle}===void 0?${queuedInput.name}:{...${queuedInput.name},configOverrides:{...${queuedInput.name}.configOverrides,${
+      JSON.stringify(taskToken)
+    }:${taskHandle}.token},responsesapiClientMetadata:{...${queuedInput.name}.responsesapiClientMetadata,${
       JSON.stringify(taskToken)
     }:${taskHandle}.token}})`,
   )
