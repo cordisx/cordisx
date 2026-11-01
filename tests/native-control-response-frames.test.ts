@@ -1,6 +1,8 @@
 import { once } from 'node:events'
 import { createConnection, type Socket } from 'node:net'
 import { describe, expect, it } from 'vitest'
+import { type DiagnosticEvent, withDiagnostics } from '../packages/cli/src/diagnostics/context.js'
+import { projectDiagnostic } from '../packages/cli/src/diagnostics/journal.js'
 import { startNativeSubmissionControlServer } from '../packages/cli/src/launcher/native-submission-control-server.js'
 
 /** An authenticated intermediary stand-in; no native App or process is launched. */
@@ -114,13 +116,17 @@ describe('native control response budgets', () => {
   })
 
   it('rejects a response above 64 MiB and settles the outstanding request', async () => {
-    const f = await peer()
+    const events: DiagnosticEvent[] = []
+    const f = await withDiagnostics({ emit: event => events.push(event) }, () => peer())
     try {
       const waiting = f.server.nativeRequest('thread/read', { threadId: 'huge', includeTurns: true })
       const rejected = expect(waiting).rejects.toThrow('disconnected')
       const request = await f.next()
       f.socket.write(JSON.stringify({ id: request.id, ok: true, value: 'x'.repeat(64 * 1024 * 1024) }) + '\n')
       await rejected
+      const oversized = events.find(event => event.event === 'native-control-frame-rejected')!
+      expect(projectDiagnostic(oversized)).toMatchObject({ phase: 'response-frame-limit', count: 64 * 1024 * 1024 })
+      expect(projectDiagnostic(oversized).bytes).toBeGreaterThan(64 * 1024 * 1024)
     } finally {
       f.socket.destroy()
       await f.server.close()

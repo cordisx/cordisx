@@ -316,8 +316,8 @@ export async function startNativeSubmissionControlServer(
           diagnostic({
             event: 'native-control-frame-rejected',
             phase: authenticated ? 'response-frame-limit' : 'request-frame-limit',
-            frameBytes: fragmentBytes,
-            frameLimitBytes: frameLimit,
+            bytes: fragmentBytes,
+            count: frameLimit,
             verified: authenticated,
           })
           socket.destroy()
