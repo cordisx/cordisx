@@ -36,6 +36,11 @@ import type {
   PendingNativeProviderChange,
 } from '../renderer/native-provider-submission-policy.js'
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import type {
+  ModelServicesReadResult,
+  ModelServicesSaveRequest,
+  ModelServicesSaveResult,
+} from '../model-service-contracts.js'
 
 const BINDING = '__cordisxNativeSubmissionCommand'
 const RECEIVER = '__cordisxNativeSubmissionReceive'
@@ -146,6 +151,11 @@ export function createNativeSubmissionCdpAuthority(options: {
     prepareImport?(text: string, authorized: () => boolean): CatalogTransferImportPreparationResult
     import?(request: CatalogTransferImportRequest, authorized: () => boolean): Promise<CatalogTransferImportResult>
     subscribe(listener: () => void): () => void
+  }
+  /** Top-level `model-service` declarations in the CordisX home config. */
+  readonly modelServices?: {
+    read(): Promise<ModelServicesReadResult>
+    save(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult>
   }
 }): NativeSubmissionCdpAuthority {
   const states = new Map<string, State>()
@@ -440,6 +450,22 @@ export function createNativeSubmissionCdpAuthority(options: {
             await respond(requestId, result)
             return
           }
+          if (envelope.operation === 'modelServicesRead' || envelope.operation === 'modelServicesSave') {
+            if (
+              !options.modelServices || input?.generation !== generation || owner.disposed
+              || documents.get(target.id) !== owner || session.isClosed()
+            ) throw new Error('Model services unavailable')
+            active.add(requestId)
+            admitted = true
+            const result = envelope.operation === 'modelServicesRead'
+              ? await options.modelServices.read()
+              : await options.modelServices.save(input.request as ModelServicesSaveRequest)
+            if (owner.disposed || documents.get(target.id) !== owner || session.isClosed()) {
+              throw new Error('Model services retired')
+            }
+            await respond(requestId, result)
+            return
+          }
           if (envelope.operation === 'catalogRead' || envelope.operation === 'catalogSnapshotRead') {
             active.add(requestId)
             admitted = true
@@ -625,6 +651,10 @@ export function createNativeSubmissionCdpAuthority(options: {
       }${
         options.management
           ? "catalogManagementRead:()=>call('catalogManagementRead',{generation}),catalogManagementSubscribe:listener=>{managementListeners.add(listener);return()=>managementListeners.delete(listener)},catalogManagementCommand:command=>call('catalogManagementCommand',{generation,command}),catalogEnvironmentRead:()=>call('catalogEnvironmentRead',{generation}),catalogEnvironmentSave:entries=>call('catalogEnvironmentSave',{generation,entries}),catalogEnvironmentGenerate:request=>call('catalogEnvironmentGenerate',{generation,request}),catalogEnvironmentGenerateCancel:runId=>call('catalogEnvironmentGenerateCancel',{generation,runId}),catalogManagementPrepareExport:request=>call('catalogManagementPrepareExport',{generation,request}),catalogManagementExport:request=>call('catalogManagementExport',{generation,request}),catalogManagementPrepareImport:text=>call('catalogManagementPrepareImport',{generation,text}),catalogManagementImport:request=>call('catalogManagementImport',{generation,request}),"
+          : ''
+      }${
+        options.modelServices
+          ? "modelServicesRead:()=>call('modelServicesRead',{generation}),modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
           : ''
       }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionDiscard:input=>call('selectionDiscard',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};

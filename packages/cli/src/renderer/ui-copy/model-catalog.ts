@@ -170,4 +170,45 @@ export const MODEL_CATALOG_COPY = {
   'catalog.noModels': { en: 'No models', 'zh-CN': '暂无模型' },
   'catalog.noMatchingModels': { en: 'No matching models', 'zh-CN': '无匹配模型' },
   'catalog.noSelectableModels': { en: 'No selectable models', 'zh-CN': '暂无可选模型' },
+  'catalog.sharedServices': { en: 'Model services for Codex and Claude', 'zh-CN': '跨应用模型服务' },
+  'catalog.sharedServicesDescription': {
+    en:
+      'Register a model service once. CordisX adds it to Codex and Claude when it starts them; restart the app to apply changes.',
+    'zh-CN': '在这里登记一次，CordisX 启动 Codex 或 Claude 时会自动写入它们的配置。保存后重启应用生效。',
+  },
+  'catalog.sharedServicesEmpty': { en: 'No shared model services yet', 'zh-CN': '还没有跨应用模型服务' },
+  'catalog.sharedServiceAdd': { en: 'Add shared service', 'zh-CN': '添加跨应用服务' },
+  'catalog.sharedServiceEdit': { en: 'Edit shared service', 'zh-CN': '编辑跨应用服务' },
+  'catalog.sharedServiceDelete': { en: 'Delete', 'zh-CN': '删除' },
+  'catalog.sharedServiceEditShort': { en: 'Edit', 'zh-CN': '编辑' },
+  'catalog.sharedServiceId': { en: 'Service ID', 'zh-CN': '服务 ID' },
+  'catalog.sharedServiceForCodex': { en: 'Use in Codex (OpenAI Responses)', 'zh-CN': '用于 Codex（OpenAI Responses）' },
+  'catalog.sharedServiceForClaude': {
+    en: 'Use in Claude (Anthropic Messages)',
+    'zh-CN': '用于 Claude（Anthropic Messages）',
+  },
+  'catalog.sharedServiceCodexModels': { en: 'Codex model IDs', 'zh-CN': 'Codex 模型 ID' },
+  'catalog.sharedServiceClaudeModels': { en: 'Claude model IDs', 'zh-CN': 'Claude 模型 ID' },
+  'catalog.sharedServiceModelsHint': { en: 'Separate with commas', 'zh-CN': '用逗号分隔' },
+  'catalog.sharedServiceKey': { en: 'API key', 'zh-CN': 'API 密钥' },
+  'catalog.sharedServiceKeyKeep': {
+    en: 'Leave empty to keep the current key',
+    'zh-CN': '留空则保留当前密钥',
+  },
+  'catalog.sharedServiceEnabled': { en: 'Enabled', 'zh-CN': '启用' },
+  'catalog.sharedServiceKeySet': { en: 'Key set', 'zh-CN': '已配置密钥' },
+  'catalog.sharedServiceKeyMissing': { en: 'No key', 'zh-CN': '未配置密钥' },
+  'catalog.sharedServiceDisabled': { en: 'Disabled', 'zh-CN': '已停用' },
+  'catalog.sharedServiceSaved': {
+    en: 'Saved. Restart Codex or Claude through CordisX to apply.',
+    'zh-CN': '已保存。通过 CordisX 重启 Codex 或 Claude 后生效。',
+  },
+  'catalog.sharedServiceInvalid': {
+    en: 'Enter an ID, a name, an HTTPS endpoint, and at least one app.',
+    'zh-CN': '请填写服务 ID、名称、HTTPS 服务地址，并至少选择一个应用。',
+  },
+  'catalog.sharedServiceConflict': {
+    en: 'The services changed elsewhere. Reload and try again.',
+    'zh-CN': '服务配置已在别处改动，请刷新后重试。',
+  },
 } as const satisfies ProductCopyCatalog<'catalog'>

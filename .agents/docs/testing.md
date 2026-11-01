@@ -35,6 +35,11 @@ the existing tooling installed. Check generated source together with its
 generator using its owner's regeneration/drift command; a formatter alone
 does not prove generated content is current. Run the focused owning tests when
 an icon or label changes derived UI expectations.
+`npm install` installs a pre-commit hook that formats the staged files of a
+commit; see [commit-time formatting](../rules/README.md#commit-time-formatting).
+Editing that hook or `scripts/pre-commit-format.mjs` uses
+`npm run test:ci-policy`, which covers the installer, the chained machine-wide
+hook, partial staging, and a formatter failure stopping the commit.
 
 `vitest.config.mjs` partitions discovery into core, renderer, integration, and
 browser projects. Core catches otherwise unclassified tests so additions are

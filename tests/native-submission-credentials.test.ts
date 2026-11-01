@@ -26,6 +26,26 @@ function endpoint(
 }
 
 describe('native submission credential adapter', () => {
+  it('routes managed Responses while retaining the credential command and lease lifecycle', async () => {
+    const dispose = vi.fn()
+    const credentials = {
+      prepare: vi.fn(async () => ({ scheme: 'none' as const, serviceGeneration: 'service-1', dispose })),
+      close: vi.fn(async () => undefined),
+    }
+    const routeEndpoint = vi.fn(() => 'http://127.0.0.1:1234/opaque')
+    const broker = nativeSubmissionCredentialBroker({
+      credentials,
+      routeEndpoint,
+      resolveEndpoint: () => endpoint({ scheme: 'none', dispose: vi.fn() }),
+    })
+    const lease = await broker.prepare('managed-provider')
+    expect(lease.endpoint.baseUrl).toBe('http://127.0.0.1:1234/opaque')
+    expect(lease.auth).toEqual({ scheme: 'none' })
+    expect(routeEndpoint).toHaveBeenCalledWith('http://127.0.0.1:43127/v1')
+    await lease.dispose()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
   it('combines matching private snapshots and retains only the durable broker lease', async () => {
     const disposePreparation = vi.fn()
     const disposeEndpoint = vi.fn()

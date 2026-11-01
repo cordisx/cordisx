@@ -140,6 +140,14 @@ export async function prepareCliCommand(
     else await runAppCommand(runtime)
     return
   }
+  if (
+    'app' in parsedInvocation && parsedInvocation.app === 'claude'
+    && ['start', 'run', 'restart', 'stop', 'status'].includes(parsedInvocation.action)
+  ) {
+    const { runClaudeDesktopCommand } = await import('./claude-desktop-command.js')
+    await runClaudeDesktopCommand(parsedInvocation as Parameters<typeof runClaudeDesktopCommand>[0], runtime)
+    return
+  }
   const internalForeground = [
     runtime.internalRunInjectedHost,
     runtime.internalAgentHistoryHost,

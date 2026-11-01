@@ -33,6 +33,7 @@ export function harness(input: {
   now?: () => number
   runtimeValid?: () => boolean
   createdNavigation?: () => number
+  prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
   providerSource?: (providerId: string) => 'managed' | 'config' | undefined
   validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
 } = {}) {
@@ -119,6 +120,9 @@ export function harness(input: {
       }),
     },
     existingThread: { switch: switchThread },
+    ...(input.prepareConfiguredProvider === undefined
+      ? {}
+      : { prepareConfiguredProvider: input.prepareConfiguredProvider }),
     ...(input.providerSource === undefined ? {} : { providerSource: input.providerSource }),
     ...(input.validateSelection === undefined ? {} : { validateSelection: input.validateSelection }),
     operationTtlMs: 100,
