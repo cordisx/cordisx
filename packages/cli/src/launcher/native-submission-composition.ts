@@ -1,3 +1,5 @@
+import { startResponsesEncryptedReplay } from './responses-encrypted-replay.js'
+import { configuredEncryptedReplay } from './configured-encrypted-replay.js'
 import { diagnostic } from '../diagnostics/context.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { type CliModelExportResult, exportCliModelCatalog } from './model-catalog/cli-export.js'
@@ -427,6 +429,7 @@ export async function prepareNativeSubmissionBootstrap(
     await control.close()
     throw error
   })
+  let encryptedReplay: Awaited<ReturnType<typeof startResponsesEncryptedReplay>> | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
   let agentTasks: NativeAgentTasks | undefined
@@ -454,6 +457,7 @@ export async function prepareNativeSubmissionBootstrap(
       } finally {
         try {
           await credentials?.close()
+          await encryptedReplay?.close()
         } finally {
           try {
             await managed?.close()
@@ -735,13 +739,18 @@ export async function prepareNativeSubmissionBootstrap(
             ? {}
             : { defaultProviderId: completeOptions.defaultProviderId }),
         })
+        encryptedReplay = await startResponsesEncryptedReplay()
+        const prepareConfiguredProvider = configuredEncryptedReplay(codexHome, encryptedReplay.route)
+        control.bindConfiguredProvider(prepareConfiguredProvider)
         controller = createNativeSubmissionController({
+          prepareConfiguredProvider,
           selection: cdp.selection,
           runtime: cdp.runtime,
           existingThread: control.existingThread,
           credentials: nativeSubmissionCredentialBroker({
             credentials,
             resolveEndpoint: resolveConnection,
+            routeEndpoint: encryptedReplay.route,
           }),
           providerSource: providerId =>
             managed?.owns(providerId) || hasPluginProvider(providerId)

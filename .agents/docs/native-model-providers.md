@@ -585,3 +585,32 @@ alone does not establish a timeout or CPU-contention root cause.
 
 Formal dependency pins, repository delivery gates, publication and explicit user
 acceptance remain separate from an experimental local candidate.
+
+## Encrypted reasoning recovery
+
+The launch-scoped Responses transport preserves the configured provider ID,
+model and native authentication. Config-backed routes override only
+`model_providers.<id>.base_url` in the native request; managed routes retain
+their existing credential lease. The native OpenAI default and non-Responses
+routes remain unchanged. No installed application, persistent configuration or
+conversation history is rewritten.
+
+A stateless full-history request that contains encrypted reasoning may retry
+once after an exact `invalid_encrypted_content` error (including a gateway's
+`-4003` wrapper). HTTP 400 errors and SSE `response.failed` errors are handled.
+Only encrypted reasoning items are excluded from the retry; visible messages,
+model options and tool-call/result associations are retained. Recovery loses
+the inaccessible opaque reasoning, not the visible conversation. Requests with
+`previous_response_id` are not recovered because complete history cannot be
+proven. Ordinary same-provider requests are never proactively sanitized.
+
+SSE recovery is permitted only before any output item, text delta, tool event
+or unknown event is forwarded. An exhausted retry, unrelated error, cancelled
+request or partially delivered stream cannot trigger another replay. Unknown
+SSE frames and oversized preludes pass through without recovery. The loopback
+transport uses unguessable, fixed-upstream routes, bounded request sizes and
+concurrency; redirects are rejected rather than forwarding credentials to a
+new destination. Routes and requests are retired with the launch.
+
+Transport and native-request composition checks do not establish real-provider
+login, every model's history compatibility, or installed Desktop acceptance.
