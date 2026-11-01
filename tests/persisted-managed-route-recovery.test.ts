@@ -20,10 +20,17 @@ describe('persisted managed provider resume routing', () => {
       h.send({
         id: 'known-provider',
         method: 'thread/resume',
-        params: { threadId: 'recognized-managed-thread', config: { 'model_providers.provider-b': historical } },
+        params: {
+          threadId: 'recognized-managed-thread',
+          modelProvider: null,
+          model: null,
+          config: { 'model_providers.provider-b': historical },
+        },
       })
       const received = JSON.parse(await h.read())
       expect(received.result.received.config['model_providers.provider-b'].base_url).toBe('http://127.0.0.1/v1')
+      expect(received.result.received.modelProvider).toBeNull()
+      expect(received.result.received.model).toBeNull()
       expect(configured).not.toHaveBeenCalled()
       expect(h.prepareThreadResume).toHaveBeenCalledWith({
         threadId: 'recognized-managed-thread',

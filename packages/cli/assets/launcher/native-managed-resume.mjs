@@ -10,7 +10,7 @@ export async function prepareManagedResume(message, { nativeCall, controlCall })
     thread?.id !== params.threadId || !['idle', 'notLoaded', 'systemError'].includes(thread.status?.type)
     || typeof thread.modelProvider !== 'string' || thread.modelProvider === 'openai'
     || typeof thread.model !== 'string' || thread.model === ''
-    || (params.modelProvider !== undefined && params.modelProvider !== thread.modelProvider)
+    || (params.modelProvider != null && params.modelProvider !== thread.modelProvider)
     || (params.config?.model_provider !== undefined && params.config.model_provider !== thread.modelProvider)
   ) return undefined
   const prepared = await controlCall('managed-resume', {

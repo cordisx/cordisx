@@ -77,6 +77,20 @@ describe('current managed resume route', () => {
       model: 'new-model',
     })
   })
+  it('accepts native nullable resume defaults without inventing a provider change', async () => {
+    const f = fixture()
+    const result = await prepareManagedResume({
+      ...request,
+      params: { ...request.params, modelProvider: null, model: null, config: null },
+    }, f)
+    expect(result?.message.params.modelProvider).toBeNull()
+    expect(result?.message.params.model).toBeNull()
+    expect(f.controlCall).toHaveBeenCalledWith('managed-resume', {
+      threadId: 'history',
+      providerId: 'provider',
+      model: 'model',
+    })
+  })
   it.each([{ kind: 'reject' }, { kind: 'resume', resumeToken: 'bad', configOverrides: {} }])(
     'does not apply rejected preparations: %s',
     async prepared => {
