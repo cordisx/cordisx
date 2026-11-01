@@ -192,6 +192,11 @@ function draftRequest(plan: ResourcePlan, fn: SyntaxNode): void {
       JSON.stringify(modelReasoningEfforts)
     }.includes(${effort})?{model_reasoning_effort:${effort}}:{})})`,
   )
+  // Main-process first-turn builders retain client metadata but drop config.
+  // Carry the original admitted Send token; the intermediary removes it.
+  const metadata = properties(request).get('responsesapiClientMetadata')
+  if (metadata) plan.replace(metadata, config(token, plan.text(metadata)))
+  else plan.insert(request.end - 1, `,...(${token}===void 0?{}:{responsesapiClientMetadata:${config(token)}})`)
   plan.serviceTier(request)
   plan.capabilities.push('draft-request')
 }

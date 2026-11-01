@@ -320,6 +320,28 @@ async function forward(line) {
     return
   }
   const params = object(message?.params)
+  const clientMetadata = object(params?.responsesapiClientMetadata)
+  if (clientMetadata && Object.hasOwn(clientMetadata, marker)) {
+    const carried = clientMetadata[marker]
+    const originalConfig = object(params.config)
+    if (
+      !['thread/start', 'turn/start'].includes(message.method) || !validToken(carried)
+      || (originalConfig && Object.hasOwn(originalConfig, marker) && originalConfig[marker] !== carried)
+    ) {
+      await write(process.stdout, {
+        id: message.id,
+        error: { code: -32000, message: 'Invalid managed Send association' },
+      })
+      return
+    }
+    // The main-process first-turn builder retains metadata but drops config.
+    // This is the original Send token, not authority inferred from a thread ID.
+    params.config = { ...originalConfig, [marker]: carried }
+    const nextMetadata = { ...clientMetadata }
+    delete nextMetadata[marker]
+    if (Object.keys(nextMetadata).length === 0) delete params.responsesapiClientMetadata
+    else params.responsesapiClientMetadata = nextMetadata
+  }
   if (
     message?.method === 'turn/start' && agentFirstTurns.has(params?.threadId)
     && params.config?.[marker] !== agentFirstTurns.get(params.threadId)
