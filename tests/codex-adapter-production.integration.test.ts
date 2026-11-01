@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, symlink } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { PluginPackageSourceSnapshotter } from '../packages/cli/src/launcher/packages/integrity.js'

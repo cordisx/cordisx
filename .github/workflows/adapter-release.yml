@@ -60,7 +60,7 @@ jobs:
       - name: Pack only the adapter
         run: |
           mkdir -p .adapter-release
-          npm pack --workspace=@cordisx/codex-adapter --ignore-scripts --pack-destination .adapter-release
+          npm pack --workspace=@cordisx/codex-adapter --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/.adapter-release"
       - uses: actions/upload-artifact@v4
         with:
           name: codex-adapter-${{ github.event.pull_request.head.sha || github.sha }}
