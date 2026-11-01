@@ -503,6 +503,12 @@ and unify model/effort menu selection. Both menu contracts retain awaited native
 update completion; an incomplete or ambiguous owner still fails closed.
 Model-update callbacks are resolved within their owning function, so unrelated
 minified bindings with the same spelling do not reject a compatible resource.
+Desktop may create a thread and reconstruct its first turn in the main process
+rather than the intercepted renderer. The draft carries its admitted Send token
+in native client metadata as well as config. The intermediary validates that
+carrier through the same consume/authorize path and removes it before the native
+write. Conflicting or invalid carriers are rejected; a thread ID alone never
+supplies authorization. Unmarked first turns retain their existing safety fence.
 
 The launcher admits a new renderer only while its title or URL still identifies
 Codex/ChatGPT. After that strict admission, the Desktop may retitle the document

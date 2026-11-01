@@ -74,7 +74,7 @@ type NativeSubmissionActivation =
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 9
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 10
 const SHA256 = /^[a-f0-9]{64}$/u
 
 interface CachedNativeTransform {
