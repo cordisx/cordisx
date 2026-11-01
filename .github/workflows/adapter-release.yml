@@ -41,6 +41,7 @@ jobs:
       - name: Build actual Host/adapter production composition
         run: npm run build --workspace=cordisx
       - run: npm run typecheck --workspace=@cordisx/codex-adapter
+      - run: npm test --workspace=@cordisx/codex-adapter
       - name: Related modules and Host intermediary regression
         run: >-
           npx vitest run

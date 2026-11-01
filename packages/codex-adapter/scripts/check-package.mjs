@@ -19,7 +19,7 @@ const [{ files }] = JSON.parse(
 )
 assert(files.some(f => f.path === 'dist/adapter.mjs'))
 assert(files.some(f => f.path === 'src/index.ts'))
-assert(files.some(f => f.path.startsWith('tests/')))
+assert(files.some(f => f.path === 'tests/checks.mjs'))
 assert(
   files.every(f =>
     /^(?:dist\/|src\/|tests\/|package\.json$|README\.md$|LICENSE$|THIRD_PARTY_NOTICES\.md$)/u.test(f.path)

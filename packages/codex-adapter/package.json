@@ -25,7 +25,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:package": "node scripts/check-package.mjs"
+    "check:package": "node scripts/check-package.mjs",
+    "test": "node --test tests/checks.mjs"
   },
   "engines": {
     "node": ">=22.19"

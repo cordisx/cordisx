@@ -13,3 +13,6 @@ transformed resources stay on the user's machine.
 
 See the [adapter reference](../../.agents/docs/codex-adapters.md) for source
 trust, exact selection, coexistence, cache policy, activation and release gates.
+
+After building, `npm test` in this package directory runs the shipped synthetic
+checks with Node alone. The same checks run directly from an unpacked artifact.

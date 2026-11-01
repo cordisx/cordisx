@@ -55,6 +55,11 @@ it('uses an independent npm artifact through compiled production analysis, parti
     'import {bundle} from "@cordisx/codex-adapter"; import {parseNativeSource} from "@cordisx/codex-adapter/native-source-structure"; console.log(JSON.stringify({version:bundle.version,type:parseNativeSource("export const value=1").type}))',
   ], { cwd: root, encoding: 'utf8' })
   expect(JSON.parse(standalone)).toEqual({ version: '0.1.0-beta.1', type: 'Program' })
+  const shippedChecks = execFileSync(process.execPath, ['--test', 'tests/checks.mjs'], {
+    cwd: path.join(store, 'packages', id, 'payload'),
+    encoding: 'utf8',
+  })
+  expect(shippedChecks).toContain('# pass 5')
 
   await writePrivateJson(path.join(store, 'state.json'), {
     schema: 1,
