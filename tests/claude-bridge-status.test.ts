@@ -112,6 +112,7 @@ describe('integration_status in the Claude bridge plugin', () => {
       'read_session',
       'start_session',
       'send_message',
+      'list_model_providers',
       'integration_status',
     ])
     const status = p.registered.find(tool => tool.name === 'integration_status')!
