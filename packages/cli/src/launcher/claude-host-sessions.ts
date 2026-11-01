@@ -1,11 +1,14 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { access, chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { type HomeConfigProvider, parseHomeConfig } from '../config/home-config.js'
+import { readClaudeProviderCatalog } from './claude-desktop-profile.js'
 import { runningClaudeProfile } from './claude-desktop-process.js'
 import { CLAUDE_DEFAULT_PERMISSION_MODE } from './claude-permission-mode.js'
+import { modelsForApp } from './model-service-projection.js'
 
 /**
  * Claude Desktop conversations driven from outside the app, with no Claude
@@ -88,14 +91,22 @@ export function appLaunchQuestion(app: 'codex' | 'claude') {
 const CLAUDE_LAUNCH_QUESTION = appLaunchQuestion('claude')
 
 const LAUNCH_WAIT_MS = 30_000
+/** How long a started turn gets to fail visibly before the tool answers "started". */
+const TURN_REPORT_MS = 8_000
 
 const MAX_TRANSCRIPT_CHARS = 60_000
+/** The organization folder Claude Desktop files sessions under on a fresh profile. */
+const DEFAULT_ORGANIZATION = '00000000-0000-4000-8000-000000000001'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 const text = (value: unknown, max = 512): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= max ? value : undefined
+
+/** `limit` as the tools declare it: a positive integer of message entries, or undefined when absent. */
+const transcriptLimit = (value: unknown): number | undefined =>
+  Number.isInteger(value) ? Math.min(Math.max(value as number, 1), 200) : undefined
 
 interface SessionRecord {
   readonly sessionId: string
@@ -164,8 +175,11 @@ export async function findClaudeTranscript(homedir: string, cliSessionId: string
   return undefined
 }
 
-/** The user and assistant text of a CLI transcript, newest last, bounded. */
-export function claudeTranscript(jsonl: string): readonly { role: string; text: string }[] {
+/** The user and assistant text of a CLI transcript, newest last, bounded by `limit` entries and 60k characters. */
+export function claudeTranscript(
+  jsonl: string,
+  limit?: number,
+): readonly { role: string; text: string }[] {
   const entries: { role: string; text: string }[] = []
   for (const line of jsonl.split('\n')) {
     let entry: Record<string, unknown> | undefined
@@ -186,7 +200,8 @@ export function claudeTranscript(jsonl: string): readonly { role: string; text: 
   }
   let budget = MAX_TRANSCRIPT_CHARS
   const kept: { role: string; text: string }[] = []
-  for (const entry of entries.reverse()) {
+  const newest = limit === undefined ? entries : entries.slice(-Math.max(limit, 0))
+  for (const entry of newest.reverse()) {
     if (budget <= 0) break
     const clipped = entry.text.length > budget ? `…${entry.text.slice(-budget)}` : entry.text
     budget -= clipped.length
@@ -266,6 +281,8 @@ export interface ClaudeHostSessionsInput {
   ) => Promise<void>
   /** Answers through a Claude session's plugin, for a session the app is running right now. */
   readonly viaPlugin?: (operation: 'send_message', args: Record<string, unknown>, target: string) => Promise<unknown>
+  /** How long a started turn is given to report a failure before the call answers "started" (tests shorten it). */
+  readonly turnReportMs?: number
 }
 
 /** Validated `app: "claude"` operations that need no Claude session to be open. */
@@ -325,12 +342,14 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     readonly prompt: string
     readonly cwd: string
     readonly model?: string
-  }): Promise<void> {
+    /** A model service this call named, instead of the one the profile was launched on. */
+    readonly service?: ClaudeServiceChoice
+  }): Promise<TurnHandle> {
     const cli = await claudeProfileCli(options.binding.dataDir, homedir)
     if (cli === undefined) {
       throw new Error('Claude Desktop has not installed Claude Code yet; open one Code session in Claude once')
     }
-    const provider = options.binding.provider
+    const provider = options.service ?? options.binding.provider
     const key = provider === undefined ? undefined : await input.secret(provider.apiKeyEnv)
     if (provider !== undefined && key === undefined) {
       throw new Error(`The key for model service ${provider.id} (${provider.apiKeyEnv}) is not set`)
@@ -355,15 +374,142 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       environment.ANTHROPIC_AUTH_TOKEN = key
       delete environment.ANTHROPIC_API_KEY
     }
-    const child = spawn(cli, args, { cwd: options.cwd, env: environment, stdio: ['pipe', 'ignore', 'ignore'] })
+    // The CLI's own report of a failed turn is the only evidence a background run gives:
+    // a nonzero exit, or a JSON result that says it failed.
+    const out: Buffer[] = []
+    const child = spawn(cli, args, {
+      cwd: options.cwd,
+      env: environment,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (out.length < 64) out.push(chunk)
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (out.length < 64) out.push(chunk)
+    })
     child.stdin.end(options.prompt)
     child.once('error', () => undefined)
-    child.once('exit', () => {
-      void (async () => {
-        const { pid } = await profile().catch(() => ({ pid: undefined }))
-        if (pid !== undefined) await sendClaudeUrl(pid, claudeSessionLink(options.cliSessionId)).catch(() => undefined)
-      })()
+    const ended = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>(resolve => {
+      child.once('error', () => resolve({ code: null, signal: null }))
+      child.once('exit', (code, signal) => resolve({ code, signal }))
     })
+    void ended.then(async () => {
+      const { pid } = await profile().catch(() => ({ pid: undefined }))
+      if (pid !== undefined) await sendClaudeUrl(pid, claudeSessionLink(options.cliSessionId)).catch(() => undefined)
+    })
+    return {
+      ended: ended.then(exit => turnFailure(exit, Buffer.concat(out).toString('utf8'))),
+    }
+  }
+
+  /** Writes a started session's title into the record Claude Desktop lists it by. */
+  async function titleStartedSession(
+    binding: ClaudeDesktopBinding,
+    cliSessionId: string,
+    title: string,
+  ): Promise<void> {
+    const account = await preferredAccount(binding.dataDir)
+    const folder = path.join(binding.dataDir, 'claude-code-sessions', account, DEFAULT_ORGANIZATION)
+    const sessionId = `local_${cliSessionId}`
+    const record = await readJson(path.join(folder, `${sessionId}.json`))
+    const file = path.join(folder, `${sessionId}.json`)
+    await mkdir(folder, { recursive: true, mode: 0o700 })
+    await writeAtomically(
+      file,
+      JSON.stringify({
+        ...(record ?? {}),
+        sessionId,
+        cliSessionId,
+        title,
+        titleSource: 'tool',
+        cwd: record?.cwd ?? homedir,
+        createdAt: typeof record?.createdAt === 'number' ? record.createdAt : Date.now(),
+        lastActivityAt: typeof record?.lastActivityAt === 'number' ? record.lastActivityAt : Date.now(),
+        isArchived: false,
+      }),
+    )
+  }
+
+  /** The account folder Claude files sessions under: the one its config names, else the first it has, else a fresh one. */
+  async function preferredAccount(dataDir: string): Promise<string> {
+    const known = (await readJson(path.join(dataDir, 'config.json')))?.lastKnownAccountUuid
+    if (typeof known === 'string' && UUID.test(known)) return known
+    const existing = (await directories(path.join(dataDir, 'claude-code-sessions'))).map(folder =>
+      path.basename(folder)
+    )
+    return existing.sort()[0] ?? DEFAULT_ORGANIZATION
+  }
+
+  /**
+   * The Claude model services this home declares for Claude, as
+   * `list_model_providers` returns them: the CordisX config's `model-service`
+   * entries merged with what the profile's `configLibrary` already holds. The
+   * same shape the Codex tool returns, and only ids, titles and model ids: no
+   * endpoint and no key.
+   */
+  async function claudeCatalog(binding: ClaudeDesktopBinding) {
+    const providers = (await readClaudeProviderCatalog(await readHomeProviders(input.cordisxHomeDir), binding.dataDir))
+      .map(entry => ({
+        providerId: entry.providerId,
+        title: entry.title,
+        models: entry.models.map(id => ({ id, label: id })),
+      }))
+    return { providers }
+  }
+
+  /** `providerId` and `model` for a Claude start, or why they cannot be honored. */
+  async function selectClaudeService(
+    binding: ClaudeDesktopBinding,
+    args: Record<string, unknown>,
+  ): Promise<
+    | { readonly providerId?: string; readonly model?: string; readonly service?: ClaudeServiceChoice }
+    | { readonly status: 'rejected'; readonly reason: string }
+  > {
+    const catalog = await claudeCatalog(binding)
+    const declared = await readHomeProviders(input.cordisxHomeDir)
+    const serviceOf = (providerId: string): ClaudeServiceChoice | undefined => {
+      const declaration = declared.find(entry => entry.kind === 'model-service' && entry.id === providerId)
+      return declaration === undefined || declaration.kind !== 'model-service'
+        ? undefined
+        : {
+          id: declaration.id,
+          baseUrl: declaration.baseUrl,
+          apiKeyEnv: declaration.apiKeyEnv,
+          ...(modelsForApp(declaration, 'claude')[0] === undefined
+            ? {}
+            : { model: modelsForApp(declaration, 'claude')[0]! }),
+        }
+    }
+    const providerId = text(args.providerId, 128)
+    const model = text(args.model)
+    if (providerId === undefined) {
+      // A model on its own names a model of the service the profile runs on.
+      if (model === undefined) return {}
+      const profile = binding.provider
+      if (profile === undefined) return { status: 'rejected', reason: 'model-without-provider' }
+      const known = catalog.providers.find(entry => entry.providerId === profile.id)?.models ?? []
+      return known.some(entry => entry.id === model)
+        ? { providerId: profile.id, model, service: profile }
+        : { status: 'rejected', reason: 'model-not-in-provider-catalog' }
+    }
+    const provider = catalog.providers.find(entry => entry.providerId === providerId)
+    if (provider === undefined) return { status: 'rejected', reason: 'provider-not-configured' }
+    const chosen = model ?? provider.models[0]?.id
+    if (chosen !== undefined && !provider.models.some(entry => entry.id === chosen)) {
+      return { status: 'rejected', reason: 'model-not-in-provider-catalog' }
+    }
+    const service = serviceOf(providerId)
+    if (service === undefined) {
+      // A service only the profile's own library holds has no declaration here to
+      // take an endpoint and key from; refusing beats starting a turn on the wrong one.
+      return { status: 'rejected', reason: 'provider-not-declared' }
+    }
+    return {
+      providerId,
+      ...chosen === undefined ? {} : { model: chosen },
+      service: chosen === undefined ? service : { ...service, model: chosen },
+    }
   }
 
   async function read(
@@ -391,12 +537,20 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     return {
       ...(record ?? { sessionId: `local_${cliSessionId}`, cliSessionId }),
       link: claudeSessionLink(cliSessionId),
-      transcript: file === undefined ? [] : claudeTranscript(await readFile(file, 'utf8')),
+      transcript: file === undefined ? [] : claudeTranscript(await readFile(file, 'utf8'), transcriptLimit(args.limit)),
     }
   }
 
   return async (operation: unknown, rawArgs: unknown): Promise<unknown> => {
     const args = object(rawArgs) ?? {}
+    if (operation === 'list_model_providers') {
+      // A catalog read needs only the home config and the profile's files.
+      const current = await profile()
+      const binding = current.binding ?? {
+        dataDir: path.join(input.cordisxHomeDir, 'apps', 'claude', 'profiles', 'default', 'data-3p'),
+      } as ClaudeDesktopBinding
+      return await claudeCatalog(binding)
+    }
     if (operation === 'list_sessions' || operation === 'read_session') {
       // Reading needs only the profile's files, not the app.
       const current = await profile()
@@ -414,15 +568,37 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       if (prompt === undefined) return { status: 'rejected', reason: 'prompt-required' }
       const cwd = text(args.cwd, 4096) ?? homedir
       if (!path.isAbsolute(cwd)) return { status: 'rejected', reason: 'cwd-must-be-absolute' }
+      const selection = await selectClaudeService(binding, args)
+      if ('status' in selection) return selection
       const cliSessionId = randomUUID()
-      await runTurn({ binding, cliSessionId, resume: false, prompt, cwd, ...modelOf(args) })
+      const turn = await runTurn({
+        binding,
+        cliSessionId,
+        resume: false,
+        prompt,
+        cwd,
+        ...selection.model === undefined ? {} : { model: selection.model },
+        ...selection.service === undefined ? {} : { service: selection.service },
+      })
+      const title = text(args.title, 120)
+      if (title !== undefined) await titleStartedSession(binding, cliSessionId, title).catch(() => undefined)
+      // A turn may run for minutes: only a failure it reports within a brief wait
+      // is folded in, and a slow turn stays "started" with a note on how to check.
+      const reported = await withinReportWindow(turn.ended, input.turnReportMs)
       return {
         status: 'started',
         sessionId: `local_${cliSessionId}`,
         cliSessionId,
+        ...(title === undefined ? {} : { title }),
+        ...(selection.providerId === undefined ? {} : { modelProvider: selection.providerId }),
+        ...(selection.model === undefined ? {} : { model: selection.model }),
         link: claudeSessionLink(cliSessionId),
-        note:
-          'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it.',
+        ...(reported === undefined ? {} : { turn: reported }),
+        note: reported === undefined
+          ? 'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it. Read the session again to see whether that turn finished.'
+          : reported.status === 'failed'
+          ? 'The first turn failed before the session could appear in Claude; the link still opens it, and another message runs a new turn.'
+          : 'The turn finished; the session appears in Claude, and the link opens it.',
       }
     }
     const sessionId = text(args.sessionId)
@@ -460,7 +636,94 @@ export function resumes(processList: string, cliSessionId: string): boolean {
   return processList.split('\n').some(line => flag.test(line))
 }
 
-function modelOf(args: Record<string, unknown>): { model?: string } {
-  const model = text(args.model)
-  return model === undefined ? {} : { model }
+interface TurnHandle {
+  /** Resolves once the turn ended, with what its exit said about it. Never rejects. */
+  readonly ended: Promise<TurnResult>
+}
+
+interface TurnResult {
+  readonly status: 'succeeded' | 'failed'
+  readonly error?: string
+}
+
+/** The turn's result if it ended within the report window, else undefined: it is still running. */
+async function withinReportWindow(
+  ended: Promise<TurnResult>,
+  windowMs = TURN_REPORT_MS,
+): Promise<TurnResult | undefined> {
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<undefined>(resolve => {
+    timer = setTimeout(() => resolve(undefined), windowMs)
+    timer.unref?.()
+  })
+  try {
+    return await Promise.race([ended, late])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * What a finished background turn reported. The CLI prints one JSON result on
+ * `--output-format json`; a nonzero exit or `is_error` means the turn failed,
+ * and the reason is what the CLI said, never the model service's key.
+ */
+export function turnFailure(
+  exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null },
+  output: string,
+  key?: string,
+): { readonly status: 'succeeded' | 'failed'; readonly error?: string } {
+  const scrub = (value: string): string => (key === undefined ? value : value.split(key).join('[redacted]'))
+  let reported: Record<string, unknown> | undefined
+  for (const line of output.split('\n').reverse()) {
+    const candidate = line.trim()
+    if (!candidate.startsWith('{')) continue
+    try {
+      reported = object(JSON.parse(candidate))
+      if (reported !== undefined) break
+    } catch { /* a later line may still be the result */ }
+  }
+  const failed = exit.code !== 0 || reported?.is_error === true || reported?.subtype === 'error'
+  if (!failed) return { status: 'succeeded' }
+  const said = typeof reported?.result === 'string'
+    ? reported.result
+    : typeof reported?.error === 'string'
+    ? reported.error
+    : undefined
+  const tail = said ?? output.trim().slice(-1000)
+  const reason = exit.signal !== null
+    ? `The turn was stopped by ${exit.signal}`
+    : exit.code === null
+    ? 'The turn could not be run'
+    : `The turn exited with code ${exit.code}`
+  return {
+    status: 'failed',
+    error: scrub(tail.length === 0 ? reason : `${reason}: ${tail}`).slice(0, 2000),
+  }
+}
+
+/** A record is replaced in one step, so a reader never sees half a session. */
+async function writeAtomically(file: string, content: string): Promise<void> {
+  const temporary = `${file}.cordisx-${process.pid}.tmp`
+  await writeFile(temporary, `${content}\n`, { mode: 0o600 })
+  await chmod(temporary, 0o600)
+  await rename(temporary, file)
+}
+
+/** The CordisX config's provider declarations; a missing or invalid file declares none. */
+export async function readHomeProviders(cordisxHomeDir: string): Promise<readonly HomeConfigProvider[]> {
+  try {
+    const document = JSON.parse(await readFile(path.join(cordisxHomeDir, 'config.json'), 'utf8'))
+    return parseHomeConfig(document).providers
+  } catch {
+    return []
+  }
+}
+
+/** One model service a call named, as the turn needs it: where to send, which key, which model. */
+interface ClaudeServiceChoice {
+  readonly id: string
+  readonly baseUrl: string
+  readonly apiKeyEnv: string
+  readonly model?: string
 }

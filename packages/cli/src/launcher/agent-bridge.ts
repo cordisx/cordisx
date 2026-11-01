@@ -49,7 +49,13 @@ const CLAUDE_TIMEOUT_MS = 60_000
 
 export const BRIDGE_APPS = ['codex', 'claude'] as const
 export type BridgeApp = typeof BRIDGE_APPS[number]
-export const BRIDGE_OPERATIONS = ['list_sessions', 'read_session', 'start_session', 'send_message'] as const
+export const BRIDGE_OPERATIONS = [
+  'list_sessions',
+  'read_session',
+  'start_session',
+  'send_message',
+  'list_model_providers',
+] as const
 export type BridgeOperation = typeof BRIDGE_OPERATIONS[number]
 
 export const isBridgeApp = (value: unknown): value is BridgeApp =>
@@ -86,8 +92,14 @@ function threadSummary(value: unknown) {
   }
 }
 
-/** A readable transcript of a thread: messages, plans, and commands, newest last, bounded. */
-export function threadTranscript(value: unknown): readonly { role: string; text: string }[] {
+/**
+ * A readable transcript of a thread: messages, plans, and commands, newest
+ * last, bounded by `limit` entries (the newest ones) and 60k characters.
+ */
+export function threadTranscript(
+  value: unknown,
+  limit?: number,
+): readonly { role: string; text: string }[] {
   const thread = object(value) ?? {}
   const entries: { role: string; text: string }[] = []
   for (const turn of Array.isArray(thread.turns) ? thread.turns : []) {
@@ -109,7 +121,8 @@ export function threadTranscript(value: unknown): readonly { role: string; text:
   }
   let budget = MAX_TRANSCRIPT_CHARS
   const kept: { role: string; text: string }[] = []
-  for (const entry of entries.reverse()) {
+  const newest = limit === undefined ? entries : entries.slice(-Math.max(limit, 0))
+  for (const entry of newest.reverse()) {
     if (budget <= 0) break
     const clipped = entry.text.length > budget ? `…${entry.text.slice(-budget)}` : entry.text
     budget -= clipped.length
@@ -117,6 +130,10 @@ export function threadTranscript(value: unknown): readonly { role: string; text:
   }
   return kept.reverse()
 }
+
+/** `limit` as the tools declare it: a positive integer of message entries, or undefined when absent. */
+const transcriptLimit = (value: unknown): number | undefined =>
+  Number.isInteger(value) ? Math.min(Math.max(value as number, 1), 200) : undefined
 
 /** Validated operations on Codex. Each maps onto the allowlisted native methods only. */
 export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homedir = os.homedir()) {
@@ -131,6 +148,16 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
   }
   return async (operation: unknown, input: unknown): Promise<unknown> => {
     const args = object(input) ?? {}
+    if (operation === 'list_model_providers') {
+      // The same shape the Claude plugin answers with, from this app's own catalog.
+      return {
+        providers: (await codex.catalog()).map(provider => ({
+          providerId: provider.providerId,
+          title: provider.title ?? provider.providerId,
+          models: provider.models.map(model => ({ id: model.id, label: model.label })),
+        })),
+      }
+    }
     if (operation === 'list_sessions') {
       const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit as number, 1), 50) : 20
       const listed = object(
@@ -149,11 +176,15 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
       const threadId = text(args.sessionId)
       if (threadId === undefined) return { status: 'rejected', reason: 'sessionId-required' }
       const read = object(await codex.nativeRequest('thread/read', { threadId, includeTurns: true }))
-      return { ...threadSummary(read?.thread), transcript: threadTranscript(read?.thread) }
+      return {
+        ...threadSummary(read?.thread),
+        transcript: threadTranscript(read?.thread, transcriptLimit(args.limit)),
+      }
     }
     if (operation === 'start_session') {
       const prompt = text(args.prompt, 100_000)
       if (prompt === undefined) return { status: 'rejected', reason: 'prompt-required' }
+      const requestedTitle = text(args.title, 120)
       const providerId = text(args.providerId, 128)
       let model = text(args.model)
       if (providerId !== undefined) {
@@ -175,11 +206,19 @@ export function createCodexBridgeHandler(codex: AgentBridgeCodexAuthority, homed
       )
       const threadId = text(object(started?.thread)?.id)
       if (threadId === undefined) return { status: 'failed', reason: 'thread-not-started' }
+      // `thread/start` takes no name, so the sidebar title is set right after it.
+      let title: string | undefined
+      if (requestedTitle !== undefined) {
+        title = await codex.nativeRequest('thread/name/set', { threadId, name: requestedTitle })
+          .then(() => requestedTitle)
+          .catch(() => undefined)
+      }
       const turnId = await startTurn(threadId, prompt)
       return {
         status: 'started',
         sessionId: threadId,
         ...(turnId === undefined ? {} : { turnId }),
+        ...(title === undefined ? {} : { title }),
         modelProvider: started?.modelProvider,
         model: started?.model,
         link: codexThreadLink(threadId),

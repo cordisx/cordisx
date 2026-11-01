@@ -38,6 +38,7 @@ export type NativeBridgeMethod =
   | 'thread/read'
   | 'thread/start'
   | 'thread/resume'
+  | 'thread/name/set'
   | 'turn/start'
   | 'turn/interrupt'
 

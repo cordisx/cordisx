@@ -70,7 +70,7 @@ const tools = [{
 }, {
   name: 'read_session',
   description:
-    'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only.',
+    'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only. `limit` caps the number of returned message entries (the newest ones); the transcript is also capped at about 60k characters.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -84,7 +84,7 @@ const tools = [{
 }, {
   name: 'start_session',
   description:
-    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. In Claude the session runs in the background in bypass permissions mode on the CordisX model service (model picks a Claude model) and shows in Claude when its first turn ends; the link opens it. If Claude is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
+    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns for that app; a value it does not list is refused. In Claude the session runs in the background in bypass permissions mode on the CordisX model service and shows in Claude when its first turn ends; the result says whether that turn failed within a short wait, and the link opens it. If Claude is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

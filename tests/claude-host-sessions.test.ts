@@ -8,6 +8,7 @@ import {
   claudeTranscript,
   createClaudeHostSessions,
   findClaudeTranscript,
+  readClaudeSessionRecords,
   resumes,
   writeClaudeDesktopBinding,
 } from '../packages/cli/src/launcher/claude-host-sessions.js'
@@ -19,7 +20,7 @@ async function temporary(): Promise<string> {
 }
 
 /** A Claude Code CLI stand-in that records its arguments, stdin, and flag settings. */
-async function fakeCli(dataDir: string, version: string, record: string): Promise<string> {
+async function fakeCli(dataDir: string, version: string, record: string, exitCode = 0): Promise<string> {
   const directory = path.join(dataDir, 'claude-code', version, 'build', 'claude.app', 'Contents', 'MacOS')
   await mkdir(directory, { recursive: true })
   const binary = path.join(directory, 'claude')
@@ -32,10 +33,35 @@ async function fakeCli(dataDir: string, version: string, record: string): Promis
       'cat > "$out.stdin"',
       'printf "%s\\n%s\\n" "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" > "$out.gateway"',
       'pwd > "$out.cwd"',
+      // The real CLI prints one JSON result on --output-format json; a failed one says is_error.
+      exitCode === 0
+        ? 'printf \'{"type":"result","is_error":false}\''
+        : `printf '{"type":"result","is_error":true,"result":"model rejected the request"}'`,
+      `exit ${exitCode}`,
     ].join('\n'),
   )
   await chmod(binary, 0o755)
   return binary
+}
+
+/** A CordisX home config declaring one Claude model service. */
+async function writeModelServices(cordisxHomeDir: string): Promise<void> {
+  const { createDefaultHomeConfig } = await import('../packages/cli/src/config/home-config.js')
+  await writeFile(
+    path.join(cordisxHomeDir, 'config.json'),
+    JSON.stringify({
+      ...createDefaultHomeConfig(),
+      providers: [{
+        id: 'other',
+        kind: 'model-service',
+        displayName: 'Other gateway',
+        baseUrl: 'https://other.invalid',
+        apiKeyEnv: 'OTHER_KEY',
+        protocols: ['anthropic-messages'],
+        models: { claude: ['claude-sonnet-5-5', 'claude-opus-5-5'] },
+      }],
+    }),
+  )
 }
 
 async function until(file: string): Promise<string> {
@@ -159,6 +185,117 @@ describe('Claude sessions driven from the host', () => {
       reason: 'cwd-must-be-absolute',
     })
   })
+
+  it('writes the requested title into the record list_sessions reads', async () => {
+    const { cordisxHomeDir, homedir, dataDir } = await launched()
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      runningPid: async () => -1,
+      secret: async () => 'sk-test',
+    })
+    const started = await sessions('start_session', { prompt: 'x', title: 'Tidy the README' }) as Record<string, string>
+    expect(started).toEqual(expect.objectContaining({ status: 'started', title: 'Tidy the README' }))
+    const records = await readClaudeSessionRecords(dataDir)
+    expect(records).toEqual([
+      expect.objectContaining({ sessionId: `local_${started.cliSessionId}`, title: 'Tidy the README' }),
+    ])
+    expect(await sessions('list_sessions', {})).toEqual(expect.objectContaining({
+      sessions: [expect.objectContaining({ title: 'Tidy the README' })],
+    }))
+  })
+
+  it('runs the turn on a named model service and refuses one it does not declare', async () => {
+    const { cordisxHomeDir, homedir, record } = await launched()
+    await writeModelServices(cordisxHomeDir)
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      runningPid: async () => -1,
+      secret: async name => name === 'OTHER_KEY' ? 'sk-other' : name === 'SUB2TOK_KEY' ? 'sk-test' : undefined,
+    })
+
+    const started = await sessions('start_session', {
+      prompt: 'x',
+      providerId: 'other',
+      model: 'claude-sonnet-5-5',
+    }) as Record<string, string>
+    expect(started).toEqual(expect.objectContaining({
+      status: 'started',
+      modelProvider: 'other',
+      model: 'claude-sonnet-5-5',
+    }))
+    expect((await until(`${record}.gateway`)).trim().split('\n')).toEqual(['https://other.invalid', 'sk-other'])
+    expect((await until(`${record}.args`)).trim().split('\n')).toContain('claude-sonnet-5-5')
+
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'nope' })).toEqual({
+      status: 'rejected',
+      reason: 'provider-not-configured',
+    })
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'other', model: 'gpt-6.1' })).toEqual({
+      status: 'rejected',
+      reason: 'model-not-in-provider-catalog',
+    })
+    // A service only the profile's own library holds has no declaration to run from.
+    await mkdir(path.join(cordisxHomeDir, 'data-3p', 'configLibrary'), { recursive: true })
+    await writeFile(
+      path.join(cordisxHomeDir, 'data-3p', 'configLibrary', '_meta.json'),
+      JSON.stringify({ entries: [{ id: 'library-only', name: 'Library only' }] }),
+    )
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'library-only' })).toEqual({
+      status: 'rejected',
+      reason: 'provider-not-declared',
+    })
+  })
+
+  it('reports a first turn that failed', async () => {
+    const { cordisxHomeDir, homedir, record } = await launched()
+    await fakeCli(path.join(cordisxHomeDir, 'data-3p'), '2.1.310', record, 1)
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      runningPid: async () => -1,
+      secret: async () => 'sk-test',
+    })
+    const started = await sessions('start_session', { prompt: 'x' }) as Record<string, unknown>
+    expect(started).toMatchObject({
+      status: 'started',
+      turn: { status: 'failed', error: expect.stringMatching(/model rejected the request/u) },
+    })
+    // The gateway key never reaches the result.
+    expect(JSON.stringify(started)).not.toMatch(/sk-test/)
+  })
+
+  it('answers while a long turn is still running instead of blocking on it', async () => {
+    const cordisxHomeDir = await temporary()
+    const homedir = await temporary()
+    const dataDir = path.join(cordisxHomeDir, 'data-3p')
+    const directory = path.join(dataDir, 'claude-code', '2.1.309', 'build', 'claude.app', 'Contents', 'MacOS')
+    await mkdir(directory, { recursive: true })
+    const binary = path.join(directory, 'claude')
+    // A turn that outlives the report window, as a real multi-minute task does.
+    await writeFile(binary, '#!/bin/sh\nsleep 30\n')
+    await chmod(binary, 0o755)
+    await writeClaudeDesktopBinding(cordisxHomeDir, {
+      version: 1,
+      profileId: 'e2e',
+      homeDir: cordisxHomeDir,
+      dataDir,
+    })
+    const sessions = createClaudeHostSessions({
+      cordisxHomeDir,
+      homedir,
+      runningPid: async () => -1,
+      secret: async () => undefined,
+      turnReportMs: 200,
+    })
+    const before = Date.now()
+    const started = await sessions('start_session', { prompt: 'long job' }) as Record<string, string>
+    expect(Date.now() - before).toBeLessThan(5_000)
+    expect(started).toMatchObject({ status: 'started' })
+    expect(started.turn).toBeUndefined()
+    expect(started.note).toMatch(/background/u)
+  }, 30_000)
 
   it('resumes a closed session for a message and hands an open one to its plugin', async () => {
     const { cordisxHomeDir, homedir, dataDir, record } = await launched()

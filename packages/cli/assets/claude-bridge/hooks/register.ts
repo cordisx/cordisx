@@ -42,6 +42,14 @@ const LAUNCH = {
 const CODEX_START_MS = 90_000
 
 /** One set of tool names for every app CordisX connects; `app` names the target. */
+const MODEL_PROVIDER_TOOL = {
+  name: 'list_model_providers',
+  description:
+    'List the CordisX model services declared for Claude in this CordisX home (`<CORDISX_HOME>/config.json`) merged with the services this Claude profile already holds, with their exact model ids. Read-only: never returns endpoints or credentials, and changes no default. The same shape the Codex app returns. `start_session` with `app: "claude"` takes a `providerId` and `model` from here; one it does not list is refused.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+} as const
+
+/** One set of tool names for every app CordisX connects; `app` names the target. */
 const SESSION_TOOLS = [
   {
     name: 'list_sessions',
@@ -62,7 +70,7 @@ const SESSION_TOOLS = [
   {
     name: 'read_session',
     description:
-      'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only.',
+      'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only. `limit` caps the number of returned message entries (the newest ones); the transcript is also capped at about 60k characters.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -78,7 +86,7 @@ const SESSION_TOOLS = [
   {
     name: 'start_session',
     description:
-      'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. For Codex, providerId and model pick one of the model services CordisX configured. Only when the user explicitly asks.',
+      'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns for that app; a value it does not list is refused. For Claude the turn runs in the background, and the result says whether it failed within a short wait; a turn still running is reported as started. Only when the user explicitly asks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -151,6 +159,39 @@ function textOf(value: unknown): string {
 
 function limitOf(args: Record<string, unknown>, fallback: number): number {
   return typeof args.limit === 'number' ? args.limit : fallback
+}
+
+/**
+ * The model services a Claude start may name, in the shape the Codex tool
+ * returns: provider id, title, exact model ids and labels. The CordisX side
+ * merges the home config's declarations with this profile's own library, so
+ * the two apps answer the same list; without a bridge, the declarations alone
+ * are read from `<CORDISX_HOME>/config.json`.
+ */
+async function modelProviders($: EngineInterface): Promise<unknown> {
+  const bridged = await post($, '/sessions', { app: 'claude', operation: 'list_model_providers', args: {} })
+  if (bridged.ok) return bridged.value
+  const home = await cordisxHome($)
+  let providers: Record<string, unknown>[] = []
+  try {
+    const config = JSON.parse(await $.fs.read(`${home}/config.json`)) as { providers?: unknown }
+    const declared = Array.isArray(config.providers) ? config.providers : []
+    providers = declared.flatMap(entry => {
+      const provider = entry as Record<string, unknown>
+      if (provider?.kind !== 'model-service' || provider.enabled === false) return []
+      const protocols = Array.isArray(provider.protocols) ? provider.protocols : []
+      const appliesTo = Array.isArray(provider.appliesTo) ? provider.appliesTo : undefined
+      if (!protocols.includes('anthropic-messages')) return []
+      if (appliesTo !== undefined && !appliesTo.includes('claude')) return []
+      const models = (provider.models as Record<string, unknown> | undefined)?.claude
+      return [{
+        providerId: String(provider.id ?? ''),
+        title: String(provider.displayName ?? provider.id ?? ''),
+        models: (Array.isArray(models) ? models : []).map(id => ({ id: String(id), label: String(id) })),
+      }]
+    })
+  } catch { /* no config yet: nothing is declared */ }
+  return { providers }
 }
 
 /** Runs one Codex -> Claude request with Claude Desktop's own session tools. */
@@ -330,11 +371,21 @@ async function startCodex($: EngineInterface, launch: unknown): Promise<true | R
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    for (const tool of SESSION_TOOLS) {
+    for (const tool of [...SESSION_TOOLS, MODEL_PROVIDER_TOOL]) {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
     }
     $.clock.every(POLL_MS, () => void poll($))
     return next(e)
+  })
+
+  on('tool.call', { tool: `mcp__cordisx__${MODEL_PROVIDER_TOOL.name}` }, async $ => {
+    try {
+      return { result: JSON.stringify(await modelProviders($), null, 2) }
+    } catch (error) {
+      return {
+        result: `The model services could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      }
+    }
   })
 
   for (const tool of SESSION_TOOLS) {
