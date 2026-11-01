@@ -620,6 +620,12 @@ their existing credential lease. The native OpenAI default and non-Responses
 routes remain unchanged. No installed application, persistent configuration or
 conversation history is rewritten.
 
+Resuming an idle or unloaded managed thread refreshes its launch-scoped routing
+lease even when the native client still recognizes its historical provider table.
+This prevents a persisted old endpoint from bypassing encrypted-reasoning recovery.
+The refresh preserves the selected provider, requested model and unrelated resume
+options; active threads and explicit provider changes are not rewritten.
+
 A stateless full-history request that contains encrypted reasoning may retry
 once after an exact `invalid_encrypted_content` error (including a gateway's
 `-4003` wrapper). HTTP 400 errors and SSE `response.failed` errors are handled.

@@ -1,7 +1,8 @@
 import { createInterface } from 'node:readline'
 const reader = createInterface({ input: process.stdin })
 const resumedThreads = new Set()
-reader.on('line', line => {
+const restoredEndpoints = new Map()
+reader.on('line', async line => {
   const message = JSON.parse(line)
   const threadId = message.params?.threadId
   if (message.method === 'thread/unsubscribe' && String(threadId).startsWith('lost-lifecycle-')) return
@@ -123,6 +124,48 @@ reader.on('line', line => {
     && message.params.config?.['model_providers.provider-b'] !== undefined
   ) {
     process.stdout.write(`${JSON.stringify({ id: message.id, result: { thread: { id: 'another-thread' } } })}\n`)
+    return
+  }
+  if (threadId === 'recognized-managed-replay' && message.method === 'turn/start') {
+    const response = await fetch(restoredEndpoints.get(threadId) + '/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer synthetic-auth' },
+      body: JSON.stringify(message.params.request),
+    })
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        result: {
+          status: response.status,
+          received: await response.json(),
+        },
+      }) + '\n',
+    )
+    return
+  }
+  if (threadId === 'recognized-managed-replay' && message.method === 'thread/resume') {
+    restoredEndpoints.set(threadId, message.params.config?.['model_providers.provider-b']?.base_url)
+  }
+  if (threadId === 'recognized-managed-failed' && message.method === 'thread/resume') {
+    process.stdout.write(
+      JSON.stringify({ id: message.id, error: { code: -32001, message: 'native resume denied' } }) + '\n',
+    )
+    return
+  }
+  if (String(threadId).startsWith('recognized-managed-') && message.method === 'thread/read') {
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        result: {
+          thread: {
+            id: threadId,
+            modelProvider: 'provider-b',
+            model: 'model-b',
+            status: { type: 'notLoaded' },
+          },
+        },
+      }) + '\n',
+    )
     return
   }
   // A restarted app-server rejects a persisted managed thread until its provider table is supplied again.
