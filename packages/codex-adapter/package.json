@@ -1,0 +1,49 @@
+{
+  "name": "@cordisx/codex-adapter",
+  "version": "0.1.0-beta.1",
+  "description": "CordisX-owned local structural adaptation for Codex Desktop",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "files": [
+    "dist",
+    "src",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/adapter.mjs"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/adapter.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:package": "node scripts/check-package.mjs",
+    "test": "node --test tests/checks.mjs"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cordisx/cordisx.git",
+    "directory": "packages/codex-adapter"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "acorn": "8.18.0",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.2",
+    "@types/node": "^22.18.1"
+  }
+}

@@ -39,6 +39,7 @@ describe('structural native task creation', () => {
       expect.objectContaining({
         collaborationMode: { settings: { model: 'provider-model', thinking: undefined } },
         config: { 'cordisx.operation_token': handle.token },
+        responsesapiClientMetadata: { 'cordisx.operation_token': handle.token },
       }),
     )
     await value.create({ __cordisxTask: handle, target: { type: 'worktree' }, model: 'native', prompt: 'prompt' })
@@ -47,6 +48,7 @@ describe('structural native task creation', () => {
         startConversationParamsInput: {
           collaborationMode: { settings: { model: 'provider-model', thinking: undefined } },
           configOverrides: { permissions: 'native', 'cordisx.operation_token': handle.token },
+          responsesapiClientMetadata: { 'cordisx.operation_token': handle.token },
         },
       }),
     )

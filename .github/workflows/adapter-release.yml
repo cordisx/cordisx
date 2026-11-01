@@ -1,0 +1,107 @@
+name: Codex adapter
+
+on:
+  pull_request:
+    paths:
+      - 'packages/codex-adapter/**'
+      - 'packages/cli/src/launcher/codex-adapter/**'
+      - 'packages/cli/src/launcher/native-adapter-analysis.ts'
+      - 'tests/codex-adapter*'
+      - 'scripts/adapter-release.mjs'
+      - '.github/workflows/adapter-release.yml'
+  push:
+    tags: ['codex-adapter-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-adapter-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Validate independent release identity before preparing dependencies
+        if: github.event_name == 'push'
+        run: |
+          node scripts/adapter-release.mjs "$GITHUB_REF_NAME"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - run: npm ci --ignore-scripts
+      - name: Build actual Host/adapter production composition
+        run: npm run build --workspace=cordisx
+      - run: npm run typecheck --workspace=@cordisx/codex-adapter
+      - run: npm test --workspace=@cordisx/codex-adapter
+      - name: Related modules and Host intermediary regression
+        run: >-
+          npx vitest run
+          tests/codex-adapter-selection.test.ts
+          tests/codex-adapter-registry.test.ts
+          tests/codex-adapter-release.test.ts
+          tests/codex-adapter-store.integration.test.ts
+          tests/codex-adapter-production.integration.test.ts
+          tests/native-submission-composition.test.ts
+          tests/native-lazy-wire-request.test.ts
+          tests/native-agent-task-transform.test.ts
+          tests/native-account-capability.test.ts
+          tests/native-app-server-intermediary.test.ts
+          tests/native-main-first-turn.test.ts
+          tests/native-predispatch-interception.test.ts
+      - run: npm run check:package --workspace=@cordisx/codex-adapter
+      - name: Pack only the adapter
+        run: |
+          mkdir -p adapter-release
+          npm pack --workspace=@cordisx/codex-adapter --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/adapter-release"
+          archives=("$GITHUB_WORKSPACE/adapter-release/"*.tgz)
+          test "${#archives[@]}" -eq 1
+          test -s "${archives[0]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-adapter-${{ github.event.pull_request.head.sha || github.sha }}
+          path: adapter-release/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/codex-adapter-v')
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-adapter-${{ github.sha }}
+          path: adapter-release
+      - name: Require exact native evidence before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern adapter-native-validation.json --dir adapter-release
+          node scripts/adapter-release.mjs "$GITHUB_REF_NAME" adapter-release/cordisx-codex-adapter-*.tgz adapter-release/adapter-native-validation.json
+      - name: Publish the verified adapter with npm OIDC provenance
+        run: |
+          channel=$(node scripts/adapter-release.mjs "$GITHUB_REF_NAME" | node -e 'let input="";process.stdin.on("data",c=>input+=c).on("end",()=>console.log(JSON.parse(input).distTag))')
+          npm publish adapter-release/cordisx-codex-adapter-*.tgz --tag "$channel" --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org

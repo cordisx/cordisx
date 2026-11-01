@@ -204,6 +204,9 @@ function decoded(text: string) {
 describe('CLI portable model export', () => {
   it('routes help and rejects ambiguous, duplicate and unsupported arguments before opening configuration', async () => {
     expect(parseCordisXCli(['model', 'export', '--help'])).toMatchObject({ action: 'model-export', help: true })
+    expect(parseCordisXCli(['model', 'export', '--service=-managed-id', '--exclude-values'])).toMatchObject({
+      services: ['-managed-id'],
+    })
     for (
       const args of [
         [],
@@ -293,7 +296,7 @@ describe('CLI portable model export', () => {
     expect(modelExport).toHaveBeenCalledTimes(2)
     expect(f.stderr.join('')).not.toContain('Offline')
     const managedId = list.services.find((service: any) => service.title === 'Managed').bindingRef
-    expect(decoded(await f.run(['--service', managedId, '--include-values']))).toMatchObject({
+    expect(decoded(await f.run([`--service=${managedId}`, '--include-values']))).toMatchObject({
       environment: [{ value: 'saved-user-value' }],
       connections: [{ models: [{ id: 'managed-model' }] }],
     })

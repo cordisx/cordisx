@@ -12,6 +12,7 @@ export const HELP = `Usage:
   cordisx cli [options] [-- codex-arguments...]
   cordisx plugin <command> [options]
   cordisx source <command> [options]
+  cordisx adapter [status|install|use|pin|unpin|revoke|prune]
 
 Options:
   -M, --mode app|cli       start: desktop App (default) or original terminal client

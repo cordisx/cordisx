@@ -111,6 +111,14 @@ export async function prepareCliCommand(
   argv: readonly string[],
   runtime: CordisXCliRuntime,
 ): Promise<PreparedRunCommand | undefined> {
+  if (argv[0] === 'adapter') {
+    const { runAdapterCommand } = await import('./adapter-command.js')
+    await runAdapterCommand(argv.slice(1), {
+      env: runtime.env ?? process.env,
+      ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+    }, runtime.stdout ?? console.log)
+    return
+  }
   if (argv[0] === 'source-trust') {
     const { runSourceTrust } = await import('./source-trust.js')
     await runSourceTrust(

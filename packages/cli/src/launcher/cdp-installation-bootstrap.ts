@@ -95,6 +95,11 @@ async function bootstrapInstalledDocument(
             signal,
           )
         }),
+        onStatusChange: status => {
+          if (status === 'unavailable' || status === 'disposed') {
+            void nativeSubmission.adapterLifecycle?.lifecycle(target.id, 'unavailable').catch(() => {})
+          }
+        },
         timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal }),
       })
@@ -102,6 +107,7 @@ async function bootstrapInstalledDocument(
         throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
       }
       await waitForRendererBootstrap(options, deadline, network)
+      await nativeSubmission.adapterLifecycle?.lifecycle(target.id, 'active')
     } else {
       if (activateDocument === undefined) {
         await support.reloadAndWaitForBootstrap(
@@ -117,6 +123,9 @@ async function bootstrapInstalledDocument(
       }
     }
     return nativeInterception
+  } catch (error) {
+    await nativeSubmission?.adapterLifecycle?.lifecycle(target.id, 'unavailable').catch(() => {})
+    throw error
   } finally {
     await network?.close()
   }

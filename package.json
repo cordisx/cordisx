@@ -135,6 +135,7 @@
     "reicon": "1.2.1",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
+    "sigstore": "4.0.0",
     "smol-toml": "1.8.0",
     "style-to-js": "1.1.21",
     "swr": "2.5.1",
@@ -158,7 +159,8 @@
     "eslint": "9.39.4",
     "lint-staged": "16.2.7",
     "stylelint": "17.15.0",
-    "@projectwallace/stylelint-plugin": "0.7.0"
+    "@projectwallace/stylelint-plugin": "0.7.0",
+    "@cordisx/codex-adapter": "file:packages/codex-adapter"
   },
   "bundleDependencies": [
     "@cordisx/schemastery-ui"
