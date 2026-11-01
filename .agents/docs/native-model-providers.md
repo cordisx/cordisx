@@ -522,10 +522,10 @@ remain stable. Evicting an installed renderer on a cosmetic retitle disposes
 the submission channel, rejects an in-flight first turn, and reloads the page.
 
 Managed provider tables are launch-scoped request overrides, not persisted Codex
-configuration. A restarted app-server therefore rejects `thread/resume` for a
+configuration. A restarted app-server can therefore reject `thread/resume` for a
 thread that still names a managed provider, which also leaves the native model
-control, and with it the Host selector seat, unrendered. Only the explicit
-missing-provider configuration error is eligible for recovery. The intermediary
+control, and with it the Host selector seat, unrendered. Reactive resume recovery
+handles only the explicit missing-provider configuration error. The intermediary
 verifies that provider against the persisted thread and retries once with a
 candidate provider table. The candidate lease replaces the thread binding only
 after native resume succeeds; other native errors and failed retries leave the
@@ -624,7 +624,8 @@ Resuming an idle or unloaded managed thread refreshes its launch-scoped routing
 lease even when the native client still recognizes its historical provider table.
 This prevents a persisted old endpoint from bypassing encrypted-reasoning recovery.
 The refresh preserves the selected provider, requested model and unrelated resume
-options; active threads and explicit provider changes are not rewritten.
+options; native nullable defaults retain the persisted selection. Active threads,
+explicit provider changes and alternate path/history resumes are not rewritten.
 
 A stateless full-history request that contains encrypted reasoning may retry
 once after an exact `invalid_encrypted_content` error (including a gateway's
