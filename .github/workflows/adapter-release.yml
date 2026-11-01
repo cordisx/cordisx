@@ -104,4 +104,4 @@ jobs:
       - name: Publish the verified adapter with npm OIDC provenance
         run: |
           channel=$(node scripts/adapter-release.mjs "$GITHUB_REF_NAME" | node -e 'let input="";process.stdin.on("data",c=>input+=c).on("end",()=>console.log(JSON.parse(input).distTag))')
-          npm publish adapter-release/cordisx-codex-adapter-*.tgz --tag "$channel" --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org
+          npm publish ./adapter-release/cordisx-codex-adapter-*.tgz --tag "$channel" --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org
