@@ -30,6 +30,7 @@ import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { NativeModelSelectionSynchronizer } from './native-model-selection-synchronizer.js'
 import { applyNativeFastMode } from './native-model-fast-mode.js'
 import {
+  NativeModelAssignments,
   nativeThreadBusy as threadBusy,
   nextSendSelectionFields,
   patchNativeSelection,
@@ -75,8 +76,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private readonly listeners = new Set<() => void>()
   private readonly nativeRequests = new Map<string, PendingNativeRequest>()
   private readonly effectiveByThread = new Map<string, EffectiveSelection>()
-  private readonly nativeModelAssignments = new Map<string, { readonly providerId: string; readonly model: string }>()
-  private nativeModelAssignmentScope: string | undefined
+  private readonly nativeModelAssignments = new NativeModelAssignments()
   private nativeModelCatalogIdentity: string | undefined
   private readonly nativeModelSource = new NativeModelSource()
   private readonly requestClient: NativeMcpRequestClient
@@ -286,7 +286,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     'accepted' | 'busy' | 'unavailable'
   > {
     if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
-    if (this.selectionClient.submissionActive()) return 'busy'
+    if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
     if (options === undefined && (this.turnBusy || this.selectionClient.snapshot().nextSend !== undefined)) {
       const navigation = this.navigationGeneration
       const threadId = this.state.threadId
@@ -323,6 +323,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       if (target.model === this.state.model) return 'accepted'
     }
     if (this.state.busy) return 'busy'
+    if (this.selectionClient.synchronizationActive()) {
+      const result = await this.selectionClient.select(target, options)
+      if (!this.isCurrent(navigation, threadId)) return 'unavailable'
+      this.publishPatch({ error: null, submissionError: null })
+      return result
+    }
     const control = this.modelControl()
     if (control === undefined) return 'unavailable'
     const previousModel = this.state.model ?? control.model
@@ -608,7 +614,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       }
       if (!this.isRefreshCurrent(generation, threadId)) return
       this.nativeModelCatalogIdentity = catalogIdentity
-      this.updateNativeModelAssignmentScope(threadId, catalogIdentity, control.models.map(option => option.id))
+      this.nativeModelAssignments.updateScope(threadId, catalogIdentity, control.models.map(option => option.id))
       this.confirmNativeModelAssignment(provider, model, nativeModelsScope, control.models)
       this.replaceState({
         available: true,
@@ -744,7 +750,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.state.modelProvider,
       control.models,
     )
-    this.updateNativeModelAssignmentScope(
+    this.nativeModelAssignments.updateScope(
       threadId,
       this.nativeModelCatalogIdentity,
       control.models.map(option => option.id),
@@ -908,20 +914,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     return !this.disposed && generation === this.navigationGeneration && currentThreadId(this.document) === threadId
   }
 
-  private updateNativeModelAssignmentScope(
-    threadId: string | undefined,
-    catalogIdentity: string | undefined,
-    modelIds: readonly string[],
-  ): void {
-    const scope = JSON.stringify([threadId ?? null, catalogIdentity ?? null, modelIds])
-    if (scope === this.nativeModelAssignmentScope) return
-    this.nativeModelAssignments.clear()
-    this.nativeModelAssignmentScope = scope
-  }
-
   private invalidateNativeModelAssignments(): void {
     this.nativeModelAssignments.clear()
-    this.nativeModelAssignmentScope = undefined
     this.nativeModelCatalogIdentity = undefined
   }
 
@@ -931,11 +925,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     scope = this.state.nativeModelsScope,
     models = this.modelControl()?.models ?? [],
   ): void {
-    if (
-      scope !== 'global' || providerId === undefined || model === undefined
-      || !models.some(option => option.id === model)
-    ) return
-    this.nativeModelAssignments.set(JSON.stringify([providerId, model]), { providerId, model })
+    this.nativeModelAssignments.confirm(scope, providerId, model, models.map(option => option.id))
   }
 
   private isRefreshCurrent(generation: number, threadId: string | undefined): boolean {
@@ -974,14 +964,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       modelLabel: control?.model === next.model ? control?.modelLabel : undefined,
       ...nativeModelSource,
       ...(next.nativeModelsScope === 'global'
-        ? { nativeModelAssignments: [...this.nativeModelAssignments.values()] }
+        ? { nativeModelAssignments: this.nativeModelAssignments.snapshot() }
         : {}),
       providerLabel: next.modelProvider === undefined ? undefined : this.providerNames.get(next.modelProvider),
-      busy: next.busy || this.selectionClient.synchronizationActive(),
+      busy: next.busy || this.selectionClient.selectionActive(),
       ...nextSendSelectionFields(
         projection,
         this.selectionClient.submissionActive(),
-        this.selectionClient.synchronizationActive(),
+        this.selectionClient.selectionActive(),
         { effort: pendingReasoning?.effort, confirmation, error: this.submissionError },
       ),
     })

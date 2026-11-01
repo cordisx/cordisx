@@ -19,6 +19,38 @@ export interface SelectionPatch {
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
+/** Model ownership evidence lives only within its exact thread/catalog scope. */
+export class NativeModelAssignments {
+  private readonly entries = new Map<string, { readonly providerId: string; readonly model: string }>()
+  private scope: string | undefined
+
+  updateScope(threadId: string | undefined, catalogIdentity: string | undefined, modelIds: readonly string[]): void {
+    const scope = JSON.stringify([threadId ?? null, catalogIdentity ?? null, modelIds])
+    if (scope === this.scope) return
+    this.entries.clear()
+    this.scope = scope
+  }
+
+  clear(): void {
+    this.entries.clear()
+    this.scope = undefined
+  }
+
+  confirm(
+    scope: ProviderSelectionSnapshot['nativeModelsScope'],
+    providerId: string | undefined,
+    model: string | undefined,
+    modelIds: readonly string[],
+  ): void {
+    if (scope !== 'global' || providerId === undefined || model === undefined || !modelIds.includes(model)) return
+    this.entries.set(JSON.stringify([providerId, model]), { providerId, model })
+  }
+
+  snapshot(): NonNullable<ProviderSelectionSnapshot['nativeModelAssignments']> {
+    return [...this.entries.values()]
+  }
+}
+
 /** Merge durable control fields; pending choices and labels are projected by their owners. */
 export function patchNativeSelection(
   state: SelectionSnapshot,
@@ -67,7 +99,7 @@ export function nativeThreadBusy(thread: Record<string, unknown>): boolean | und
 export function nextSendSelectionFields(
   projection: import('./native-provider-selection-client.js').NativeProviderSelectionProjection,
   submissionActive: boolean,
-  synchronizationActive: boolean,
+  selectionActive: boolean,
   details: {
     effort?: string | undefined
     confirmation?: import('./native-provider-selection-client.js').NativeProviderSubmitConfirmation | undefined
@@ -75,7 +107,7 @@ export function nextSendSelectionFields(
   },
 ) {
   return {
-    selectionLocked: submissionActive || synchronizationActive,
+    selectionLocked: submissionActive || selectionActive,
     ...(projection.nextSend ? { nextSend: projection.nextSend } : {}),
     ...(projection.pending
       ? {

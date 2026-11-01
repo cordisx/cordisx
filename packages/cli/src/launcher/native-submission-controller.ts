@@ -571,7 +571,7 @@ export function createNativeSubmissionController(
       }
       const operation = await prepareOperation(prepared)
       if (operation === undefined) {
-        clearSelection()
+        if (!await validSelection(pending)) clearSelection()
         return { kind: 'reject', reason: 'thread-switch-failed' }
       }
       try {
@@ -614,7 +614,7 @@ export function createNativeSubmissionController(
           projection: { available: true, revision: effective.revision, effective: effective.effective },
         }
       } catch {
-        clearSelection()
+        if (disposed || !revalidateSelection(prepared) || !await validSelection(pending)) clearSelection()
         if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
           await operation.credential.dispose()
         }

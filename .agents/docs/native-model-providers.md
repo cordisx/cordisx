@@ -404,9 +404,24 @@ Canceling a pending switch can still restore the exact prior pair. The built-in
 `openai` path retains native model selection and is not configurable by this map.
 Managed providers continue to use launch-scoped credential leases and provider
 tables.
-Only an accepted native operation changes the selected Provider shown to users.
-Failed transitions attempt to restore the prior effective session/configuration;
-failed recovery disables the replacement instead of claiming success.
+The selector distinguishes the user's chosen Provider from the native session's
+effective Provider. An accepted native operation updates the effective Provider.
+If an idle existing-thread transition fails after a valid explicit selection,
+the selector retains that choice as a next-Send target and remains operable.
+Ordinary Send retries the native transition without another model confirmation;
+a failed retry retains the target and reports an unexecuted Send. Catalog, owner,
+navigation, revision and thread-idleness checks still apply. An invalid or stale
+choice is not acknowledged as successful. The Host does not send an ordinary
+message through the prior Provider as a fallback.
+When the Host acknowledges a selection but the native Composer model callback
+fails, the selector accepts and retains that authoritative selection and allows
+another explicit provider choice after the operation finishes. The next ordinary
+Send retries Composer synchronization before preparing the request. If that retry
+fails, Send is rejected while the choice remains available; if it succeeds, the
+same Send continues through normal authorization. Unsupported submission actions
+do not retry synchronization.
+An in-flight selection or synchronization still locks conflicting selector
+actions; a completed synchronization failure does not keep that action lock.
 
 Native controls remain available when the adapter is unsupported, its audited
 composer seat cannot be found, or the replacement cannot represent the current

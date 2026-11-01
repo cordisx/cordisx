@@ -622,20 +622,32 @@ describe('native submission controller', () => {
     expect(disposed).toEqual([])
   })
 
-  it('clears the pending selection when an immediate existing-thread switch fails', async () => {
+  it('retains the pending selection when an immediate existing-thread switch fails', async () => {
     const fixture = harness({ scope: threadScope, pending: pendingThread })
     fixture.switchThread.mockRejectedValueOnce(new Error('resume failed'))
     await expect(fixture.controller.commitSelection(threadScope)).resolves.toEqual({
       kind: 'reject',
       reason: 'thread-switch-failed',
     })
-    expect(fixture.clearPending).toHaveBeenCalledWith({
-      scope: threadScope,
-      expectedRevision: 4,
-      pendingGeneration: 7,
-    })
+    expect(fixture.clearPending).not.toHaveBeenCalled()
     expect(fixture.commitEffective).not.toHaveBeenCalled()
     expect(fixture.disposed).toEqual(['provider-b-1'])
+    fixture.setSnapshot({
+      revision: 5,
+      effective: { providerId: 'provider-a', model: 'model-a' },
+      pending: { ...pendingThread, sendOnly: true },
+    })
+    fixture.switchThread.mockRejectedValueOnce(new Error('resume still failed'))
+    await expect(fixture.controller.prepareSubmission(threadScope, threadAction)).resolves.toMatchObject({
+      kind: 'reject',
+    })
+    expect(fixture.clearPending).not.toHaveBeenCalled()
+    await expect(fixture.controller.prepareSubmission(threadScope, threadAction)).resolves.toMatchObject({
+      kind: 'allow-original',
+      projection: { effective: { providerId: 'provider-b', model: 'model-b' } },
+    })
+    expect(fixture.switchThread).toHaveBeenCalledTimes(3)
+    await fixture.controller.dispose()
   })
 
   it('moves the exact returned thread selection when its composer mounts before the first turn', async () => {
