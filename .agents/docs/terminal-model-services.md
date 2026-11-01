@@ -16,6 +16,7 @@ cordisx start --mode cli claude-code -s aiden -m gpt-6.1-sol
 cordisx start --mode cli --list
 ```
 
+`-M` is the short form of `--mode`, for example `cordisx start -M cli -s aiden -m gpt-6.1-sol`.
 `--mode app` is the default. App mode keeps the configured default app/profile;
 explicit service/model selection currently targets Codex new drafts. It does
 not move an existing chat to a different service. `start` stays idempotent:

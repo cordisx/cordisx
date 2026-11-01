@@ -14,7 +14,7 @@ export const HELP = `Usage:
   cordisx source <command> [options]
 
 Options:
-  --mode app|cli           start: desktop App (default) or original terminal client
+  -M, --mode app|cli       start: desktop App (default) or original terminal client
   -s, --service <id>       Select model service (use together with --model)
   -m, --model <id>         Select exact service model for this launch
   --attach                 Attach to an existing loopback CDP endpoint

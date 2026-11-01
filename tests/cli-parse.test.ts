@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { CordisXCliParseError, parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 
 describe('parseCordisXCli', () => {
+  it('treats -M as --mode while keeping lowercase -m for model selection', () => {
+    const args = ['-s', 'aiden', '-m', 'gpt-6.1-sol']
+    expect(parseCordisXCli(['start', '-M', 'cli', ...args])).toEqual(
+      parseCordisXCli(['start', '--mode', 'cli', ...args]),
+    )
+    expect(parseCordisXCli(['start', '-M=cli', 'claude-code', ...args])).toEqual(
+      parseCordisXCli(['start', '--mode=cli', 'claude-code', ...args]),
+    )
+    expect(parseCordisXCli(['start', '-M', 'app'])).toEqual(parseCordisXCli(['start']))
+    expect(() => parseCordisXCli(['start', '-M', 'cli', '--mode', 'cli'])).toThrow(CordisXCliParseError)
+    expect(parseCordisXCli(['start', '--', '-M', 'cli'])).toMatchObject({ action: 'start', hostArgs: ['-M', 'cli'] })
+  })
   it('unifies app and terminal launch without passing mode to the native client', () => {
     expect(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-6.1-sol'])).toMatchObject({
       action: 'start',

@@ -19,6 +19,7 @@ export const TERMINAL_HELP = `Usage:
   cordisx cli [--instructions-file PATH] [-- codex-arguments...]
 
 Options:
+  -M, --mode cli           start: run the original terminal client
   --profile ID             Existing CordisX Codex profile
   -s, --service PROVIDER   Shared model service or live plugin provider ID
   -m, --model MODEL       Exact model ID for the selected service

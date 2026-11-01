@@ -8,10 +8,10 @@ export function normalizeStartMode(argv: readonly string[]): readonly string[] {
   let mode: string | undefined
   for (let i = 0; i < head.length; i++) {
     const token = head[i]!
-    if (token !== '--mode' && !token.startsWith('--mode=')) continue
+    if (token !== '--mode' && token !== '-M' && !token.startsWith('--mode=') && !token.startsWith('-M=')) continue
     if (mode !== undefined) throw new CordisXCliParseError('duplicate-option', '--mode may only be specified once')
-    const inline = token.startsWith('--mode=')
-    mode = inline ? token.slice(7) : head[i + 1]
+    const inline = token.includes('=')
+    mode = inline ? token.slice(token.indexOf('=') + 1) : head[i + 1]
     if (mode !== 'app' && mode !== 'cli') {
       throw new CordisXCliParseError('invalid-option-value', '--mode must be app or cli')
     }
