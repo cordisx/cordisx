@@ -147,8 +147,13 @@ export async function readNativeStartupReadiness(
     trace?.('account-module-start')
     const native = await load(descriptor.module) as Record<string, {
       accessInputs?: { readAccountInfo(): Promise<unknown> }
+      accountInfo?: { readAccountInfo(): Promise<unknown> }
     }>
-    const inputs = native[descriptor.exportName]?.accessInputs
+    const property = descriptor.readerProperty ?? 'accessInputs'
+    if (property !== 'accessInputs' && property !== 'accountInfo') {
+      return { ready: false, reason: 'account-service-pending' }
+    }
+    const inputs = native[descriptor.exportName]?.[property]
     if (typeof inputs?.readAccountInfo !== 'function') return { ready: false, reason: 'account-service-pending' }
     trace?.('account-module-ready')
     accountStarted = performance.now()

@@ -61,6 +61,19 @@ function showLogin() {
 }
 
 describe('startup surface readiness is independent of workspace account enrichment', () => {
+  it('uses the structurally selected split account reader on native login', async () => {
+    readyDocument()
+    showLogin()
+    const readAccountInfo = vi.fn(async () => ({ status: 'ready', data: null }))
+    const legacy = vi.fn()
+    const result = await readNativeStartupReadiness(
+      { ...descriptor, readerProperty: 'accountInfo' },
+      async () => ({ accountService: { accountInfo: { readAccountInfo }, accessInputs: { readAccountInfo: legacy } } }),
+    )
+    expect(result).toMatchObject({ ready: true, surface: 'auth-required' })
+    expect(readAccountInfo).toHaveBeenCalledTimes(1)
+    expect(legacy).not.toHaveBeenCalled()
+  })
   it.each(['pending', 'error', 'unavailable'])(
     'does not block a usable workspace on %s account enrichment',
     async status => {
