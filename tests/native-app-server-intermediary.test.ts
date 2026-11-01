@@ -36,6 +36,28 @@ describe('native app-server intermediary', () => {
     }
   })
 
+  it('keeps ordinary native requests usable if optional configured routing fails', async () => {
+    const h = await harness()
+    try {
+      h.server.bindConfiguredProvider(async () => {
+        throw new Error('optional route unavailable')
+      })
+      h.send({
+        id: 'optional-unavailable',
+        method: 'thread/start',
+        params: { modelProvider: 'openai', model: 'native-model', config: { unrelated: true } },
+      })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        modelProvider: 'openai',
+        config: { unrelated: true },
+      })
+      h.send({ id: 'still-running', method: 'echo/bytes', params: {} })
+      expect(JSON.parse(await h.read()).id).toBe('still-running')
+    } finally {
+      await h.close()
+    }
+  })
+
   it('records request metadata over the existing authenticated control channel while preserving opaque input', async () => {
     const events: DiagnosticEvent[] = []
     await withDiagnostics({ emit: event => events.push(event) }, async () => {
