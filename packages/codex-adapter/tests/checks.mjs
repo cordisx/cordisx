@@ -41,6 +41,11 @@ for (const [name, fixture] of [['direct', resources], ['shared', sharedResources
     })
     const draft = await world.draft({ context: operation, prompt: 'synthetic', serviceTier: null })
     const first = await world.first({ input: 'synthetic', config: draft.configOverrides })
+    // Native task creation calls executeTurnStart directly; its main-process
+    // builder keeps metadata but drops config before the intermediary sees it.
+    const directTaskWire = { ...first }
+    delete directTaskWire.config
+    assert.equal(directTaskWire.responsesapiClientMetadata['cordisx.operation_token'], token)
     const sent = await world.dispatch({
       manager: {
         getConversation: () => ({}),

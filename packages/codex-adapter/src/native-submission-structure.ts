@@ -379,6 +379,11 @@ function firstTurn(plan: ResourcePlan, fn: SyntaxNode): void {
   )
   plan.replace(requestEffort, `(${validEffort}?${effort}:${plan.text(requestEffort)})`)
   plan.addConfig(request, token)
+  // Native task first turns can skip the renderer wire normalizer. The
+  // main-process builder retains client metadata while dropping config.
+  const metadata = properties(request).get('responsesapiClientMetadata')
+  if (metadata) plan.replace(metadata, config(token, plan.text(metadata)))
+  else plan.insert(request.end - 1, `,...(${token}===void 0?{}:{responsesapiClientMetadata:${config(token)}})`)
   plan.serviceTier(request)
   plan.capabilities.push('first-turn')
 }
