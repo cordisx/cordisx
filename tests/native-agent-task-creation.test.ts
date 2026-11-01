@@ -5,8 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NativeAgentTasks } from '../packages/cli/src/launcher/native-agent-tasks.js'
 import { NativeAgentTaskRouting } from '../packages/cli/src/launcher/native-agent-task-routing.js'
 import {
-  agentTaskEdits,
-  applyAgentTaskEdits,
+  applyAgentTaskStructure,
   nativeAgentTaskTransforms,
 } from '../packages/cli/src/launcher/native-agent-task-transform.js'
 import { parseNativeSource } from '../packages/cli/src/launcher/native-source-structure.js'
@@ -175,9 +174,7 @@ describe('provider-aware native task operation', () => {
     expect(nativeAgentTaskTransforms('future', 'unknown', [], []).available).toBe(false)
     expect(nativeAgentTaskTransforms('26.1021.31345', '21828', [], []).available).toBe(false)
     for (const kind of ['initial', 'execution'] as const) {
-      expect(() => applyAgentTaskEdits('', kind)).toThrow()
-      const anchors = agentTaskEdits(kind).map(([anchor]) => anchor).join('\n')
-      expect(() => applyAgentTaskEdits(anchors + '\n' + anchors, kind)).toThrow()
+      expect(() => applyAgentTaskStructure('', kind)).toThrow()
     }
     expect(() => parseNativeSource('async function claim(){return {token:"opaque"}}')).not.toThrow()
   })
