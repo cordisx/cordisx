@@ -22,10 +22,12 @@ import { resources } from './fixtures/native-submission-structure.js'
 import { ownedDirectory, writePrivateJson } from '../packages/cli/src/launcher/codex-adapter/files.js'
 
 let archive: Buffer
+let adapterVersion: string
 let temp: string
 let root: string
 const input = () => ({ appVersion: 'future', buildNumber: 'future', resources: resources() })
 beforeAll(async () => {
+  adapterVersion = JSON.parse(await readFile(path.resolve('packages/codex-adapter/package.json'), 'utf8')).version
   const dir = await mkdtemp(path.join(os.tmpdir(), 'adapter-pack-'))
   try {
     const [packed] = JSON.parse(
@@ -47,9 +49,9 @@ beforeEach(async () => {
   temp = await mkdtemp(path.join(os.tmpdir(), 'cordisx-adapter-store-'))
   root = path.join(temp, 'codex-adapters')
   vi.spyOn(registry, 'resolveAdapterRelease').mockResolvedValue({
-    version: '0.1.0-beta.1',
+    version: adapterVersion,
     integrity: `sha512-${createHash('sha512').update(archive).digest('base64')}`,
-    tarball: 'https://registry.npmjs.org/@cordisx/codex-adapter/-/codex-adapter-0.1.0-beta.1.tgz',
+    tarball: `https://registry.npmjs.org/@cordisx/codex-adapter/-/codex-adapter-${adapterVersion}.tgz`,
     publishedAt: '2026-11-01T00:00:00Z',
     sourceCommit: 'a'.repeat(40),
     workflowIdentity: 'synthetic-trust-fixture',
@@ -170,7 +172,7 @@ describe('packed adapter production intake and loading (registry trust is a sepa
     await mkdir(path.join(source, 'package'), { recursive: true })
     await writeFile(
       path.join(source, 'package/package.json'),
-      JSON.stringify({ name: registry.ADAPTER_PACKAGE, version: '0.1.0-beta.1', ...extra }),
+      JSON.stringify({ name: registry.ADAPTER_PACKAGE, version: adapterVersion, ...extra }),
     )
     const file = path.join(temp, 'malformed.tgz')
     await createTar({ file, cwd: source, gzip: true }, ['package'])
