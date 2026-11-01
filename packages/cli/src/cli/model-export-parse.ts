@@ -76,7 +76,7 @@ export function parseModelExport(argv: readonly string[]): ModelExportInvocation
       if (equal >= 0) throw new CordisXCliParseError('invalid-option-value', `${key} does not accept a value`)
     } else {
       value = equal < 0 ? argv[++i] ?? '' : token.slice(equal + 1)
-      if (!value || value.startsWith('-') && !(key === '--output' && value === '-')) {
+      if (!value || equal < 0 && value.startsWith('-') && !(key === '--output' && value === '-')) {
         throw new CordisXCliParseError('missing-option-value', `${key} requires a value`)
       }
       if (value.length > 4096 || /[\0\r\n]/u.test(value)) {
