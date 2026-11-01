@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import { modelReasoningEfforts } from '../model-reasoning-capabilities.js'
 import { resolveNativeVariable } from './native-source-bindings.js'
+import { nativeLazyRequestSource, resolveNativeLazyWireRequest } from './native-lazy-wire-request.js'
 import {
   applySourceEdits,
   literal,
@@ -247,15 +248,20 @@ function normalizedRequest(plan: ResourcePlan, fn: SyntaxNode): void {
   plan.capabilities.push('normalized-request')
 }
 
-function wireRequestInputs(expression: SyntaxNode): SyntaxNode[] {
-  if (member(expression, 'request')) return [expression]
+function wireRequestInputs(expression: SyntaxNode, local = false): SyntaxNode[] {
+  const request = (node: SyntaxNode | undefined): boolean =>
+    member(node, 'request') || (local && node?.type === 'Identifier')
+  if (request(expression)) return [expression]
   if (
-    expression.type === 'CallExpression' && member(expression.arguments[0], 'request')
+    expression.type === 'CallExpression' && request(expression.arguments[0])
     && expression.arguments[1]?.type === 'CallExpression'
     && member(expression.arguments[1].callee, 'getAppServerVersion')
   ) return [expression.arguments[0]]
   if (expression.type === 'ConditionalExpression') {
-    return [...wireRequestInputs(expression.consequent), ...wireRequestInputs(expression.alternate)]
+    return [...wireRequestInputs(expression.consequent, local), ...wireRequestInputs(expression.alternate, local)]
+  }
+  if (local && expression.type === 'SequenceExpression') {
+    return wireRequestInputs(expression.expressions.at(-1), local)
   }
   throw new Error('Native capability wire-normalizer: unsupported request source')
 }
@@ -273,6 +279,31 @@ function finalDispatch(plan: ResourcePlan, fn: SyntaxNode): void {
     n.type === 'CallExpression'
     && member(n.callee, 'sendRequest') && literal(n.arguments[0]) === 'turn/start', 'turn-dispatch')
   const argument = call.arguments[1]
+  if (argument?.type === 'CallExpression') {
+    const lazy = resolveNativeLazyWireRequest(fn, argument)
+    const requests = wireRequestInputs(lazy.expression, true)
+    const origins = requests.map(request => nativeLazyRequestSource(lazy.factory, lazy.statement, request))
+    if (
+      !requests.every(request => sameRequestReference(requests[0]!, request))
+      || !origins.every(origin => sameRequestReference(origins[0]!, origin))
+    ) {
+      throw new Error('Native capability lazy-wire-request: branches use different request sources')
+    }
+    const capturedRequest = uniqueBinding(plan, fn, '__cordisxOperationRequest')
+    const wire = uniqueBinding(plan, fn, '__cordisxNormalizedWire')
+    plan.insert(lazy.statement.start, `let ${capturedRequest};`)
+    for (const request of requests) plan.replace(request, `(${capturedRequest}=${plan.text(request)})`)
+    const token = valid(`${capturedRequest}.config?.[${JSON.stringify(TOKEN)}]`)
+    // Keep normalization lazy and run it once after native workspace/permission
+    // checks. Forwarding inside the factory covers every existing native caller.
+    plan.insert(
+      lazy.expression.start,
+      `((${wire})=>(${token}===void 0?${wire}:{...${wire},config:${config(token, `${wire}.config`)}}))((`,
+    )
+    plan.insert(lazy.expression.end, '))')
+    plan.capabilities.push('final-dispatch')
+    return
+  }
   if (argument?.type !== 'Identifier') throw new Error('Native capability turn-dispatch: expected normalized request')
   const wire = resolveNativeVariable(fn, argument, 'wire-normalizer')
   if (wire.end > call.start) throw new Error('Native capability turn-dispatch: invalid normalization order')

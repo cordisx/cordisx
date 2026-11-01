@@ -74,7 +74,7 @@ type NativeSubmissionActivation =
 const execFileAsync = promisify(execFile)
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 1
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 8
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 9
 const SHA256 = /^[a-f0-9]{64}$/u
 
 interface CachedNativeTransform {
@@ -233,6 +233,8 @@ function validAccountCapability(
   const capability = value as NativeAccountCapabilityDescriptor
   return resources.some(resource => resource.url === capability.module)
     && typeof capability.exportName === 'string' && capability.exportName.length > 0
+    && (capability.readerProperty === undefined || capability.readerProperty === 'accessInputs'
+      || capability.readerProperty === 'accountInfo')
 }
 
 function materializeCachedTransforms(
@@ -354,7 +356,7 @@ async function nativeSubmissionTransforms(contents: string, cacheDirectory: stri
       return [
         syntax === undefined
           ? discoverNativeAccountCapability(resource)
-          : discoverNativeAccountCapabilityFromSyntax(resource, syntax),
+          : discoverNativeAccountCapabilityFromSyntax(resource, syntax, resources),
       ]
     } catch {
       return [] /* Account admission reports its own unavailable capability. */

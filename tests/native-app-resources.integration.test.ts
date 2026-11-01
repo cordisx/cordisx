@@ -176,10 +176,20 @@ it('uses the application HTML entry when the bundler changes every chunk prefix'
     .toEqual(scripts.map(resource => resource.url).sort())
 })
 
-it.skipIf(process.platform !== 'darwin')(
-  'assembles management from a split shared resource and unified native menu',
-  async () => {
+it.skipIf(process.platform !== 'darwin').each([false, true])(
+  'assembles split native management with unified menu (lazy request: %s)',
+  async lazy => {
     const scripts = sharedResources()
+    if (lazy) {
+      const dispatch = scripts.find(resource => resource.source.includes('async function dispatch'))!
+      dispatch.source = dispatch.source.replace(
+        'let wire=normalizeWire(prepared.request,manager.requestClient.getAppServerVersion());',
+        'let makeWire=()=>{let current=prepared.request;return useDirect()?current:normalizeWire(current,manager.requestClient.getAppServerVersion())};',
+      ).replace("manager.sendRequest('turn/start',wire)", "manager.sendRequest('turn/start',makeWire())")
+      scripts[0]!.source +=
+        '\nimport { Service as services } from "./app-shared-new.js";async function readAccount(){let info=services?.accountInfo;return info.readAccountInfo()}'
+      dispatch.source += '\nlet native;export {native as Service};'
+    }
     const f = await bundle(false, scripts)
     expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
       .toEqual(scripts.map(resource => resource.url).sort())
@@ -194,6 +204,13 @@ it.skipIf(process.platform !== 'darwin')(
     const installed = await installNativeChannel(composition)
     try {
       expect(composition.installation.transforms).toHaveLength(3)
+      if (lazy) {
+        expect(composition.installation.accountCapability).toEqual({
+          module: 'app://-/assets/app-shared-new.js',
+          exportName: 'Service',
+          readerProperty: 'accountInfo',
+        })
+      }
       expect((await installed.channel.catalogManagementRead()).views)
         .toEqual([expect.objectContaining({ providerId: 'fixture', selectableCount: 1 })])
       expect(installed.channel.catalogManagementCommand).toBeTypeOf('function')
