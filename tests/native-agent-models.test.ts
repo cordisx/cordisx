@@ -202,6 +202,7 @@ describe('Agent model-provider tools', () => {
         'read_session',
         'start_session',
         'send_message',
+        'integration_status',
       ])
       expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })

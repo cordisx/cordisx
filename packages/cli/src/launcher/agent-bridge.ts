@@ -6,6 +6,10 @@ import path from 'node:path'
 import { type ClaudeHostSessionsInput, createClaudeHostSessions } from './claude-host-sessions.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
+import { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
+import { createIntegrationStatus } from './integration-status.js'
+
+export { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
 
 /**
  * The CordisX agent bridge: one owner-only HTTP endpoint on a Unix socket that
@@ -56,14 +60,6 @@ export const isBridgeApp = (value: unknown): value is BridgeApp =>
   typeof value === 'string' && (BRIDGE_APPS as readonly string[]).includes(value)
 export const isBridgeOperation = (value: unknown): value is BridgeOperation =>
   typeof value === 'string' && (BRIDGE_OPERATIONS as readonly string[]).includes(value)
-
-export function codexLaunchRecordPath(cordisxHomeDir: string): string {
-  return path.join(cordisxHomeDir, 'run', 'codex-launch.json')
-}
-
-export function agentBridgeBindingPath(cordisxHomeDir: string): string {
-  return path.join(cordisxHomeDir, 'run', 'agent-bridge.json')
-}
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -223,6 +219,8 @@ export interface AgentBridge {
   readonly binding: AgentBridgeBinding
   /** One operation on the named app: Codex directly, Claude through a polling session. */
   call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown>
+  /** The read-only integration report, as the `/status` route serves it. Never launches or writes. */
+  status(args?: unknown): Promise<unknown>
   claudeLive(): boolean
   close(): Promise<void>
 }
@@ -271,6 +269,8 @@ export async function startAgentBridge(input: {
   readonly launchClaude?: ClaudeHostSessionsInput['launchClaude']
   /** The Codex profile this launch runs, recorded so Claude can start it again. */
   readonly codexProfileId?: string
+  /** The `model-service` declaration this launch was started on, for the status report only. */
+  readonly codexModelServiceId?: string
 }): Promise<AgentBridge> {
   const runDir = path.join(input.cordisxHomeDir, 'run')
   await mkdir(runDir, { recursive: true, mode: 0o700 })
@@ -290,6 +290,27 @@ export async function startAgentBridge(input: {
   const queue: ClaudeRequest[] = []
   const lastPollAt = new Map<string, number>()
   let closed = false
+  /** Whether any open Claude session's plugin answered the bridge recently: its session tools are connected. */
+  const claudeLive = (): boolean => [...lastPollAt.values()].some(at => Date.now() - at < CLAUDE_LIVE_MS)
+  const integrationStatus = createIntegrationStatus({
+    cordisxHomeDir: input.cordisxHomeDir,
+    // This endpoint is only ever reached from a running Codex launch, so that is the caller unless named.
+    caller: 'codex',
+    ...(input.homedir === undefined ? {} : { homedir: input.homedir }),
+    ...(input.environment === undefined ? {} : { environment: input.environment }),
+    // Reaching this route already proves the bridge answers.
+    bridgeAnswers: () => true,
+    claudePluginPolling: claudeLive,
+    ...(input.runningClaudePid === undefined ? {} : { runningClaudePid: input.runningClaudePid }),
+    codexAppServer: async () => {
+      try {
+        await input.codex.nativeRequest('thread/list', { limit: 1 })
+        return true
+      } catch {
+        return false
+      }
+    },
+  })
 
   /** Hands a request to one open Claude session's plugin, which answers it from inside that session. */
   async function callClaude(operation: BridgeOperation, args: unknown, target: string): Promise<unknown> {
@@ -332,6 +353,14 @@ export async function startAgentBridge(input: {
             return
           }
           reply(response, 200, { ok: true, value: await call(body.app, body.operation, body.args) })
+        } else if (request.url === '/status') {
+          reply(response, 200, {
+            ok: true,
+            value: await integrationStatus({
+              ...(isBridgeApp(body.app) ? { app: body.app } : {}),
+              ...(isBridgeApp(body.caller) ? { caller: body.caller } : {}),
+            }),
+          })
         } else if (request.url === '/claude/poll') {
           const sessionId = text(body.sessionId) ?? 'unknown'
           lastPollAt.set(sessionId, Date.now())
@@ -372,15 +401,23 @@ export async function startAgentBridge(input: {
     // Kept after this launch ends: it tells the Claude plugin which profile to start.
     await writeFile(
       codexLaunchRecordPath(input.cordisxHomeDir),
-      `${JSON.stringify({ version: 1, homeDir: input.cordisxHomeDir, profileId: input.codexProfileId })}\n`,
+      `${
+        JSON.stringify({
+          version: 1,
+          homeDir: input.cordisxHomeDir,
+          profileId: input.codexProfileId,
+          ...(input.codexModelServiceId === undefined ? {} : { modelServiceId: input.codexModelServiceId }),
+        })
+      }\n`,
       { mode: 0o600 },
     )
   }
 
   return Object.freeze({
     binding,
-    claudeLive: () => [...lastPollAt.values()].some(at => Date.now() - at < CLAUDE_LIVE_MS),
+    claudeLive,
     call,
+    status: (args?: unknown) => integrationStatus(args),
     async close() {
       if (closed) return
       closed = true
