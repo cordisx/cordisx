@@ -377,6 +377,21 @@ async function forward(line) {
       } else lifecycleCalls.set(message.id, params.threadId)
       if (message.method === 'thread/unsubscribe') unmarkedTurns.retireThread(params.threadId)
     }
+    if (['thread/start', 'thread/resume'].includes(message?.method) && params) {
+      let providerId = params.modelProvider
+      if (message.method === 'thread/resume' && providerId === undefined && typeof params.threadId === 'string') {
+        const persisted = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
+        providerId = persisted?.thread?.modelProvider
+      }
+      const overrides = await controlCall('configured-provider', {
+        ...(typeof providerId === 'string' ? { providerId } : {}),
+      })
+      if (object(overrides) && Object.keys(overrides).length) {
+        params.config = { ...object(params.config), ...overrides }
+        await write(child.stdin, message)
+        return
+      }
+    }
     await write(child.stdin, line)
     return
   }

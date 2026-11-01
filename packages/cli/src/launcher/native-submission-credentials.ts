@@ -6,6 +6,7 @@ import type { NativeManagedGatewayConnectionSession } from './managed-service-na
 import type { NativeProviderCredentialBroker, NativeProviderCredentialLease } from './native-submission-controller.js'
 
 export interface NativeSubmissionCredentialAdapterOptions {
+  readonly routeEndpoint?: (baseUrl: string) => string
   readonly credentials: ManagedCredentialBroker
   readonly resolveEndpoint: (
     providerId: string,
@@ -70,7 +71,8 @@ export function nativeSubmissionCredentialBroker(
         return Object.freeze({
           serviceGeneration: preparation.serviceGeneration,
           endpoint: Object.freeze({
-            baseUrl: endpointBaseUrl(providerId, session),
+            baseUrl: options.routeEndpoint?.(endpointBaseUrl(providerId, session))
+              ?? endpointBaseUrl(providerId, session),
             wireApi: 'responses' as const,
           }),
           auth: auth(preparation),

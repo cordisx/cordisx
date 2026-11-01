@@ -56,6 +56,7 @@ export interface NativeSubmissionControlServer {
   isThreadIdle(threadId: string): Promise<boolean>
   /** One allowlisted method on the desktop's own app-server; see `native-app-server-protocol.mjs`. */
   nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
+  bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
   invokeTask(
@@ -72,6 +73,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
   const nonce = randomBytes(32).toString('hex')
   let peer: Socket | undefined
   let authenticated = false
+  let prepareConfigured: ((providerId?: string) => Promise<Readonly<Record<string, unknown>>>) | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
   let closed = false
@@ -168,6 +170,24 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         if (!authenticated) throw new Error('Unauthenticated diagnostic')
         if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
           diagnostic({ ...projectDiagnostic(value as { event: string }), event: value.event, serviceRef: peerRef })
+        }
+        return
+      }
+      if (value.type === 'configured-provider') {
+        if (!authenticated || active >= 32 || (value.providerId !== undefined && !valid(value.providerId, 128))) {
+          throw new Error('Configured provider unavailable')
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          const overrides =
+            await prepareConfigured?.(typeof value.providerId === 'string' ? value.providerId : undefined) ?? {}
+          await write(socket, { id: value.id, ok: true, value: overrides })
+        } catch {
+          await write(socket, { id: value.id, ok: false })
+        } finally {
+          active--
+          activeIds.delete(value.id)
         }
         return
       }
@@ -354,6 +374,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     },
     async nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>) {
       return await callPeer({ type: 'native-request', method, params })
+    },
+    bindConfiguredProvider(value: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>) {
+      if (prepareConfigured) throw new Error('Configured provider already bound')
+      prepareConfigured = value
     },
     bindController(value: NativeSubmissionController) {
       if (controller) throw new Error('Native controller already bound')

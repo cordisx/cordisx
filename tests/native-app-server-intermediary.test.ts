@@ -9,6 +9,33 @@ import {
 } from './fixtures/native-submission-controller-harness.js'
 
 describe('native app-server intermediary', () => {
+  it('routes an unmarked configured start through the authenticated Host without replacing authentication', async () => {
+    const h = await harness()
+    try {
+      const prepare = vi.fn(async () => ({ 'model_providers.modelhub.base_url': 'http://127.0.0.1:1234/opaque' }))
+      h.server.bindConfiguredProvider(prepare)
+      h.send({
+        id: 'configured-start',
+        method: 'thread/start',
+        params: {
+          modelProvider: 'modelhub',
+          model: 'model-a',
+          config: { 'model_providers.modelhub.env_key': 'ORIGINAL_KEY' },
+        },
+      })
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        modelProvider: 'modelhub',
+        config: {
+          'model_providers.modelhub.base_url': 'http://127.0.0.1:1234/opaque',
+          'model_providers.modelhub.env_key': 'ORIGINAL_KEY',
+        },
+      })
+      expect(prepare).toHaveBeenCalledWith('modelhub')
+    } finally {
+      await h.close()
+    }
+  })
+
   it('records request metadata over the existing authenticated control channel while preserving opaque input', async () => {
     const events: DiagnosticEvent[] = []
     await withDiagnostics({ emit: event => events.push(event) }, async () => {
