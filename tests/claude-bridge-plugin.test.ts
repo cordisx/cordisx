@@ -89,7 +89,7 @@ const declaredConfig = JSON.stringify({
 })
 
 describe('The Claude bridge plugin', () => {
-  it('registers the four session tools and list_model_providers', async () => {
+  it('registers the session tools, list_model_providers and integration_status', async () => {
     const { registered } = await plugin({})
     expect(registered.map(tool => tool.name)).toEqual([
       'list_sessions',
@@ -97,6 +97,7 @@ describe('The Claude bridge plugin', () => {
       'start_session',
       'send_message',
       'list_model_providers',
+      'integration_status',
     ])
     const read = registered.find(tool => tool.name === 'read_session')!
     expect(JSON.stringify(read.inputSchema)).toContain('"limit"')

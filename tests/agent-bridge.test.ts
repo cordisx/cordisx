@@ -223,6 +223,49 @@ describe('agent bridge transport', () => {
     })
   })
 
+  it('records the model service the launch was started on', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
+    bridge = await startAgentBridge({
+      cordisxHomeDir: home,
+      codex: fakeCodex(),
+      codexProfileId: 'work',
+      codexModelServiceId: 'deepseek',
+    })
+    await bridge.close()
+    expect(JSON.parse(await readFile(path.join(home, 'run', 'codex-launch.json'), 'utf8'))).toEqual({
+      version: 1,
+      homeDir: home,
+      profileId: 'work',
+      modelServiceId: 'deepseek',
+    })
+  })
+
+  it('reports integration status over the same token-guarded socket', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
+    bridge = await startAgentBridge({
+      cordisxHomeDir: home,
+      codex: fakeCodex(),
+      codexProfileId: 'work',
+      environment: {},
+      runningClaudePid: async () => undefined,
+    })
+    expect((await post(bridge, '/status', {}, 'wrong')).status).toBe(403)
+    const answered = await post(bridge, '/status', { caller: 'codex' })
+    expect(answered.status).toBe(200)
+    // This launch proves the bridge and its app-server answer; Claude is closed and no config exists yet.
+    expect(answered.body.value).toMatchObject({
+      version: 1,
+      app: 'codex',
+      self: { app: 'codex', status: 'ok', profileId: 'work', bridge: { status: 'ok', token: 'present' } },
+      other: { app: 'claude', status: 'not-configured', reason: 'profile-not-recorded' },
+      modelServices: [],
+      plugins: { codexAppServer: { status: 'ok' } },
+    })
+    expect(JSON.stringify(answered.body.value)).not.toContain(bridge.binding.token)
+    const claudeView = await post(bridge, '/status', { caller: 'claude' })
+    expect(claudeView.body.value).toMatchObject({ app: 'claude', self: { app: 'claude' }, other: { app: 'codex' } })
+  })
+
   it('writes an owner-only binding and refuses a request without its token', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })

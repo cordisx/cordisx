@@ -120,6 +120,33 @@ const SESSION_TOOLS = [
   },
 ] as const
 
+/**
+ * The status tool has its own result shape, not a session operation: it reports
+ * the bridge, both apps, the declared model services, and plugin health.
+ */
+const STATUS_TOOL = {
+  name: 'integration_status',
+  description:
+    "Report whether the CordisX integrations work right now, and what to fix when they do not, before you guess or retry: this app's bridge socket and token, the CordisX home and running profile; the other app (Codex Desktop or Claude Desktop) whether its process is still alive, its profile, the model service it was launched with, and whether its side of the bridge answers; the model services declared in the CordisX config with the models each app can use and whether their key variable is set (never its value); and cheap bridge-plugin health. Read-only and fast: no app is started, no turn runs, nothing is written. `problems` already carries a reason and a remedy for everything that is not working.",
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: {
+        enum: ['claude', 'codex'],
+        description: 'Whose side to report as "self". Defaults to this app (Claude).',
+      },
+    },
+  },
+} as const
+
+/** One judged fact, in the shape both apps report. */
+interface Check {
+  status: string
+  reason?: string
+  remedy?: string
+}
+
 let polling = false
 
 async function readBinding($: EngineInterface): Promise<Binding | undefined> {
@@ -140,12 +167,26 @@ async function post($: EngineInterface, route: string, body: unknown): Promise<B
     return { ok: false, unreachable: true, error: 'CordisX is not running Codex (no agent bridge found)' }
   }
   try {
-    const response = await $.http.fetch(`http://cordisx${route}`, {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const fetch = $.http.fetch(`http://cordisx${route}`, {
       method: 'POST',
       socketPath: binding.socketPath,
       headers: { 'content-type': 'application/json', 'x-cordisx-bridge-token': binding.token },
       body: JSON.stringify(body),
     })
+    let response: Awaited<typeof fetch>
+    try {
+      response = route === '/status'
+        ? await Promise.race([
+          fetch,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Status probe timed out')), 3500)
+          }),
+        ])
+        : await fetch
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
     return JSON.parse(response.text) as BridgeReply
   } catch {
     return { ok: false, unreachable: true, error: 'The CordisX agent bridge is not reachable' }
@@ -317,6 +358,167 @@ async function runSessionTool($: EngineInterface, operation: string, input: Reco
     : `Codex is unavailable: ${answered.error ?? 'unknown error'}`
 }
 
+/**
+ * The report when no CordisX Codex launch answers: the same shape, assembled
+ * from the profile files this session can read. It can speak for Claude (this
+ * plugin runs inside the app) but not for Codex, whose process it cannot probe.
+ */
+async function localStatus($: EngineInterface, args: Record<string, unknown>): Promise<unknown> {
+  const home = await cordisxHome($)
+  const requested: 'claude' | 'codex' = args.app === 'codex' ? 'codex' : 'claude'
+  const read = async (file: string): Promise<Record<string, unknown> | undefined> => {
+    try {
+      return JSON.parse(await $.fs.read(file)) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  }
+  const string = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.length > 0 ? value : undefined
+  const record = (value: unknown): Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+
+  const config = await read(`${home}/config.json`)
+  const binding = await read(`${home}/run/agent-bridge.json`)
+  const claudeProfile = await read(`${home}/run/claude-desktop.json`)
+  const codexLaunch = await read(`${home}/run/codex-launch.json`)
+  const token = string(binding?.token)
+  const socketPath = string(binding?.socketPath)
+
+  const configuredVariables = Array.isArray(config?.environmentVariables) ? config.environmentVariables : []
+  const keySet = async (name: string): Promise<boolean> =>
+    (await $.env.get(name) ?? '').length > 0
+    || configuredVariables.some(entry =>
+      string(record(entry).name) === name && record(entry).enabled === true
+      && (string(record(entry).value) ?? '').length > 0
+    )
+
+  const use = (provider: Record<string, unknown>, app: 'claude' | 'codex') => {
+    const models = record(provider.models)[app]
+    const list = Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+    if (provider.enabled === false) return { usable: false, models: list, reason: 'disabled' }
+    const appliesTo = Array.isArray(provider.appliesTo) ? provider.appliesTo : undefined
+    if (appliesTo !== undefined && !appliesTo.includes(app)) {
+      return { usable: false, models: list, reason: 'app-not-declared' }
+    }
+    const protocols = Array.isArray(provider.protocols) ? provider.protocols : []
+    if (!protocols.includes(app === 'claude' ? 'anthropic-messages' : 'openai-responses')) {
+      return { usable: false, models: list, reason: 'protocol-unsupported' }
+    }
+    return list.length === 0
+      ? { usable: false, models: list, reason: 'no-models' }
+      : { usable: true, models: list }
+  }
+  const declared = Array.isArray(config?.providers) ? (config!.providers as unknown[]).map(record) : []
+  const services = await Promise.all(
+    declared
+      .filter(provider => provider.kind === 'model-service')
+      .map(async provider => ({
+        id: string(provider.id),
+        displayName: string(provider.displayName),
+        keyVariable: string(provider.apiKeyEnv),
+        keySet: await keySet(string(provider.apiKeyEnv) ?? ''),
+        apps: { claude: use(provider, 'claude'), codex: use(provider, 'codex') },
+      })),
+  )
+  const declares = (id: string | undefined): boolean => id !== undefined && services.some(service => service.id === id)
+
+  const bridge = (answers: boolean, status?: Check) => ({
+    ...(status ?? { status: token !== undefined && answers ? 'ok' : 'unreachable' }),
+    token: token === undefined ? 'missing' : 'present',
+    ...(socketPath === undefined ? {} : { socketPath }),
+  })
+
+  const claudeProfileId = string(claudeProfile?.profileId)
+  const claudeProviderId = string(record(claudeProfile?.provider).id)
+  const sessionToolsConnected = await hostsClaudeSessions($)
+  // The plugin proves this Claude process is alive; it does not prove the shared bridge answers.
+  const claude: Record<string, unknown> = {
+    app: 'claude',
+    ...(claudeProfileId === undefined ? {} : { profileId: claudeProfileId }),
+    ...(claudeProviderId === undefined
+      ? {}
+      : { modelService: { id: claudeProviderId, declared: declares(claudeProviderId) } }),
+    status: 'ok',
+    bridge: bridge(false, { status: 'unreachable', reason: 'bridge-not-answering' }),
+  }
+  const codexProfileId = string(codexLaunch?.profileId)
+  const codexServiceId = string(codexLaunch?.modelServiceId)
+  const codexRemedy = token === undefined
+    ? 'Start Codex with `cordisx start codex <profile>`; its launch creates the bridge.'
+    : `Ask the person before starting Codex: \`cordisx start codex ${codexProfileId ?? '<profile>'}\`.`
+  const codex: Record<string, unknown> = {
+    app: 'codex',
+    ...(codexProfileId === undefined ? {} : { profileId: codexProfileId }),
+    ...(codexServiceId === undefined
+      ? {}
+      : { modelService: { id: codexServiceId, declared: declares(codexServiceId) } }),
+    status: 'unknown',
+    reason: 'codex-process-not-probed',
+    remedy: codexRemedy,
+    bridge: bridge(false, {
+      status: 'unreachable',
+      reason: token === undefined ? 'bridge-binding-missing' : 'bridge-not-answering',
+      remedy: codexRemedy,
+    }),
+  }
+
+  const problems = [
+    ...services.flatMap(service => {
+      const usable = service.apps.claude.usable || service.apps.codex.usable
+      if (!usable) {
+        return [{
+          area: `model-service:${service.id}`,
+          status: 'not-configured',
+          reason: 'no-app-can-use-it',
+          remedy:
+            `Neither app can use ${service.id}: give it an "anthropic-messages" protocol with models.claude (Claude) or "openai-responses" with models.codex (Codex).`,
+        }]
+      }
+      return service.keySet ? [] : [{
+        area: `model-service:${service.id}`,
+        status: 'not-configured',
+        reason: 'key-not-set',
+        remedy: `Set ${service.keyVariable} in the CordisX environment variables, or export it before launching.`,
+      }]
+    }),
+    { area: requested === 'codex' ? 'self' : 'other', status: codex.status, reason: codex.reason, remedy: codexRemedy },
+    { area: requested === 'codex' ? 'self.bridge' : 'other.bridge', ...(codex.bridge as Check) },
+    { area: requested === 'claude' ? 'self.bridge' : 'other.bridge', ...(claude.bridge as Check) },
+    ...(config === undefined
+      ? [{
+        area: 'config',
+        status: 'missing',
+        reason: 'home-config-unreadable',
+        remedy: 'Check the CordisX home config.',
+      }]
+      : []),
+    ...(!sessionToolsConnected
+      ? [{ area: 'plugins.claudeSessionTools', status: 'not-connected', reason: 'claude-session-tools-missing' }]
+      : []),
+  ]
+
+  return {
+    version: 1,
+    status: 'unavailable',
+    app: requested,
+    cordisxHome: home,
+    self: requested === 'claude' ? claude : codex,
+    other: requested === 'claude' ? codex : claude,
+    modelServices: services,
+    plugins: {
+      claudePluginDirectory: { status: 'ok' },
+      claudeSessionTools: sessionToolsConnected
+        ? { status: 'ok' }
+        : { status: 'not-connected', reason: 'claude-session-tools-missing' },
+      codexAppServer: { status: 'unknown', reason: 'codex-app-server-not-probed' },
+    },
+    problems,
+    note:
+      'Assembled inside Claude without a CordisX Codex launch answering; start Codex for the bridge, app-server, and Codex process checks.',
+  }
+}
+
 async function cordisxHome($: EngineInterface): Promise<string> {
   return await $.env.get('CORDISX_HOME') ?? `${await $.env.get('HOME') ?? ''}/.cordisx`
 }
@@ -371,7 +573,7 @@ async function startCodex($: EngineInterface, launch: unknown): Promise<true | R
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    for (const tool of [...SESSION_TOOLS, MODEL_PROVIDER_TOOL]) {
+    for (const tool of [...SESSION_TOOLS, MODEL_PROVIDER_TOOL, STATUS_TOOL]) {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
     }
     $.clock.every(POLL_MS, () => void poll($))
@@ -394,4 +596,11 @@ export const register: Register = on => {
       return { result: await runSessionTool($, tool.name, args) }
     })
   }
+
+  on('tool.call', { tool: `mcp__cordisx__${STATUS_TOOL.name}` }, async ($, e) => {
+    const { tool: _tool, tool_use_id: _id, ...args } = e as Record<string, unknown>
+    // The bridge holds both apps' state; without it, report what this side can see.
+    const answered = await post($, '/status', { caller: 'claude', ...args })
+    return { result: JSON.stringify(answered.ok ? answered.value : await localStatus($, args)) }
+  })
 }

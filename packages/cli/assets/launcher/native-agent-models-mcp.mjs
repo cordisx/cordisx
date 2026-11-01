@@ -122,6 +122,20 @@ const tools = [{
     },
     required: ['app', 'sessionId', 'prompt'],
   },
+}, {
+  name: 'integration_status',
+  description:
+    "Report whether the CordisX integrations work right now, and what to fix when they do not, before you guess or retry: this app's bridge socket and token, the CordisX home and running profile; the other app (Codex Desktop or Claude Desktop) whether its process is still alive, its profile, the model service it was launched with, and whether its side of the bridge answers; the model services declared in the CordisX config with the models each app can use and whether their key variable is set (never its value); and cheap bridge-plugin health. Read-only and fast: no app is started, no turn runs, nothing is written. `problems` already carries a reason and a remedy for everything that is not working.",
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: {
+        enum: ['claude', 'codex'],
+        description: 'Whose side to report as "self". Defaults to this app (Codex).',
+      },
+    },
+  },
 }]
 const sessionTools = new Set(['list_sessions', 'read_session', 'start_session', 'send_message'])
 
@@ -199,6 +213,8 @@ reader.on('line', line => {
       else if (request.method === 'tools/call') {
         const operation = sessionTools.has(request.params?.name)
           ? `session:${request.params.name}`
+          : request.params?.name === 'integration_status'
+          ? 'integration_status'
           : request.params?.name === 'list_model_providers'
           ? 'list'
           : request.params?.name === 'select_thread_model_provider'
