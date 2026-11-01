@@ -11,6 +11,7 @@ async function harness(options: Readonly<{
   submissionAvailable?: boolean
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
+  defaultModelId?: string
   catalogSubscribe?: (listener: () => void) => () => void
   catalog?: () => readonly {
     providerId: string
@@ -36,6 +37,7 @@ async function harness(options: Readonly<{
       }],
     isThreadIdle: idle,
     ...(options.defaultProviderId === undefined ? {} : { defaultProviderId: options.defaultProviderId }),
+    ...(options.defaultModelId === undefined ? {} : { defaultModelId: options.defaultModelId }),
   })
   const session = {
     isClosed: () => false,
@@ -427,6 +429,22 @@ describe('native submission document authority', () => {
         scope: thread,
         effective: { providerId: 'openai', model: 'gpt-current' },
       })).resolves.not.toHaveProperty('draftPreference')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('keeps an explicit launch model on new drafts without changing existing threads', async () => {
+    const h = await harness({ defaultProviderId: 'provider-b', defaultModelId: 'model-b' })
+    try {
+      await expect(h.channel.selectionRead({ scope: h.draft, effective: { providerId: 'openai', model: 'old' } }))
+        .resolves.toMatchObject({
+          draftPreference: { providerId: 'provider-b', model: 'model-b' },
+        })
+      const thread = { ...h.draft, threadId: 'existing', navigationGeneration: 4 }
+      h.setLive(thread)
+      await expect(h.channel.selectionRead({ scope: thread, effective: { providerId: 'openai', model: 'old' } }))
+        .resolves.not.toHaveProperty('draftPreference')
     } finally {
       await h.installed.dispose()
     }

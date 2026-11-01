@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import {
   pluginManagementRpcPaths,
@@ -11,6 +12,7 @@ import type { TerminalProviderRequest, TerminalProviderResult } from '../launche
 import { hasMatchingProcessIdentity } from './supervisor-state.js'
 import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
+import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
@@ -25,7 +27,7 @@ function toml(value: unknown): string {
 
 export function terminalCodexArguments(
   invocation: TerminalInvocation,
-  prepared?: Extract<TerminalProviderResult, { kind: 'prepared' }>,
+  prepared?: Pick<Extract<TerminalProviderResult, { kind: 'prepared' }>, 'providerId' | 'model' | 'provider'>,
   instructionsFile?: string,
 ): readonly string[] {
   const reserved = (key: string) =>
@@ -60,14 +62,36 @@ export function terminalCodexArguments(
     )
   }
   if (instructionsFile) result.push('-c', `model_instructions_file=${toml(instructionsFile)}`)
+  if (!prepared && invocation.model) result.push('--model', invocation.model)
   result.push(...invocation.codexArgs)
   return result
+}
+
+export function terminalClaudeArguments(invocation: TerminalInvocation, instructionsFile?: string): readonly string[] {
+  if (
+    invocation.service
+    && invocation.codexArgs.some(arg =>
+      ['--model', '--fallback-model', '--settings', '--setting-sources', '--agents', '--agent'].includes(arg)
+      || /^(--model|--fallback-model|--settings|--setting-sources|--agents|--agent)=/u.test(arg)
+    )
+  ) throw new Error('Claude arguments cannot override the selected CordisX service/model')
+  return [
+    ...(invocation.model ? ['--model', invocation.model] : []),
+    ...(instructionsFile ? ['--system-prompt-file', instructionsFile] : []),
+    ...invocation.codexArgs,
+  ]
 }
 
 export async function runTerminalCommand(invocation: TerminalInvocation, runtime: CordisXCliRuntime): Promise<void> {
   const stdout = runtime.stdout ?? console.log
   if (invocation.help) return stdout(TERMINAL_HELP)
   const environment = { ...runtime.env ?? process.env }
+  const client = invocation.client ?? 'codex'
+  if (client === 'claude-code') {
+    delete environment.CLAUDECODE
+    delete environment.CLAUDE_CODE_SESSION_ID
+    delete environment.CLAUDE_CODE_PLUGIN_DIRS
+  }
   // A terminal launched by an agent inside the App is a new CLI instance, not
   // the App's native app-server intermediary or supervisor child.
   for (const key of Object.keys(environment)) {
@@ -93,48 +117,68 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   }
   let request: ((input: TerminalProviderRequest) => Promise<TerminalProviderResult>) | undefined
+  let shared: ReturnType<typeof prepareSharedTerminalService>
+  let declared: ReturnType<typeof sharedTerminalServices> = []
   if (invocation.service || invocation.list || invocation.profile) {
     const configPath = resolveHomeConfigPath({
       env: environment,
       ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
     })
     const config = await loadHomeConfig(configPath)
+    declared = sharedTerminalServices(config, client)
+    if (invocation.service && invocation.model) {
+      shared = prepareSharedTerminalService(config, client, invocation.service, invocation.model, environment)
+    }
+    if (shared) Object.assign(environment, shared.environment)
     const app = config.apps.codex
     const profileId = invocation.profile ?? app?.defaultProfile
     const profile = profileId && Object.hasOwn(app?.profiles ?? {}, profileId) ? app!.profiles[profileId] : undefined
     if (!profile || !profileId) throw new Error('Existing CordisX Codex profile required; CLI never creates profiles')
-    if (profile.dataMode === 'host-isolated') {
+    if (profile.dataMode === 'host-isolated' && client === 'codex') {
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
     const paths = pluginManagementRpcPaths(path.dirname(configPath), 'codex', profileId)
-    const endpoint = await readPluginManagementRpcEndpoint(paths)
-    if (invocation.service || invocation.list) {
+    const endpoint = shared ? undefined : await readPluginManagementRpcEndpoint(paths)
+    if (!shared && (invocation.service || invocation.list)) {
       if (
         !endpoint || endpoint.appId !== 'codex' || endpoint.profileId !== profileId
         || path.resolve(endpoint.configPath) !== path.resolve(configPath)
         || !await hasMatchingProcessIdentity(endpoint.pid, endpoint.processStartedAt)
       ) {
-        throw new Error('CordisX service selection requires an already-running compatible Host; no App was started')
-      }
-      request = async input => {
-        const current = await readPluginManagementRpcEndpoint(paths)
-        if (
-          !current || current.token !== endpoint.token || current.generation !== endpoint.generation
-          || !await hasMatchingProcessIdentity(current.pid, current.processStartedAt)
-        ) {
-          throw new Error('CordisX owner changed; start a new CLI session')
+        if (!invocation.list) {
+          throw new Error(
+            'CordisX plugin service selection requires an already-running compatible Host; no App was started',
+          )
         }
-        return await requestPluginManagementRpc(paths, endpoint, {
-          kind: 'terminal-provider',
-          request: input,
-        }) as TerminalProviderResult
+      } else {
+        request = async input => {
+          const current = await readPluginManagementRpcEndpoint(paths)
+          if (
+            !current || current.token !== endpoint.token || current.generation !== endpoint.generation
+            || !await hasMatchingProcessIdentity(current.pid, current.processStartedAt)
+          ) throw new Error('CordisX owner changed; start a new CLI session')
+          return await requestPluginManagementRpc(paths, endpoint, {
+            kind: 'terminal-provider',
+            request: input,
+          }) as TerminalProviderResult
+        }
       }
     }
   }
   if (invocation.list) {
-    const result = await request!({ kind: 'list' })
+    const result = request ? await request({ kind: 'list' }) : { kind: 'list' as const, providers: [] }
     if (result.kind !== 'list') throw new Error('Invalid terminal catalog response')
-    stdout(JSON.stringify(result, null, 2))
+    stdout(
+      JSON.stringify(
+        {
+          ...result,
+          ...(request ? {} : { complete: false }),
+          providers: [...result.providers.filter(p => !declared.some(d => d.providerId === p.providerId)), ...declared],
+        },
+        null,
+        2,
+      ),
+    )
     return
   }
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
@@ -142,20 +186,54 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let timer: ReturnType<typeof setInterval> | undefined
   let renewing = false, failure: Error | undefined
   try {
-    if (invocation.service && invocation.model) {
-      const result = await request!({ kind: 'prepare', providerId: invocation.service, model: invocation.model })
+    if (invocation.service && invocation.model && !shared) {
+      const result = await request!({
+        kind: 'prepare',
+        providerId: invocation.service,
+        model: invocation.model,
+        ...(client === 'claude-code' ? { client } : {}),
+      })
       if (result.kind !== 'prepared' || result.providerId !== invocation.service || result.model !== invocation.model) {
         throw new Error('Invalid terminal provider preparation')
       }
       prepared = result
     }
-    const args = terminalCodexArguments(invocation, prepared, instructionsFile)
-    child = (runtime.internalSpawnTerminal ?? spawn)(invocation.executable ?? 'codex', [...args], {
-      cwd,
-      env: environment,
-      stdio: 'inherit',
-      shell: false,
-    })
+    if (client === 'claude-code' && prepared) {
+      if (!prepared.anthropicBaseUrl) throw new Error('This Host does not provide Claude Code gateway support')
+      environment.ANTHROPIC_BASE_URL = prepared.anthropicBaseUrl
+      // Claude requires an auth selection even when the local plugin owns login.
+      environment.ANTHROPIC_AUTH_TOKEN = 'cordisx-local-gateway'
+      delete environment.ANTHROPIC_API_KEY
+    }
+    let claudeSettings: string | undefined
+    if (client === 'claude-code' && invocation.service) {
+      environment.CORDISX_TERMINAL_SERVICE_KEY = environment.ANTHROPIC_AUTH_TOKEN
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+      claudeSettings = JSON.stringify({
+        apiKeyHelper: `${quote(process.execPath)} ${
+          quote(fileURLToPath(new URL('../../assets/launcher/terminal-claude-key.mjs', import.meta.url)))
+        }`,
+        env: { ANTHROPIC_BASE_URL: environment.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_API_KEY: '' },
+      })
+      delete environment.ANTHROPIC_AUTH_TOKEN
+      delete environment.ANTHROPIC_API_KEY
+    }
+    const args = client === 'codex'
+      ? terminalCodexArguments(invocation, prepared ?? shared, instructionsFile)
+      : [
+        ...terminalClaudeArguments(invocation, instructionsFile),
+        ...(claudeSettings ? ['--settings', claudeSettings] : []),
+      ]
+    child = (runtime.internalSpawnTerminal ?? spawn)(
+      invocation.executable ?? (client === 'codex' ? 'codex' : 'claude'),
+      [...args],
+      {
+        cwd,
+        env: environment,
+        stdio: 'inherit',
+        shell: false,
+      },
+    )
     if (prepared) {
       const leaseId = prepared.leaseId
       timer = setInterval(() => {
@@ -185,7 +263,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (runtime.internalSignal?.aborted) abort()
     try {
       const code = await new Promise<number>((resolve, reject) => {
-        child!.once('error', () => reject(new Error('Could not start Codex CLI; check --codex-executable or PATH')))
+        child!.once('error', () => reject(new Error(`Could not start ${client} CLI; check --executable or PATH`)))
         child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
       })
       if (failure) throw failure

@@ -55,6 +55,9 @@ export async function prepareRunCommand(
 
   const config = await ensureHomeConfig(homeConfigOptions)
   const appId = invocation.action === 'launch' ? invocation.app ?? config.defaultApp : config.defaultApp
+  if (invocation.action === 'launch' && invocation.options.service && appId !== 'codex') {
+    throw new Error('--service/--model App launch currently supports Codex; name codex explicitly')
+  }
   const adapter = resolveHostAdapter(appId)
   if (
     invocation.action === 'launch' && invocation.options.attach && (

@@ -23,7 +23,7 @@ runCordisXCli(argv).catch((error) => {
       console.error(`[cordisx] ${message}`)
     }
   }
-  process.exitCode = argv[0] === 'cli' && error instanceof Error && 'exitCode' in error
+  process.exitCode = error instanceof Error && 'exitCode' in error
       && Number.isSafeInteger(error.exitCode)
     ? error.exitCode as number
     : (error instanceof CordisXManagementCommandError || error instanceof ModelExportChoiceError)

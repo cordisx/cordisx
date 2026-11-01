@@ -7,7 +7,7 @@ import { nativeProviderConfig, type NativeProviderCredentialLease } from './nati
 
 export type TerminalProviderRequest =
   | { readonly kind: 'list' }
-  | { readonly kind: 'prepare'; readonly providerId: string; readonly model: string }
+  | { readonly kind: 'prepare'; readonly providerId: string; readonly model: string; readonly client?: 'claude-code' }
   | { readonly kind: 'renew' | 'release'; readonly leaseId: string }
 export type TerminalProviderResult =
   | {
@@ -25,6 +25,7 @@ export type TerminalProviderResult =
     readonly providerId: string
     readonly model: string
     readonly provider: Readonly<Record<string, unknown>>
+    readonly anthropicBaseUrl?: string
   }
   | { readonly kind: 'renewed' | 'released' }
 
@@ -37,9 +38,10 @@ export function parseTerminalProviderRequest(value: unknown): TerminalProviderRe
   const keys = item.kind === 'list'
     ? ['kind']
     : item.kind === 'prepare'
-    ? ['kind', 'providerId', 'model']
+    ? ['kind', 'providerId', 'model', 'client']
     : ['kind', 'leaseId']
   if (Object.keys(item).some(key => !keys.includes(key))) throw new Error('Invalid terminal provider request fields')
+  if (item.client !== undefined && item.client !== 'claude-code') throw new Error('Invalid terminal client')
   if (item.kind === 'list') return { kind: 'list' }
   if (item.kind === 'prepare' && text('providerId') && text('model')) return item as unknown as TerminalProviderRequest
   if ((item.kind === 'renew' || item.kind === 'release') && text('leaseId')) {
@@ -127,9 +129,28 @@ export function createTerminalProviderAuthority(options: {
           await validate(request.providerId, request.model, credential.serviceGeneration)
           if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
           const provider = nativeProviderConfig(credential)
+          // Claude Code can reuse an unauthenticated loopback gateway. Bearer
+          // credentials retain the Codex command broker and are never exported.
+          if (
+            request.client === 'claude-code'
+            && ('auth' in provider || !String(provider.base_url).startsWith('http://127.0.0.1:'))
+          ) {
+            throw new Error(
+              'This managed gateway cannot supply Claude Code authentication; select an anthropic-messages shared service',
+            )
+          }
           const leaseId = randomUUID()
           leases.set(leaseId, { ...request, credential, expires: now() + ttlMs })
-          return { kind: 'prepared', leaseId, providerId: request.providerId, model: request.model, provider }
+          return {
+            kind: 'prepared',
+            leaseId,
+            providerId: request.providerId,
+            model: request.model,
+            provider,
+            ...(request.client === 'claude-code'
+              ? { anthropicBaseUrl: String(provider.base_url).replace(/\/v1\/?$/u, '') }
+              : {}),
+          }
         } catch (error) {
           credential.dispose()
           throw error

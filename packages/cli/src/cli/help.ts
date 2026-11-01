@@ -1,6 +1,7 @@
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx start|status|logs|stop|restart [app] [profile] [options]
+  cordisx start --mode cli [codex|claude-code] [-s SERVICE -m MODEL] [-- client-arguments...]
   cordisx app [check|update]
   cordisx setup
   cordisx config
@@ -13,6 +14,9 @@ export const HELP = `Usage:
   cordisx source <command> [options]
 
 Options:
+  --mode app|cli           start: desktop App (default) or original terminal client
+  -s, --service <id>       Select model service (use together with --model)
+  -m, --model <id>         Select exact service model for this launch
   --attach                 Attach to an existing loopback CDP endpoint
   --system                 Use the host's system Chromium profile (escape hatch)
   --profile-dir <path>     Override this launch profile's independent Chromium directory

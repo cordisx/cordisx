@@ -58,6 +58,86 @@ it('runs ordinary native Codex commands without a Host or CordisX config', async
   await expect(readFile(path.join(missing, 'config.json'))).rejects.toThrow()
 })
 
+it.each(['codex', 'claude-code'] as const)(
+  'starts %s from a shared declaration without an App or global config write',
+  async client => {
+    const f = await fixture()
+    const config = {
+      ...createDefaultHomeConfig(),
+      providers: [{
+        id: 'shared',
+        kind: 'model-service',
+        displayName: 'Shared',
+        baseUrl: 'https://example.com/v1',
+        apiKeyEnv: 'SHARED_KEY',
+        protocols: ['openai-responses', 'anthropic-messages'],
+        models: { codex: ['model-one'], claude: ['model-one'] },
+      }],
+      environmentVariables: [{ name: 'SHARED_KEY', value: 'TEST_PRIVATE_KEY', enabled: true }],
+    }
+    await writeFile(f.configPath, JSON.stringify(config))
+    const before = await readFile(f.configPath, 'utf8')
+    let called = false
+    await runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'model-one', '--', '--version'], {
+      env: f.env,
+      internalSpawnTerminal: ((executable: string, args: string[], options: any) => {
+        called = true
+        expect(executable).toBe(client === 'codex' ? 'codex' : 'claude')
+        expect(options.env.SHARED_KEY).toBe('TEST_PRIVATE_KEY')
+        expect(args.join(' ')).not.toContain('TEST_PRIVATE_KEY')
+        if (client === 'claude-code') {
+          expect(options.env.CORDISX_TERMINAL_SERVICE_KEY).toBe('TEST_PRIVATE_KEY')
+          expect(options.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+          expect(options.env.ANTHROPIC_BASE_URL).toBe('https://example.com/v1')
+          expect(args.slice(0, 3)).toEqual(['--model', 'model-one', '--version'])
+          const settings = JSON.parse(args[args.indexOf('--settings') + 1]!)
+          expect(settings.env.ANTHROPIC_BASE_URL).toBe('https://example.com/v1')
+          expect(settings.apiKeyHelper).toContain('terminal-claude-key.mjs')
+        } else expect(args).toContain('model_provider="shared"')
+        return spawn(process.execPath, ['-e', 'process.exit(0)'])
+      }) as typeof spawn,
+    })
+    expect(called).toBe(true)
+    expect(await readFile(f.configPath, 'utf8')).toBe(before)
+    await expect(runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'missing'], { env: f.env }))
+      .rejects.toThrow('catalog')
+    await runCordisXCli(['start', '--mode', 'cli', client, '--list'], {
+      env: f.env,
+      stdout: line => f.stdout.push(line),
+    })
+    expect(JSON.parse(f.stdout[0]!)).toMatchObject({
+      complete: false,
+      providers: [{ providerId: 'shared', managed: false }],
+    })
+    expect(f.stdout.join('')).not.toContain('TEST_PRIVATE_KEY')
+  },
+)
+
+it('rejects unsupported Claude protocol before child spawn', async () => {
+  const f = await fixture()
+  await writeFile(
+    f.configPath,
+    JSON.stringify({
+      ...createDefaultHomeConfig(),
+      providers: [{
+        id: 'responses',
+        kind: 'model-service',
+        displayName: 'Responses',
+        baseUrl: 'https://example.com',
+        apiKeyEnv: 'KEY',
+        protocols: ['openai-responses'],
+        models: { codex: ['model'] },
+      }],
+    }),
+  )
+  const spawnTerminal = vi.fn()
+  await expect(runCordisXCli(['start', '--mode', 'cli', 'claude-code', '-s', 'responses', '-m', 'model'], {
+    env: f.env,
+    internalSpawnTerminal: spawnTerminal as unknown as typeof spawn,
+  })).rejects.toThrow('anthropic-messages')
+  expect(spawnTerminal).not.toHaveBeenCalled()
+})
+
 it('leaves foreground Ctrl-C semantics to the original Codex CLI', async () => {
   const f = await fixture()
   const child = Object.assign(new EventEmitter(), { exitCode: null, kill: vi.fn() })

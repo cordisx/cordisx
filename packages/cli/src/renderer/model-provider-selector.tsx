@@ -55,6 +55,7 @@ export interface ProviderSelectionSnapshot {
   readonly confirmation?: NativeProviderSubmitConfirmation
   readonly submissionError?: NativeSubmissionRejection
   readonly draftPreference?: Readonly<{
+    readonly model?: string
     readonly providerId: string
     readonly generation: number
     readonly revision: number
@@ -398,8 +399,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   useEffect(() => {
     // A newly discovered member must not turn a catalog update into a native selection.
     if (!canInteract()) return
-    if (registry.hasLiveSource()) return
     const preference = native.draftPreference
+    if (registry.hasLiveSource() && preference?.model === undefined) return
     if (preference === undefined || native.threadId !== undefined || pendingProviderId !== undefined) return
     const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
     if (attemptedDraftPreference.current === key) return
@@ -410,7 +411,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       }
       : catalog.providers.find(candidate => candidate.providerId === preference.providerId)
     if (provider === undefined) return
-    const model = selectionModelForProvider(displayedModel, provider, locale)
+    const model = preference.model === undefined
+      ? selectionModelForProvider(displayedModel, provider, locale)
+      : provider.models.find(model => model.id === preference.model && (!('disabled' in model) || !model.disabled))
     if (model === undefined) return
     attemptedDraftPreference.current = key
     void transport.select(

@@ -69,6 +69,60 @@ function fixture() {
 }
 
 describe('terminal provider lifecycle', () => {
+  it('reuses an unauthenticated loopback gateway for Claude without exporting bearer credentials', async () => {
+    const dispose = vi.fn()
+    const authority = createTerminalProviderAuthority({
+      owns: id => id === 'aiden',
+      catalog: async () => [{
+        providerId: 'aiden',
+        pluginId: 'aiden',
+        models: [{ id: 'gpt-model', label: 'GPT', aliases: [] }],
+      }],
+      resolve: () => ({
+        value: {
+          service: { pluginId: 'aiden', serviceId: 'gateway', generation: 'one' },
+          endpoint: { origin: 'http://127.0.0.1:54321', apiPath: '/v1', auth: { scheme: 'none' } },
+          models: {
+            generation: 'one',
+            defaultAlias: 'gpt-model',
+            aliases: [{ alias: 'gpt-model', gatewayModelId: 'gpt-model' }],
+          },
+          cleanup: { authorityId: 'test' },
+        },
+        dispose() {},
+      }),
+      credentials: {
+        prepare: async () => ({ scheme: 'none', serviceGeneration: 'one', dispose }),
+        close: async () => {},
+      },
+    })
+    try {
+      const result = await authority.request({
+        kind: 'prepare',
+        providerId: 'aiden',
+        model: 'gpt-model',
+        client: 'claude-code',
+      })
+      expect(result).toMatchObject({ kind: 'prepared', anthropicBaseUrl: 'http://127.0.0.1:54321' })
+    } finally {
+      authority.close()
+    }
+    expect(dispose).toHaveBeenCalledOnce()
+    const bearer = fixture()
+    try {
+      await expect(
+        bearer.authority.request({
+          kind: 'prepare',
+          providerId: 'plugin-provider',
+          model: 'model-one',
+          client: 'claude-code',
+        }),
+      ).rejects.toThrow('authentication')
+      expect(bearer.releaseCredential).toHaveBeenCalledOnce()
+    } finally {
+      bearer.authority.close()
+    }
+  })
   it('lists without acquiring credentials and revokes only the selected launch on release', async () => {
     const f = fixture()
     try {

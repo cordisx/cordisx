@@ -51,6 +51,17 @@ describe('provider selection interaction', () => {
     expect(result.select).not.toHaveBeenCalled()
     result.registry.dispose()
   })
+  it('applies the exact explicit launch model even with a live catalog', async () => {
+    const { select } = await setup('shared', false, {
+      draft: true,
+      liveCatalog: true,
+      draftPreference: { providerId: 'second', model: 'other', generation: 7, revision: 3 },
+    })
+    expect(select).toHaveBeenCalledWith({ providerId: 'second', model: 'other' }, {
+      source: 'preference',
+      expectedRevision: 3,
+    })
+  })
   it('applies a launcher draft preference with the existing legal model pairing strategy', async () => {
     const { select } = await setup('source-model', false, {
       draft: true,

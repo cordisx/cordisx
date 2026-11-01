@@ -123,6 +123,7 @@ export class NativeSubmissionCompatibilityError extends Error {
 interface NativeSubmissionCatalogOptions {
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
+  readonly defaultModelId?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
   readonly nativeModelDiscovery?: boolean
@@ -711,6 +712,14 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        if (completeOptions.defaultProviderId && completeOptions.defaultModelId) {
+          const launchProvider = (await catalog()).find(provider =>
+            provider.providerId === completeOptions.defaultProviderId
+          )
+          if (!launchProvider?.models.some(model => model.id === completeOptions.defaultModelId)) {
+            throw new Error('Selected launch service/model is not available in this profile')
+          }
+        }
         terminalProviders = createTerminalProviderAuthority({
           catalog,
           owns: id => managed?.owns(id) === true || hasPluginProvider(id),
@@ -748,6 +757,7 @@ export async function prepareNativeSubmissionBootstrap(
           ...(completeOptions.defaultProviderId === undefined
             ? {}
             : { defaultProviderId: completeOptions.defaultProviderId }),
+          ...(completeOptions.defaultModelId === undefined ? {} : { defaultModelId: completeOptions.defaultModelId }),
         })
         controller = createNativeSubmissionController({
           selection: cdp.selection,

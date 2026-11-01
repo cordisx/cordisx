@@ -35,6 +35,7 @@ export function nativeSubmissionCatalogOptions(
   recoverLegacyLock?: Readonly<{ exitedPid: number; inode: number }>,
   environmentVariables: readonly HomeConfigEnvironmentVariable[] = [],
   providers: readonly HomeConfigProvider[] = [],
+  launch?: Readonly<{ service?: string; model?: string }>,
 ) {
   const nativeEnvironment = hostModelServiceEnvironment(environment, environmentVariables, planEnvironment)
   const declared = servicesForApp(providers, 'codex')
@@ -52,5 +53,6 @@ export function nativeSubmissionCatalogOptions(
     ...(profile.selectorIcons === undefined ? {} : { selectorIcons: profile.selectorIcons }),
     ...(profile.providerBindings === undefined ? {} : { providerBindings: profile.providerBindings }),
     ...(declared.length === 0 ? {} : { declaredProviders: providers }),
+    ...(launch?.service ? { defaultProviderId: launch.service, defaultModelId: launch.model } : {}),
   }
 }
