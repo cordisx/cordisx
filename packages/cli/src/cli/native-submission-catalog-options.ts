@@ -1,5 +1,6 @@
-import type { HomeConfigProfile } from '../config/home-config.js'
+import type { HomeConfigProfile, HomeConfigProvider } from '../config/home-config.js'
 import { type HomeConfigEnvironmentVariable, mergeHomeEnvironment } from '../config/home-config-environment.js'
+import { servicesForApp } from '../launcher/model-service-projection.js'
 
 export function hostModelServiceEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
@@ -33,8 +34,10 @@ export function nativeSubmissionCatalogOptions(
   planEnvironment?: Readonly<Record<string, string>>,
   recoverLegacyLock?: Readonly<{ exitedPid: number; inode: number }>,
   environmentVariables: readonly HomeConfigEnvironmentVariable[] = [],
+  providers: readonly HomeConfigProvider[] = [],
 ) {
   const nativeEnvironment = hostModelServiceEnvironment(environment, environmentVariables, planEnvironment)
+  const declared = servicesForApp(providers, 'codex')
   return {
     managedCatalog: {
       homeDir,
@@ -48,5 +51,6 @@ export function nativeSubmissionCatalogOptions(
     ...(profile.configModelCatalogs === undefined ? {} : { configModelCatalogs: profile.configModelCatalogs }),
     ...(profile.selectorIcons === undefined ? {} : { selectorIcons: profile.selectorIcons }),
     ...(profile.providerBindings === undefined ? {} : { providerBindings: profile.providerBindings }),
+    ...(declared.length === 0 ? {} : { declaredProviders: providers }),
   }
 }

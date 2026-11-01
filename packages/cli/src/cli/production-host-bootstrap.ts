@@ -22,6 +22,7 @@ import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } f
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
+import { codexHomeOfPlan, projectModelServicesBeforeLaunch } from '../launcher/model-service-projection.js'
 
 export interface ProductionHostBootstrap {
   readonly plan?: ResolvedLaunchPlan
@@ -143,6 +144,14 @@ export async function prepareProductionHostBootstrap(
       stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
     }
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
+    // Model-service declarations become the provider entries this host reads at
+    // startup, so the projection must land before the process starts.
+    await projectModelServicesBeforeLaunch({
+      providers: configured.providers,
+      codexHome: codexHomeOfPlan(plan),
+      selectedId: invocation.options.provider,
+      stdout,
+    })
     const hostEnvironment = {
       ...configuredEnvironment,
       ...nativeSubmissionBootstrap?.environment,

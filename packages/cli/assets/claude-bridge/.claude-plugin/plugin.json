@@ -1,0 +1,6 @@
+{
+  "name": "cordisx",
+  "version": "0.1.0",
+  "description": "CordisX bridge between Claude Desktop and Codex Desktop conversations",
+  "license": "AGPL-3.0-or-later"
+}

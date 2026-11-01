@@ -130,6 +130,7 @@ import {
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { modelServiceLaunchHook } from '../launcher/model-service-projection.js'
 import { runInjectedHost } from './run-injected-host.js'
 import { type CordisXCliRuntime, createDevelopmentManagedServiceActivation } from './run-runtime.js'
 export { captureMainInspectorUrl, completeHostReadiness, runInjectedHost } from './run-injected-host.js'
@@ -494,6 +495,7 @@ export async function runDevelopment(
             undefined,
             runtime.internalNativeSubmissionLegacyLockRecovery,
             homeConfig.environmentVariables,
+            homeConfig.providers,
           ),
         )
         managedServiceProjection = await createNativeViteManagedServiceProjection({
@@ -650,6 +652,7 @@ export async function runDevelopment(
           providerBridgeToken: composition.providerBridgeToken,
         }),
         ...(executable === undefined ? {} : { executable }),
+        beforeHostLaunch: modelServiceLaunchHook(homeConfig, codexHome(environment), invocation.options, stdout),
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,

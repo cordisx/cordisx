@@ -7,6 +7,7 @@ import {
   type NativeSubmissionComposition,
 } from '../launcher/native-submission-composition.js'
 import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { codexHomeOfPlan, modelServiceLaunchHook } from '../launcher/model-service-projection.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
@@ -379,6 +380,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       plan?.environment,
       undefined,
       currentHomeConfig.environmentVariables,
+      currentHomeConfig.providers,
     )
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined
@@ -946,6 +948,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         publisherGrant,
         executable: plan.executable,
         ...(prelaunchedHost === undefined ? {} : { prelaunchedHost }),
+        beforeHostLaunch: modelServiceLaunchHook(currentHomeConfig, codexHomeOfPlan(plan), invocation.options, stdout),
         debugPort: resolvedDebugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,

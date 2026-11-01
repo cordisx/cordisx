@@ -109,6 +109,8 @@ export async function runInjectedHost(input: {
     hostPid?: number
     inspectorUrl?: Promise<string>
   }>
+  /** Runs right before this function starts the host itself; a prelaunched host skips it. */
+  readonly beforeHostLaunch?: () => Promise<void>
   readonly debugPort: number
   readonly hostArgs: readonly string[]
   readonly launcher: CordisXLauncherOptions
@@ -210,6 +212,7 @@ export async function runInjectedHost(input: {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir, { stdout: input.stdout })
     }
     if (input.prelaunchedHost === undefined) {
+      await input.beforeHostLaunch?.()
       const hidden = input.hiddenUntilReady === true
       const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
       diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector === true, verified: mainInspector })

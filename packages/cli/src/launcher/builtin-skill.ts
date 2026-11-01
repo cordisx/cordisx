@@ -490,7 +490,7 @@ async function replaceManagedTarget(
   await rm(backupDir, { recursive: true, force: true })
 }
 
-async function bundledSkillSourceDir(skillName: CordisXBundledSkillName): Promise<string> {
+export async function bundledSkillSourceDir(skillName: CordisXBundledSkillName): Promise<string> {
   const candidates = [
     fileURLToPath(new URL(`../../skills/${skillName}`, import.meta.url)),
     fileURLToPath(new URL(`../../../../skills/${skillName}`, import.meta.url)),

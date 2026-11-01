@@ -32,6 +32,8 @@ export interface CordisXLauncherOptions {
   readonly profileDir?: string
   readonly executable?: string
   readonly debugPort?: number
+  /** Declared `model-service` provider this launch should use. */
+  readonly provider?: string
   /** Restrictive dev ledger admission precondition; never selects or overrides usage. */
   readonly workScopeGuard?: string
   readonly onlineDevtools: boolean
@@ -143,7 +145,14 @@ type BooleanOptionName =
   | 'recoverStartup'
   | 'help'
   | 'createShortcut'
-type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath' | 'workScopeGuard'
+type ValueOptionName =
+  | 'dataMode'
+  | 'profileDir'
+  | 'executable'
+  | 'debugPort'
+  | 'configPath'
+  | 'workScopeGuard'
+  | 'provider'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
 interface ParsedOptions {
@@ -159,6 +168,7 @@ interface ParsedOptions {
   help: boolean
   createShortcut: boolean
   dataMode?: CordisXDataMode
+  provider?: string
   profileDir?: string
   executable?: string
   debugPort?: number
@@ -186,6 +196,7 @@ const VALUE_OPTIONS = new Map<string, ValueOptionName>([
   ['--profile-dir', 'profileDir'],
   ['--executable', 'executable'],
   ['--debug-port', 'debugPort'],
+  ['--provider', 'provider'],
   ['--config', 'configPath'],
   ['--work-scope-guard', 'workScopeGuard'],
   ['-c', 'configPath'],
@@ -318,6 +329,7 @@ function launcherOptions(options: ParsedOptions): CordisXLauncherOptions {
     ...(options.profileDir === undefined ? {} : { profileDir: options.profileDir }),
     ...(options.executable === undefined ? {} : { executable: options.executable }),
     ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
+    ...(options.provider === undefined ? {} : { provider: options.provider }),
     ...(options.workScopeGuard === undefined ? {} : { workScopeGuard: options.workScopeGuard }),
   }
 }
