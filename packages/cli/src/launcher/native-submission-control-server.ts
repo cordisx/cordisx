@@ -11,7 +11,8 @@ import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 
 // Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
-const MAX_RESPONSE_LINE = 8 * 1024 * 1024
+// Match the intermediary native-history envelope; command budgets stay small.
+const MAX_RESPONSE_LINE = 64 * 1024 * 1024
 const TIMEOUT = 30_000
 const valid = (value: unknown, max = 512): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
@@ -312,6 +313,13 @@ export async function startNativeSubmissionControlServer(
         fragmentBytes += Buffer.byteLength(fragment)
         const frameLimit = authenticated ? MAX_RESPONSE_LINE : MAX_LINE
         if (fragmentBytes > frameLimit) {
+          diagnostic({
+            event: 'native-control-frame-rejected',
+            phase: authenticated ? 'response-frame-limit' : 'request-frame-limit',
+            frameBytes: fragmentBytes,
+            frameLimitBytes: frameLimit,
+            verified: authenticated,
+          })
           socket.destroy()
           return
         }

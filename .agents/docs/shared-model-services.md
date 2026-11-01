@@ -166,7 +166,7 @@ character clipping; the 60k-character cap still applies underneath it.
   intermediary's `native-request` control message, which allows only
   `thread/list`, `thread/read`, `thread/start`, `thread/resume`,
   `thread/name/set`, `turn/start`, and `turn/interrupt`. Authenticated replies
-  to outstanding native requests may contain up to 8 MiB of history; commands
+  to outstanding native requests may contain up to 64 MiB of history; commands
   and diagnostics retain their 256 KiB frame limit. Threads it starts show
   in the Codex sidebar; `start_session` can pick a declared provider and model,
   and names the thread when `title` is given (`thread/start` has no name field,

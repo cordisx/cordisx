@@ -41,12 +41,12 @@ async function fragments(socket: Socket, frame: string) {
 }
 
 describe('native control response budgets', () => {
-  it('accepts multi-megabyte history and remains usable for subsequent requests', async () => {
+  it('accepts history above the old 8 MiB budget and remains usable for subsequent requests', async () => {
     const f = await peer()
     try {
       const waiting = f.server.nativeRequest('thread/read', { threadId: 'history', includeTurns: true })
       const request = await f.next()
-      const history = 'x'.repeat(2 * 1024 * 1024)
+      const history = 'x'.repeat(9 * 1024 * 1024)
       await fragments(
         f.socket,
         JSON.stringify({ id: request.id, ok: true, value: { thread: { turns: [{ items: [{ text: history }] }] } } })
@@ -113,13 +113,13 @@ describe('native control response budgets', () => {
     }
   })
 
-  it('rejects a response above 8 MiB and settles the outstanding request', async () => {
+  it('rejects a response above 64 MiB and settles the outstanding request', async () => {
     const f = await peer()
     try {
       const waiting = f.server.nativeRequest('thread/read', { threadId: 'huge', includeTurns: true })
       const rejected = expect(waiting).rejects.toThrow('disconnected')
       const request = await f.next()
-      f.socket.write(JSON.stringify({ id: request.id, ok: true, value: 'x'.repeat(8 * 1024 * 1024) }) + '\n')
+      f.socket.write(JSON.stringify({ id: request.id, ok: true, value: 'x'.repeat(64 * 1024 * 1024) }) + '\n')
       await rejected
     } finally {
       f.socket.destroy()
