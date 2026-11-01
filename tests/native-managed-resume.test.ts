@@ -64,6 +64,10 @@ describe('current managed resume route', () => {
     expect(await prepareManagedResume({ ...request, params: { ...request.params, ...params } }, f)).toBeUndefined()
     expect(f.controlCall).not.toHaveBeenCalled()
   })
+  it('refreshes a failed thread that can accept direct input', async () => {
+    const f = fixture({ status: { type: 'systemError' } })
+    expect(await prepareManagedResume(request, f)).toBeDefined()
+  })
   it('keeps an explicit requested model on the same provider', async () => {
     const f = fixture()
     await prepareManagedResume({ ...request, params: { ...request.params, model: 'new-model' } }, f)

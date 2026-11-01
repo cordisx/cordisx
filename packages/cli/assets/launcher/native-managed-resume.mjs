@@ -7,7 +7,7 @@ export async function prepareManagedResume(message, { nativeCall, controlCall })
   const read = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
   const thread = read?.thread
   if (
-    thread?.id !== params.threadId || !['idle', 'notLoaded'].includes(thread.status?.type)
+    thread?.id !== params.threadId || !['idle', 'notLoaded', 'systemError'].includes(thread.status?.type)
     || typeof thread.modelProvider !== 'string' || thread.modelProvider === 'openai'
     || typeof thread.model !== 'string' || thread.model === ''
     || (params.modelProvider !== undefined && params.modelProvider !== thread.modelProvider)
