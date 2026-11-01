@@ -59,12 +59,15 @@ jobs:
       - run: npm run check:package --workspace=@cordisx/codex-adapter
       - name: Pack only the adapter
         run: |
-          mkdir -p .adapter-release
-          npm pack --workspace=@cordisx/codex-adapter --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/.adapter-release"
+          mkdir -p adapter-release
+          npm pack --workspace=@cordisx/codex-adapter --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/adapter-release"
+          archives=("$GITHUB_WORKSPACE/adapter-release/"*.tgz)
+          test "${#archives[@]}" -eq 1
+          test -s "${archives[0]}"
       - uses: actions/upload-artifact@v4
         with:
           name: codex-adapter-${{ github.event.pull_request.head.sha || github.sha }}
-          path: .adapter-release/*.tgz
+          path: adapter-release/*.tgz
           if-no-files-found: error
           retention-days: 14
 
@@ -90,14 +93,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: codex-adapter-${{ github.sha }}
-          path: .adapter-release
+          path: adapter-release
       - name: Require exact native evidence before publication
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern adapter-native-validation.json --dir .adapter-release
-          node scripts/adapter-release.mjs "$GITHUB_REF_NAME" .adapter-release/cordisx-codex-adapter-*.tgz .adapter-release/adapter-native-validation.json
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern adapter-native-validation.json --dir adapter-release
+          node scripts/adapter-release.mjs "$GITHUB_REF_NAME" adapter-release/cordisx-codex-adapter-*.tgz adapter-release/adapter-native-validation.json
       - name: Publish the verified adapter with npm OIDC provenance
         run: |
           channel=$(node scripts/adapter-release.mjs "$GITHUB_REF_NAME" | node -e 'let input="";process.stdin.on("data",c=>input+=c).on("end",()=>console.log(JSON.parse(input).distTag))')
-          npm publish .adapter-release/cordisx-codex-adapter-*.tgz --tag "$channel" --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org
+          npm publish adapter-release/cordisx-codex-adapter-*.tgz --tag "$channel" --access public --provenance --ignore-scripts --registry=https://registry.npmjs.org
