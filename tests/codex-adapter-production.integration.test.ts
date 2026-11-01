@@ -46,6 +46,16 @@ it('uses an independent npm artifact through compiled production analysis, parti
   })
   await ownedDirectory(path.join(store, 'packages'))
   await rename(snapshot.stagingDirectory, path.join(store, 'packages', id))
+  const modules = path.join(root, 'node_modules/@cordisx')
+  await mkdir(modules, { recursive: true })
+  await symlink(path.join(store, 'packages', id, 'payload'), path.join(modules, 'codex-adapter'))
+  const standalone = execFileSync(process.execPath, [
+    '--input-type=module',
+    '-e',
+    'import {bundle} from "@cordisx/codex-adapter"; import {parseNativeSource} from "@cordisx/codex-adapter/native-source-structure"; console.log(JSON.stringify({version:bundle.version,type:parseNativeSource("export const value=1").type}))',
+  ], { cwd: root, encoding: 'utf8' })
+  expect(JSON.parse(standalone)).toEqual({ version: '0.1.0-beta.1', type: 'Program' })
+
   await writePrivateJson(path.join(store, 'state.json'), {
     schema: 1,
     preferred: [id],

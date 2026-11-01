@@ -4,7 +4,16 @@ import { legacyNativeSubmissionResources } from './native-submission-legacy-reso
 import { nativeAgentTaskTransforms } from './native-agent-task-transform.js'
 import { discoverNativeAccountCapabilityFromSyntax } from './native-account-structure.js'
 import { parseNativeSource, type SyntaxNode } from './native-source-structure.js'
-export type * from './contracts.js'
+export type {
+  AdapterBundle,
+  AdapterContext,
+  AdapterModule,
+  AdapterModuleResult,
+  NativeAccountCapabilityDescriptor,
+  NativeResourceTransform,
+  NativeResourceTransformResult,
+  NativeScriptResource,
+} from './contracts.js'
 
 const syntaxes = new WeakMap<readonly NativeScriptResource[], ReadonlyMap<NativeScriptResource, SyntaxNode>>()
 
@@ -81,3 +90,23 @@ export const bundle: AdapterBundle = {
     },
   ],
 }
+
+export * from './native-submission-structure.js'
+
+export * from './native-submission-legacy-resources.js'
+
+export * from './native-account-structure.js'
+
+export * from './native-agent-task-transform.js'
+
+export * from './native-agent-task-source.js'
+
+export * from './native-source-structure.js'
+
+export * from './native-source-bindings.js'
+
+export * from './native-lazy-wire-request.js'
+
+export * from './native-operation-request-transform.js'
+
+export * from './native-submit-orchestrator-transform.js'
