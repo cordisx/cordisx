@@ -87,6 +87,16 @@ function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: strin
 }
 
 describe('Codex side of the agent bridge', () => {
+  it('answers list_model_providers in the same shape the Claude plugin uses', async () => {
+    expect(await createCodexBridgeHandler(fakeCodex())('list_model_providers', {})).toEqual({
+      providers: [{
+        providerId: 'deepseek',
+        title: 'DeepSeek',
+        models: [{ id: 'deepseek-chat', label: 'deepseek-chat' }],
+      }],
+    })
+  })
+
   it('lists threads with clickable codex links', async () => {
     const codex = fakeCodex()
     const listed = await createCodexBridgeHandler(codex)('list_sessions', { limit: 5 }) as {
@@ -109,6 +119,39 @@ describe('Codex side of the agent bridge', () => {
     ])
     const long = threadTranscript({ turns: [{ items: [{ type: 'agentMessage', text: 'x'.repeat(100_000) }] }] })
     expect(long[0]!.text.length).toBeLessThanOrEqual(60_001)
+  })
+
+  it('bounds the transcript by message entries, newest kept', async () => {
+    const read = await createCodexBridgeHandler(fakeCodex())('read_session', { sessionId: 't1', limit: 2 }) as {
+      transcript: Array<{ role: string; text: string }>
+    }
+    expect(read.transcript).toEqual([
+      { role: 'command', text: 'npm test' },
+      { role: 'assistant', text: 'fixed' },
+    ])
+    // The character cap still applies on top of the entry limit.
+    const long = threadTranscript(
+      { turns: [{ items: [{ type: 'agentMessage', text: 'x'.repeat(100_000) }] }] },
+      5,
+    )
+    expect(long).toHaveLength(1)
+    expect(long[0]!.text.length).toBeLessThanOrEqual(60_001)
+  })
+
+  it('names a started thread through thread/name/set and reports the title', async () => {
+    const codex = fakeCodex()
+    const started = await createCodexBridgeHandler(codex, '/home/u')('start_session', {
+      prompt: 'build it',
+      title: 'Fix the build',
+    }) as Record<string, unknown>
+    expect(started).toMatchObject({ status: 'started', title: 'Fix the build' })
+    expect(codex.calls.map(call => call.method)).toEqual(['thread/start', 'thread/name/set', 'turn/start'])
+    expect(codex.calls[1]!.params).toEqual({ threadId: 'new-thread', name: 'Fix the build' })
+    // An unnamed start does not touch the native name.
+    const unnamed = fakeCodex()
+    const plain = await createCodexBridgeHandler(unnamed)('start_session', { prompt: 'x' }) as Record<string, unknown>
+    expect(plain.title).toBeUndefined()
+    expect(unnamed.calls.map(call => call.method)).toEqual(['thread/start', 'turn/start'])
   })
 
   it('starts a thread on a declared provider and refuses one outside the catalog', async () => {

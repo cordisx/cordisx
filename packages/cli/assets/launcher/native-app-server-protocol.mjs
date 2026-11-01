@@ -679,6 +679,7 @@ const BRIDGE_NATIVE_METHODS = new Set([
   'thread/read',
   'thread/start',
   'thread/resume',
+  'thread/name/set',
   'turn/start',
   'turn/interrupt',
 ])

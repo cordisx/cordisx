@@ -98,13 +98,28 @@ A Codex launch starts the agent bridge: an owner-only HTTP endpoint on
 Both apps get the same four tools, named the same in each:
 `list_sessions`, `read_session`, `start_session`, and `send_message`, each with
 an `app` argument (`"codex"` or `"claude"`). A new app is a new `app` value,
-not new tool names. Results carry `codex://` or `claude://` links.
+not new tool names. Results carry `codex://` or `claude://` links. Both apps
+also have `list_model_providers`, which returns the same shape on either side.
+
+Every declared argument does something on both sides; a tool never accepts a
+value it ignores.
+
+| Argument                             | Codex                                                              | Claude                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `read_session.limit`                 | newest `limit` transcript entries, on top of the 60k-character cap | same                                                                     |
+| `start_session.title`                | `thread/name/set` right after `thread/start`                       | written into the session record `list_sessions` reads                    |
+| `start_session.providerId` / `model` | a catalog provider and one of its models                           | a `model-service` declared for Claude and one of its `models.claude` ids |
+
+`limit` bounds message entries, so a short request never spends its budget on
+character clipping; the 60k-character cap still applies underneath it.
 
 - **`app: "codex"`** runs on the Codex desktop's own app-server through the
   intermediary's `native-request` control message, which allows only
-  `thread/list`, `thread/read`, `thread/start`, `thread/resume`, `turn/start`,
-  and `turn/interrupt`. Threads it starts show in the Codex sidebar;
-  `start_session` can pick a declared provider and model.
+  `thread/list`, `thread/read`, `thread/start`, `thread/resume`,
+  `thread/name/set`, `turn/start`, and `turn/interrupt`. Threads it starts show
+  in the Codex sidebar; `start_session` can pick a declared provider and model,
+  and names the thread when `title` is given (`thread/start` has no name field,
+  so the name is set immediately after it).
 - **`app: "claude"`** runs on the profile `cordisx start claude` launched
   (recorded in `~/.cordisx/run/claude-desktop.json`) with no Claude session
   open and no prompt:
@@ -117,13 +132,35 @@ not new tool names. Results carry `codex://` or `claude://` links.
     `ANTHROPIC_AUTH_TOKEN` in the child's environment only), with a session id
     chosen up front. When the turn ends, CordisX sends
     `claude://resume?session=<id>` to that profile's process by pid (an Apple
-    Event, never to whichever Claude the system would pick), and Claude
-    imports it as `local_<id>`. The link is returned at once.
+    Event, never to whichever Claude would pick), and Claude imports it as
+    `local_<id>`.
+  - `start_session.providerId` picks another declaration for that turn: the id
+    must be a `model-service` the CordisX config declares for Claude (a service
+    only the profile's own `configLibrary` holds has no endpoint here to run
+    from), and `model` must be one of its `models.claude` ids. The turn runs on
+    that declaration's `baseUrl` and `apiKeyEnv` key. `model` without
+    `providerId` names a model of the profile's own service.
+  - `start_session.title` writes the title into the session record, so
+    `list_sessions` shows it instead of an empty title.
+  - The first turn may run for minutes, so the call answers `"started"` without
+    waiting for it. It waits up to about eight seconds first: a turn that ends
+    in that window adds `turn: { status: "succeeded" }`, or
+    `turn: { status: "failed", error }` with the CLI's own reason (the model
+    service key is scrubbed out). A turn still running adds no `turn` field and
+    a `note` saying to read the session again to see whether it finished. The
+    call never blocks on a long task.
   - `send_message` to a session the app is not running resumes it the same
     way (`--resume`). A session the app has open (a Claude Code process with
     `--resume=<id>`) gets the message from its own CordisX plugin
     (`assets/claude-bridge`, loaded through `CLAUDE_CODE_PLUGIN_DIRS`), which
     claims requests addressed to it and submits them with `$.prompt.submit`.
+
+`list_model_providers` in the Claude plugin answers `{ providers: [{ providerId,
+title, models: [{ id, label }] }] }` — the CordisX config's Claude-capable
+`model-service` declarations merged with the profile's own `configLibrary`
+entries. The Codex tool answers the same shape from its own catalog, plus
+`threadCreation` (whether `create_thread_with_provider` is available). Neither
+returns an endpoint or a key.
 
 From Claude, the plugin's tools send `app: "claude"` through the bridge too, so
 starting a Claude session from Claude skips the "Allow Claude to start the
