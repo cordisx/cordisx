@@ -91,6 +91,15 @@ describe('current managed resume route', () => {
       model: 'model',
     })
   })
+  it.each([{ path: '/different/rollout.jsonl' }, { history: [] }])(
+    'leaves explicit alternate history to the native resume path: %s',
+    async params => {
+      const f = fixture()
+      expect(await prepareManagedResume({ ...request, params: { ...request.params, ...params } }, f)).toBeUndefined()
+      expect(f.nativeCall).not.toHaveBeenCalled()
+      expect(f.controlCall).not.toHaveBeenCalled()
+    },
+  )
   it.each([{ kind: 'reject' }, { kind: 'resume', resumeToken: 'bad', configOverrides: {} }])(
     'does not apply rejected preparations: %s',
     async prepared => {

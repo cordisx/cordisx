@@ -4,6 +4,8 @@ const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.
 /** Refresh recognized persisted managed routes without changing the selected provider or inventing a Send. */
 export async function prepareManagedResume(message, { nativeCall, controlCall }) {
   const params = message.params
+  // Native path/history overrides can select history other than the named thread.
+  if (params.path != null || params.history != null) return undefined
   const read = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
   const thread = read?.thread
   if (
