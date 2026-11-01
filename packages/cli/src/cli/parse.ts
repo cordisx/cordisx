@@ -1,6 +1,8 @@
 import { type ModelExportInvocation, parseModelExport } from './model-export-parse.js'
 import { type CordisXManagementInvocation, parseManagementCli } from './management-parse.js'
 import { CordisXCliParseError } from './parse-error.js'
+import { parseTerminalCli, type TerminalInvocation } from './terminal-parse.js'
+import { normalizeStartMode } from './start-mode.js'
 
 export { CordisXCliParseError, type CordisXCliParseErrorCode } from './parse-error.js'
 
@@ -21,6 +23,7 @@ export type CordisXCliAction =
   | 'feedback'
   | 'management'
   | 'model-export'
+  | 'terminal'
 export type CordisXDataMode = 'shared' | 'host-isolated'
 
 export interface CordisXLauncherOptions {
@@ -32,6 +35,8 @@ export interface CordisXLauncherOptions {
   readonly debugPort?: number
   /** Declared `model-service` provider this launch should use. */
   readonly provider?: string
+  readonly service?: string
+  readonly model?: string
   /** Restrictive dev ledger admission precondition; never selects or overrides usage. */
   readonly workScopeGuard?: string
   readonly onlineDevtools: boolean
@@ -119,6 +124,7 @@ export interface CordisXFeedbackInvocation {
 export type CordisXCliInvocation =
   | CordisXHelpInvocation
   | ModelExportInvocation
+  | TerminalInvocation
   | CordisXLaunchInvocation
   | CordisXRunInvocation
   | CordisXManagedInvocation
@@ -150,6 +156,8 @@ type ValueOptionName =
   | 'configPath'
   | 'workScopeGuard'
   | 'provider'
+  | 'service'
+  | 'model'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
 interface ParsedOptions {
@@ -166,6 +174,8 @@ interface ParsedOptions {
   createShortcut: boolean
   dataMode?: CordisXDataMode
   provider?: string
+  service?: string
+  model?: string
   profileDir?: string
   executable?: string
   debugPort?: number
@@ -194,6 +204,10 @@ const VALUE_OPTIONS = new Map<string, ValueOptionName>([
   ['--executable', 'executable'],
   ['--debug-port', 'debugPort'],
   ['--provider', 'provider'],
+  ['--service', 'service'],
+  ['-s', 'service'],
+  ['--model', 'model'],
+  ['-m', 'model'],
   ['--config', 'configPath'],
   ['--work-scope-guard', 'workScopeGuard'],
   ['-c', 'configPath'],
@@ -221,6 +235,9 @@ function parseValue(option: string, name: ValueOptionName, raw: string): string 
   }
   if (raw.length === 0) {
     throw new CordisXCliParseError('missing-option-value', `${option} requires a value`)
+  }
+  if ((name === 'service' || name === 'model') && (raw.length > 512 || /[\u0000-\u001f\u007f]/u.test(raw))) {
+    throw new CordisXCliParseError('invalid-option-value', `${option} requires a valid ID`)
   }
   if (name === 'dataMode') {
     if (raw !== 'shared' && raw !== 'host-isolated' && raw !== 'isolated') {
@@ -327,6 +344,8 @@ function launcherOptions(options: ParsedOptions): CordisXLauncherOptions {
     ...(options.executable === undefined ? {} : { executable: options.executable }),
     ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
     ...(options.provider === undefined ? {} : { provider: options.provider }),
+    ...(options.service === undefined ? {} : { service: options.service }),
+    ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.workScopeGuard === undefined ? {} : { workScopeGuard: options.workScopeGuard }),
   }
 }
@@ -551,6 +570,8 @@ function parseFeedbackCli(argv: readonly string[]): CordisXFeedbackInvocation {
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
+  argv = normalizeStartMode(argv)
+  if (argv[0] === 'cli') return parseTerminalCli(argv)
   if (argv[0] === 'model') return parseModelExport(argv)
   if (argv[0] === 'feedback') return parseFeedbackCli(argv)
   if (argv[0] === 'plugin' || argv[0] === 'source') return parseManagementCli(argv)
@@ -566,6 +587,17 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   // The bare command (including its optional app/profile) is intentionally the
   // idempotent background default. `run` is the foreground escape hatch.
   const action: CordisXCliAction = hasCommandPrefix ? first as CordisXCliAction : 'start'
+  if (options.service !== undefined || options.model !== undefined) {
+    if (!['start', 'run', 'restart'].includes(action)) {
+      throw new CordisXCliParseError('unsupported-option', '--service/--model require start or run')
+    }
+    if (options.provider !== undefined) {
+      throw new CordisXCliParseError('conflicting-options', '--provider and --service cannot be combined')
+    }
+    if ((options.service === undefined) !== (options.model === undefined)) {
+      throw new CordisXCliParseError('conflicting-options', '--service and --model must be selected together')
+    }
+  }
   if (
     options.createShortcut
     && (action !== 'start' || options.attach || options.system || options.dryRun || options.debugPort !== undefined
@@ -670,6 +702,12 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   const commandOffset = hasCommandPrefix ? 1 : 0
   const profile = positionals[commandOffset + 1]
   const app = positionals[commandOffset]
+  if (options.service && app !== undefined && app !== 'codex') {
+    throw new CordisXCliParseError(
+      'unsupported-option',
+      '--service/--model App launch currently supports codex; use --mode cli claude-code for Claude Code',
+    )
+  }
   if (app !== undefined && !PROFILE_ID.test(app)) {
     throw new CordisXCliParseError(
       'invalid-option-value',

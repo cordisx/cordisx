@@ -2,6 +2,52 @@ import { describe, expect, it } from 'vitest'
 import { CordisXCliParseError, parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 
 describe('parseCordisXCli', () => {
+  it('treats -M as --mode while keeping lowercase -m for model selection', () => {
+    const args = ['-s', 'aiden', '-m', 'gpt-6.1-sol']
+    expect(parseCordisXCli(['start', '-M', 'cli', ...args])).toEqual(
+      parseCordisXCli(['start', '--mode', 'cli', ...args]),
+    )
+    expect(parseCordisXCli(['start', '-M=cli', 'claude-code', ...args])).toEqual(
+      parseCordisXCli(['start', '--mode=cli', 'claude-code', ...args]),
+    )
+    expect(parseCordisXCli(['start', '-M', 'app'])).toEqual(parseCordisXCli(['start']))
+    expect(() => parseCordisXCli(['start', '-M', 'cli', '--mode', 'cli'])).toThrow(CordisXCliParseError)
+    expect(parseCordisXCli(['start', '--', '-M', 'cli'])).toMatchObject({ action: 'start', hostArgs: ['-M', 'cli'] })
+  })
+  it('unifies app and terminal launch without passing mode to the native client', () => {
+    expect(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-6.1-sol'])).toMatchObject({
+      action: 'start',
+      options: { service: 'aiden', model: 'gpt-6.1-sol' },
+      hostArgs: [],
+    })
+    expect(parseCordisXCli(['start', '--mode', 'cli', '-s', 'aiden', '-m', 'gpt-6.1-sol', '--', 'exec', 'hello']))
+      .toMatchObject({
+        action: 'terminal',
+        service: 'aiden',
+        model: 'gpt-6.1-sol',
+        codexArgs: ['exec', 'hello'],
+      })
+    expect(parseCordisXCli(['start', '--mode=cli', 'claude-code', '-s', 'aiden', '-m', 'gpt-6.1-sol'])).toMatchObject({
+      action: 'terminal',
+      client: 'claude-code',
+      service: 'aiden',
+      model: 'gpt-6.1-sol',
+    })
+    expect(parseCordisXCli(['start', '--mode', 'app'])).toEqual(parseCordisXCli(['start']))
+    for (
+      const args of [['stop', '--mode', 'cli'], ['start', '--mode', 'unknown'], [
+        'start',
+        '-s',
+        'a',
+        '--service',
+        'b',
+        '-m',
+        'm',
+      ], ['start', '--mode', 'cli', 'claude']]
+    ) {
+      expect(() => parseCordisXCli(args)).toThrow(CordisXCliParseError)
+    }
+  })
   it('parses the bare command as the default background start without inventing an app or profile', () => {
     expect(parseCordisXCli([])).toEqual({
       action: 'start',
