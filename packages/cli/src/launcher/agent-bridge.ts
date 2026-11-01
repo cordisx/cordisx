@@ -464,6 +464,8 @@ export function createCodexBridgeHandler(
         const search = text(args.searchTerm, 256)
         const listed = object(
           await codex.nativeRequest('thread/list', {
+            sortKey: 'updated_at',
+            sortDirection: 'desc',
             limit: search === undefined ? limit : Math.max(limit, SEARCH_RECENT_THREADS),
             ...(text(args.cursor, 512) === undefined ? {} : { cursor: args.cursor }),
           }),

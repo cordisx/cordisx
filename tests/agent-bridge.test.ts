@@ -102,7 +102,10 @@ describe('Codex side of the agent bridge', () => {
     const listed = await createCodexBridgeHandler(codex)('list_sessions', { limit: 5 }) as {
       sessions: Array<{ sessionId: string; title: string; link: string }>
     }
-    expect(codex.calls[0]).toEqual({ method: 'thread/list', params: { limit: 5 } })
+    expect(codex.calls[0]).toEqual({
+      method: 'thread/list',
+      params: { limit: 5, sortKey: 'updated_at', sortDirection: 'desc' },
+    })
     expect(listed.sessions).toEqual([
       expect.objectContaining({ sessionId: 't1', title: 'Fix the build', link: 'codex://threads/t1' }),
     ])

@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { startNativeSubmissionControlServer } from '../packages/cli/src/launcher/native-submission-control-server.js'
 
 /** An authenticated intermediary stand-in; no native App or process is launched. */
-async function peer() {
-  const server = await startNativeSubmissionControlServer()
+async function peer(requestTimeoutMs?: number) {
+  const server = await startNativeSubmissionControlServer(requestTimeoutMs === undefined ? {} : { requestTimeoutMs })
   const socket = createConnection(server.socketPath)
   socket.on('error', () => undefined)
   let buffer = ''
@@ -58,6 +58,39 @@ describe('native control response budgets', () => {
       const request2 = await f.next()
       f.socket.write(JSON.stringify({ id: request2.id, ok: true, value: { data: [] } }) + '\n')
       expect(await second).toEqual({ data: [] })
+    } finally {
+      f.socket.destroy()
+      await f.server.close()
+    }
+  })
+
+  it('discards the matching late reply to a timed-out request without disconnecting or replaying it', async () => {
+    const f = await peer(20)
+    try {
+      const waiting = f.server.nativeRequest('thread/read', { threadId: 'late', includeTurns: true })
+      const rejected = expect(waiting).rejects.toThrow('timed out')
+      const timedOut = await f.next()
+      await rejected
+      f.socket.write(JSON.stringify({ id: timedOut.id, ok: false }) + '\n')
+      const second = f.server.nativeRequest('thread/list', { limit: 1 })
+      const next = await f.next()
+      expect(next.method).toBe('thread/list')
+      f.socket.write(JSON.stringify({ id: next.id, ok: true, value: { data: [] } }) + '\n')
+      expect(await second).toEqual({ data: [] })
+      expect(f.socket.destroyed).toBe(false)
+    } finally {
+      f.socket.destroy()
+      await f.server.close()
+    }
+  })
+
+  it('still rejects an unknown response that never belonged to a timed-out request', async () => {
+    const f = await peer()
+    try {
+      const closed = once(f.socket, 'close')
+      f.socket.write(JSON.stringify({ id: 'unknown', ok: true, value: {} }) + '\n')
+      await closed
+      expect(f.socket.destroyed).toBe(true)
     } finally {
       f.socket.destroy()
       await f.server.close()

@@ -69,7 +69,9 @@ export interface NativeSubmissionControlServer {
 }
 
 /** Private launch-scoped transport. No renderer-supplied scope crosses this boundary. */
-export async function startNativeSubmissionControlServer(): Promise<NativeSubmissionControlServer> {
+export async function startNativeSubmissionControlServer(
+  options: { readonly requestTimeoutMs?: number } = {},
+): Promise<NativeSubmissionControlServer> {
   const diagnostic = bindDiagnostic()
   const directory = await mkdtemp(path.join(await realpath(tmpdir()), 'cx-native-'))
   const socketPath = path.join(directory, 'control.sock')
@@ -81,6 +83,12 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
   let taskRouting: NativeAgentTaskRouting | undefined
   let closed = false
   let closePromise: Promise<void> | undefined
+  // Retire only timed-out IDs; a late response cannot resolve a new request.
+  const expiredIds = new Set<string>()
+  const rememberExpired = (id: string): void => {
+    expiredIds.add(id)
+    if (expiredIds.size > 128) expiredIds.delete(expiredIds.values().next().value!)
+  }
   const pending = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
@@ -114,7 +122,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         clearTimeout(item.timer)
         reject(error)
       }
-      const timer = setTimeout(() => fail(new Error('Native switch timed out')), TIMEOUT)
+      const timer = setTimeout(() => {
+        rememberExpired(id)
+        fail(new Error('Native switch timed out'))
+      }, options.requestTimeoutMs ?? TIMEOUT)
       pending.set(id, { resolve, reject, timer })
       void write(socket, { ...request, id }).catch(fail)
     })
@@ -164,7 +175,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (typeof value.ok === 'boolean') {
         if (!authenticated) throw new Error('Unauthenticated response')
         const item = pending.get(value.id)
-        if (!item) throw new Error('Unknown control response')
+        if (!item) {
+          if (expiredIds.has(value.id)) return
+          throw new Error('Unknown control response')
+        }
         pending.delete(value.id)
         clearTimeout(item.timer)
         value.ok ? item.resolve(value.value) : item.reject(new Error('Native switch rejected'))
@@ -315,7 +329,8 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
           // an outstanding request. Commands and diagnostics retain 256 KiB.
           if (
             lineBytes > MAX_LINE
-            && (!authenticated || typeof value.ok !== 'boolean' || !valid(value.id, 256) || !pending.has(value.id))
+            && (!authenticated || typeof value.ok !== 'boolean' || !valid(value.id, 256)
+              || (!pending.has(value.id) && !expiredIds.has(value.id)))
           ) {
             throw new Error('Invalid oversized control envelope')
           }
@@ -406,6 +421,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       closePromise ??= (async () => {
         closed = true
         failPending()
+        expiredIds.clear()
         peer?.destroy()
         await new Promise<void>(resolve => server.close(() => resolve()))
         await rm(directory, { recursive: true, force: true })
