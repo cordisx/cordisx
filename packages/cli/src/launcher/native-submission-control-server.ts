@@ -206,7 +206,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         await write(socket, { id: value.id, ok: true, value: { version: 1 } })
         return
       }
-      if (value.type === 'resume' || value.type === 'resume-complete') {
+      if (value.type === 'resume' || value.type === 'managed-resume' || value.type === 'resume-complete') {
         // Thread resumes carry no Send token: the intermediary reports only what the app-server persisted.
         if (!authenticated || !controller || active >= 32 || !valid(value.threadId)) {
           throw new Error('Control unavailable')
@@ -231,6 +231,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
               threadId: value.threadId,
               providerId: value.providerId,
               model: value.model,
+              ...(value.type === 'managed-resume' ? { managedOnly: true } : {}),
             })
             await write(socket, { id: value.id, ok: true, value: result })
           } else throw new Error('Invalid native thread resume')

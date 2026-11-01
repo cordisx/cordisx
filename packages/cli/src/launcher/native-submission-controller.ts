@@ -183,11 +183,11 @@ export interface NativeSubmissionController {
     }>,
   ): Promise<void>
   /**
-   * The app-server forgets launch-scoped provider tables when it restarts; the persisted thread still names them.
+   * Refresh launch-scoped routes on resume, including recognized historical provider tables.
    * Never return this value through the renderer command API.
    */
   prepareThreadResume(
-    input: Readonly<{ threadId: string; providerId: string; model: string }>,
+    input: Readonly<{ threadId: string; providerId: string; model: string; managedOnly?: boolean }>,
   ): Promise<NativeThreadResumePreparation>
   completeThreadResume(
     input: Readonly<{ threadId: string; resumeToken: string; succeeded: boolean; createdThreadId?: string }>,
@@ -861,6 +861,7 @@ export function createNativeSubmissionController(
         || !validText(input.model, 512) || !validText(input.threadId, 512)
       ) return { kind: 'reject', reason: 'unknown-provider' }
       const source = options.providerSource?.(input.providerId)
+      if (input.managedOnly && source !== 'managed') return { kind: 'reject', reason: 'unknown-provider' }
       if (options.providerSource !== undefined && source === undefined) {
         return { kind: 'reject', reason: 'unknown-provider' }
       }

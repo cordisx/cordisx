@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
+import { prepareManagedResume } from './native-managed-resume.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -51,6 +52,7 @@ const controlCalls = new Map()
 const privateCalls = new Map()
 const desktopCalls = new Map()
 const resumeCalls = new NativeRequestTracker()
+const preparedResumes = new Map()
 const unmarkedTurns = new NativeRequestTracker()
 // An unacknowledged lifecycle mutation stays uncertain; retain its fence, not its payload.
 const lifecycleCalls = new Map()
@@ -183,6 +185,7 @@ function stop(reason = 'transport-closed') {
   rejectAll(privateCalls)
   desktopCalls.clear()
   resumeCalls.clear()
+  preparedResumes.clear()
   unmarkedTurns.clear()
   recoveringTurns.clear()
   cancelledRecovery.clear()
@@ -381,10 +384,11 @@ async function forward(line) {
       return
     }
     if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) throw new Error('Reserved request id')
+    let trackedResume = false
     if (
       message?.method === 'thread/resume' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
-    ) resumeCalls.track(message.id, params)
+    ) trackedResume = resumeCalls.track(message.id, params)
     if (
       message?.method === 'turn/start' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
@@ -398,6 +402,22 @@ async function forward(line) {
         lifecycleUncertain = true
       } else lifecycleCalls.set(message.id, params.threadId)
       if (message.method === 'thread/unsubscribe') unmarkedTurns.retireThread(params.threadId)
+    }
+    if (
+      trackedResume && preparedResumes.size < 64 && !lifecycleUncertain
+      && [...lifecycleCalls.values()].filter(id => id === params.threadId).length === 1
+      && !recoveringTurns.has(params.threadId) && !switching.has(params.threadId)
+    ) {
+      let prepared
+      try {
+        prepared = await prepareManagedResume(message, { nativeCall, controlCall })
+      } catch {}
+      if (prepared) {
+        preparedResumes.set(message.id, { threadId: prepared.threadId, resumeToken: prepared.resumeToken })
+        // A failed native write must not cause a second attempt with the original request.
+        await write(child.stdin, prepared.message)
+        return
+      }
     }
     if (['thread/start', 'thread/resume'].includes(message?.method) && params) {
       try {
@@ -660,6 +680,15 @@ readLines(child.stdout, line => {
       void recoverUnloadedTurn(message.id, turnParams, line).catch(stop)
       return
     }
+  }
+  const preparedResume = message.method === undefined ? preparedResumes.get(message.id) : undefined
+  if (preparedResume !== undefined) {
+    preparedResumes.delete(message.id)
+    resumeCalls.take(message.id)
+    const succeeded = message.error === undefined && message.result?.thread?.id === preparedResume.threadId
+    void controlCall('resume-complete', { ...preparedResume, succeeded })
+      .then(() => write(process.stdout, line)).catch(stop)
+    return
   }
   const resumeParams = message.method === undefined ? resumeCalls.take(message?.id) : undefined
   if (resumeParams !== undefined) {
