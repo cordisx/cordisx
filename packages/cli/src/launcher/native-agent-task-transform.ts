@@ -1,130 +1,278 @@
 import { createHash } from 'node:crypto'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
+import { literal, member, one, properties, type SyntaxNode } from './native-source-structure.js'
+import {
+  discoverTaskExecution,
+  discoverTaskInitial,
+  hasKeys,
+  taskHandle,
+  taskMarker,
+  TaskSource,
+  taskToken,
+} from './native-agent-task-source.js'
 
-export const NATIVE_AGENT_TASK_PINS = Object.freeze({
-  version: '26.1021.31345',
-  build: '21828',
-  initial: '8f4e5fe65617413cabf689afbfc04bc6c24f73a5c0b57d7d0de443942343bd55',
-  execution: 'f1a35f5a2b7397024aae8fdfc154bbb86cc6fd17c08c78811f8c41d54cc28a9b',
-})
 const hash = (source: string) => createHash('sha256').update(source).digest('hex')
-const marker = '__cordisxNativeAgentTaskAdapter'
-const tokenKey = 'cordisx.operation_token'
 
-/** Exact audited creation dispatcher. The ordinary delegated-config guard remains intact. */
-export function agentTaskEdits(kind: 'initial' | 'execution'): readonly (readonly [string, string])[] {
-  if (kind === 'execution') {
-    return [
-      [
-        'async function wp({scope:e,argumentsValue:t,parentTurnId:n,',
-        'async function wp({scope:e,argumentsValue:t,cordisxCallId:__cxCallId,parentTurnId:n,',
-      ],
-      ['case dl:b=await wp({scope:e,parentTurnId:', 'case dl:b=await wp({scope:e,cordisxCallId:h.callId,parentTurnId:'],
-      [
-        'sourceThreadId:s}){let c=Kp.safeParse(t);',
-        'sourceThreadId:s}){const __cxArguments=t;let c=Kp.safeParse(t);',
-      ],
-      [
-        'a?.throwIfAborted();let d=await sa({scope:e,turnTrigger:`app_tool_create_thread`,',
-        `a?.throwIfAborted();let __cxTask=await globalThis.${marker}?.claim({callId:__cxCallId,sourceThreadId:s,arguments:__cxArguments,hostId:u});if(typeof __cxCallId==='string'&&__cxCallId.startsWith('cordisx-task-')&&__cxTask===void 0)throw Error('Native task routing unavailable');let d=await sa({scope:e,__cordisxTask:__cxTask,turnTrigger:\`app_tool_create_thread\`,`,
-      ],
-    ]
+function executionEdits(plan: TaskSource): void {
+  const fn = discoverTaskExecution(plan)
+  const input = plan.parameter(fn, ['argumentsValue', 'sourceThreadId', 'parentTurnId', 'rootTurnId'])
+  const args = plan.binding(input, 'argumentsValue')
+  const sourceThread = plan.binding(input, 'sourceThreadId')
+  plan.addProperty(input, 'cordisxCallId:__cxTaskCallId')
+  plan.insert(fn.body.start + 1, `const __cxTaskArguments=${args},__cxTaskSourceThread=${sourceThread};`)
+  const call = plan.require(fn.body, node =>
+    node.type === 'CallExpression'
+    && literal(properties(node.arguments[0]).get('turnTrigger')) === 'app_tool_create_thread', 'native-create-call')
+  const options = call.arguments[0]
+  if (!hasKeys(options, ['scope', 'sourceThreadId', 'target', 'model', 'prompt', 'parentTurnId', 'rootTurnId'])) {
+    throw new Error('Native task creation input unavailable')
   }
-  return [
-    [
-      'title:b,startWithoutFirstTurn:x=!1,onBeforeWorktreeCreate:S}){if(i!=null&&f!=null)',
-      'title:b,startWithoutFirstTurn:x=!1,onBeforeWorktreeCreate:S,__cordisxTask:__cxTask}){if(__cxTask!==void 0&&!globalThis.__cordisxNativeAgentTaskAdapter?.owns(__cxTask))throw Error(`Invalid native task handle`);if(i!=null&&f!=null)',
-    ],
-    [
-      'return sus({scope:e,attachments:T?.attachments,input:x?[]:D,',
-      'return sus({scope:e,__cordisxTask:__cxTask,attachments:T?.attachments,input:x?[]:D,',
-    ],
-    [
-      'return aus({scope:e,attachments:T?.attachments,config:i,input:D,',
-      'return aus({scope:e,__cordisxTask:__cxTask,attachments:T?.attachments,config:i,input:D,',
-    ],
-    [
-      'threadSource:v,turnTrigger:y,parentTurnId:b,rootTurnId:x,title:S}){let C,w,T,E,D,O=Er;',
-      'threadSource:v,turnTrigger:y,parentTurnId:b,rootTurnId:x,title:S,__cordisxTask:__cxTask}){let C,w,T,E,D,O=Er;',
-    ],
-    [
-      'A={type:`text`,text:d,text_elements:[]},j=fus(l,_),',
-      'A={type:`text`,text:d,text_elements:[]},j=fus(__cxTask?.model??l,_),',
-    ],
-    [
-      'config:M==null?n:{...n,...M},projectAssignment:D,',
-      `config:__cxTask===void 0?(M==null?n:{...n,...M}):{...n,...M,${
-        JSON.stringify(tokenKey)
-      }:__cxTask.token},projectAssignment:D,`,
-    ],
-    [
-      'title:x,workspaceRoots:S,onBeforeWorktreeCreate:C}){let w=m==null?',
-      'title:x,workspaceRoots:S,onBeforeWorktreeCreate:C,__cordisxTask:__cxTask}){let w=m==null?',
-    ],
-    [
-      'T.responseItems=r;let E=await lus(e,i,u,h);',
-      `T.responseItems=r;if(__cxTask!==void 0){T.configOverrides={...T.configOverrides,${
-        JSON.stringify(tokenKey)
-      }:__cxTask.token};T.collaborationMode=fus(__cxTask.model,g)}let E=await lus(e,i,u,h);`,
-    ],
-    [
-      'request:{threadId:de,clientUserMessageId:xe,disabledPluginIds:D,',
-      `request:{threadId:de,...(typeof n.config?.[${JSON.stringify(tokenKey)}]==='string'?{config:{${
-        JSON.stringify(tokenKey)
-      }:n.config[${JSON.stringify(tokenKey)}]}}:{}),clientUserMessageId:xe,disabledPluginIds:D,`,
-    ],
-  ]
+  const targetNode = properties(options).get('target')!
+  if (targetNode.type !== 'Identifier') throw new Error('Native task target binding unavailable')
+  const target = plan.text(targetNode)
+  // Wrap this one native call, preserving original permission, registration and settlement helpers.
+  plan.replace(
+    call,
+    `await (async()=>{const ${taskHandle}=await globalThis.${taskMarker}?.claim({callId:__cxTaskCallId,sourceThreadId:__cxTaskSourceThread,arguments:__cxTaskArguments,hostId:${target}.type==='remoteProject'?${target}.hostId:'local'});if(typeof __cxTaskCallId==='string'&&__cxTaskCallId.startsWith('cordisx-task-')&&${taskHandle}===void 0)throw Error('Native task routing unavailable');return ${
+      plan.text(call.callee)
+    }({${taskHandle},${plan.text(options).slice(1, -1)}})})()`,
+  )
+  const callers = plan.nodes(
+    plan.ast,
+    node => node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === fn.id?.name,
+  )
+  const caller = one(callers, 'task-dispatch-call')
+  const argumentsValue = properties(caller.arguments[0]).get('argumentsValue')
+  if (!member(argumentsValue, 'arguments') || argumentsValue?.object.type !== 'Identifier') {
+    throw new Error('Native task call identity unavailable')
+  }
+  plan.addProperty(caller.arguments[0], `cordisxCallId:${argumentsValue.object.name}.callId`)
 }
 
-export function applyAgentTaskEdits(source: string, kind: 'initial' | 'execution'): string {
-  for (const [anchor, replacement] of agentTaskEdits(kind)) {
-    if (source.split(anchor).length !== 2) throw new Error(`Native task ${kind} anchor unavailable`)
-    source = source.replace(anchor, replacement)
+function initialEdits(plan: TaskSource): void {
+  const fn = discoverTaskInitial(plan)
+  const input = plan.parameter(fn, ['config', 'sourceThreadId', 'startWithoutFirstTurn', 'onBeforeWorktreeCreate'])
+  // Ordinary delegated config remains rejected by the unchanged native guard.
+  const config = plan.binding(input, 'config'), sourceThread = plan.binding(input, 'sourceThreadId')
+  const nonNull = (node: SyntaxNode, binding: string): boolean =>
+    node.type === 'BinaryExpression'
+    && node.operator === '!=' && node.left.type === 'Identifier' && node.left.name === binding
+    && node.right.type === 'Literal' && node.right.value === null
+  plan.require(fn.body, node =>
+    node.type === 'IfStatement' && node.test.type === 'LogicalExpression'
+    && node.test.operator === '&&'
+    && (nonNull(node.test.left, config) && nonNull(node.test.right, sourceThread)
+      || nonNull(node.test.right, config) && nonNull(node.test.left, sourceThread))
+    && (node.consequent.type === 'ThrowStatement'
+      || node.consequent.type === 'BlockStatement' && node.consequent.body.length === 1
+        && node.consequent.body[0].type === 'ThrowStatement'), 'delegated-config-guard')
+  plan.addHandle(fn, input)
+  const local = plan.require(
+    fn.body,
+    node =>
+      node.type === 'CallExpression'
+      && hasKeys(node.arguments[0], ['scope', 'attachments', 'config', 'input', 'target', 'startWithoutFirstTurn']),
+    'local-helper-call',
+  )
+  const worktree = plan.require(
+    fn.body,
+    node =>
+      node.type === 'CallExpression'
+      && hasKeys(node.arguments[0], [
+        'scope',
+        'attachments',
+        'input',
+        'startingState',
+        'projectPath',
+        'onBeforeWorktreeCreate',
+      ]),
+    'worktree-helper-call',
+  )
+  for (const call of [local, worktree]) {
+    if (call.callee.type !== 'Identifier') throw new Error('Native task helper reference unavailable')
+    plan.addProperty(call.arguments[0], taskHandle)
   }
-  return source
+  const localFn = plan.declaration(local.callee.name)
+  const localInput = plan.parameter(localFn, ['config', 'model', 'thinking', 'target', 'sourceThreadId'])
+  plan.addHandle(localFn, localInput, plan.binding(localInput, 'model'))
+  const localRequest = plan.require(
+    localFn.body,
+    node =>
+      node.type === 'ObjectExpression'
+      && hasKeys(node, ['collaborationMode', 'config', 'projectAssignment', 'workspaceKind', 'threadSource']),
+    'local-request',
+  )
+  const priorConfig = properties(localRequest).get('config')!
+  plan.replace(
+    priorConfig,
+    `(${taskHandle}===void 0?${plan.text(priorConfig)}:{...(${plan.text(priorConfig)}),${
+      JSON.stringify(taskToken)
+    }:${taskHandle}.token})`,
+  )
+  const worktreeFn = plan.declaration(worktree.callee.name)
+  const worktreeInput = plan.parameter(worktreeFn, [
+    'model',
+    'thinking',
+    'projectPath',
+    'startingState',
+    'sourceThreadId',
+  ])
+  plan.addHandle(worktreeFn, worktreeInput, plan.binding(worktreeInput, 'model'))
+  const queued = plan.require(
+    worktreeFn.body,
+    node =>
+      node.type === 'ObjectExpression'
+      && hasKeys(node, ['startConversationParamsInput', 'startingState', 'launchMode']),
+    'worktree-request',
+  )
+  const queuedInput = properties(queued).get('startConversationParamsInput')!
+  if (queuedInput.type !== 'Identifier') throw new Error('Native task worktree input unavailable')
+  plan.replace(
+    queuedInput,
+    `(${taskHandle}===void 0?${queuedInput.name}:{...${queuedInput.name},configOverrides:{...${queuedInput.name}.configOverrides,${
+      JSON.stringify(taskToken)
+    }:${taskHandle}.token}})`,
+  )
+  // The regular submission adapter also carries this token. Keep this seam when composed or used independently.
+  const firstFn = one(
+    plan.functions.filter(f =>
+      f.params.some((p: SyntaxNode) => hasKeys(p, ['readThreadCreationInputs', 'onFirstTurnReady', 'onSettled']))
+    ),
+    'task-first-turn',
+  )
+  const incoming = firstFn.params[2]
+  if (incoming?.type !== 'Identifier') throw new Error('Native task first-turn config unavailable')
+  const firstCall = plan.require(
+    firstFn.body,
+    node =>
+      node.type === 'CallExpression' && member(node.callee, 'executeTurnStart')
+      && hasKeys(properties(node.arguments[1]).get('request'), [
+        'threadId',
+        'clientUserMessageId',
+        'disabledPluginIds',
+        'collaborationMode',
+      ]),
+    'first-turn-call',
+  )
+  const request = properties(firstCall.arguments[1]).get('request')!
+  const existingConfig = properties(request).get('config')
+  if (existingConfig !== undefined) {
+    // Only the normal submission transform's attested carrier may satisfy this seam.
+    const text = plan.text(existingConfig)
+    if (!text.includes(`${incoming.name}.config`) || !text.includes(JSON.stringify(taskToken))) {
+      throw new Error('Native task first-turn carrier unavailable')
+    }
+  } else {
+    plan.addProperty(
+      request,
+      `...(typeof ${incoming.name}.config?.[${JSON.stringify(taskToken)}]==='string'?{config:{${
+        JSON.stringify(taskToken)
+      }:${incoming.name}.config[${JSON.stringify(taskToken)}]}}:{})`,
+    )
+  }
 }
 
-/** Compose with the real submission transform on the same resource, never intercept it twice. */
+function verifyModuleLink(
+  initial: { resource: NativeScriptResource; plan: TaskSource },
+  execution: { resource: NativeScriptResource; plan: TaskSource },
+): void {
+  const initialFn = discoverTaskInitial(initial.plan)
+  const executionFn = discoverTaskExecution(execution.plan)
+  const call = execution.plan.require(executionFn.body, node =>
+    node.type === 'CallExpression'
+    && literal(properties(node.arguments[0]).get('turnTrigger')) === 'app_tool_create_thread', 'linked-create-call')
+  if (call.callee.type !== 'Identifier') throw new Error('Native task helper import unavailable')
+  const imported = one(
+    execution.plan.nodes(execution.plan.ast, node =>
+      node.type === 'ImportDeclaration'
+      && node.specifiers.some((s: SyntaxNode) => s.type === 'ImportSpecifier' && s.local.name === call.callee.name)),
+    'task-helper-import',
+  )
+  const specifier = one<SyntaxNode>(
+    imported.specifiers.filter((s: SyntaxNode) => s.local.name === call.callee.name),
+    'task-helper-import-binding',
+  )
+  if (new URL(imported.source.value, execution.resource.url).href !== initial.resource.url) {
+    throw new Error('Native task helper resource mismatch')
+  }
+  const exported = one(
+    initial.plan.nodes(initial.plan.ast, node =>
+      node.type === 'ExportSpecifier'
+      && node.local.name === initialFn.id?.name && node.exported.name === specifier.imported.name),
+    'task-helper-export',
+  )
+  if (!exported) throw new Error('Native task helper export unavailable')
+}
+
+export function applyAgentTaskStructure(source: string, kind: 'initial' | 'execution', ast?: SyntaxNode): string {
+  const plan = new TaskSource(source, ast)
+  if (kind === 'execution') executionEdits(plan)
+  else initialEdits(plan)
+  return plan.result()
+}
+
+/** Discover semantics across native builds, then bind transforms to the exact discovered asset bytes. */
 export function nativeAgentTaskTransforms(
-  version: string,
-  build: string,
+  _version: string,
+  _build: string,
   resources: readonly NativeScriptResource[],
   transforms: readonly NativeResourceTransform[],
+  syntaxByResource?: ReadonlyMap<NativeScriptResource, SyntaxNode>,
 ): { transforms: readonly NativeResourceTransform[]; available: boolean } {
-  if (version !== NATIVE_AGENT_TASK_PINS.version || build !== NATIVE_AGENT_TASK_PINS.build) {
-    return { transforms, available: false }
-  }
-  const initial = resources.filter(resource => hash(resource.source) === NATIVE_AGENT_TASK_PINS.initial)
-  const execution = resources.filter(resource => hash(resource.source) === NATIVE_AGENT_TASK_PINS.execution)
-  if (initial.length !== 1 || execution.length !== 1) return { transforms, available: false }
   try {
-    applyAgentTaskEdits(initial[0]!.source, 'initial')
-    applyAgentTaskEdits(execution[0]!.source, 'execution')
+    const plans = resources.filter(resource =>
+      resource.source.includes('create_thread')
+      || resource.source.includes('startWithoutFirstTurn') && resource.source.includes('onBeforeWorktreeCreate')
+    ).map(resource => ({ resource, plan: new TaskSource(resource.source, syntaxByResource?.get(resource)) }))
+    const candidates = (kind: 'initial' | 'execution') =>
+      plans.filter(({ plan }) => {
+        try {
+          if (kind === 'initial') discoverTaskInitial(plan)
+          else discoverTaskExecution(plan)
+          return true
+        } catch {
+          return false
+        }
+      })
+    const initial = one(candidates('initial'), 'task-initial-resource')
+    const execution = one(candidates('execution'), 'task-execution-resource')
+    verifyModuleLink(initial, execution)
     const merged = [...transforms]
-    for (const [resource, kind] of [[initial[0]!, 'initial'], [execution[0]!, 'execution']] as const) {
+    for (const [{ resource, plan }, kind] of [[initial, 'initial'], [execution, 'execution']] as const) {
+      // Prove all creation seams before admitting any part of this capability.
+      if (kind === 'initial') initialEdits(plan)
+      else executionEdits(plan)
       const priorIndex = merged.findIndex(transform => transform.url === resource.url)
       const prior = merged[priorIndex]
       const next: NativeResourceTransform = {
         url: resource.url,
         sha256: hash(resource.source),
         requiredForDocumentReady: prior?.requiredForDocumentReady ?? false,
+        taskExecutionUrl: execution.resource.url,
         transform(source) {
           if (hash(source) !== hash(resource.source)) throw new Error('Native task resource drift')
           const result = prior?.transform(source)
+          // Compose on the transformed source; native submission edits can shift creation offsets.
+          const transformed = result === undefined ? plan.result() : applyAgentTaskStructure(result.source, kind)
           return {
-            source: applyAgentTaskEdits(result?.source ?? source, kind)
-              + `\n;globalThis.__cordisxNativeAgentTask_${kind}=true;`,
+            source: transformed + `\n;globalThis.__cordisxNativeAgentTask_${kind}=true;${
+              kind === 'initial'
+                ? `globalThis.__cordisxNativeAgentTaskExecutionUrl=${JSON.stringify(execution.resource.url)};`
+                : ''
+            }`,
             anchorMatches: 1,
             acknowledgementExpression: `(globalThis.__cordisxNativeAgentTask_${kind}===true&&(${
               result?.acknowledgementExpression ?? 'true'
             }))`,
-            fenceExpression: `(delete globalThis.__cordisxNativeAgentTask_${kind},globalThis.${marker}?.dispose(),${
-              result?.fenceExpression ?? 'true'
-            })`,
+            fenceExpression:
+              `(delete globalThis.__cordisxNativeAgentTask_${kind},delete globalThis.__cordisxNativeAgentTaskExecutionUrl,globalThis.${taskMarker}?.dispose(),${
+                result?.fenceExpression ?? 'true'
+              })`,
           }
         },
       }
+      next.transform(resource.source)
       if (priorIndex < 0) merged.push(next)
       else merged[priorIndex] = next
     }
