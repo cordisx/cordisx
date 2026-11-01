@@ -9,7 +9,9 @@ import type { NativeExistingThreadSwitch, NativeSubmissionController } from './n
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 
+// Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
+const MAX_RESPONSE_LINE = 8 * 1024 * 1024
 const TIMEOUT = 30_000
 const valid = (value: unknown, max = 512): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
@@ -141,7 +143,8 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     }
     peer = socket
     diagnostic({ event: 'native-control-peer-connected', requestRef: peerRef })
-    let buffer = ''
+    let fragments: string[] = []
+    let fragmentBytes = 0
     let active = 0
     const activeIds = new Set<string>()
     const authTimer = setTimeout(() => socket.destroy(), TIMEOUT)
@@ -288,19 +291,34 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       }
     }
     socket.on('data', (chunk: string) => {
-      buffer += chunk
+      let start = 0
       for (;;) {
-        const newline = buffer.indexOf('\n')
-        if (newline < 0) break
-        const line = buffer.slice(0, newline)
-        buffer = buffer.slice(newline + 1)
-        if (Buffer.byteLength(line) > MAX_LINE) {
+        const newline = chunk.indexOf('\n', start)
+        const fragment = chunk.slice(start, newline < 0 ? undefined : newline)
+        fragmentBytes += Buffer.byteLength(fragment)
+        const frameLimit = authenticated ? MAX_RESPONSE_LINE : MAX_LINE
+        if (fragmentBytes > frameLimit) {
           socket.destroy()
           return
         }
+        if (fragment.length > 0) fragments.push(fragment)
+        if (newline < 0) return
+        const line = fragments.join('')
+        const lineBytes = fragmentBytes
+        fragments = []
+        fragmentBytes = 0
+        start = newline + 1
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
+          // The larger frame budget is only for an authenticated response to
+          // an outstanding request. Commands and diagnostics retain 256 KiB.
+          if (
+            lineBytes > MAX_LINE
+            && (!authenticated || typeof value.ok !== 'boolean' || !valid(value.id, 256) || !pending.has(value.id))
+          ) {
+            throw new Error('Invalid oversized control envelope')
+          }
           void handle(value).catch(error => {
             diagnostic({
               event: 'native-control-message-rejected',
@@ -323,7 +341,6 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
           return
         }
       }
-      if (Buffer.byteLength(buffer) > MAX_LINE) socket.destroy()
     })
   })
   try {

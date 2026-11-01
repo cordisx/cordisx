@@ -56,7 +56,7 @@ const tools = [{
 }, {
   name: 'list_sessions',
   description:
-    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. Claude needs Claude Desktop launched with `cordisx start claude`; no Claude session has to be open.',
+    'List conversations in another app CordisX connects (`app`: "claude" for Claude Desktop Code sessions, "codex" for this Codex app), most recent first, each with a link the user can click to open it. Read-only. searchTerm matches messages as well as titles; matches include matchedIn and a short match excerpt. scan.capped reports bounded-search omissions. Claude needs Claude Desktop launched with `cordisx start claude`; no Claude session has to be open.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -70,7 +70,7 @@ const tools = [{
 }, {
   name: 'read_session',
   description:
-    'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only. `limit` caps the number of returned message entries (the newest ones); the transcript is also capped at about 60k characters.',
+    'Read one page of a conversation transcript by its sessionId (from list_sessions), newest messages kept, plus the link and `transcriptTotal`. Read-only and cheap for one page, but a page may be large (~60k characters). Page older text with `cursor` from `nextCursor`; `truncated: true` means something was left out, and `clippedCharacters` says how much of the oldest returned message was cut.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -78,27 +78,46 @@ const tools = [{
       app: { enum: ['claude', 'codex'] },
       sessionId: { type: 'string', minLength: 1, maxLength: 512 },
       limit: { type: 'integer', minimum: 1, maximum: 200 },
+      cursor: {
+        type: 'string',
+        maxLength: 128,
+        description: 'nextCursor from an earlier read_session, unchanged, to read the next older page.',
+      },
     },
     required: ['app', 'sessionId'],
   },
 }, {
   name: 'start_session',
   description:
-    'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns for that app; a value it does not list is refused. In Claude the session runs in the background in bypass permissions mode on the CordisX model service and shows in Claude when its first turn ends; the result says whether that turn failed within a short wait, and the link opens it. If Claude is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
+    'Start a new conversation in the named app for a task the user asked to hand over. context summary appends a bounded summary of this conversation as background. Costs a model call and may take minutes. Returns `operationId`, `sessionId` and a link; keep the operationId. A repeat with the same operationId returns that same session instead of starting a second one. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns; a value it does not list is refused. In Claude the turn runs in the background in bypass permissions mode; `check_operation` reports when it ends. `dryRun: true` validates provider, model, cwd and key and starts nothing. If the app is not running the result asks you to ask the user whether to start it. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       app: { enum: ['claude', 'codex'] },
+      operationId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 128,
+        description: 'Unique per intended start. Reuse it only to repeat this exact call.',
+      },
+      dryRun: {
+        type: 'boolean',
+        description: 'Validate the provider, model, cwd and key without starting anything. Never required.',
+      },
       prompt: { type: 'string', minLength: 1, maxLength: 100000 },
       title: { type: 'string', minLength: 1, maxLength: 120 },
       cwd: { type: 'string', minLength: 1, maxLength: 4096 },
       providerId: { type: 'string', minLength: 1, maxLength: 128 },
       model: { type: 'string', minLength: 1, maxLength: 512 },
+      context: {
+        enum: ['none', 'summary'],
+        description: 'summary appends bounded background from the calling conversation.',
+      },
       launch: {
         enum: ['once', 'always', 'ask'],
         description:
-          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+          'Only after the user answered a needs-confirmation result: "once" starts the app this time, "always" also from now on without asking, "ask" goes back to asking.',
       },
     },
     required: ['app', 'prompt'],
@@ -106,21 +125,40 @@ const tools = [{
 }, {
   name: 'send_message',
   description:
-    'Send a message to an existing conversation by its sessionId in the named app. It runs there as the next turn, without any approval prompt. If Claude is not running the result asks you to ask the user first. Only when the user explicitly asks.',
+    'Send a message to an existing conversation by its sessionId in the named app; it runs there as the next turn. Costs a model call and may take minutes. Returns `operationId`; a repeat with the same operationId does not send twice. Only when the user explicitly asks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       app: { enum: ['claude', 'codex'] },
+      operationId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 128,
+        description: 'Unique per intended send. Reuse it only to repeat this exact call.',
+      },
       sessionId: { type: 'string', minLength: 1, maxLength: 512 },
       prompt: { type: 'string', minLength: 1, maxLength: 100000 },
       launch: {
         enum: ['once', 'always', 'ask'],
         description:
-          'Only after the user answered a needs-confirmation result: "once" starts Claude this time, "always" also from now on without asking, "ask" goes back to asking.',
+          'Only after the user answered a needs-confirmation result: "once" starts the app this time, "always" also from now on without asking, "ask" goes back to asking.',
       },
     },
     required: ['app', 'sessionId', 'prompt'],
+  },
+}, {
+  name: 'check_operation',
+  description:
+    'Report what a start_session or send_message operation became: `running`, `done` or `failed`, with the sessionId and link, or the failure reason. Read-only, side-effect free and cheap: call it instead of guessing how long a background turn takes, and poll it a few seconds apart rather than in a tight loop.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      app: { enum: ['claude', 'codex'] },
+      operationId: { type: 'string', minLength: 1, maxLength: 128 },
+    },
+    required: ['app', 'operationId'],
   },
 }, {
   name: 'integration_status',
@@ -137,7 +175,13 @@ const tools = [{
     },
   },
 }]
-const sessionTools = new Set(['list_sessions', 'read_session', 'start_session', 'send_message'])
+const sessionTools = new Set([
+  'list_sessions',
+  'read_session',
+  'start_session',
+  'send_message',
+  'check_operation',
+])
 
 async function invoke(operation, input, metadata) {
   const binding = JSON.parse(await readFile(bindingPath, 'utf8'))
@@ -228,9 +272,10 @@ reader.on('line', line => {
           'cordisx/mcpRequestId': request.id,
         })
         result = {
+          // Compact JSON: tool results are read by an agent, not a person.
           content: [{ type: 'text', text: JSON.stringify(value) }],
           isError: value?.status === 'rejected' || value?.status === 'reconciliation-required'
-            || value?.status === 'unavailable',
+            || value?.status === 'unavailable' || value?.status === 'failed',
         }
       } else {
         process.stdout.write(

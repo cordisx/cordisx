@@ -179,11 +179,18 @@ describe('Claude sessions driven from the host', () => {
       runningPid: async () => -1,
       secret: async () => undefined,
     })
-    await expect(sessions('start_session', { prompt: 'x' })).rejects.toThrow(/SUB2TOK_KEY/)
-    expect(await sessions('start_session', { prompt: 'x', cwd: 'relative' })).toEqual({
+    // A missing key is the same structured failure as any other, not a thrown error.
+    expect(await sessions('start_session', { prompt: 'x' })).toEqual(expect.objectContaining({
+      status: 'failed',
+      reason: 'provider-key-missing',
+      retryable: false,
+      detail: 'SUB2TOK_KEY',
+    }))
+    expect(await sessions('start_session', { prompt: 'x', cwd: 'relative' })).toEqual(expect.objectContaining({
       status: 'rejected',
       reason: 'cwd-must-be-absolute',
-    })
+      retryable: false,
+    }))
   })
 
   it('writes the requested title into the record list_sessions reads', async () => {
@@ -228,24 +235,22 @@ describe('Claude sessions driven from the host', () => {
     expect((await until(`${record}.gateway`)).trim().split('\n')).toEqual(['https://other.invalid', 'sk-other'])
     expect((await until(`${record}.args`)).trim().split('\n')).toContain('claude-sonnet-5-5')
 
-    expect(await sessions('start_session', { prompt: 'x', providerId: 'nope' })).toEqual({
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'nope' })).toEqual(expect.objectContaining({
       status: 'rejected',
       reason: 'provider-not-configured',
-    })
-    expect(await sessions('start_session', { prompt: 'x', providerId: 'other', model: 'gpt-6.1' })).toEqual({
-      status: 'rejected',
-      reason: 'model-not-in-provider-catalog',
-    })
+    }))
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'other', model: 'gpt-6.1' })).toEqual(
+      expect.objectContaining({ status: 'rejected', reason: 'model-not-in-provider-catalog' }),
+    )
     // A service only the profile's own library holds has no declaration to run from.
     await mkdir(path.join(cordisxHomeDir, 'data-3p', 'configLibrary'), { recursive: true })
     await writeFile(
       path.join(cordisxHomeDir, 'data-3p', 'configLibrary', '_meta.json'),
       JSON.stringify({ entries: [{ id: 'library-only', name: 'Library only' }] }),
     )
-    expect(await sessions('start_session', { prompt: 'x', providerId: 'library-only' })).toEqual({
-      status: 'rejected',
-      reason: 'provider-not-declared',
-    })
+    expect(await sessions('start_session', { prompt: 'x', providerId: 'library-only' })).toEqual(
+      expect.objectContaining({ status: 'rejected', reason: 'provider-not-declared' }),
+    )
   })
 
   it('reports a first turn that failed', async () => {
@@ -258,10 +263,14 @@ describe('Claude sessions driven from the host', () => {
       secret: async () => 'sk-test',
     })
     const started = await sessions('start_session', { prompt: 'x' }) as Record<string, unknown>
+    // A turn known to have failed is reported as failed, with the session still open.
     expect(started).toMatchObject({
-      status: 'started',
+      status: 'failed',
+      reason: 'turn-failed',
+      retryable: true,
       turn: { status: 'failed', error: expect.stringMatching(/model rejected the request/u) },
     })
+    expect(typeof started.sessionId).toBe('string')
     // The gateway key never reaches the result.
     expect(JSON.stringify(started)).not.toMatch(/sk-test/)
   })
@@ -274,7 +283,7 @@ describe('Claude sessions driven from the host', () => {
     await mkdir(directory, { recursive: true })
     const binary = path.join(directory, 'claude')
     // A turn that outlives the report window, as a real multi-minute task does.
-    await writeFile(binary, '#!/bin/sh\nsleep 30\n')
+    await writeFile(binary, '#!/bin/sh\nsleep 0.4\n')
     await chmod(binary, 0o755)
     await writeClaudeDesktopBinding(cordisxHomeDir, {
       version: 1,
@@ -294,7 +303,13 @@ describe('Claude sessions driven from the host', () => {
     expect(Date.now() - before).toBeLessThan(5_000)
     expect(started).toMatchObject({ status: 'started' })
     expect(started.turn).toBeUndefined()
+    expect(await sessions('send_message', { sessionId: started.sessionId, prompt: 'duplicate' })).toMatchObject({
+      reason: 'session-busy',
+    })
     expect(started.note).toMatch(/background/u)
+    expect(await sessions('check_operation', { operationId: started.operationId })).toMatchObject({ status: 'running' })
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    expect(await sessions('check_operation', { operationId: started.operationId })).toMatchObject({ status: 'done' })
   }, 30_000)
 
   it('resumes a closed session for a message and hands an open one to its plugin', async () => {
@@ -324,11 +339,13 @@ describe('Claude sessions driven from the host', () => {
       },
     })
 
-    expect(await sessions('send_message', { sessionId: CLI_ID, prompt: 'And the CHANGELOG' })).toEqual({
-      status: 'sent',
-      sessionId: `local_${CLI_ID}`,
-      link: `claude://resume?session=${CLI_ID}`,
-    })
+    expect(await sessions('send_message', { sessionId: CLI_ID, prompt: 'And the CHANGELOG' })).toEqual(
+      expect.objectContaining({
+        status: 'sent',
+        sessionId: `local_${CLI_ID}`,
+        link: `claude://resume?session=${CLI_ID}`,
+      }),
+    )
     await until(`${record}.cwd`)
     expect((await until(`${record}.args`)).trim().split('\n')).toEqual(expect.arrayContaining([
       '--resume',
@@ -338,7 +355,9 @@ describe('Claude sessions driven from the host', () => {
     ]))
 
     open = `/claude --resume ${CLI_ID}`
-    expect(await sessions('send_message', { sessionId: `local_${CLI_ID}`, prompt: 'hi' })).toEqual({ status: 'sent' })
+    expect(await sessions('send_message', { sessionId: `local_${CLI_ID}`, prompt: 'hi' })).toMatchObject({
+      status: 'sent',
+    })
     expect(forwarded).toEqual([[
       'send_message',
       { sessionId: `local_${CLI_ID}`, cliSessionId: CLI_ID, prompt: 'hi' },
@@ -366,6 +385,7 @@ describe('a closed Claude', () => {
       homedir,
       secret: async () => 'sk-test',
       processList: async () => '',
+      launchWaitMs: 1,
       launchClaude: async request => {
         launches.push(request)
         await writeClaudeDesktopBinding(cordisxHomeDir, {
@@ -382,8 +402,12 @@ describe('a closed Claude', () => {
     expect(asked).toEqual(expect.objectContaining({ status: 'needs-confirmation', reason: 'claude-not-running' }))
     expect(launches).toEqual([])
 
-    // The fake launch leaves no running process, so the wait ends in an error; it did launch.
-    await expect(sessions('start_session', { prompt: 'x', launch: 'always' })).rejects.toThrow(/did not start/)
+    // The fake launch leaves no running process, so the wait ends in a failure; it did launch.
+    expect(await sessions('start_session', { prompt: 'x', launch: 'always' })).toEqual(expect.objectContaining({
+      status: 'failed',
+      reason: 'claude-did-not-start',
+      retryable: true,
+    }))
     expect(launches).toEqual([{ homeDir: cordisxHomeDir, profileId: 'default' }])
     expect(JSON.parse(await readFile(claudeLaunchPreferencePath(cordisxHomeDir), 'utf8'))).toEqual({ launch: 'always' })
 

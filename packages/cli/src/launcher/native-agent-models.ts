@@ -1,4 +1,6 @@
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { callerThreadId } from './agent-bridge-context.js'
+import { bridgeFailure } from './agent-bridge-contract.js'
 import { randomBytes } from 'node:crypto'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
@@ -9,7 +11,13 @@ import type { NativeSubmissionController } from './native-submission-controller.
 
 type Selection = Readonly<{ threadId: string; providerId: string; model: string }>
 const SESSION_APPS = ['codex', 'claude'] as const
-const SESSION_OPERATIONS = ['list_sessions', 'read_session', 'start_session', 'send_message'] as const
+const SESSION_OPERATIONS = [
+  'list_sessions',
+  'read_session',
+  'start_session',
+  'send_message',
+  'check_operation',
+] as const
 export type SessionApp = typeof SESSION_APPS[number]
 export type SessionOperation = typeof SESSION_OPERATIONS[number]
 const sessionOperation = (value: unknown): SessionOperation | undefined =>
@@ -29,7 +37,7 @@ export interface NativeAgentModelsAuthority {
   release(threadId: string): void
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
   /** Cross-app session tools through the CordisX agent bridge; `app` names the target. */
-  sessions?(app: SessionApp, operation: SessionOperation, input: unknown): Promise<unknown>
+  sessions?(app: SessionApp, operation: SessionOperation, input: unknown, metadata?: unknown): Promise<unknown>
   /** The read-only integration report. Reads files and probes; never launches or writes. */
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
@@ -47,14 +55,29 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       const args = object(input) ?? {}
       const app = args.app
       if (typeof app !== 'string' || !(SESSION_APPS as readonly string[]).includes(app)) {
-        return { status: 'rejected', reason: `app must be one of ${SESSION_APPS.join(', ')}` }
+        return bridgeFailure('unknown-app', { message: `app must be one of ${SESSION_APPS.join(', ')}`, detail: 'app' })
       }
-      if (authority.sessions === undefined) return { status: 'unavailable', reason: 'agent-bridge-unavailable' }
-      const { app: _app, ...rest } = args
+      if (authority.sessions === undefined) {
+        return bridgeFailure('agent-bridge-unavailable', {
+          status: 'unavailable',
+          message: 'The CordisX agent bridge is not running',
+        })
+      }
+      const { app: _app, callerSessionId: _caller, callerSummary: _summary, ...rest } = args
       try {
-        return { status: 'ok', value: await authority.sessions(app as SessionApp, session, rest) }
+        // The bridge answers with the whole result: a value, or its structured failure.
+        const caller = session === 'start_session' ? callerThreadId(metadata) : undefined
+        return await authority.sessions(
+          app as SessionApp,
+          session,
+          caller === undefined ? rest : { ...rest, callerSessionId: caller },
+          metadata,
+        )
       } catch (error) {
-        return { status: 'unavailable', reason: error instanceof Error ? error.message : 'unavailable' }
+        return bridgeFailure('agent-bridge-unavailable', {
+          status: 'unavailable',
+          message: error instanceof Error ? error.message : 'The CordisX agent bridge is unavailable',
+        })
       }
     }
     if (operation === 'integration_status') {
