@@ -21,7 +21,8 @@ export interface TranscriptEntry {
 export const EXCERPT_CHARS = 200
 /** Conversations one search may read. A Codex thread is a round trip; a Claude transcript is a file. */
 export const SEARCH_MAX_THREADS = 8
-export const SEARCH_MAX_ELAPSED_MS = 60_000
+// Stop starting reads after 45s; one in-flight native read can take another 30s.
+export const SEARCH_MAX_ELAPSED_MS = 45_000
 export const SEARCH_MAX_FILES = 40
 /** The most recent Codex threads a content search considers. */
 export const SEARCH_RECENT_THREADS = 20

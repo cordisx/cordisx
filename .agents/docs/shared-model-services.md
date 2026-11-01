@@ -113,8 +113,9 @@ value it ignores.
 
 `list_sessions.searchTerm` matches message content as well as titles and returns
 `matchedIn` plus a short `match` excerpt and role. Codex searches at most eight
-recent thread-read attempts per call, across all providers, with a 60-second
-search budget; Claude reads at most forty transcript tails of 1 MiB
+recent thread-read attempts per call, across all providers. No new read starts
+after 45 seconds; a final in-flight native read has its normal 30-second timeout,
+so the search completes within about 75 seconds; Claude reads at most forty transcript tails of 1 MiB
 each. The total character budget is 4 MiB. `scan.capped` names an incomplete
 scan; narrow the query or read a known session directly. `scan.reason:
 "read-unavailable"` identifies an interrupted transcript read, rather than a

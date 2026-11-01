@@ -202,6 +202,34 @@ describe('bridge operation recovery', () => {
     }
   })
 
+  it('fences the next request at 45 seconds so a final timeout stays below the MCP budget', async () => {
+    const f = backend()
+    let elapsed = 0
+    let reads = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => elapsed)
+    try {
+      f.authority.nativeRequest = async method => {
+        if (method === 'thread/list') {
+          return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
+        }
+        if (method === 'thread/read') {
+          reads += 1
+          elapsed += reads === 1 ? 44_999 : 30_000
+          if (reads === 2) throw new Error('timed out')
+          return { thread: { turns: [] } }
+        }
+        return {}
+      }
+      expect(await createCodexBridgeHandler(f.authority)('list_sessions', { searchTerm: 'needle' })).toMatchObject({
+        scan: { capped: true, reason: 'read-unavailable', scanned: 1 },
+      })
+      expect(reads).toBe(2)
+      expect(elapsed).toBeLessThan(75_000)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('delivers a bounded handoff as background in the actual turn prompt', async () => {
     const f = backend()
     await createCodexBridgeHandler(f.authority)('start_session', {
