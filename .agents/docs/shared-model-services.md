@@ -95,8 +95,9 @@ SIGKILL.
 A Codex launch starts the agent bridge: an owner-only HTTP endpoint on
 `~/.cordisx/run/agent-bridge.sock`, with its token in `agent-bridge.json`.
 
-Both apps get the same four tools, named the same in each:
-`list_sessions`, `read_session`, `start_session`, and `send_message`, each with
+Both apps get the same five tools, named the same in each:
+`list_sessions`, `read_session`, `start_session`, `send_message`, and
+`check_operation`, each with
 an `app` argument (`"codex"` or `"claude"`). A new app is a new `app` value,
 not new tool names. Results carry `codex://` or `claude://` links. Both apps
 also have `list_model_providers`, which returns the same shape on either side.
@@ -110,13 +111,63 @@ value it ignores.
 | `start_session.title`                | `thread/name/set` right after `thread/start`                       | written into the session record `list_sessions` reads                    |
 | `start_session.providerId` / `model` | a catalog provider and one of its models                           | a `model-service` declared for Claude and one of its `models.claude` ids |
 
+`list_sessions.searchTerm` matches message content as well as titles and returns
+`matchedIn` plus a short `match` excerpt and role. Codex searches at most eight
+recent thread-read attempts per call, across all providers. No new read starts
+after 45 seconds; a final in-flight native read has its normal 30-second timeout,
+so the search completes within about 75 seconds; Claude reads at most forty transcript tails of 1 MiB
+each. The total character budget is 4 MiB. `scan.capped` names an incomplete
+scan; narrow the query or read a known session directly. `scan.reason:
+"read-unavailable"` identifies an interrupted transcript read, rather than a
+complete search with no matches. Failed reads count toward the attempt budget;
+subsequent fast candidates may still match before the elapsed limit is reached. A matching title does not
+require reading its transcript.
+
+`start_session.context: "summary"` appends a mechanical summary of the calling
+conversation, capped at 4,000 characters and marked as background. The caller's
+app supplies it: Codex uses trusted tool metadata to read the source thread;
+Claude uses its session messages. No model call generates the summary. The
+result reports `context.summary: "included"` or `"unavailable"`; the default
+`"none"` sends the prompt alone.
+
+`start_session` and `send_message` return an `operationId`. Retain it and reuse
+it for an identical retry: the bridge returns the existing session instead of
+starting a second turn. Reusing it for a different brief is rejected. Operations
+live in bridge memory; after a restart `check_operation` returns
+`operation-not-found`, so inspect the session before deciding whether to retry.
+`check_operation` reports `running`, `done`, `failed`, or `submitted`: a Codex turn is done
+only after its matching turn reports completion, and a Claude CLI turn only
+after the process exits. A failed readback leaves its state running. An open
+Claude session's plugin can confirm that a message was submitted; that
+submission acknowledgement does not prove the subsequent model turn finished.
+
+`start_session.dryRun: true` is optional. It checks the provider, model, working
+directory and required key without starting an app or spending a model call,
+even with a remembered launch preference. Successful combinations are cached
+under `run/bridge-validation.json`, keyed by app, provider, model, cwd and the
+provider configuration digest. Provider configuration changes invalidate the
+cache; keys, directories and the Claude CLI are checked live on every dry run.
+The cache contains no credentials. An unavailable bridge refuses enhanced
+operations rather than falling back to a path that cannot honor them.
+
+Failures carry `status`, `reason`, `retryable`, `howToContinue`, and a short
+`message`, so an agent can determine the next action without parsing prose.
+
+`read_session` reports `transcriptTotal` and `truncated`; pass its `nextCursor`
+as `cursor` to continue reading older text. Character clipping preserves the
+remaining head of the clipped message on the following page. Cursors are
+opaque and valid for the current transcript; changing the transcript can make
+one invalid.
+
 `limit` bounds message entries, so a short request never spends its budget on
 character clipping; the 60k-character cap still applies underneath it.
 
 - **`app: "codex"`** runs on the Codex desktop's own app-server through the
   intermediary's `native-request` control message, which allows only
   `thread/list`, `thread/read`, `thread/start`, `thread/resume`,
-  `thread/name/set`, `turn/start`, and `turn/interrupt`. Threads it starts show
+  `thread/name/set`, `turn/start`, and `turn/interrupt`. Authenticated replies
+  to outstanding native requests may contain up to 64 MiB of history; commands
+  and diagnostics retain their 256 KiB frame limit. Threads it starts show
   in the Codex sidebar; `start_session` can pick a declared provider and model,
   and names the thread when `title` is given (`thread/start` has no name field,
   so the name is set immediately after it).
@@ -147,7 +198,7 @@ character clipping; the 60k-character cap still applies underneath it.
     in that window adds `turn: { status: "succeeded" }`, or
     `turn: { status: "failed", error }` with the CLI's own reason (the model
     service key is scrubbed out). A turn still running adds no `turn` field and
-    a `note` saying to read the session again to see whether it finished. The
+    a `note` saying to call `check_operation` to see whether it finished. The
     call never blocks on a long task.
   - `send_message` to a session the app is not running resumes it the same
     way (`--resume`). A session the app has open (a Claude Code process with

@@ -9,7 +9,10 @@ import type { NativeExistingThreadSwitch, NativeSubmissionController } from './n
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 
+// Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
+// Match the intermediary native-history envelope; command budgets stay small.
+const MAX_RESPONSE_LINE = 64 * 1024 * 1024
 const TIMEOUT = 30_000
 const valid = (value: unknown, max = 512): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
@@ -67,7 +70,9 @@ export interface NativeSubmissionControlServer {
 }
 
 /** Private launch-scoped transport. No renderer-supplied scope crosses this boundary. */
-export async function startNativeSubmissionControlServer(): Promise<NativeSubmissionControlServer> {
+export async function startNativeSubmissionControlServer(
+  options: { readonly requestTimeoutMs?: number } = {},
+): Promise<NativeSubmissionControlServer> {
   const diagnostic = bindDiagnostic()
   const directory = await mkdtemp(path.join(await realpath(tmpdir()), 'cx-native-'))
   const socketPath = path.join(directory, 'control.sock')
@@ -79,6 +84,12 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
   let taskRouting: NativeAgentTaskRouting | undefined
   let closed = false
   let closePromise: Promise<void> | undefined
+  // Retire only timed-out IDs; a late response cannot resolve a new request.
+  const expiredIds = new Set<string>()
+  const rememberExpired = (id: string): void => {
+    expiredIds.add(id)
+    if (expiredIds.size > 128) expiredIds.delete(expiredIds.values().next().value!)
+  }
   const pending = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
@@ -112,7 +123,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
         clearTimeout(item.timer)
         reject(error)
       }
-      const timer = setTimeout(() => fail(new Error('Native switch timed out')), TIMEOUT)
+      const timer = setTimeout(() => {
+        rememberExpired(id)
+        fail(new Error('Native switch timed out'))
+      }, options.requestTimeoutMs ?? TIMEOUT)
       pending.set(id, { resolve, reject, timer })
       void write(socket, { ...request, id }).catch(fail)
     })
@@ -141,7 +155,8 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
     }
     peer = socket
     diagnostic({ event: 'native-control-peer-connected', requestRef: peerRef })
-    let buffer = ''
+    let fragments: string[] = []
+    let fragmentBytes = 0
     let active = 0
     const activeIds = new Set<string>()
     const authTimer = setTimeout(() => socket.destroy(), TIMEOUT)
@@ -161,7 +176,10 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       if (typeof value.ok === 'boolean') {
         if (!authenticated) throw new Error('Unauthenticated response')
         const item = pending.get(value.id)
-        if (!item) throw new Error('Unknown control response')
+        if (!item) {
+          if (expiredIds.has(value.id)) return
+          throw new Error('Unknown control response')
+        }
         pending.delete(value.id)
         clearTimeout(item.timer)
         value.ok ? item.resolve(value.value) : item.reject(new Error('Native switch rejected'))
@@ -288,19 +306,42 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       }
     }
     socket.on('data', (chunk: string) => {
-      buffer += chunk
+      let start = 0
       for (;;) {
-        const newline = buffer.indexOf('\n')
-        if (newline < 0) break
-        const line = buffer.slice(0, newline)
-        buffer = buffer.slice(newline + 1)
-        if (Buffer.byteLength(line) > MAX_LINE) {
+        const newline = chunk.indexOf('\n', start)
+        const fragment = chunk.slice(start, newline < 0 ? undefined : newline)
+        fragmentBytes += Buffer.byteLength(fragment)
+        const frameLimit = authenticated ? MAX_RESPONSE_LINE : MAX_LINE
+        if (fragmentBytes > frameLimit) {
+          diagnostic({
+            event: 'native-control-frame-rejected',
+            phase: authenticated ? 'response-frame-limit' : 'request-frame-limit',
+            bytes: fragmentBytes,
+            count: frameLimit,
+            verified: authenticated,
+          })
           socket.destroy()
           return
         }
+        if (fragment.length > 0) fragments.push(fragment)
+        if (newline < 0) return
+        const line = fragments.join('')
+        const lineBytes = fragmentBytes
+        fragments = []
+        fragmentBytes = 0
+        start = newline + 1
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
+          // The larger frame budget is only for an authenticated response to
+          // an outstanding request. Commands and diagnostics retain 256 KiB.
+          if (
+            lineBytes > MAX_LINE
+            && (!authenticated || typeof value.ok !== 'boolean' || !valid(value.id, 256)
+              || (!pending.has(value.id) && !expiredIds.has(value.id)))
+          ) {
+            throw new Error('Invalid oversized control envelope')
+          }
           void handle(value).catch(error => {
             diagnostic({
               event: 'native-control-message-rejected',
@@ -323,7 +364,6 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
           return
         }
       }
-      if (Buffer.byteLength(buffer) > MAX_LINE) socket.destroy()
     })
   })
   try {
@@ -389,6 +429,7 @@ export async function startNativeSubmissionControlServer(): Promise<NativeSubmis
       closePromise ??= (async () => {
         closed = true
         failPending()
+        expiredIds.clear()
         peer?.destroy()
         await new Promise<void>(resolve => server.close(() => resolve()))
         await rm(directory, { recursive: true, force: true })

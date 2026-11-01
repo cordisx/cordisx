@@ -13,6 +13,8 @@ async function plugin(files: Readonly<Record<string, string>>) {
   const registered: { name: string; description: string; inputSchema: unknown }[] = []
   const handlers = new Map<string, Handler>()
   let started: Handler | undefined
+  const launches: unknown[] = []
+  const submitted: unknown[] = []
   const on = (event: string, filter: unknown, handler?: Handler) => {
     if (event === 'session.start') {
       started = filter as Handler
@@ -39,16 +41,31 @@ async function plugin(files: Readonly<Record<string, string>>) {
       list: async () => [],
       call: async () => ({ text: '' }),
     },
-    session: { id: async () => 'local_self' },
+    session: { id: async () => 'local_self', messages: async () => [{ role: 'user', content: 'source goal' }] },
+    process: {
+      run: async (args: unknown) => {
+        launches.push(args)
+        return { exitCode: 0 }
+      },
+    },
+    prompt: {
+      submit: async (args: unknown) => {
+        submitted.push(args)
+      },
+    },
     clock: { every: () => ({}) },
   }
   await started!(engine, {}, async () => undefined)
   return {
     registered,
-    async call(name: string) {
+    launches,
+    submitted,
+    async call(name: string, args: Record<string, unknown> = {}) {
       const handler = handlers.get(`mcp__cordisx__${name}`)
       if (handler === undefined) throw new Error(`no handler for ${name}`)
-      return (await handler(engine, { tool: `mcp__cordisx__${name}`, tool_use_id: 'call' })) as { result: string }
+      return (await handler(engine, { tool: `mcp__cordisx__${name}`, tool_use_id: 'call', ...args })) as {
+        result: string
+      }
     },
   }
 }
@@ -89,20 +106,23 @@ const declaredConfig = JSON.stringify({
 })
 
 describe('The Claude bridge plugin', () => {
-  it('registers the session tools, list_model_providers and integration_status', async () => {
+  it('registers the session, operation, provider and integration status tools', async () => {
     const { registered } = await plugin({})
     expect(registered.map(tool => tool.name)).toEqual([
       'list_sessions',
       'read_session',
       'start_session',
       'send_message',
+      'check_operation',
       'list_model_providers',
       'integration_status',
     ])
     const read = registered.find(tool => tool.name === 'read_session')!
     expect(JSON.stringify(read.inputSchema)).toContain('"limit"')
-    expect(read.description).toMatch(/limit/u)
-    expect(JSON.stringify(registered.find(tool => tool.name === 'start_session')!.inputSchema)).toContain('"title"')
+    expect(read.description).toMatch(/cursor/u)
+    expect(JSON.stringify(read.inputSchema)).toContain('"cursor"')
+    const schema = JSON.stringify(registered.find(tool => tool.name === 'start_session')!.inputSchema)
+    for (const field of ['title', 'context', 'dryRun', 'operationId']) expect(schema).toContain(`"${field}"`)
   })
 
   it('lists the Claude-capable declared services in the Codex tool shape, without credentials', async () => {
@@ -125,4 +145,17 @@ describe('The Claude bridge plugin', () => {
     const { call } = await plugin({})
     expect(JSON.parse((await call('list_model_providers')).result)).toEqual({ providers: [] })
   })
+})
+
+it('keeps disconnected dryRun read-only in both app directions', async () => {
+  const f = await plugin({})
+  for (const app of ['codex', 'claude']) {
+    const result = JSON.parse(
+      (await f.call('start_session', { app, prompt: 'work', dryRun: true, launch: 'always' })).result,
+    )
+    expect(result.status).toBe('failed')
+    expect(result.reason).toBe('agent-bridge-unavailable')
+  }
+  expect(f.launches).toEqual([])
+  expect(f.submitted).toEqual([])
 })

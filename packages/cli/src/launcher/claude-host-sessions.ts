@@ -1,10 +1,29 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { access, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { access, chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { homedir as systemHomedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { type HomeConfigProvider, parseHomeConfig } from '../config/home-config.js'
+import {
+  AgentBridgeUnavailable,
+  type BridgeFailure,
+  bridgeFailure,
+  BridgeOperationError,
+  type BridgeOperationRegistry,
+  type BridgeTurnOperation,
+  type BridgeValidationCache,
+  type BridgeValidationKey,
+  createBridgeOperationRegistry,
+  createTurnRunner,
+  dryRunResult,
+  failureFromError,
+  pageTranscript,
+  requireDirectory,
+  type TurnContext,
+} from './agent-bridge-contract.js'
+import { memoryValidationCache } from './agent-bridge-validation.js'
+import { contextArgument, contextResult, handedSummary, handoffPrompt } from './agent-bridge-context.js'
 import { readClaudeProviderCatalog } from './claude-desktop-profile.js'
 import { runningClaudeProfile } from './claude-desktop-process.js'
 import { CLAUDE_DEFAULT_PERMISSION_MODE } from './claude-permission-mode.js'
@@ -21,6 +40,9 @@ import { modelsForApp } from './model-service-projection.js'
  * profile's process (by pid, never to whichever Claude the system picks)
  * imports it as `local_<id>`. Lists and transcripts are read from the
  * profile's session records and the CLI's transcript files.
+ *
+ * Failures use the bridge's one shape (agent-bridge-contract.ts): `status`,
+ * `reason`, `retryable` and `howToContinue`, plus a human `message`.
  */
 
 const run = promisify(execFile)
@@ -51,7 +73,23 @@ export async function writeClaudeDesktopBinding(cordisxHomeDir: string, binding:
   await chmod(file, 0o600)
 }
 
-export const claudeSessionLink = (cliSessionId: string): string => `claude://resume?session=${cliSessionId}`
+export {
+  claudeSessionLink,
+  claudeTranscript,
+  findClaudeTranscript,
+  readClaudeSessionRecords,
+  readTranscriptTail,
+} from './claude-session-records.js'
+import {
+  claudeSessionLink,
+  claudeTranscriptEntries,
+  directories,
+  findClaudeTranscript,
+  readClaudeSessionRecords,
+  readJson,
+  searchClaudeSessions,
+  type SessionRecord,
+} from './claude-session-records.js'
 
 /** Whether the bridge may start Claude itself: `always` once the person said so, else it asks. */
 export type ClaudeLaunchPreference = 'ask' | 'always'
@@ -78,15 +116,13 @@ export async function writeClaudeLaunchPreference(
  * What an agent hears when the target app is closed and nobody said it may be
  * started. The Claude plugin answers the same shape for Codex.
  */
-export function appLaunchQuestion(app: 'codex' | 'claude') {
+export function appLaunchQuestion(app: 'codex' | 'claude'): BridgeFailure & { readonly question: string } {
   const name = app === 'codex' ? 'Codex Desktop' : 'Claude Desktop'
-  return Object.freeze({
+  const failure = bridgeFailure(`${app}-not-running`, {
     status: 'needs-confirmation',
-    reason: `${app}-not-running`,
-    question: `${name} is not running. Start it?`,
-    howToContinue:
-      `Ask the user, in their language, whether to start ${name}. If they agree, call this tool again with the same arguments plus launch "once" (start it this time) or "always" (start it automatically from now on, without asking). Do not retry without their answer.`,
+    message: `${name} is not running`,
   })
+  return { ...failure, question: `${name} is not running. Start it?` }
 }
 const CLAUDE_LAUNCH_QUESTION = appLaunchQuestion('claude')
 
@@ -94,7 +130,6 @@ const LAUNCH_WAIT_MS = 30_000
 /** How long a started turn gets to fail visibly before the tool answers "started". */
 const TURN_REPORT_MS = 8_000
 
-const MAX_TRANSCRIPT_CHARS = 60_000
 /** The organization folder Claude Desktop files sessions under on a fresh profile. */
 const DEFAULT_ORGANIZATION = '00000000-0000-4000-8000-000000000001'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
@@ -108,114 +143,12 @@ const text = (value: unknown, max = 512): string | undefined =>
 const transcriptLimit = (value: unknown): number | undefined =>
   Number.isInteger(value) ? Math.min(Math.max(value as number, 1), 200) : undefined
 
-interface SessionRecord {
-  readonly sessionId: string
-  readonly cliSessionId: string
-  readonly title: string
-  readonly cwd?: string
-  readonly model?: string
-  readonly updatedAt?: number
-  readonly archived: boolean
-}
-
-async function readJson(file: string): Promise<Record<string, unknown> | undefined> {
-  try {
-    return object(JSON.parse(await readFile(file, 'utf8')))
-  } catch {
-    return undefined
-  }
-}
-
-async function directories(parent: string): Promise<readonly string[]> {
-  try {
-    return (await readdir(parent, { withFileTypes: true }))
-      .filter(entry => entry.isDirectory())
-      .map(entry => path.join(parent, entry.name))
-  } catch {
-    return []
-  }
-}
-
-/** Every Code session record the profile keeps, newest first. */
-export async function readClaudeSessionRecords(dataDir: string): Promise<readonly SessionRecord[]> {
-  const records: SessionRecord[] = []
-  for (const account of await directories(path.join(dataDir, 'claude-code-sessions'))) {
-    for (const organization of await directories(account)) {
-      for (const name of await readdir(organization).catch(() => [] as string[])) {
-        if (!/^local_.+\.json$/u.test(name)) continue
-        const record = await readJson(path.join(organization, name))
-        const sessionId = text(record?.sessionId)
-        const cliSessionId = text(record?.cliSessionId)
-        if (record === undefined || sessionId === undefined || cliSessionId === undefined) continue
-        records.push({
-          sessionId,
-          cliSessionId,
-          title: text(record.title, 1024) ?? '',
-          ...(typeof record.cwd === 'string' ? { cwd: record.cwd } : {}),
-          ...(typeof record.model === 'string' ? { model: record.model } : {}),
-          ...(typeof record.lastActivityAt === 'number' ? { updatedAt: record.lastActivityAt } : {}),
-          archived: record.isArchived === true,
-        })
-      }
-    }
-  }
-  return records.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))
-}
-
-/** The CLI transcript of a session, found by id under `~/.claude/projects`. */
-export async function findClaudeTranscript(homedir: string, cliSessionId: string): Promise<string | undefined> {
-  if (!UUID.test(cliSessionId)) return undefined
-  for (const project of await directories(path.join(homedir, '.claude', 'projects'))) {
-    const file = path.join(project, `${cliSessionId}.jsonl`)
-    try {
-      await access(file)
-      return file
-    } catch { /* next project */ }
-  }
-  return undefined
-}
-
-/** The user and assistant text of a CLI transcript, newest last, bounded by `limit` entries and 60k characters. */
-export function claudeTranscript(
-  jsonl: string,
-  limit?: number,
-): readonly { role: string; text: string }[] {
-  const entries: { role: string; text: string }[] = []
-  for (const line of jsonl.split('\n')) {
-    let entry: Record<string, unknown> | undefined
-    try {
-      entry = object(JSON.parse(line))
-    } catch {
-      continue
-    }
-    if (entry?.type !== 'user' && entry?.type !== 'assistant') continue
-    const content = object(entry.message)?.content
-    const said = typeof content === 'string'
-      ? content
-      : (Array.isArray(content) ? content : [])
-        .map(part => object(part)?.type === 'text' ? object(part)?.text : undefined)
-        .filter((part): part is string => typeof part === 'string')
-        .join('\n')
-    if (said.trim().length > 0) entries.push({ role: entry.type, text: said })
-  }
-  let budget = MAX_TRANSCRIPT_CHARS
-  const kept: { role: string; text: string }[] = []
-  const newest = limit === undefined ? entries : entries.slice(-Math.max(limit, 0))
-  for (const entry of newest.reverse()) {
-    if (budget <= 0) break
-    const clipped = entry.text.length > budget ? `…${entry.text.slice(-budget)}` : entry.text
-    budget -= clipped.length
-    kept.push({ role: entry.role, text: clipped })
-  }
-  return kept.reverse()
-}
-
 /**
  * The newest Claude Code CLI Claude Desktop installed: the profile's own, else
  * the person's own Claude data folders' (a new profile installs one with its
  * first session).
  */
-export async function claudeProfileCli(dataDir: string, homedir = os.homedir()): Promise<string | undefined> {
+export async function claudeProfileCli(dataDir: string, homedir = systemHomedir()): Promise<string | undefined> {
   const support = path.join(homedir, 'Library', 'Application Support')
   for (const folder of [dataDir, path.join(support, 'Claude-3p'), path.join(support, 'Claude')]) {
     const found = await newestCli(folder)
@@ -271,6 +204,12 @@ export interface ClaudeHostSessionsInput {
   readonly homedir?: string
   /** Resolves a model service key by variable name: the launch environment, then the CordisX config. */
   readonly secret: (name: string) => Promise<string | undefined>
+  /** The CordisX home's provider declarations; defaults to reading its config. */
+  readonly providers?: () => Promise<readonly HomeConfigProvider[]>
+  /** Remembers a validated app + provider + model + cwd combination; defaults to this handler's memory. */
+  readonly validation?: BridgeValidationCache
+  /** The operations this handler answers `check_operation` for; defaults to one of its own. */
+  readonly operations?: BridgeOperationRegistry
   /** The pid of the app running a profile, if it runs. */
   readonly runningPid?: (homeDir: string, profileId: string) => Promise<number | undefined>
   /** The command lines of running processes; a session the app has open shows its id there. */
@@ -280,14 +219,27 @@ export interface ClaudeHostSessionsInput {
     request: { readonly homeDir: string; readonly profileId: string; readonly providerId?: string },
   ) => Promise<void>
   /** Answers through a Claude session's plugin, for a session the app is running right now. */
-  readonly viaPlugin?: (operation: 'send_message', args: Record<string, unknown>, target: string) => Promise<unknown>
+  readonly viaPlugin?: (
+    operation: BridgeTurnOperation,
+    args: Record<string, unknown>,
+    target: string,
+  ) => Promise<unknown>
   /** How long a started turn is given to report a failure before the call answers "started" (tests shorten it). */
   readonly turnReportMs?: number
+  readonly launchWaitMs?: number
 }
 
 /** Validated `app: "claude"` operations that need no Claude session to be open. */
 export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
-  const homedir = input.homedir ?? os.homedir()
+  const homedir = input.homedir ?? systemHomedir()
+  const declaredProviders = input.providers
+    ?? ((): Promise<readonly HomeConfigProvider[]> => readHomeProviders(input.cordisxHomeDir))
+  const validation = input.validation ?? memoryValidationCache()
+  const activeSessions = new Set<string>()
+  const turns = createTurnRunner('claude', {
+    registry: input.operations ?? createBridgeOperationRegistry(),
+    dryRun: async (args, operationId) => await dryRun(args, operationId),
+  })
 
   async function profile(): Promise<{ binding?: ClaudeDesktopBinding; pid?: number }> {
     const binding = await readJson(claudeDesktopBindingPath(input.cordisxHomeDir)) as ClaudeDesktopBinding | undefined
@@ -321,12 +273,15 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       profileId: current.binding?.profileId ?? 'default',
       ...(current.binding?.provider === undefined ? {} : { providerId: current.binding.provider.id }),
     })
-    for (const deadline = Date.now() + LAUNCH_WAIT_MS; Date.now() < deadline;) {
+    for (const deadline = Date.now() + (input.launchWaitMs ?? LAUNCH_WAIT_MS); Date.now() < deadline;) {
       const started = await profile()
       if (started.binding !== undefined && started.pid !== undefined) return started.binding
       await new Promise(resolve => setTimeout(resolve, 500))
     }
-    throw new Error('Claude Desktop did not start within 30 seconds')
+    throw new BridgeOperationError('claude-did-not-start', {
+      status: 'failed',
+      message: 'Claude Desktop did not start within 30 seconds',
+    })
   }
 
   async function findRecord(dataDir: string, sessionId: string): Promise<SessionRecord | undefined> {
@@ -347,12 +302,18 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
   }): Promise<TurnHandle> {
     const cli = await claudeProfileCli(options.binding.dataDir, homedir)
     if (cli === undefined) {
-      throw new Error('Claude Desktop has not installed Claude Code yet; open one Code session in Claude once')
+      throw new BridgeOperationError('claude-code-missing', {
+        message: 'Claude Desktop has not installed Claude Code yet; open one Code session in Claude once',
+      })
     }
     const provider = options.service ?? options.binding.provider
     const key = provider === undefined ? undefined : await input.secret(provider.apiKeyEnv)
     if (provider !== undefined && key === undefined) {
-      throw new Error(`The key for model service ${provider.id} (${provider.apiKeyEnv}) is not set`)
+      throw new BridgeOperationError('provider-key-missing', {
+        status: 'failed',
+        message: `The key for model service ${provider.id} (${provider.apiKeyEnv}) is not set`,
+        detail: provider.apiKeyEnv,
+      })
     }
     const model = options.model ?? provider?.model
     const args = [
@@ -388,6 +349,8 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     child.stderr.on('data', (chunk: Buffer) => {
       if (out.length < 64) out.push(chunk)
     })
+    activeSessions.add(options.cliSessionId)
+    child.stdin.on('error', () => undefined)
     child.stdin.end(options.prompt)
     child.once('error', () => undefined)
     const ended = new Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>(resolve => {
@@ -395,11 +358,12 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       child.once('exit', (code, signal) => resolve({ code, signal }))
     })
     void ended.then(async () => {
+      activeSessions.delete(options.cliSessionId)
       const { pid } = await profile().catch(() => ({ pid: undefined }))
       if (pid !== undefined) await sendClaudeUrl(pid, claudeSessionLink(options.cliSessionId)).catch(() => undefined)
     })
     return {
-      ended: ended.then(exit => turnFailure(exit, Buffer.concat(out).toString('utf8'))),
+      ended: ended.then(exit => turnFailure(exit, Buffer.concat(out).toString('utf8'), key)),
     }
   }
 
@@ -449,7 +413,7 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
    * endpoint and no key.
    */
   async function claudeCatalog(binding: ClaudeDesktopBinding) {
-    const providers = (await readClaudeProviderCatalog(await readHomeProviders(input.cordisxHomeDir), binding.dataDir))
+    const providers = (await readClaudeProviderCatalog(await declaredProviders(), binding.dataDir))
       .map(entry => ({
         providerId: entry.providerId,
         title: entry.title,
@@ -458,18 +422,20 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
     return { providers }
   }
 
-  /** `providerId` and `model` for a Claude start, or why they cannot be honored. */
+  /** `providerId` and `model` for a Claude start, or the failure that says why they cannot be honored. */
   async function selectClaudeService(
     binding: ClaudeDesktopBinding,
     args: Record<string, unknown>,
-  ): Promise<
-    | { readonly providerId?: string; readonly model?: string; readonly service?: ClaudeServiceChoice }
-    | { readonly status: 'rejected'; readonly reason: string }
-  > {
+  ): Promise<{
+    readonly providerId?: string
+    readonly model?: string
+    readonly service?: ClaudeServiceChoice
+    readonly declared?: boolean
+  }> {
     const catalog = await claudeCatalog(binding)
-    const declared = await readHomeProviders(input.cordisxHomeDir)
+    const declarations = await declaredProviders()
     const serviceOf = (providerId: string): ClaudeServiceChoice | undefined => {
-      const declaration = declared.find(entry => entry.kind === 'model-service' && entry.id === providerId)
+      const declaration = declarations.find(entry => entry.kind === 'model-service' && entry.id === providerId)
       return declaration === undefined || declaration.kind !== 'model-service'
         ? undefined
         : {
@@ -487,29 +453,123 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       // A model on its own names a model of the service the profile runs on.
       if (model === undefined) return {}
       const profile = binding.provider
-      if (profile === undefined) return { status: 'rejected', reason: 'model-without-provider' }
+      if (profile === undefined) throw new BridgeOperationError('model-without-provider')
       const known = catalog.providers.find(entry => entry.providerId === profile.id)?.models ?? []
-      return known.some(entry => entry.id === model)
-        ? { providerId: profile.id, model, service: profile }
-        : { status: 'rejected', reason: 'model-not-in-provider-catalog' }
+      if (!known.some(entry => entry.id === model)) throw new BridgeOperationError('model-not-in-provider-catalog')
+      return { providerId: profile.id, model, service: profile, declared: false }
     }
     const provider = catalog.providers.find(entry => entry.providerId === providerId)
-    if (provider === undefined) return { status: 'rejected', reason: 'provider-not-configured' }
+    if (provider === undefined) throw new BridgeOperationError('provider-not-configured')
     const chosen = model ?? provider.models[0]?.id
     if (chosen !== undefined && !provider.models.some(entry => entry.id === chosen)) {
-      return { status: 'rejected', reason: 'model-not-in-provider-catalog' }
+      throw new BridgeOperationError('model-not-in-provider-catalog')
     }
     const service = serviceOf(providerId)
     if (service === undefined) {
       // A service only the profile's own library holds has no declaration here to
       // take an endpoint and key from; refusing beats starting a turn on the wrong one.
-      return { status: 'rejected', reason: 'provider-not-declared' }
+      throw new BridgeOperationError('provider-not-declared')
     }
     return {
       providerId,
       ...chosen === undefined ? {} : { model: chosen },
       service: chosen === undefined ? service : { ...service, model: chosen },
+      declared: true,
     }
+  }
+
+  /** A start's arguments, validated once, so `dryRun` and the real call check the same things. */
+  async function startPlan(args: Record<string, unknown>, binding: ClaudeDesktopBinding) {
+    const prompt = text(args.prompt, 100_000)
+    if (prompt === undefined) throw new BridgeOperationError('prompt-required')
+    const cwd = text(args.cwd, 4096) ?? homedir
+    if (!path.isAbsolute(cwd)) throw new BridgeOperationError('cwd-must-be-absolute')
+    const context = contextArgument(args)
+    if (context === undefined) throw new BridgeOperationError('context-invalid')
+    const handed = context === 'summary' ? handedSummary(args) : undefined
+    const selection = await selectClaudeService(binding, args)
+    return {
+      prompt: handoffPrompt(prompt, handed),
+      cwd,
+      selection,
+      title: text(args.title, 120),
+      context,
+      handed,
+      configuration: JSON.stringify(await declaredProviders()),
+    }
+  }
+
+  /**
+   * Validates a start without starting anything: the provider and model are in
+   * this profile's catalog, the cwd is a directory, and the declaration's key
+   * is set. A combination an earlier start proved works answers `remembered`.
+   */
+  async function dryRun(args: Record<string, unknown>, operationId: string): Promise<Record<string, unknown>> {
+    const current = await profile()
+    const binding = current.binding
+    if (binding === undefined || current.pid === undefined) {
+      return { ...CLAUDE_LAUNCH_QUESTION, dryRun: true, operationId }
+    }
+    const plan = await startPlan(args, binding)
+    const key = (plan.selection.service ?? binding.provider)?.apiKeyEnv
+    const known = await validation.remembers({ ...validationKeyFor(plan), configuration: plan.configuration })
+    {
+      await requireDirectory(plan.cwd)
+      if (key !== undefined && await input.secret(key) === undefined) {
+        return {
+          ...dryRunResult({
+            app: 'claude',
+            operationId,
+            checks: { provider: 'ok', model: 'ok', cwd: 'ok', key: 'not-required' },
+            wouldStart: {
+              cwd: plan.cwd,
+              ...(plan.selection.providerId === undefined ? {} : {
+                providerId: plan.selection.providerId,
+              }),
+            },
+          }),
+          ...bridgeFailure('provider-key-missing', {
+            status: 'failed',
+            message: `The key for model service ${plan.selection.providerId} (${key}) is not set`,
+            detail: key,
+          }),
+        }
+      }
+      if (await claudeProfileCli(binding.dataDir, homedir) === undefined) {
+        return {
+          ...dryRunResult({
+            app: 'claude',
+            operationId,
+            checks: { provider: 'ok', model: 'ok', cwd: 'ok', key: key === undefined ? 'not-required' : 'ok' },
+            wouldStart: { cwd: plan.cwd },
+          }),
+          ...bridgeFailure('claude-code-missing', {
+            status: 'failed',
+            message: 'Claude Desktop has not installed Claude Code yet; open one Code session in Claude once',
+          }),
+        }
+      }
+    }
+    return dryRunResult({
+      app: 'claude',
+      operationId,
+      checks: {
+        provider: plan.selection.providerId === undefined
+          ? 'not-requested'
+          : known
+          ? 'remembered'
+          : 'ok',
+        model: plan.selection.model === undefined ? 'not-requested' : known ? 'remembered' : 'ok',
+        cwd: 'ok',
+        key: key === undefined ? 'not-required' : 'ok',
+      },
+      wouldStart: {
+        cwd: plan.cwd,
+        ...(plan.selection.providerId === undefined ? {} : { providerId: plan.selection.providerId }),
+        ...(plan.selection.model === undefined ? {} : { model: plan.selection.model }),
+        runsInBackground: true,
+      },
+    })
   }
 
   async function read(
@@ -520,105 +580,148 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
   ): Promise<unknown> {
     if (operation === 'list_sessions') {
       const limit = Number.isInteger(args.limit) ? Math.min(Math.max(args.limit as number, 1), 50) : 20
-      const search = text(args.searchTerm, 256)?.toLowerCase()
-      const sessions = (await readClaudeSessionRecords(binding.dataDir))
-        .filter(record => !record.archived)
-        .filter(record => search === undefined || record.title.toLowerCase().includes(search))
-        .slice(0, limit)
-        .map(record => ({ ...record, link: claudeSessionLink(record.cliSessionId) }))
-      return { running, sessions }
+      const search = text(args.searchTerm, 256)
+      const records = (await readClaudeSessionRecords(binding.dataDir)).filter(record => !record.archived)
+      return search === undefined
+        ? {
+          running,
+          sessions: records.slice(0, limit).map(record => ({
+            ...record,
+            link: claudeSessionLink(record.cliSessionId),
+          })),
+        }
+        : { running, ...await searchClaudeSessions(records, search, limit, homedir) }
     }
     const sessionId = text(args.sessionId)
-    if (sessionId === undefined) return { status: 'rejected', reason: 'sessionId-required' }
+    if (sessionId === undefined) throw new BridgeOperationError('sessionId-required')
     const record = await findRecord(binding.dataDir, sessionId)
     const cliSessionId = record?.cliSessionId ?? sessionId.replace(/^local_/u, '')
     const file = await findClaudeTranscript(homedir, cliSessionId)
-    if (record === undefined && file === undefined) return { status: 'rejected', reason: 'session-not-found' }
+    if (record === undefined && file === undefined) throw new BridgeOperationError('session-not-found')
+    const limit = transcriptLimit(args.limit)
+    const page = pageTranscript(file === undefined ? [] : claudeTranscriptEntries(await readFile(file, 'utf8')), {
+      ...(limit === undefined ? {} : { limit }),
+      ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+    })
     return {
       ...(record ?? { sessionId: `local_${cliSessionId}`, cliSessionId }),
       link: claudeSessionLink(cliSessionId),
-      transcript: file === undefined ? [] : claudeTranscript(await readFile(file, 'utf8'), transcriptLimit(args.limit)),
+      transcript: page.entries,
+      transcriptTotal: page.total,
+      truncated: page.truncated,
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      ...(page.clippedCharacters === 0 ? {} : { clippedCharacters: page.clippedCharacters }),
     }
   }
 
-  return async (operation: unknown, rawArgs: unknown): Promise<unknown> => {
-    const args = object(rawArgs) ?? {}
-    if (operation === 'list_model_providers') {
-      // A catalog read needs only the home config and the profile's files.
-      const current = await profile()
-      const binding = current.binding ?? {
-        dataDir: path.join(input.cordisxHomeDir, 'apps', 'claude', 'profiles', 'default', 'data-3p'),
-      } as ClaudeDesktopBinding
-      return await claudeCatalog(binding)
-    }
-    if (operation === 'list_sessions' || operation === 'read_session') {
-      // Reading needs only the profile's files, not the app.
-      const current = await profile()
-      const binding = current.binding ?? await running(args)
-      if (!('version' in binding)) return binding
-      return await read(operation, args, binding, current.pid !== undefined || current.binding === undefined)
-    }
-    if (operation !== 'start_session' && operation !== 'send_message') {
-      return { status: 'rejected', reason: 'unknown-operation' }
-    }
+  async function start(
+    args: Record<string, unknown>,
+    turn: TurnContext,
+  ): Promise<Record<string, unknown>> {
     const binding = await running(args)
-    if (!('version' in binding)) return binding
-    if (operation === 'start_session') {
-      const prompt = text(args.prompt, 100_000)
-      if (prompt === undefined) return { status: 'rejected', reason: 'prompt-required' }
-      const cwd = text(args.cwd, 4096) ?? homedir
-      if (!path.isAbsolute(cwd)) return { status: 'rejected', reason: 'cwd-must-be-absolute' }
-      const selection = await selectClaudeService(binding, args)
-      if ('status' in selection) return selection
-      const cliSessionId = randomUUID()
-      const turn = await runTurn({
-        binding,
-        cliSessionId,
-        resume: false,
-        prompt,
-        cwd,
-        ...selection.model === undefined ? {} : { model: selection.model },
-        ...selection.service === undefined ? {} : { service: selection.service },
+    if (!('version' in binding)) return { ...binding }
+    const plan = await startPlan(args, binding)
+    // A normal start behaves as before; `dryRun` is where a bad cwd is reported first.
+    const declaredKey = plan.selection.declared === true
+      ? plan.selection.service?.apiKeyEnv
+      : plan.selection.providerId === binding.provider?.id
+      ? binding.provider?.apiKeyEnv
+      : undefined
+    if (declaredKey !== undefined && await input.secret(declaredKey) === undefined) {
+      throw new BridgeOperationError('provider-key-missing', {
+        status: 'failed',
+        message: `The key for model service ${plan.selection.providerId} (${declaredKey}) is not set`,
+        detail: declaredKey,
       })
-      const title = text(args.title, 120)
-      if (title !== undefined) await titleStartedSession(binding, cliSessionId, title).catch(() => undefined)
-      // A turn may run for minutes: only a failure it reports within a brief wait
-      // is folded in, and a slow turn stays "started" with a note on how to check.
-      const reported = await withinReportWindow(turn.ended, input.turnReportMs)
-      return {
-        status: 'started',
-        sessionId: `local_${cliSessionId}`,
-        cliSessionId,
-        ...(title === undefined ? {} : { title }),
-        ...(selection.providerId === undefined ? {} : { modelProvider: selection.providerId }),
-        ...(selection.model === undefined ? {} : { model: selection.model }),
-        link: claudeSessionLink(cliSessionId),
-        ...(reported === undefined ? {} : { turn: reported }),
-        note: reported === undefined
-          ? 'The turn runs in the background with the CordisX model service; the session appears in Claude when it finishes, and the link opens it. Read the session again to see whether that turn finished.'
-          : reported.status === 'failed'
-          ? 'The first turn failed before the session could appear in Claude; the link still opens it, and another message runs a new turn.'
-          : 'The turn finished; the session appears in Claude, and the link opens it.',
-      }
     }
+    const cliSessionId = randomUUID()
+    const link = claudeSessionLink(cliSessionId)
+    const sessionId = `local_${cliSessionId}`
+    const handle = await runTurn({
+      binding,
+      cliSessionId,
+      resume: false,
+      prompt: plan.prompt,
+      cwd: plan.cwd,
+      ...plan.selection.model === undefined ? {} : { model: plan.selection.model },
+      ...plan.selection.service === undefined ? {} : { service: plan.selection.service },
+    })
+    // The turn is running: an agent that loses this answer still has the session.
+    turn.effected(sessionId, link)
+    if (plan.title !== undefined) await titleStartedSession(binding, cliSessionId, plan.title).catch(() => undefined)
+    const base = {
+      sessionId,
+      cliSessionId,
+      ...(plan.context === 'summary' ? { context: contextResult(plan.handed) } : {}),
+      ...(plan.title === undefined ? {} : { title: plan.title }),
+      ...(plan.selection.providerId === undefined ? {} : { modelProvider: plan.selection.providerId }),
+      ...(plan.selection.model === undefined ? {} : { model: plan.selection.model }),
+      link,
+    }
+    // A turn may run for minutes: only a failure it reports within a brief wait
+    // is folded in, and a slow turn stays "started" for `check_operation` to settle.
+    const reported = await withinReportWindow(handle.ended, input.turnReportMs)
+    if (reported === undefined) {
+      const result = turn.started({
+        status: 'started',
+        ...base,
+        note:
+          'The turn runs in the background; check_operation with this operationId reports when it ends, and the link opens the session in Claude.',
+      })
+      turn.follow(handle.ended)
+      void handle.ended.then(async outcome => {
+        if (outcome.status === 'succeeded') {
+          await validation.remember({ ...validationKeyFor(plan), configuration: plan.configuration })
+        }
+      }).catch(() => undefined)
+      return result
+    }
+    if (reported.status === 'failed') {
+      return turn.failed({
+        status: 'failed',
+        ...base,
+        reason: 'turn-failed',
+        retryable: true,
+        howToContinue:
+          'The turn failed before the session appeared in Claude; read message, then call send_message to this sessionId to run a new turn.',
+        message: reported.error ?? 'The first turn failed',
+        turn: reported,
+      })
+    }
+    await validation.remember({ ...validationKeyFor(plan), configuration: plan.configuration })
+    return turn.done({
+      status: 'started',
+      ...base,
+      turn: reported,
+      note: 'The turn finished; the session appears in Claude, and the link opens it.',
+    })
+  }
+
+  async function send(args: Record<string, unknown>, turn: TurnContext): Promise<Record<string, unknown>> {
+    const binding = await running(args)
+    if (!('version' in binding)) return { ...binding }
     const sessionId = text(args.sessionId)
     const prompt = text(args.prompt, 100_000)
-    if (sessionId === undefined || prompt === undefined) {
-      return { status: 'rejected', reason: 'sessionId-and-prompt-required' }
-    }
+    if (sessionId === undefined || prompt === undefined) throw new BridgeOperationError('sessionId-and-prompt-required')
+    if (activeSessions.has(sessionId.replace(/^local_/u, ''))) throw new BridgeOperationError('session-busy')
     const record = await findRecord(binding.dataDir, sessionId)
-    if (record === undefined) return { status: 'rejected', reason: 'session-not-found' }
+    if (record === undefined) throw new BridgeOperationError('session-not-found')
     // An open session belongs to the app's own process; a second writer would fork its transcript.
     if (resumes(await (input.processList ?? liveCliSessions)(), record.cliSessionId)) {
-      if (input.viaPlugin === undefined) return { status: 'rejected', reason: 'session-open-in-claude' }
+      if (input.viaPlugin === undefined) throw new BridgeOperationError('session-open-in-claude')
+      turn.effected(record.sessionId, claudeSessionLink(record.cliSessionId))
       // The open session's own plugin submits it there, as the next turn.
-      return await input.viaPlugin(
+      const forwarded = await input.viaPlugin(
         'send_message',
         { sessionId: record.sessionId, cliSessionId: record.cliSessionId, prompt },
         record.cliSessionId,
       )
+      const result = object(forwarded)
+        ?? bridgeFailure('claude-plugin-unavailable', { message: 'The Claude plugin returned no acknowledgement' })
+      if ('reason' in result) return turn.failed({ ...result, sessionId: record.sessionId })
+      return turn.started({ ...result, sessionId: record.sessionId, completion: 'unavailable' })
     }
-    await runTurn({
+    const handle = await runTurn({
       binding,
       cliSessionId: record.cliSessionId,
       resume: true,
@@ -626,7 +729,81 @@ export function createClaudeHostSessions(input: ClaudeHostSessionsInput) {
       cwd: record.cwd ?? homedir,
       ...(record.model === undefined ? {} : { model: record.model }),
     })
-    return { status: 'sent', sessionId: record.sessionId, link: claudeSessionLink(record.cliSessionId) }
+    turn.effected(record.sessionId, claudeSessionLink(record.cliSessionId))
+    const reported = await withinReportWindow(handle.ended, input.turnReportMs)
+    if (reported === undefined) {
+      const result = turn.started({
+        status: 'sent',
+        sessionId: record.sessionId,
+        link: claudeSessionLink(record.cliSessionId),
+        note: 'The turn runs in the background; check_operation with this operationId reports when it ends.',
+      })
+      turn.follow(handle.ended)
+      return result
+    }
+    if (reported.status === 'failed') {
+      return turn.failed({
+        status: 'failed',
+        sessionId: record.sessionId,
+        link: claudeSessionLink(record.cliSessionId),
+        reason: 'turn-failed',
+        retryable: true,
+        howToContinue: 'The turn failed; read message, then send a new message with a new operationId.',
+        message: reported.error ?? 'The turn failed',
+        turn: reported,
+      })
+    }
+    return turn.done({
+      status: 'sent',
+      sessionId: record.sessionId,
+      link: claudeSessionLink(record.cliSessionId),
+      turn: reported,
+    })
+  }
+
+  return async (operation: unknown, rawArgs: unknown): Promise<unknown> => {
+    const args = object(rawArgs) ?? {}
+    try {
+      if (operation === 'check_operation') return await turns.check(args)
+      if (operation === 'list_model_providers') {
+        // A catalog read needs only the home config and the profile's files.
+        const current = await profile()
+        const binding = current.binding ?? {
+          dataDir: path.join(input.cordisxHomeDir, 'apps', 'claude', 'profiles', 'default', 'data-3p'),
+        } as ClaudeDesktopBinding
+        return await claudeCatalog(binding)
+      }
+      if (operation === 'list_sessions' || operation === 'read_session') {
+        // Reading needs only the profile's files, not the app.
+        const current = await profile()
+        const binding = current.binding
+        if (binding === undefined) {
+          return bridgeFailure('claude-not-running', {
+            status: 'unavailable',
+            message: 'No CordisX Claude profile has been recorded',
+          })
+        }
+        return await read(operation, args, binding, current.pid !== undefined)
+      }
+      if (operation === 'start_session') return await turns.run('start_session', args, turn => start(args, turn))
+      if (operation === 'send_message') return await turns.run('send_message', args, turn => send(args, turn))
+      return bridgeFailure('unknown-operation')
+    } catch (error) {
+      return failureFromError(error)
+    }
+  }
+}
+
+/** The combination a start proved works, as the cache keys it. */
+function validationKeyFor(plan: {
+  readonly cwd: string
+  readonly selection: { readonly providerId?: string; readonly model?: string }
+}): BridgeValidationKey {
+  return {
+    app: 'claude',
+    ...(plan.selection.providerId === undefined ? {} : { providerId: plan.selection.providerId }),
+    ...(plan.selection.model === undefined ? {} : { model: plan.selection.model }),
+    cwd: plan.cwd,
   }
 }
 
@@ -727,3 +904,5 @@ interface ClaudeServiceChoice {
   readonly apiKeyEnv: string
   readonly model?: string
 }
+
+export { AgentBridgeUnavailable }

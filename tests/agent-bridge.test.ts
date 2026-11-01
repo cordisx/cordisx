@@ -102,7 +102,10 @@ describe('Codex side of the agent bridge', () => {
     const listed = await createCodexBridgeHandler(codex)('list_sessions', { limit: 5 }) as {
       sessions: Array<{ sessionId: string; title: string; link: string }>
     }
-    expect(codex.calls[0]).toEqual({ method: 'thread/list', params: { limit: 5 } })
+    expect(codex.calls[0]).toEqual({
+      method: 'thread/list',
+      params: { limit: 5, sortKey: 'updated_at', sortDirection: 'desc', modelProviders: [] },
+    })
     expect(listed.sessions).toEqual([
       expect.objectContaining({ sessionId: 't1', title: 'Fix the build', link: 'codex://threads/t1' }),
     ])
@@ -167,20 +170,96 @@ describe('Codex side of the agent bridge', () => {
       threadId: 'new-thread',
       input: [{ type: 'text', text: 'build it', text_elements: [] }],
     })
-    expect(await handler('start_session', { prompt: 'x', providerId: 'nope' })).toEqual({
+    expect(await handler('start_session', { prompt: 'x', providerId: 'nope' })).toEqual(expect.objectContaining({
       status: 'rejected',
       reason: 'provider-not-configured',
-    })
-    expect(await handler('start_session', { prompt: 'x', cwd: 'relative' })).toEqual({
+      retryable: false,
+    }))
+    expect(await handler('start_session', { prompt: 'x', cwd: 'relative' })).toEqual(expect.objectContaining({
       status: 'rejected',
       reason: 'cwd-must-be-absolute',
-    })
+    }))
   })
 
   it('resumes an unloaded thread before sending to it', async () => {
     const codex = fakeCodex()
     await createCodexBridgeHandler(codex)('send_message', { sessionId: 'cold', prompt: 'next' })
     expect(codex.calls.map(call => call.method)).toEqual(['thread/read', 'thread/resume', 'turn/start'])
+  })
+})
+
+/** A Codex app-server whose threads say whatever the test wrote for them. */
+function searchableCodex(threads: Readonly<Record<string, readonly string[]>>) {
+  const reads: string[] = []
+  const turns = (id: string) => [{
+    items: (threads[id] ?? []).map((text, index) =>
+      index % 2 === 0
+        ? { type: 'userMessage', content: [{ type: 'text', text }] }
+        : { type: 'agentMessage', text }
+    ),
+  }]
+  const codex: AgentBridgeCodexAuthority & { reads: string[] } = {
+    reads,
+    async catalog() {
+      return []
+    },
+    async nativeRequest(method, params) {
+      if (method === 'thread/list') {
+        return { data: Object.keys(threads).map(id => ({ id, name: `thread ${id}`, cwd: '/w' })) }
+      }
+      if (method === 'thread/read') {
+        const id = String((params as { threadId: string }).threadId)
+        reads.push(id)
+        return { thread: { id, name: `thread ${id}`, turns: turns(id) } }
+      }
+      if (method === 'thread/start') return { thread: { id: 'new-thread' } }
+      if (method === 'turn/start') return { turn: { id: 'turn-1' } }
+      return {}
+    },
+  }
+  return codex
+}
+
+describe('conversation discovery and hand-off', () => {
+  it('matches a Codex thread by what was said in it and returns the excerpt', async () => {
+    const codex = searchableCodex({
+      a: ['We discussed the keystore rotation last week', 'Noted.'],
+      b: ['unrelated work'],
+    })
+    const listed = await createCodexBridgeHandler(codex)('list_sessions', { searchTerm: 'keystore' }) as {
+      sessions: Array<{ sessionId: string; matchedIn: string; match?: { role: string; excerpt: string } }>
+    }
+    expect(listed.sessions).toEqual([
+      expect.objectContaining({
+        sessionId: 'a',
+        matchedIn: 'messages',
+        match: { role: 'user', excerpt: expect.stringContaining('keystore') },
+      }),
+    ])
+    // A thread with no match is read to rule it out, and never answered.
+    expect(codex.reads).toEqual(['a', 'b'])
+  })
+
+  it('says when a content search stopped before reading every thread', async () => {
+    const threads = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [`t${index}`, [`message ${index}`]]),
+    )
+    const listed = await createCodexBridgeHandler(searchableCodex(threads))('list_sessions', {
+      searchTerm: 'nowhere',
+    }) as { sessions: unknown[]; scan: { capped: boolean; scanned: number; reason?: string } }
+    expect(listed.sessions).toEqual([])
+    expect(listed.scan).toEqual(expect.objectContaining({ capped: true, reason: 'candidate-limit', scanned: 8 }))
+  })
+
+  it('carries the calling thread into a Codex start, capped and marked as background', async () => {
+    const codex = searchableCodex({ caller: ['Please rotate the keystore in src/config/keys.ts', 'Done.'] })
+    const started = await createCodexBridgeHandler(codex)('start_session', {
+      prompt: 'Add a CHANGELOG entry for the rotation',
+      context: 'summary',
+      callerSummary: 'Conversation in Codex.\nAsked: Please rotate the keystore.',
+    }) as { context: Record<string, unknown> }
+    expect(started.context).toEqual({ summary: 'included', characters: expect.any(Number) })
+    expect(codex.reads).toEqual([])
   })
 })
 
@@ -282,9 +361,9 @@ describe('agent bridge transport', () => {
   it('answers Claude requests from the launched profile without any Claude session', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
-    // Never launched and not allowed to start it: the agent gets a question, at once.
+    // A read reports missing profile state without launching the app.
     expect(await bridge.call('claude', 'list_sessions', {})).toEqual(expect.objectContaining({
-      status: 'needs-confirmation',
+      status: 'unavailable',
       reason: 'claude-not-running',
     }))
 
@@ -310,9 +389,15 @@ describe('agent bridge transport', () => {
     })
     await claudeProfile(home)
     const message = { sessionId: `local_${CLI_ID}`, prompt: 'hi' }
-    // Another session polling does not make this one reachable.
+    // Another session polling does not make this one reachable: the agent gets a
+    // structured failure it can act on, not a thrown error it cannot read.
     await post(bridge, '/claude/poll', { sessionId: 'other' })
-    await expect(bridge.call('claude', 'send_message', message)).rejects.toThrow(/plugin is not connected/)
+    expect(await bridge.call('claude', 'send_message', message)).toEqual(expect.objectContaining({
+      status: 'failed',
+      reason: 'claude-plugin-unavailable',
+      retryable: true,
+      message: expect.stringMatching(/plugin/u),
+    }))
 
     await post(bridge, '/claude/poll', { sessionId: CLI_ID })
     const pending = bridge.call('claude', 'send_message', message)
@@ -325,7 +410,12 @@ describe('agent bridge transport', () => {
       args: { ...message, cliSessionId: CLI_ID },
     }))
     await post(bridge, '/claude/result', { id: claimed.id, ok: true, value: { status: 'sent' } })
-    await expect(pending).resolves.toEqual({ status: 'sent' })
+    const sent = await pending as { operationId: string }
+    expect(sent).toMatchObject({ status: 'sent', sessionId: `local_${CLI_ID}` })
+    expect(await bridge.call('claude', 'check_operation', { operationId: sent.operationId })).toMatchObject({
+      status: 'submitted',
+      completion: 'unavailable',
+    })
   })
 
   it('routes the generic session tools to the named app through the agent-models handler', async () => {
@@ -342,10 +432,8 @@ describe('agent bridge transport', () => {
         return { sessions: [] }
       },
     })
-    expect(await handler('session:list_sessions', { app: 'claude', limit: 2 })).toEqual({
-      status: 'ok',
-      value: { sessions: [] },
-    })
+    // The bridge's own result, failures included: it used to be wrapped in an extra layer.
+    expect(await handler('session:list_sessions', { app: 'claude', limit: 2 })).toEqual({ sessions: [] })
     expect(seen).toEqual([['claude', 'list_sessions', { limit: 2 }]])
     expect(await handler('session:list_sessions', { app: 'zcode' })).toEqual(expect.objectContaining({
       status: 'rejected',

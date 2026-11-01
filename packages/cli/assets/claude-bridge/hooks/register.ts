@@ -54,7 +54,7 @@ const SESSION_TOOLS = [
   {
     name: 'list_sessions',
     description:
-      'List conversations in an app CordisX connects (`app`: "codex" for Codex Desktop threads, "claude" for Claude Desktop Code sessions), most recent first, each with a link the user can click to open it. Read-only.',
+      'List conversations in an app CordisX connects (`app`: "codex" for Codex Desktop threads, "claude" for Claude Desktop Code sessions), most recent first, each with a link the user can click to open it. Read-only. searchTerm matches messages as well as titles; matches include matchedIn and a short match excerpt. scan.capped reports bounded-search omissions.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -70,7 +70,7 @@ const SESSION_TOOLS = [
   {
     name: 'read_session',
     description:
-      'Read the recent transcript of one conversation by its sessionId (from list_sessions) in the named app, plus its link. Read-only. `limit` caps the number of returned message entries (the newest ones); the transcript is also capped at about 60k characters.',
+      'Read one page of a conversation transcript by its sessionId (from list_sessions), newest messages kept, plus the link and `transcriptTotal`. Read-only, but one page may be large (~60k characters). Page older text with `cursor` from `nextCursor`; `truncated: true` means something was left out, and `clippedCharacters` says how much of the oldest returned message was cut.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -78,6 +78,11 @@ const SESSION_TOOLS = [
         app: APP,
         sessionId: { type: 'string', minLength: 1, maxLength: 512 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
+        cursor: {
+          type: 'string',
+          maxLength: 128,
+          description: 'nextCursor from an earlier read_session, unchanged, to read the next older page.',
+        },
         launch: LAUNCH,
       },
       required: ['app', 'sessionId'],
@@ -86,17 +91,32 @@ const SESSION_TOOLS = [
   {
     name: 'start_session',
     description:
-      'Start a new conversation in the named app for a task the user asked to hand over, and return its sessionId and link. The prompt is the full brief. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns for that app; a value it does not list is refused. For Claude the turn runs in the background, and the result says whether it failed within a short wait; a turn still running is reported as started. Only when the user explicitly asks.',
+      'Start a new conversation in the named app for a task the user asked to hand over. context summary appends a bounded summary of this conversation as background. Costs a model call and may take minutes. Returns `operationId`, `sessionId` and a link; keep the operationId. A repeat with the same operationId returns that same session instead of starting a second one. `title` names the conversation where the app supports it. `providerId` and `model` pick one of the model services `list_model_providers` returns; a value it does not list is refused. `dryRun: true` validates provider, model, cwd and key and starts nothing. Only when the user explicitly asks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         app: APP,
+        operationId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          description: 'Unique per intended start. Reuse it only to repeat this exact call.',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Validate the provider, model, cwd and key without starting anything. Never required.',
+        },
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
         title: { type: 'string', minLength: 1, maxLength: 120 },
         cwd: { type: 'string', minLength: 1, maxLength: 4096 },
         providerId: { type: 'string', minLength: 1, maxLength: 128 },
         model: { type: 'string', minLength: 1, maxLength: 512 },
+        context: {
+          enum: ['none', 'summary'],
+          description:
+            'summary appends a bounded summary of the calling conversation, marked as background; none sends only the prompt.',
+        },
         launch: LAUNCH,
       },
       required: ['app', 'prompt'],
@@ -105,17 +125,34 @@ const SESSION_TOOLS = [
   {
     name: 'send_message',
     description:
-      'Send a message to an existing conversation by its sessionId in the named app; it runs there as the next turn. Only when the user explicitly asks.',
+      'Send a message to an existing conversation by its sessionId in the named app; it runs there as the next turn. Costs a model call and may take minutes. Returns `operationId`; a repeat with the same operationId does not send twice. Only when the user explicitly asks.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         app: APP,
+        operationId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          description: 'Unique per intended send. Reuse it only to repeat this exact call.',
+        },
         sessionId: { type: 'string', minLength: 1, maxLength: 512 },
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
         launch: LAUNCH,
       },
       required: ['app', 'sessionId', 'prompt'],
+    },
+  },
+  {
+    name: 'check_operation',
+    description:
+      'Report what a start_session or send_message operation became: `running`, `done` or `failed`, with the sessionId and link, or the failure reason. Read-only, side-effect free and cheap: call it instead of guessing how long a background turn takes, and poll it a few seconds apart rather than in a tight loop.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { app: APP, operationId: { type: 'string', minLength: 1, maxLength: 128 } },
+      required: ['app', 'operationId'],
     },
   },
 ] as const
@@ -190,6 +227,17 @@ async function post($: EngineInterface, route: string, body: unknown): Promise<B
     return JSON.parse(response.text) as BridgeReply
   } catch {
     return { ok: false, unreachable: true, error: 'The CordisX agent bridge is not reachable' }
+  }
+}
+
+/** One sentence an agent can follow, so a failure from the fallback path reads like one from the bridge. */
+function failure(reason: string, message: string, retryable = false): Record<string, unknown> {
+  return {
+    status: 'failed',
+    reason,
+    retryable,
+    howToContinue: 'Read message; if the bridge is not what failed, call this tool again.',
+    message,
   }
 }
 
@@ -270,7 +318,9 @@ async function answer($: EngineInterface, operation: string, args: Record<string
       ...(typeof args.cwd === 'string' ? { cwd: args.cwd } : {}),
     })
     const sessionId = SESSION_ID.exec(textOf(started))?.[0]
-    if (sessionId === undefined) return { status: 'unknown', result: textOf(started) }
+    if (sessionId === undefined) {
+      return failure('session-not-started', `Claude did not report a session: ${textOf(started)}`)
+    }
     // A session this one starts nests under it; the user should see it as their own.
     try {
       await $.tool.call({ tool: 'mcp__ccd_session_mgmt__detach_session', session_id: sessionId })
@@ -278,6 +328,14 @@ async function answer($: EngineInterface, operation: string, args: Record<string
     const details = await $.tool.call({ tool: 'mcp__ccd_session_mgmt__get_session', session_id: sessionId })
     const link = CLAUDE_LINK.exec(textOf(details))?.[0]
     return { status: 'started', sessionId, ...(link === undefined ? {} : { link }) }
+  }
+  if (operation === 'check_operation') {
+    // The fallback path starts Claude's own sessions, which report synchronously:
+    // there is nothing to poll, and pretending otherwise would mislead the agent.
+    return failure(
+      'operation-not-found',
+      'This Claude session answers through the CordisX bridge, which is not running, so it has no background operations to check.',
+    )
   }
   if (operation === 'send_message') {
     const prompt = String(args.prompt ?? args.message ?? '')
@@ -330,32 +388,136 @@ async function hostsClaudeSessions($: EngineInterface): Promise<boolean> {
   )
 }
 
-/** Runs one session tool: Codex through the agent bridge, Claude with this app's own session tools. */
+const SUMMARY_CHARS = 4000
+const FILE_MENTIONED = /[\w.@+-]+(?:\/[\w.@+-]+)*\.[A-Za-z][A-Za-z0-9]{1,7}\b/gu
+
+const flatten = (value: string): string => value.replace(/\s+/gu, ' ').trim()
+
+function clip(value: string, max: number): string {
+  const text = flatten(value)
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function textOfMessage(message: unknown): string | undefined {
+  if (typeof message === 'string') return message
+  const value = message as { content?: unknown } | undefined
+  if (typeof value?.content === 'string') return value.content
+  const parts = Array.isArray(value?.content) ? value.content : Array.isArray(message) ? message : []
+  const said = parts.flatMap(part => {
+    const text = (part as { text?: unknown } | undefined)?.text
+    return typeof text === 'string' ? [text] : []
+  })
+  return said.length === 0 ? undefined : said.join('\n')
+}
+
+/**
+ * What this conversation has been about, for a Codex task handed over from it:
+ * the first and latest requests, the latest answer, and the files named. It is
+ * the same shape the CordisX host builds, and it is capped before it is sent.
+ */
+async function conversationSummary($: EngineInterface, sessionId: string): Promise<string | undefined> {
+  let messages: unknown[] = []
+  try {
+    messages = (await $.session.messages()) as unknown[]
+  } catch {
+    return undefined
+  }
+  const entries: { role: string; text: string }[] = []
+  for (const message of messages) {
+    const value = message as { role?: unknown; type?: unknown } | undefined
+    const role = typeof value?.role === 'string' ? value.role : value?.type
+    const said = textOfMessage(message)
+    if (typeof role !== 'string' || said === undefined || said.trim().length === 0) continue
+    entries.push({ role, text: said })
+  }
+  const users = entries.filter(entry => entry.role === 'user')
+  if (users.length === 0) return undefined
+  const answers = entries.filter(entry => entry.role === 'assistant')
+  const lines = [`Conversation in Claude (${sessionId}).`, `Asked: ${clip(users[0]!.text, 700)}`]
+  for (const entry of users.slice(1).slice(-3)) lines.push(`Then asked: ${clip(entry.text, 300)}`)
+  const latest = answers[answers.length - 1]
+  if (latest !== undefined) lines.push(`Latest answer: ${clip(latest.text, 700)}`)
+  const files: string[] = []
+  for (const entry of entries) {
+    if (files.length >= 12) break
+    for (const match of entry.text.matchAll(FILE_MENTIONED)) {
+      const found = match[0].replace(/^[./]+/u, '')
+      if (found.length > 120 || files.includes(found)) continue
+      files.push(found)
+      if (files.length >= 12) break
+    }
+  }
+  if (files.length > 0) lines.push(`Files mentioned: ${files.join(', ')}`)
+  return clip(lines.join('\n'), SUMMARY_CHARS)
+}
+
+/** Tool results are read by an agent, not a person: compact JSON, never pretty-printed. */
+const compact = (value: unknown): string => JSON.stringify(value)
+
+/**
+ * Runs one session tool: Codex through the agent bridge, Claude with this
+ * app's own session tools. Whatever happens, the result is one JSON object
+ * with the bridge's fields — `status`, and for a failure `reason`,
+ * `retryable` and `howToContinue` — so an agent branches on them either way.
+ */
 async function runSessionTool($: EngineInterface, operation: string, input: Record<string, unknown>): Promise<string> {
   const { app, ...args } = input
+  if (operation === 'start_session' && args.context === 'summary') {
+    const summary = await conversationSummary($, await $.session.id())
+    if (summary !== undefined) args.callerSummary = summary
+  }
   if (app === 'claude') {
     // The bridge drives Claude from outside the app, so a new session needs no
     // "start the session?" prompt; without a bridge, Claude's own tools answer.
     const { launch: _launch, ...request } = args
     const bridged = await post($, '/sessions', { app, operation, args: request })
-    if (bridged.ok) return JSON.stringify(bridged.value, null, 2)
+    // A bridge answer is final, failure included: it knows the app state better
+    // than this session's own tools do.
+    if (bridged.ok) return compact(bridged.value)
+    if (
+      args.dryRun === true || args.context === 'summary' || args.operationId !== undefined || args.cursor !== undefined
+    ) {
+      return compact(
+        failure(
+          'agent-bridge-unavailable',
+          'Start Codex with CordisX to use recoverable operations, dryRun, context handoff, or transcript paging.',
+        ),
+      )
+    }
     try {
-      return JSON.stringify(await answer($, operation, args), null, 2)
+      return compact(await answer($, operation, args))
     } catch (error) {
-      return `Claude could not do it: ${error instanceof Error ? error.message : String(error)}`
+      return compact(
+        failure('claude-unavailable', error instanceof Error ? error.message : String(error), true),
+      )
     }
   }
-  if (app !== 'codex') return `app must be one of ${APPS.join(', ')}`
+  if (app !== 'codex') {
+    return compact({
+      status: 'rejected',
+      reason: 'unknown-app',
+      retryable: false,
+      howToContinue: `Pass app ${APPS.map(name => `"${name}"`).join(' or ')}.`,
+      message: `app must be one of ${APPS.join(', ')}`,
+    })
+  }
   const { launch, ...request } = args
   let answered = await post($, '/sessions', { app, operation, args: request })
-  if (!answered.ok && answered.unreachable === true) {
+  if (!answered.ok && answered.unreachable === true && args.dryRun !== true && operation !== 'check_operation') {
+    // An operationId only means something to one bridge process; a restarted
+    // bridge reports it as not found, which is what the agent needs to know.
     const started = await startCodex($, launch)
-    if (started !== true) return JSON.stringify(started, null, 2)
+    if (started !== true) return compact(started)
     answered = await post($, '/sessions', { app, operation, args: request })
   }
-  return answered.ok
-    ? JSON.stringify(answered.value, null, 2)
-    : `Codex is unavailable: ${answered.error ?? 'unknown error'}`
+  if (answered.ok) return compact(answered.value)
+  return compact({
+    status: 'failed',
+    reason: 'agent-bridge-unavailable',
+    retryable: true,
+    howToContinue: 'CordisX is not running the Codex bridge; start it with `cordisx start codex`, then call again.',
+    message: answered.error ?? 'Codex is unavailable',
+  })
 }
 
 /**
@@ -544,6 +706,7 @@ async function startCodex($: EngineInterface, launch: unknown): Promise<true | R
     return {
       status: 'needs-confirmation',
       reason: 'codex-not-running',
+      retryable: false,
       question: 'Codex Desktop is not running. Start it?',
       howToContinue:
         'Ask the user, in their language, whether to start Codex Desktop. If they agree, call this tool again with the same arguments plus launch "once" (start it this time) or "always" (start it automatically from now on, without asking). Do not retry without their answer.',
@@ -562,13 +725,26 @@ async function startCodex($: EngineInterface, launch: unknown): Promise<true | R
     : ['cordisx', 'start', 'codex', target.profileId]
   const started = await $.process.run(argv, { env: { CORDISX_HOME: target.homeDir }, timeoutMs: CODEX_START_MS })
   if (started.exitCode !== 0) {
-    return { status: 'failed', reason: 'codex-start-failed', detail: started.stderr.slice(-2000) }
+    return {
+      status: 'failed',
+      reason: 'codex-start-failed',
+      retryable: true,
+      howToContinue: 'Codex Desktop did not start; start it with `cordisx start codex`, then call again.',
+      message: 'Codex Desktop did not start',
+      detail: started.stderr.slice(-2000),
+    }
   }
   for (const deadline = Date.now() + CODEX_START_MS; Date.now() < deadline;) {
     if ((await post($, '/sessions', { app: 'codex', operation: 'list_sessions', args: { limit: 1 } })).ok) return true
     await new Promise(resolve => setTimeout(resolve, 1000))
   }
-  return { status: 'failed', reason: 'codex-bridge-not-ready' }
+  return {
+    status: 'failed',
+    reason: 'agent-bridge-unavailable',
+    retryable: true,
+    howToContinue: 'Codex Desktop started but its bridge did not answer in time; call this tool again.',
+    message: 'Codex Desktop started but its agent bridge did not come up',
+  }
 }
 
 export const register: Register = on => {
@@ -582,10 +758,12 @@ export const register: Register = on => {
 
   on('tool.call', { tool: `mcp__cordisx__${MODEL_PROVIDER_TOOL.name}` }, async $ => {
     try {
-      return { result: JSON.stringify(await modelProviders($), null, 2) }
+      return { result: compact(await modelProviders($)) }
     } catch (error) {
       return {
-        result: `The model services could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        result: compact(
+          failure('agent-bridge-unavailable', error instanceof Error ? error.message : String(error), true),
+        ),
       }
     }
   })

@@ -115,6 +115,7 @@ describe('integration_status in the Claude bridge plugin', () => {
       'read_session',
       'start_session',
       'send_message',
+      'check_operation',
       'list_model_providers',
       'integration_status',
     ])

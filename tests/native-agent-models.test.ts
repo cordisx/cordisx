@@ -217,8 +217,13 @@ describe('Agent model-provider tools', () => {
         'read_session',
         'start_session',
         'send_message',
+        'check_operation',
         'integration_status',
       ])
+      const startSchema = JSON.stringify(advertised.find((tool: any) => tool.name === 'start_session').inputSchema)
+      for (const field of ['context', 'operationId', 'dryRun']) expect(startSchema).toContain(`"${field}"`)
+      expect(JSON.stringify(advertised.find((tool: any) => tool.name === 'select_thread_model_provider').inputSchema))
+        .not.toContain('"context"')
       expect(advertised[0].description).toContain('only when threadCreation is available')
       const catalog = await request(3, 'tools/call', { name: 'list_model_providers' })
       expect(catalog.isError).toBe(false)
