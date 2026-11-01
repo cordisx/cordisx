@@ -158,7 +158,8 @@
     "eslint": "9.39.4",
     "lint-staged": "16.2.7",
     "stylelint": "17.15.0",
-    "@projectwallace/stylelint-plugin": "0.7.0"
+    "@projectwallace/stylelint-plugin": "0.7.0",
+    "@cordisx/codex-adapter": "file:packages/codex-adapter"
   },
   "bundleDependencies": [
     "@cordisx/schemastery-ui"

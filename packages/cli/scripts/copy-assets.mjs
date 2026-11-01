@@ -79,3 +79,30 @@ await copyFile(new URL(notificationStyles, import.meta.url), notificationDestina
 const dialogDestination = new URL('../dist/src/renderer/dialogs/styles.css', import.meta.url)
 await mkdir(new URL('.', dialogDestination), { recursive: true })
 await copyFile(new URL('../src/renderer/dialogs/styles.css', import.meta.url), dialogDestination)
+
+// The adapter workspace releases independently; Host retains this exact built baseline offline.
+const adapterDestination = fileURLToPath(new URL('../dist/codex-adapter', import.meta.url))
+await rm(adapterDestination, { recursive: true, force: true })
+await cp(new URL('../../codex-adapter/dist', import.meta.url), adapterDestination, { recursive: true })
+async function bindBuiltinAdapter(directory) {
+  const { readdir } = await import('node:fs/promises')
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name)
+    if (entry.isDirectory()) await bindBuiltinAdapter(file)
+    else if (/\.(?:js|ts)$/u.test(entry.name)) {
+      const source = await readFile(file, 'utf8')
+      const target = path.relative(path.dirname(file), adapterDestination).split(path.sep).join('/')
+      await writeFile(
+        file,
+        source.replace(
+          /(['"])@cordisx\/codex-adapter(?:\/([^'"]+))?\1/gu,
+          (_all, quote, subpath) =>
+            `${quote}${target.startsWith('.') ? target : `./${target}`}/${
+              subpath ? `${subpath}.js` : 'adapter.mjs'
+            }${quote}`,
+        ),
+      )
+    }
+  }
+}
+await bindBuiltinAdapter(fileURLToPath(new URL('../dist/src', import.meta.url)))

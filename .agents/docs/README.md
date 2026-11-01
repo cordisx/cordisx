@@ -51,6 +51,8 @@ implementation of those contracts, not a second public specification.
 - [Agent creation with a configured provider](native-agent-task-creation.md):
   experimental native task adapter, operation identity and retained acceptance gates.
 
+- [Independent Codex adapters](codex-adapters.md): exact trusted intake, compatible module combinations, local cache, activation and independent releases.
+
 ## Understand runtime composition and delivery
 
 | Document                                                        | Type      | Use it for                                                                        |
@@ -104,6 +106,8 @@ implementation of those contracts, not a second public specification.
   | [channel-runtime](channel-runtime.md) | Reference | Node Channel services, bindings, adapters, reliability, and evidence scope |
   | [marketplace-source-management](marketplace-source-management.md) | Reference | Source management, cache behavior, and Manager information architecture |
   | [marketplace-trust-and-ranking](marketplace-trust-and-ranking.md) | Reference | Official/Certified dimensions, revocation, search, and projection |
+
+- [Independent adapter candidate, 2026-11-02](history/codex-adapter-2026-11-02.md): initial requirement ledger and evidence boundaries.
 
 ## Read historical plans and delivery evidence
 

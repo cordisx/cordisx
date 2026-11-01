@@ -1,3 +1,4 @@
+import { bundle as builtinAdapter } from '@cordisx/codex-adapter'
 import { extractFile, listPackage } from '@electron/asar'
 import path from 'node:path'
 import { initSync, parse } from 'es-module-lexer'
@@ -5,7 +6,11 @@ import { literal, parseNativeSource } from './native-source-structure.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 
 /** Read installed resources without extracting, modifying, or launching the App. */
-export function readNativeSubmissionResources(contents: string): readonly NativeScriptResource[] {
+export function readNativeSubmissionResources(
+  contents: string,
+  resourceHints?: readonly (readonly string[])[],
+): readonly NativeScriptResource[] {
+  resourceHints ??= builtinAdapter.resourceHints
   const archive = path.join(contents, 'Resources', 'app.asar')
   const packageEntries = listPackage(archive, { isPack: false })
   const assets = new Set(
@@ -30,19 +35,8 @@ export function readNativeSubmissionResources(contents: string): readonly Native
     // Only capability-bearing modules need the heavier syntax analysis. A dependency
     // graph can include unrelated tool/browser bundles with thousands of chunks.
     if (
-      entries.includes(entry) || /^\/webview\/assets\/app-shared-[^/]+\.js$/u.test(entry) || [
-        ['submitTarget', 'options', 'openingPromptForHistory'],
-        ['context', 'configOverrides', 'requiresThreadReferences'],
-        ['configOverrides', 'threadStartKind', 'requiresThreadReferences'],
-        ['context', 'targetConversationId', 'clientUserMessageId'],
-        ['inheritThreadSettings', 'usePermissionSelection'],
-        ['projectAssignment', 'conversationResponse', 'localTurnMetadata'],
-        ['sendRequest', 'turn/start', 'getAppServerVersion'],
-        ['onSelectModel', 'onSelectModelOption', 'reasoningEffort'],
-        ['accessInputs', 'readAccountInfo'],
-        ['accountInfo', 'readAccountInfo'],
-        ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
-      ].some(keys => keys.every(key => source.includes(key)))
+      entries.includes(entry) || /^\/webview\/assets\/app-shared-[^/]+\.js$/u.test(entry)
+      || resourceHints.some(keys => keys.every(key => source.includes(key)))
     ) {
       resources.push({ url: `app://-/assets/${path.basename(entry)}`, source })
     }

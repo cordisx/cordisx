@@ -53,7 +53,7 @@
     }
   },
   "scripts": {
-    "build": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json && node scripts/copy-assets.mjs && node scripts/build-shortcut-helper.mjs",
+    "build": "npm run build --workspace=@cordisx/codex-adapter && npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json && node scripts/copy-assets.mjs && node scripts/build-shortcut-helper.mjs",
     "check": "npm run typecheck",
     "check:package": "node scripts/check-package-contents.mjs",
     "dev": "tsx src/cli.ts",
@@ -66,7 +66,7 @@
     "prepack": "npm run build && node ../../scripts/prepare-bundled-runtime-plugins.mjs",
     "smoke": "node scripts/live-smoke.mjs",
     "smoke:desktop-agents": "node scripts/run-codex-desktop-agent-session-harness.mjs",
-    "typecheck": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"
+    "typecheck": "npm run build --workspace=@cordisx/codex-adapter && npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"
   },
   "engines": {
     "node": ">=22.19"
@@ -124,6 +124,7 @@
     "reicon": "1.2.1",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
+    "sigstore": "4.0.0",
     "smol-toml": "1.8.0",
     "style-to-js": "1.1.21",
     "swr": "2.5.1",
@@ -138,6 +139,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
+    "@cordisx/codex-adapter": "file:../codex-adapter",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

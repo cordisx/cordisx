@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { connect } from 'node:net'
 import vm from 'node:vm'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 import { ManagedCatalogComposition } from '../packages/cli/src/launcher/model-catalog/managed-catalog-composition.js'
 import {
@@ -20,8 +20,14 @@ import { resources, sharedResources } from './fixtures/native-submission-structu
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 
 const roots: string[] = []
+beforeEach(async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cx-adapter-home-'))
+  roots.push(home)
+  vi.stubEnv('CORDISX_HOME', home)
+})
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 async function bundle(incompatible = false, scripts = resources(), entryHtml?: string) {
