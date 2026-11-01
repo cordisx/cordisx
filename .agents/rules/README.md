@@ -48,4 +48,29 @@ its initial CI report is nonblocking while that debt is handled separately.
 A passing configuration job is not a passing full-source lint result.
 Update the dependency, lock, formatter reference and CI provider SHA together.
 
+### Commit-time formatting
+
+PR CI runs `dprint check` over the changed files, so an unformatted change costs
+a full CI round. `npm install` installs a pre-commit hook (`npm run
+hooks:install`, also run by `npm run prepare`) that formats exactly the files a
+commit stages before it is recorded: `scripts/pre-commit-format.mjs` formats the
+staged blobs through `dprint fmt --stdin` and writes the result back to the
+index. Only staged paths are formatted, and the working tree is untouched, so
+unstaged hunks of a partially staged file stay out of the commit and a commit
+does not reformat the repository.
+
+- The hook is installed into the Git directory (`cordisx-hooks`) and sets the
+  repository's `core.hooksPath` to it. Git stops reading `.git/hooks` as soon as
+  `core.hooksPath` is set, so an install there would silently disable a
+  machine-wide hook. The installer records the hooks directory it replaced in
+  `cordisx.hooksChainPath`, and the installed hook runs that directory's hook
+  for every name it provides after formatting. Keep that chain when changing
+  the hook: losing it also loses a company scanner.
+- `npm run hooks:install` refuses to replace a different local `core.hooksPath`
+  instead of overwriting whatever it runs. `npm run hooks:uninstall` removes the
+  override so the machine-wide setting applies again. `CI` and
+  `CORDISX_NO_HOOKS=1` skip installation.
+- `git commit --no-verify` still bypasses the formatter. `npm run lint:staged`
+  keeps checking without rewriting the checkout, because CI calls it.
+
 - For plugin operation feedback, follow [notifications](../docs/notifications.md). Use the owner-bound public notification API; do not add custom Toasts or page-level operation alerts.
