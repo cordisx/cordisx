@@ -203,6 +203,7 @@ export interface NativeSubmissionControllerOptions {
   readonly credentials: NativeProviderCredentialBroker
   readonly runtime: NativeSubmissionRuntimeAuthority
   readonly existingThread: NativeExistingThreadSwitch
+  readonly prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
   readonly providerSource?: (providerId: string) => 'managed' | 'config' | undefined
   readonly validateSelection?: (selection: NativeProviderSelection) => Promise<boolean>
   readonly operationTtlMs?: number
@@ -424,6 +425,7 @@ export function createNativeSubmissionController(
         // Codex owns built-in and config-backed authentication. Never synthesize a managed provider table.
         credential = { serviceGeneration: `native-${source}`, dispose() {} }
         configOverrides = Object.freeze({
+          ...(source === 'config' ? await options.prepareConfiguredProvider?.(prepared.pending.providerId) : {}),
           model_provider: prepared.pending.providerId,
           model: prepared.pending.model,
           ...(prepared.action.reasoningEffort === undefined
@@ -870,7 +872,7 @@ export function createNativeSubmissionController(
         let configOverrides: Readonly<Record<string, unknown>>
         if (source === 'config') {
           credential = { serviceGeneration: 'native-config', dispose() {} }
-          configOverrides = Object.freeze({})
+          configOverrides = Object.freeze(await options.prepareConfiguredProvider?.(input.providerId) ?? {})
         } else {
           const managed = await options.credentials.prepare(input.providerId)
           credential = managed

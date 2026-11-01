@@ -261,3 +261,90 @@
 .cxms-model-empty .cxh-empty-illustration {
   width: var(--cxh-empty-compact-width);
 }
+
+.cxms-shared {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+}
+
+.cxms-shared-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cxms-shared-header h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cxms-shared-header p,
+.cxms-shared-empty,
+.cxms-shared-notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--cx-muted);
+}
+
+.cxms-shared-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cxms-shared-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.cxms-shared-list li[data-enabled="false"] .cxms-shared-main {
+  opacity: 0.55;
+}
+
+.cxms-shared-main {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cxms-shared-endpoint {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--cx-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cxms-shared-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.cxms-shared-tags span {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--cx-hover);
+}
+
+.cxms-shared-tags span[data-key="missing"] {
+  color: var(--cx-warning);
+}
+
+.cxms-shared-actions {
+  display: flex;
+  gap: 4px;
+}

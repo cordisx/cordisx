@@ -263,4 +263,8 @@ export interface CatalogManagementChannel {
   catalogManagementExport?(request: CatalogTransferExportRequest): Promise<CatalogTransferExportResult>
   catalogManagementPrepareImport?(text: string): Promise<CatalogTransferImportPreparationResult>
   catalogManagementImport?(request: CatalogTransferImportRequest): Promise<CatalogTransferImportResult>
+  modelServicesRead?(): Promise<import('./model-service-contracts.js').ModelServicesReadResult>
+  modelServicesSave?(
+    request: import('./model-service-contracts.js').ModelServicesSaveRequest,
+  ): Promise<import('./model-service-contracts.js').ModelServicesSaveResult>
 }

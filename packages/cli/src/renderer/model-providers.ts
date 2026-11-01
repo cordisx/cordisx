@@ -96,6 +96,8 @@ export function nativeModelProviderRegistry(managed?: {
       ...(channel.catalogManagementPrepareImport
         ? { catalogManagementPrepareImport: text => channel.catalogManagementPrepareImport!(text) }
         : {}),
+      ...(channel.modelServicesRead ? { modelServicesRead: () => channel.modelServicesRead!() } : {}),
+      ...(channel.modelServicesSave ? { modelServicesSave: request => channel.modelServicesSave!(request) } : {}),
     })
   }
   return registry

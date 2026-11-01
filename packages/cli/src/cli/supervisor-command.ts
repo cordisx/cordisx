@@ -1,6 +1,5 @@
 import { diagnostic, diagnosticError, diagnosticId, diagnosticRef, withDiagnostics } from '../diagnostics/context.js'
 import { journalDirectory, LocalJournal, readJournal } from '../diagnostics/journal.js'
-import { fileURLToPath } from 'node:url'
 import { launchFingerprint } from './launch-fingerprint.js'
 import { randomBytes } from 'node:crypto'
 import { open, readFile, realpath, writeFile } from 'node:fs/promises'
@@ -24,6 +23,7 @@ import {
   writeSupervisorState,
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
+import { supervisorEntryArgs } from './supervisor-entry.js'
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { preflightShortcut } from '../shortcuts/create.js'
 import { shortcutKey } from '../shortcuts/model.js'
@@ -658,7 +658,7 @@ async function runSelectedSupervisorCommand(
     const log = await open(os.devNull, 'a')
     const instanceToken = randomBytes(32).toString('hex')
     await writeFile(paths.bootstrapToken, instanceToken, { mode: 0o600 })
-    const args = [fileURLToPath(new URL('../cli.js', import.meta.url)), ...childArgs(invocation)]
+    const args = [...supervisorEntryArgs(), ...childArgs(invocation)]
     const {
       CORDISX_DOCK_ENTRY: _untrustedDockEntry,
       CORDISX_DOCK_RECORD: _untrustedDockRecord,

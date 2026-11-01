@@ -21,6 +21,11 @@ import type {
   CatalogTransferImportResult,
 } from '../model-catalog-transfer.js'
 import { parseManagementSnapshot, safeManagementCode } from './model-catalog-projection.js'
+import type {
+  ModelServicesReadResult,
+  ModelServicesSaveRequest,
+  ModelServicesSaveResult,
+} from '../model-service-contracts.js'
 
 export interface CatalogClientState extends CatalogManagementSnapshot {
   readonly connected: boolean
@@ -146,6 +151,29 @@ export class ModelCatalogClient {
     }
     try {
       return await this.channel.catalogManagementExport(request)
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  /** Whether the Host offers the top-level model-service declarations to this document. */
+  get modelServicesAvailable(): boolean {
+    return this.channel.modelServicesRead !== undefined && this.channel.modelServicesSave !== undefined
+  }
+
+  async modelServicesRead(): Promise<ModelServicesReadResult> {
+    if (this.disposed || !this.channel.modelServicesRead) return { status: 'rejected', code: 'unavailable' }
+    try {
+      return await this.channel.modelServicesRead()
+    } catch {
+      return { status: 'rejected', code: 'unavailable' }
+    }
+  }
+
+  async modelServicesSave(request: ModelServicesSaveRequest): Promise<ModelServicesSaveResult> {
+    if (this.disposed || !this.channel.modelServicesSave) return { status: 'rejected', code: 'unavailable' }
+    try {
+      return await this.channel.modelServicesSave(request)
     } catch {
       return { status: 'rejected', code: 'unavailable' }
     }

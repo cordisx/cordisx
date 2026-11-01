@@ -11,6 +11,36 @@ import {
 } from './fixtures/native-submission-controller-harness.js'
 
 describe('native submission controller', () => {
+  it('preserves config authentication while routing selection and resume through encrypted replay', async () => {
+    const overrides = { 'model_providers.modelhub.base_url': 'http://127.0.0.1:1234/opaque' }
+    const prepareConfiguredProvider = vi.fn(async () => overrides)
+    const fixture = harness({
+      pending: { ...pendingDraft, providerId: 'modelhub' },
+      providerSource: () => 'config',
+      prepareConfiguredProvider,
+    })
+    const prepared = await fixture.controller.prepareSubmission(draftScope, draftAction)
+    if (prepared.kind !== 'allow-original') throw new Error('operation not prepared')
+    const consumed = await fixture.controller.consumeMarkedRequest({
+      method: 'thread/start',
+      requestId,
+      operationToken: prepared.operationToken,
+    })
+    expect(consumed).toMatchObject({
+      kind: 'dispatch',
+      configOverrides: { ...overrides, model_provider: 'modelhub', model: pendingDraft.model },
+    })
+    const resumed = await fixture.controller.prepareThreadResume({
+      threadId: 'existing',
+      providerId: 'modelhub',
+      model: pendingDraft.model,
+    })
+    expect(resumed).toMatchObject({ kind: 'resume', configOverrides: overrides })
+    expect(prepareConfiguredProvider).toHaveBeenCalledTimes(2)
+    expect(fixture.prepare).not.toHaveBeenCalled()
+    await fixture.controller.dispose()
+  })
+
   it('revalidates config membership at preparation, reservation and final authorization', async () => {
     let valid = true
     const fixture = harness({

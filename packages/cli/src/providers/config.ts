@@ -73,9 +73,14 @@ export function resolveProviderConfigs(
 ): readonly CliProxyProviderConfig[] {
   if (value === undefined) return Object.freeze([])
   if (!Array.isArray(value)) throw new Error('config.providers must be an array')
+  // Model-service declarations are projected into each app's own configuration and
+  // never start a launcher-owned process, so the Fleet only sees gateway entries.
+  const gateways = value.filter(item =>
+    !(item !== null && typeof item === 'object' && (item as Record<string, unknown>).kind === 'model-service')
+  )
   const ids = new Set<string>()
   const dataRoots = new Set<string>()
-  const result = value.map((item, index): CliProxyProviderConfig => {
+  const result = gateways.map((item, index): CliProxyProviderConfig => {
     const label = `config.providers[${index}]`
     const provider = object(item, label)
     const unknown = Object.keys(provider).find(key =>
