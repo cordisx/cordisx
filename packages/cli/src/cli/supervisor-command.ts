@@ -353,6 +353,10 @@ function childArgs(invocation: Extract<CordisXCliInvocation, { readonly action: 
   if (invocation.options.executable !== undefined) args.push('--executable', invocation.options.executable)
   if (invocation.options.debugPort !== undefined) args.push('--debug-port', String(invocation.options.debugPort))
   if (invocation.options.onlineDevtools) args.push('--online-devtools')
+  if (invocation.options.provider) args.push('--provider', invocation.options.provider)
+  if (invocation.options.service) {
+    args.push('--service', invocation.options.service, '--model', invocation.options.model!)
+  }
   if (invocation.hostArgs.length > 0) args.push('--', ...invocation.hostArgs)
   return args
 }

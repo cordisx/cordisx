@@ -89,7 +89,7 @@ interface State {
   nextGeneration: number
   effective: NativeProviderSelection
   pending?: PendingNativeProviderChange
-  draftPreference?: Readonly<{ providerId: string; generation: number }>
+  draftPreference?: Readonly<{ providerId: string; model?: string; generation: number }>
   draftUserSelected?: true
 }
 const projection = (state: State) => ({
@@ -134,6 +134,7 @@ export function createNativeSubmissionCdpAuthority(options: {
   catalogSubscribe?(listener: () => void): () => void
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
+  readonly defaultModelId?: string
   readonly management?: {
     snapshot(): CatalogManagementSnapshot
     command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>
@@ -189,7 +190,14 @@ export function createNativeSubmissionCdpAuthority(options: {
     )
     return providerId === undefined
       ? undefined
-      : Object.freeze({ providerId, generation: nextDraftPreferenceGeneration++ })
+      : Object.freeze({
+        providerId,
+        generation: nextDraftPreferenceGeneration++,
+        ...(providerId === defaultProviderId && options.defaultModelId
+            && catalog.some(p => p.providerId === providerId && p.models.some(m => m.id === options.defaultModelId))
+          ? { model: options.defaultModelId }
+          : {}),
+      })
   }
   const selection: NativeSubmissionSelectionAuthority = {
     adoptScope(source, target) {

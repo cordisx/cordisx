@@ -287,7 +287,7 @@ function bindingKey(threadId: string): string {
   return threadId
 }
 
-function providerConfig(lease: NativeProviderCredentialLease): Readonly<Record<string, unknown>> {
+export function nativeProviderConfig(lease: NativeProviderCredentialLease): Readonly<Record<string, unknown>> {
   const baseUrl = new URL(lease.endpoint.baseUrl)
   const loopback = baseUrl.hostname === '127.0.0.1'
     || baseUrl.hostname === 'localhost'
@@ -339,7 +339,7 @@ function requestConfig(
   return Object.freeze({
     model_provider: pending.providerId,
     model: pending.model,
-    [`model_providers.${pending.providerId}`]: providerConfig(lease),
+    [`model_providers.${pending.providerId}`]: nativeProviderConfig(lease),
   })
 }
 
@@ -876,7 +876,7 @@ export function createNativeSubmissionController(
         } else {
           const managed = await options.credentials.prepare(input.providerId)
           credential = managed
-          configOverrides = Object.freeze({ [`model_providers.${input.providerId}`]: providerConfig(managed) })
+          configOverrides = Object.freeze({ [`model_providers.${input.providerId}`]: nativeProviderConfig(managed) })
         }
         if (disposed) throw new Error('native submission controller was disposed')
         const token = createId()

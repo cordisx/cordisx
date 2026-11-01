@@ -144,6 +144,7 @@ import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import {
   nativeCatalogExport,
+  nativeTerminalProvider,
   openProductionPluginManagementComposition,
   type ProductionPluginManagementComposition,
 } from './production-plugin-management.js'
@@ -181,7 +182,6 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
   let prelaunchedHostHandedOff = false
   try {
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
-      // The same primary window shows startup while compatibility work proceeds.
       prelaunch: runHost === runInjectedHost && supervisorRuntime.mainInspector
         && (selection.profile.providerBindings?.length ?? 0) === 0
         && environment.CORDISX_SUPERVISOR_HOME !== undefined,
@@ -298,8 +298,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           }>,
         ) => {
           try {
-            // The formal Marketplace projection validates sha256 integrity at its
-            // Launcher boundary; its public type is intentionally wider (`string`).
+            // Marketplace validates sha256 at its Launcher boundary; the public type is wider.
             return (await activeCertifiedPermissionAuthority.lookup(artifact)).projection as
               | CordisXCertifiedPermissionProjectionV1
               | undefined
@@ -380,6 +379,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       undefined,
       currentHomeConfig.environmentVariables,
       currentHomeConfig.providers,
+      invocation.options,
     )
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined
@@ -399,7 +399,6 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       ).then(composition => {
         nativeSubmission = composition
       })
-      // Observe early failure during renderer assembly; readiness still awaits the original promise.
       void nativeSubmissionCompletion.catch(() => undefined)
     }
     const nativeAppVersion = environment.CORDISX_EXPERIMENTAL_MANAGER_WORKSPACE === '1'
@@ -747,6 +746,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
@@ -864,6 +864,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
               )
           }
         } catch (error) {
+          if (invocation.options.service) throw error
           stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
         }
       }
@@ -902,6 +903,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost

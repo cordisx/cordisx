@@ -4,6 +4,11 @@ import { diagnostic } from '../diagnostics/context.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { type CliModelExportResult, exportCliModelCatalog } from './model-catalog/cli-export.js'
 import type { ModelExportRequest } from '../cli/model-export-parse.js'
+import {
+  createTerminalProviderAuthority,
+  type TerminalProviderRequest,
+  type TerminalProviderResult,
+} from './terminal-provider.js'
 import { constants } from 'node:fs'
 import { access, chmod, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -96,6 +101,7 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
   readonly environment: Readonly<Record<string, string>>
@@ -119,6 +125,7 @@ export class NativeSubmissionCompatibilityError extends Error {
 interface NativeSubmissionCatalogOptions {
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
+  readonly defaultModelId?: string
   readonly configModelCatalogs?: Readonly<Record<string, string>>
   readonly dynamicModelCatalog?: boolean
   readonly nativeModelDiscovery?: boolean
@@ -434,6 +441,7 @@ export async function prepareNativeSubmissionBootstrap(
   let taskRouting: NativeAgentTaskRouting | undefined
   let agentTasks: NativeAgentTasks | undefined
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
+  let terminalProviders: ReturnType<typeof createTerminalProviderAuthority> | undefined
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
@@ -456,6 +464,7 @@ export async function prepareNativeSubmissionBootstrap(
         await controller?.dispose()
       } finally {
         try {
+          terminalProviders?.close()
           await credentials?.close()
           await encryptedReplay?.close()
         } finally {
@@ -707,6 +716,20 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        if (completeOptions.defaultProviderId && completeOptions.defaultModelId) {
+          const launchProvider = (await catalog()).find(provider =>
+            provider.providerId === completeOptions.defaultProviderId
+          )
+          if (!launchProvider?.models.some(model => model.id === completeOptions.defaultModelId)) {
+            throw new Error('Selected launch service/model is not available in this profile')
+          }
+        }
+        terminalProviders = createTerminalProviderAuthority({
+          catalog,
+          owns: id => managed?.owns(id) === true || hasPluginProvider(id),
+          resolve: resolveConnection,
+          credentials,
+        })
         const homeConfigPath = completeOptions.managedCatalog === undefined
           ? undefined
           : path.join(completeOptions.managedCatalog.homeDir, 'config.json')
@@ -738,6 +761,7 @@ export async function prepareNativeSubmissionBootstrap(
           ...(completeOptions.defaultProviderId === undefined
             ? {}
             : { defaultProviderId: completeOptions.defaultProviderId }),
+          ...(completeOptions.defaultModelId === undefined ? {} : { defaultModelId: completeOptions.defaultModelId }),
         })
         encryptedReplay = await startResponsesEncryptedReplay()
         const prepareConfiguredProvider = configuredEncryptedReplay(codexHome, encryptedReplay.route)
@@ -833,6 +857,7 @@ export async function prepareNativeSubmissionBootstrap(
         })
         reportStage('native-submission-controller-bound')
         return {
+          terminalProvider: request => terminalProviders!.request(request),
           async modelExport(request) {
             if (closePromise !== undefined || !management || !managed || !completeOptions.managedCatalog) {
               throw new Error('Model export catalog unavailable')
