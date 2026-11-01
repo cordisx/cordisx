@@ -1,6 +1,7 @@
 export const HELP = `Usage:
   cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
   cordisx start|status|logs|stop|restart [app] [profile] [options]
+  cordisx start --mode cli [codex|claude-code] [-s SERVICE -m MODEL] [-- client-arguments...]
   cordisx app [check|update]
   cordisx setup
   cordisx config
@@ -8,10 +9,14 @@ export const HELP = `Usage:
   cordisx feedback <collect|inspect|export> [options]
   cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
   cordisx model export [options]
+  cordisx cli [options] [-- codex-arguments...]
   cordisx plugin <command> [options]
   cordisx source <command> [options]
 
 Options:
+  -M, --mode app|cli       start: desktop App (default) or original terminal client
+  -s, --service <id>       Select model service (use together with --model)
+  -m, --model <id>         Select exact service model for this launch
   --attach                 Attach to an existing loopback CDP endpoint
   --system                 Use the host's system Chromium profile (escape hatch)
   --profile-dir <path>     Override this launch profile's independent Chromium directory
@@ -24,6 +29,7 @@ Options:
   --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
   model export --help      Show portable model service export commands
+  cli --help               Run the original Codex terminal with a selected model service
   plugin --help            Show plugin management commands
   source --help            Show source management commands
   feedback --help          Show local, privacy-filtered feedback commands

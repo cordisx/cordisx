@@ -1,4 +1,5 @@
 import { runModelExportCommand } from './model-export-command.js'
+import { runTerminalCommand } from './terminal-command.js'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import {
   ensureHomeConfig,
@@ -54,6 +55,9 @@ export async function prepareRunCommand(
 
   const config = await ensureHomeConfig(homeConfigOptions)
   const appId = invocation.action === 'launch' ? invocation.app ?? config.defaultApp : config.defaultApp
+  if (invocation.action === 'launch' && invocation.options.service && appId !== 'codex') {
+    throw new Error('--service/--model App launch currently supports Codex; name codex explicitly')
+  }
   const adapter = resolveHostAdapter(appId)
   if (
     invocation.action === 'launch' && invocation.options.attach && (
@@ -122,6 +126,10 @@ export async function prepareCliCommand(
     return
   }
   const parsedInvocation = parseCordisXCli(argv)
+  if (parsedInvocation.action === 'terminal') {
+    await runTerminalCommand(parsedInvocation, runtime)
+    return
+  }
   if (parsedInvocation.action === 'model-export') {
     await runModelExportCommand(parsedInvocation, runtime)
     return

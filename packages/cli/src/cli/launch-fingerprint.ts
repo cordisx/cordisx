@@ -41,6 +41,8 @@ export function launchFingerprint(input: {
       profileDir: input.options.profileDir ? path.resolve(input.cwd, input.options.profileDir) : null,
       debugPort: input.options.debugPort ?? null,
       onlineDevtools: input.options.onlineDevtools,
+      ...(input.options.provider ? { provider: input.options.provider } : {}),
+      ...(input.options.service ? { service: input.options.service, model: input.options.model } : {}),
       dataMode: input.dataMode,
       cwd: input.cwd,
       codexHome: input.codexHome ?? null,

@@ -116,7 +116,11 @@ describe('supervisor management commands', () => {
     const runtime = {
       env: { CORDISX_HOME: root },
       stdout: (line: string) => output.push(line),
-      internalSpawnSupervisor: () => {
+      internalSpawnSupervisor: (input: { args: readonly string[] }) => {
+        expect(input.args).toContain('--service')
+        expect(input.args).toContain('aiden')
+        expect(input.args).toContain('--model')
+        expect(input.args).toContain('gpt-model')
         spawned++
         void (async () => {
           for (;;) {
@@ -132,8 +136,8 @@ describe('supervisor management commands', () => {
       },
     }
     await Promise.all([
-      runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
-      runSupervisorCommand(parseCordisXCli(['start', '--json']), runtime),
+      runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
+      runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
     ])
     expect(spawned).toBe(1)
     expect(output.map(line => JSON.parse(line))).toEqual([

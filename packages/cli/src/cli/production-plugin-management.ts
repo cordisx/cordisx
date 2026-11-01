@@ -1,4 +1,5 @@
 import type { NativeSubmissionComposition } from '../launcher/native-submission-composition.js'
+import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
 import type { ModelExportRequest } from './model-export-parse.js'
 import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
@@ -23,6 +24,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly token: string
   readonly coordinator: PluginLifecycleCoordinator
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
+  readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -45,6 +47,7 @@ export async function openProductionPluginManagementComposition(input: {
       processStartedAt,
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
+      ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
     })
   } catch (error) {
     service.close()
@@ -77,5 +80,13 @@ export function nativeCatalogExport(current: () => NativeSubmissionComposition |
     const composition = current()
     if (!composition?.modelExport) throw new Error('Model export catalog unavailable in this runtime')
     return composition.modelExport(request)
+  }
+}
+
+export function nativeTerminalProvider(current: () => NativeSubmissionComposition | undefined) {
+  return async (request: TerminalProviderRequest): Promise<TerminalProviderResult> => {
+    const composition = current()
+    if (!composition?.terminalProvider) throw new Error('Terminal provider unavailable in this runtime')
+    return composition.terminalProvider(request)
   }
 }

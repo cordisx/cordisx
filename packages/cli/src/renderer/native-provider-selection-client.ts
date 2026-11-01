@@ -30,6 +30,7 @@ export interface NativeProviderSelectionProjection {
   readonly pending?: PendingNativeProviderSelection
   readonly nextSend?: NativeProviderSelection & { readonly reasoningEffort?: ModelReasoningEffort }
   readonly draftPreference?: Readonly<{
+    readonly model?: string
     readonly providerId: string
     readonly generation: number
   }>
