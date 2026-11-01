@@ -1,7 +1,7 @@
 # Use Codex CLI with CordisX model services
 
-Status: implementation candidate; not present in Host beta.36. Use a compatible
-installed Host and CLI after this feature is released.
+Available from Host beta.37. Plugin service selection requires a compatible
+running Host; shared declarations can launch the CLI without a desktop App.
 
 `cordisx cli` starts the original Codex CLI with inherited terminal input and
 output. It preserves its terminal UI, tools, approval controls, `exec`, `resume`,
