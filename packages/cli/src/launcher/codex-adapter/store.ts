@@ -127,9 +127,11 @@ export async function installAdapterPackage(
     const transaction = path.join(root, 'downloads')
     await ownedDirectory(transaction)
     const archivePath = path.join(transaction, `${id}.tgz`)
-    await writeFile(archivePath, archive, { mode: 0o600, flag: 'wx' })
     let snapshot: Awaited<ReturnType<PluginPackageSourceSnapshotter['snapshot']>> | undefined
     try {
+      // The exclusive store lock proves no live intake owns a previous interrupted download.
+      await rm(archivePath, { force: true })
+      await writeFile(archivePath, archive, { mode: 0o600, flag: 'wx' })
       let expandedBytes = 0
       await listTar({
         file: archivePath,
@@ -143,6 +145,7 @@ export async function installAdapterPackage(
         kind: 'downloaded-tarball',
         path: archivePath,
         downloadedFrom: release.tarball,
+        distributionIntegrity: `sha256:${id}`,
       })
       const manifest = JSON.parse(await readFile(path.join(snapshot.payloadDirectory, 'package.json'), 'utf8'))
       if (
@@ -224,6 +227,29 @@ export async function liveAdapterLeases(root: string): Promise<AdapterLease[]> {
   }
   return result
 }
+async function clearAbandonedAdapterIntake(root: string): Promise<void> {
+  const downloads = path.join(root, 'downloads')
+  let entries
+  try {
+    entries = await readdir(downloads, { withFileTypes: true })
+  } catch (error) {
+    if (missing(error)) return
+    throw error
+  }
+  await ownedDirectory(downloads)
+  for (const entry of entries) {
+    if (/^[a-f0-9]{64}\.tgz$/u.test(entry.name)) await rm(path.join(downloads, entry.name), { force: true })
+    if (entry.name !== 'staging') continue
+    const staging = path.join(downloads, 'staging')
+    await ownedDirectory(staging)
+    for (const name of await readdir(staging)) {
+      if (/^[a-f0-9-]{36}\.[a-f0-9-]{36}$/u.test(name)) {
+        await rm(path.join(staging, name), { recursive: true, force: true })
+      }
+    }
+  }
+}
+
 /** Disk/recency policy, never a version count. Leases, selected, rollback and pins survive. */
 export async function pruneAdapterCache(
   root: string,
@@ -233,6 +259,8 @@ export async function pruneAdapterCache(
   return withStoreLock(root, async () => {
     const state = await readAdapterState(root)
     const leases = await liveAdapterLeases(root)
+    // Only the intake's named temporary artifacts are swept; unknown files are preserved.
+    await clearAbandonedAdapterIntake(root)
     const protectedIds = new Set([
       ...state.preferred,
       ...state.rollback,

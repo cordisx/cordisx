@@ -19,7 +19,7 @@ import { openAdapterRuntime } from '../packages/cli/src/launcher/codex-adapter/r
 import { selectAdapterModules } from '../packages/cli/src/launcher/codex-adapter/selection.js'
 import * as registry from '../packages/cli/src/launcher/codex-adapter/registry.js'
 import { resources } from './fixtures/native-submission-structure.js'
-import { writePrivateJson } from '../packages/cli/src/launcher/codex-adapter/files.js'
+import { ownedDirectory, writePrivateJson } from '../packages/cli/src/launcher/codex-adapter/files.js'
 
 let archive: Buffer
 let temp: string
@@ -182,5 +182,20 @@ describe('packed adapter production intake and loading (registry trust is a sepa
     })
     await expect(installAdapterPackage(root, 'beta')).rejects.toThrow('policy')
     expect(await adapterReceipts(root)).toEqual([])
+  })
+  it('recovers an interrupted archive download and prunes only abandoned intake artifacts', async () => {
+    const id = createHash('sha256').update(archive).digest('hex')
+    const downloads = path.join(root, 'downloads')
+    await ownedDirectory(downloads)
+    await writeFile(path.join(downloads, `${id}.tgz`), 'interrupted', { mode: 0o600 })
+    const installed = await installAdapterPackage(root, 'beta')
+    expect(installed.id).toBe(id)
+    const abandoned = path.join(downloads, 'staging', `${'a'.repeat(36)}.${'b'.repeat(36)}`)
+    await mkdir(abandoned, { recursive: true, mode: 0o700 })
+    await writeFile(path.join(abandoned, 'partial'), 'unused')
+    await writeFile(path.join(downloads, 'review-note.txt'), 'preserve')
+    await pruneAdapterCache(root, 0, 0)
+    await expect(readFile(path.join(abandoned, 'partial'))).rejects.toHaveProperty('code', 'ENOENT')
+    expect(await readFile(path.join(downloads, 'review-note.txt'), 'utf8')).toBe('preserve')
   })
 })
