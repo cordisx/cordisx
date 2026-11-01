@@ -104,7 +104,7 @@ describe('Codex side of the agent bridge', () => {
     }
     expect(codex.calls[0]).toEqual({
       method: 'thread/list',
-      params: { limit: 5, sortKey: 'updated_at', sortDirection: 'desc' },
+      params: { limit: 5, sortKey: 'updated_at', sortDirection: 'desc', modelProviders: [] },
     })
     expect(listed.sessions).toEqual([
       expect.objectContaining({ sessionId: 't1', title: 'Fix the build', link: 'codex://threads/t1' }),

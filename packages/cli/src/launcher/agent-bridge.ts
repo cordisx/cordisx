@@ -13,6 +13,7 @@ import {
   handoffPrompt,
   readCandidate,
   scanReport,
+  SEARCH_MAX_ELAPSED_MS,
   SEARCH_MAX_THREADS,
   SEARCH_RECENT_THREADS,
   searchEntries,
@@ -192,6 +193,8 @@ async function searchCodexThreads(
   const scan = beginScan()
   const matched: unknown[] = []
   let unread = 0
+  let attempts = 0
+  const startedAt = Date.now()
   const term = search.toLowerCase()
   for (const thread of threads) {
     if (thread === undefined) continue
@@ -205,17 +208,23 @@ async function searchCodexThreads(
       matched.push({ ...session, matchedIn: 'title' })
       continue
     }
-    if (scan.scanned >= SEARCH_MAX_THREADS) {
+    if (attempts >= SEARCH_MAX_THREADS) {
       unread += 1
       continue
     }
+    if (Date.now() - startedAt >= SEARCH_MAX_ELAPSED_MS) {
+      scan.capped = true
+      scan.reason ??= 'time-limit'
+      break
+    }
+    attempts += 1
     let read: Record<string, unknown> | undefined
     try {
       read = object(await codex.nativeRequest('thread/read', { threadId: session.sessionId, includeTurns: true }))
     } catch {
       scan.capped = true
       scan.reason = 'read-unavailable'
-      break
+      continue
     }
     const entries = threadEntries(read?.thread)
     if (!readCandidate(scan, transcriptSize(entries))) {
@@ -466,6 +475,7 @@ export function createCodexBridgeHandler(
           await codex.nativeRequest('thread/list', {
             sortKey: 'updated_at',
             sortDirection: 'desc',
+            modelProviders: [],
             limit: search === undefined ? limit : Math.max(limit, SEARCH_RECENT_THREADS),
             ...(text(args.cursor, 512) === undefined ? {} : { cursor: args.cursor }),
           }),

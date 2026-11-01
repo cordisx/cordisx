@@ -21,6 +21,7 @@ export interface TranscriptEntry {
 export const EXCERPT_CHARS = 200
 /** Conversations one search may read. A Codex thread is a round trip; a Claude transcript is a file. */
 export const SEARCH_MAX_THREADS = 8
+export const SEARCH_MAX_ELAPSED_MS = 60_000
 export const SEARCH_MAX_FILES = 40
 /** The most recent Codex threads a content search considers. */
 export const SEARCH_RECENT_THREADS = 20
@@ -46,7 +47,7 @@ export interface ContentScan {
   characters: number
   /** Whether the scan stopped while candidates were left unread. */
   capped: boolean
-  reason?: 'candidate-limit' | 'size-limit' | 'read-unavailable'
+  reason?: 'candidate-limit' | 'size-limit' | 'read-unavailable' | 'time-limit'
 }
 
 export const beginScan = (): ContentScan => ({ scanned: 0, characters: 0, capped: false })

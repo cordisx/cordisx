@@ -2,7 +2,7 @@ import { createNativeAgentModelsHandler } from '../packages/cli/src/launcher/nat
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from '../packages/cli/src/launcher/agent-bridge.js'
 import { pageTranscript } from '../packages/cli/src/launcher/agent-bridge-transcript.js'
 import { createBridgeValidationCache } from '../packages/cli/src/launcher/agent-bridge-validation.js'
@@ -148,6 +148,58 @@ describe('bridge operation recovery', () => {
       scan: { capped: true, scanned: 0, reason: 'read-unavailable' },
     })
     expect(f.calls.filter(call => call.method === 'thread/list')).toHaveLength(1)
+  })
+
+  it('continues past unreadable histories but caps attempts, including failures, at eight', async () => {
+    const f = backend()
+    let attempts = 0
+    f.authority.nativeRequest = async (method, params) => {
+      if (method === 'thread/list') {
+        expect(params.modelProviders).toEqual([])
+        return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
+      }
+      if (method === 'thread/read') {
+        attempts += 1
+        if (attempts === 1) throw new Error('large history timeout')
+        return { thread: { turns: [{ items: [{ type: 'agentMessage', text: 'needle' }] }] } }
+      }
+      return {}
+    }
+    const listed = await createCodexBridgeHandler(f.authority)('list_sessions', {
+      searchTerm: 'needle',
+      limit: 20,
+    }) as { sessions: unknown[]; scan: { reason: string; scanned: number } }
+    expect(attempts).toBe(8)
+    expect(listed.sessions).toHaveLength(7)
+    expect(listed.scan).toMatchObject({ capped: true, reason: 'read-unavailable', scanned: 7 })
+  })
+
+  it('stops after two failed thirty-second reads without leaving uncancelled races', async () => {
+    const f = backend()
+    let elapsed = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => elapsed)
+    let reads = 0
+    try {
+      f.authority.nativeRequest = async method => {
+        if (method === 'thread/list') {
+          return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
+        }
+        if (method === 'thread/read') {
+          reads += 1
+          elapsed += 30_000
+          throw new Error('timed out')
+        }
+        return {}
+      }
+      expect(await createCodexBridgeHandler(f.authority)('list_sessions', { searchTerm: 'needle' })).toMatchObject({
+        sessions: [],
+        scan: { capped: true, reason: 'read-unavailable', scanned: 0 },
+      })
+      expect(reads).toBe(2)
+      expect(elapsed).toBe(60_000)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('delivers a bounded handoff as background in the actual turn prompt', async () => {
