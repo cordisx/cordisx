@@ -25,6 +25,7 @@ export interface ComponentSpec {
   readonly legacy?: boolean
   readonly slow?: boolean
   readonly slowPrepare?: boolean
+  readonly uncooperativePrepare?: boolean
   readonly configuration?: { one: Record<string, unknown>; two: Record<string, unknown> }
   readonly fail?: boolean
   readonly dependsOn?: string
@@ -38,12 +39,16 @@ export async function progressiveLifecycleFixture(specs: readonly ComponentSpec[
   const fixtureKey = `__progressive_${randomUUID()}`
   const release = deferred<void>()
   const releaseCandidate = deferred<void>()
+  const prepareEntered = deferred<AbortSignal>()
+  const prepareReturned = deferred<void>()
   const observations: string[] = []
   const configurations: { phase: string; pluginId: string; generation: string; input: unknown; keys: string[] }[] = []
   Object.assign(globalThis, {
     [fixtureKey]: {
       release: release.promise,
       releaseCandidate: releaseCandidate.promise,
+      prepareEntered: prepareEntered.resolve,
+      prepareReturned: prepareReturned.resolve,
       observations,
       configurations,
     },
@@ -145,6 +150,11 @@ export async function prepare(ctx, input) {
           ? "if (input.owner.pluginGeneration === 'one') await Promise.race([fixture.release, new Promise(resolve => input.signal.addEventListener('abort', resolve, { once: true }))])"
           : ''
       }
+  ${
+        spec.uncooperativePrepare
+          ? "fixture.prepareEntered(input.signal); await fixture.release; fixture.prepareReturned(); throw new Error('late ignored preparation rejection')"
+          : ''
+      }
   fixture.observations.push('prepare:${spec.pluginId}:${access.serviceId}:' + input.owner.pluginGeneration)
   await input.registration.ensureReady()
   const generation = 'catalog'
@@ -244,6 +254,8 @@ export async function prepare(ctx, input) {
     configurations,
     release,
     releaseCandidate,
+    prepareEntered,
+    prepareReturned,
     children,
     stage,
     spawns,

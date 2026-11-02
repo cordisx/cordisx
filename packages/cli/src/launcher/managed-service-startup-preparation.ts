@@ -100,48 +100,53 @@ export class ManagedServiceStartupPreparation {
         if (registration.binding.serviceGeneration !== owner.serviceGeneration) {
           throw new Error('startup registration replaced')
         }
-        await module.module.prepare(module.context, {
-          ...(module.configuration === undefined ? {} : { configuration: module.configuration }),
-          owner: module.binding.owner,
-          client: module.binding.client,
+        // A package callback may ignore abort; cleanup waits only for this attempt.
+        // The waiter still observes a late callback rejection without restoring authority.
+        await waitForStartupOperation(
+          Promise.resolve(module.module.prepare(module.context, {
+            ...(module.configuration === undefined ? {} : { configuration: module.configuration }),
+            owner: module.binding.owner,
+            client: module.binding.client,
+            signal,
+            capability: structuredClone(capability),
+            registration: Object.freeze<typeof registration>({
+              ...registration,
+              get binding() {
+                return registration.binding
+              },
+              ensureReady: options => {
+                const waiterSignal = options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal])
+                waiterSignal.throwIfAborted()
+                return waitForStartupOperation(
+                  registration.ensureReady({ ...options, signal: module.controller.signal }),
+                  waiterSignal,
+                )
+              },
+              authenticate: (action, options) =>
+                registration.authenticate(action, {
+                  ...options,
+                  signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+                }),
+              restart: options =>
+                registration.restart({
+                  ...options,
+                  signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+                }),
+              publishNativeProvider: (input, options) =>
+                registration.publishNativeProvider(input, {
+                  ...options,
+                  signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+                }),
+            }),
+            generation: {
+              host: module.access.hostGeneration,
+              plugin: owner.pluginGeneration,
+              service: owner.serviceGeneration,
+            },
+            startup: attempt.reporter,
+          })),
           signal,
-          capability: structuredClone(capability),
-          registration: Object.freeze<typeof registration>({
-            ...registration,
-            get binding() {
-              return registration.binding
-            },
-            ensureReady: options => {
-              const waiterSignal = options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal])
-              waiterSignal.throwIfAborted()
-              return waitForStartupOperation(
-                registration.ensureReady({ ...options, signal: module.controller.signal }),
-                waiterSignal,
-              )
-            },
-            authenticate: (action, options) =>
-              registration.authenticate(action, {
-                ...options,
-                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
-              }),
-            restart: options =>
-              registration.restart({
-                ...options,
-                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
-              }),
-            publishNativeProvider: (input, options) =>
-              registration.publishNativeProvider(input, {
-                ...options,
-                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
-              }),
-          }),
-          generation: {
-            host: module.access.hostGeneration,
-            plugin: owner.pluginGeneration,
-            service: owner.serviceGeneration,
-          },
-          startup: attempt.reporter,
-        })
+        )
         signal.throwIfAborted()
         this.sync()
         attempt.finish()
