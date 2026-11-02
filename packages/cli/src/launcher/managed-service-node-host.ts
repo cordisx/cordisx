@@ -94,6 +94,11 @@ function providerRoot(state: ProviderState): ManagedServiceContextProviderRootV1
   return state.root
 }
 
+/** V15 metadata also carries Config for services that retain legacy blocking adoption. */
+function blocksCoreReadiness(state: ModuleState): boolean {
+  return !state.access.startup?.startup.capabilities.some(capability => capability.serviceId === state.access.serviceId)
+}
+
 function modulePath(access: ManagedBackendRuntimeServiceModuleAccess): string {
   const root = path.resolve(access.artifactDirectory)
   const file = path.resolve(root, access.runtimeEntry)
@@ -443,7 +448,7 @@ export class ManagedServiceNodeHost {
         signal.throwIfAborted()
       })
       const coreReady = Promise.all(
-        pendingGroups.filter((_, index) => groups[index]!.some(state => state.access.startup === undefined)),
+        pendingGroups.filter((_, index) => groups[index]!.some(blocksCoreReadiness)),
       ).then(() => {
         signal.throwIfAborted()
       })
@@ -477,7 +482,7 @@ export class ManagedServiceNodeHost {
         const value: ManagedServiceNodeActivationGroup = Object.freeze({
           pluginIds,
           adopted: pendingGroups[index]!,
-          coreReady: group.some(state => state.access.startup === undefined)
+          coreReady: group.some(blocksCoreReadiness)
             ? pendingGroups[index]!
             : Promise.resolve(),
           subscribeSources,

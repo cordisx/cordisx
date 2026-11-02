@@ -376,6 +376,13 @@ export class ManagedServiceStartupAuthority {
       startupCapabilityKey(entry.identity) === startupCapabilityKey(ref)
     )
     if (entry === undefined) return unavailable('unknown-target')
+    if (
+      modelId !== undefined && entry.catalog.state === 'known' && !entry.catalog.modelIds.includes(modelId)
+      && (entry.actions.execute.available
+        || !['revoked', 'stopped', 'failed', 'authentication-required', 'catalog-empty'].includes(
+          entry.actions.execute.reason,
+        ))
+    ) return unavailable('model-unavailable')
     if (!entry.actions.execute.available) {
       if (entry.actions.execute.reason === 'dependency-not-ready') {
         for (const dependency of this.declaration(ref, owners.get(ref.pluginId))?.declaration.dependsOn ?? []) {

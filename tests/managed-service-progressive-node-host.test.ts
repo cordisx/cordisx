@@ -65,6 +65,75 @@ describe('progressive Node service preparation', () => {
     }
   })
 
+  it.each([false, true])('keeps v15 undeclared services in core adoption (mixed: %s)', async mixed => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-v15-blocking-'))
+    await mkdir(path.join(root, 'services'))
+    const release = deferred<void>()
+    const entered = deferred<void>()
+    const key = `__v15_blocking_${Date.now()}_${mixed}`
+    Object.assign(globalThis, { [key]: { release: release.promise, entered: entered.resolve } })
+    await writeFile(
+      path.join(root, 'services/legacy.mjs'),
+      `export async function apply() {
+      globalThis[${JSON.stringify(key)}].entered()
+      await globalThis[${JSON.stringify(key)}].release
+    }`,
+    )
+    await writeFile(path.join(root, 'services/gateway.mjs'), 'export function apply() {} export function prepare() {}')
+    const runtime = new ManagedServiceRuntime({ homeDir: path.join(root, 'home') })
+    const host = new ManagedServiceNodeHost(runtime)
+    const services = [declaration('legacy', 'example', []), ...(mixed ? [declaration('gateway', 'example', [])] : [])]
+    const startup = {
+      pluginId: 'example',
+      pluginGeneration: 'one',
+      source: 'https://example.test/plugin',
+      sourceRevision: `sha256:${'a'.repeat(64)}`,
+      dependencies: [],
+      services,
+      startup: {
+        contract: 'cordisx.startup-declaration/v1' as const,
+        pages: [],
+        capabilities: mixed ? [capability('provider')] : [],
+      },
+    }
+    const accesses: ManagedBackendRuntimeServiceModuleAccess[] = services.map(service => ({
+      packageIdentity: { pluginId: 'example', version: '1.0.0', integrity: `sha256:${'a'.repeat(64)}` },
+      pluginIdentity: { pluginId: 'example', source: 'https://example.test/plugin', generation: 'one' },
+      serviceId: service.id,
+      hostGeneration: 'host',
+      serviceKind: 'managed-backend',
+      declaration: service,
+      artifactDirectory: root,
+      runtimeEntry: `./services/${service.id}.mjs`,
+      startup,
+    }))
+    try {
+      const activation = await host.replace(accesses, { isolateStartupFailures: true })
+      await entered.promise
+      let coreReady = false
+      let groupReady = false
+      void activation.coreReady!.then(() => {
+        coreReady = true
+      })
+      void activation.groups[0]!.coreReady.then(() => {
+        groupReady = true
+      })
+      await new Promise(resolve => setImmediate(resolve))
+      expect(coreReady).toBe(false)
+      expect(groupReady).toBe(false)
+      release.resolve()
+      await activation.coreReady
+      await activation.groups[0]!.coreReady
+      expect(coreReady).toBe(true)
+      expect(groupReady).toBe(true)
+    } finally {
+      release.resolve()
+      await host.dispose()
+      Reflect.deleteProperty(globalThis, key)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('adopts once, prepares independent targets, rejects early execution and preserves borrowed process on cleanup', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-progressive-'))
     await mkdir(path.join(root, 'services'))

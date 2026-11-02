@@ -53,6 +53,7 @@ export function projectStartupCapability(
   const failure = evidence.failed || service?.state === 'failed' || evidence.catalog.state === 'failed'
     || milestones.some(item => item.state === 'failed')
   const revoked = evidence.revoked || service?.state === 'disposed'
+  const stopped = service?.state === 'stopped'
   const missingMilestone = declaration.success.allOf.some(condition =>
     condition.kind === 'milestone' && evidence.milestones.get(condition.milestoneId)?.state !== 'satisfied'
   )
@@ -60,6 +61,7 @@ export function projectStartupCapability(
   const serviceReady = service?.state === 'ready' && service.health === 'ready'
   let execute: StartupActionAvailabilityV1 = available
   if (revoked) execute = unavailable('revoked')
+  else if (stopped) execute = unavailable('stopped')
   else if (emptyCatalog) execute = unavailable('catalog-empty')
   else if (failure) execute = unavailable('failed')
   else if (service !== undefined && !authenticated) execute = unavailable('authentication-required')
@@ -71,7 +73,9 @@ export function projectStartupCapability(
   else if (provider && evidence.catalog.state === 'known' && evidence.catalog.modelIds.length === 0) {
     execute = unavailable('catalog-empty')
   } else if (provider && !evidence.published) execute = unavailable('provider-unpublished')
-  const state = revoked ? 'revoked' : failure || emptyCatalog
+  const state = revoked ? 'revoked' : stopped
+    ? 'stopped'
+    : failure || emptyCatalog
     ? 'failed'
     : service !== undefined && !authenticated
     ? 'auth-required'
@@ -102,7 +106,7 @@ export function projectStartupCapability(
       ? 'starting'
       : service.state === 'failed'
       ? 'failed'
-      : service.state === 'disposed'
+      : service.state === 'disposed' || service.state === 'stopped'
       ? 'stopped'
       : 'not-started',
     health: service?.health ?? 'unknown',

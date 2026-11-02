@@ -1,9 +1,35 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ModelStartupStore, startupPageActionAvailable } from '../packages/cli/src/renderer/model-startup-store.js'
 import { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import { createRuntimeModelProviders } from '../packages/cli/src/renderer/runtime-model-providers.js'
+import { BrowserManagedServiceUIBridge } from '../packages/cli/src/renderer/managed-service-ui-bridge.js'
+import type { CordisXRuntimeMetadata } from '../packages/cli/src/renderer/runtime-shared.js'
 import { startupObserver, startupProvider, startupSnapshot } from './helpers/startup-model-fixture.js'
 
 describe('shared model startup projection', () => {
+  it('composes the runtime model registry with its Host startup observer and retains owner cleanup', async () => {
+    const source = startupObserver()
+    const binding = vi.spyOn(BrowserManagedServiceUIBridge.prototype, 'bindHostStartup').mockReturnValue(
+      source.observer,
+    )
+    const composed = createRuntimeModelProviders(
+      { profileId: 'profile', startupHostCapability: { token: 'host-token' } } as CordisXRuntimeMetadata,
+      'host-one',
+    )
+    try {
+      expect(binding).toHaveBeenCalledOnce()
+      await vi.waitFor(() => expect(composed.modelProviders.snapshot().startup?.snapshot?.entries).toHaveLength(1))
+      source.emit({ kind: 'snapshot', reason: 'epoch-changed', snapshot: startupSnapshot([], 'replacement') })
+      expect(composed.modelProviders.snapshot().startup?.snapshot?.entries).toHaveLength(0)
+    } finally {
+      composed.modelProviders.dispose()
+      composed.managedServiceBridge?.dispose()
+      binding.mockRestore()
+    }
+    await Promise.resolve()
+    expect(source.close).toHaveBeenCalledOnce()
+  })
+
   it('invalidates an in-flight directory read across observer epoch replacement', async () => {
     let resolve!: (
       value: readonly { providerId: string; pluginId: string; models: readonly { id: string; label: string }[] }[],

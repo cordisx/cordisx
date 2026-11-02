@@ -188,6 +188,57 @@ describe('startup authority', () => {
     authority.dispose()
   })
 
+  it.each([false, true])(
+    'rejects an exact missing model from a known catalog before provider readiness (prepared: %s)',
+    async prepared => {
+      const { authority } = setup()
+      const reporter = authority.bindService(owner)
+      authority.adopt(owner)
+      authority.preparing(owner)
+      authority.updateService(owner, service(), false)
+      await reporter.report(report())
+      await reporter.reportCatalog({
+        contract: 'cordisx.startup-catalog-report/v1',
+        target: ref,
+        generation: report().generation,
+        sequence: 1,
+        catalog: {
+          state: 'known',
+          generation: 'catalog-one',
+          modelIds: ['model-a'],
+          digest: `sha256:${createHash('sha256').update(JSON.stringify(['catalog-one', ['model-a']])).digest('hex')}`,
+        },
+      })
+      if (prepared) authority.settled(owner)
+      expect(authority.availability(ref)).toMatchObject({ reason: prepared ? 'provider-unpublished' : 'preparing' })
+      await expect(authority.wait(ref, { modelId: 'model-b', timeoutMs: 1000 })).resolves.toEqual({
+        available: false,
+        reason: 'model-unavailable',
+      })
+      authority.revoke(owner)
+      expect(authority.availability(ref, 'model-b')).toEqual({ available: false, reason: 'revoked' })
+      authority.dispose()
+    },
+  )
+
+  it('ends a pending capability wait promptly when its admitted service stops', async () => {
+    const { authority, observer } = setup()
+    authority.bindService(owner)
+    authority.adopt(owner)
+    authority.settled(owner)
+    authority.updateService(owner, { ...service(), state: 'preparing', health: 'starting' }, false)
+    const waiting = authority.wait(ref, { timeoutMs: 1000 })
+    authority.updateService(owner, { ...service(), state: 'stopped', health: 'stopped' }, false)
+    await expect(waiting).resolves.toEqual({ available: false, reason: 'stopped' })
+    expect((await observer.read()).entries[0]).toMatchObject({
+      state: 'stopped',
+      service: 'stopped',
+      process: 'stopped',
+      actions: { execute: { available: false, reason: 'stopped' } },
+    })
+    authority.dispose()
+  })
+
   it('keeps authentication available while target wait reports authentication-required', async () => {
     const { authority, observer } = setup()
     authority.bindService(owner)
