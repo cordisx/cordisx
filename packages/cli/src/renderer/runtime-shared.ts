@@ -273,6 +273,7 @@ export interface CordisXRuntimeMetadata {
     readonly pluginId: string
     readonly pluginGeneration: string
     readonly token: string
+    readonly startup?: boolean
   }[]
   /** Host-private. True only when managed native model requests have a safe routing path. */
   readonly nativeManagedModelRoutingAvailable?: boolean

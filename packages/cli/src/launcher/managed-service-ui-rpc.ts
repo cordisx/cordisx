@@ -1,3 +1,9 @@
+import {
+  createStartupUIRPC,
+  parseStartupUIRequest,
+  type StartupUIObserverBinding,
+  type StartupUIRequest,
+} from './startup-ui-rpc.js'
 import type {
   ManagedServiceBindingV1,
   ManagedServiceCliProxyAccountToggleRequestV1,
@@ -41,6 +47,7 @@ interface RequestScope {
 }
 
 export type ManagedServiceUIBindingRequest =
+  | StartupUIRequest
   | { readonly requestId: string; readonly operation: 'nativeProviders'; readonly serviceId: string }
   | { readonly requestId: string; readonly operation: 'get'; readonly serviceId: string }
   | {
@@ -396,11 +403,17 @@ export function parseManagedServiceUIBindingRequest(
       'subscriptionId',
       'request',
       'sessionId',
+      'after',
     ],
     'managed service UI request',
   )
   if (envelope.version !== 1 || envelope.token !== handler.token) {
     throw new Error('managed service UI request is not authorized')
+  }
+  if (typeof envelope.operation === 'string' && envelope.operation.startsWith('startup')) {
+    scope(envelope.scope, handler, owner)
+    requestId(envelope.requestId)
+    return parseStartupUIRequest(envelope)
   }
   operationEnvelope(value, envelope.operation)
   scope(envelope.scope, handler, owner)
@@ -495,8 +508,10 @@ export function createManagedServiceUIBridgeHandler(input: {
   readonly profileId: string
   readonly generation: string
   readonly services: readonly ManagedServiceUISourceBinding[]
+  readonly startupObservers?: readonly StartupUIObserverBinding[]
   readonly readNativeProviders?: () => Promise<readonly unknown[]>
 }): ManagedServiceUIBridgeHandler {
+  const startup = createStartupUIRPC(input.startupObservers ?? [])
   const services = new Map<string, ManagedServiceSourceV1>()
   const loginTimeouts = new Map<string, number>()
   for (const service of input.services) {
@@ -550,6 +565,12 @@ export function createManagedServiceUIBridgeHandler(input: {
     profileId: input.profileId,
     generation: input.generation,
     async handle(owner, request) {
+      if (
+        request.operation === 'startupRead' || request.operation === 'startupSubscribe'
+        || request.operation === 'startupNext' || request.operation === 'startupClose'
+      ) {
+        return clone(await startup.handle(owner, request))
+      }
       if (request.operation === 'nativeProviders') {
         if (disposed) throw new Error('managed service UI is disposed')
         if (![...services.keys()].some(key => key.startsWith(`${ownerKey(owner)}\u0000`))) {
@@ -671,6 +692,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       return { status: 'closed', closed }
     },
     async disposeOwner(owner) {
+      startup.disposeOwner(owner)
       const key = ownerKey(owner)
       for (const service of services.keys()) {
         if (service.startsWith(`${key}\u0000`)) services.delete(service)
@@ -681,6 +703,7 @@ export function createManagedServiceUIBridgeHandler(input: {
     async dispose() {
       if (disposed) return
       disposed = true
+      startup.dispose()
       await Promise.allSettled([...subscriptions.keys()].map(async subscriptionId => await unsubscribe(subscriptionId)))
       services.clear()
     },
