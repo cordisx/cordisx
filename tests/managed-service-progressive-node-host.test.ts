@@ -74,12 +74,25 @@ describe('progressive Node service preparation', () => {
     Object.assign(globalThis, { [key]: { release: release.promise, entered: entered.resolve } })
     await writeFile(
       path.join(root, 'services/legacy.mjs'),
-      `export async function apply() {
+      `export async function apply(ctx) {
       globalThis[${JSON.stringify(key)}].entered()
       await globalThis[${JSON.stringify(key)}].release
-    }`,
+      await ctx.managedServices.register(${JSON.stringify(definition('legacy'))}, { revision: 'sha256:${
+        'a'.repeat(64)
+      }' })
+    }
+    apply.inject = ['managedServices']`,
     )
-    await writeFile(path.join(root, 'services/gateway.mjs'), 'export function apply() {} export function prepare() {}')
+    await writeFile(
+      path.join(root, 'services/gateway.mjs'),
+      `export async function apply(ctx) {
+      await ctx.managedServices.register(${JSON.stringify(definition('gateway'))}, { revision: 'sha256:${
+        'a'.repeat(64)
+      }' })
+    }
+    apply.inject = ['managedServices']
+    export function prepare() {}`,
+    )
     const runtime = new ManagedServiceRuntime({ homeDir: path.join(root, 'home') })
     const host = new ManagedServiceNodeHost(runtime)
     const services = [declaration('legacy', 'example', []), ...(mixed ? [declaration('gateway', 'example', [])] : [])]
@@ -126,6 +139,7 @@ describe('progressive Node service preparation', () => {
       await activation.groups[0]!.coreReady
       expect(coreReady).toBe(true)
       expect(groupReady).toBe(true)
+      expect(runtime.listRegistrationIdentities()).toHaveLength(mixed ? 2 : 1)
     } finally {
       release.resolve()
       await host.dispose()
