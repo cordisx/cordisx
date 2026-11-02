@@ -320,4 +320,27 @@ describe('startup observation transport', () => {
     await handler.dispose()
     expect(vi.getTimerCount()).toBe(0)
   })
+  it('keeps generic owner-unavailable recoverable rather than asserting scope revocation', async () => {
+    const { observer, source, bridge, handler } = setup()
+    const deliver = globalThis.__cordisxManagedServiceUIRequestV1!
+    let rejectNext = true
+    globalThis.__cordisxManagedServiceUIRequestV1 = payload => {
+      const request = JSON.parse(payload)
+      if (rejectNext && request.operation === 'startupNext') {
+        rejectNext = false
+        globalThis.__cordisxManagedServiceUIReceiveV1?.(
+          JSON.stringify({ requestId: request.requestId, ok: false, code: 'owner-unavailable' }),
+        )
+      } else deliver(payload)
+    }
+    const events: StartupEventV1[] = []
+    const sub = await observer.subscribe(event => events.push(event))
+    await vi.waitFor(() => expect(source.afters).toHaveLength(2))
+    expect(events.filter(event => event.kind === 'closed')).toHaveLength(0)
+    source.update(1)
+    await vi.waitFor(() => expect(events.filter(event => event.kind === 'snapshot')).toHaveLength(2))
+    sub.close()
+    bridge.dispose()
+    await handler.dispose()
+  })
 })

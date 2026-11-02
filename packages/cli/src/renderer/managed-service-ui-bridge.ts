@@ -389,9 +389,7 @@ export class BrowserManagedServiceUIBridge {
     this.pending.delete(response.requestId)
     if (pending.timer !== undefined) clearTimeout(pending.timer)
     if (response.ok === true) pending.resolve(clone(response.value))
-    else if (pending.observation && response.code === 'owner-unavailable') {
-      pending.reject(new StartupObservationTerminated('scope-revoked'))
-    } else {
+    else {
       pending.reject(
         new Error(typeof response.code === 'string' ? response.code : 'managed-service-ui-unavailable'),
       )
