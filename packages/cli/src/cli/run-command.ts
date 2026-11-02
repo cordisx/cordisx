@@ -352,17 +352,22 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       managedServiceUICapabilities,
     } = rendererLifecycle
     const managedServiceUI = startupBridge
-    const nativeCatalogOptions = nativeSubmissionCatalogOptions(
-      rootFromConfigPath(configPath),
-      selection.profileId,
-      selection.profile,
-      environment,
-      plan?.environment,
-      undefined,
-      currentHomeConfig.environmentVariables,
-      currentHomeConfig.providers,
-      invocation.options,
-    )
+    const nativeCatalogOptions = {
+      ...(runtime.internalRemoteTerminalProvider === undefined
+        ? {}
+        : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
+      ...nativeSubmissionCatalogOptions(
+        rootFromConfigPath(configPath),
+        selection.profileId,
+        selection.profile,
+        environment,
+        plan?.environment,
+        undefined,
+        currentHomeConfig.environmentVariables,
+        currentHomeConfig.providers,
+        invocation.options,
+      ),
+    }
     if (
       nativeSubmissionBootstrap !== undefined && plan !== undefined
       && shouldEnableNativeSubmission({

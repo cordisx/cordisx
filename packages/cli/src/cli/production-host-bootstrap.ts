@@ -123,6 +123,9 @@ export async function prepareProductionHostBootstrap(
           {
             ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
             environment: configuredEnvironment,
+            ...(runtime.internalRemoteTerminalProvider === undefined
+              ? {}
+              : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
           },
         )

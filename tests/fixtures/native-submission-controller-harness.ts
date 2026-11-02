@@ -36,7 +36,11 @@ export function harness(input: {
   runtimeValid?: () => boolean
   createdNavigation?: () => number
   prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
-  providerSource?: (providerId: string) => 'managed' | 'config' | undefined
+  prepareRemoteProvider?:
+    import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions[
+      'prepareRemoteProvider'
+    ]
+  providerSource?: (providerId: string) => 'managed' | 'config' | 'remote' | undefined
   validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
 } = {}) {
   const scope = input.scope ?? draftScope
@@ -123,6 +127,7 @@ export function harness(input: {
       }),
     },
     existingThread: { switch: switchThread },
+    ...(input.prepareRemoteProvider === undefined ? {} : { prepareRemoteProvider: input.prepareRemoteProvider }),
     ...(input.prepareConfiguredProvider === undefined
       ? {}
       : { prepareConfiguredProvider: input.prepareConfiguredProvider }),

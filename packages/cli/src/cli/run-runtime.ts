@@ -67,6 +67,9 @@ export interface CordisXCliRuntime {
   readonly internalBuiltinSkillSourceDir?: string
   readonly internalBuiltinSkillsSourceRootDir?: string
   readonly internalSharedHomeDir?: string
+  /** Private explicit reuse of an existing Host; never starts its services. */
+  readonly internalRemoteTerminalProvider?:
+    import('../launcher/existing-terminal-provider-rpc.js').ExistingTerminalProviderSource
   readonly internalRunInjectedHost?: typeof runInjectedHost
   readonly internalCreateNativeSubmissionComposition?: typeof createNativeSubmissionComposition
   readonly internalCreateDevelopmentManagedServiceActivation?: typeof createDevelopmentManagedServiceActivation

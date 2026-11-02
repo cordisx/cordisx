@@ -1,3 +1,6 @@
+import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
+import { RemoteTerminalProviderClient } from './remote-terminal-provider-client.js'
+import type { ExistingTerminalProviderSource } from './existing-terminal-provider-rpc.js'
 import { StartupRequirementsCoordinator } from '../cli/startup-requirements.js'
 import { startupProviderAdmission } from './startup-provider-admission.js'
 import { bundle as builtinAdapter } from '@cordisx/codex-adapter'
@@ -99,7 +102,8 @@ export class NativeSubmissionCompatibilityError extends Error {
     this.name = 'NativeSubmissionCompatibilityError'
   }
 }
-interface NativeSubmissionCatalogOptions {
+export interface NativeSubmissionCatalogOptions {
+  readonly remoteTerminalProvider?: ExistingTerminalProviderSource
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
   readonly defaultModelId?: string
@@ -144,6 +148,7 @@ export async function createNativeSubmissionComposition(
   const bootstrap = await prepareNativeSubmissionBootstrap(desktopExecutable, {
     ...(options.cacheDirectory === undefined ? {} : { cacheDirectory: options.cacheDirectory }),
     ...(options.nativeDiscoveryEnvironment === undefined ? {} : { environment: options.nativeDiscoveryEnvironment }),
+    ...(options.remoteTerminalProvider === undefined ? {} : { remoteTerminalProvider: options.remoteTerminalProvider }),
   })
   try {
     return await bootstrap.complete(activation, codexHome, options)
@@ -193,6 +198,7 @@ export async function prepareNativeSubmissionBootstrap(
     cacheDirectory?: string
     environment?: Readonly<Record<string, string | undefined>>
     signal?: AbortSignal
+    remoteTerminalProvider?: ExistingTerminalProviderSource
   }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   options.signal?.throwIfAborted()
@@ -207,6 +213,16 @@ export async function prepareNativeSubmissionBootstrap(
   const node = await resolveBundledCodexNodePath(contents)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   const control = await startNativeSubmissionControlServer()
+  const readThreadProvider = async (threadId: string) => {
+    const result = await control.nativeRequest('thread/read', { threadId, includeTurns: false }) as {
+      thread?: { modelProvider?: string }
+    }
+    return result.thread?.modelProvider
+  }
+  if (options.remoteTerminalProvider) {
+    control.bindUnmarkedProviderGuard(nativeRemoteUnmarkedGuard({ localSource: () => undefined, readThreadProvider }))
+  }
+
   const agentModels = await startNativeAgentModelsServer().catch(async error => {
     await control.close()
     throw error
@@ -222,6 +238,7 @@ export async function prepareNativeSubmissionBootstrap(
     { signal: lifetime.signal },
   )
   let encryptedReplay: Awaited<ReturnType<typeof startResponsesEncryptedReplay>> | undefined
+  let remote: RemoteTerminalProviderClient | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
   let agentTasks: NativeAgentTasks | undefined
@@ -253,6 +270,7 @@ export async function prepareNativeSubmissionBootstrap(
         await controller?.dispose()
       } finally {
         try {
+          await remote?.close()
           terminalProviders?.close()
           await credentials?.close()
           await encryptedReplay?.close()
@@ -420,6 +438,9 @@ export async function prepareNativeSubmissionBootstrap(
             ? managed.nativeConnection(id)
             : activation.prepareNativeConnection(id)
         credentials = createNativeProviderCredentialBroker({ resolve: resolveConnection })
+        if (completeOptions.remoteTerminalProvider) {
+          remote = new RemoteTerminalProviderClient(completeOptions.remoteTerminalProvider)
+        }
         const hasPluginProvider = (providerId: string) => activation.nativeProviderIds.includes(providerId)
         let lastDiagnostic: string | undefined
         const loadConfigured = async () => {
@@ -501,10 +522,37 @@ export async function prepareNativeSubmissionBootstrap(
         if (pluginManagement === undefined) {
           pluginCatalog = nativeModelProviderCatalog(activation, completeOptions.selectorIcons)
         }
-        const catalog = combinedNativeModelProviderCatalog(
+        const localCatalog = combinedNativeModelProviderCatalog(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
+        const providerSources = nativeRemoteProviderSource({
+          localCatalog,
+          localSource: id =>
+            managed?.owns(id) || hasPluginProvider(id)
+              ? 'managed'
+              : nativeManagement!.hasProvider(id)
+              ? 'config'
+              : undefined,
+          validateLocal: async selection => {
+            if (selection.providerId.startsWith('cordisx-')) {
+              return await managed?.validateSelection(selection.providerId, selection.model) ?? false
+            }
+            if (selection.providerId === 'openai' || hasPluginProvider(selection.providerId)) return true
+            return nativeManagement!.validateSelection(selection.providerId, selection.model)
+          },
+          ...(remote === undefined ? {} : { remote }),
+        })
+        const catalog = providerSources.catalog
+        if (remote) {
+          control.bindUnmarkedProviderGuard(nativeRemoteUnmarkedGuard({
+            localSource: id => {
+              const source = providerSources.source(id)
+              return source === 'remote' ? undefined : source
+            },
+            readThreadProvider,
+          }))
+        }
         const startup = activation.startup === undefined
           ? undefined
           : startupProviderAdmission(activation.startup, activation.startupObserver)
@@ -569,6 +617,7 @@ export async function prepareNativeSubmissionBootstrap(
           catalogSubscribe: (listener: () => void) => {
             const subscriptions = [
               nativeManagement!.subscribe(listener),
+              remote?.subscribe(listener),
               managed?.subscribe(listener),
               pluginManagement?.catalogSubscribe(listener),
             ]
@@ -588,6 +637,18 @@ export async function prepareNativeSubmissionBootstrap(
         controller = createNativeSubmissionController({
           ...(startup === undefined ? {} : { startup }),
           prepareConfiguredProvider,
+          ...(remote === undefined ? {} : {
+            prepareRemoteProvider: async (selection, signal) => {
+              const lease = await remote!.prepare(selection, signal)
+              return {
+                ...lease,
+                provider: Object.freeze({
+                  ...lease.provider,
+                  base_url: encryptedReplay!.route(String(lease.provider.base_url)),
+                }),
+              }
+            },
+          }),
           selection: cdp.selection,
           runtime: cdp.runtime,
           existingThread: control.existingThread,
@@ -596,19 +657,8 @@ export async function prepareNativeSubmissionBootstrap(
             resolveEndpoint: resolveConnection,
             routeEndpoint: encryptedReplay.route,
           }),
-          providerSource: providerId =>
-            managed?.owns(providerId) || hasPluginProvider(providerId)
-              ? 'managed'
-              : nativeManagement!.hasProvider(providerId)
-              ? 'config'
-              : undefined,
-          validateSelection: async selection => {
-            if (selection.providerId.startsWith('cordisx-')) {
-              return await managed?.validateSelection(selection.providerId, selection.model) ?? false
-            }
-            if (selection.providerId === 'openai' || hasPluginProvider(selection.providerId)) return true
-            return nativeManagement!.validateSelection(selection.providerId, selection.model)
-          },
+          providerSource: providerSources.source,
+          validateSelection: providerSources.validate,
         })
         lifetime.signal.throwIfAborted()
         control.bindController(controller)

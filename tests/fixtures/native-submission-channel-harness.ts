@@ -9,6 +9,10 @@ import type {
 
 import { createNativeSubmissionController } from '../../packages/cli/src/launcher/native-submission-controller.js'
 export async function harness(options: Readonly<{
+  controllerOptions?: Pick<
+    import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions,
+    'prepareRemoteProvider' | 'providerSource' | 'validateSelection'
+  >
   realController?: boolean
   taskExecutionUrl?: string
   evaluate?: (expression: string) => unknown
@@ -98,6 +102,7 @@ export async function harness(options: Readonly<{
             provider.providerId === selected.providerId
             && provider.models.some(model => model.id === selected.model)
           ) === true,
+      ...options.controllerOptions,
     })
     : controller
   authority.bindController(actual)

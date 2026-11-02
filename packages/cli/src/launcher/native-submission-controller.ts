@@ -1,9 +1,7 @@
+import type { RemotePreparedProvider } from './remote-terminal-provider-client.js'
 import { nativeProviderConfig } from './native-provider-config.js'
 export { nativeProviderConfig } from './native-provider-config.js'
-import type { StartupActionReasonV1 } from '@cordisx/protocol/startup/v1'
-import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { randomUUID } from 'node:crypto'
-import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 import {
   decideNativeProviderSubmission,
@@ -13,219 +11,36 @@ import {
   revalidatePreparedNativeProviderChange,
 } from '../renderer/native-provider-submission-policy.js'
 
-export interface NativeProviderCredentialLease {
-  readonly serviceGeneration: string
-  readonly endpoint: Readonly<{ baseUrl: string; wireApi: 'responses' }>
-  readonly auth:
-    | Readonly<{ scheme: 'none' }>
-    | Readonly<{
-      scheme: 'bearer-command'
-      command: string
-      args: readonly string[]
-      cwd: string
-      timeoutMs: number
-      refreshIntervalMs: number
-    }>
-  dispose(): void | Promise<void>
-}
+export type {
+  NativeExistingThreadSwitch,
+  NativeMarkedRequest,
+  NativeMarkedRequestConsumption,
+  NativeProviderCredentialBroker,
+  NativeProviderCredentialLease,
+  NativeReservedRequest,
+  NativeSubmissionConfirmation,
+  NativeSubmissionController,
+  NativeSubmissionControllerOptions,
+  NativeSubmissionPreparation,
+  NativeSubmissionRuntimeAuthority,
+  NativeSubmissionScope,
+  NativeSubmissionSelectionAuthority,
+  NativeSubmissionSelectionSnapshot,
+  NativeThreadResumePreparation,
+} from './native-submission-controller-contracts.js'
+import type {
+  NativeMarkedRequest,
+  NativeProviderCredentialLease,
+  NativeSubmissionConfirmation,
+  NativeSubmissionController,
+  NativeSubmissionControllerOptions,
+  NativeSubmissionScope,
+  NativeSubmissionSelectionSnapshot,
+} from './native-submission-controller-contracts.js'
 
-export interface NativeProviderCredentialBroker {
-  prepare(providerId: string): Promise<NativeProviderCredentialLease>
-}
-
-/** Exact renderer/document owner for every private submission record. */
-export interface NativeSubmissionScope {
-  readonly targetId: string
-  readonly rendererGeneration: string
-  readonly navigationGeneration: number
-  readonly threadId?: string
-}
-
-export interface NativeSubmissionSelectionSnapshot {
-  readonly revision: number
-  readonly effective: NativeProviderSelection
-  readonly pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
-  readonly pending?: PendingNativeProviderChange
-}
-
-export interface NativeSubmissionSelectionAuthority {
-  snapshot(scope: NativeSubmissionScope): NativeSubmissionSelectionSnapshot
-  adoptScope(source: NativeSubmissionScope, target: NativeSubmissionScope): boolean
-  commitEffective(
-    input: Readonly<{
-      scope: NativeSubmissionScope
-      sourceScope?: NativeSubmissionScope
-      expectedRevision: number
-      pendingGeneration: number
-      selection: NativeProviderSelection
-    }>,
-  ): boolean
-  clearPending(
-    input: Readonly<{
-      scope: NativeSubmissionScope
-      expectedRevision: number
-      pendingGeneration: number
-    }>,
-  ): boolean
-}
-
-export interface NativeSubmissionRuntimeAuthority {
-  /** Revalidates the exact target generation and, when requested, authoritative thread idleness. */
-  revalidate(scope: NativeSubmissionScope, requireIdle: boolean, createdFrom?: NativeSubmissionScope): Promise<boolean>
-  resolveCreatedScope(draft: NativeSubmissionScope, threadId: string): Promise<NativeSubmissionScope | undefined>
-}
-
-export interface NativeExistingThreadSwitch {
-  /** Resolves only after unsubscribe/resume and native effective-selection acknowledgement. */
-  switch(
-    input: Readonly<{
-      scope: NativeSubmissionScope
-      threadId: string
-      providerId: string
-      model: string
-      /** Host-private only. Never return this value through the renderer command API. */
-      configOverrides: Readonly<Record<string, unknown>>
-      serviceGeneration: string
-    }>,
-  ): Promise<void>
-}
-
-export type NativeSubmissionPreparation =
-  | Readonly<{ kind: 'pass-through' }>
-  | Readonly<
-    {
-      kind: 'allow-original'
-      operationToken: string
-      projection?: NativeSubmissionSelectionSnapshot & { available: boolean }
-    }
-  >
-  | Readonly<{ kind: 'confirm'; confirmationId: string; selectionRevision: number }>
-  | Readonly<{
-    kind: 'reject'
-    startupReason?: StartupActionReasonV1
-    reason: 'unsupported-submission-intent' | 'scope-mismatch' | 'stale-operation' | 'provider-preparation-failed'
-  }>
-
-export type NativeSubmissionConfirmation =
-  | Readonly<{
-    kind: 'allow-original'
-    operationToken: string
-    projection: Readonly<{
-      available: true
-      revision: number
-      effective: NativeProviderSelection
-    }>
-  }>
-  | Readonly<{
-    kind: 'reject'
-    reason: 'unknown-confirmation' | 'expired-confirmation' | 'stale-operation' | 'thread-switch-failed'
-  }>
-
-export interface NativeMarkedRequest {
-  readonly method: 'thread/start' | 'turn/start'
-  readonly operationToken: string
-  readonly requestId: string | number
-  readonly threadId?: string
-}
-
-export interface NativeReservedRequest {
-  readonly operationToken: string
-  readonly requestId: string | number
-}
-
-/** Host-internal result for the eventual pre-dispatch request mutator. */
-export type NativeMarkedRequestConsumption =
-  | Readonly<{
-    kind: 'dispatch'
-    configOverrides: Readonly<Record<string, unknown>>
-    providerId: string
-    model: string
-    serviceGeneration: string
-    reasoningEffort?: ModelReasoningEffort
-  }>
-  | Readonly<{
-    kind: 'reject'
-    reason: 'unknown-token' | 'expired-token' | 'stale-operation' | 'request-mismatch' | 'scope-mismatch'
-  }>
-
-/** Host-internal provider table for natively resuming a thread that a managed provider owns. */
-export type NativeThreadResumePreparation =
-  | Readonly<{ kind: 'resume'; resumeToken: string; configOverrides: Readonly<Record<string, unknown>> }>
-  | Readonly<
-    {
-      kind: 'reject'
-      reason: 'unknown-provider' | 'provider-preparation-failed'
-      startupReason?: StartupActionReasonV1
-    }
-  >
-
-export interface NativeSubmissionController {
-  readonly nativeManagedModelRoutingAvailable: false
-  commitSelection(scope: NativeSubmissionScope): Promise<
-    | Readonly<{
-      kind: 'accepted'
-      projection: Readonly<{
-        available: true
-        revision: number
-        effective: NativeProviderSelection
-      }>
-    }>
-    | Readonly<
-      { kind: 'reject'; reason: 'stale-operation' | 'thread-switch-failed'; startupReason?: StartupActionReasonV1 }
-    >
-  >
-  prepareSubmission(
-    scope: NativeSubmissionScope,
-    action: NormalizedNativeSubmissionAction,
-  ): Promise<NativeSubmissionPreparation>
-  confirmSubmission(
-    input: Readonly<{
-      scope: NativeSubmissionScope
-      confirmationId: string
-      expectedSelectionRevision: number
-    }>,
-  ): Promise<NativeSubmissionConfirmation>
-  consumeMarkedRequest(request: NativeMarkedRequest): Promise<NativeMarkedRequestConsumption>
-  authorizeMarkedRequest(request: NativeReservedRequest): Promise<boolean>
-  completeMarkedRequest(
-    input: Readonly<{
-      operationToken: string
-      requestId: string | number
-      succeeded: boolean
-      /** Stable native response id, joined with the token's private document scope. */
-      boundThreadId?: string
-    }>,
-  ): Promise<void>
-  /**
-   * Refresh launch-scoped routes on resume, including recognized historical provider tables.
-   * Never return this value through the renderer command API.
-   */
-  prepareThreadResume(
-    input: Readonly<{ threadId: string; providerId: string; model: string; managedOnly?: boolean }>,
-  ): Promise<NativeThreadResumePreparation>
-  completeThreadResume(
-    input: Readonly<{ threadId: string; resumeToken: string; succeeded: boolean; createdThreadId?: string }>,
-  ): Promise<boolean>
-  cancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<boolean>
-  releaseScope(scope: NativeSubmissionScope): Promise<void>
-  releaseThread(threadId: string): Promise<void>
-  dispose(): Promise<void>
-}
-
-export interface NativeSubmissionControllerOptions {
-  readonly startup?: StartupProviderAdmission
-  readonly selection: NativeSubmissionSelectionAuthority
-  readonly credentials: NativeProviderCredentialBroker
-  readonly runtime: NativeSubmissionRuntimeAuthority
-  readonly existingThread: NativeExistingThreadSwitch
-  readonly prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
-  readonly providerSource?: (providerId: string) => 'managed' | 'config' | undefined
-  readonly validateSelection?: (selection: NativeProviderSelection) => Promise<boolean>
-  readonly operationTtlMs?: number
-  readonly confirmationTtlMs?: number
-  readonly now?: () => number
-  readonly createId?: () => string
-}
+type SubmissionLease =
+  & Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
+  & Partial<Pick<RemotePreparedProvider, 'validate' | 'provider'>>
 
 interface PreparedBase {
   readonly intentGeneration?: number
@@ -245,7 +60,7 @@ interface PreparedOperation extends PreparedBase {
   readonly token: string
   readonly configOverrides: Readonly<Record<string, unknown>>
   readonly serviceGeneration: string
-  readonly credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
+  readonly credential: SubmissionLease
   selectionRevision: number
   expiresAt: number
   selectionState: 'pending' | 'effective'
@@ -262,7 +77,7 @@ interface ActiveBinding {
   readonly threadId: string
   readonly selection: NativeProviderSelection
   readonly serviceGeneration: string
-  readonly credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
+  readonly credential: SubmissionLease
 }
 
 interface PreparedThreadResume extends ActiveBinding {
@@ -345,6 +160,33 @@ export function createNativeSubmissionController(
   const bindings = new Map<string, ActiveBinding>()
   const threadResumes = new Map<string, PreparedThreadResume>()
   let disposed = false
+  const preparations = new Map<AbortController, NativeSubmissionScope>()
+  const validateLease = async (lease: SubmissionLease): Promise<boolean> => {
+    try {
+      return await lease.validate?.() ?? true
+    } catch {
+      return false
+    }
+  }
+  const prepareRemote = async (
+    selection: NativeProviderSelection,
+    scope: NativeSubmissionScope,
+  ): Promise<RemotePreparedProvider> => {
+    const abort = new AbortController()
+    preparations.set(abort, scope)
+    try {
+      if (disposed || !options.prepareRemoteProvider) throw new Error('Remote provider unavailable')
+      return await options.prepareRemoteProvider(selection, abort.signal)
+    } finally {
+      preparations.delete(abort)
+    }
+  }
+  const remoteConfig = (selection: NativeProviderSelection, lease: SubmissionLease) =>
+    Object.freeze({
+      model_provider: selection.providerId,
+      model: selection.model,
+      [`model_providers.${selection.providerId}`]: lease.provider,
+    })
 
   const releaseOperation = async (operation: PreparedOperation): Promise<void> => {
     if (operations.get(operation.token) !== operation) return
@@ -392,7 +234,7 @@ export function createNativeSubmissionController(
     }
   }
   const prepareOperation = async (prepared: PreparedBase): Promise<PreparedOperation | undefined> => {
-    let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
+    let credential: SubmissionLease | undefined
     try {
       if (!await validSelection(prepared.pending) || !revalidateSelection(prepared)) return undefined
       let configOverrides: Readonly<Record<string, unknown>>
@@ -410,6 +252,14 @@ export function createNativeSubmissionController(
             ? {}
             : { model_reasoning_effort: prepared.action.reasoningEffort }),
         })
+      } else if (source === 'remote') {
+        credential = await prepareRemote(prepared.pending, prepared.scope)
+        configOverrides = Object.freeze({
+          ...remoteConfig(prepared.pending, credential),
+          ...(prepared.action.reasoningEffort === undefined
+            ? {}
+            : { model_reasoning_effort: prepared.action.reasoningEffort }),
+        })
       } else if (source === 'managed' || options.providerSource === undefined) {
         const managed = await options.credentials.prepare(prepared.pending.providerId)
         credential = managed
@@ -420,7 +270,7 @@ export function createNativeSubmissionController(
             : { model_reasoning_effort: prepared.action.reasoningEffort }),
         })
       } else throw new Error('native provider is unknown')
-      if (disposed || !revalidateSelection(prepared)) {
+      if (disposed || !revalidateSelection(prepared) || !await validateLease(credential)) {
         await credential.dispose()
         return undefined
       }
@@ -459,7 +309,7 @@ export function createNativeSubmissionController(
     try {
       if (
         !await options.runtime.revalidate(prepared.scope, true) || !await validSelection(prepared.pending)
-        || disposed || !revalidateSelection(prepared)
+        || disposed || !revalidateSelection(prepared) || !await validateLease(operation.credential)
       ) {
         throw new Error('native thread changed before switch')
       }
@@ -543,6 +393,7 @@ export function createNativeSubmissionController(
         expiresAt: now() + operationTtlMs,
       }
       const clearSelection = (): void => {
+        if (options.providerSource?.(pending.providerId) === 'remote') return
         if (options.startup?.availability(pending.providerId, pending.model)?.available === false) return
         options.selection.clearPending({
           scope,
@@ -562,7 +413,7 @@ export function createNativeSubmissionController(
       try {
         if (
           !await options.runtime.revalidate(scope, true) || !await validSelection(pending)
-          || disposed || !revalidateSelection(prepared)
+          || disposed || !revalidateSelection(prepared) || !await validateLease(operation.credential)
         ) {
           throw new Error('native thread changed before switch')
         }
@@ -626,6 +477,60 @@ export function createNativeSubmissionController(
       }
       const decision = decideNativeProviderSubmission(snapshot.pending, action)
       if (decision.kind === 'pass-through') {
+        if (options.providerSource?.(snapshot.effective.providerId) === 'remote') {
+          if (!await validSelection(snapshot.effective) || !await options.runtime.revalidate(scope, true)) {
+            return { kind: 'reject', reason: 'provider-preparation-failed' }
+          }
+          let credential: SubmissionLease | undefined
+          let borrowed = false
+          try {
+            const binding = scope.threadId === undefined ? undefined : bindings.get(scope.threadId)
+            borrowed = binding?.selection.providerId === snapshot.effective.providerId
+              && binding?.selection.model === snapshot.effective.model
+            credential = borrowed ? binding!.credential : await prepareRemote(snapshot.effective, scope)
+            if (
+              !await validateLease(credential) || disposed
+              || options.selection.snapshot(scope).revision !== snapshot.revision
+            ) {
+              throw new Error('Remote effective selection changed')
+            }
+            if (!borrowed && scope.threadId !== undefined) {
+              await options.existingThread.switch({
+                scope,
+                threadId: scope.threadId,
+                providerId: snapshot.effective.providerId,
+                model: snapshot.effective.model,
+                configOverrides: remoteConfig(snapshot.effective, credential),
+                serviceGeneration: credential.serviceGeneration,
+              })
+              if (
+                disposed || options.selection.snapshot(scope).revision !== snapshot.revision
+                || !await validateLease(credential)
+              ) {
+                throw new Error('Remote resume acknowledgement stale')
+              }
+            }
+            const token = createId()
+            operations.set(token, {
+              scope,
+              scopeKey: key,
+              action,
+              pending: { ...snapshot.effective, selectionGeneration: snapshot.revision },
+              selectionRevision: snapshot.revision,
+              expiresAt: now() + operationTtlMs,
+              token,
+              configOverrides: remoteConfig(snapshot.effective, credential),
+              credential,
+              serviceGeneration: credential.serviceGeneration,
+              selectionState: 'effective',
+              state: 'available',
+            })
+            return { kind: 'allow-original', operationToken: token }
+          } catch {
+            if (!borrowed) await credential?.dispose()
+            return { kind: 'reject', reason: 'provider-preparation-failed' }
+          }
+        }
         if (!await validSelection(snapshot.effective)) {
           return { kind: 'reject', reason: 'provider-preparation-failed' }
         }
@@ -641,6 +546,13 @@ export function createNativeSubmissionController(
         pending: decision.prepared.pending,
         selectionRevision: snapshot.revision,
         expiresAt: now() + (scope.threadId === undefined ? operationTtlMs : confirmationTtlMs),
+      }
+      if (
+        scope.threadId !== undefined && options.providerSource?.(prepared.pending.providerId) === 'remote'
+        && prepared.pending.providerId === snapshot.effective.providerId
+      ) {
+        const result = await applyPreparedThreadSelection(prepared)
+        return result.kind === 'allow-original' ? result : { kind: 'reject', reason: 'provider-preparation-failed' }
       }
       if (scope.threadId === undefined || decision.prepared.pending.providerId === snapshot.effective.providerId) {
         if (scope.threadId !== undefined && !await options.runtime.revalidate(scope, true)) {
@@ -721,7 +633,7 @@ export function createNativeSubmissionController(
       const currentScope = operation.boundScope ?? operation.scope
       if (
         disposed || operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
-        || !await validSelection(operation.pending)
+        || !await validSelection(operation.pending) || !await validateLease(operation.credential)
         || !await options.runtime.revalidate(
           currentScope,
           true,
@@ -761,7 +673,7 @@ export function createNativeSubmissionController(
       const currentScope = operation.boundScope ?? operation.scope
       if (
         operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
-        || !await validSelection(operation.pending)
+        || !await validSelection(operation.pending) || !await validateLease(operation.credential)
         || !await options.runtime.revalidate(
           currentScope,
           true,
@@ -794,6 +706,21 @@ export function createNativeSubmissionController(
       }
       if (operation.state !== 'consumed') return
       if (operation.selectionState === 'effective') {
+        if (operation.credential.validate) {
+          const bound = operation.scope.threadId === undefined
+            ? input.boundThreadId === undefined
+              ? undefined
+              : await options.runtime.resolveCreatedScope(operation.scope, input.boundThreadId)
+            : operation.scope
+          if (bound?.threadId && await options.runtime.revalidate(bound, false, operation.scope)) {
+            await replaceBinding({
+              threadId: bound.threadId,
+              selection: operation.pending,
+              serviceGeneration: operation.serviceGeneration,
+              credential: operation.credential,
+            })
+          } else await releaseOperation(operation)
+        }
         operations.delete(operation.token)
         return
       }
@@ -858,17 +785,34 @@ export function createNativeSubmissionController(
         || !validText(input.model, 512) || !validText(input.threadId, 512)
       ) return { kind: 'reject', reason: 'unknown-provider' }
       const source = options.providerSource?.(input.providerId)
-      if (input.managedOnly && source !== 'managed') return { kind: 'reject', reason: 'unknown-provider' }
+      if (input.managedOnly && source !== 'managed' && source !== 'remote') {
+        return { kind: 'reject', reason: 'unknown-provider' }
+      }
       if (options.providerSource !== undefined && source === undefined) {
         return { kind: 'reject', reason: 'unknown-provider' }
       }
       if (!await validSelection({ providerId: input.providerId, model: input.model })) {
         return { kind: 'reject', reason: 'unknown-provider' }
       }
-      let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
+      let credential: SubmissionLease | undefined
       try {
         let configOverrides: Readonly<Record<string, unknown>>
-        if (source === 'config') {
+        if (source === 'remote') {
+          const abort = new AbortController()
+          preparations.set(abort, {
+            targetId: 'remote-resume',
+            rendererGeneration: input.threadId,
+            navigationGeneration: 0,
+            threadId: input.threadId,
+          })
+          try {
+            credential = await options.prepareRemoteProvider!(input, abort.signal)
+          } finally {
+            preparations.delete(abort)
+          }
+          if (!await validateLease(credential)) throw new Error('Remote lease unavailable')
+          configOverrides = remoteConfig(input, credential)
+        } else if (source === 'config') {
           credential = { serviceGeneration: 'native-config', dispose() {} }
           configOverrides = Object.freeze(await options.prepareConfiguredProvider?.(input.providerId) ?? {})
         } else {
@@ -904,6 +848,10 @@ export function createNativeSubmissionController(
         await resume.credential.dispose()
         return !disposed
       }
+      if (!await validateLease(resume.credential)) {
+        await resume.credential.dispose()
+        return false
+      }
       if (input.createdThreadId !== undefined && !validText(input.createdThreadId, 512)) {
         await resume.credential.dispose()
         return false
@@ -925,6 +873,7 @@ export function createNativeSubmissionController(
       return true
     },
     async releaseScope(scope) {
+      for (const [abort, owner] of preparations) if (sameScope(owner, scope)) abort.abort()
       const key = scopeKey(scope)
       for (const [id, confirmation] of confirmations) {
         if (confirmation.scopeKey === key) confirmations.delete(id)
@@ -949,6 +898,7 @@ export function createNativeSubmissionController(
       }
     },
     async releaseThread(threadId) {
+      for (const [abort, owner] of preparations) if (owner.threadId === threadId) abort.abort()
       const key = bindingKey(threadId)
       const binding = bindings.get(key)
       if (binding === undefined) return
@@ -958,6 +908,7 @@ export function createNativeSubmissionController(
     async dispose() {
       if (disposed) return
       disposed = true
+      for (const abort of preparations.keys()) abort.abort()
       confirmations.clear()
       await Promise.allSettled([
         ...[...operations.values()].map(releaseOperation),

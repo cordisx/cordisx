@@ -4,13 +4,8 @@ import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
-import {
-  pluginManagementRpcPaths,
-  readPluginManagementRpcEndpoint,
-  requestPluginManagementRpc,
-} from '../launcher/management-rpc.js'
+import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
-import { hasMatchingProcessIdentity } from './supervisor-state.js'
 import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
@@ -138,30 +133,14 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (profile.dataMode === 'host-isolated' && client === 'codex') {
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
-    const paths = pluginManagementRpcPaths(path.dirname(configPath), 'codex', profileId)
-    const endpoint = shared ? undefined : await readPluginManagementRpcEndpoint(paths)
     if (!shared && (invocation.service || invocation.list)) {
-      if (
-        !endpoint || endpoint.appId !== 'codex' || endpoint.profileId !== profileId
-        || path.resolve(endpoint.configPath) !== path.resolve(configPath)
-        || !await hasMatchingProcessIdentity(endpoint.pid, endpoint.processStartedAt)
-      ) {
+      try {
+        request = await connectExistingTerminalProvider({ homeDir: path.dirname(configPath), profileId })
+      } catch {
         if (!invocation.list) {
           throw new Error(
             'CordisX plugin service selection requires an already-running compatible Host; no App was started',
           )
-        }
-      } else {
-        request = async input => {
-          const current = await readPluginManagementRpcEndpoint(paths)
-          if (
-            !current || current.token !== endpoint.token || current.generation !== endpoint.generation
-            || !await hasMatchingProcessIdentity(current.pid, current.processStartedAt)
-          ) throw new Error('CordisX owner changed; start a new CLI session')
-          return await requestPluginManagementRpc(paths, endpoint, {
-            kind: 'terminal-provider',
-            request: input,
-          }) as TerminalProviderResult
         }
       }
     }
