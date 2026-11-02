@@ -20,6 +20,7 @@ import {
   removeSupervisorState,
   SupervisorOperationBusyError,
   supervisorPaths,
+  updateSupervisorState,
   writeSupervisorState,
 } from './supervisor-state.js'
 import { requestSupervisorStop } from './supervisor-control.js'
@@ -113,12 +114,10 @@ async function markSupervisorFailed(
   state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
   failure: string,
 ): Promise<void> {
-  const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = state
-  await writeSupervisorState(paths, {
-    ...withoutEndpoint,
-    phase: 'failed',
-    failure,
-    failedAt: new Date().toISOString(),
+  await updateSupervisorState(paths, state, current => {
+    if (current.phase !== 'starting') return undefined
+    const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = current
+    return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
   })
 }
 
