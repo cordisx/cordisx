@@ -56,7 +56,7 @@ export function createBrowserStartupObserver(invoke: Invoke) {
       if (terminated || options?.signal?.aborted) throw new Error('startup observer is unavailable')
       const controller = new AbortController()
       let closed = false
-      let cursor: StartupCursorV1 | undefined
+      let cursor: StartupCursorV1 | undefined = options?.after
       let subscriptionId: string | undefined
       let retryTimer: ReturnType<typeof setTimeout> | undefined
       let wakeRetry: (() => void) | undefined
@@ -103,7 +103,9 @@ export function createBrowserStartupObserver(invoke: Invoke) {
           finish(event.reason)
           return
         }
-        if (cursor && next.epoch === cursor.epoch && next.sequence <= cursor.sequence) return
+        if (cursor && event.reason === 'update' && next.epoch === cursor.epoch && next.sequence <= cursor.sequence) {
+          return
+        }
         if (cursor && next.epoch !== cursor.epoch && event.reason !== 'epoch-changed' && event.reason !== 'gap') {
           throw new Error('startup epoch changed without a reset')
         }
@@ -119,14 +121,14 @@ export function createBrowserStartupObserver(invoke: Invoke) {
           ...(after ? { after } : {}),
         }, controller.signal) as {
           subscriptionId: string
-          initial: StartupEventV1
+          initial?: StartupEventV1
         }
         if (closed) {
           cleanupRemote(result.subscriptionId)
           return
         }
         subscriptionId = result.subscriptionId
-        accept(result.initial)
+        if (result.initial !== undefined) accept(result.initial)
         while (!closed && cursor === undefined) {
           accept(
             await invoke(

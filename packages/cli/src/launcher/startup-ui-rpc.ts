@@ -166,12 +166,9 @@ export function createStartupUIRPC(
             stream.subscription.close()
             throw new Error('startup observer was revoked')
           }
-          const initial = stream.queue.length
-            ? stream.queue.shift()!
-            : await new Promise<StartupEventV1>((resolve, reject) => {
-              stream.pending = { resolve, reject }
-            })
-          return { subscriptionId, initial }
+          // A valid current cursor has no replay events. Atomic subscribe is still complete.
+          const initial = stream.queue.shift()
+          return { subscriptionId, ...(initial === undefined ? {} : { initial }) }
         } catch (error) {
           streams.delete(subscriptionId)
           stream.controller.abort()
