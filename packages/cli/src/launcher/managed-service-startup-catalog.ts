@@ -11,7 +11,9 @@ export function validateStartupCatalog(value: StartupDiscoveredCatalogV1): boole
     || value.modelIds.some(id => typeof id !== 'string' || id.length === 0)
     || new Set(value.modelIds).size !== value.modelIds.length
   ) return false
-  const sorted = [...value.modelIds].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
+  const sorted = [...value.modelIds].sort((left, right) =>
+    Buffer.compare(Buffer.from(left), Buffer.from(right)) || (left < right ? -1 : left > right ? 1 : 0)
+  )
   return value.digest
     === `sha256:${createHash('sha256').update(JSON.stringify([value.generation, sorted])).digest('hex')}`
 }

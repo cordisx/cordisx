@@ -82,6 +82,11 @@ scratch plugin, second watcher, or restart. Build, publication, rollback,
 fencing, diagnostics, and shutdown remain the existing local-generation
 authorities.
 
+See [progressive startup](progressive-startup.md) for workspace readiness,
+background managed-service preparation, caller requirements, and native adapter
+preparation. These states keep the service and launcher lifecycle authorities
+separate.
+
 ### Package and bundle composition
 
 The launch-private Host manifest has a bounded normal-request window: failed
