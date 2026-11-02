@@ -773,6 +773,17 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     </button>
                   )
                   : null}
+                {menuProvider?.startup
+                  ? (
+                    <div className="cxmp-menu-heading">
+                      <ModelStartupStatus
+                        entry={menuProvider.startup}
+                        state={catalog.startup}
+                        locale={locale}
+                      />
+                    </div>
+                  )
+                  : null}
                 {reasoningEfforts.length > 0 || displayedNativeModel !== undefined
                   ? (
                     <div className="cxmp-model-controls">
