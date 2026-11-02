@@ -1,12 +1,16 @@
 import { waitForStartupOperation } from './managed-service-startup-operation.js'
 import type { StartupCapabilityDeclarationV1, StartupCapabilityRefV1 } from '@cordisx/protocol/startup/v1'
-import type { StartupManagedServiceNodeModuleV1 } from '@cordisx/protocol/startup-runtime/v1'
+import type {
+  StartupManagedServiceConfigurationV1,
+  StartupManagedServiceNodeModuleV1,
+} from '@cordisx/protocol/startup-runtime/v1'
 import type { ManagedServiceServiceContextV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ManagedServiceActivationBinding, ManagedServiceRuntime } from './managed-service-runtime.js'
 import { ManagedServiceStartupAuthority, type StartupServiceOwner } from './managed-service-startup-authority.js'
 import type { ManagedBackendRuntimeServiceModuleAccess } from './packages/authority-access.js'
 
 export interface StartupPreparedModule {
+  readonly configuration?: StartupManagedServiceConfigurationV1
   readonly access: ManagedBackendRuntimeServiceModuleAccess
   readonly binding: ManagedServiceActivationBinding
   readonly controller: AbortController
@@ -97,6 +101,7 @@ export class ManagedServiceStartupPreparation {
           throw new Error('startup registration replaced')
         }
         await module.module.prepare(module.context, {
+          ...(module.configuration === undefined ? {} : { configuration: module.configuration }),
           owner: module.binding.owner,
           client: module.binding.client,
           signal,

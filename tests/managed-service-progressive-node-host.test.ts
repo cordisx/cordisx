@@ -72,9 +72,11 @@ describe('progressive Node service preparation', () => {
     const entered = deferred<void>()
     const observations: string[] = []
     const attempts: Record<string, number> = {}
+    const configurations: unknown[] = []
+    const selectedConfiguration = { account: { root: './selected' } }
     const fixtureKey = `__progressive_${Date.now()}`
     Object.assign(globalThis, {
-      [fixtureKey]: { release: release.promise, entered: entered.resolve, observations, attempts },
+      [fixtureKey]: { release: release.promise, entered: entered.resolve, observations, attempts, configurations },
     })
     const value = definition('gateway', { fixedPort: 41231 })
     let spawns = 0
@@ -96,6 +98,7 @@ describe('progressive Node service preparation', () => {
       declaration: declaration('gateway', 'example', []),
       artifactDirectory: root,
       runtimeEntry: './services/gateway.mjs',
+      selectedConfiguration,
       startup: {
         pluginId: 'example',
         pluginGeneration: 'one',
@@ -120,12 +123,15 @@ describe('progressive Node service preparation', () => {
       `
 import { createHash } from 'node:crypto'
 const fixture = globalThis[${JSON.stringify(fixtureKey)}]
-export async function apply(ctx) {
+export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture', validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { account: { type: 'object', dict: { root: { type: 'string' } } } } }) }
+export async function apply(ctx, input) {
+  fixture.configurations.push(input.configuration)
   fixture.observations.push('apply')
   await ctx.managedServices.register(${JSON.stringify(value)}, { revision: 'sha256:${'a'.repeat(64)}' })
 }
 apply.inject = ['managedServices']
 export async function prepare(ctx, input) {
+  fixture.configurations.push(input.configuration)
   const id = input.capability.id
   fixture.observations.push('prepare:' + id)
   const attempt = fixture.attempts[id] = (fixture.attempts[id] || 0) + 1
@@ -143,7 +149,17 @@ export async function prepare(ctx, input) {
 `,
     )
     try {
-      const activation = await host.replace(accesses, { isolateStartupFailures: true })
+      const invalid = new Proxy({}, {
+        ownKeys() {
+          throw new Error('must not invoke')
+        },
+      })
+      await expect(host.replace([{ ...accesses[0]!, selectedConfiguration: invalid }])).rejects.toThrow('safe JSON')
+      expect(observations).toEqual([])
+      expect(runtime.listRegistrationIdentities()).toEqual([])
+      const pending = host.replace(accesses, { isolateStartupFailures: true })
+      selectedConfiguration.account.root = './later'
+      const activation = await pending
       await entered.promise
       const authority = activation.startup!
       expect(observations.filter(item => item === 'apply')).toHaveLength(1)
@@ -166,6 +182,14 @@ export async function prepare(ctx, input) {
       expect(activation.nativeProviderIds).toContain('slow')
       expect(observations.filter(item => item === 'apply')).toHaveLength(1)
       await expect(authority.wait({ pluginId: 'example', capabilityId: 'slow' })).resolves.toEqual({ available: true })
+      expect(configurations.length).toBeGreaterThan(5)
+      expect(configurations.every(value => value === configurations[0])).toBe(true)
+      expect(configurations[0]).toEqual({
+        contract: 'cordisx.managed-service-instance-configuration/v1',
+        value: { account: { root: './selected' } },
+      })
+      expect(Object.isFrozen(configurations[0])).toBe(true)
+      expect(Object.isFrozen((configurations[0] as { value: { account: object } }).value.account)).toBe(true)
       expect(spawns).toBe(0)
       await host.dispose()
       expect(runtime.listNativeProviderIds()).toEqual([])

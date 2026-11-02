@@ -14,6 +14,76 @@ function serviceRequest(token: string, pluginGeneration = 'one') {
 }
 
 describe('real progressive NodeHost and lifecycle adoption boundaries', () => {
+  it('preserves v14 input and defaults, snapshots new configuration only for the atomic candidate generation', async () => {
+    const configuration = { one: { root: './selected' }, two: { root: './candidate' } }
+    const f = await progressiveLifecycleFixture([
+      { pluginId: 'configured', configuration, slowPrepare: true },
+      { pluginId: 'legacy', legacy: true, configuration },
+      { pluginId: 'defaults' },
+    ], true)
+    try {
+      const session = await f.lifecycle.initialize(f.record())
+      await session.coreReady
+      await session.adopted
+      await vi.waitFor(() =>
+        expect(f.configurations.some(item => item.phase === 'prepare' && item.pluginId === 'configured')).toBe(true)
+      )
+      const one = f.configurations.filter(item => item.pluginId === 'configured')
+      expect(one).toHaveLength(2)
+      expect(one[0]!.input).toBe(one[1]!.input)
+      expect(one[0]!.input).toEqual({
+        contract: 'cordisx.managed-service-instance-configuration/v1',
+        value: { root: './selected' },
+      })
+      expect(session.authority.availability({ pluginId: 'configured', capabilityId: 'gateway' }).available).toBe(false)
+      for (
+        const item of f.configurations.filter(item =>
+          ['legacy', 'defaults'].includes(item.pluginId) && item.phase === 'apply'
+        )
+      ) {
+        expect(item.keys).toEqual(['client', 'owner', 'signal'])
+        expect(item.input).toBeUndefined()
+      }
+      configuration.one.root = './mutated'
+      const staging = f.lifecycle.stage(
+        {
+          transactionId: 'config-update',
+          previous: f.record(),
+          candidate: f.record(2),
+          targetId: 'configured',
+          operation: 'update',
+          affectedPluginIds: ['configured'],
+        } as PluginRuntimeMutation,
+      )
+      const stageFailure: unknown[] = []
+      void staging.catch(error => {
+        stageFailure.push(error)
+      })
+      await vi.waitFor(() => {
+        expect(stageFailure).toEqual([])
+        expect(f.observations).toContain('apply:configured:gateway:two')
+      })
+      configuration.two.root = './mutated-late'
+      expect(f.stage).not.toHaveBeenCalled()
+      expect(one[0]!.input).toMatchObject({ value: { root: './selected' } })
+      f.releaseCandidate.resolve()
+      await staging
+      const two = f.configurations.filter(item => item.pluginId === 'configured' && item.generation === 'two')
+      expect(two).toHaveLength(2)
+      expect(two[0]!.input).toBe(two[1]!.input)
+      expect(two[0]!.input).not.toBe(one[0]!.input)
+      expect(two[0]!.input).toMatchObject({ value: { root: './candidate' } })
+      await f.lifecycle.rollback('config-update')
+      expect(f.runtimes[1]!.listRegistrationIdentities()).toEqual([])
+      f.release.resolve()
+      await expect(session.authority.wait({ pluginId: 'configured', capabilityId: 'gateway' })).resolves.toEqual({
+        available: true,
+      })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
   it('publishes core and fast execution/source before independent slow apply; retains full transaction barrier', async () => {
     const f = await progressiveLifecycleFixture([{ pluginId: 'slow', slow: true }, { pluginId: 'fast' }], true)
     try {

@@ -1,4 +1,10 @@
-import type { StartupManagedServiceNodeModuleV1 } from '@cordisx/protocol/startup-runtime/v1'
+import { resolveManagedServiceConfiguration } from './managed-service-configuration-policy.js'
+import { snapshotManagedServiceConfigurations } from './managed-service-instance-configuration.js'
+import type {
+  StartupManagedServiceApplyInputV1,
+  StartupManagedServiceConfigurationV1,
+  StartupManagedServiceNodeModuleV1,
+} from '@cordisx/protocol/startup-runtime/v1'
 import { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 import { ManagedServiceStartupPreparation } from './managed-service-startup-preparation.js'
 import type {
@@ -9,6 +15,7 @@ import type {
 import type { ManagedServiceServiceContextV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { Context, Inject, type Plugin } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { NativeManagedGatewayConnectionSession } from './managed-service-native-connection.js'
@@ -35,6 +42,7 @@ interface ProviderState {
 interface ModuleState {
   readonly access: ManagedBackendRuntimeServiceModuleAccess
   module: ManagedServiceNodeModuleV1 | undefined
+  configuration?: StartupManagedServiceConfigurationV1
   context?: ManagedServiceServiceContextV1
   readonly binding: ManagedServiceActivationBinding
   readonly controller: AbortController
@@ -121,6 +129,7 @@ export class ManagedServiceNodeHost {
     accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
     options: { readonly isolateStartupFailures?: boolean; readonly signal?: AbortSignal } = {},
   ): Promise<ManagedServiceNodeActivation> {
+    const selectedAccesses = snapshotManagedServiceConfigurations(accesses)
     const operation = this.transition.then(async () => {
       const previous = this.current
       this.current = undefined
@@ -130,7 +139,7 @@ export class ManagedServiceNodeHost {
       let activation: ManagedServiceNodeActivation
       try {
         activation = await this.activate(
-          accesses,
+          selectedAccesses,
           options.isolateStartupFailures === true,
           options.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, options.signal]),
         )
@@ -273,10 +282,29 @@ export class ManagedServiceNodeHost {
         if ('inject' in imported) throw new Error('managed backend service module-level inject is invalid')
         if (typeof imported.apply !== 'function') throw new Error('managed backend service exports no apply function')
         state.module = imported as unknown as ManagedServiceNodeModuleV1
+        if (access.startup !== undefined) {
+          const configuration = resolveManagedServiceConfiguration(access.selectedConfiguration, imported.Config)
+          if (configuration !== undefined) state.configuration = configuration
+        }
         if (
           access.startup?.startup.capabilities.some(capability => capability.serviceId === access.serviceId)
           && typeof imported.prepare !== 'function'
         ) throw new Error('progressive managed service exports no prepare function')
+      }
+      const configurations = new Map<string, StartupManagedServiceConfigurationV1 | undefined>()
+      for (const state of states) {
+        if (state.access.startup === undefined) continue
+        const owner = JSON.stringify([
+          state.access.pluginIdentity.source,
+          state.access.pluginIdentity.pluginId,
+          state.access.pluginIdentity.generation,
+        ])
+        if (configurations.has(owner) && !isDeepStrictEqual(configurations.get(owner), state.configuration)) {
+          throw new Error('managed service Config differs within one plugin generation')
+        }
+        if (!configurations.has(owner)) configurations.set(owner, state.configuration)
+        const configuration = configurations.get(owner)
+        if (configuration !== undefined) state.configuration = configuration
       }
       for (const state of states) {
         const module = state.module!
@@ -636,11 +664,13 @@ export class ManagedServiceNodeHost {
     const plugin: Plugin.Function = async context => {
       state.controller.signal.throwIfAborted()
       state.context = context as unknown as ManagedServiceServiceContextV1
-      await apply(state.context, {
+      const input: StartupManagedServiceApplyInputV1 = {
+        ...(state.configuration === undefined ? {} : { configuration: state.configuration }),
         owner: state.binding.owner,
         client: state.binding.client,
         signal: state.binding.signal,
-      })
+      }
+      await apply(state.context, input)
     }
     plugin.inject = ['managedServices', ...requested.filter(service => service !== 'managedServices')]
     const fiber = scope.plugin(plugin)

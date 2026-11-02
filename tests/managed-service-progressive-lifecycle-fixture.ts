@@ -24,6 +24,8 @@ export interface ComponentSpec {
   readonly serviceId?: string
   readonly legacy?: boolean
   readonly slow?: boolean
+  readonly slowPrepare?: boolean
+  readonly configuration?: { one: Record<string, unknown>; two: Record<string, unknown> }
   readonly fail?: boolean
   readonly dependsOn?: string
   readonly slowContext?: boolean
@@ -37,8 +39,14 @@ export async function progressiveLifecycleFixture(specs: readonly ComponentSpec[
   const release = deferred<void>()
   const releaseCandidate = deferred<void>()
   const observations: string[] = []
+  const configurations: { phase: string; pluginId: string; generation: string; input: unknown; keys: string[] }[] = []
   Object.assign(globalThis, {
-    [fixtureKey]: { release: release.promise, releaseCandidate: releaseCandidate.promise, observations },
+    [fixtureKey]: {
+      release: release.promise,
+      releaseCandidate: releaseCandidate.promise,
+      observations,
+      configurations,
+    },
   })
   const accesses: (Omit<ManagedBackendRuntimeServiceModuleAccess, 'startup'> & { startup?: StartupPluginAdmission })[] =
     specs.map((spec, index) => {
@@ -100,7 +108,13 @@ export async function progressiveLifecycleFixture(specs: readonly ComponentSpec[
       `
 import { createHash } from 'node:crypto'
 const fixture = globalThis[${JSON.stringify(fixtureKey)}]
+${
+        spec.configuration && !spec.legacy
+          ? `export const Config = { type: 'object', '~standard': { version: 1, vendor: 'fixture', validate: value => ({ value }) }, toJSON: () => ({ type: 'object', dict: { root: { type: 'string' } } }) }`
+          : ''
+      }
 export async function apply(ctx, input) {
+  fixture.configurations.push({ phase: 'apply', pluginId: input.owner.pluginId, generation: input.owner.pluginGeneration, input: input.configuration, keys: Object.keys(input).sort() })
   const definition = ${JSON.stringify(value)}
   if (input.owner.pluginGeneration !== 'one' && definition.discovery.kind === 'fixed-loopback') definition.discovery.port += 100
   const registration = await ctx.managedServices.register(definition, { revision: 'sha256:${'a'.repeat(64)}' })
@@ -125,6 +139,12 @@ ${
           : ''
       }
 export async function prepare(ctx, input) {
+  fixture.configurations.push({ phase: 'prepare', pluginId: input.owner.pluginId, generation: input.owner.pluginGeneration, input: input.configuration, keys: Object.keys(input).sort() })
+  ${
+        spec.slowPrepare
+          ? "if (input.owner.pluginGeneration === 'one') await Promise.race([fixture.release, new Promise(resolve => input.signal.addEventListener('abort', resolve, { once: true }))])"
+          : ''
+      }
   fixture.observations.push('prepare:${spec.pluginId}:${access.serviceId}:' + input.owner.pluginGeneration)
   await input.registration.ensureReady()
   const generation = 'catalog'
@@ -157,10 +177,11 @@ export async function prepare(ctx, input) {
     }
   }
   function selected(record: CordisXPluginActivationRecordV1) {
-    return accesses.map(access => {
+    return accesses.map((access, index) => {
       const plugin = record.plugins.find(item => item.id === access.pluginIdentity.pluginId)!
       return {
         ...access,
+        selectedConfiguration: specs[index]!.configuration?.[plugin.moduleGeneration === 'one' ? 'one' : 'two'],
         pluginIdentity: { ...access.pluginIdentity, generation: plugin.moduleGeneration },
         packageIdentity: { ...access.packageIdentity, integrity: plugin.digest },
         ...(access.startup
@@ -220,6 +241,7 @@ export async function prepare(ctx, input) {
     nodes,
     runtimes,
     observations,
+    configurations,
     release,
     releaseCandidate,
     children,
