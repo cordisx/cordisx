@@ -44,6 +44,7 @@ export interface NativeSubmissionScope {
 export interface NativeSubmissionSelectionSnapshot {
   readonly revision: number
   readonly effective: NativeProviderSelection
+  readonly pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
   readonly pending?: PendingNativeProviderChange
 }
 
@@ -227,6 +228,7 @@ export interface NativeSubmissionControllerOptions {
 }
 
 interface PreparedBase {
+  readonly intentGeneration?: number
   readonly scope: NativeSubmissionScope
   readonly scopeKey: string
   readonly action: NormalizedNativeSubmissionAction
@@ -367,7 +369,8 @@ export function createNativeSubmissionController(
   }
   const revalidateSelection = (prepared: PreparedBase): boolean => {
     const snapshot = options.selection.snapshot(prepared.scope)
-    return snapshot.revision === prepared.selectionRevision
+    return snapshot.pendingProviderIntent?.generation === prepared.intentGeneration
+      && snapshot.revision === prepared.selectionRevision
       && revalidatePreparedNativeProviderChange(
           { pending: prepared.pending, action: prepared.action },
           { action: prepared.action, ...(snapshot.pending === undefined ? {} : { pending: snapshot.pending }) },
@@ -380,7 +383,8 @@ export function createNativeSubmissionController(
     try {
       if (operation.selectionState === 'pending') return revalidateSelection(operation)
       const snapshot = options.selection.snapshot(currentScope)
-      return snapshot.revision === operation.selectionRevision && snapshot.pending === undefined
+      return snapshot.pendingProviderIntent === undefined
+        && snapshot.revision === operation.selectionRevision && snapshot.pending === undefined
         && snapshot.effective.providerId === operation.pending.providerId
         && snapshot.effective.model === operation.pending.model
     } catch {
@@ -390,7 +394,7 @@ export function createNativeSubmissionController(
   const prepareOperation = async (prepared: PreparedBase): Promise<PreparedOperation | undefined> => {
     let credential: Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'> | undefined
     try {
-      if (!await validSelection(prepared.pending)) return undefined
+      if (!await validSelection(prepared.pending) || !revalidateSelection(prepared)) return undefined
       let configOverrides: Readonly<Record<string, unknown>>
       const source = prepared.pending.providerId === 'openai'
         ? 'openai'
@@ -525,6 +529,7 @@ export function createNativeSubmissionController(
         return { kind: 'reject', reason: 'stale-operation' }
       }
       const prepared: PreparedBase = {
+        ...(snapshot.pendingProviderIntent ? { intentGeneration: snapshot.pendingProviderIntent.generation } : {}),
         scope,
         scopeKey: scopeKey(scope),
         action: {
@@ -604,6 +609,7 @@ export function createNativeSubmissionController(
     async prepareSubmission(scope, action) {
       if (disposed) return { kind: 'reject', reason: 'stale-operation' }
       const selected = options.selection.snapshot(scope)
+      if (selected.pendingProviderIntent) return { kind: 'reject', reason: 'provider-preparation-failed' }
       const desired = selected.pending ?? selected.effective
       const startup = options.startup?.availability(desired.providerId, desired.model)
       if (startup !== undefined && !startup.available) {
@@ -613,6 +619,7 @@ export function createNativeSubmissionController(
       if (scope.threadId !== action.threadId) return { kind: 'reject', reason: 'scope-mismatch' }
       await expire()
       const snapshot = options.selection.snapshot(scope)
+      if (snapshot.pendingProviderIntent) return { kind: 'reject', reason: 'provider-preparation-failed' }
       clearMismatchedPending(scope, snapshot)
       if (snapshot.pending !== undefined && snapshot.pending.threadId !== scope.threadId) {
         return { kind: 'reject', reason: 'scope-mismatch' }

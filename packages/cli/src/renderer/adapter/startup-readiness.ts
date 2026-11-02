@@ -1,3 +1,4 @@
+import { nativeModelProviderInteractionAllowed } from './native-model-provider-interaction.js'
 import type { NativeAccountCapabilityDescriptor } from '../../native-account-capability.js'
 
 // authenticated-ready remains readable for older supervisor state; new workspace
@@ -69,9 +70,12 @@ export async function readNativeStartupReadiness(
         visible(element) && !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
       )
     const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
-    const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
+    const model = document.querySelector<HTMLElement>('.cxmp-selector[data-cordisx-model-selector-ready="true"]')
     const modelReady = model !== null && visible(model)
-      && !model.hasAttribute('disabled') && model.getAttribute('aria-disabled') !== 'true'
+      && nativeModelProviderInteractionAllowed(model)
+      && [...model.querySelectorAll<HTMLElement>('button')].some(control =>
+        visible(control) && !control.hasAttribute('disabled') && control.getAttribute('aria-disabled') !== 'true'
+      )
     const managerReady = manager !== null && visible(manager)
     if (editor) trace?.('editor-observed')
     if (modelReady) trace?.('model-observed')

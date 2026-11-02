@@ -46,7 +46,7 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
     selectionRead: vi.fn(async () => projection),
     selectionSelect: vi.fn<NativeProviderSelectionCommandChannel['selectionSelect']>(async input => ({
       status: 'accepted',
-      revision: 3,
+      revision: (input.expectedRevision ?? 2) + 1,
       effective: existing ? { providerId: input.providerId, model: input.model } : projection.effective!,
       ...(existing ? {} : { pending: { providerId: input.providerId, model: input.model, generation: 3 } }),
     })),

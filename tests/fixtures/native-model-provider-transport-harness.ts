@@ -149,5 +149,6 @@ export async function harness(
     catalogReasoning,
   )
   if (transport === undefined) throw new Error('transport unavailable')
+  await settle()
   return { ...control, dom, requests, transport, channel }
 }

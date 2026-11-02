@@ -28,6 +28,7 @@ export interface NativeProviderSelectionProjection {
   readonly revision: number
   readonly effective?: NativeProviderSelection
   readonly pending?: PendingNativeProviderSelection
+  readonly pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
   readonly nextSend?: NativeProviderSelection & { readonly reasoningEffort?: ModelReasoningEffort }
   readonly draftPreference?: Readonly<{
     readonly model?: string
@@ -53,6 +54,12 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
   }>
   selectionRead(
     input: Readonly<{ scope: NativeSubmissionScope; effective?: NativeProviderSelection }>,
+  ): Promise<NativeProviderSelectionProjection>
+  selectionProviderIntent?(
+    input: Readonly<{ scope: NativeSubmissionScope; providerId: string; expectedRevision: number }>,
+  ): Promise<NativeProviderSelectionProjection>
+  selectionCancelProviderIntent?(
+    input: Readonly<{ scope: NativeSubmissionScope; expectedRevision: number }>,
   ): Promise<NativeProviderSelectionProjection>
   selectionSelect(
     input: Readonly<{
@@ -143,6 +150,7 @@ export class NativeProviderSelectionClient {
   private lifetimeGeneration = 0
   private operationSequence = 0
   private admission: number | undefined
+  private intentUnacknowledged = false
   private disposed = false
   private nextSend: NativeProviderSelectionProjection['nextSend']
   private nextSendActive = false
@@ -150,7 +158,7 @@ export class NativeProviderSelectionClient {
   private submittedEffort: ModelReasoningEffort | undefined
   private readonly unsynchronized = new Set<string>()
   // A failed acknowledgement keeps Send fenced, but is no longer an in-flight selector operation.
-  private readonly selectionOperations = new Set<{ readonly scope: NativeSubmissionScope }>()
+  private readonly selectionOperations = new Set<{ readonly scope: NativeSubmissionScope; readonly read?: true }>()
 
   constructor(
     private readonly channel: NativeProviderSelectionCommandChannel,
@@ -178,7 +186,8 @@ export class NativeProviderSelectionClient {
     generation = this.reserveDraftEdit(),
   ): boolean {
     if (
-      this.disposed || generation !== this.draftEditGeneration || this.submissionActive() || !this.projection.available
+      this.disposed || generation !== this.draftEditGeneration || this.submissionActive() || this.intentUnacknowledged
+      || this.projection.pendingProviderIntent !== undefined || !this.projection.available
     ) return false
     this.nextSend = Object.freeze({ ...target })
     this.emit()
@@ -203,15 +212,15 @@ export class NativeProviderSelectionClient {
     if (this.disposed) return
     const authority = this.authority()
     const scope = authority.scope
-    const operation = { scope }
+    const operation = { scope, read: true as const }
     const generation = ++this.projectionGeneration
     const synchronize = scope.threadId !== undefined && authority.idle && !this.submissionActive()
       && this.projection.pending === undefined
     if (synchronize) {
       this.unsynchronized.add(scope.threadId!)
-      this.selectionOperations.add(operation)
-      this.emit()
     }
+    this.selectionOperations.add(operation)
+    this.emit()
     try {
       const next = await this.channel.selectionRead({
         scope,
@@ -220,7 +229,7 @@ export class NativeProviderSelectionClient {
       if (this.projectionCurrent(scope, generation, next.revision)) {
         this.replace(next)
         if (!this.projectionCurrent(scope, generation, next.revision)) return
-        if (synchronize && next.effective && next.pending === undefined) {
+        if (synchronize && next.effective && next.pending === undefined && next.pendingProviderIntent === undefined) {
           try {
             await this.synchronizeEffective(next.effective)
           } catch {
@@ -234,8 +243,61 @@ export class NativeProviderSelectionClient {
       }
     } catch {
       if (this.projectionCurrent(scope, generation, this.projection.revision)) {
-        this.replace({ available: false, revision: this.projection.revision })
+        this.replace({ ...this.projection, available: false })
       }
+    } finally {
+      this.selectionOperations.delete(operation)
+      this.emit()
+    }
+  }
+
+  async selectProviderIntent(providerId: string): Promise<'accepted' | 'unavailable'> {
+    return this.changeProviderIntent(providerId)
+  }
+
+  async cancelProviderIntent(): Promise<'accepted' | 'unavailable'> {
+    return this.changeProviderIntent()
+  }
+
+  private async changeProviderIntent(providerId?: string): Promise<'accepted' | 'unavailable'> {
+    if (
+      this.disposed || this.submissionActive()
+      || [...this.selectionOperations].some(operation =>
+        !operation.read && sameScope(operation.scope, this.authority().scope)
+      )
+    ) return 'unavailable'
+    const call = providerId === undefined
+      ? this.channel.selectionCancelProviderIntent
+      : this.channel.selectionProviderIntent
+    if (!call) return 'unavailable'
+    const scope = this.authority().scope
+    const operation = { scope }
+    const generation = ++this.projectionGeneration
+    const expectedRevision = this.projection.revision
+    this.intentUnacknowledged = true
+    this.nextSend = undefined
+    this.draftEditGeneration++
+    this.confirmSubmission(false)
+    this.selectionOperations.add(operation)
+    this.emit()
+    try {
+      const next = providerId === undefined
+        ? await this.channel.selectionCancelProviderIntent!({ scope, expectedRevision })
+        : await this.channel.selectionProviderIntent!({ scope, providerId, expectedRevision })
+      if (!this.projectionCurrent(scope, generation, next.revision) || next.revision <= expectedRevision) {
+        return 'unavailable'
+      }
+      if (
+        providerId === undefined
+          ? next.pendingProviderIntent !== undefined
+          : next.pendingProviderIntent?.providerId !== providerId
+      ) return 'unavailable'
+      this.intentUnacknowledged = false
+      this.replace(next)
+      if (!next.available && this.authority().effective) void this.refresh()
+      return 'accepted'
+    } catch {
+      return 'unavailable'
     } finally {
       this.selectionOperations.delete(operation)
       this.emit()
@@ -249,15 +311,22 @@ export class NativeProviderSelectionClient {
     if (this.disposed || this.nextSendActive || this.selectionActive() || !this.projection.available) {
       return 'unavailable'
     }
+    if (this.projection.pendingProviderIntent) this.intentUnacknowledged = true
     this.confirmSubmission(false)
     const scope = this.authority().scope
     const operation = { scope }
+    const expectedRevision = this.projection.revision
     const generation = ++this.projectionGeneration
     this.selectionOperations.add(operation)
     this.emit()
     try {
-      const result = await this.channel.selectionSelect({ scope, ...target, ...options })
-      if (!this.projectionCurrent(scope, generation, result.revision)) return 'unavailable'
+      const result = await this.channel.selectionSelect({ scope, ...target, expectedRevision, ...options })
+      if (!this.projectionCurrent(scope, generation, result.revision) || result.revision <= expectedRevision) {
+        return 'unavailable'
+      }
+      const selected = result.pending ?? result.effective
+      if (selected.providerId !== target.providerId || selected.model !== target.model) return 'unavailable'
+      this.intentUnacknowledged = false
       this.replace({
         available: true,
         revision: result.revision,
@@ -294,6 +363,7 @@ export class NativeProviderSelectionClient {
   }
 
   invalidateScope(): void {
+    this.intentUnacknowledged = false
     this.nextSend = undefined
     this.draftEditGeneration++
     this.lifetimeGeneration++
@@ -304,7 +374,10 @@ export class NativeProviderSelectionClient {
   }
 
   readonly submitHook = async (descriptor: NativeSubmissionOrchestratorDescriptor): Promise<NativeSubmitHookResult> => {
-    if (this.nextSendActive) return { allow: false }
+    if (
+      this.nextSendActive || !this.projection.available || this.intentUnacknowledged
+      || this.projection.pendingProviderIntent !== undefined
+    ) return { allow: false }
     const draft = this.nextSend
     if (!draft) return this.submitCurrent(descriptor)
     const before = this.authority()
@@ -461,7 +534,9 @@ export class NativeProviderSelectionClient {
         const synchronizationChanged = action.intent === 'ordinary-send' && before.scope.threadId !== undefined
           && (this.unsynchronized.has(before.scope.threadId) || projectionGeneration !== this.projectionGeneration)
         if (synchronizationChanged) this.notice('submission-rejected')
-        return !synchronizationChanged && this.scopeCurrent(before.scope, lifetime)
+        return !synchronizationChanged && this.projection.available && !this.intentUnacknowledged
+            && this.projection.pendingProviderIntent === undefined && projectionGeneration === this.projectionGeneration
+            && this.scopeCurrent(before.scope, lifetime)
             && (this.projection.pending === undefined
               || this.projection.pending.sendOnly && action.intent !== 'ordinary-send')
           ? { allow: true }
@@ -614,7 +689,8 @@ export class NativeProviderSelectionClient {
     const live = this.authority()
     return pending !== undefined && this.scopeCurrent(scope, lifetime) && this.admission === sequence
       && live.idle && live.scope.threadId === action.threadId && action.intent === 'ordinary-send'
-      && this.projection.available && this.projection.revision === revision
+      && this.projection.available && !this.intentUnacknowledged && this.projection.pendingProviderIntent === undefined
+      && this.projection.revision === revision
       && samePending(this.projection.pending, pending)
   }
 

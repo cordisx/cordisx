@@ -30,12 +30,18 @@ import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { NativeModelSelectionSynchronizer } from './native-model-selection-synchronizer.js'
 import { applyNativeFastMode } from './native-model-fast-mode.js'
 import {
+  type EffectiveSelection,
+  errorMessage,
   NativeModelAssignments,
   nativeThreadBusy as threadBusy,
   nextSendSelectionFields,
   patchNativeSelection,
+  type PendingNativeRequest,
+  record,
+  sameValues,
   type SelectionPatch,
   type SelectionSnapshot,
+  string,
 } from './native-model-provider-state.js'
 
 type NativeHookGlobal = typeof globalThis & {
@@ -44,29 +50,6 @@ type NativeHookGlobal = typeof globalThis & {
   __cordisxNativeServiceTierOverride?: 'priority' | 'default'
 }
 
-interface PendingNativeRequest {
-  readonly method: 'thread/start' | 'thread/resume'
-  readonly navigationGeneration: number
-  readonly threadId?: string
-  readonly provider?: string
-  readonly model?: string
-}
-
-interface EffectiveSelection {
-  readonly providerId?: string
-  readonly model?: string
-}
-
-const record = (value: unknown): Record<string, unknown> | undefined => (
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-)
-const string = (value: unknown): string | undefined => (
-  typeof value === 'string' && value.length > 0 && value.length <= 1_000_000 ? value : undefined
-)
-const errorMessage = (error: unknown): string =>
-  error instanceof Error && error.message.trim() !== ''
-    ? error.message
-    : 'Native model provider selection failed'
 const CONTROL_DISCOVERY_RETRY_MS = 50
 const CONTROL_DISCOVERY_ATTEMPTS = 20
 const TURN_STATUS_RETRY_MS = 500
@@ -254,7 +237,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         commandChannel,
         catalogReasoning,
       )
-      await transport.refreshComposer()
+      void transport.refreshComposer()
       return transport
     } catch {
       return undefined
@@ -279,6 +262,18 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     return () => this.listeners.delete(listener)
   }
 
+  async selectProviderIntent(providerId: string): Promise<'accepted' | 'busy' | 'unavailable'> {
+    if (this.disposed || this.modelControl() === undefined) return 'unavailable'
+    if (this.selectionClient.submissionActive()) return 'busy'
+    return this.selectionClient.selectProviderIntent(providerId)
+  }
+
+  async cancelProviderIntent(): Promise<'accepted' | 'busy' | 'unavailable'> {
+    if (this.disposed) return 'unavailable'
+    if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
+    return this.selectionClient.cancelProviderIntent()
+  }
+
   async select(target: {
     readonly providerId: string
     readonly model: string
@@ -287,6 +282,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   > {
     if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
     if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
+    if (this.selectionClient.snapshot().pendingProviderIntent !== undefined) {
+      if (options !== undefined) return 'unavailable'
+      return this.selectionClient.select(target)
+    }
     if (options === undefined && (this.turnBusy || this.selectionClient.snapshot().nextSend !== undefined)) {
       const navigation = this.navigationGeneration
       const threadId = this.state.threadId
@@ -630,8 +629,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         serviceTier: serviceTier === 'priority' || serviceTier === 'fast' ? 'priority' : null,
       })
       await this.selectionClient.refresh()
+      if (!this.isRefreshCurrent(generation, threadId)) return
       const projection = this.selectionClient.snapshot()
       this.publishPatch({
+        available: projection.available,
         draftPreference: threadId === undefined && projection.draftPreference !== undefined
           ? { ...projection.draftPreference, revision: projection.revision }
           : null,
@@ -761,7 +762,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       && JSON.stringify(this.state.nativeModels) === JSON.stringify(projectedModels.nativeModels)
       && this.state.nativeModelsProviderId === projectedModels.nativeModelsProviderId
       && this.state.reasoningEffort === control.reasoningEffort
-      && this.sameValues(this.state.reasoningEfforts, reasoningEfforts)
+      && sameValues(this.state.reasoningEfforts, reasoningEfforts)
     ) return
     this.confirmNativeModelAssignment(
       this.state.modelProvider,
@@ -774,10 +775,6 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       reasoningEffort: control.reasoningEffort,
       reasoningEfforts,
     })
-  }
-
-  private sameValues(left: readonly string[] | undefined, right: readonly string[]): boolean {
-    return left !== undefined && left.length === right.length && left.every((value, index) => value === right[index])
   }
 
   // A later resume or accepted selection supersedes pending native readback for that thread.
