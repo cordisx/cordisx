@@ -1,3 +1,4 @@
+import { productionStartupReady } from './production-startup-ready.js'
 import { startupTerminalRequests } from '../launcher/startup-provider-admission.js'
 import { abortable } from '../launcher/cdp-session.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
@@ -772,11 +773,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
           signal: startupLifetime.signal,
-          onReady: async signal => {
-            await abortable(startupSession.adopted, signal)
-            await markCliProxyStartupConfigApplied()
+          onReady: productionStartupReady(startupSession, markCliProxyStartupConfigApplied, async signal => {
             await supervisorRuntime.markReady(debugPort, nativeSubmission?.installation.accountCapability, signal)
-          },
+          }),
           onHostLaunched: async (pid, inspectorUrl) =>
             await supervisorRuntime.markHostLaunched(pid, inspectorUrl, debugPort),
           mainInspector: supervisorRuntime.mainInspector,
@@ -936,11 +935,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
         signal: startupLifetime.signal,
-        onReady: async signal => {
-          await abortable(startupSession.adopted, signal)
-          await markCliProxyStartupConfigApplied()
+        onReady: productionStartupReady(startupSession, markCliProxyStartupConfigApplied, async signal => {
           await supervisorRuntime.markReady(resolvedDebugPort, nativeSubmission?.installation.accountCapability, signal)
-        },
+        }),
         onHostLaunched: async (pid, inspectorUrl) =>
           await supervisorRuntime.markHostLaunched(pid, inspectorUrl, resolvedDebugPort),
         mainInspector: supervisorRuntime.mainInspector,
