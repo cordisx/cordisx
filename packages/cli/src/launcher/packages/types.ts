@@ -1,3 +1,4 @@
+import type { StartupDeclarationV1 } from '@cordisx/protocol/startup/v1'
 import type { EntityTemplateDeclaration } from '@cordisx/protocol/entities/v1'
 import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginActivationRecordV1, CordisXPluginDependencyV1 } from '../../plugin-lifecycle-contracts.js'
@@ -74,8 +75,9 @@ export interface HostPlatformProviderServiceDeclaration {
 }
 
 export interface HostResolvedRuntimeManifest {
+  readonly startup?: StartupDeclarationV1
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]

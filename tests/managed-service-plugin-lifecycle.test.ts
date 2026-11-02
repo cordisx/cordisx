@@ -341,3 +341,45 @@ describe('managed service plugin lifecycle participant', () => {
     expect(old.dispose).toHaveBeenCalledOnce()
   })
 })
+
+it('returns an observed v15 session and owner capability while base adoption is pending', async () => {
+  let finish!: () => void
+  const adopting = new Promise<void>(resolve => {
+    finish = resolve
+  })
+  const first = activation(1, 'one')
+  const runtime = new ManagedServicePluginLifecycleRuntime({
+    runtime: new BaseRuntime(),
+    profileId: 'work',
+    runtimeGeneration: 'runtime-1',
+    readStartupAdmissions: async () => [{
+      pluginId: 'aiden',
+      pluginGeneration: 'one',
+      source: 'https://example.test/plugin',
+      sourceRevision: `sha256:${'1'.repeat(64)}`,
+      services: [],
+      dependencies: [],
+      startup: { contract: 'cordisx.startup-declaration/v1', capabilities: [], pages: [] },
+    }],
+    activate: async () => {
+      await adopting
+      return undefined
+    },
+  })
+  const session = await runtime.initialize(first)
+  expect(session.authority).toBe(runtime.nativeActivation().startup)
+  expect(session.observer).toBe(runtime.nativeActivation().startupObserver)
+  expect((await session.observer.read()).entries).toEqual([])
+  const capability = runtime.capabilities()[0]!
+  expect(capability).toMatchObject({ pluginId: 'aiden', pluginGeneration: 'one', startup: true })
+  const settled = vi.fn()
+  void session.adopted.then(settled)
+  await Promise.resolve()
+  expect(settled).not.toHaveBeenCalled()
+  const host = runtime.hostStartupCapability()
+  expect(host.token).not.toBe(capability.token)
+  finish()
+  await session.adopted
+  expect(runtime.capabilities()[0]!.token).toBe(capability.token)
+  await runtime.dispose()
+})

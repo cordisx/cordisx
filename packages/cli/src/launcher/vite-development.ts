@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import { nativeViteBootModuleSource, nativeViteEntryModuleSource } from './vite-development-bootstrap.js'
 export { nativeViteBootModuleSource, nativeViteEntryModuleSource } from './vite-development-bootstrap.js'
 import { nativeViteManifestLoaderSource } from './vite-manifest-loader.js'
@@ -107,6 +108,7 @@ interface DevelopmentGeneration {
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
@@ -604,7 +606,7 @@ export async function startNativeViteServer(
         ? undefined
         : [...generations.values()].find(item => item.realEntry === realFile)
       if (
-        generation?.manifest?.schemaVersion === 14
+        (generation?.manifest?.schemaVersion === 14 || generation?.manifest?.schemaVersion === 15)
         && code.includes('CORDISX_PLUGIN_RUNTIME_MANIFEST')
       ) {
         const transformed = await transformWithEsbuild(code, {

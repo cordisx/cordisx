@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { StartupEventV1, StartupMilestoneReportV1 } from '@cordisx/protocol/startup/v1'
 import type { ManagedServiceProjectionV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { describe, expect, it } from 'vitest'
@@ -79,6 +80,44 @@ function setup() {
 }
 
 describe('startup authority', () => {
+  it('fences retry reporters independently of unchanged generations and monotonic report sequences', async () => {
+    const { authority, observer } = setup()
+    authority.bindService(owner)
+    authority.adopt(owner)
+    authority.updateService(owner, service(), false)
+    const old = authority.beginAttempt(owner, ref.capabilityId, new AbortController().signal)
+    const empty = {
+      state: 'known' as const,
+      generation: 'empty',
+      modelIds: [],
+      digest: `sha256:${createHash('sha256').update(JSON.stringify(['empty', []])).digest('hex')}` as const,
+    }
+    const catalog = {
+      contract: 'cordisx.startup-catalog-report/v1' as const,
+      target: ref,
+      generation: report().generation,
+      sequence: 1,
+      catalog: empty,
+    }
+    expect(await old.reporter.reportCatalog(catalog)).toEqual({ status: 'accepted' })
+    old.finish()
+    expect(await authority.wait(ref)).toEqual({ available: false, reason: 'catalog-empty' })
+    expect((await observer.read()).entries[0]).toMatchObject({
+      state: 'failed',
+      service: 'ready',
+      process: 'running',
+      health: 'ready',
+    })
+    const next = authority.beginAttempt(owner, ref.capabilityId, new AbortController().signal)
+    expect(await old.reporter.report(report(99))).toMatchObject({ status: 'rejected', reason: 'revoked' })
+    old.finish()
+    expect(await next.reporter.reportCatalog(catalog)).toMatchObject({ reason: 'stale-sequence' })
+    expect(await next.reporter.reportCatalog({ ...catalog, sequence: 2, catalog: { ...empty, digest: 'sha256:bad' } }))
+      .toMatchObject({ reason: 'invalid-catalog' })
+    expect(await next.reporter.reportCatalog({ ...catalog, sequence: 2 })).toMatchObject({ status: 'accepted' })
+    authority.dispose()
+  })
+
   it('exposes declared identity before execution registration, with no private binding data', async () => {
     const { authority, observer } = setup()
     const snapshot = await observer.read()
@@ -104,7 +143,20 @@ describe('startup authority', () => {
     authority.adopt(owner)
     expect(authority.acceptsPublication(owner, 'provider', 'api')).toBe(true)
     expect(authority.acceptsPublication(owner, 'other', 'api')).toBe(false)
+    await reporter.reportCatalog({
+      contract: 'cordisx.startup-catalog-report/v1',
+      target: ref,
+      generation: report().generation,
+      sequence: 1,
+      catalog: {
+        state: 'known',
+        generation: 'catalog-one',
+        modelIds: ['model'],
+        digest: `sha256:${createHash('sha256').update(JSON.stringify(['catalog-one', ['model']])).digest('hex')}`,
+      },
+    })
     authority.publication(owner, 'provider', { state: 'known', generation: 'catalog-one', modelIds: ['model'] })
+    authority.settled(owner)
     expect(authority.availability(ref)).toMatchObject({ available: false, reason: 'milestone-pending' })
     expect(await reporter.report(report())).toEqual({ status: 'accepted' })
     expect(authority.availability(ref)).toEqual({ available: true })

@@ -49,5 +49,18 @@ export async function managedBackendRuntimeServiceAccess(
     artifactDirectory: path.dirname(path.dirname(servicePath)),
     runtimeEntry: `./services/${serviceId}.mjs`,
     runtimeResources,
+    ...(!('startup' in staged.manifest.runtimeManifest) ? {} : {
+      startup: {
+        pluginId: item.id,
+        pluginGeneration: item.moduleGeneration,
+        source: staged.identitySource,
+        sourceRevision: item.digest,
+        startup: staged.manifest.runtimeManifest.startup,
+        dependencies: staged.manifest.dependencies.map(dependency => dependency.id),
+        services: staged.serviceModules.flatMap(module =>
+          module.declaration.kind === 'managed-backend' ? [module.declaration] : []
+        ),
+      },
+    }),
   }
 }

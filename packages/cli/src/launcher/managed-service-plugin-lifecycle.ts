@@ -1,3 +1,11 @@
+import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
+import { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
+import type { StartupPluginAdmission } from './managed-service-startup-admission.js'
+import {
+  type ManagedServiceStartupSession,
+  readStartupAdmissions,
+  startupRecordOwners,
+} from './managed-service-startup-lifecycle.js'
 import { randomBytes } from 'node:crypto'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type {
@@ -30,12 +38,14 @@ interface ManagedServiceOwnerRoute {
   readonly key: string
   readonly token: string
   readonly owner: ManagedServiceUIOwner
+  readonly startup?: true
   readonly handler: ManagedServiceUIBridgeHandler
 }
 
 interface ManagedServiceFleet {
   readonly leases: readonly ManagedServiceFleetLease[]
   readonly activation: ManagedServiceNodeActivation | undefined
+  readonly record?: CordisXPluginActivationRecordV1
   readonly routes: ReadonlyMap<string, ManagedServiceOwnerRoute>
 }
 
@@ -50,9 +60,14 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly runtime: PluginLifecycleRuntime
   readonly profileId: string
   readonly runtimeGeneration: string
+  readonly homeDir?: string
+  readonly readStartupAdmissions?: (
+    record: CordisXPluginActivationRecordV1,
+  ) => Promise<readonly StartupPluginAdmission[]>
   readonly activate: (
     activation: CordisXPluginActivationRecordV1,
     options: {
+      readonly startupAuthority?: ManagedServiceStartupAuthority
       readonly isolateStartupFailures: boolean
       readonly pluginIds: readonly string[]
       readonly reservedLoopbackPorts?: readonly number[]
@@ -65,6 +80,8 @@ export interface ManagedServicePluginLifecycleOptions {
 export interface ManagedServiceNativeActivation
   extends Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
 {
+  readonly startup: ManagedServiceStartupAuthority
+  readonly startupObserver: StartupObserverV1
   readonly revision: number
   subscribeNativeProviders(listener: () => void): () => void
 }
@@ -89,31 +106,94 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private nativeRevision = 0
   private mutation: Promise<unknown> = Promise.resolve()
   private disposed = false
+  readonly startup: ManagedServiceStartupAuthority
+  readonly startupObserver: StartupObserverV1
+  private initialized = false
 
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
     this.runtime = options.runtime
+    this.startup = new ManagedServiceStartupAuthority({
+      profileId: options.profileId,
+      hostGeneration: options.runtimeGeneration,
+    })
+    this.startupObserver = this.startup.observer({ scopeId: 'host-providers', authorize: () => true })
     this.createToken = options.createToken ?? (() => randomBytes(32).toString('hex'))
   }
 
-  async initialize(activation: CordisXPluginActivationRecordV1): Promise<void> {
-    return await this.enqueue(() => this.initializeNow(activation))
+  async initialize(activation: CordisXPluginActivationRecordV1): Promise<ManagedServiceStartupSession> {
+    if (this.initialized || this.disposed) throw new Error('managed service lifecycle already initialized or disposed')
+    this.initialized = true
+    const admissions = await this.resolveAdmissions(activation)
+    this.startup.admit(admissions)
+    this.startup.selectOwners(startupRecordOwners(activation))
+    if (admissions.length > 0) {
+      const routes = new Map<string, ManagedServiceOwnerRoute>()
+      for (const admission of admissions) {
+        const owner = { pluginId: admission.pluginId, pluginGeneration: admission.pluginGeneration }
+        const key = ownerKey(owner)
+        const token = this.uniqueToken()
+        const observer = this.startup.observer({
+          scopeId: `plugin:${owner.pluginId}:${owner.pluginGeneration}`,
+          owner,
+          authorize: ref => ref.pluginId === owner.pluginId,
+        })
+        const handlerOptions = {
+          token,
+          profileId: this.options.profileId,
+          generation: this.options.runtimeGeneration,
+          services: [],
+          declaredServices: admission.services.map(service => ({ ...owner, serviceId: service.id })),
+          startupObservers: [{ ...owner, observer }],
+        }
+        const route = {
+          key,
+          token,
+          owner,
+          handler: createManagedServiceUIBridgeHandler(handlerOptions),
+          startup: true as const,
+        }
+        routes.set(key, route)
+        this.routesByToken.set(token, route)
+      }
+      this.setActive({ record: activation, leases: [], activation: undefined, routes })
+    }
+    // Queue adoption, but return the stable observation authority before it settles.
+    const adopted = this.enqueue(async () => {
+      const provisional = this.active
+      const fleet = await this.createFleet(activation)
+      if (provisional !== undefined) {
+        for (const route of provisional.routes.values()) {
+          if (!fleet.routes.has(route.key)) await route.handler.dispose()
+        }
+      }
+      this.setActive(fleet)
+      for (const route of fleet.routes.values()) this.routesByToken.set(route.token, route)
+    })
+    void adopted.catch(() => undefined)
+    if (admissions.length === 0) await adopted // Preserve legacy blocking callers.
+    return { authority: this.startup, adopted, observer: this.startupObserver }
   }
 
-  private async initializeNow(activation: CordisXPluginActivationRecordV1): Promise<void> {
-    if (this.active !== undefined) throw new Error('managed service lifecycle is already initialized')
-    const fleet = await this.createFleet(activation)
-    this.setActive(fleet)
-    for (const route of fleet.routes.values()) this.routesByToken.set(route.token, route)
+  private async resolveAdmissions(record: CordisXPluginActivationRecordV1): Promise<readonly StartupPluginAdmission[]> {
+    return this.options.readStartupAdmissions?.(record)
+      ?? (this.options.homeDir === undefined ? [] : await readStartupAdmissions(this.options.homeDir, record))
   }
 
   capabilities(): readonly ManagedServiceUICapabilityMutation[] {
     return Object.freeze([...this.requireActive().routes.values()].map(route =>
       Object.freeze({
         ...route.owner,
+        ...(route.startup === true ? { startup: true } : {}),
         token: route.token,
       })
     ))
   }
+
+  /** Host bootstrap passes this only to B's dedicated Host transport, never plugin metadata. */
+  hostStartupCapability(): { readonly token: string; readonly observer: StartupObserverV1 } {
+    return this.hostStartupInput ??= { token: this.uniqueToken(), observer: this.startupObserver }
+  }
+  private hostStartupInput: { readonly token: string; readonly observer: StartupObserverV1 } | undefined
 
   readonly managedServiceUI = {
     handleBindingValue: async (value: string): Promise<Record<string, unknown>> => await this.handleBindingValue(value),
@@ -122,11 +202,13 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   nativeActivation(): ManagedServiceNativeActivation {
     const owner = this
     return Object.freeze({
+      startup: owner.startup,
+      startupObserver: owner.startupObserver,
       get revision(): number {
         return owner.nativeRevision
       },
       get nativeProviderIds(): readonly string[] {
-        return owner.requireActive().activation?.nativeProviderIds ?? []
+        return owner.active?.activation?.nativeProviderIds ?? []
       },
       prepareNativeConnection(providerId: string) {
         const activation = owner.requireActive().activation
@@ -168,7 +250,9 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       return { activation: undefined, leases: [], routes: new Map() }
     })
     const newCapabilities = [...candidate.routes.values()].flatMap(route =>
-      previous.routes.has(route.key) ? [] : [{ ...route.owner, token: route.token }]
+      previous.routes.has(route.key)
+        ? []
+        : [{ ...route.owner, token: route.token, ...(route.startup === true ? { startup: true } : {}) }]
     )
     const transaction: ManagedServiceTransaction = {
       previous,
@@ -312,12 +396,15 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     await Promise.allSettled([...groups].map(async group => await group.dispose()))
     this.changedNativeProviders()
     this.nativeProviderListeners.clear()
+    this.startup.dispose()
   }
 
   private async createFleet(
     record: CordisXPluginActivationRecordV1,
     previous?: ManagedServiceFleet,
   ): Promise<ManagedServiceFleet> {
+    const admissions = await this.resolveAdmissions(record)
+    this.startup.admit(admissions)
     const retained = previous?.leases.filter(lease => unchangedManagedServiceLease(lease, record)) ?? []
     for (const lease of previous?.leases ?? []) {
       if (retained.includes(lease)) continue
@@ -331,6 +418,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       plugins: record.plugins.filter(plugin => plugin.enabled && !retainedIds.has(plugin.id)),
     }
     const activated = changed.plugins.length === 0 ? undefined : await this.options.activate(record, {
+      startupAuthority: this.startup,
       pluginIds: changed.plugins.map(plugin => plugin.id),
       isolateStartupFailures: previous === undefined,
       ...(previous === undefined ? {} : {
@@ -341,36 +429,68 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     const created = managedServiceLeases(activated, changed)
     const leases = [...retained, ...created]
     const activation = managedServiceFleetActivation(leases)
-    if (activation === undefined) return { activation: undefined, leases, routes: new Map() }
+    if (activation === undefined && admissions.length === 0) {
+      return { record, activation: undefined, leases, routes: new Map() }
+    }
     const routes = new Map<string, ManagedServiceOwnerRoute>()
-    const readNativeProviders = nativeModelProviderCatalog(activation)
-    const sourcesByOwner = new Map<string, typeof activation.sources>()
-    for (const source of activation.sources) {
+    const readNativeProviders = activation === undefined ? async () => [] : nativeModelProviderCatalog(activation)
+    const sourcesByOwner = new Map<string, ManagedServiceNodeActivation['sources']>()
+    for (const source of activation?.sources ?? []) {
       const owner = { pluginId: source.pluginId, pluginGeneration: source.pluginGeneration }
       const key = ownerKey(owner)
       const sources = sourcesByOwner.get(key) ?? []
       sourcesByOwner.set(key, [...sources, source])
     }
+    for (const admission of admissions) {
+      const key = ownerKey(admission)
+      if (!sourcesByOwner.has(key)) sourcesByOwner.set(key, [])
+    }
     try {
       for (const [key, sources] of sourcesByOwner) {
-        const owner = { pluginId: sources[0]!.pluginId, pluginGeneration: sources[0]!.pluginGeneration }
+        const declaration = admissions.find(admission => ownerKey(admission) === key)
+        const owner = declaration === undefined
+          ? { pluginId: sources[0]!.pluginId, pluginGeneration: sources[0]!.pluginGeneration }
+          : { pluginId: declaration.pluginId, pluginGeneration: declaration.pluginGeneration }
+        const observer = declaration === undefined
+          ? undefined
+          : this.startup.observer({
+            scopeId: `plugin:${owner.pluginId}:${owner.pluginGeneration}`,
+            owner,
+            authorize: ref => ref.pluginId === owner.pluginId,
+          })
         const existing = previous?.routes.get(key)
         if (existing !== undefined && retainedIds.has(owner.pluginId)) {
           routes.set(key, existing)
           continue
         }
-        const token = this.uniqueToken()
-        const handler = createManagedServiceUIBridgeHandler({
+        const early = previous === undefined
+          ? [...this.routesByToken.values()].find(route => route.key === key)
+          : undefined
+        const token = early?.token ?? this.uniqueToken()
+        const handlerOptions = {
           token,
           profileId: this.options.profileId,
           generation: this.options.runtimeGeneration,
           readNativeProviders,
           services: sources,
-        })
-        routes.set(key, { key, token, owner, handler })
+          ...(observer === undefined ? {} : { startupObservers: [{ ...owner, observer }] }),
+        }
+        const executionHandler = createManagedServiceUIBridgeHandler(handlerOptions)
+        const handler: ManagedServiceUIBridgeHandler = early === undefined ? executionHandler : {
+          ...executionHandler,
+          handle: (owner, request) =>
+            String(request.operation).startsWith('startup')
+              ? early.handler.handle(owner, request)
+              : executionHandler.handle(owner, request),
+          dispose: async () => {
+            await early.handler.dispose()
+            await executionHandler.dispose()
+          },
+        }
+        routes.set(key, { key, token, owner, handler, ...(observer === undefined ? {} : { startup: true }) })
       }
-      void activation.nativeProviderIds // Reject cross-component provider collisions before publication.
-      return { activation, leases, routes }
+      void activation?.nativeProviderIds // Reject cross-component provider collisions before publication.
+      return { record, activation, leases, routes }
     } catch (error) {
       await Promise.allSettled(
         [...routes.values()].filter(route => previous?.routes.get(route.key) !== route)
@@ -464,6 +584,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.stopNativeProviders?.()
     this.stopNativeProviders = undefined
     this.active = fleet
+    if (fleet?.record !== undefined) this.startup.selectOwners(startupRecordOwners(fleet.record))
     // Subscribe before readers can take their next snapshot. Retained components
     // are observed through the new fleet only; late callbacks from old bindings
     // cannot advance the active revision.

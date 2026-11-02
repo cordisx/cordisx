@@ -3,7 +3,10 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13,
 } from '../../runtime-exact-request-permissions.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14 } from '../latest-runtime-manifest.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15,
+} from '../latest-runtime-manifest.js'
 export { PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11 }
 export const PLUGIN_PACKAGE_SCHEMA_V11 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v11.schema.json'
@@ -11,6 +14,8 @@ export const PLUGIN_PACKAGE_SCHEMA_V12 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v12.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V13 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v13.schema.json'
+export const PLUGIN_PACKAGE_SCHEMA_V15 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v15.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V14 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v14.schema.json'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10 } from '../../extension-point-interaction-permissions.js'
@@ -73,6 +78,7 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15,
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -249,11 +255,13 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       ? 13
       : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 && manifest.schemaVersion === 14
       ? 14
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15
+      ? 15
       : undefined
     if (packageVersion === undefined) {
       throw new PackageLifecycleError(
         'invalid-package-manifest',
-        'package manifest must use plugin-package.v2 through plugin-package.v14',
+        'package manifest must use plugin-package.v2 through plugin-package.v15',
       )
     }
     const pluginId = string(manifest.id, 'package manifest id')
@@ -302,20 +310,23 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       || (packageVersion < 6 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6)
       || (packageVersion < 7 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)
       || (packageVersion !== 8 && packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12
-        && packageVersion !== 13 && packageVersion !== 14
+        && packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
       || (packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
-        && packageVersion !== 14
+        && packageVersion !== 14 && packageVersion !== 15
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9)
       || (packageVersion !== 10 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
-        && packageVersion !== 14
+        && packageVersion !== 14 && packageVersion !== 15
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10)
       || (packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13 && packageVersion !== 14
+        && packageVersion !== 15
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11)
-      || (packageVersion !== 12 && packageVersion !== 13 && packageVersion !== 14
+      || (packageVersion !== 12 && packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12)
-      || (packageVersion !== 13 && packageVersion !== 14 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13)
-      || (packageVersion !== 14 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14)
+      || (packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13)
+      || (packageVersion !== 14 && packageVersion !== 15 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14)
+      || (packageVersion !== 15 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15)
       || (packageVersion >= 11 && (
         runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6
         || runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7

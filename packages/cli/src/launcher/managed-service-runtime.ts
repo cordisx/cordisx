@@ -131,9 +131,10 @@ export class ManagedServiceRuntime {
     return createManagedServiceActivationBinding({
       access,
       signal,
-      register: (nextAccess, serviceGeneration, definition, revision) =>
+      register: (nextAccess, serviceGeneration, definition, revision, registrationSignal) =>
         registerManagedService({
           access: nextAccess,
+          signal: registrationSignal,
           serviceGeneration,
           definition,
           revision,
@@ -188,6 +189,19 @@ export class ManagedServiceRuntime {
 
   prepareNativeConnection(request: NativeManagedGatewayConnectionRequest): NativeManagedGatewayConnectionSession {
     return this.native.prepareNativeConnection(request)
+  }
+
+  nativePublication(providerId: string) {
+    return this.native.publications.inspect(providerId)
+  }
+
+  refreshNativeProviders(): void {
+    this.native.publications.refresh()
+  }
+
+  revokeNativeProvider(identity: ManagedServiceIdentityV1, providerId: string): void {
+    const record = this.records.get(managedIdentityKey(identity))
+    if (record !== undefined) this.native.publications.revokeProvider(record, providerId)
   }
 
   listNativeProviderIds(pluginIds?: readonly string[]): readonly string[] {

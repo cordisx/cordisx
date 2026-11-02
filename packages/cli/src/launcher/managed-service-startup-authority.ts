@@ -1,6 +1,7 @@
 import type {
   StartupActionAvailabilityV1,
   StartupCapabilityRefV1,
+  StartupCatalogReportV1,
   StartupCatalogV1,
   StartupMilestoneReportV1,
   StartupModeV1,
@@ -9,6 +10,7 @@ import type {
   StartupReporterV1,
 } from '@cordisx/protocol/startup/v1'
 import type { ManagedServiceProjectionV1 } from '@cordisx/protocol/managed-service-runtime/v1'
+import { validateStartupCatalog } from './managed-service-startup-catalog.js'
 import { createStartupObserverSource } from './managed-service-startup-observer.js'
 import {
   projectStartupCapability,
@@ -30,8 +32,10 @@ export interface StartupServiceOwner {
 }
 interface Entry extends Omit<StartupCapabilityEvidence, 'milestones'> {
   bindingGeneration?: string
+  catalogSequence: number
+  attempt?: object
   readonly admission: StartupPluginAdmission
-  milestones: Map<string, { sequence: number; state: 'satisfied' | 'failed' }>
+  milestones: Map<string, { sequence: number; state: 'pending' | 'satisfied' | 'failed' }>
 }
 const ownerKey = (pluginId: string, generation: string) => `${pluginId}\u0000${generation}`
 const entryKey = (ref: StartupCapabilityRefV1, generation: string) =>
@@ -72,6 +76,7 @@ export class ManagedServiceStartupAuthority {
         this.entries.set(
           entryKey({ pluginId: plugin.pluginId, capabilityId: declaration.id }, plugin.pluginGeneration),
           {
+            catalogSequence: 0,
             admission: plugin,
             pluginId: plugin.pluginId,
             pluginGeneration: plugin.pluginGeneration,
@@ -79,6 +84,7 @@ export class ManagedServiceStartupAuthority {
             declaration,
             adopted: false,
             preparing: false,
+            prepared: false,
             failed: false,
             revoked: false,
             canAuthenticate: false,
@@ -116,13 +122,63 @@ export class ManagedServiceStartupAuthority {
     )
   }
 
-  bindService(owner: StartupServiceOwner): StartupReporterV1 {
+  bindService(owner: StartupServiceOwner, capabilityId?: string): StartupReporterV1 {
     for (const entry of this.ownerEntries(owner)) {
       if (entry.revoked) throw new Error('startup owner is revoked')
       Object.assign(entry, { bindingGeneration: owner.serviceGeneration, serviceGeneration: owner.serviceGeneration })
     }
     this.changed()
-    return Object.freeze({ report: async (report: StartupMilestoneReportV1) => this.report(owner, report) })
+    return this.reporter(owner, capabilityId)
+  }
+
+  private reporter(
+    owner: StartupServiceOwner,
+    capabilityId?: string,
+    current: () => boolean = () => true,
+  ): StartupReporterV1 {
+    return Object.freeze({
+      report: async (report: StartupMilestoneReportV1) =>
+        !current()
+          ? { status: 'rejected' as const, reason: 'revoked' as const }
+          : capabilityId !== undefined && report.target.capabilityId !== capabilityId
+          ? { status: 'rejected' as const, reason: 'not-owner' as const }
+          : this.report(owner, report),
+      reportCatalog: async (report: StartupCatalogReportV1) =>
+        !current()
+          ? { status: 'rejected' as const, reason: 'revoked' as const }
+          : capabilityId !== undefined && report.target.capabilityId !== capabilityId
+          ? { status: 'rejected' as const, reason: 'not-owner' as const }
+          : this.reportCatalog(owner, report),
+    })
+  }
+
+  beginAttempt(owner: StartupServiceOwner, capabilityId: string, signal: AbortSignal) {
+    const entry = this.entries.get(entryKey({ pluginId: owner.pluginId, capabilityId }, owner.pluginGeneration))
+    if (entry === undefined || entry.revoked || entry.bindingGeneration !== owner.serviceGeneration) {
+      throw new Error('startup preparation owner is unavailable')
+    }
+    const attempt = {}
+    for (const [id, prior] of entry.milestones) entry.milestones.set(id, { ...prior, state: 'pending' })
+    Object.assign(entry, {
+      attempt,
+      preparing: true,
+      prepared: false,
+      failed: false,
+      published: false,
+      catalog: { state: entry.declaration.kind === 'provider' ? 'pending' : 'not-applicable' },
+    })
+    const current = () =>
+      !signal.aborted && !this.disposed && !entry.revoked && entry.attempt === attempt
+      && entry.serviceGeneration === owner.serviceGeneration
+    this.changed()
+    return {
+      reporter: this.reporter(owner, capabilityId, current),
+      finish: (failed = false) => {
+        if (!current()) return
+        Object.assign(entry, { preparing: false, prepared: !failed, failed })
+        this.changed()
+      },
+    }
   }
 
   updateService(owner: StartupServiceOwner, service: ManagedServiceProjectionV1, canAuthenticate: boolean): void {
@@ -133,7 +189,18 @@ export class ManagedServiceStartupAuthority {
         || service.binding.hostGeneration !== this.options.hostGeneration
       ) continue
       // Registration lifetime stays stable while restart rotates execution binding.
-      if (entry.service?.binding.serviceGeneration !== service.binding.serviceGeneration) entry.milestones.clear()
+      if (
+        entry.service !== undefined && entry.service.binding.serviceGeneration !== service.binding.serviceGeneration
+      ) {
+        entry.milestones.clear()
+        Object.assign(entry, {
+          attempt: undefined,
+          prepared: false,
+          published: false,
+          catalogSequence: 0,
+          catalog: { state: entry.declaration.kind === 'provider' ? 'unknown' : 'not-applicable' },
+        })
+      }
       Object.assign(entry, {
         service: structuredClone(service),
         canAuthenticate,
@@ -146,11 +213,11 @@ export class ManagedServiceStartupAuthority {
   adopt(owner: StartupServiceOwner): void {
     this.patchOwner(owner, { adopted: true })
   }
-  preparing(owner: StartupServiceOwner): void {
-    this.patchOwner(owner, { preparing: true, failed: false })
+  preparing(owner: StartupServiceOwner, capabilityId?: string): void {
+    this.patchOwner(owner, { preparing: true, failed: false }, capabilityId)
   }
-  settled(owner: StartupServiceOwner, failed = false): void {
-    this.patchOwner(owner, { preparing: false, failed })
+  settled(owner: StartupServiceOwner, failed = false, capabilityId?: string): void {
+    this.patchOwner(owner, { preparing: false, prepared: !failed, failed }, capabilityId)
   }
   revoke(owner: StartupServiceOwner): void {
     this.patchOwner(owner, { revoked: true, published: false })
@@ -162,22 +229,40 @@ export class ManagedServiceStartupAuthority {
         entry.revoked || entry.bindingGeneration !== owner.serviceGeneration || entry.declaration.kind !== 'provider'
         || entry.declaration.providerId !== providerId
       ) continue
-      Object.assign(entry, { published: catalog !== undefined, ...(catalog === undefined ? {} : { catalog }) })
+      if (catalog === undefined) Object.assign(entry, { published: false })
+      else if (
+        entry.catalog.state === 'known' && catalog.state === 'known'
+        && entry.catalog.generation === catalog.generation && entry.catalog.modelIds.length === catalog.modelIds.length
+        && entry.catalog.modelIds.every(id => catalog.modelIds.includes(id))
+      ) Object.assign(entry, { published: true })
     }
     this.changed()
   }
 
-  acceptsPublication(owner: StartupServiceOwner, providerId: string, compositionOrigin: string): boolean {
+  acceptsPublication(
+    owner: StartupServiceOwner,
+    providerId: string,
+    compositionOrigin: string,
+    catalog?: { readonly generation: string; readonly routes: readonly { readonly alias: string }[] },
+  ): boolean {
     return this.ownerEntries(owner).some(entry =>
       !entry.revoked && entry.adopted
       && entry.bindingGeneration === owner.serviceGeneration && entry.declaration.kind === 'provider'
       && entry.declaration.providerId === providerId && entry.declaration.compositionOrigin === compositionOrigin
+      && entry.serviceGeneration === owner.serviceGeneration
+      && (catalog === undefined || (entry.catalog.state === 'known' && entry.catalog.generation === catalog.generation
+        && entry.catalog.modelIds.length === catalog.routes.length && catalog.routes.every(route =>
+          entry.catalog.state === 'known' && entry.catalog.modelIds.includes(route.alias)
+        )))
     )
   }
 
-  private patchOwner(owner: StartupServiceOwner, patch: Partial<Entry>): void {
+  private patchOwner(owner: StartupServiceOwner, patch: Partial<Entry>, capabilityId?: string): void {
     for (const entry of this.ownerEntries(owner)) {
-      if (!entry.revoked && entry.bindingGeneration === owner.serviceGeneration) Object.assign(entry, patch)
+      if (
+        !entry.revoked && entry.bindingGeneration === owner.serviceGeneration
+        && (capabilityId === undefined || entry.declaration.id === capabilityId)
+      ) Object.assign(entry, patch)
     }
     this.changed()
   }
@@ -199,6 +284,9 @@ export class ManagedServiceStartupAuthority {
       report.generation.host !== this.options.hostGeneration || report.generation.plugin !== owner.pluginGeneration
       || report.generation.service !== entry.serviceGeneration || owner.serviceGeneration !== entry.bindingGeneration
     ) return reject('stale-generation')
+    if (
+      report.contract !== 'cordisx.startup-milestone/v1' || (report.state !== 'satisfied' && report.state !== 'failed')
+    ) return reject('undeclared')
     const previous = entry.milestones.get(report.milestoneId)
     if (!Number.isSafeInteger(report.sequence) || report.sequence <= (previous?.sequence ?? 0)) {
       return reject('stale-sequence')
@@ -206,6 +294,53 @@ export class ManagedServiceStartupAuthority {
     entry.milestones.set(report.milestoneId, { sequence: report.sequence, state: report.state })
     this.changed()
     return { status: 'accepted' }
+  }
+
+  private reportCatalog(
+    owner: StartupServiceOwner,
+    report: StartupCatalogReportV1,
+  ): Awaited<ReturnType<StartupReporterV1['reportCatalog']>> {
+    const reject = (
+      reason: Extract<Awaited<ReturnType<StartupReporterV1['reportCatalog']>>, { status: 'rejected' }>['reason'],
+    ) => ({ status: 'rejected' as const, reason })
+    if (this.disposed) return reject('revoked')
+    if (report.target.pluginId !== owner.pluginId) return reject('not-owner')
+    const entry = this.entries.get(entryKey(report.target, owner.pluginGeneration))
+    if (entry === undefined) return reject('undeclared')
+    if (entry.declaration.serviceId !== owner.serviceId) return reject('not-owner')
+    if (entry.revoked) return reject('revoked')
+    if (
+      report.generation.host !== this.options.hostGeneration || report.generation.plugin !== owner.pluginGeneration
+      || report.generation.service !== entry.serviceGeneration || owner.serviceGeneration !== entry.bindingGeneration
+    ) return reject('stale-generation')
+    if (entry.declaration.kind !== 'provider') return reject('not-provider')
+    if (report.contract !== 'cordisx.startup-catalog-report/v1' || !validateStartupCatalog(report.catalog)) {
+      return reject('invalid-catalog')
+    }
+    if (!Number.isSafeInteger(report.sequence) || report.sequence <= entry.catalogSequence) {
+      return reject('stale-sequence')
+    }
+    const catalog: StartupCatalogV1 = report.catalog.state === 'known'
+      ? { state: 'known', generation: report.catalog.generation, modelIds: [...report.catalog.modelIds] }
+      : { state: report.catalog.state }
+    const same = entry.catalog.state === 'known' && catalog.state === 'known'
+      && entry.catalog.generation === catalog.generation && entry.catalog.modelIds.length === catalog.modelIds.length
+      && entry.catalog.modelIds.every(id => catalog.modelIds.includes(id))
+    Object.assign(entry, { catalog, catalogSequence: report.sequence, published: same && entry.published })
+    this.changed()
+    return { status: 'accepted' }
+  }
+
+  subscribe(listener: () => void): () => void {
+    let first = true
+    return this.changes.subscribe(() => {
+      if (first) first = false
+      else listener()
+    })
+  }
+
+  providerReference(providerId: string): StartupCapabilityRefV1 | undefined {
+    return this.projections(this.selected).find(entry => entry.identity.providerId === providerId)?.identity
   }
 
   private projections(owners: ReadonlyMap<string, string>): StartupProjectionV1[] {
@@ -231,16 +366,54 @@ export class ManagedServiceStartupAuthority {
     return [...projected.values()]
   }
 
-  availability(ref: StartupCapabilityRefV1, modelId?: string): StartupActionAvailabilityV1 {
-    const entry = this.projections(this.selected).find(entry =>
+  availability(
+    ref: StartupCapabilityRefV1,
+    modelId?: string,
+    owners: ReadonlyMap<string, string> = this.selected,
+  ): StartupActionAvailabilityV1 {
+    const entry = this.projections(owners).find(entry =>
       startupCapabilityKey(entry.identity) === startupCapabilityKey(ref)
     )
     if (entry === undefined) return unavailable('unknown-target')
-    if (!entry.actions.execute.available) return entry.actions.execute
+    if (!entry.actions.execute.available) {
+      if (entry.actions.execute.reason === 'dependency-not-ready') {
+        for (const dependency of this.declaration(ref, owners.get(ref.pluginId))?.declaration.dependsOn ?? []) {
+          const result = this.availability(dependency, undefined, owners)
+          if (
+            !result.available
+            && ['unknown-target', 'failed', 'revoked', 'stopped', 'catalog-empty', 'authentication-required'].includes(
+              result.reason,
+            )
+          ) return result
+        }
+      }
+      return entry.actions.execute
+    }
     if (modelId !== undefined && (entry.catalog.state !== 'known' || !entry.catalog.modelIds.includes(modelId))) {
       return unavailable('model-unavailable')
     }
     return { available: true }
+  }
+
+  async waitForDependency(
+    ref: StartupCapabilityRefV1,
+    owners: ReadonlyMap<string, string>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await this.changes.wait(() => {
+      const result = this.availability(ref, undefined, owners)
+      if (result.available) return true
+      if (
+        ['unknown-target', 'failed', 'revoked', 'stopped', 'catalog-empty', 'authentication-required'].includes(
+          result.reason,
+        )
+      ) throw new Error(`startup dependency ${result.reason}`)
+      return false
+    }, { signal })
+  }
+
+  ownerSelections(): ReadonlyMap<string, string> {
+    return new Map(this.selected)
   }
 
   targets(mode: StartupModeV1, explicit?: StartupCapabilityRefV1): readonly StartupCapabilityRefV1[] {

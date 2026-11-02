@@ -45,6 +45,12 @@ export function managedServiceFleetActivation(
   const groups = leases.map(lease => lease.activation)
   return {
     hostGeneration: groups[0]!.hostGeneration,
+    ...(groups[0]!.startup === undefined ? {} : { startup: groups[0]!.startup }),
+    retryStartup(ref) {
+      const group = groups.find(group => group.pluginIds.includes(ref.pluginId))
+      if (group?.retryStartup === undefined) throw new Error('startup retry unavailable')
+      group.retryStartup(ref)
+    },
     groups,
     authorities: groups.flatMap(group => group.authorities),
     sources: groups.flatMap(group => group.sources),

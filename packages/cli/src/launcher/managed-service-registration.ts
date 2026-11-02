@@ -7,6 +7,7 @@ import { observeManagedServiceRecord } from './managed-service-runtime-record.js
 import { managedHandle, managedIdentityKey } from './managed-service-runtime-support.js'
 
 export async function registerManagedService(input: {
+  readonly signal?: AbortSignal
   readonly access: ManagedServiceActivationAccess
   readonly serviceGeneration: string
   readonly definition: ManagedServiceDefinitionV1
@@ -28,7 +29,9 @@ export async function registerManagedService(input: {
   readonly onRecordChanged?: (record: ManagedServiceRecord) => void
 }): Promise<ManagedServiceRecord> {
   const { access, definition, revision } = input
+  input.signal?.throwIfAborted()
   await input.schemas.validateDefinition(definition)
+  input.signal?.throwIfAborted()
   if (
     (definition.discovery.kind === 'fixed-loopback'
       && input.reservedLoopbackPorts?.includes(definition.discovery.port))
@@ -68,6 +71,7 @@ export async function registerManagedService(input: {
       continue
     }
     const registration = (async (): Promise<ManagedServiceRecord> => {
+      input.signal?.throwIfAborted()
       const prior = input.records.get(key)
       if (prior !== undefined) {
         if (
@@ -100,6 +104,7 @@ export async function registerManagedService(input: {
         serviceId: definition.serviceId,
         serviceHome,
       })
+      input.signal?.throwIfAborted()
       const runtimeResources = access.runtimeResources
         ?? access.declaration.runtimeResources.filter(resource => managedServiceResourceMatchesTarget(resource))
       const packageSchemas = runtimeResources

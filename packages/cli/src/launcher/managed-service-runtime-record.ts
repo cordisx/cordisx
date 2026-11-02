@@ -1,5 +1,6 @@
 import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type {
+  ManagedNativeProviderPublicationInputV1,
   ManagedServiceBindingV1,
   ManagedServiceControlResultV1,
   ManagedServiceDefinitionV1,
@@ -17,6 +18,11 @@ export interface ManagedServiceActivationAccess {
   readonly source: `https://${string}`
   readonly declaration: PluginManifestManagedBackendServiceV14
   readonly artifactDirectory: string
+  readonly publicationExecutable?: (providerId: string) => boolean
+  readonly publicationAllowed?: (
+    input: ManagedNativeProviderPublicationInputV1,
+    binding: ManagedServiceBindingV1,
+  ) => boolean
   readonly runtimeResources?: readonly {
     readonly path: `./${string}`
     readonly mode: 'executable' | 'data'

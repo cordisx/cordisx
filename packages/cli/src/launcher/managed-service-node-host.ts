@@ -1,5 +1,7 @@
+import type { StartupManagedServiceNodeModuleV1 } from '@cordisx/protocol/startup-runtime/v1'
+import { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
+import { ManagedServiceStartupPreparation } from './managed-service-startup-preparation.js'
 import type {
-  ManagedServiceContextBindingV1,
   ManagedServiceContextProviderRootV1,
   ManagedServiceContextProviderV1,
   ManagedServiceNodeModuleV1,
@@ -9,7 +11,6 @@ import type {
   ManagedServiceIdentityV1,
   ManagedServiceServiceContextV1,
 } from '@cordisx/protocol/managed-service-runtime/v1'
-import type { ManagedServiceSourceV1 } from '@cordisx/protocol/managed-service/v1'
 import { Context, Inject, type Plugin } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -37,6 +38,7 @@ interface ProviderState {
 interface ModuleState {
   readonly access: ManagedBackendRuntimeServiceModuleAccess
   module: ManagedServiceNodeModuleV1 | undefined
+  context?: ManagedServiceServiceContextV1
   readonly binding: ManagedServiceActivationBinding
   readonly controller: AbortController
 }
@@ -50,6 +52,8 @@ export interface ManagedServiceNodeActivationGroup extends Omit<ManagedServiceNo
 export interface ManagedServiceNodeActivation {
   /** Internal dependency-component cleanup boundaries, never renderer capabilities. */
   readonly groups?: readonly ManagedServiceNodeActivationGroup[]
+  readonly startup?: ManagedServiceStartupAuthority
+  readonly retryStartup?: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => void
   readonly hostGeneration: string
   readonly authorities: readonly ManagedServiceContextAuthorityV1[]
   readonly sources: readonly ManagedServiceNodeSourceBinding[]
@@ -106,6 +110,7 @@ export class ManagedServiceNodeHost {
     private readonly runtime: ManagedServiceRuntime,
     private readonly profileId: string = 'default',
     private readonly runtimeGeneration: string = randomUUID(),
+    private readonly startupAuthority?: ManagedServiceStartupAuthority,
   ) {}
 
   async replace(
@@ -138,6 +143,28 @@ export class ManagedServiceNodeHost {
     accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
     isolateStartupFailures: boolean,
   ): Promise<ManagedServiceNodeActivation> {
+    const authority = this.startupAuthority
+      ?? new ManagedServiceStartupAuthority({
+        profileId: this.profileId,
+        hostGeneration: accesses[0]?.hostGeneration ?? this.runtimeGeneration,
+      })
+    const admissions = [
+      ...new Map(
+        accesses.flatMap(access =>
+          access.startup === undefined ? [] : [[access.pluginIdentity.pluginId, access.startup] as const]
+        ),
+      ).values(),
+    ]
+    authority.admit(admissions)
+    if (this.startupAuthority === undefined) {
+      authority.selectOwners(
+        accesses.map(access => ({
+          pluginId: access.pluginIdentity.pluginId,
+          pluginGeneration: access.pluginIdentity.generation,
+        })),
+      )
+    }
+    const preparation = new ManagedServiceStartupPreparation(authority, this.runtime, accesses)
     const rootContext = new Context()
     const states: ModuleState[] = []
     const providers = new Map<string, ProviderState>()
@@ -147,6 +174,9 @@ export class ManagedServiceNodeHost {
     const dispose = (): Promise<void> => {
       cleanupPromise ??= (async () => {
         for (const state of states) state.controller.abort(new Error('managed service activation disposed'))
+        await preparation.disposeModules(states)
+        preparation.dispose()
+        if (this.startupAuthority === undefined) authority.dispose()
         await Promise.allSettled([...inFlight])
         await settleCleanup([...cleanup].reverse())
       })()
@@ -171,9 +201,38 @@ export class ManagedServiceNodeHost {
           declaration: access.declaration,
           artifactDirectory: access.artifactDirectory,
           ...(access.runtimeResources === undefined ? {} : { runtimeResources: access.runtimeResources }),
+          ...(access.startup === undefined ? {} : {
+            publicationExecutable: providerId => {
+              const capability = access.startup!.startup.capabilities.find(capability =>
+                capability.kind === 'provider' && capability.providerId === providerId
+              )
+              return capability !== undefined
+                && authority.availability(
+                  { pluginId: owner.pluginId, capabilityId: capability.id },
+                  undefined,
+                  new Map([
+                    ...authority.ownerSelections(),
+                    ...accesses.map(item => [item.pluginIdentity.pluginId, item.pluginIdentity.generation] as const),
+                  ]),
+                ).available
+            },
+            publicationAllowed: (input, current) =>
+              authority.acceptsPublication(
+                {
+                  pluginId: owner.pluginId,
+                  pluginGeneration: owner.pluginGeneration,
+                  serviceId: access.serviceId,
+                  serviceGeneration: current.serviceGeneration,
+                },
+                input.providerId,
+                input.compositionOrigin,
+                input.catalog,
+              ),
+          }),
         }, controller.signal)
         const state: ModuleState = { access, module: undefined, binding, controller }
         states.push(state)
+        if (access.startup !== undefined) authority.bindService(binding.authority)
         cleanup.push(async () => await binding.dispose())
         const imported = await import(
           `${pathToFileURL(modulePath(access)).href}?generation=${encodeURIComponent(access.pluginIdentity.generation)}`
@@ -181,6 +240,10 @@ export class ManagedServiceNodeHost {
         if ('inject' in imported) throw new Error('managed backend service module-level inject is invalid')
         if (typeof imported.apply !== 'function') throw new Error('managed backend service exports no apply function')
         state.module = imported as unknown as ManagedServiceNodeModuleV1
+        if (
+          access.startup?.startup.capabilities.some(capability => capability.serviceId === access.serviceId)
+          && typeof imported.prepare !== 'function'
+        ) throw new Error('progressive managed service exports no prepare function')
       }
       for (const state of states) {
         const module = state.module!
@@ -216,6 +279,7 @@ export class ManagedServiceNodeHost {
         const disposeGroup = (): Promise<void> => {
           groupDisposal ??= (async () => {
             for (const state of group) state.controller.abort(new Error('managed service activation disposed'))
+            await preparation.disposeModules(group)
             await Promise.allSettled([...pending])
             await settleCleanup([
               ...groupCleanup.slice().reverse(),
@@ -251,11 +315,24 @@ export class ManagedServiceNodeHost {
           const providerOwners = new Set([...groupProviders.values()].map(provider => provider.module))
           await startBatch(group.filter(state => !providerOwners.has(state)))
           for (const batch of this.providerOwnerBatches(group, groupProviders)) await startBatch(batch)
+          preparation.adopt(
+            group.filter(state =>
+              state.access.startup?.startup.capabilities.some(capability =>
+                capability.serviceId === state.access.serviceId
+              )
+            )
+              .map(state => ({
+                ...state,
+                module: state.module as StartupManagedServiceNodeModuleV1,
+                context: state.context!,
+              })),
+          )
         } catch (error) {
           await disposeGroup()
           if (!isolateStartupFailures) throw error
           for (const state of group) {
             failed.add(state)
+            if (state.access.startup !== undefined) authority.settled(state.binding.authority, true)
             reportManagedServiceStartup({
               pluginId: state.access.pluginIdentity.pluginId,
               serviceId: state.access.serviceId,
@@ -342,13 +419,19 @@ export class ManagedServiceNodeHost {
               await groupDisposals.get(group)!()
             } finally {
               remainingGroups -= 1
-              if (remainingGroups === 0) await rootContext.fiber.dispose()
+              if (remainingGroups === 0) {
+                preparation.dispose()
+                if (this.startupAuthority === undefined) authority.dispose()
+                await rootContext.fiber.dispose()
+              }
             }
           })()
           return groupDisposal
         }
         const value: ManagedServiceNodeActivationGroup = Object.freeze({
           pluginIds,
+          startup: authority,
+          retryStartup: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => preparation.retry(ref),
           get exclusiveServiceKeys() {
             return runtime.exclusiveServiceKeys(pluginIds)
           },
@@ -388,6 +471,8 @@ export class ManagedServiceNodeHost {
       })
       return Object.freeze({
         groups: Object.freeze(activations),
+        startup: authority,
+        retryStartup: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => preparation.retry(ref),
         hostGeneration: accesses[0]?.hostGeneration ?? randomUUID(),
         authorities: Object.freeze(activations.flatMap(group => group.authorities)),
         sources: Object.freeze(sources),
@@ -499,7 +584,8 @@ export class ManagedServiceNodeHost {
     cleanup.push(async () => await providerFiber.dispose())
     await providerFiber
     const plugin: Plugin.Function = async context => {
-      await apply(context as unknown as ManagedServiceServiceContextV1, {
+      state.context = context as unknown as ManagedServiceServiceContextV1
+      await apply(state.context, {
         owner: state.binding.owner,
         client: state.binding.client,
         signal: state.binding.signal,

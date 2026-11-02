@@ -1,3 +1,5 @@
+import type { StartupDeclarationV1 } from '@cordisx/protocol/startup/v1'
+import { validateStartupDeclaration } from '../../startup-declaration-validation.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
   type CordisXPluginManifestV11,
@@ -53,6 +55,8 @@ import {
   normalizePluginManifestV9,
 } from '../../permission-model-v4.js'
 
+const CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v15.schema.json'
 const CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v14.schema.json'
 
@@ -133,6 +137,7 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV11
   | CordisXPluginManifestV12
   | CordisXPluginManifestV13
+  | (CordisXPluginManifestV13 & { readonly startup: StartupDeclarationV1 })
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -144,6 +149,23 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.schemaVersion === 15) {
+    if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.schemaVersion !== 15) {
+      throw new Error('manifest v15 identity is invalid')
+    }
+    const startup = validateStartupDeclaration(manifest.startup)
+    const { startup: ignored, ...base } = manifest
+    // Renderer permission projection follows v13; startup remains explicitly
+    // preserved and never creates backend execution authority here.
+    const normalized = normalizePluginManifest({
+      ...base,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+      schemaVersion: 14,
+    }, expectedId)
+    return Object.freeze({ ...normalized, startup }) as CordisXPluginManifestV13 & {
+      readonly startup: StartupDeclarationV1
+    }
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 || manifest.schemaVersion === 14) {
     if (!Array.isArray(manifest.services)) throw new Error(`plugin ${expectedId} manifest services must be an array`)
     return normalizePluginManifestV13({

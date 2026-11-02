@@ -1,3 +1,5 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V15, normalizePluginManifestV15 } from './latest-runtime-manifest.js'
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
@@ -58,6 +60,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
@@ -348,6 +351,11 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
     const packageRoot = path.resolve(path.dirname(plugin.entry), '..', '..')
     const resolved = await new JsonPackageManifestV2Resolver({
       runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V15]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV15(value, id)
+        },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, plugin.id),
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizePluginManifestV14(value, plugin.id),
       },

@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import {
   type CordisXPluginManifestV12,
@@ -136,6 +137,7 @@ export interface PluginRuntimeMutation {
       | CordisXPluginManifestV12
       | CordisXPluginManifestV13
       | PluginRuntimeManifestV14
+      | PluginRuntimeManifestV15
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
@@ -484,7 +486,7 @@ export function authorizationPlanV4(
 }
 
 export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {
-  return schemaVersion >= 5 && schemaVersion <= 14
+  return schemaVersion >= 5 && schemaVersion <= 15
 }
 
 export function isLegacyPermissionDeclarationV4(

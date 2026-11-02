@@ -1,3 +1,5 @@
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
+import { validateStartupDeclaration } from '../startup-declaration-validation.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
@@ -13,6 +15,9 @@ import type {
   PluginRuntimeManifestV14,
 } from '@cordisx/protocol/plugin-manifest/v14'
 import { managedServiceResourceMatchesTarget } from './managed-service-package-resources.js'
+
+export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v15.schema.json'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v14.schema.json'
@@ -168,11 +173,43 @@ export function normalizePluginManifestV14(value: unknown, expectedId: string): 
   }) as PluginRuntimeManifestV14
 }
 
+export function normalizePluginManifestV15(value: unknown, expectedId: string): PluginRuntimeManifestV15 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('manifest must be an object')
+  const candidate = value as Record<string, unknown>
+  if (candidate.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || candidate.schemaVersion !== 15) {
+    throw new Error('manifest v15 identity is invalid')
+  }
+  const startup = validateStartupDeclaration(candidate.startup)
+  const { startup: ignored, ...base } = candidate
+  const normalized = normalizePluginManifestV14({
+    ...base,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+    schemaVersion: 14,
+  }, expectedId)
+  for (const capability of startup.capabilities) {
+    const service = normalized.services.find(service => service.id === capability.serviceId)
+    if (
+      service === undefined
+      || ((capability.kind === 'provider' || capability.milestones.length > 0) && service.kind !== 'managed-backend')
+    ) throw new Error('startup capability service is unsupported')
+  }
+  return Object.freeze({ ...normalized, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V15, schemaVersion: 15, startup })
+}
+
 export function normalizeLatestRuntimeManifest(
   value: unknown,
   expectedId: string,
-): CordisXPluginManifestV12 | CordisXPluginManifestV13 | PluginRuntimeManifestV14 | undefined {
+):
+  | CordisXPluginManifestV12
+  | CordisXPluginManifestV13
+  | PluginRuntimeManifestV14
+  | PluginRuntimeManifestV15
+  | undefined
+{
   const candidate = value as { readonly $schema?: unknown; readonly schemaVersion?: unknown }
+  if (candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || candidate.schemaVersion === 15) {
+    return normalizePluginManifestV15(value, expectedId)
+  }
   return candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 && candidate.schemaVersion === 12
     ? normalizePluginManifestV12(value, expectedId)
     : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 && candidate.schemaVersion === 13

@@ -1,3 +1,5 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15 } from './latest-runtime-manifest.js'
+import { PLUGIN_PACKAGE_SCHEMA_V15 } from './packages/manifest.js'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -48,6 +50,8 @@ export function declaredRuntimeManifestSchema(manifest: Record<string, unknown>)
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13
     : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 && manifest.schemaVersion === 14
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14
+    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15
+    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15
     : undefined
 }
 

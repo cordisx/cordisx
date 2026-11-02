@@ -14,12 +14,16 @@ export interface StartupCapabilityEvidence {
   readonly service?: ManagedServiceProjectionV1
   readonly adopted: boolean
   readonly preparing: boolean
+  readonly prepared: boolean
   readonly failed: boolean
   readonly revoked: boolean
   readonly canAuthenticate: boolean
   readonly catalog: StartupProjectionV1['catalog']
   readonly published: boolean
-  readonly milestones: ReadonlyMap<string, { readonly sequence: number; readonly state: 'satisfied' | 'failed' }>
+  readonly milestones: ReadonlyMap<
+    string,
+    { readonly sequence: number; readonly state: 'pending' | 'satisfied' | 'failed' }
+  >
 }
 
 export const unavailable = (
@@ -45,7 +49,9 @@ export function projectStartupCapability(
     milestoneId,
     state: evidence.milestones.get(milestoneId)?.state ?? 'pending' as const,
   }))
-  const failure = evidence.failed || service?.state === 'failed' || milestones.some(item => item.state === 'failed')
+  const emptyCatalog = provider && evidence.catalog.state === 'known' && evidence.catalog.modelIds.length === 0
+  const failure = evidence.failed || service?.state === 'failed' || evidence.catalog.state === 'failed'
+    || milestones.some(item => item.state === 'failed')
   const revoked = evidence.revoked || service?.state === 'disposed'
   const missingMilestone = declaration.success.allOf.some(condition =>
     condition.kind === 'milestone' && evidence.milestones.get(condition.milestoneId)?.state !== 'satisfied'
@@ -54,16 +60,18 @@ export function projectStartupCapability(
   const serviceReady = service?.state === 'ready' && service.health === 'ready'
   let execute: StartupActionAvailabilityV1 = available
   if (revoked) execute = unavailable('revoked')
+  else if (emptyCatalog) execute = unavailable('catalog-empty')
   else if (failure) execute = unavailable('failed')
   else if (service !== undefined && !authenticated) execute = unavailable('authentication-required')
-  else if (!evidence.adopted || !serviceReady) execute = unavailable(evidence.preparing ? 'preparing' : 'not-prepared')
-  else if (!dependencyReady) execute = unavailable('dependency-not-ready')
+  else if (!evidence.adopted || !evidence.prepared || !serviceReady) {
+    execute = unavailable(evidence.preparing ? 'preparing' : 'not-prepared')
+  } else if (!dependencyReady) execute = unavailable('dependency-not-ready')
   else if (missingMilestone) execute = unavailable('milestone-pending')
   else if (!catalogKnown) execute = unavailable('catalog-pending')
   else if (provider && evidence.catalog.state === 'known' && evidence.catalog.modelIds.length === 0) {
     execute = unavailable('catalog-empty')
   } else if (provider && !evidence.published) execute = unavailable('provider-unpublished')
-  const state = revoked ? 'revoked' : failure
+  const state = revoked ? 'revoked' : failure || emptyCatalog
     ? 'failed'
     : service !== undefined && !authenticated
     ? 'auth-required'

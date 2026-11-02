@@ -1,3 +1,4 @@
+import type { StartupPluginAdmission } from '../managed-service-startup-admission.js'
 import type {
   HostPermissionReviewId,
   HostPermissionReviewToken,
@@ -57,6 +58,7 @@ export interface PlatformProviderRuntimeServiceModuleAccess {
 }
 
 export interface ManagedBackendRuntimeServiceModuleAccess {
+  readonly startup?: StartupPluginAdmission
   readonly packageIdentity: PackageIdentity
   readonly pluginIdentity: {
     readonly source: string

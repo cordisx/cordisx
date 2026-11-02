@@ -71,12 +71,15 @@ export function createManagedServiceActivationBinding(input: {
     serviceGeneration: string,
     definition: ManagedServiceDefinitionV1,
     revision: `sha256:${string}`,
+    signal: AbortSignal,
   ) => Promise<ManagedServiceRecord>
   readonly registrationHandle: (record: ManagedServiceRecord) => ManagedServiceRegistrationHandleV1
   readonly boundClient: (state: ManagedServiceClientState) => ManagedServiceBoundClientV1
   readonly disposeRecord: (record: ManagedServiceRecord) => Promise<unknown>
   readonly disposeRecords: (records: Iterable<ManagedServiceRecord>) => Promise<void>
 }): ManagedServiceActivationBinding {
+  const lifecycle = new AbortController()
+  const signal = AbortSignal.any([input.signal, lifecycle.signal])
   const authority = Object.freeze({
     pluginId: input.access.owner.pluginId,
     pluginGeneration: input.access.owner.pluginGeneration,
@@ -97,10 +100,18 @@ export function createManagedServiceActivationBinding(input: {
       definition: ManagedServiceDefinitionV1,
       options: { readonly revision: `sha256:${string}` },
     ) => {
-      if (!clientState.active) return Promise.reject(new Error('managed service plugin binding is disposed'))
+      if (!clientState.active || signal.aborted) {
+        return Promise.reject(new Error('managed service plugin binding is disposed'))
+      }
       const registration = (async () => {
-        const record = await input.register(input.access, authority.serviceGeneration, definition, options.revision)
-        if (!clientState.active) {
+        const record = await input.register(
+          input.access,
+          authority.serviceGeneration,
+          definition,
+          options.revision,
+          signal,
+        )
+        if (!clientState.active || signal.aborted) {
           await input.disposeRecord(record)
           throw new Error('managed service plugin binding was disposed during registration')
         }
@@ -122,9 +133,10 @@ export function createManagedServiceActivationBinding(input: {
     authority,
     registry,
     client,
-    signal: input.signal,
+    signal,
     dispose: () => {
       if (disposal !== undefined) return disposal
+      lifecycle.abort(new Error('managed service plugin binding was disposed during registration'))
       client.dispose()
       disposal = (async () => {
         await Promise.allSettled([...pendingRegistrations])
