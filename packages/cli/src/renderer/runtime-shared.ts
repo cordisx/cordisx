@@ -269,6 +269,8 @@ export interface CordisXRuntimeMetadata {
     readonly token: string
   }[]
   readonly serviceConfigBridgeToken?: string
+  /** Host-only startup observation; never supplied to plugin Contexts. */
+  readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceCapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string

@@ -205,9 +205,15 @@ export async function start(
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
-  const managedServiceBridge = metadata.managedServiceCapabilities === undefined
-    ? undefined
-    : BrowserManagedServiceUIBridge.connect(metadata.managedServiceCapabilities, metadata.profileId, generation)
+  const managedServiceBridge =
+    metadata.managedServiceCapabilities === undefined && metadata.startupHostCapability === undefined
+      ? undefined
+      : BrowserManagedServiceUIBridge.connect(
+        metadata.managedServiceCapabilities ?? [],
+        metadata.profileId,
+        generation,
+        metadata.startupHostCapability,
+      )
   const modelProviders = nativeModelProviderRegistry(managedServiceBridge)
   const channelCredentialBridge = metadata.channelCredentialBridgeToken === undefined
     ? undefined

@@ -9,6 +9,7 @@ import {
   createManagedServiceUIBridgeHandler,
   parseManagedServiceUIBindingRequest,
 } from '../packages/cli/src/launcher/managed-service-ui-rpc.js'
+import { createBrowserStartupObserver } from '../packages/cli/src/renderer/startup-ui-observer.js'
 import { BrowserManagedServiceUIBridge } from '../packages/cli/src/renderer/managed-service-ui-bridge.js'
 
 const owner = { pluginId: 'demo', pluginGeneration: 'plugin-1' }
@@ -72,9 +73,12 @@ function setup(startup = true) {
     startupObservers: [{ ...owner, observer: source.observer }],
   })
   let disconnect = false
+  let failedReconnects = 0
   globalThis.__cordisxManagedServiceUIRequestV1 = payload => {
     const value = JSON.parse(payload)
-    const fail = disconnect && value.operation === 'startupNext'
+    const fail = (disconnect && value.operation === 'startupNext')
+      || (failedReconnects > 0 && value.operation === 'startupSubscribe')
+    if (fail && value.operation === 'startupSubscribe') failedReconnects--
     if (fail) disconnect = false
     const response = fail
       ? Promise.reject(new Error('disconnected'))
@@ -100,8 +104,9 @@ function setup(startup = true) {
     handler,
     bridge,
     observer: bridge.bindStartup(owner)!,
-    disconnect: () => {
+    disconnect: (reconnectFailures = 0) => {
       disconnect = true
+      failedReconnects = reconnectFailures
     },
   }
 }
@@ -116,7 +121,9 @@ describe('startup observation transport', () => {
     const { observer, bridge, handler } = setup()
     expect((await observer.read()).cursor).toEqual(cursor)
     const events: StartupEventV1[] = []
-    const sub = await observer.subscribe(event => events.push(event))
+    const sub = await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    })
     expect(events[0]).toMatchObject({ kind: 'snapshot', reason: 'initial' })
     expect((await bridge.bind(owner)!.get({ serviceId: 'gateway' })).status).toBe('unavailable')
     sub.close()
@@ -137,7 +144,9 @@ describe('startup observation transport', () => {
       'cross-scope',
     )
     const events: StartupEventV1[] = []
-    const gap = await observer.subscribe(event => events.push(event), { after: { ...cursor, sequence: 99 } })
+    const gap = await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    }, { after: { ...cursor, sequence: 99 } })
     expect(events[0]).toMatchObject({ kind: 'snapshot', reason: 'gap' })
     source.update(0, 'replacement')
     await vi.waitFor(() => expect(events).toHaveLength(2))
@@ -154,7 +163,9 @@ describe('startup observation transport', () => {
     const { observer, source, bridge, handler, disconnect } = setup()
     disconnect()
     const events: StartupEventV1[] = []
-    const sub = await observer.subscribe(event => events.push(event))
+    const sub = await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    })
     await vi.waitFor(() => expect(source.afters).toHaveLength(2))
     expect(source.afters[1]).toEqual(cursor)
     expect(events).toHaveLength(1)
@@ -171,7 +182,9 @@ describe('startup observation transport', () => {
   it('fences owner replacement, closes exactly once and keeps new generation sequence independent', async () => {
     const { observer, source, bridge, handler } = setup()
     const events: StartupEventV1[] = []
-    await observer.subscribe(event => events.push(event))
+    await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    })
     bridge.disposeStartupOwner(owner)
     source.update(10)
     await Promise.resolve()
@@ -194,5 +207,117 @@ describe('startup observation transport', () => {
     await expect(observer.read()).rejects.toThrow('private or unsupported')
     bridge.dispose()
     await handler.dispose()
+  })
+  it('survives a temporary reconnect failure and only terminates on actual revocation', async () => {
+    const { observer, source, bridge, handler, disconnect } = setup()
+    const events: StartupEventV1[] = []
+    const sub = await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    })
+    disconnect(1)
+    source.update(1)
+    await vi.waitFor(() => expect(source.afters.length).toBe(2), { timeout: 2500 })
+    expect(events.filter(event => event.kind === 'closed')).toHaveLength(0)
+    source.update(2)
+    await vi.waitFor(() => expect(events).toHaveLength(3))
+    await handler.disposeOwner(owner)
+    await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'scope-revoked' }))
+    source.update(2)
+    sub.close()
+    expect(events.filter(event => event.kind === 'closed')).toHaveLength(1)
+    bridge.dispose()
+    await handler.dispose()
+  })
+  it('rejects a read that resolves after local dispose even when the transport ignores abort', async () => {
+    let resolve!: (value: unknown) => void
+    const facade = createBrowserStartupObserver(async () =>
+      await new Promise(done => {
+        resolve = done
+      })
+    )
+    const pending = facade.observer.read()
+    facade.dispose()
+    resolve({ contract: 'cordisx.startup-snapshot/v1', cursor, entries: [], pages: [] })
+    await expect(pending).rejects.toThrow('unavailable')
+  })
+  it('aborts observation once and frees remote watches without stopping its producer', async () => {
+    const { observer, source, bridge, handler } = setup()
+    const controller = new AbortController()
+    const events: StartupEventV1[] = []
+    await observer.subscribe(event => {
+      if (event.kind !== 'connection') events.push(event)
+    }, { signal: controller.signal })
+    controller.abort()
+    await vi.waitFor(() => expect(source.listeners.size).toBe(0))
+    source.update(2)
+    expect(events).toHaveLength(2)
+    expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'unsubscribed' })
+    expect(bridge.bindStartup(owner)).toBe(observer)
+    bridge.dispose()
+    await handler.dispose()
+  })
+  it('resets slow subscribers with a full gap snapshot and fences subscription ids by owner', async () => {
+    const source = fixture()
+    const other = { pluginId: 'other', pluginGeneration: 'other-1' }
+    const handler = createManagedServiceUIBridgeHandler({
+      ...options,
+      startupObservers: [{ ...owner, observer: source.observer }, { ...other, observer: fixture().observer }],
+    })
+    const opened = await handler.handle(owner, {
+      requestId: 'open',
+      operation: 'startupSubscribe',
+      subscriptionId: 'slow',
+    }) as { subscriptionId: string }
+    for (let sequence = 1; sequence <= 40; sequence++) source.update(sequence)
+    const next = await handler.handle(owner, {
+      requestId: 'next',
+      operation: 'startupNext',
+      ...opened,
+    }) as StartupEventV1
+    expect(next).toMatchObject({ kind: 'snapshot', reason: 'gap', snapshot: { cursor: { sequence: 33 } } })
+    await expect(handler.handle(other, { requestId: 'steal', operation: 'startupNext', ...opened })).rejects.toThrow(
+      'owner scope',
+    )
+    await handler.dispose()
+  })
+
+  it('reports connection loss and recovery separately without changing the authority cursor', async () => {
+    const { observer, source, bridge, handler, disconnect } = setup()
+    const events: StartupEventV1[] = []
+    const sub = await observer.subscribe(event => events.push(event))
+    disconnect(1)
+    source.update(1)
+    await vi.waitFor(() => expect(source.afters.length).toBe(2), { timeout: 2500 })
+    const connection = events.filter(event => event.kind === 'connection').map(event => event.connection.state)
+    expect(connection).toEqual(['connected', 'disconnected', 'reconnecting', 'reconnecting', 'connected'])
+    const snapshots = events.filter(event => event.kind === 'snapshot')
+    expect(snapshots.map(event => event.snapshot.cursor.sequence)).toEqual([0, 1])
+    sub.close()
+    bridge.dispose()
+    await handler.dispose()
+  })
+
+  it('keeps an idle long read healthy beyond eight seconds and releases it on abort or real disconnect', async () => {
+    vi.useFakeTimers()
+    const { observer, source, bridge, handler } = setup()
+    const events: StartupEventV1[] = []
+    const controller = new AbortController()
+    await observer.subscribe(event => events.push(event), { signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(9000)
+    expect(events.filter(event => event.kind === 'connection').map(event => event.connection.state)).toEqual([
+      'connected',
+    ])
+    bridge.transportDisconnected()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(events.filter(event => event.kind === 'connection').map(event => event.connection.state)).toContain(
+      'disconnected',
+    )
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(source.listeners.size).toBe(0)
+    expect(events.filter(event => event.kind === 'closed')).toHaveLength(1)
+    bridge.dispose()
+    await handler.dispose()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

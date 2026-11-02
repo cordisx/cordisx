@@ -35,10 +35,13 @@ export interface RendererComposition {
   readonly iconThemePreferenceBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginManagementBridgeToken?: string
+  /** Host-only startup observation; never supplied to plugin Contexts. */
+  readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceUICapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string
     readonly token: string
+    readonly startup?: boolean
   }[]
   readonly rebuild: (
     config: CordisXConfig,
@@ -48,10 +51,12 @@ export interface RendererComposition {
       permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
       pluginBundles: CordisXPluginBundleManagerSnapshotV1
       channelManager?: ChannelManagerBundleProjection
+      startupHostCapability?: { readonly token: string }
       managedServiceUICapabilities?: readonly {
         readonly pluginId: string
         readonly pluginGeneration: string
         readonly token: string
+        readonly startup?: boolean
       }[]
     }>,
   ) => Promise<Readonly<{ source: string; newDocumentSource?: string }>>
@@ -87,10 +92,12 @@ export interface BuildRendererCompositionOptions {
   /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
+  readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceUICapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string
     readonly token: string
+    readonly startup?: boolean
   }[]
   readonly internalBuildRendererBundle?: typeof buildRendererBundle
   /** Launcher-owned native production uses the immutable Host graph. */
@@ -141,6 +148,7 @@ export async function buildRendererComposition(
     ...(options.channelActionsBridgeToken === undefined
       ? {}
       : { channelActionsBridgeToken: options.channelActionsBridgeToken }),
+    ...(options.startupHostCapability === undefined ? {} : { startupHostCapability: options.startupHostCapability }),
     ...(options.managedServiceUICapabilities === undefined
       ? {}
       : { managedServiceUICapabilities: options.managedServiceUICapabilities }),
@@ -226,6 +234,7 @@ export async function buildRendererComposition(
     ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
     ...(options.pluginManagement === undefined ? {} : { pluginManagementBridgeToken: options.pluginManagement.token }),
+    ...(options.startupHostCapability === undefined ? {} : { startupHostCapability: options.startupHostCapability }),
     ...(options.managedServiceUICapabilities === undefined
       ? {}
       : { managedServiceUICapabilities: options.managedServiceUICapabilities }),
@@ -249,6 +258,9 @@ export async function buildRendererComposition(
             ...(current.managedServiceUICapabilities === undefined
               ? {}
               : { managedServiceUICapabilities: current.managedServiceUICapabilities }),
+            ...(current.startupHostCapability === undefined
+              ? {}
+              : { startupHostCapability: current.startupHostCapability }),
           }
         })()
       const rebuildOptions: BuildRendererBundleOptions = {

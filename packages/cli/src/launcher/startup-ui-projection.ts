@@ -53,6 +53,9 @@ export function safeStartupSnapshot(value: StartupSnapshotV1): StartupSnapshotV1
   return safe(value, snapshot) as StartupSnapshotV1
 }
 export function safeStartupEvent(value: StartupEventV1): StartupEventV1 {
+  if (value.kind === 'connection') {
+    return safe(value, { kind: 'id', connection: { state: 'id', reason: 'id' } }) as StartupEventV1
+  }
   return safe(
     value,
     value.kind === 'snapshot'

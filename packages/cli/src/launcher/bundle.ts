@@ -43,10 +43,13 @@ export interface BuildRendererBundleOptions {
   readonly pluginManagement?: { readonly token: string; readonly profileId: string }
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   readonly certifiedPermissionChannelToken?: string
+  /** Host-only startup observation; never supplied to plugin Contexts. */
+  readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceUICapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string
     readonly token: string
+    readonly startup?: boolean
   }[]
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
@@ -416,6 +419,10 @@ export async function buildRendererCompositionSource(
     options.managedServiceUICapabilities === undefined
       ? ''
       : `, managedServiceCapabilities: ${JSON.stringify(options.managedServiceUICapabilities)}`
+  }${
+    options.startupHostCapability === undefined
+      ? ''
+      : `, startupHostCapability: ${JSON.stringify(options.startupHostCapability)}`
   }${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${
     options.initialRegistryEpoch === undefined
       ? ''
