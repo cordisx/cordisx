@@ -881,3 +881,14 @@
     transition: none;
   }
 }
+.cxmp-startup-status {
+  color: var(--cx-muted);
+  font-size: 0.85em;
+  white-space: normal;
+}
+.cxmp-provider-summary {
+  display: grid;
+  min-width: 0;
+  text-align: start;
+  gap: 2px;
+}

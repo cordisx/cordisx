@@ -29,6 +29,7 @@ export class ModelStartupStore {
         this.publish({ ...this.state, connection: event.connection.state })
       } else if (event.kind === 'closed') {
         this.publish({ ...this.state, connection: 'closed' })
+        controller.abort()
       } else {
         const previous = this.state.snapshot?.cursor
         const next = event.snapshot.cursor
@@ -38,7 +39,8 @@ export class ModelStartupStore {
             || previous.epoch !== next.epoch)
         ) return
         if (
-          previous && previous.scopeId === next.scopeId && previous.hostGeneration === next.hostGeneration
+          previous && event.reason === 'update' && previous.scopeId === next.scopeId
+          && previous.hostGeneration === next.hostGeneration
           && previous.epoch === next.epoch && next.sequence < previous.sequence
         ) return
         // Initial, gap and generation resets replace the complete projection, never merge entries.
@@ -48,7 +50,9 @@ export class ModelStartupStore {
       if (controller.signal.aborted) subscription.close()
       else controller.signal.addEventListener('abort', () => subscription.close(), { once: true })
     }).catch(() => {
-      if (!controller.signal.aborted) this.publish({ ...this.state, connection: 'disconnected' })
+      if (!controller.signal.aborted && binding === this.binding) {
+        this.publish({ ...this.state, connection: 'disconnected' })
+      }
     })
   }
 
@@ -75,4 +79,19 @@ export function providerStartup(
 
 export function startupExecutionAvailable(state: ModelStartupState | undefined, entry: StartupProjectionV1): boolean {
   return state?.connection === 'connected' && entry.actions.execute.available
+}
+
+/** Explicit page/action declarations only; contribution labels do not establish ownership. */
+export function startupPageActionAvailable(
+  state: ModelStartupState | undefined,
+  ownerKey: string,
+  actionId: string,
+): boolean {
+  if (!state) return true
+  if (!state.snapshot) return false
+  const pluginId: unknown = JSON.parse(ownerKey)[0]
+  const actions = state.snapshot?.pages.filter(page => page.pluginId === pluginId)
+    .flatMap(page => page.actions.filter(action => action.actionId === actionId)) ?? []
+  if (actions.length === 0) return true
+  return state.connection === 'connected' && actions.every(action => action.availability.available)
 }

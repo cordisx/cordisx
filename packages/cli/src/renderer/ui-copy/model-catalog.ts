@@ -1,6 +1,19 @@
 import type { ProductCopyCatalog } from './types.js'
 
 export const MODEL_CATALOG_COPY = {
+  'catalog.startup.unknown': { en: 'Status unknown', 'zh-CN': '状态未知' },
+  'catalog.startup.pending': { en: 'Starting…', 'zh-CN': '正在启动…' },
+  'catalog.startup.catalogPending': { en: 'Loading models…', 'zh-CN': '正在加载模型…' },
+  'catalog.startup.authRequired': { en: 'Sign in required', 'zh-CN': '需要登录' },
+  'catalog.startup.expired': { en: 'Sign-in expired', 'zh-CN': '登录已过期' },
+  'catalog.startup.permission': { en: 'Permission denied', 'zh-CN': '权限被拒绝' },
+  'catalog.startup.failed': { en: 'Service failed', 'zh-CN': '服务启动失败' },
+  'catalog.startup.stopped': { en: 'Service stopped', 'zh-CN': '服务已停止' },
+  'catalog.startup.revoked': { en: 'Service unavailable', 'zh-CN': '服务不可用' },
+  'catalog.startup.ready': { en: 'Ready', 'zh-CN': '已就绪' },
+  'catalog.startup.disconnected': { en: 'Disconnected · last known status', 'zh-CN': '连接已断开 · 上次状态' },
+  'catalog.startup.reconnecting': { en: 'Reconnecting… · last known status', 'zh-CN': '正在重新连接… · 上次状态' },
+  'catalog.startup.intent': { en: 'Selected · waiting for models', 'zh-CN': '已选择 · 等待模型加载' },
   'catalog.configureScript': { en: 'Configure model script', 'zh-CN': '配置模型脚本' },
   'catalog.replaceScript': { en: 'Replace script configuration', 'zh-CN': '替换脚本配置' },
   'catalog.scriptNotice': {

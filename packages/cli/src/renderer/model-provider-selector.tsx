@@ -17,6 +17,9 @@ import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { resolveTargetReasoning } from './native-model-reasoning.js'
+import { ModelStartupStatus } from './model-startup-status.js'
+import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
+import { managerCopy } from './ui-copy.js'
 
 export interface NativeProviderModelOption {
   readonly id: string
@@ -177,6 +180,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const [fastActionPending, setFastActionPending] = useState(false)
   const [error, setError] = useState<string>()
   const [status, setStatus] = useState<string>()
+  const [providerIntent, setProviderIntent] = useState<string>()
   const anchor = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<HTMLButtonElement>(null)
   const providerTrigger = useRef<HTMLButtonElement>(null)
@@ -214,15 +218,20 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     ?? (native.modelProvider === undefined || native.modelProvider === 'openai'
       ? copy.official
       : native.providerLabel ?? copy.unknown)
-  const displayedProvider = pendingProvider ?? selected
-  const displayedProviderId = pendingProviderId ?? native.modelProvider ?? 'openai'
+  const intentProvider = catalog.providers.find(provider => provider.providerId === providerIntent)
+  const displayedProvider = intentProvider ?? pendingProvider ?? selected
+  const displayedProviderId = providerIntent ?? pendingProviderId ?? native.modelProvider ?? 'openai'
   const displayedProviderLabel = displayedProviderId === 'openai'
     ? copy.official
-    : displayedProvider?.title ?? providerLabel
-  const displayedModel = pendingModel ?? effectiveModel
-  const displayedModelId = pendingModelId ?? displayedModel?.id
+    : displayedProvider?.title ?? providerIntent ?? providerLabel
+  const displayedModel = providerIntent === undefined
+    ? pendingModel ?? (pendingModelId === undefined ? effectiveModel : { id: pendingModelId, label: pendingModelId })
+    : undefined
+  const displayedModelId = providerIntent === undefined ? pendingModelId ?? displayedModel?.id : undefined
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
-  const menuProvider = pendingProviderId === undefined ? selected : pendingProvider
+  const menuProvider = providerIntent === undefined
+    ? pendingProviderId === undefined ? selected : pendingProvider
+    : intentProvider
   const menuModels = menuProvider?.models
     ?? (displayedProviderId === 'openai'
       ? nativeModelsForProvider(native, 'openai')
@@ -360,6 +369,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
 
   const apply = async (provider: Pick<ModelProviderV1, 'providerId'>, model: ModelProviderModelV1) => {
     if (!canInteract()) return
+    const progress = registry.snapshot().providers.find(item => item.providerId === provider.providerId)?.startup
+    if (progress && !startupExecutionAvailable(registry.snapshot().startup, progress)) return
     const generation = ++operation.current
     setSwitching(true)
     setError(undefined)
@@ -386,7 +397,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       if (result !== 'accepted') {
         setStatus(undefined)
         setError(result === 'busy' ? copy.busy : copy.failed)
-      } else setStatus(undefined)
+      } else {
+        setProviderIntent(undefined)
+        setStatus(undefined)
+      }
     } catch {
       if (generation !== operation.current) return
       setStatus(undefined)
@@ -484,6 +498,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       provider,
       label: providerMenuLabel(provider),
       usable: provider.models.length > 0,
+      intentAvailable: provider.startup !== undefined,
       favorite: provider.providerFavorite === true,
     })),
   ]
@@ -516,6 +531,13 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   return (
     <div
       className="cxmp-selector"
+      data-cordisx-model-selector-ready={!suspended ? 'true' : undefined}
+      data-cordisx-model-send-eligible={Boolean(
+        native.available && displayedModelId
+          && (!catalog.startup || displayedProviderId === 'openai' || displayedProvider !== undefined)
+          && (displayedProviderId === 'openai' || disclosedModel !== undefined)
+          && (!displayedProvider?.startup || startupExecutionAvailable(catalog.startup, displayedProvider.startup)),
+      )}
       ref={anchor}
       inert={suspended}
       onPointerDownCapture={blockInteraction}
@@ -526,6 +548,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
+      {providerIntent
+        ? <span className="cxmp-announcement" role="status">{managerCopy(locale, 'catalog.startup.intent')}</span>
+        : null}
 
       {queued
         ? (
@@ -663,8 +688,17 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     key={row.key}
                     aria-checked={row.provider.providerId === displayedProviderId}
                     data-menu-initial={row.provider.providerId === displayedProviderId || undefined}
-                    disabled={!native.available || switching || native.selectionLocked || !row.usable}
+                    disabled={switching || native.selectionLocked
+                      || ('intentAvailable' in row && row.intentAvailable ? false : !native.available || !row.usable)}
                     onClick={() => {
+                      if (
+                        row.kind === 'catalog' && row.provider.startup
+                        && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))
+                      ) {
+                        setProviderIntent(row.provider.providerId)
+                        setOpen('model')
+                        return
+                      }
                       if (row.kind === 'native') {
                         if (native.model) choose(row.provider, { id: native.model, label: selectedModelLabel })
                         return
@@ -685,7 +719,20 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       ? <ModelBrandIcon brand={row.provider.selectorBrand} kind="provider" />
                       : <HostBrandIcon icon={row.provider.icon} />}
                     {row.kind === 'catalog'
-                      ? <ProviderMenuLabel provider={row.provider} />
+                      ? (
+                        <span className="cxmp-provider-summary">
+                          <ProviderMenuLabel provider={row.provider} />
+                          {row.provider.startup
+                            ? (
+                              <ModelStartupStatus
+                                entry={row.provider.startup}
+                                state={catalog.startup}
+                                locale={locale}
+                              />
+                            )
+                            : null}
+                        </span>
+                      )
                       : <span>{row.label}</span>}
                     {row.provider.providerId === displayedProviderId
                       ? <HostIcon token="control.check" />
@@ -700,6 +747,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     key={key}
                     entry={entry}
                     failed={copy.actionFailed}
+                    available={startupPageActionAvailable(catalog.startup, key, entry.id)}
                     refresh={registry.refresh}
                     {...(notifications === undefined ? {} : { notifications })}
                   />
@@ -788,7 +836,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                           role="menuitemradio"
                           aria-checked={model.id === displayedModelId}
                           disabled={!modelExpanded || !native.available || switching || native.selectionLocked
-                            || ('disabled' in model && model.disabled === true)}
+                            || ('disabled' in model && model.disabled === true)
+                            || Boolean(
+                              menuProvider?.startup
+                                && !startupExecutionAvailable(catalog.startup, menuProvider.startup),
+                            )}
                           onClick={() => {
                             const provider = menuProvider
                               ?? (pendingProviderId === 'openai' ? officialProvider : nativeProvider)
@@ -807,7 +859,13 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       {filteredModels.length === 0
                         ? (
                           <div className="cxmp-menu-heading" role="status">
-                            {modelTerms.length ? copy.noMatches : copy.emptyModels}
+                            {modelTerms.length ? copy.noMatches : providerIntent && !menuProvider
+                              ? managerCopy(locale, 'catalog.startup.unknown')
+                              : menuProvider?.startup
+                                  && (menuProvider.startup.catalog.state === 'pending'
+                                    || menuProvider.startup.catalog.state === 'unknown')
+                              ? copy.loading
+                              : copy.emptyModels}
                           </div>
                         )
                         : null}

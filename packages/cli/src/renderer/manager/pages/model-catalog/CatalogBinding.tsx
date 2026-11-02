@@ -18,6 +18,8 @@ import { ModelEditor } from './ModelEditor.js'
 import { ConnectionEditor } from './ConnectionEditor.js'
 import { ScriptEditor } from './ScriptEditor.js'
 import { useProgressiveModelRows } from './model-service-list.js'
+import { ModelStartupStatus } from '../../../model-startup-status.js'
+import type { ModelStartupState } from '../../../model-startup-store.js'
 
 type Intent = Exclude<CatalogManagementCommand, { operation: 'createConnection' }> extends infer C
   ? C extends CatalogManagementCommand ? Omit<C, 'bindingRef' | 'scopeRevision' | 'expectedRevision'> : never
@@ -47,6 +49,7 @@ export function CatalogBinding(
     query,
     filters,
     connected,
+    startupState,
     expanded,
     onExpandedChange,
     exportSelection,
@@ -60,6 +63,7 @@ export function CatalogBinding(
     readonly query: string
     readonly filters: ReadonlySet<CatalogFilter>
     readonly connected: boolean
+    readonly startupState?: ModelStartupState | undefined
     readonly expanded?: boolean
     readonly onExpandedChange?: (open: boolean) => void
     readonly exportSelection?: {
@@ -89,6 +93,8 @@ export function CatalogBinding(
   const changeExpanded = onExpandedChange ?? (() => {})
   const sourceAllowed = (operation: CatalogManagementOperation) =>
     connected && !busy && sourceCapabilities.includes(operation)
+    && (operation !== 'refresh' || !provider?.startup
+      || startupState?.connection === 'connected' && provider.startup.actions.retry.available)
   const preferenceAllowed = (operation: CatalogManagementOperation) =>
     connected && !busy && preferenceCapabilities.includes(operation)
   const scriptRunning = sourceCapabilities.includes('cancelScript')
@@ -236,6 +242,9 @@ export function CatalogBinding(
         : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
       <span className="cxms-provider-identity">
         <strong>{view.title}</strong>
+        {provider?.startup
+          ? <ModelStartupStatus entry={provider.startup} state={startupState} locale={locale} />
+          : null}
         <code>{view.scopeLabel ?? view.providerId}</code>
       </span>
       <span className="cxms-model-count">

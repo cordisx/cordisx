@@ -25,6 +25,8 @@ import {
 } from './model-catalog/CatalogBinding.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
+import { modelStartupLabel, ModelStartupStatus } from '../../model-startup-status.js'
+import { startupPageActionAvailable } from '../../model-startup-store.js'
 import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
 import { useModelTransfer } from './model-catalog/useModelTransfer.js'
 import { SharedModelServices } from './model-catalog/SharedModelServices.js'
@@ -105,9 +107,9 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
   const visibleSelectedCount = visibleExportRefs.filter(ref => transfer.selected.has(ref)).length
   const allVisibleSelected = visibleExportRefs.length > 0 && visibleSelectedCount === visibleExportRefs.length
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected
-  const loading = state.loading || catalog.loading
+  const loading = state.loading || catalog.loading || Boolean(state.startup && !state.startup.snapshot)
   const refreshing = loading || state.refreshing === true || catalog.refreshing === true
-  const unavailable = !registry || !client
+  const unavailable = !registry || !client && !state.startup
   const failed = Boolean(state.error) || Boolean(client && !catalog.connected && !catalog.loading)
   const canCreate = Boolean(onCreate && client && catalog.connected && catalog.canCreateConnection && !loading)
   const refresh = () => {
@@ -265,6 +267,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                     key={key}
                     entry={entry}
                     failed={copy.actionFailed}
+                    available={startupPageActionAvailable(state.startup, key, entry.id)}
                     refresh={() => registry!.refresh()}
                   />
                 ))}
@@ -294,6 +297,7 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
                 query={normalized}
                 filters={filters}
                 connected={catalog.connected}
+                startupState={state.startup}
                 expanded={normalized.length > 0 || expanded.has(view.bindingRef)}
                 onExpandedChange={open => {
                   if (!normalized) setProviderExpanded(view.bindingRef, open)
@@ -320,7 +324,11 @@ export function ModelServicesPage({ registry, locale, onCreate, onSecondaryPageC
               modelsLabel={copy.models}
               {...(catalog.connected ? { readOnly: t('catalog.readOnly') } : {})}
               bindingState={catalog.connected ? 'unbound' : managementState}
-              emptyLabel={state.loading
+              startupState={state.startup}
+              locale={locale}
+              emptyLabel={provider.startup
+                ? modelStartupLabel(provider.startup, locale)
+                : state.loading
                 ? copy.loading
                 : state.error
                 ? copy.loadFailed
@@ -491,6 +499,8 @@ function LegacyProvider({
   expanded,
   onExpandedChange,
   resetKey,
+  startupState,
+  locale,
 }: {
   readonly provider: ModelProviderSnapshot['providers'][number]
   readonly modelsLabel: string
@@ -500,6 +510,8 @@ function LegacyProvider({
   readonly expanded: boolean
   readonly onExpandedChange: (open: boolean) => void
   readonly resetKey: string
+  readonly startupState?: ModelProviderSnapshot['startup']
+  readonly locale: string
 }) {
   const canExpand = provider.models.length > 0
   const effectiveExpanded = canExpand && expanded
@@ -526,17 +538,24 @@ function LegacyProvider({
             : <HostBrandIcon icon={provider.icon} />}
           <span className="cxms-provider-identity">
             <strong>{provider.title}</strong>
+            {provider.startup
+              ? <ModelStartupStatus entry={provider.startup} state={startupState} locale={locale} />
+              : null}
             {provider.title.toLocaleLowerCase() === provider.providerId.toLocaleLowerCase()
               ? null
               : <code>{provider.providerId}</code>}
           </span>
           <span className="cxms-model-count">
-            {canExpand ? `${modelsLabel}: ${provider.models.length}` : (
-              <span className="cxms-model-empty">
-                <EmptyStateIllustration family="model-services" compact />
-                {emptyLabel}
-              </span>
-            )}
+            {canExpand
+              ? `${modelsLabel}: ${provider.models.length}`
+              : provider.startup
+              ? null
+              : (
+                <span className="cxms-model-empty">
+                  <EmptyStateIllustration family="model-services" compact />
+                  {emptyLabel}
+                </span>
+              )}
           </span>
         </button>
       </header>

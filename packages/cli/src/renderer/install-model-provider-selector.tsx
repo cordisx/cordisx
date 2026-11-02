@@ -21,7 +21,7 @@ export function canReplaceNativeModelProviderTrigger(
   state: ProviderSelectionSnapshot,
   catalog: ReturnType<ModelProviderRegistry['snapshot']>,
 ): boolean {
-  return state.available || catalog.providers.length > 0 || catalog.entries.length > 0
+  return catalog.startup !== undefined || state.available || catalog.providers.length > 0 || catalog.entries.length > 0
 }
 
 /** One Host-owned seat; native controls are restored whenever this seat retires. */
@@ -137,7 +137,8 @@ export async function installModelProviderSelector(
   const refresh = setInterval(() => {
     void registry.refresh()
   }, 5_000)
-  await registry.refresh()
+  // Installation is independent of directory discovery; pending services must not block core UI.
+  void registry.refresh()
   reconcile()
   return () => {
     if (disposed) return

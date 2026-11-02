@@ -151,7 +151,20 @@ export class ModelProviderRegistry {
     if (this.disposed) return
     this.observingStartup = true
     this.disconnectStartup?.()
-    this.disconnectStartup = this.startupStore.subscribe(() => this.emit())
+    let previous = this.startupStore.snapshot().snapshot?.cursor
+    this.disconnectStartup = this.startupStore.subscribe(() => {
+      const next = this.startupStore.snapshot().snapshot?.cursor
+      const replaced = previous && next && (previous.scopeId !== next.scopeId
+        || previous.hostGeneration !== next.hostGeneration || previous.epoch !== next.epoch)
+      previous = next
+      if (replaced) {
+        this.revision++
+        this.projections = []
+        this.hasSnapshot = false
+      }
+      this.emit()
+      if (replaced) void this.refresh()
+    })
     this.startupStore.connect(observer)
   }
   private _management: ModelCatalogClient | undefined
