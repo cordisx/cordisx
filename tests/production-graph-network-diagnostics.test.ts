@@ -131,6 +131,41 @@ describe('production Host graph network diagnostics', () => {
     expect(listeners.size).toBe(0)
   })
 
+  it('retains a failed chunk across sibling requests and clears only a successful retry of that resource', async () => {
+    const listeners = new Map<string, (params: Record<string, unknown>) => void>()
+    const origin = `http://127.0.0.1:43210/cordisx-host-generation/${'a'.repeat(64)}`
+    const observer = await observeProductionGraphNetwork({
+      send: async () => ({}),
+      onEvent(method, listener) {
+        listeners.set(method, listener)
+        return () => listeners.delete(method)
+      },
+    }, hostGenerationBootloaderSource(origin))
+    const request = (id: string, file: string) =>
+      listeners.get('Network.requestWillBeSent')!({ requestId: id, request: { url: `${origin}/${file}` } })
+    const fail = (id: string) =>
+      listeners.get('Network.loadingFailed')!({ requestId: id, errorText: 'net::ERR_FAILED' })
+    const success = (id: string) => {
+      listeners.get('Network.responseReceived')!({ requestId: id, response: { status: 200 } })
+      listeners.get('Network.loadingFinished')!({ requestId: id })
+    }
+    request('manifest', 'manifest.json')
+    fail('manifest')
+    request('entry', 'host.js')
+    expect(observer!.latest()).toBeUndefined()
+    request('chunk-a', 'chunk-a.js')
+    fail('chunk-a')
+    const failure = observer!.latest()
+    request('chunk-b', 'chunk-b.js')
+    success('chunk-b')
+    expect(observer!.latest()).toBe(failure)
+    request('retry-a', 'chunk-a.js')
+    expect(observer!.latest()).toBe(failure)
+    success('retry-a')
+    expect(observer!.latest()).toBeUndefined()
+    await observer!.close()
+  })
+
   it('does not block installation when the diagnostic Network domain is unavailable', async () => {
     await expect(observeProductionGraphNetwork(
       {
