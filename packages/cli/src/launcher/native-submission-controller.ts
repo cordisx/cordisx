@@ -1,3 +1,7 @@
+import { nativeProviderConfig } from './native-provider-config.js'
+export { nativeProviderConfig } from './native-provider-config.js'
+import type { StartupActionReasonV1 } from '@cordisx/protocol/startup/v1'
+import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { randomUUID } from 'node:crypto'
 import type { ModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
@@ -97,6 +101,7 @@ export type NativeSubmissionPreparation =
   | Readonly<{ kind: 'confirm'; confirmationId: string; selectionRevision: number }>
   | Readonly<{
     kind: 'reject'
+    startupReason?: StartupActionReasonV1
     reason: 'unsupported-submission-intent' | 'scope-mismatch' | 'stale-operation' | 'provider-preparation-failed'
   }>
 
@@ -145,7 +150,13 @@ export type NativeMarkedRequestConsumption =
 /** Host-internal provider table for natively resuming a thread that a managed provider owns. */
 export type NativeThreadResumePreparation =
   | Readonly<{ kind: 'resume'; resumeToken: string; configOverrides: Readonly<Record<string, unknown>> }>
-  | Readonly<{ kind: 'reject'; reason: 'unknown-provider' | 'provider-preparation-failed' }>
+  | Readonly<
+    {
+      kind: 'reject'
+      reason: 'unknown-provider' | 'provider-preparation-failed'
+      startupReason?: StartupActionReasonV1
+    }
+  >
 
 export interface NativeSubmissionController {
   readonly nativeManagedModelRoutingAvailable: false
@@ -158,7 +169,9 @@ export interface NativeSubmissionController {
         effective: NativeProviderSelection
       }>
     }>
-    | Readonly<{ kind: 'reject'; reason: 'stale-operation' | 'thread-switch-failed' }>
+    | Readonly<
+      { kind: 'reject'; reason: 'stale-operation' | 'thread-switch-failed'; startupReason?: StartupActionReasonV1 }
+    >
   >
   prepareSubmission(
     scope: NativeSubmissionScope,
@@ -199,6 +212,7 @@ export interface NativeSubmissionController {
 }
 
 export interface NativeSubmissionControllerOptions {
+  readonly startup?: StartupProviderAdmission
   readonly selection: NativeSubmissionSelectionAuthority
   readonly credentials: NativeProviderCredentialBroker
   readonly runtime: NativeSubmissionRuntimeAuthority
@@ -287,47 +301,6 @@ function bindingKey(threadId: string): string {
   return threadId
 }
 
-export function nativeProviderConfig(lease: NativeProviderCredentialLease): Readonly<Record<string, unknown>> {
-  const baseUrl = new URL(lease.endpoint.baseUrl)
-  const loopback = baseUrl.hostname === '127.0.0.1'
-    || baseUrl.hostname === 'localhost'
-    || baseUrl.hostname === '[::1]'
-  if (
-    !['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username !== '' || baseUrl.password !== ''
-    || baseUrl.hash !== '' || lease.endpoint.wireApi !== 'responses'
-    || (baseUrl.protocol === 'http:' && !loopback)
-  ) throw new Error('native provider credential lease endpoint is invalid')
-  if (lease.auth.scheme === 'none') {
-    return Object.freeze({
-      name: 'CordisX managed provider',
-      base_url: lease.endpoint.baseUrl,
-      wire_api: 'responses',
-      requires_openai_auth: false,
-    })
-  }
-  if (
-    !validText(lease.auth.command, 4_096)
-    || !validText(lease.auth.cwd, 4_096)
-    || lease.auth.args.some(argument => argument.length > 16_384 || argument.includes('\0'))
-    || !Number.isSafeInteger(lease.auth.timeoutMs) || lease.auth.timeoutMs < 1 || lease.auth.timeoutMs > 60_000
-    || !Number.isSafeInteger(lease.auth.refreshIntervalMs)
-    || lease.auth.refreshIntervalMs < 1 || lease.auth.refreshIntervalMs > 60_000
-  ) throw new Error('native provider credential command is invalid')
-  return Object.freeze({
-    name: 'CordisX managed provider',
-    base_url: lease.endpoint.baseUrl,
-    wire_api: 'responses',
-    requires_openai_auth: false,
-    auth: Object.freeze({
-      command: lease.auth.command,
-      args: Object.freeze([...lease.auth.args]),
-      cwd: lease.auth.cwd,
-      timeout_ms: lease.auth.timeoutMs,
-      refresh_interval_ms: lease.auth.refreshIntervalMs,
-    }),
-  })
-}
-
 function requestConfig(
   pending: PendingNativeProviderChange,
   lease: NativeProviderCredentialLease,
@@ -358,7 +331,8 @@ export function createNativeSubmissionController(
   const now = options.now ?? Date.now
   const validSelection = async (selection: NativeProviderSelection): Promise<boolean> => {
     try {
-      return await options.validateSelection?.(selection) ?? true
+      const startup = options.startup?.availability(selection.providerId, selection.model)
+      return startup?.available === false ? false : await options.validateSelection?.(selection) ?? true
     } catch {
       return false
     }
@@ -542,6 +516,11 @@ export function createNativeSubmissionController(
       await expire()
       const snapshot = options.selection.snapshot(scope)
       const pending = snapshot.pending
+      const selected = pending ?? snapshot.effective
+      const startup = options.startup?.availability(selected.providerId, selected.model)
+      if (startup !== undefined && !startup.available) {
+        return { kind: 'reject', reason: 'thread-switch-failed', startupReason: startup.reason }
+      }
       if (pending === undefined || pending.threadId !== scope.threadId) {
         return { kind: 'reject', reason: 'stale-operation' }
       }
@@ -559,6 +538,7 @@ export function createNativeSubmissionController(
         expiresAt: now() + operationTtlMs,
       }
       const clearSelection = (): void => {
+        if (options.startup?.availability(pending.providerId, pending.model)?.available === false) return
         options.selection.clearPending({
           scope,
           expectedRevision: snapshot.revision,
@@ -623,6 +603,12 @@ export function createNativeSubmissionController(
     },
     async prepareSubmission(scope, action) {
       if (disposed) return { kind: 'reject', reason: 'stale-operation' }
+      const selected = options.selection.snapshot(scope)
+      const desired = selected.pending ?? selected.effective
+      const startup = options.startup?.availability(desired.providerId, desired.model)
+      if (startup !== undefined && !startup.available) {
+        return { kind: 'reject', reason: 'provider-preparation-failed', startupReason: startup.reason }
+      }
       const key = scopeKey(scope)
       if (scope.threadId !== action.threadId) return { kind: 'reject', reason: 'scope-mismatch' }
       await expire()
@@ -856,6 +842,10 @@ export function createNativeSubmissionController(
       operation.expiresAt = now() + operationTtlMs
     },
     async prepareThreadResume(input) {
+      const startup = options.startup?.availability(input.providerId, input.model)
+      if (startup !== undefined && !startup.available) {
+        return { kind: 'reject', reason: 'provider-preparation-failed', startupReason: startup.reason }
+      }
       if (
         disposed || input.providerId === 'openai' || !validText(input.providerId, 128)
         || !validText(input.model, 512) || !validText(input.threadId, 512)

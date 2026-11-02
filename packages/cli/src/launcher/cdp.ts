@@ -1,3 +1,4 @@
+import type { StartupCdpTransport } from './startup-cdp-transport.js'
 import { bindDiagnostic, diagnosticError, diagnosticRef } from '../diagnostics/context.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
@@ -164,6 +165,7 @@ export interface WatchInjectionOptions {
   }>
   readonly managedServiceUI?: {
     readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+    readonly transport?: StartupCdpTransport
   }
 }
 

@@ -71,6 +71,7 @@ export async function completeHostReadiness(
 }
 
 export async function runInjectedHost(input: {
+  readonly signal?: AbortSignal
   readonly nativeSubmission?: WatchInjectionOptions['nativeSubmission']
   readonly source: string | (() => string)
   readonly newDocumentSource?: string | (() => string)
@@ -126,6 +127,9 @@ export async function runInjectedHost(input: {
 }): Promise<void> {
   const emitDiagnostic = bindDiagnostic()
   const controller = new AbortController()
+  const abort = () => controller.abort(input.signal?.reason)
+  input.signal?.addEventListener('abort', abort, { once: true })
+  if (input.signal?.aborted) abort()
   let rendererIsReady = false
   let launched = input.prelaunchedHost?.child
   let removeHostObserver = launched === undefined
@@ -212,7 +216,9 @@ export async function runInjectedHost(input: {
       profileLease = await acquireCodexProfileLaunchLease(input.profile.userDataDir, { stdout: input.stdout })
     }
     if (input.prelaunchedHost === undefined) {
+      controller.signal.throwIfAborted()
       await input.beforeHostLaunch?.()
+      controller.signal.throwIfAborted()
       const hidden = input.hiddenUntilReady === true
       const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
       diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector === true, verified: mainInspector })
@@ -269,6 +275,7 @@ export async function runInjectedHost(input: {
   } finally {
     lifecycle({ event: 'cleanup-started' })
     controller.abort()
+    input.signal?.removeEventListener('abort', abort)
     const launchedHost = launched
     const cleanup = await settleInjectedHostCleanup({
       beforeHostTermination: [

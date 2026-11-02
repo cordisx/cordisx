@@ -7,7 +7,7 @@ import { parseTerminalCli } from '../packages/cli/src/cli/terminal-parse.js'
 import { terminalCodexArguments } from '../packages/cli/src/cli/terminal-command.js'
 import type { NativeManagedGatewayConnectionSession } from '../packages/cli/src/launcher/managed-service-native-connection.js'
 
-function fixture() {
+function fixture(startup?: Parameters<typeof createTerminalProviderAuthority>[0]['startup']) {
   let generation = 'generation-one', clock = 1000
   const dispose = vi.fn()
   const releaseCredential = vi.fn()
@@ -41,6 +41,7 @@ function fixture() {
     dispose: releaseCredential,
   }))
   const authority = createTerminalProviderAuthority({
+    ...(startup === undefined ? {} : { startup }),
     catalog: async () => [{
       providerId: 'plugin-provider',
       pluginId: 'test-plugin',
@@ -241,4 +242,144 @@ describe('terminal argument boundaries', () => {
     expect(() => parseTerminalProviderRequest({ kind: 'list', token: 'spoof' })).toThrow()
     expect(() => parseTerminalProviderRequest({ kind: 'prepare', providerId: 'ok', model: 'bad\nmodel' })).toThrow()
   })
+})
+
+it('waits once per caller before acquiring independent terminal credentials', async () => {
+  let ready!: () => void
+  const prepared = new Promise<void>(resolve => {
+    ready = resolve
+  })
+  const f = fixture({
+    availability: () => ({ available: false, reason: 'preparing' }),
+    wait: async () => {
+      await prepared
+      return { status: 'ready' }
+    },
+  })
+  try {
+    const a = f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+    const b = f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' })
+    expect(f.prepare).not.toHaveBeenCalled()
+    ready()
+    const [first, second] = await Promise.all([a, b])
+    expect(first.kind).toBe('prepared')
+    expect(second.kind).toBe('prepared')
+    if (first.kind === 'prepared' && second.kind === 'prepared') expect(first.leaseId).not.toBe(second.leaseId)
+    expect(f.prepare).toHaveBeenCalledTimes(2)
+  } finally {
+    f.authority.close()
+  }
+})
+
+it('returns a typed authentication outcome without acquiring a credential', async () => {
+  const f = fixture({
+    availability: () => ({ available: false, reason: 'authentication-required' }),
+    wait: async () => ({
+      status: 'unavailable',
+      target: { pluginId: 'test', capabilityId: 'models' },
+      reason: 'authentication-required',
+    }),
+  })
+  try {
+    expect(await f.authority.request({ kind: 'prepare', providerId: 'plugin-provider', model: 'model-one' }))
+      .toMatchObject({ kind: 'unavailable', startup: { reason: 'authentication-required' } })
+    expect(f.prepare).not.toHaveBeenCalled()
+    expect(f.resolve).not.toHaveBeenCalled()
+  } finally {
+    f.authority.close()
+  }
+})
+
+it('cancels one terminal waiter without cancelling the other or minting an early lease', async () => {
+  const pending = new Map<AbortSignal, () => void>()
+  const f = fixture({
+    availability: () => ({ available: false, reason: 'preparing' }),
+    wait: async (_provider, _model, signal) =>
+      await new Promise(resolve => {
+        const done = () => {
+          pending.delete(signal!)
+          resolve({ status: 'ready' })
+        }
+        pending.set(signal!, done)
+        signal!.addEventListener('abort', () => {
+          pending.delete(signal!)
+          resolve({ status: 'cancelled' })
+        }, { once: true })
+      }),
+  })
+  try {
+    const first = f.authority.request({
+      kind: 'prepare',
+      providerId: 'plugin-provider',
+      model: 'model-one',
+      waiterId: 'first',
+    })
+    const second = f.authority.request({
+      kind: 'prepare',
+      providerId: 'plugin-provider',
+      model: 'model-one',
+      waiterId: 'second',
+    })
+    await f.authority.request({ kind: 'cancel-wait', waiterId: 'first' })
+    expect(await first).toMatchObject({ kind: 'unavailable', startup: { status: 'cancelled' } })
+    expect(f.prepare).not.toHaveBeenCalled()
+    expect(pending.size).toBe(1)
+    for (const done of [...pending.values()]) done()
+    expect(await second).toMatchObject({ kind: 'prepared' })
+    expect(f.prepare).toHaveBeenCalledOnce()
+  } finally {
+    f.authority.close()
+  }
+})
+
+it.each(['cancel', 'close'] as const)('disposes a late credential when %s happens after readiness', async action => {
+  const f = fixture({ availability: () => ({ available: true }), wait: async () => ({ status: 'ready' }) })
+  const makeCredential = f.prepare.getMockImplementation()!
+  let entered!: () => void
+  const started = new Promise<void>(resolve => {
+    entered = resolve
+  })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  f.prepare.mockImplementation(async () => {
+    entered()
+    await gate
+    return await makeCredential()
+  })
+  const pending = f.authority.request({
+    kind: 'prepare',
+    providerId: 'plugin-provider',
+    model: 'model-one',
+    waiterId: 'late',
+  })
+  await started
+  if (action === 'cancel') await f.authority.request({ kind: 'cancel-wait', waiterId: 'late' })
+  else f.authority.close()
+  release()
+  expect(await pending).toMatchObject({ kind: 'unavailable', startup: { status: 'cancelled' } })
+  expect(f.releaseCredential).toHaveBeenCalledOnce()
+  f.authority.close()
+  expect(f.releaseCredential).toHaveBeenCalledOnce()
+})
+
+it('cancel-wait retires a lease whose prepared response was lost', async () => {
+  const f = fixture()
+  try {
+    const prepared = await f.authority.request({
+      kind: 'prepare',
+      providerId: 'plugin-provider',
+      model: 'model-one',
+      waiterId: 'lost',
+    })
+    expect(prepared.kind).toBe('prepared')
+    await f.authority.request({ kind: 'cancel-wait', waiterId: 'lost' })
+    expect(f.releaseCredential).toHaveBeenCalledOnce()
+    if (prepared.kind === 'prepared') {
+      await expect(f.authority.request({ kind: 'renew', leaseId: prepared.leaseId })).rejects.toThrow('expired')
+    }
+  } finally {
+    f.authority.close()
+  }
 })

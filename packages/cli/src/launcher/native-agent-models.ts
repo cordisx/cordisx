@@ -1,3 +1,4 @@
+import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { callerThreadId } from './agent-bridge-context.js'
 import { bridgeFailure } from './agent-bridge-contract.js'
@@ -29,6 +30,7 @@ export class NativeAgentModelSelectionRejected extends Error {
   readonly reason = 'thread-not-idle'
 }
 export interface NativeAgentModelsAuthority {
+  readonly startup?: StartupProviderAdmission
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   controller: Pick<NativeSubmissionController, 'prepareThreadResume' | 'completeThreadResume'>
   switchThread(input: Selection & { configOverrides: Readonly<Record<string, unknown>> }): Promise<void>
@@ -118,6 +120,8 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       || Object.keys(selection).some(key => !['threadId', 'providerId', 'model'].includes(key))
     ) return { status: 'rejected', reason: 'invalid-selection' }
     const target: Selection = { threadId: selection.threadId, providerId: selection.providerId, model: selection.model }
+    const startup = authority.startup?.availability(target.providerId, target.model)
+    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     if (
       !catalog.some(provider =>
         provider.providerId === target.providerId && provider.models.some(model => model.id === target.model)
@@ -128,7 +132,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     let attempted = false
     try {
       const prepared = await authority.controller.prepareThreadResume(target)
-      if (prepared.kind !== 'resume') return { status: 'rejected', reason: prepared.reason }
+      if (prepared.kind !== 'resume') return { status: 'rejected', reason: prepared.startupReason ?? prepared.reason }
       token = prepared.resumeToken
       attempted = true
       await authority.switchThread({ ...target, configOverrides: prepared.configOverrides })

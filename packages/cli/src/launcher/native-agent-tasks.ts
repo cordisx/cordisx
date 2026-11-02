@@ -1,3 +1,4 @@
+import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -23,6 +24,7 @@ export class NativeAgentTasks {
   private readonly fingerprints = new Map<string, string>()
   constructor(
     private readonly authority: {
+      startup?: StartupProviderAdmission
       directory: string
       catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
       available(): Promise<boolean>
@@ -86,6 +88,8 @@ export class NativeAgentTasks {
     sourceCallId: string,
     value: Record<string, any>,
   ) {
+    const startup = this.authority.startup?.availability(value.providerId, value.model)
+    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     const file = path.join(this.authority.directory, `${key}.json`)
     await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
     const directory = await lstat(this.authority.directory)
@@ -162,6 +166,11 @@ export class NativeAgentTasks {
       !intent || intent.claimed || request.sourceThreadId !== intent.sourceThreadId || request.hostId !== 'local'
       || JSON.stringify(request.arguments) !== intent.fingerprint
     ) return undefined
+    const startup = this.authority.startup?.availability(
+      String(intent.arguments.providerId),
+      String(intent.arguments.model),
+    )
+    if (startup !== undefined && !startup.available) throw new Error(`Native task unavailable: ${startup.reason}`)
     intent.claimed = true
     if (!await this.authority.available()) throw new Error('Native task adapter retired')
     const catalog = await this.authority.catalog()

@@ -1,3 +1,8 @@
+import { startupTerminalRequests } from '../launcher/startup-provider-admission.js'
+import { abortable } from '../launcher/cdp-session.js'
+import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
+import { createStartupLifetime } from './startup-lifetime.js'
+import { createStartupHostBridge } from './startup-host-bridge.js'
 import { recordRuntimeGeneration, runWithLaunchDiagnostics } from './launch-diagnostics.js'
 import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import path from 'node:path'
@@ -108,8 +113,6 @@ import {
   type OwnerDocumentBridgeHandler,
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
-import { managedBackendRuntimeServiceAccess } from '../launcher/packages/managed-backend-service-access.js'
-import { activateManagedServiceCandidate } from '../launcher/managed-service-candidate.js'
 import { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
 import {
   agentHistoryHost,
@@ -144,7 +147,6 @@ import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import {
   nativeCatalogExport,
-  nativeTerminalProvider,
   openProductionPluginManagementComposition,
   type ProductionPluginManagementComposition,
 } from './production-plugin-management.js'
@@ -160,7 +162,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
 
 async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: CordisXCliRuntime): Promise<void> {
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
+  const startupLifetime = createStartupLifetime(runtime.internalSignal)
   const supervisorRuntime = await createSupervisorRuntime(environment)
+  let startupBridge: ReturnType<typeof createStartupHostBridge> | undefined
   const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
   let bootstrap: ProductionHostBootstrap | undefined
   let plan: ProductionHostBootstrap['plan']
@@ -186,6 +190,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         && (selection.profile.providerBindings?.length ?? 0) === 0
         && environment.CORDISX_SUPERVISOR_HOME !== undefined,
       prepareNativeSubmission: runHost === runInjectedHost,
+      signal: startupLifetime.signal,
       mainInspector: supervisorRuntime.mainInspector,
       markHostLaunched: async (pid, inspectorUrl, port) =>
         await supervisorRuntime.markHostLaunched(pid, inspectorUrl, port),
@@ -237,45 +242,20 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     )
     const lifecycleRuntime = new CdpPluginLifecycleRuntime()
     const platformProviderLifecycleRuntime = new PlatformProviderPluginLifecycleRuntime(lifecycleRuntime)
-    managedServiceLifecycleRuntime = new ManagedServicePluginLifecycleRuntime({
+    managedServiceLifecycleRuntime = createProductionManagedServiceLifecycle({
       runtime: platformProviderLifecycleRuntime,
+      homeDir: rootFromConfigPath(configPath),
       profileId: selection.profileId,
-      runtimeGeneration: lifecycleGeneration,
-      activate: async (activation, options) => {
-        if (invocation.options.dryRun) return undefined
-        const plugins = await loadPluginComposition(lifecycleStore, activation)
-        const accesses = await Promise.all(plugins.flatMap(plugin => {
-          if (
-            !plugin.enabled || !options.pluginIds.includes(plugin.id) || plugin.package === undefined
-            || plugin.manifest?.schemaVersion !== 14
-          ) return []
-          return plugin.manifest.services.flatMap(service =>
-            service.kind === 'managed-backend'
-              ? [managedBackendRuntimeServiceAccess(
-                rootFromConfigPath(configPath),
-                {
-                  id: plugin.id,
-                  version: plugin.package!.version,
-                  digest: plugin.package!.digest,
-                  moduleGeneration: plugin.package!.moduleGeneration,
-                },
-                service.id,
-                lifecycleGeneration,
-              )]
-              : []
-          )
-        }))
-        if (accesses.length === 0) return undefined
-        return await activateManagedServiceCandidate(accesses, {
-          homeDir: rootFromConfigPath(configPath),
-          environment: runtime.env ?? process.env,
-          profileId: selection.profileId,
-          runtimeGeneration: lifecycleGeneration,
-          ...options,
-        })
-      },
+      generation: lifecycleGeneration,
+      environment: runtime.env ?? process.env,
+      store: lifecycleStore,
+      dryRun: invocation.options.dryRun,
     })
     const lifecycleTransactionRuntime = managedServiceLifecycleRuntime
+    startupLifetime.signal.addEventListener('abort', () => {
+      void lifecycleTransactionRuntime.dispose().catch(() => undefined)
+    }, { once: true })
+    startupLifetime.signal.throwIfAborted()
     const configuredIds = new Set(configuredComposition.plugins.map(plugin => plugin.id))
     const pluginLifecycleCoordinator = new PluginLifecycleCoordinator({
       homeDir: rootFromConfigPath(configPath),
@@ -330,7 +310,8 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       lifecycleRuntime,
     })
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
-    await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
+    const startupSession = await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
+    startupBridge = createStartupHostBridge(managedServiceLifecycleRuntime, selection.profileId, lifecycleGeneration)
     const permissionIdentities = new PluginPermissionIdentityRegistry([
       ...pluginIdentities(configuredComposition),
       ...pluginIdentities({ ...configuredComposition, plugins: activatedPlugins }),
@@ -368,8 +349,8 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       pluginLifecycle,
       managedServiceActivation,
       managedServiceUICapabilities,
-      managedServiceUI,
     } = rendererLifecycle
+    const managedServiceUI = startupBridge
     const nativeCatalogOptions = nativeSubmissionCatalogOptions(
       rootFromConfigPath(configPath),
       selection.profileId,
@@ -431,6 +412,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
       ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
       managedServiceUICapabilities,
+      startupHostCapability: startupBridge.capability,
       productionGraph: !invocation.options.attach,
       ...(runtime.internalBuildRendererBundle === undefined
         ? {}
@@ -746,7 +728,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
+        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
@@ -789,7 +771,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           debugPort,
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
+          signal: startupLifetime.signal,
           onReady: async signal => {
+            await abortable(startupSession.adopted, signal)
             await markCliProxyStartupConfigApplied()
             await supervisorRuntime.markReady(debugPort, nativeSubmission?.installation.accountCapability, signal)
           },
@@ -824,7 +808,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     if (nativeSubmissionCompletion !== undefined) {
       stdout('[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-wait', at: Date.now() }))
       try {
-        await nativeSubmissionCompletion
+        await abortable(nativeSubmissionCompletion, startupLifetime.signal)
         stdout(
           '[cordisx-startup] ' + JSON.stringify({ event: 'native-submission-completion-resolved', at: Date.now() }),
         )
@@ -903,7 +887,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        terminalProvider: nativeTerminalProvider(() => nativeSubmission),
+        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
@@ -951,7 +935,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         debugPort: resolvedDebugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
+        signal: startupLifetime.signal,
         onReady: async signal => {
+          await abortable(startupSession.adopted, signal)
           await markCliProxyStartupConfigApplied()
           await supervisorRuntime.markReady(resolvedDebugPort, nativeSubmission?.installation.accountCapability, signal)
         },
@@ -983,6 +969,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     await supervisorRuntime.markFailed(error instanceof Error ? error.message : String(error)).catch(() => undefined)
     throw error
   } finally {
+    startupLifetime.abort()
+    const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
+    await nativeSubmissionBootstrap?.close().catch(() => undefined)
     if (prelaunchedHost !== undefined && !prelaunchedHostHandedOff) {
       await terminateIsolatedCodex(prelaunchedHost.child, profile).catch(() => undefined)
     }
@@ -993,8 +982,10 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     await nativeSubmissionCompletion?.catch(() => undefined)
     await nativeSubmission?.close().catch(() => undefined)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
-    await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
+    await serviceCleanup?.catch(() => undefined)
     await pluginGenerationArtifactServer?.close()
     await certifiedPermissionAuthority?.dispose()
+    await startupBridge?.close()
+    startupLifetime.close()
   }
 }

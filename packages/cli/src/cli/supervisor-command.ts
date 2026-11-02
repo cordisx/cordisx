@@ -1,3 +1,4 @@
+import { waitForStartupCaller } from './startup-caller-wait.js'
 import { diagnostic, diagnosticError, diagnosticId, diagnosticRef, withDiagnostics } from '../diagnostics/context.js'
 import { journalDirectory, LocalJournal, readJournal } from '../diagnostics/journal.js'
 import { launchFingerprint } from './launch-fingerprint.js'
@@ -489,6 +490,17 @@ async function finishReady(
       )
     }
   }
+  await waitForStartupCaller({
+    ...(runtime.internalSignal === undefined ? {} : { signal: runtime.internalSignal }),
+    configPath: ready.target.configPath,
+    appId: ready.target.appId,
+    profileId: ready.target.selection.profileId,
+    state: ready.state,
+    ...(invocation.options.service || invocation.options.provider
+      ? { providerId: invocation.options.service ?? invocation.options.provider! }
+      : {}),
+    ...(invocation.options.model === undefined ? {} : { model: invocation.options.model }),
+  })
   output(runtime, display(ready.state), invocation.options.json)
   return ready
 }

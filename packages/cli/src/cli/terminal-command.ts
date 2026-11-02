@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
@@ -187,12 +188,40 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let renewing = false, failure: Error | undefined
   try {
     if (invocation.service && invocation.model && !shared) {
-      const result = await request!({
-        kind: 'prepare',
-        providerId: invocation.service,
-        model: invocation.model,
-        ...(client === 'claude-code' ? { client } : {}),
-      })
+      runtime.internalSignal?.throwIfAborted()
+      const waiterId = randomUUID()
+      let cancelled = false
+      const cancelWait = () => {
+        cancelled = true
+        void request!({ kind: 'cancel-wait', waiterId }).catch(() => undefined)
+      }
+      runtime.internalSignal?.addEventListener('abort', cancelWait, { once: true })
+      process.once('SIGTERM', cancelWait)
+      process.once('SIGHUP', cancelWait)
+      let result: TerminalProviderResult
+      try {
+        result = await request!({
+          kind: 'prepare',
+          waiterId,
+          providerId: invocation.service,
+          model: invocation.model,
+          ...(client === 'claude-code' ? { client } : {}),
+        })
+      } finally {
+        runtime.internalSignal?.removeEventListener('abort', cancelWait)
+        process.off('SIGTERM', cancelWait)
+        process.off('SIGHUP', cancelWait)
+      }
+      if (result.kind === 'prepared') prepared = result
+      if (cancelled) throw new Error('Terminal provider wait cancelled')
+      if (result.kind === 'unavailable') {
+        throw new Error(
+          `Terminal provider unavailable: ${
+            result.startup.status === 'unavailable' ? result.startup.reason : result.startup.status
+          }`,
+        )
+      }
+      runtime.internalSignal?.throwIfAborted()
       if (result.kind !== 'prepared' || result.providerId !== invocation.service || result.model !== invocation.model) {
         throw new Error('Invalid terminal provider preparation')
       }

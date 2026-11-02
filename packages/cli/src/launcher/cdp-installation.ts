@@ -1,3 +1,4 @@
+import type { StartupCdpTransport } from './startup-cdp-transport.js'
 import { installRuntimeBindings } from './cdp-runtime-bindings.js'
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
@@ -46,6 +47,7 @@ export async function install(
   hostMutationGate?: support.CdpLifecycleRequestGate,
   managedServiceUI?: {
     readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+    readonly transport?: StartupCdpTransport
   },
   nativeSubmission?: NativeSubmissionInstallation,
   activateDocument?: (identifier: string) => Promise<void>,
@@ -846,6 +848,7 @@ export async function install(
       }
       generationJoin = undefined
     }
+    await managedServiceUI?.transport?.connected(session)
     return {
       target,
       ...(viteDevelopment ? { viteDevelopment: true } : {}),
@@ -900,6 +903,7 @@ export async function install(
         ? {}
         : { managedServiceUIController, removeManagedServiceUIBindingListener }),
       managedServiceUIBindingInstalled: managedServiceUI !== undefined,
+      ...(managedServiceUI?.transport === undefined ? {} : { startupTransport: managedServiceUI.transport }),
       ...(nativeChannel === undefined ? {} : { nativeChannel }),
       ...(documentInstallation.nativeInterception === undefined
         ? {}

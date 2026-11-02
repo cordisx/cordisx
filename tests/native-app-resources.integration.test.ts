@@ -860,3 +860,17 @@ it.skipIf(process.platform !== 'darwin')(
     }
   },
 )
+
+it.skipIf(process.platform !== 'darwin')(
+  'closes an early adapter preparation before complete without a late lease',
+  async () => {
+    const f = await bundle()
+    const bootstrap = await prepareNativeSubmissionBootstrap(f.executable, {
+      cacheDirectory: path.join(f.contents, 'cancel-before-complete-cache'),
+    })
+    await bootstrap.close()
+    await bootstrap.close()
+    await expect(bootstrap.complete({ nativeProviderIds: [], prepareNativeConnection: vi.fn() }, f.contents))
+      .rejects.toThrow('closed')
+  },
+)
