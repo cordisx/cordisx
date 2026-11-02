@@ -12,6 +12,14 @@ export function modelStartupLabel(entry: StartupProjectionV1, locale: string): s
     ? 'catalog.startup.authRequired'
     : entry.state === 'failed'
     ? 'catalog.startup.failed'
+    : entry.catalog.state === 'failed'
+    ? 'catalog.startup.catalogFailed'
+    : entry.authentication === 'failed'
+    ? 'catalog.startup.authFailed'
+    : entry.authentication === 'authenticating'
+    ? 'catalog.startup.authenticating'
+    : entry.authentication === 'logged-out' || entry.authentication === 'missing'
+    ? 'catalog.startup.authRequired'
     : entry.state === 'stopped'
     ? 'catalog.startup.stopped'
     : entry.state === 'revoked'
@@ -41,7 +49,11 @@ export function ModelStartupStatus({ entry, state, locale }: {
         ? ` · ${
           managerCopy(
             locale,
-            connection === 'reconnecting' ? 'catalog.startup.reconnecting' : 'catalog.startup.disconnected',
+            connection === 'closed'
+              ? 'catalog.startup.observationClosed'
+              : connection === 'reconnecting'
+              ? 'catalog.startup.reconnecting'
+              : 'catalog.startup.disconnected',
           )
         }`
         : null}

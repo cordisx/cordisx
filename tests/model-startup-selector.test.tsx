@@ -5,7 +5,7 @@ import { startupObserver, startupProvider, startupSnapshot } from './helpers/sta
 
 describe('model selector startup states', () => {
   it('keeps pending provider intent across epoch resets without dispatching or falling back', async () => {
-    const { registry, select } = await setup()
+    const { registry, select } = await setup('shared', false, { firstProviderTitle: 'Current provider' })
     const source = startupObserver()
     await act(async () => registry.connectStartup(source.observer))
     expect(document.querySelector('[data-cordisx-model-selector-ready="true"]')).not.toBeNull()
@@ -20,6 +20,7 @@ describe('model selector startup states', () => {
       source.emit({ kind: 'snapshot', reason: 'epoch-changed', snapshot: startupSnapshot([], 'next') })
     )
     expect(document.querySelector(providerTrigger)?.getAttribute('aria-label')).toContain('first')
+    expect(document.querySelector(providerTrigger)?.getAttribute('aria-label')).not.toContain('Current provider')
     expect(select).not.toHaveBeenCalled()
     registry.dispose()
   })

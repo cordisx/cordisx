@@ -1,6 +1,13 @@
 import type { ProductCopyCatalog } from './types.js'
 
 export const MODEL_CATALOG_COPY = {
+  'catalog.startup.catalogFailed': { en: 'Failed to load models', 'zh-CN': '模型加载失败' },
+  'catalog.startup.authFailed': { en: 'Sign-in failed', 'zh-CN': '登录失败' },
+  'catalog.startup.authenticating': { en: 'Signing in…', 'zh-CN': '正在登录…' },
+  'catalog.startup.observationClosed': {
+    en: 'Status unavailable · last known status',
+    'zh-CN': '状态暂不可用 · 上次状态',
+  },
   'catalog.startup.unknown': { en: 'Status unknown', 'zh-CN': '状态未知' },
   'catalog.startup.pending': { en: 'Starting…', 'zh-CN': '正在启动…' },
   'catalog.startup.catalogPending': { en: 'Loading models…', 'zh-CN': '正在加载模型…' },

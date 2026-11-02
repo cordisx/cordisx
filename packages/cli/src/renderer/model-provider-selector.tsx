@@ -219,11 +219,15 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       ? copy.official
       : native.providerLabel ?? copy.unknown)
   const intentProvider = catalog.providers.find(provider => provider.providerId === providerIntent)
-  const displayedProvider = intentProvider ?? pendingProvider ?? selected
+  const displayedProvider = providerIntent !== undefined
+    ? intentProvider
+    : pendingProviderId !== undefined
+    ? pendingProvider
+    : selected
   const displayedProviderId = providerIntent ?? pendingProviderId ?? native.modelProvider ?? 'openai'
   const displayedProviderLabel = displayedProviderId === 'openai'
     ? copy.official
-    : displayedProvider?.title ?? providerIntent ?? providerLabel
+    : displayedProvider?.title ?? providerIntent ?? pendingProviderId ?? providerLabel
   const displayedModel = providerIntent === undefined
     ? pendingModel ?? (pendingModelId === undefined ? effectiveModel : { id: pendingModelId, label: pendingModelId })
     : undefined
