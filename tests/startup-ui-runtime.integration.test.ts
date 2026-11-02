@@ -1,6 +1,9 @@
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { ManagedServiceStartupAuthority } from '../packages/cli/src/launcher/managed-service-startup-authority.js'
+import type { ModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import { declaration } from './managed-service-runtime-fixture.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import {
   createManagedServiceUIBridgeHandler,
@@ -12,6 +15,31 @@ import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-
 it('carries startup authorization through the production bundle and registers a plugin page before execution exists', async () => {
   const generation = 'startup-host'
   const owner = { pluginId: 'startup-fixture', pluginGeneration: 'startup-plugin' }
+  const authority = new ManagedServiceStartupAuthority({ profileId: 'work', hostGeneration: generation })
+  const hostOwners = ['provider-one', 'provider-two'].map(pluginId => ({ pluginId, pluginGeneration: 'one' }))
+  authority.admit(hostOwners.map(owner => ({
+    ...owner,
+    source: `https://example.test/${owner.pluginId}`,
+    sourceRevision: `sha256:${'a'.repeat(64)}`,
+    dependencies: [],
+    services: [declaration('gateway', owner.pluginId, [])],
+    startup: {
+      contract: 'cordisx.startup-declaration/v1',
+      pages: [],
+      capabilities: [{
+        id: 'models',
+        serviceId: 'gateway',
+        kind: 'provider',
+        providerId: owner.pluginId,
+        compositionOrigin: 'api',
+        dependsOn: [],
+        wait: { interactive: 'background', command: 'when-selected' },
+        milestones: [],
+        success: { allOf: [{ kind: 'service-ready' }, { kind: 'catalog-known' }, { kind: 'provider-published' }] },
+      }],
+    },
+  })))
+  authority.selectOwners(hostOwners)
   const observer: StartupObserverV1 = {
     contract: 'cordisx.startup-observer/v1',
     async read() {
@@ -33,6 +61,10 @@ it('carries startup authorization through the production bundle and registers a 
     generation,
     services: [],
     startupObservers: [{ ...owner, observer }],
+    hostStartup: {
+      token: 'host-startup-token',
+      observer: authority.observer({ scopeId: 'host-models', authorize: () => true }),
+    },
   })
   const plugin = {
     id: owner.pluginId,
@@ -66,12 +98,14 @@ it('carries startup authorization through the production bundle and registers a 
       plugins: [{ id: plugin.id, ...plugin.package, enabled: true }],
     },
     managedServiceUICapabilities: [{ ...owner, token: handler.token, startup: true }],
+    startupHostCapability: { token: handler.hostStartup!.token },
   })
   const dom = new JSDOM('<html><body></body></html>', { runScripts: 'dangerously', url: 'https://codex.local/' })
   const globals = dom.window as unknown as typeof globalThis & {
     __cordisxBoot: Promise<void>
     startupFixture?: StartupObserverV1
     __cordisxRuntime: {
+      modelProviders: ModelProviderRegistry
       snapshot(): {
         plugins: readonly { id: string; status: string }[]
         navigation: { pages: readonly { qualifiedId: string }[] }
@@ -82,6 +116,12 @@ it('carries startup authorization through the production bundle and registers a 
   Object.assign(dom.window, { structuredClone: globalThis.structuredClone })
   globals.__cordisxManagedServiceUIRequestV1 = payload => {
     const parsed = JSON.parse(payload)
+    if (parsed.token === handler.hostStartup!.token) {
+      void handler.hostStartup!.handleBindingValue(payload).then(value =>
+        globals.__cordisxManagedServiceUIReceiveV1?.(JSON.stringify(value))
+      )
+      return
+    }
     void handler.handle(owner, parseManagedServiceUIBindingRequest(parsed, handler, owner)).then(value =>
       globals.__cordisxManagedServiceUIReceiveV1?.(JSON.stringify({ requestId: parsed.requestId, ok: true, value }))
     )
@@ -102,10 +142,18 @@ it('carries startup authorization through the production bundle and registers a 
       expect.arrayContaining([expect.objectContaining({ qualifiedId: `${owner.pluginId}:startup-status` })]),
     )
     expect((await globals.startupFixture!.read()).cursor.scopeId).toBe('startup-owner')
+    await vi.waitFor(() =>
+      expect(globals.__cordisxRuntime.modelProviders.snapshot().providers.map(provider => provider.providerId).sort())
+        .toEqual(['provider-one', 'provider-two'])
+    )
+    expect(globals.__cordisxRuntime.modelProviders.snapshot().startup?.snapshot?.cursor.scopeId).toBe(
+      'work:host-models',
+    )
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
   } finally {
     await globals.__cordisxRuntime?.dispose()
     await handler.dispose()
+    authority.dispose()
     dom.window.close()
   }
 })

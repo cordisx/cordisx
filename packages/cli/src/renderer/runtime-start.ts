@@ -215,6 +215,8 @@ export async function start(
         metadata.startupHostCapability,
       )
   const modelProviders = nativeModelProviderRegistry(managedServiceBridge)
+  const hostStartup = managedServiceBridge?.bindHostStartup()
+  if (hostStartup !== undefined) modelProviders.connectStartup(hostStartup)
   const channelCredentialBridge = metadata.channelCredentialBridgeToken === undefined
     ? undefined
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)
