@@ -360,7 +360,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15))
   ) {
     throw new Error(
-      'local development entityTemplates require plugin-package.v5 through plugin-package.v15',
+      'local development entityTemplates require plugin-package.v5 through plugin-package.v14 or plugin-package.v15',
     )
   }
   const compatibility = manifest.compatibility
