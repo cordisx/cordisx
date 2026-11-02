@@ -1,3 +1,4 @@
+import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
@@ -63,6 +64,7 @@ export interface ManagedServiceRuntimeOptions {
   /** Active prior-generation endpoints must never be borrowed by a candidate. */
   readonly reservedLoopbackPorts?: readonly number[]
   readonly reservedServiceKeys?: readonly string[]
+  readonly endpointReservations?: ManagedServiceEndpointReservations
   readonly schemas?: ManagedServiceSchemaRegistry
   readonly resolveSecret?: (input: {
     readonly owner: ManagedServiceOwnerV1
@@ -104,13 +106,16 @@ export class ManagedServiceRuntime {
   private readonly native = new ManagedServiceRuntimeNative(this.registrations)
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
+  private readonly endpointReservations: ManagedServiceEndpointReservations
 
   constructor(private readonly options: ManagedServiceRuntimeOptions) {
+    this.endpointReservations = options.endpointReservations ?? new ManagedServiceEndpointReservations()
     this.schemas = options.schemas ?? new ManagedServiceSchemaRegistry()
     this.fetch = options.fetch ?? globalThis.fetch
     this.spawn = options.spawn ?? nodeSpawn
     this.findFreePort = options.findFreePort ?? findFreeLoopbackPort
     this.process = new ManagedServiceRuntimeProcess({
+      reserveEndpoint: (record, port) => this.endpointReservations.reserve(record.access, `port:${port}`),
       fetch: this.fetch,
       spawn: this.spawn,
       ...(options.reservedLoopbackPorts === undefined ? {} : { reservedLoopbackPorts: options.reservedLoopbackPorts }),
@@ -135,6 +140,7 @@ export class ManagedServiceRuntime {
         registerManagedService({
           access: nextAccess,
           signal: registrationSignal,
+          endpointReservations: this.endpointReservations,
           serviceGeneration,
           definition,
           revision,
@@ -857,6 +863,7 @@ export class ManagedServiceRuntime {
       if (failures.length === 1) throw failures[0]
       throw new AggregateError(failures, 'managed service owned child cleanup incomplete')
     }
+    this.endpointReservations.release(record.access)
     this.changedService(record)
     if (this.records.get(managedIdentityKey(record.binding.identity)) === record) {
       this.records.delete(managedIdentityKey(record.binding.identity))

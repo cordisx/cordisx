@@ -105,6 +105,7 @@ async function settleCleanup(actions: readonly (() => void | Promise<void>)[]): 
 export class ManagedServiceNodeHost {
   private current: ManagedServiceNodeActivation | undefined
   private transition: Promise<void> = Promise.resolve()
+  private activating: AbortController | undefined
 
   constructor(
     private readonly runtime: ManagedServiceRuntime,
@@ -115,13 +116,24 @@ export class ManagedServiceNodeHost {
 
   async replace(
     accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
-    options: { readonly isolateStartupFailures?: boolean } = {},
+    options: { readonly isolateStartupFailures?: boolean; readonly signal?: AbortSignal } = {},
   ): Promise<ManagedServiceNodeActivation> {
     const operation = this.transition.then(async () => {
       const previous = this.current
       this.current = undefined
       await previous?.dispose()
-      const activation = await this.activate(accesses, options.isolateStartupFailures === true)
+      const controller = new AbortController()
+      this.activating = controller
+      let activation: ManagedServiceNodeActivation
+      try {
+        activation = await this.activate(
+          accesses,
+          options.isolateStartupFailures === true,
+          options.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, options.signal]),
+        )
+      } finally {
+        if (this.activating === controller) this.activating = undefined
+      }
       this.current = activation
       return activation
     })
@@ -130,6 +142,7 @@ export class ManagedServiceNodeHost {
   }
 
   async dispose(): Promise<void> {
+    this.activating?.abort(new Error('managed service host disposed'))
     const operation = this.transition.then(async () => {
       const current = this.current
       this.current = undefined
@@ -142,12 +155,24 @@ export class ManagedServiceNodeHost {
   private async activate(
     accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
     isolateStartupFailures: boolean,
+    signal: AbortSignal,
   ): Promise<ManagedServiceNodeActivation> {
     const authority = this.startupAuthority
       ?? new ManagedServiceStartupAuthority({
         profileId: this.profileId,
         hostGeneration: accesses[0]?.hostGeneration ?? this.runtimeGeneration,
       })
+    for (const access of accesses) {
+      if (access.hostGeneration !== authority.options.hostGeneration) {
+        throw new Error('startup Host generation mismatch')
+      }
+      if (
+        access.startup !== undefined && (access.startup.pluginId !== access.pluginIdentity.pluginId
+          || access.startup.pluginGeneration !== access.pluginIdentity.generation
+          || access.startup.source !== access.pluginIdentity.source
+          || access.startup.sourceRevision !== access.packageIdentity.integrity)
+      ) throw new Error('startup declaration owner mismatch')
+    }
     const admissions = [
       ...new Map(
         accesses.flatMap(access =>
@@ -187,7 +212,11 @@ export class ManagedServiceNodeHost {
         if (!access.pluginIdentity.source.startsWith('https://')) {
           throw new Error('managed backend packages require a canonical HTTPS source')
         }
+        signal.throwIfAborted()
         const controller = new AbortController()
+        const abort = () => controller.abort(signal.reason)
+        signal.addEventListener('abort', abort, { once: true })
+        cleanup.push(() => signal.removeEventListener('abort', abort))
         const owner = Object.freeze({
           ownerHandle: `mso_${randomUUID().replaceAll('-', '')}` as const,
           pluginId: access.pluginIdentity.pluginId,
@@ -343,6 +372,7 @@ export class ManagedServiceNodeHost {
       })
       for (const operation of pendingGroups) inFlight.add(operation)
       await Promise.all(pendingGroups)
+      signal.throwIfAborted()
       inFlight.clear()
       const sources: ManagedServiceNodeSourceBinding[] = []
       for (const state of states) {
@@ -595,5 +625,6 @@ export class ManagedServiceNodeHost {
     const fiber = scope.plugin(plugin)
     cleanup.push(async () => await fiber.dispose())
     await fiber
+    state.controller.signal.throwIfAborted()
   }
 }

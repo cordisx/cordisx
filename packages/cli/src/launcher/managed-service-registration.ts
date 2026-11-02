@@ -1,3 +1,4 @@
+import type { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { ManagedServiceDefinitionV1, ManagedServiceOwnerV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { managedServiceResourceMatchesTarget } from './managed-service-package-resources.js'
 import { managedServiceEnvironment, managedServiceHome } from './managed-service-process.js'
@@ -7,6 +8,7 @@ import { observeManagedServiceRecord } from './managed-service-runtime-record.js
 import { managedHandle, managedIdentityKey } from './managed-service-runtime-support.js'
 
 export async function registerManagedService(input: {
+  readonly endpointReservations?: ManagedServiceEndpointReservations
   readonly signal?: AbortSignal
   readonly access: ManagedServiceActivationAccess
   readonly serviceGeneration: string
@@ -97,6 +99,13 @@ export async function registerManagedService(input: {
           throw new Error('managed service operation authorization references an invalid secret slot')
         }
       }
+      const exclusive = definition.discovery.kind !== 'host-assigned-loopback'
+      if (exclusive) {
+        input.endpointReservations?.reserve(access, `service:${access.owner.pluginId}:${definition.serviceId}`)
+      }
+      if (definition.discovery.kind === 'fixed-loopback') {
+        input.endpointReservations?.reserve(access, `port:${definition.discovery.port}`)
+      }
       const registrationHandle = managedHandle('msr') as `msr_${string}`
       const serviceHome = managedServiceHome(input.homeDir, access.owner.pluginId, definition.serviceId)
       const projectedEnvironment = await input.projectEnvironment?.({
@@ -163,6 +172,11 @@ export async function registerManagedService(input: {
       input.onRecordChanged?.(record)
       return record
     })()
+    void registration.catch(() => {
+      if (![...input.records.values()].some(record => record.access === access && !record.disposed)) {
+        input.endpointReservations?.release(access)
+      }
+    })
     input.pendingRegistrations.set(key, registration)
     registration.then(
       () => {

@@ -80,6 +80,24 @@ function setup() {
 }
 
 describe('startup authority', () => {
+  it('revokes only the retired plugin observer while keeping the Host scope open', async () => {
+    const { authority, observer } = setup()
+    const plugin = authority.observer({
+      scopeId: 'plugin',
+      owner: { pluginId: 'plugin', pluginGeneration: 'one' },
+      authorize: () => true,
+    })
+    const pluginEvents: StartupEventV1[] = []
+    const hostEvents: StartupEventV1[] = []
+    await plugin.subscribe(event => pluginEvents.push(event))
+    await observer.subscribe(event => hostEvents.push(event))
+    authority.retireOwner('plugin', 'one')
+    expect(pluginEvents.at(-1)).toMatchObject({ kind: 'closed', reason: 'scope-revoked' })
+    expect(hostEvents.at(-1)?.kind).toBe('snapshot')
+    await expect(plugin.read()).rejects.toThrow('scope-revoked')
+    authority.dispose()
+  })
+
   it('fences retry reporters independently of unchanged generations and monotonic report sequences', async () => {
     const { authority, observer } = setup()
     authority.bindService(owner)

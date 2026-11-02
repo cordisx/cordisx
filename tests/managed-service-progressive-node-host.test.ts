@@ -26,14 +26,56 @@ function capability(id: string, dependencies: readonly string[] = []) {
 }
 
 describe('progressive Node service preparation', () => {
+  it('cancels an awaited base apply before adopting or publishing the late generation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-base-cancel-'))
+    const started = deferred<void>()
+    const fixtureKey = `__cancel_${Date.now()}`
+    Object.assign(globalThis, { [fixtureKey]: started.resolve })
+    await mkdir(path.join(root, 'services'))
+    await writeFile(
+      path.join(root, 'services/gateway.mjs'),
+      `export async function apply(ctx, input) {
+      globalThis[${JSON.stringify(fixtureKey)}]()
+      await new Promise(resolve => input.signal.addEventListener('abort', resolve, { once: true }))
+    }`,
+    )
+    const runtime = new ManagedServiceRuntime({ homeDir: path.join(root, 'home') })
+    const host = new ManagedServiceNodeHost(runtime)
+    const access: ManagedBackendRuntimeServiceModuleAccess = {
+      packageIdentity: { pluginId: 'example', version: '1.0.0', integrity: `sha256:${'a'.repeat(64)}` },
+      pluginIdentity: { pluginId: 'example', source: 'https://example.test/plugin', generation: 'one' },
+      serviceId: 'gateway',
+      hostGeneration: 'host',
+      serviceKind: 'managed-backend',
+      declaration: declaration('gateway', 'example', []),
+      artifactDirectory: root,
+      runtimeEntry: './services/gateway.mjs',
+    }
+    try {
+      const replacing = host.replace([access])
+      const rejected = expect(replacing).rejects.toThrow('disposed')
+      await started.promise
+      await host.dispose()
+      await rejected
+      expect(runtime.listRegistrationIdentities()).toEqual([])
+    } finally {
+      await host.dispose()
+      Reflect.deleteProperty(globalThis, fixtureKey)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('adopts once, prepares independent targets, rejects early execution and preserves borrowed process on cleanup', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-progressive-'))
     await mkdir(path.join(root, 'services'))
     const release = deferred<void>()
     const entered = deferred<void>()
     const observations: string[] = []
+    const attempts: Record<string, number> = {}
     const fixtureKey = `__progressive_${Date.now()}`
-    Object.assign(globalThis, { [fixtureKey]: { release: release.promise, entered: entered.resolve, observations } })
+    Object.assign(globalThis, {
+      [fixtureKey]: { release: release.promise, entered: entered.resolve, observations, attempts },
+    })
     const value = definition('gateway', { fixedPort: 41231 })
     let spawns = 0
     const runtime = new ManagedServiceRuntime({
@@ -86,16 +128,17 @@ apply.inject = ['managedServices']
 export async function prepare(ctx, input) {
   const id = input.capability.id
   fixture.observations.push('prepare:' + id)
+  const attempt = fixture.attempts[id] = (fixture.attempts[id] || 0) + 1
   if (id === 'failed') throw new Error('one provider failed')
   await input.registration.ensureReady()
   const generation = id + '-catalog'
   const catalog = { state: 'known', generation, modelIds: ['model'], digest: 'sha256:' + createHash('sha256').update(JSON.stringify([generation,['model']])).digest('hex') }
-  await input.startup.reportCatalog({ contract: 'cordisx.startup-catalog-report/v1', target: { pluginId: 'example', capabilityId: id }, generation: input.generation, sequence: 1, catalog })
+  await input.startup.reportCatalog({ contract: 'cordisx.startup-catalog-report/v1', target: { pluginId: 'example', capabilityId: id }, generation: input.generation, sequence: attempt, catalog })
   const routes = [{ alias: 'model', gatewayModelId: 'gateway-model' }]
   const digest = 'sha256:' + createHash('sha256').update(JSON.stringify([generation, 'model', [['model','gateway-model']]])).digest('hex')
   const result = await input.registration.publishNativeProvider({ providerId: id, compositionOrigin: 'api', catalog: { generation, digest, defaultAlias: 'model', routes } })
   fixture.observations.push('publication:' + id + ':' + result.status)
-  if (id === 'slow') { fixture.entered(); await fixture.release }
+  if (id === 'slow' && attempt === 1) { fixture.entered(); await fixture.release; throw new Error('old attempt returned late') }
 }
 `,
     )
@@ -116,7 +159,12 @@ export async function prepare(ctx, input) {
       expect(observations.indexOf('prepare:dependent')).toBeGreaterThan(
         observations.indexOf('publication:fast:accepted'),
       )
+      activation.retryStartup!({ pluginId: 'example', capabilityId: 'slow' })
+      await expect(authority.wait({ pluginId: 'example', capabilityId: 'slow' })).resolves.toEqual({ available: true })
       release.resolve()
+      await new Promise(resolve => setImmediate(resolve))
+      expect(activation.nativeProviderIds).toContain('slow')
+      expect(observations.filter(item => item === 'apply')).toHaveLength(1)
       await expect(authority.wait({ pluginId: 'example', capabilityId: 'slow' })).resolves.toEqual({ available: true })
       expect(spawns).toBe(0)
       await host.dispose()

@@ -47,7 +47,7 @@ export class ManagedServiceStartupAuthority {
   private readonly admissions = new Map<string, StartupPluginAdmission>()
   private readonly selected = new Map<string, string>()
   private readonly changes = new StartupSession(0)
-  private readonly scopes = new Set<ReturnType<typeof createStartupObserverSource>>()
+  private readonly scopes = new Map<ReturnType<typeof createStartupObserverSource>, string | undefined>()
   private disposed = false
 
   constructor(readonly options: { readonly profileId: string; readonly hostGeneration: string }) {}
@@ -172,6 +172,7 @@ export class ManagedServiceStartupAuthority {
       && entry.serviceGeneration === owner.serviceGeneration
     this.changed()
     return {
+      current,
       reporter: this.reporter(owner, capabilityId, current),
       finish: (failed = false) => {
         if (!current()) return
@@ -527,14 +528,33 @@ export class ManagedServiceStartupAuthority {
         return { entries, pages }
       },
     })
-    this.scopes.add(scope)
+    this.scopes.set(
+      scope,
+      input.owner === undefined ? undefined : ownerKey(input.owner.pluginId, input.owner.pluginGeneration),
+    )
     return scope.observer
+  }
+
+  retireOwner(pluginId: string, pluginGeneration: string): void {
+    const key = ownerKey(pluginId, pluginGeneration)
+    for (const [scope, owner] of this.scopes) {
+      if (owner === key) {
+        scope.close('scope-revoked')
+        this.scopes.delete(scope)
+      }
+    }
+    for (const entry of this.entries.values()) {
+      if (entry.pluginId === pluginId && entry.pluginGeneration === pluginGeneration) {
+        Object.assign(entry, { revoked: true, published: false, attempt: undefined })
+      }
+    }
+    this.changed()
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    for (const scope of this.scopes) scope.close('host-replaced')
+    for (const scope of this.scopes.keys()) scope.close('host-replaced')
     this.scopes.clear()
     this.changes.dispose()
   }

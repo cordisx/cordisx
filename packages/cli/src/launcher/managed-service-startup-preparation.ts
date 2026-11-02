@@ -1,3 +1,4 @@
+import { waitForStartupOperation } from './managed-service-startup-operation.js'
 import type { StartupCapabilityDeclarationV1, StartupCapabilityRefV1 } from '@cordisx/protocol/startup/v1'
 import type { StartupManagedServiceNodeModuleV1 } from '@cordisx/protocol/startup-runtime/v1'
 import type { ManagedServiceServiceContextV1 } from '@cordisx/protocol/managed-service-runtime/v1'
@@ -28,6 +29,7 @@ export class ManagedServiceStartupPreparation {
   private readonly stop: (() => void)[] = []
   private readonly owners: Map<string, string>
   private syncing = false
+  private readonly inFlight = new Map<Promise<void>, StartupPreparedModule>()
 
   constructor(
     readonly authority: ManagedServiceStartupAuthority,
@@ -99,7 +101,35 @@ export class ManagedServiceStartupPreparation {
           client: module.binding.client,
           signal,
           capability: structuredClone(capability),
-          registration,
+          registration: Object.freeze<typeof registration>({
+            ...registration,
+            get binding() {
+              return registration.binding
+            },
+            ensureReady: options => {
+              const waiterSignal = options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal])
+              waiterSignal.throwIfAborted()
+              return waitForStartupOperation(
+                registration.ensureReady({ ...options, signal: module.controller.signal }),
+                waiterSignal,
+              )
+            },
+            authenticate: (action, options) =>
+              registration.authenticate(action, {
+                ...options,
+                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+              }),
+            restart: options =>
+              registration.restart({
+                ...options,
+                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+              }),
+            publishNativeProvider: (input, options) =>
+              registration.publishNativeProvider(input, {
+                ...options,
+                signal: options?.signal === undefined ? signal : AbortSignal.any([signal, options.signal]),
+              }),
+          }),
           generation: {
             host: module.access.hostGeneration,
             plugin: owner.pluginGeneration,
@@ -111,14 +141,17 @@ export class ManagedServiceStartupPreparation {
         this.sync()
         attempt.finish()
       } catch {
+        const current = attempt.current()
         attempt.finish(true)
-        if (capability.kind === 'provider') {
+        if (current && capability.kind === 'provider') {
           this.runtime.revokeNativeProvider(this.identity(module), capability.providerId)
         }
       }
     })()
     preparation.pending = operation
+    this.inFlight.set(operation, module)
     void operation.then(() => {
+      this.inFlight.delete(operation)
       if (preparation.pending === operation) preparation.pending = undefined
     })
   }
@@ -133,7 +166,7 @@ export class ManagedServiceStartupPreparation {
       this.preparations.delete(key({ pluginId: preparation.owner.pluginId, capabilityId: preparation.capability.id }))
     }
     await Promise.allSettled(
-      disposing.flatMap(preparation => preparation.pending === undefined ? [] : [preparation.pending]),
+      [...this.inFlight].filter(([, module]) => bindings.has(module.binding)).map(([operation]) => operation),
     )
   }
 

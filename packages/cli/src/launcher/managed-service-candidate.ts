@@ -1,3 +1,4 @@
+import type { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 import { ManagedServiceNodeHost } from './managed-service-node-host.js'
 import { ManagedServiceRuntime } from './managed-service-runtime.js'
@@ -7,6 +8,8 @@ import type { ManagedBackendRuntimeServiceModuleAccess } from './packages/author
 export async function activateManagedServiceCandidate(
   accesses: readonly ManagedBackendRuntimeServiceModuleAccess[],
   options: {
+    readonly signal?: AbortSignal
+    readonly endpointReservations?: ManagedServiceEndpointReservations
     readonly startupAuthority?: ManagedServiceStartupAuthority
     readonly homeDir: string
     readonly environment: NodeJS.ProcessEnv

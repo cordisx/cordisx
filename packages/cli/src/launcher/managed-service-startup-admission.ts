@@ -1,3 +1,4 @@
+import { validateStartupDeclaration } from '../startup-declaration-validation.js'
 import type { StartupCapabilityRefV1, StartupDeclarationV1 } from '@cordisx/protocol/startup/v1'
 import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 
@@ -44,6 +45,7 @@ export function validateStartupAdmissions(plugins: readonly StartupPluginAdmissi
     return target
   }
   for (const plugin of plugins) {
+    validateStartupDeclaration(plugin.startup)
     for (const capability of plugin.startup.capabilities) {
       count += 1
       if (!plugin.services.some(service => service.id === capability.serviceId)) {

@@ -1,3 +1,5 @@
+import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
+import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
 import { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 import type { StartupPluginAdmission } from './managed-service-startup-admission.js'
@@ -67,6 +69,8 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly activate: (
     activation: CordisXPluginActivationRecordV1,
     options: {
+      readonly signal?: AbortSignal
+      readonly endpointReservations?: ManagedServiceEndpointReservations
       readonly startupAuthority?: ManagedServiceStartupAuthority
       readonly isolateStartupFailures: boolean
       readonly pluginIds: readonly string[]
@@ -109,8 +113,12 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   readonly startup: ManagedServiceStartupAuthority
   readonly startupObserver: StartupObserverV1
   private initialized = false
+  private readonly lifecycle = new AbortController()
+  private readonly startupTombstones: ManagedServiceStartupTombstones
+  private readonly endpointReservations = new ManagedServiceEndpointReservations()
 
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
+    this.startupTombstones = new ManagedServiceStartupTombstones(options.profileId, options.runtimeGeneration)
     this.runtime = options.runtime
     this.startup = new ManagedServiceStartupAuthority({
       profileId: options.profileId,
@@ -375,6 +383,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   async dispose(): Promise<void> {
     if (this.disposed) return await this.mutation.then(() => undefined)
     this.disposed = true
+    this.lifecycle.abort(new Error('managed service lifecycle disposed'))
     const disposal = this.mutation.then(() => this.disposeNow())
     this.mutation = disposal.catch(() => undefined)
     return await disposal
@@ -387,6 +396,8 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       fleets.add(transaction.previous)
       fleets.add(transaction.candidate)
     }
+    for (const fleet of fleets) for (const route of fleet.routes.values()) this.retireRoute(route, 'host-replaced')
+    this.startup.dispose()
     this.setActive(undefined)
     this.transactions.clear()
     this.routesByToken.clear()
@@ -419,6 +430,8 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     }
     const activated = changed.plugins.length === 0 ? undefined : await this.options.activate(record, {
       startupAuthority: this.startup,
+      signal: this.lifecycle.signal,
+      endpointReservations: this.endpointReservations,
       pluginIds: changed.plugins.map(plugin => plugin.id),
       isolateStartupFailures: previous === undefined,
       ...(previous === undefined ? {} : {
@@ -504,25 +517,33 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private uniqueToken(): string {
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const token = this.createToken()
-      if (token.length >= 32 && !this.routesByToken.has(token)) return token
+      if (
+        token.length >= 32 && !this.routesByToken.has(token) && !this.startupTombstones.contains(token)
+        && token !== this.hostStartupInput?.token
+      ) return token
     }
     throw new Error('managed service UI token generation failed')
   }
 
   private async handleBindingValue(value: string): Promise<Record<string, unknown>> {
     let requestId = 'invalid'
+    let envelope: Record<string, unknown> | undefined
     try {
       if (Buffer.byteLength(value) > MAX_MANAGED_SERVICE_UI_REQUEST_BYTES) {
         throw new Error('managed service UI request exceeds maximum size')
       }
-      const envelope = JSON.parse(value) as { readonly requestId?: unknown; readonly token?: unknown }
+      envelope = JSON.parse(value) as Record<string, unknown>
       if (typeof envelope.requestId === 'string') requestId = envelope.requestId
       if (typeof envelope.token !== 'string') throw new Error('managed service UI request is not authorized')
+      const terminated = this.startupTombstones.result(envelope)
+      if (terminated !== undefined) return { requestId, ok: true, value: terminated }
       const route = this.routesByToken.get(envelope.token)
       if (route === undefined) throw new Error('managed service UI request is not authorized')
       const request = parseManagedServiceUIBindingRequest(envelope, route.handler, route.owner)
       return { requestId, ok: true, value: await route.handler.handle(route.owner, request) }
     } catch (error) {
+      const terminated = envelope === undefined ? undefined : this.startupTombstones.result(envelope)
+      if (terminated !== undefined) return { requestId, ok: true, value: terminated }
       const message = safeMessage(error)
       const code = message.includes('not declared')
         ? 'service-not-declared'
@@ -555,7 +576,24 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     this.transactions.delete(transactionId)
   }
 
+  private retireRoute(route: ManagedServiceOwnerRoute, reason: 'scope-revoked' | 'host-replaced'): void {
+    if (route.startup === true) this.startupTombstones.retire(route.token, route.owner, reason)
+    if (this.routesByToken.get(route.token) === route) this.routesByToken.delete(route.token)
+  }
+
   private async disposeFleet(fleet: ManagedServiceFleet, retained?: ManagedServiceFleet): Promise<void> {
+    for (const route of fleet.routes.values()) {
+      if (retained?.routes.get(route.key) !== route) this.retireRoute(route, 'scope-revoked')
+    }
+    for (const plugin of fleet.record?.plugins ?? []) {
+      if (
+        !retained?.record?.plugins.some(item =>
+          item.enabled && item.id === plugin.id && item.moduleGeneration === plugin.moduleGeneration
+        )
+      ) {
+        this.startup.retireOwner(plugin.id, plugin.moduleGeneration)
+      }
+    }
     await Promise.allSettled(
       [...fleet.routes.values()]
         .filter(route => retained?.routes.get(route.key) !== route)

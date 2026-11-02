@@ -381,5 +381,25 @@ it('returns an observed v15 session and owner capability while base adoption is 
   finish()
   await session.adopted
   expect(runtime.capabilities()[0]!.token).toBe(capability.token)
+  const startupRequest = (token: string) =>
+    JSON.stringify({
+      version: 1,
+      token,
+      requestId: 'observation',
+      operation: 'startupNext',
+      scope: { profileId: 'work', runtimeGeneration: 'runtime-1', pluginGeneration: 'one' },
+      subscriptionId: 'stream',
+    })
+  // Baseline transport does not implement this request; generic errors are not termination.
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest('unknown'))).toMatchObject({ ok: false })
   await runtime.dispose()
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest(capability.token))).toEqual({
+    requestId: 'observation',
+    ok: true,
+    value: { status: 'startup-terminated', reason: 'host-replaced' },
+  })
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest('unknown'))).toMatchObject({
+    ok: false,
+    code: 'owner-unavailable',
+  })
 })

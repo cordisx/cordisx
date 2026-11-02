@@ -67,3 +67,18 @@ describe('startup session journal', () => {
     }
   })
 })
+
+it('cancels a callback waiter without cancelling its shared service preparation', async () => {
+  const { waitForStartupOperation } = await import('../packages/cli/src/launcher/managed-service-startup-operation.js')
+  let finish!: (value: string) => void
+  const shared = new Promise<string>(resolve => {
+    finish = resolve
+  })
+  const firstController = new AbortController()
+  const first = waitForStartupOperation(shared, firstController.signal)
+  const second = waitForStartupOperation(shared, new AbortController().signal)
+  firstController.abort(new Error('attempt replaced'))
+  await expect(first).rejects.toThrow('attempt replaced')
+  finish('ready')
+  await expect(second).resolves.toBe('ready')
+})
