@@ -64,6 +64,7 @@ type NativeSubmissionActivation =
   & Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
   & {
     readonly startup?: ManagedServiceNativeActivation['startup']
+    readonly startupObserver?: ManagedServiceNativeActivation['startupObserver']
     subscribeNativeProviders?(listener: () => void): () => void
   }
 
@@ -504,7 +505,9 @@ export async function prepareNativeSubmissionBootstrap(
           combinedNativeModelProviderCatalog(async () => managed?.catalog() ?? [], pluginCatalog),
           () => nativeManagement!.catalog(),
         )
-        const startup = activation.startup === undefined ? undefined : startupProviderAdmission(activation.startup)
+        const startup = activation.startup === undefined
+          ? undefined
+          : startupProviderAdmission(activation.startup, activation.startupObserver)
         const taskExecutionUrl = discovered.transforms.find(transform => transform.taskExecutionUrl)?.taskExecutionUrl
         if (
           completeOptions.defaultProviderId && completeOptions.defaultModelId

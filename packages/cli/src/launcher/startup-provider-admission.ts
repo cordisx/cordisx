@@ -1,16 +1,22 @@
-import type { StartupActionAvailabilityV1 } from '@cordisx/protocol/startup/v1'
+import { safeStartupSnapshot } from './startup-ui-projection.js'
+import type { StartupActionAvailabilityV1, StartupObserverV1, StartupSnapshotV1 } from '@cordisx/protocol/startup/v1'
 import { StartupRequirementsCoordinator, type StartupRequirementsResult } from '../cli/startup-requirements.js'
 import type { ManagedServiceStartupAuthority } from './managed-service-startup-authority.js'
 
 export interface StartupProviderAdmission {
+  snapshot?(): Promise<StartupSnapshotV1>
   availability(providerId: string, modelId: string): StartupActionAvailabilityV1 | undefined
   wait(providerId: string, modelId: string, signal?: AbortSignal): Promise<StartupRequirementsResult | undefined>
 }
 
 /** Undefined means legacy/not declared, never a declared provider that is still preparing. */
-export function startupProviderAdmission(authority: ManagedServiceStartupAuthority): StartupProviderAdmission {
+export function startupProviderAdmission(
+  authority: ManagedServiceStartupAuthority,
+  observer?: StartupObserverV1,
+): StartupProviderAdmission {
   const coordinator = new StartupRequirementsCoordinator(authority)
   return {
+    ...(observer === undefined ? {} : { snapshot: async () => safeStartupSnapshot(await observer.read()) }),
     availability(providerId, modelId) {
       const target = authority.providerReference(providerId)
       return target === undefined ? undefined : authority.availability(target, modelId)

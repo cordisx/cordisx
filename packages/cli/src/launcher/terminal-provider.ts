@@ -1,3 +1,4 @@
+import type { StartupSnapshotV1 } from '@cordisx/protocol/startup/v1'
 import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import type { StartupRequirementsResult } from '../cli/startup-requirements.js'
 import { randomUUID } from 'node:crypto'
@@ -24,6 +25,7 @@ export type TerminalProviderResult =
   | { readonly kind: 'unavailable'; readonly startup: Exclude<StartupRequirementsResult, { status: 'ready' }> }
   | {
     readonly kind: 'list'
+    readonly startup?: StartupSnapshotV1
     readonly providers: readonly {
       readonly providerId: string
       readonly title: string
@@ -170,6 +172,7 @@ export function createTerminalProviderAuthority(options: {
         const catalog = await options.catalog()
         return {
           kind: 'list',
+          ...(options.startup?.snapshot === undefined ? {} : { startup: await options.startup.snapshot() }),
           providers: catalog.map(provider => ({
             providerId: provider.providerId,
             title: provider.title ?? provider.providerId,

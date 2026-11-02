@@ -96,6 +96,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
       return {
+        ...(authority.startup?.snapshot === undefined ? {} : { startup: await authority.startup.snapshot() }),
         threadCreation: await authority.taskCreationAvailable?.()
           ? { status: 'available', tool: 'create_thread_with_provider' }
           : { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
