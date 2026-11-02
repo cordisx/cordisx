@@ -11,6 +11,8 @@ import type { ModelBrandChoice, ProviderBrandChoice, ProviderBrandProjection } f
 import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-branding.js'
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
+import type { StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/startup/v1'
+import { type ModelStartupState, ModelStartupStore } from './model-startup-store.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
 import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 
@@ -34,12 +36,14 @@ export interface HostModelProviderModel extends ModelProviderModelV1 {
 }
 
 export interface HostModelProvider extends Omit<ModelProviderV1, 'models'> {
+  readonly startup?: StartupProjectionV1
   readonly models: readonly HostModelProviderModel[]
   readonly selectorBrand?: ProviderBrandChoice
   readonly providerFavorite?: boolean
 }
 
 export interface ModelProviderSnapshot {
+  readonly startup?: ModelStartupState
   readonly providers: readonly HostModelProvider[]
   readonly entries: readonly {
     readonly key: string
@@ -137,6 +141,19 @@ function label(value: string, maximum = 256): string {
 }
 
 export class ModelProviderRegistry {
+  private readonly startupStore = new ModelStartupStore()
+  private disconnectStartup?: () => void
+  private observingStartup = false
+  private readonly startupProviderIds = new Set<string>()
+
+  /** The caller supplies a Host-authorized observer covering shared providers. */
+  connectStartup(observer: StartupObserverV1): void {
+    if (this.disposed) return
+    this.observingStartup = true
+    this.disconnectStartup?.()
+    this.disconnectStartup = this.startupStore.subscribe(() => this.emit())
+    this.startupStore.connect(observer)
+  }
   private _management: ModelCatalogClient | undefined
   private disconnectManagement: (() => void) | undefined
   private disconnectSource?: () => void
@@ -388,6 +405,8 @@ export class ModelProviderRegistry {
   }
 
   dispose(): void {
+    this.disconnectStartup?.()
+    this.startupStore.dispose()
     this.disconnectManagement?.()
     this._management?.dispose()
     this.disconnectSource?.()
@@ -408,12 +427,33 @@ export class ModelProviderRegistry {
     refreshing = this.state.refreshing,
   ): void {
     if (this.disposed) return
+    const startup = this.observingStartup ? this.startupStore.snapshot() : undefined
+    const declarations = startup?.snapshot?.entries.filter(entry => entry.identity.providerId !== null) ?? []
+    for (const entry of declarations) this.startupProviderIds.add(entry.identity.providerId!)
+    const projections = this.projections.filter(provider =>
+      !this.startupProviderIds.has(provider.providerId)
+      || declarations.some(entry =>
+        entry.identity.providerId === provider.providerId
+        && entry.identity.pluginId === provider.pluginId
+      )
+    )
+    for (const entry of declarations) {
+      if (!projections.some(provider => provider.providerId === entry.identity.providerId)) {
+        projections.push({ providerId: entry.identity.providerId!, pluginId: entry.identity.pluginId, models: [] })
+      }
+    }
     this.state = Object.freeze({
+      ...(startup === undefined ? {} : { startup }),
       providers: Object.freeze(
         applyCatalogManagementPreferences<NativeProviderProjection>(
-          this.projections,
+          projections,
           this._management?.snapshot(),
         ).map(provider => {
+          const matches = declarations.filter(entry =>
+            entry.identity.providerId === provider.providerId
+            && entry.identity.pluginId === provider.pluginId
+          )
+          const progress = matches.length === 1 ? matches[0] : undefined
           const key = JSON.stringify([provider.pluginId, provider.providerId])
           const presentation = [...this.presentations.values()].find(item =>
             item.key === key && (this.visibility?.visible(item.generation) ?? true)
@@ -428,15 +468,21 @@ export class ModelProviderRegistry {
             ? projectedBrand?.brand
             : undefined
           return Object.freeze({
+            ...(progress === undefined ? {} : { startup: progress }),
             providerId: provider.providerId,
             title: presentation?.title ?? provider.title ?? provider.providerId,
             icon: presentation?.icon ?? 'host:settings',
             providerFavorite: provider.providerFavorite === true,
             ...(selectorBrand === undefined ? {} : { selectorBrand }),
-            models: Object.freeze(provider.models.map(model => {
-              const metadata = presentation?.models?.find(item => item.id === model.id)
-              return metadata ? Object.freeze({ ...model, ...metadata }) : model
-            })),
+            models: Object.freeze(
+              provider.models.filter(model =>
+                progress === undefined
+                || progress.catalog.state === 'known' && progress.catalog.modelIds.includes(model.id)
+              ).map(model => {
+                const metadata = presentation?.models?.find(item => item.id === model.id)
+                return metadata ? Object.freeze({ ...model, ...metadata }) : model
+              }),
+            ),
             ...(provider.defaultModelId === undefined ? {} : { defaultModelId: provider.defaultModelId }),
           })
         }),
