@@ -31,8 +31,9 @@ function readyDocument() {
   vi.stubGlobal('__cordisxBoot', Promise.resolve())
   vi.stubGlobal('__startupAccountRead', accountRead)
   const showNativeControls = () => {
-    document.body.innerHTML = '<textarea></textarea><button data-cordisx-model-ready="true">Model</button>'
-    for (const element of document.querySelectorAll('textarea, button')) {
+    document.body.innerHTML =
+      '<textarea></textarea><div class="cxmp-selector" data-cordisx-model-selector-ready="true"><button>Model</button></div>'
+    for (const element of document.querySelectorAll('textarea, button, .cxmp-selector')) {
       element.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect
     }
   }

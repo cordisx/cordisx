@@ -186,7 +186,9 @@ it.skipIf(!executable)(
           const started=performance.now();setTimeout(()=>{timer=true},0);document.querySelector(selector).click();
           await new Promise(resolve=>setTimeout(resolve,0));const menu=document.querySelector('.cxmp-menu');
           const result={elapsed:performance.now()-started,timer,reads:Fixture.catalogReadCount()-reads,
-            nodes:menu.querySelectorAll('*').length,models:menu.querySelectorAll('.cxmp-model-choice').length};
+            nodes:menu.querySelectorAll('*').length,models:menu.querySelectorAll('.cxmp-model-choice').length,
+            providerSummaries:menu.querySelectorAll('.cxmp-provider-summary').length,
+            providerLabels:menu.querySelectorAll('.cxmp-provider-summary > .cxmp-provider-label').length};
           document.querySelector(selector).click();await Fixture.settle();return result};
         return {count:${count},provider:await measure('.cxmp-provider-trigger'),model:await measure('.cxmp-model-trigger')}})()`)
         catalogMeasurements.push(await evaluate('window.measurement'))
@@ -198,7 +200,16 @@ it.skipIf(!executable)(
           model: { elapsed: number; timer: boolean; reads: number; nodes: number; models: number }
         }[]
       ) {
-        expect(measurement.provider).toMatchObject({ timer: true, reads: 0, nodes: 14, models: 0 })
+        // One fixed summary wrapper contains the catalog provider label and optional startup status.
+        // It adds one node to the previous 14-node menu, independent of model directory size.
+        expect(measurement.provider).toMatchObject({
+          timer: true,
+          reads: 0,
+          nodes: 15,
+          models: 0,
+          providerSummaries: 1,
+          providerLabels: 1,
+        })
         expect(measurement.model.timer).toBe(true)
         expect(measurement.model.reads).toBe(0)
         expect(measurement.model.models).toBe(measurement.count)
@@ -206,7 +217,7 @@ it.skipIf(!executable)(
         expect(measurement.model.elapsed).toBeLessThan(1000)
       }
       if (process.env.MODEL_SELECTOR_MEASUREMENTS) console.info(JSON.stringify(catalogMeasurements))
-      expect(catalogMeasurements.map(measurement => measurement.provider.nodes)).toEqual([14, 14, 14, 14])
+      expect(catalogMeasurements.map(measurement => measurement.provider.nodes)).toEqual([15, 15, 15, 15])
       await run(`await Fixture.catalog(500);
       document.querySelector('.cxmp-model-trigger').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
       await Fixture.settle();document.querySelector('.cxmp-model-disclosure').click();await Fixture.settle()`)

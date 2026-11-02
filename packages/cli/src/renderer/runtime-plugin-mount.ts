@@ -594,8 +594,19 @@ export const createRuntimeMountPlugin = async (
     modelProviderBinding.dispose()
     await unprovideModelProviders()
   }
-  if (managedServices !== undefined) {
-    controller.unregisterManagedServices = pluginContext.reflect.provide('managedServices', managedServices)
+  const startupOwner = {
+    pluginId: controller.item.id,
+    pluginGeneration: runtimeScope.moduleGenerationOf()!(controller),
+  }
+  const startup = runtimeScope.managedServiceBridge()?.bindStartup(startupOwner)
+  const unprovideStartup = startup === undefined ? undefined : pluginContext.reflect.provide('startup', startup)
+  const unprovideManagedServices = managedServices === undefined
+    ? undefined
+    : pluginContext.reflect.provide('managedServices', managedServices)
+  controller.unregisterManagedServices = async () => {
+    runtimeScope.managedServiceBridge()?.disposeStartupOwner(startupOwner)
+    await unprovideStartup?.()
+    await unprovideManagedServices?.()
   }
   let activatingPlugin = false
   try {

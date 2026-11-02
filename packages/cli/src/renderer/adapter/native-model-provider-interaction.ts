@@ -1,19 +1,19 @@
 /** Native modal isolation affects interaction, not the lifetime of the Composer seat. */
-function isCurrentStartupDialog(dialog: HTMLElement): boolean {
-  const view = dialog.ownerDocument.defaultView as
-    | (Window & {
-      __cordisxStartupDocument?: {
-        snapshot(): { receipt?: Record<string, unknown> }
-        ownsDialog(candidate: HTMLElement, receipt: Record<string, unknown>): boolean
-      }
-    })
-    | null
-  const api = view?.__cordisxStartupDocument
-  const receipt = api?.snapshot().receipt
-  return receipt !== undefined && api?.ownsDialog(dialog, receipt) === true
-}
-
 export function nativeModelProviderInteractionAllowed(element: HTMLElement | null): boolean {
+  function isCurrentStartupDialog(dialog: HTMLElement): boolean {
+    const view = dialog.ownerDocument.defaultView as
+      | (Window & {
+        __cordisxStartupDocument?: {
+          snapshot(): { receipt?: Record<string, unknown> }
+          ownsDialog(candidate: HTMLElement, receipt: Record<string, unknown>): boolean
+        }
+      })
+      | null
+    const api = view?.__cordisxStartupDocument
+    const receipt = api?.snapshot().receipt
+    return receipt !== undefined && api?.ownsDialog(dialog, receipt) === true
+  }
+
   if (!element?.isConnected) return false
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     if (ancestor.hasAttribute('inert')) return false

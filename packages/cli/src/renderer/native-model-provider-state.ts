@@ -108,6 +108,7 @@ export function nextSendSelectionFields(
 ) {
   return {
     selectionLocked: submissionActive || selectionActive,
+    ...(projection.pendingProviderIntent ? { pendingProviderIntent: projection.pendingProviderIntent } : {}),
     ...(projection.nextSend ? { nextSend: projection.nextSend } : {}),
     ...(projection.pending
       ? {
@@ -120,3 +121,31 @@ export function nextSendSelectionFields(
     ...(details.error ? { submissionError: details.error } : {}),
   }
 }
+
+export function sameValues(left: readonly string[] | undefined, right: readonly string[]): boolean {
+  return left !== undefined && left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+export interface PendingNativeRequest {
+  readonly method: 'thread/start' | 'thread/resume'
+  readonly navigationGeneration: number
+  readonly threadId?: string
+  readonly provider?: string
+  readonly model?: string
+}
+
+export interface EffectiveSelection {
+  readonly providerId?: string
+  readonly model?: string
+}
+
+export const record = (value: unknown): Record<string, unknown> | undefined => (
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+)
+export const string = (value: unknown): string | undefined => (
+  typeof value === 'string' && value.length > 0 && value.length <= 1_000_000 ? value : undefined
+)
+export const errorMessage = (error: unknown): string =>
+  error instanceof Error && error.message.trim() !== ''
+    ? error.message
+    : 'Native model provider selection failed'

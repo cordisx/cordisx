@@ -1,3 +1,11 @@
+import { createStartupHostUIBridgeHandler } from './startup-host-ui-rpc.js'
+import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
+import {
+  createStartupUIRPC,
+  parseStartupUIRequest,
+  type StartupUIObserverBinding,
+  type StartupUIRequest,
+} from './startup-ui-rpc.js'
 import type {
   ManagedServiceBindingV1,
   ManagedServiceCliProxyAccountToggleRequestV1,
@@ -41,6 +49,7 @@ interface RequestScope {
 }
 
 export type ManagedServiceUIBindingRequest =
+  | StartupUIRequest
   | { readonly requestId: string; readonly operation: 'nativeProviders'; readonly serviceId: string }
   | { readonly requestId: string; readonly operation: 'get'; readonly serviceId: string }
   | {
@@ -144,9 +153,16 @@ export interface ManagedServiceUIBridgeHandler {
   readonly token: string
   readonly profileId: string
   readonly generation: string
+  readonly hostStartup?: ReturnType<typeof createStartupHostUIBridgeHandler>
   handle(owner: ManagedServiceUIOwner, request: ManagedServiceUIBindingRequest): Promise<unknown>
+  replaceServices?(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
   disposeOwner(owner: ManagedServiceUIOwner): Promise<void>
   dispose(): Promise<void>
+}
+
+/** Factory-produced broker supports binding replacement; legacy wrappers need not implement it. */
+export interface MutableManagedServiceUIBridgeHandler extends ManagedServiceUIBridgeHandler {
+  replaceServices(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -396,11 +412,17 @@ export function parseManagedServiceUIBindingRequest(
       'subscriptionId',
       'request',
       'sessionId',
+      'after',
     ],
     'managed service UI request',
   )
   if (envelope.version !== 1 || envelope.token !== handler.token) {
     throw new Error('managed service UI request is not authorized')
+  }
+  if (typeof envelope.operation === 'string' && envelope.operation.startsWith('startup')) {
+    scope(envelope.scope, handler, owner)
+    requestId(envelope.requestId)
+    return parseStartupUIRequest(envelope)
   }
   operationEnvelope(value, envelope.operation)
   scope(envelope.scope, handler, owner)
@@ -495,9 +517,23 @@ export function createManagedServiceUIBridgeHandler(input: {
   readonly profileId: string
   readonly generation: string
   readonly services: readonly ManagedServiceUISourceBinding[]
+  readonly hostStartup?: { readonly token: string; readonly observer: StartupObserverV1 }
+  readonly declaredServices?: readonly (ManagedServiceUIOwner & { readonly serviceId: string })[]
+  readonly startupObservers?: readonly StartupUIObserverBinding[]
   readonly readNativeProviders?: () => Promise<readonly unknown[]>
-}): ManagedServiceUIBridgeHandler {
+}): MutableManagedServiceUIBridgeHandler {
+  const hostStartup = input.hostStartup === undefined
+    ? undefined
+    : createStartupHostUIBridgeHandler({
+      ...input.hostStartup,
+      profileId: input.profileId,
+      generation: input.generation,
+    })
+  const startup = createStartupUIRPC(input.startupObservers ?? [])
   const services = new Map<string, ManagedServiceSourceV1>()
+  const declaredServices = new Set(
+    (input.declaredServices ?? input.services).map(service => serviceKey(service, service.serviceId)),
+  )
   const loginTimeouts = new Map<string, number>()
   for (const service of input.services) {
     id(service.pluginId, 'managed service UI source plugin id')
@@ -524,6 +560,8 @@ export function createManagedServiceUIBridgeHandler(input: {
   const subscriptions = new Map<string, SubscriptionState>()
   const closedSubscriptions = new Map<string, ManagedServiceSubscriptionClosedV1>()
   let disposed = false
+  const ownerRevisions = new Map<string, number>()
+  const revokedOwners = new Set<string>()
 
   const resolve = (owner: ManagedServiceUIOwner, serviceId: string, expected?: ManagedServiceBindingV1) => {
     if (disposed) throw new Error('managed service UI bridge is disposed')
@@ -545,11 +583,18 @@ export function createManagedServiceUIBridgeHandler(input: {
     closedSubscriptions.set(subscriptionId, closed)
     return closed
   }
-  const handler: ManagedServiceUIBridgeHandler = {
+  const handler: MutableManagedServiceUIBridgeHandler = {
     token: input.token,
     profileId: input.profileId,
     generation: input.generation,
+    ...(hostStartup ? { hostStartup } : {}),
     async handle(owner, request) {
+      if (
+        request.operation === 'startupRead' || request.operation === 'startupSubscribe'
+        || request.operation === 'startupNext' || request.operation === 'startupClose'
+      ) {
+        return clone(await startup.handle(owner, request))
+      }
       if (request.operation === 'nativeProviders') {
         if (disposed) throw new Error('managed service UI is disposed')
         if (![...services.keys()].some(key => key.startsWith(`${ownerKey(owner)}\u0000`))) {
@@ -561,6 +606,13 @@ export function createManagedServiceUIBridgeHandler(input: {
           && (provider as Record<string, unknown>).pluginId === owner.pluginId
         ))
       }
+      if (
+        request.operation === 'get' && !disposed && !services.has(serviceKey(owner, request.serviceId))
+        && declaredServices.has(serviceKey(owner, request.serviceId))
+      ) {
+        return { status: 'unavailable', code: 'disposed', message: 'binding-unavailable' }
+      }
+      if (!('serviceId' in request)) throw new Error('managed service UI operation is invalid')
       const resolved = resolve(owner, request.serviceId, request.operation === 'get' ? undefined : request.binding)
       if (request.operation === 'get') {
         return clone({
@@ -670,8 +722,42 @@ export function createManagedServiceUIBridgeHandler(input: {
       closedSubscriptions.set(request.subscriptionId, closed)
       return { status: 'closed', closed }
     },
-    async disposeOwner(owner) {
+    async replaceServices(owner, replacements) {
+      if (disposed) throw new Error('managed service UI bridge is disposed')
+      if (revokedOwners.has(ownerKey(owner))) throw new Error('managed service UI owner was revoked')
+      // Validate the complete candidate before retiring the old binding. No operation is replayed.
+      const candidate = createManagedServiceUIBridgeHandler({
+        token: input.token,
+        profileId: input.profileId,
+        generation: input.generation,
+        services: replacements,
+      })
+      await candidate.dispose()
+      if (disposed || revokedOwners.has(ownerKey(owner))) throw new Error('managed service UI owner was revoked')
+      if (replacements.some(service => ownerKey(service) !== ownerKey(owner))) {
+        throw new Error('replacement owner mismatch')
+      }
       const key = ownerKey(owner)
+      const revision = (ownerRevisions.get(key) ?? 0) + 1
+      ownerRevisions.set(key, revision)
+      for (const service of services.keys()) if (service.startsWith(`${key}\u0000`)) services.delete(service)
+      const owned = [...subscriptions.entries()].filter(([, state]) => state.ownerKey === key).map(([id]) => id)
+      await Promise.allSettled(owned.map(id => unsubscribe(id)))
+      if (disposed || ownerRevisions.get(key) !== revision) throw new Error('managed service UI owner was replaced')
+      for (const service of replacements) {
+        const serviceId = serviceKey(owner, service.serviceId)
+        services.set(serviceId, service.source)
+        declaredServices.add(serviceId)
+        if (service.loginTimeoutMs === undefined) loginTimeouts.delete(serviceId)
+        else loginTimeouts.set(serviceId, service.loginTimeoutMs)
+      }
+    },
+    async disposeOwner(owner) {
+      startup.disposeOwner(owner)
+      const key = ownerKey(owner)
+      revokedOwners.add(key)
+      ownerRevisions.set(key, (ownerRevisions.get(key) ?? 0) + 1)
+      for (const service of declaredServices) if (service.startsWith(`${key}\u0000`)) declaredServices.delete(service)
       for (const service of services.keys()) {
         if (service.startsWith(`${key}\u0000`)) services.delete(service)
       }
@@ -681,9 +767,23 @@ export function createManagedServiceUIBridgeHandler(input: {
     async dispose() {
       if (disposed) return
       disposed = true
+      startup.dispose()
+      hostStartup?.dispose()
       await Promise.allSettled([...subscriptions.keys()].map(async subscriptionId => await unsubscribe(subscriptionId)))
       services.clear()
     },
+  }
+  const handleCurrent = handler.handle
+  handler.handle = async (owner, request) => {
+    const revision = ownerRevisions.get(ownerKey(owner)) ?? 0
+    const result = await handleCurrent(owner, request)
+    if (
+      (request.operation === 'get' || 'binding' in request)
+      && (disposed || revision !== (ownerRevisions.get(ownerKey(owner)) ?? 0))
+    ) {
+      throw new Error('managed service UI binding was replaced')
+    }
+    return result
   }
   return handler
 }

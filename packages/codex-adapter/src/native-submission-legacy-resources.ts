@@ -1,3 +1,4 @@
+import { fixedNativeTransform } from './fixed-transform.js'
 import { createHash } from 'node:crypto'
 import { NATIVE_OPERATION_REQUEST_TRANSFORM } from './native-operation-request-transform.js'
 import { NATIVE_SUBMIT_ORCHESTRATOR_TRANSFORM } from './native-submit-orchestrator-transform.js'
@@ -16,8 +17,9 @@ export function legacyNativeSubmissionResources(
     )
     if (matches.length !== 1) return undefined
     const resource = matches[0]!
-    recipe.transform(resource.source)
-    selected.push(Object.freeze({ ...recipe, url: resource.url }))
+    const transform = fixedNativeTransform({ ...recipe, url: resource.url })
+    transform.transform(resource.source)
+    selected.push(transform)
   }
   return selected
 }

@@ -1,4 +1,10 @@
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15,
+  normalizePluginManifestV15,
+} from './latest-runtime-manifest.js'
+import { PLUGIN_PACKAGE_SCHEMA_V15 } from './packages/manifest.js'
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11,
   type CordisXPluginManifestV11,
   normalizeUsageManifestV11,
@@ -101,6 +107,7 @@ export interface LocalDevelopmentBuild {
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
 }
 
 interface LocalDevelopmentBuildOptions {
@@ -157,6 +164,7 @@ export interface LocalDevelopmentPackageInfo {
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
 }
 
 export async function localDevelopmentPackageInfo(entry: string): Promise<LocalDevelopmentPackageInfo> {
@@ -246,6 +254,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
 }> {
   const manifestPath = path.join(root, 'cordisx-package.json')
   const text = await readFile(manifestPath, 'utf8').catch(error => {
@@ -269,6 +278,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
     | PluginRuntimeManifestV14
+    | PluginRuntimeManifestV15
     | undefined
   let runtimeManifestFile: string | undefined
   const runtimeManifestSchema = declaredRuntimeManifestSchema(manifest)
@@ -280,6 +290,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 || manifest.schemaVersion === 12
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 || manifest.schemaVersion === 13
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 || manifest.schemaVersion === 14
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 || manifest.schemaVersion === 15
   if (manifest.runtimeManifest !== undefined && runtimeManifestSchema !== undefined) {
     if (
       manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object'
@@ -306,7 +317,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
     if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
     const packageId = manifest.id
     if (typeof packageId !== 'string') throw new Error('local development package id is required')
-    runtimeManifest = runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14
+    runtimeManifest = runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15
+      ? normalizePluginManifestV15(JSON.parse(runtimeText) as unknown, packageId)
+      : runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14
       ? normalizePluginManifestV14(JSON.parse(runtimeText) as unknown, packageId)
       : runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13
       ? normalizePluginManifestV13(JSON.parse(runtimeText) as unknown, packageId)
@@ -343,10 +356,11 @@ async function readRendererOnlyPackage(root: string): Promise<{
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V11 && manifest.schemaVersion === 11)
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 && manifest.schemaVersion === 12)
       || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 && manifest.schemaVersion === 13)
-      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 && manifest.schemaVersion === 14))
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V14 && manifest.schemaVersion === 14)
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15))
   ) {
     throw new Error(
-      'local development entityTemplates require plugin-package.v5 through plugin-package.v14',
+      'local development entityTemplates require plugin-package.v5 through plugin-package.v14 or plugin-package.v15',
     )
   }
   const compatibility = manifest.compatibility

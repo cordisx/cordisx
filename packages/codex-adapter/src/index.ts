@@ -1,3 +1,4 @@
+import { fixedNativeTransform } from './fixed-transform.js'
 import type { AdapterBundle, NativeScriptResource } from './contracts.js'
 import { analyzeNativeSubmissionTransforms } from './native-submission-structure.js'
 import { legacyNativeSubmissionResources } from './native-submission-legacy-resources.js'
@@ -45,7 +46,7 @@ export const bundle: AdapterBundle = {
         if (legacy) return { transforms: legacy }
         const result = analyzeNativeSubmissionTransforms(resources)
         syntaxes.set(resources, result.syntaxByResource)
-        return { transforms: result.transforms }
+        return { transforms: result.transforms.map(fixedNativeTransform) }
       },
     },
     {

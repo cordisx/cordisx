@@ -373,6 +373,23 @@ async function forward(line) {
     return
   }
   if (!managed) {
+    if (['thread/start', 'turn/start', 'turn/steer', 'turn/addUserMessage'].includes(message?.method)) {
+      const allowed = await controlCall('unmarked-provider', {
+        ...(typeof params?.threadId === 'string' ? { threadId: params.threadId } : {}),
+        ...(typeof params?.modelProvider === 'string'
+          ? { providerId: params.modelProvider }
+          : typeof params?.config?.model_provider === 'string'
+          ? { providerId: params.config.model_provider }
+          : {}),
+      })
+      if (allowed !== true) {
+        await write(process.stdout, {
+          id: message.id,
+          error: { code: -32000, message: 'Remote provider requires a current, exact Send authorization.' },
+        })
+        return
+      }
+    }
     if (message?.method === 'turn/start' && firstTurns.has(params?.threadId)) {
       await write(process.stdout, {
         id: message.id,

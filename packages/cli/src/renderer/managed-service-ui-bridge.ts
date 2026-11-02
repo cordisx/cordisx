@@ -1,3 +1,4 @@
+import { createBrowserStartupObserver, StartupObservationTerminated } from './startup-ui-observer.js'
 import type {
   ManagedServiceBindingV1,
   ManagedServiceCliProxyAccountControlV1,
@@ -14,6 +15,7 @@ import type {
   ManagedServiceUIRegistryV1,
   ManagedServiceV1,
 } from '@cordisx/protocol/managed-service-ui/v1'
+import type { StartupUIPrincipal } from '../launcher/startup-ui-rpc.js'
 import type { ManagedServiceUIBindingRequest, ManagedServiceUIOwner } from '../launcher/managed-service-ui-rpc.js'
 import type { NativeProviderProjection } from './model-providers.js'
 
@@ -25,13 +27,16 @@ const AUTHENTICATION_RESPONSE_GRACE_MS = REQUEST_TIMEOUT_MS
 
 type Binding = (payload: string) => void
 interface Pending {
+  readonly observation: boolean
   readonly resolve: (value: unknown) => void
   readonly reject: (error: Error) => void
+  readonly cleanup?: () => void
   readonly timer: ReturnType<typeof setTimeout> | undefined
 }
 
 export interface ManagedServiceUICapability extends ManagedServiceUIOwner {
   readonly token: string
+  readonly startup?: boolean
 }
 
 interface AvailableServiceDescriptor {
@@ -58,7 +63,8 @@ function clone<Value>(value: Value): Value {
     : JSON.parse(JSON.stringify(value)) as Value
 }
 
-function ownerKey(owner: ManagedServiceUIOwner): string {
+function ownerKey(owner: StartupUIPrincipal): string {
+  if ('kind' in owner) return JSON.stringify(['host', owner.hostGeneration])
   return `${owner.pluginId}\u0000${owner.pluginGeneration}`
 }
 
@@ -69,21 +75,40 @@ function nextRequestId(): string {
 /** Renderer transport. Only owner-bound registries receive a capability token. */
 export class BrowserManagedServiceUIBridge {
   private readonly pending = new Map<string, Pending>()
-  private readonly capabilities = new Map<string, { token: string; state: 'active' | 'staged' | 'retiring' }>()
+  private readonly capabilities = new Map<
+    string,
+    { token: string; startup?: boolean; state: 'active' | 'staged' | 'retiring' }
+  >()
   private readonly transactions = new Map<string, {
     readonly affectedPluginIds: ReadonlySet<string>
     readonly candidateKeys: ReadonlySet<string>
     published: boolean
   }>()
+  private readonly revokedStartupOwners = new Set<string>()
+  private readonly startupObservers = new Map<string, ReturnType<typeof createBrowserStartupObserver>>()
   private closed = false
+  private disposing = false
+  private transportControlSequence = 0
 
   private constructor(
     capabilities: readonly ManagedServiceUICapability[],
     private readonly profileId: string,
     private readonly generation: string,
+    hostCapability?: { readonly token: string },
   ) {
     for (const capability of capabilities) {
-      this.capabilities.set(ownerKey(capability), { token: capability.token, state: 'active' })
+      this.capabilities.set(ownerKey(capability), {
+        token: capability.token,
+        ...(capability.startup ? { startup: true } : {}),
+        state: 'active',
+      })
+    }
+    if (hostCapability) {
+      this.capabilities.set(ownerKey({ kind: 'host', hostGeneration: generation }), {
+        token: hostCapability.token,
+        startup: true,
+        state: 'active',
+      })
     }
     globalThis[MANAGED_SERVICE_UI_RECEIVER] = this.receive
   }
@@ -92,14 +117,59 @@ export class BrowserManagedServiceUIBridge {
     capabilities: readonly ManagedServiceUICapability[],
     profileId: string,
     generation: string,
+    hostCapability?: { readonly token: string },
   ): BrowserManagedServiceUIBridge {
-    return new BrowserManagedServiceUIBridge(capabilities, profileId, generation)
+    return new BrowserManagedServiceUIBridge(capabilities, profileId, generation, hostCapability)
   }
 
   bind(owner: ManagedServiceUIOwner): ManagedServiceUIRegistryV1 | undefined {
+    if (this.closed || this.disposing) return undefined
     const capability = this.capabilities.get(ownerKey(owner))
     if (capability === undefined) return undefined
     return new BrowserManagedServiceUIRegistry(this, owner, capability.token)
+  }
+
+  bindHostStartup() {
+    return this.startupFor({ kind: 'host', hostGeneration: this.generation })
+  }
+
+  bindStartup(owner: ManagedServiceUIOwner) {
+    return this.startupFor(owner)
+  }
+
+  private startupFor(owner: StartupUIPrincipal) {
+    const key = ownerKey(owner)
+    const capability = this.capabilities.get(key)
+    if (!capability?.startup || this.closed || this.disposing || this.revokedStartupOwners.has(key)) return undefined
+    let binding = this.startupObservers.get(key)
+    if (!binding) {
+      binding = createBrowserStartupObserver(async (request, signal) => {
+        const result = await this.request(owner, capability.token, request, REQUEST_TIMEOUT_MS, signal)
+        const terminal = result as { status?: string; reason?: string } | null
+        if (
+          terminal?.status === 'startup-terminated'
+          && (terminal.reason === 'scope-revoked' || terminal.reason === 'host-replaced')
+        ) {
+          throw new StartupObservationTerminated(terminal.reason)
+        }
+        return result
+      })
+      this.startupObservers.set(key, binding)
+    }
+    return binding.observer
+  }
+
+  disposeStartupOwner(owner: ManagedServiceUIOwner): void {
+    const key = ownerKey(owner)
+    this.revokedStartupOwners.add(key)
+    this.startupObservers.get(key)?.dispose()
+    this.startupObservers.delete(key)
+  }
+
+  private removeCapability(key: string): void {
+    this.startupObservers.get(key)?.dispose()
+    this.startupObservers.delete(key)
+    this.capabilities.delete(key)
   }
 
   stage(
@@ -107,7 +177,7 @@ export class BrowserManagedServiceUIBridge {
     affectedPluginIds: readonly string[],
     capabilities: readonly ManagedServiceUICapability[],
   ): void {
-    if (this.closed) throw new Error('managed service UI bridge is unavailable')
+    if (this.closed || this.disposing) throw new Error('managed service UI bridge is unavailable')
     if (this.transactions.has(transactionId)) {
       throw new Error('managed service UI capability transaction already exists')
     }
@@ -116,7 +186,11 @@ export class BrowserManagedServiceUIBridge {
       const key = ownerKey(capability)
       if (this.capabilities.has(key)) throw new Error('managed service UI capability generation already exists')
       candidateKeys.add(key)
-      this.capabilities.set(key, { token: capability.token, state: 'staged' })
+      this.capabilities.set(key, {
+        token: capability.token,
+        ...(capability.startup ? { startup: true } : {}),
+        state: 'staged',
+      })
     }
     this.transactions.set(transactionId, {
       affectedPluginIds: new Set(affectedPluginIds),
@@ -126,6 +200,7 @@ export class BrowserManagedServiceUIBridge {
   }
 
   publish(transactionId: string): void {
+    if (this.closed || this.disposing) throw new Error('managed service UI bridge is unavailable')
     const transaction = this.transactions.get(transactionId)
     if (transaction === undefined) throw new Error('managed service UI capability transaction is unavailable')
     if (transaction.published) return
@@ -145,7 +220,7 @@ export class BrowserManagedServiceUIBridge {
     if (!transaction.published) throw new Error('managed service UI capability transaction is not published')
     for (const [key, capability] of this.capabilities) {
       if (capability.state === 'retiring' && transaction.affectedPluginIds.has(key.split('\u0000', 1)[0]!)) {
-        this.capabilities.delete(key)
+        this.removeCapability(key)
       }
     }
     this.transactions.delete(transactionId)
@@ -163,20 +238,22 @@ export class BrowserManagedServiceUIBridge {
       }
       return
     }
-    for (const key of transaction.candidateKeys) this.capabilities.delete(key)
+    for (const key of transaction.candidateKeys) this.removeCapability(key)
     this.transactions.delete(transactionId)
   }
 
   completeRollback(transactionId: string): void {
     const transaction = this.transactions.get(transactionId)
     if (transaction === undefined) return
-    for (const key of transaction.candidateKeys) this.capabilities.delete(key)
+    for (const key of transaction.candidateKeys) this.removeCapability(key)
     this.transactions.delete(transactionId)
   }
 
   async nativeProviders(): Promise<readonly NativeProviderProjection[]> {
     const catalogs = await Promise.all([...this.capabilities.entries()].flatMap(([key, capability]) => {
-      if (capability.state !== 'active') return []
+      if (capability.state !== 'active' || key === ownerKey({ kind: 'host', hostGeneration: this.generation })) {
+        return []
+      }
       const [pluginId, pluginGeneration] = key.split('\u0000') as [string, string]
       return [this.request({ pluginId, pluginGeneration }, capability.token, {
         requestId: nextRequestId(),
@@ -195,38 +272,73 @@ export class BrowserManagedServiceUIBridge {
   }
 
   dispose(): void {
-    if (this.closed) return
+    if (this.closed || this.disposing) return
+    this.disposing = true
+    // Dispatch the owner-bound close requests while the transport can still send them.
+    for (const observer of this.startupObservers.values()) observer.dispose('host-replaced')
+    this.startupObservers.clear()
     this.closed = true
     if (globalThis[MANAGED_SERVICE_UI_RECEIVER] === this.receive) {
       globalThis[MANAGED_SERVICE_UI_RECEIVER] = undefined
     }
     for (const pending of this.pending.values()) {
+      pending.cleanup?.()
       if (pending.timer !== undefined) clearTimeout(pending.timer)
       pending.reject(new Error('managed service UI bridge was disposed'))
     }
     this.pending.clear()
   }
 
+  /** Host/CDP transport owner signals a real disconnect; idle observation never expires. */
+  transportDisconnected(): void {
+    for (const [id, pending] of this.pending) {
+      if (!pending.observation) continue
+      pending.cleanup?.()
+      if (pending.timer !== undefined) clearTimeout(pending.timer)
+      this.pending.delete(id)
+      pending.reject(new Error('startup transport disconnected'))
+    }
+  }
+
   async request(
-    owner: ManagedServiceUIOwner,
+    owner: StartupUIPrincipal,
     token: string,
     request: ManagedServiceUIBindingRequest,
     timeoutMs = REQUEST_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const capability = this.capabilities.get(ownerKey(owner))
-    if (this.closed || capability?.token !== token) {
+    if (signal?.aborted) throw new Error('startup request was aborted')
+    if (this.closed || (this.disposing && request.operation !== 'startupClose') || capability?.token !== token) {
       throw new Error('managed service UI bridge is unavailable')
     }
     const binding = globalThis[MANAGED_SERVICE_UI_BINDING]
     if (typeof binding !== 'function') throw new Error('managed service UI bridge is unavailable')
     return await new Promise((resolve, reject) => {
-      const timer = request.operation === 'next' || request.operation === 'closed'
-        ? undefined
-        : setTimeout(() => {
-          this.pending.delete(request.requestId)
-          reject(new Error('managed service UI bridge request timed out'))
-        }, timeoutMs)
-      this.pending.set(request.requestId, { resolve, reject, timer })
+      const timer =
+        request.operation === 'next' || request.operation === 'closed' || request.operation === 'startupNext'
+          ? undefined
+          : setTimeout(() => {
+            this.pending.get(request.requestId)?.cleanup?.()
+            this.pending.delete(request.requestId)
+            reject(new Error('managed service UI bridge request timed out'))
+          }, timeoutMs)
+      const abort = (): void => {
+        cleanup()
+        this.pending.delete(request.requestId)
+        if (timer !== undefined) clearTimeout(timer)
+        signal?.removeEventListener('abort', abort)
+        reject(new Error('startup request was aborted'))
+      }
+      const cleanup = (): void => signal?.removeEventListener('abort', abort)
+      signal?.addEventListener('abort', abort, { once: true })
+      this.pending.set(request.requestId, {
+        resolve,
+        reject,
+        timer,
+        cleanup,
+        observation: request.operation.startsWith('startup'),
+      })
       try {
         const payload: Record<string, unknown> = {
           version: 1,
@@ -236,11 +348,18 @@ export class BrowserManagedServiceUIBridge {
           scope: {
             profileId: this.profileId,
             runtimeGeneration: this.generation,
-            pluginGeneration: owner.pluginGeneration,
+            ...('kind' in owner ? {} : { pluginGeneration: owner.pluginGeneration }),
           },
-          serviceId: request.serviceId,
+          ...('serviceId' in request ? { serviceId: request.serviceId } : {}),
         }
-        if (request.operation !== 'get' && request.operation !== 'nativeProviders') payload.binding = request.binding
+        if ('binding' in request) payload.binding = request.binding
+        if (request.operation === 'startupSubscribe') {
+          payload.subscriptionId = request.subscriptionId
+          if (request.after !== undefined) payload.after = request.after
+        }
+        if (request.operation === 'startupNext' || request.operation === 'startupClose') {
+          payload.subscriptionId = request.subscriptionId
+        }
         if (request.operation === 'subscribe') payload.afterSequence = request.afterSequence
         if (
           request.operation === 'next' || request.operation === 'pull' || request.operation === 'closed'
@@ -254,6 +373,7 @@ export class BrowserManagedServiceUIBridge {
         if (request.operation === 'pollOAuth') payload.sessionId = request.sessionId
         binding(JSON.stringify(payload))
       } catch (error) {
+        cleanup()
         this.pending.delete(request.requestId)
         if (timer !== undefined) clearTimeout(timer)
         reject(error)
@@ -268,13 +388,38 @@ export class BrowserManagedServiceUIBridge {
     } catch {
       return
     }
+    if (response === null || typeof response !== 'object' || Array.isArray(response)) return
+    if (this.receiveTransportControl(response as Record<string, unknown>)) return
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return
+    pending.cleanup?.()
     this.pending.delete(response.requestId)
     if (pending.timer !== undefined) clearTimeout(pending.timer)
     if (response.ok === true) pending.resolve(clone(response.value))
-    else pending.reject(new Error(typeof response.code === 'string' ? response.code : 'managed-service-ui-unavailable'))
+    else {
+      pending.reject(
+        new Error(typeof response.code === 'string' ? response.code : 'managed-service-ui-unavailable'),
+      )
+    }
+  }
+
+  private receiveTransportControl(value: Record<string, unknown>): boolean {
+    if (value.contract !== 'cordisx.startup-transport-control/v1') return false
+    if (this.closed || Object.keys(value).sort().join(',') !== 'contract,phase,scope,sequence,token') return true
+    const host = this.capabilities.get(ownerKey({ kind: 'host', hostGeneration: this.generation }))
+    const scope = value.scope as Record<string, unknown> | undefined
+    if (
+      !host || value.token !== host.token || !scope || Array.isArray(scope)
+      || Object.keys(scope).sort().join(',') !== 'profileId,runtimeGeneration'
+      || scope.profileId !== this.profileId || scope.runtimeGeneration !== this.generation
+      || !Number.isSafeInteger(value.sequence) || (value.sequence as number) <= this.transportControlSequence
+      || (value.phase !== 'disconnected' && value.phase !== 'reconnected')
+    ) return true
+    this.transportControlSequence = value.sequence as number
+    // A recovered CDP transport cannot deliver the old pending RPC; resume from the retained cursor.
+    this.transportDisconnected()
+    return true
   }
 }
 

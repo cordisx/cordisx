@@ -10,6 +10,7 @@ import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/re
 import type { NativeProviderSelectionCommandChannel } from '../packages/cli/src/renderer/native-provider-selection-client.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
+import { startupObserver } from './helpers/startup-model-fixture.js'
 
 const originals = new Map<string, PropertyDescriptor | undefined>()
 const rendererOwner = { targetId: 'native-target', rendererGeneration: 'native-generation' }
@@ -122,7 +123,7 @@ describe('native model provider selector installation', () => {
     dom.window.close()
   })
 
-  it.each(['models', 'login-only', 'empty'])(
+  it.each(['models', 'login-only', 'empty', 'startup-pending'])(
     'owns one seat across multiple footers for a %s catalog and restores the native trigger on disposal',
     async catalogKind => {
       const dom = new JSDOM(
@@ -238,6 +239,7 @@ describe('native model provider selector installation', () => {
           : []
       )
       const registry = new ModelProviderRegistry(load)
+      if (catalogKind === 'startup-pending') registry.connectStartup(startupObserver().observer)
       const binding = registry.bind('provider-plugin', 'one', () => true)
       if (catalogKind === 'login-only') {
         binding.facade.insert({
@@ -260,6 +262,7 @@ describe('native model provider selector installation', () => {
         )
       })
       expect(trigger.hidden).toBe(true)
+      expect(dom.window.document.querySelector('[data-cordisx-model-selector-ready="true"]')).not.toBeNull()
       expect(dom.window.document.getElementById('workspace-control')!.hidden).toBe(false)
       expect(trigger.dataset.cordisxModelProviderHidden).toBe('true')
       expect(dom.window.getComputedStyle(trigger).display).toBe('none')

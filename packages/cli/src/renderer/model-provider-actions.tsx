@@ -26,11 +26,12 @@ function safeDetails(error: unknown): string | undefined {
   return redacted.length === 0 ? undefined : redacted.slice(0, 2_000)
 }
 
-export function ProviderAction({ entry, failed, refresh, notifications }: {
+export function ProviderAction({ entry, failed, refresh, notifications, available = true }: {
   readonly entry: ModelProviderSelectorEntryV1
   readonly failed: string
   readonly refresh: () => Promise<void>
   readonly notifications?: NotificationsV1
+  readonly available?: boolean
 }) {
   return (
     <ProviderActionState
@@ -38,16 +39,18 @@ export function ProviderAction({ entry, failed, refresh, notifications }: {
       entry={entry}
       failed={failed}
       refresh={refresh}
+      available={available}
       {...(notifications === undefined ? {} : { notifications })}
     />
   )
 }
 
-function ProviderActionState({ entry, failed, refresh, notifications }: {
+function ProviderActionState({ entry, failed, refresh, notifications, available }: {
   readonly entry: ModelProviderSelectorEntryV1
   readonly failed: string
   readonly refresh: () => Promise<void>
   readonly notifications?: NotificationsV1
+  readonly available: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const running = useRef<AbortController | null>(null)
@@ -72,10 +75,10 @@ function ProviderActionState({ entry, failed, refresh, notifications }: {
           className="cxmp-icon-action"
           title={entry.action.label}
           aria-label={entry.action.label}
-          disabled={busy}
+          disabled={busy || !available}
           aria-busy={busy}
           onClick={() => {
-            if (running.current !== null) return
+            if (running.current !== null || !available) return
             const controller = new AbortController()
             running.current = controller
             setBusy(true)

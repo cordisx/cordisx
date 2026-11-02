@@ -25,6 +25,7 @@ const MAX_HEALTH_BODY_BYTES = 64 * 1024
 const MAX_PORT_FILE_BYTES = 32
 
 export interface ManagedServiceRuntimeProcessOptions {
+  readonly reserveEndpoint?: (record: ManagedServiceRecord, port: number) => void
   readonly fetch: typeof globalThis.fetch
   readonly reservedLoopbackPorts?: readonly number[]
   readonly spawn: typeof nodeSpawn
@@ -74,6 +75,7 @@ export class ManagedServiceRuntimeProcess {
     if (record.definition.discovery.kind === 'restricted-port-file') port = await this.readRestrictedPort(record)
     if (port === undefined) return undefined
     this.assertAvailableEndpoint(port)
+    this.options.reserveEndpoint?.(record, port)
     const origin = `http://127.0.0.1:${port}`
     return await this.healthy(record, origin, signal).catch(() => false) ? origin : undefined
   }
@@ -89,7 +91,10 @@ export class ManagedServiceRuntimeProcess {
       : record.definition.discovery.kind === 'fixed-loopback'
       ? record.definition.discovery.port
       : undefined
-    if (port !== undefined) this.assertAvailableEndpoint(port)
+    if (port !== undefined) {
+      this.assertAvailableEndpoint(port)
+      this.options.reserveEndpoint?.(record, port)
+    }
     const executable = await this.resolveExecutable(record, record.definition.launch.executable)
     const arguments_ = record.definition.launch.arguments.map(argument => {
       if (typeof argument === 'string') return argument
@@ -148,6 +153,7 @@ export class ManagedServiceRuntimeProcess {
       const discoveredPort = port ?? await this.readRestrictedPort(record)
       if (discoveredPort !== undefined) {
         this.assertAvailableEndpoint(discoveredPort)
+        this.options.reserveEndpoint?.(record, discoveredPort)
         const origin = `http://127.0.0.1:${discoveredPort}`
         const remaining = Math.max(1, Math.ceil(deadline - performance.now()))
         if (

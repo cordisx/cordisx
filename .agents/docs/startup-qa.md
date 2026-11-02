@@ -91,6 +91,18 @@ The reclaim rule is defined in the
 When a background start fails for any of these reasons, `cordisx start` and
 `cordisx status` report that reason instead of a generic supervisor exit.
 
+## Why is the window ready while a provider is still preparing?
+
+Workspace readiness and provider readiness are separate. The window can become
+usable while an admitted service prepares in the background. The model selector
+and Model Services page show that provider's preparation, authentication, and
+catalog state. A provider action remains unavailable until its required state is
+ready; a ready window does not guarantee that every provider can execute.
+
+An explicit provider/model request waits for its applicable requirements within
+the caller's time budget. Cancelling that request ends its wait without stopping
+shared preparation. See [progressive startup](progressive-startup.md).
+
 ## Will CordisX require another sign-in?
 
 The default launch opens an independent Codex window while retaining the

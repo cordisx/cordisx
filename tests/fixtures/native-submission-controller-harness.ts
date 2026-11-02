@@ -1,3 +1,4 @@
+import type { StartupProviderAdmission } from '../../packages/cli/src/launcher/startup-provider-admission.js'
 import { vi } from 'vitest'
 import {
   createNativeSubmissionController,
@@ -28,13 +29,18 @@ export const threadAction = { ...draftAction, operationId: 'operation-thread', t
 export const requestId = 'native-request-1'
 
 export function harness(input: {
+  startup?: StartupProviderAdmission
   scope?: NativeSubmissionScope
   pending?: PendingNativeProviderChange
   now?: () => number
   runtimeValid?: () => boolean
   createdNavigation?: () => number
   prepareConfiguredProvider?: (providerId: string) => Promise<Readonly<Record<string, unknown>>>
-  providerSource?: (providerId: string) => 'managed' | 'config' | undefined
+  prepareRemoteProvider?:
+    import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions[
+      'prepareRemoteProvider'
+    ]
+  providerSource?: (providerId: string) => 'managed' | 'config' | 'remote' | undefined
   validateSelection?: (selection: { providerId: string; model: string }) => Promise<boolean>
 } = {}) {
   const scope = input.scope ?? draftScope
@@ -99,6 +105,7 @@ export function harness(input: {
   const runtimeRevalidate = vi.fn(async () => input.runtimeValid?.() ?? true)
   let id = 0
   const controller = createNativeSubmissionController({
+    ...(input.startup === undefined ? {} : { startup: input.startup }),
     selection: {
       adoptScope: (source, target) => {
         const current = snapshots.get(JSON.stringify(source))
@@ -120,6 +127,7 @@ export function harness(input: {
       }),
     },
     existingThread: { switch: switchThread },
+    ...(input.prepareRemoteProvider === undefined ? {} : { prepareRemoteProvider: input.prepareRemoteProvider }),
     ...(input.prepareConfiguredProvider === undefined
       ? {}
       : { prepareConfiguredProvider: input.prepareConfiguredProvider }),

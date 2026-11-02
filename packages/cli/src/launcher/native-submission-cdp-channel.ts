@@ -87,15 +87,17 @@ interface State {
   scope: NativeSubmissionScope
   revision: number
   nextGeneration: number
-  effective: NativeProviderSelection
+  effective?: NativeProviderSelection
+  pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
   pending?: PendingNativeProviderChange
   draftPreference?: Readonly<{ providerId: string; model?: string; generation: number }>
   draftUserSelected?: true
 }
 const projection = (state: State) => ({
-  available: true,
+  available: state.effective !== undefined,
   revision: state.revision,
-  effective: state.effective,
+  ...(state.effective ? { effective: state.effective } : {}),
+  ...(state.pendingProviderIntent ? { pendingProviderIntent: state.pendingProviderIntent } : {}),
   ...(state.pending === undefined
     ? {}
     : {
@@ -211,10 +213,11 @@ export function createNativeSubmissionCdpAuthority(options: {
       const prior = states.get(key(source))
       const next = states.get(key(target))
       if (
-        !prior || prior.pending || (next && (next.pending
+        !prior || !prior.effective || prior.pending || prior.pendingProviderIntent
+        || (next && (next.pending || next.pendingProviderIntent
           || next.revision !== 1 || next.nextGeneration !== 1
-          || next.effective.providerId !== prior.effective.providerId
-          || next.effective.model !== prior.effective.model))
+          || next.effective?.providerId !== prior.effective.providerId
+          || next.effective?.model !== prior.effective.model))
       ) return false
       states.set(key(target), { ...prior, scope: target })
       states.delete(key(source))
@@ -222,10 +225,11 @@ export function createNativeSubmissionCdpAuthority(options: {
     },
     snapshot(scope) {
       const state = states.get(key(scope))
-      if (!state) throw new Error('Native selection scope unavailable')
+      if (!state?.effective) throw new Error('Native selection scope unavailable')
       return {
         revision: state.revision,
         effective: state.effective,
+        ...(state.pendingProviderIntent ? { pendingProviderIntent: state.pendingProviderIntent } : {}),
         ...(state.pending === undefined ? {} : { pending: state.pending }),
       }
     },
@@ -237,6 +241,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       ) return false
       state.effective = { providerId: input.selection.providerId, model: input.selection.model }
       delete state.pending
+      delete state.pendingProviderIntent
       state.revision++
       if (input.scope.threadId !== undefined) threadSelections.set(input.scope.threadId, state.effective)
       if (key(input.scope) !== key(state.scope)) {
@@ -324,7 +329,9 @@ export function createNativeSubmissionCdpAuthority(options: {
       reserve(threadId) {
         if (
           agentSelections.has(threadId)
-          || [...states.values()].some(state => state.scope.threadId === threadId && state.pending)
+          || [...states.values()].some(state =>
+            state.scope.threadId === threadId && (state.pending || state.pendingProviderIntent)
+          )
         ) return false
         agentSelections.add(threadId)
         return true
@@ -515,20 +522,53 @@ export function createNativeSubmissionCdpAuthority(options: {
           let state = states.get(key(scope))
           if (envelope.operation === 'selectionRead') {
             const supplied = selectionOf(input?.effective)
-            if (!state) {
+            if (!state?.effective) {
               const preference = scope.threadId === undefined ? await draftPreference() : undefined
-              state = {
+              const current = await liveScope(scope)
+              if (!current || key(current) !== key(scope) || owner.disposed) throw new Error('Stale initialization')
+              const before = states.get(key(scope))
+              state = before?.effective ? before : {
+                ...before,
                 scope,
-                revision: 1,
-                nextGeneration: 1,
+                revision: before ? before.revision + 1 : 1,
+                nextGeneration: before?.nextGeneration ?? 1,
                 effective: scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied,
-                ...(preference === undefined ? {} : { draftPreference: preference }),
+                ...(preference === undefined || before?.draftUserSelected ? {} : { draftPreference: preference }),
               }
               states.set(key(scope), state)
             }
             await respond(requestId, projection(state))
+          } else if (
+            envelope.operation === 'selectionProviderIntent' || envelope.operation === 'selectionCancelProviderIntent'
+          ) {
+            if (!state && input?.expectedRevision === 0) {
+              state = { scope, revision: 0, nextGeneration: 1 }
+              states.set(key(scope), state)
+            }
+            if (!state || input?.expectedRevision !== state.revision) throw new Error('Stale provider intent')
+            if (envelope.operation === 'selectionProviderIntent') {
+              if (!text(input?.providerId, 128)) throw new Error('Invalid provider intent')
+              state.pendingProviderIntent = Object.freeze({
+                providerId: input.providerId,
+                generation: state.nextGeneration++,
+              })
+              state.draftUserSelected = true
+            } else delete state.pendingProviderIntent
+            delete state.pending
+            delete state.draftPreference
+            state.revision++
+            await respond(requestId, projection(state))
           } else if (envelope.operation === 'selectionSelect') {
-            if (!state) throw new Error('Native selection not initialized')
+            if (!state?.effective) throw new Error('Native selection not initialized')
+            const expectedRevision = state.revision
+            if (input?.expectedRevision !== undefined && input.expectedRevision !== expectedRevision) {
+              throw new Error('Stale selection')
+            }
+            if (
+              state.pendingProviderIntent
+              && (input?.expectedRevision !== expectedRevision || input?.source === 'preference'
+                || input?.mode === 'stage-send')
+            ) throw new Error('Unresolved provider intent')
             const selected = selectionOf(input)
             const stageSend = input?.mode === 'stage-send'
             if (input?.mode !== undefined && !stageSend) throw new Error('Invalid selection mode')
@@ -548,7 +588,9 @@ export function createNativeSubmissionCdpAuthority(options: {
             ) throw new Error('Stale native draft preference')
             const catalog = await options.catalog()
             const liveAfter = await liveScope(scope)
-            if (!liveAfter || key(liveAfter) !== key(scope) || owner.disposed) throw new Error('Stale native selection')
+            if (!liveAfter || key(liveAfter) !== key(scope) || owner.disposed || state.revision !== expectedRevision) {
+              throw new Error('Stale native selection')
+            }
             const catalogContainsSelection = selected.providerId === 'openai'
               || catalog.some(provider =>
                 provider.providerId === selected.providerId
@@ -582,6 +624,7 @@ export function createNativeSubmissionCdpAuthority(options: {
             state.revision++
             if (!stageSend && selected.providerId === state.effective.providerId) {
               delete state.pending
+              delete state.pendingProviderIntent
               state.effective = selected
               if (scope.threadId) threadSelections.set(scope.threadId, selected)
             } else {state.pending = {
@@ -596,6 +639,9 @@ export function createNativeSubmissionCdpAuthority(options: {
               if (committed.kind === 'accepted') {
                 await respond(requestId, { status: 'accepted', ...committed.projection })
               } else {
+                if (state.pendingProviderIntent) {
+                  throw new Error('Provider intent requires successful model acknowledgement')
+                }
                 // Keep the explicit choice; ordinary Send retries the native transition without another prompt.
                 if (
                   committed.reason !== 'thread-switch-failed' || state.revision !== revision
@@ -616,7 +662,10 @@ export function createNativeSubmissionCdpAuthority(options: {
                 state.revision++
                 await respond(requestId, { status: 'accepted', ...projection(state) })
               }
-            } else await respond(requestId, { status: 'accepted', ...projection(state) })
+            } else {
+              delete state.pendingProviderIntent
+              await respond(requestId, { status: 'accepted', ...projection(state) })
+            }
           } else if (envelope.operation === 'submissionPrepare') {
             const result = await controller!.prepareSubmission(scope, actionOf(input?.action))
             await respond(
@@ -686,7 +735,7 @@ export function createNativeSubmissionCdpAuthority(options: {
         options.modelServices
           ? "modelServicesRead:()=>call('modelServicesRead',{generation}),modelServicesSave:request=>call('modelServicesSave',{generation,request}),"
           : ''
-      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionDiscard:input=>call('selectionDiscard',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
+      }catalogSnapshotRead:()=>call('catalogSnapshotRead',{}),catalogRead:()=>call('catalogRead',{}),selectionRead:input=>call('selectionRead',input),selectionSelect:input=>call('selectionSelect',input),selectionProviderIntent:input=>call('selectionProviderIntent',input),selectionCancelProviderIntent:input=>call('selectionCancelProviderIntent',input),selectionDiscard:input=>call('selectionDiscard',input),submissionPrepare:input=>call('submissionPrepare',input),submissionConfirm:input=>call('submissionConfirm',input),submissionCancel:input=>call('submissionCancel',input)});
         globalThis.__cordisxNativeSubmissionChannelDispose=()=>{disposed=true;globalThis.__cordisxNativeAgentTaskAdapter?.dispose();managementListeners.clear();delete globalThis.__cordisxCatalogManagementChanged;catalogListeners.clear();delete globalThis.__cordisxCatalogChanged;activate(false);for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Native channel disposed'))}pending.clear();delete globalThis.__cordisxNativeProviderOwner;delete globalThis.__cordisxNativeProviderCommandChannel;delete globalThis.${RECEIVER};delete globalThis.__cordisxNativeSubmissionReady;delete globalThis.__cordisxNativeSubmissionActivate;delete globalThis.__cordisxNativeSubmissionChannelDispose};
       })()`
       let identifier: string | undefined

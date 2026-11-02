@@ -74,8 +74,7 @@ import {
 } from './configuration.js'
 import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
-import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
-import { nativeModelProviderRegistry } from './model-providers.js'
+import { createRuntimeModelProviders } from './runtime-model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
@@ -205,10 +204,7 @@ export async function start(
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
-  const managedServiceBridge = metadata.managedServiceCapabilities === undefined
-    ? undefined
-    : BrowserManagedServiceUIBridge.connect(metadata.managedServiceCapabilities, metadata.profileId, generation)
-  const modelProviders = nativeModelProviderRegistry(managedServiceBridge)
+  const { managedServiceBridge, modelProviders } = createRuntimeModelProviders(metadata, generation)
   const channelCredentialBridge = metadata.channelCredentialBridgeToken === undefined
     ? undefined
     : BrowserChannelCredentialBridge.connect(metadata.channelCredentialBridgeToken)

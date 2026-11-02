@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { abortable, cdpInstallationAborted, CdpSession, runtimeEvaluationException } from '../launcher/cdp-session.js'
 import type { CdpTarget } from '../launcher/cdp-session.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
-import { readNativeStartupReadiness, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
+import { nativeStartupReadinessSource, type StartupSurface } from '../renderer/adapter/startup-readiness.js'
 import { NATIVE_STARTUP_MARK_SELECTOR, NATIVE_STARTUP_SURFACE } from '../renderer/adapter/startup-presentation.js'
 import { startupBrand } from './startup-brand.js'
 import { observeStartupTiming } from './startup-timing.js'
@@ -243,7 +243,7 @@ export async function connectStartupCover(
             let result: Awaited<ReturnType<typeof releaseReadyStartup>> | undefined
             try {
               result = await read(
-                `(${releaseReadyStartup.toString()})(${readNativeStartupReadiness.toString()},${
+                `(${releaseReadyStartup.toString()})(${nativeStartupReadinessSource()},${
                   JSON.stringify(account)
                 },${timing.source})`,
               )

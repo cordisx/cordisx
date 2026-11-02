@@ -1,3 +1,4 @@
+import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
@@ -63,6 +64,7 @@ export interface ManagedServiceRuntimeOptions {
   /** Active prior-generation endpoints must never be borrowed by a candidate. */
   readonly reservedLoopbackPorts?: readonly number[]
   readonly reservedServiceKeys?: readonly string[]
+  readonly endpointReservations?: ManagedServiceEndpointReservations
   readonly schemas?: ManagedServiceSchemaRegistry
   readonly resolveSecret?: (input: {
     readonly owner: ManagedServiceOwnerV1
@@ -90,6 +92,8 @@ class BorrowedServiceUnavailableError extends Error {
 }
 
 export class ManagedServiceRuntime {
+  private readonly serviceListeners = new Set<() => void>()
+  private serviceSequence = 0
   private readonly schemas: ManagedServiceSchemaRegistry
   private readonly fetch: typeof globalThis.fetch
   private readonly spawn: typeof nodeSpawn
@@ -102,13 +106,16 @@ export class ManagedServiceRuntime {
   private readonly native = new ManagedServiceRuntimeNative(this.registrations)
   private readonly broker: ManagedServiceRuntimeBroker
   private readonly process: ManagedServiceRuntimeProcess
+  private readonly endpointReservations: ManagedServiceEndpointReservations
 
   constructor(private readonly options: ManagedServiceRuntimeOptions) {
+    this.endpointReservations = options.endpointReservations ?? new ManagedServiceEndpointReservations()
     this.schemas = options.schemas ?? new ManagedServiceSchemaRegistry()
     this.fetch = options.fetch ?? globalThis.fetch
     this.spawn = options.spawn ?? nodeSpawn
     this.findFreePort = options.findFreePort ?? findFreeLoopbackPort
     this.process = new ManagedServiceRuntimeProcess({
+      reserveEndpoint: (record, port) => this.endpointReservations.reserve(record.access, `port:${port}`),
       fetch: this.fetch,
       spawn: this.spawn,
       ...(options.reservedLoopbackPorts === undefined ? {} : { reservedLoopbackPorts: options.reservedLoopbackPorts }),
@@ -129,9 +136,11 @@ export class ManagedServiceRuntime {
     return createManagedServiceActivationBinding({
       access,
       signal,
-      register: (nextAccess, serviceGeneration, definition, revision) =>
+      register: (nextAccess, serviceGeneration, definition, revision, registrationSignal) =>
         registerManagedService({
           access: nextAccess,
+          signal: registrationSignal,
+          endpointReservations: this.endpointReservations,
           serviceGeneration,
           definition,
           revision,
@@ -151,6 +160,7 @@ export class ManagedServiceRuntime {
           registrations: this.registrations,
           pendingRegistrations: this.pendingRegistrations,
           disposeRecord: record => this.disposeRecord(record),
+          onRecordChanged: record => this.changedService(record),
         }),
       registrationHandle: record => this.registrationHandle(record),
       boundClient: state => this.broker.boundClient(state),
@@ -159,8 +169,45 @@ export class ManagedServiceRuntime {
     })
   }
 
+  get serviceRevision(): number {
+    return this.serviceSequence
+  }
+
+  subscribeServices(listener: () => void): () => void {
+    this.serviceListeners.add(listener)
+    return () => this.serviceListeners.delete(listener)
+  }
+
+  serviceProjection(identity: ManagedServiceIdentityV1) {
+    const record = this.records.get(managedIdentityKey(identity))
+    return record === undefined ? undefined : this.projection(record)
+  }
+
+  private changedService(record: ManagedServiceRecord): void {
+    if (this.records.get(managedIdentityKey(record.binding.identity)) !== record) return
+    this.serviceSequence += 1
+    for (const listener of this.serviceListeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
+  }
+
   prepareNativeConnection(request: NativeManagedGatewayConnectionRequest): NativeManagedGatewayConnectionSession {
     return this.native.prepareNativeConnection(request)
+  }
+
+  nativePublication(providerId: string) {
+    return this.native.publications.inspect(providerId)
+  }
+
+  refreshNativeProviders(): void {
+    this.native.publications.refresh()
+  }
+
+  revokeNativeProvider(identity: ManagedServiceIdentityV1, providerId: string): void {
+    const record = this.records.get(managedIdentityKey(identity))
+    if (record !== undefined) this.native.publications.revokeProvider(record, providerId)
   }
 
   listNativeProviderIds(pluginIds?: readonly string[]): readonly string[] {
@@ -188,6 +235,7 @@ export class ManagedServiceRuntime {
     return [...this.records.values()].flatMap(record => {
       if (record.disposed || !pluginIds.includes(record.access.owner.pluginId)) return []
       if (record.definition.discovery.kind === 'fixed-loopback') return [record.definition.discovery.port]
+      if (record.assignedPort !== undefined) return [record.assignedPort]
       return record.origin === undefined ? [] : [Number(new URL(record.origin).port)]
     })
   }
@@ -815,6 +863,8 @@ export class ManagedServiceRuntime {
       if (failures.length === 1) throw failures[0]
       throw new AggregateError(failures, 'managed service owned child cleanup incomplete')
     }
+    this.endpointReservations.release(record.access)
+    this.changedService(record)
     if (this.records.get(managedIdentityKey(record.binding.identity)) === record) {
       this.records.delete(managedIdentityKey(record.binding.identity))
     }

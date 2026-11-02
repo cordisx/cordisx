@@ -881,3 +881,61 @@
     transition: none;
   }
 }
+.cxmp-startup-status {
+  color: var(--cx-muted);
+  font-size: 0.85em;
+  white-space: normal;
+}
+.cxmp-provider-summary {
+  display: grid;
+  min-width: 0;
+  text-align: start;
+  gap: 2px;
+}
+.cxmp-startup-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  overflow: visible;
+}
+.cxmp-startup-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--cx-surface);
+  border-radius: 50%;
+  background: var(--cx-muted);
+  box-sizing: content-box;
+}
+.cxmp-startup-dot[data-startup-state="ready"] {
+  background: var(--cx-success, #4dc78f);
+}
+.cxmp-startup-dot[data-startup-state="declared"],
+.cxmp-startup-dot[data-startup-state="preparing"],
+.cxmp-startup-dot[data-startup-state="catalog-pending"],
+.cxmp-startup-dot[data-startup-state="auth-required"] {
+  background: var(--cx-warning, #e7b75b);
+}
+.cxmp-startup-dot[data-startup-state="failed"] {
+  background: var(--cx-danger, #f36d7d);
+}
+.cxmp-startup-dot[data-startup-connection="disconnected"],
+.cxmp-startup-dot[data-startup-connection="reconnecting"],
+.cxmp-startup-dot[data-startup-connection="closed"] {
+  background: var(--cx-muted);
+}
+.cxmp-startup-dot-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

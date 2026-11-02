@@ -41,6 +41,7 @@ export class CdpSession {
   private readonly connectionRef = diagnosticId()
   private nextId = 1
   private closed = false
+  private readonly closeListeners = new Set<() => void>()
   private readonly pending = new Map<number, {
     readonly resolve: (value: Record<string, unknown>) => void
     readonly reject: (error: Error) => void
@@ -74,6 +75,12 @@ export class CdpSession {
       this.closed = true
       for (const callback of this.pending.values()) callback.reject(new Error('CDP connection closed'))
       this.pending.clear()
+      for (const listener of [...this.closeListeners]) {
+        try {
+          listener()
+        } catch { /* Transport observers cannot affect socket cleanup. */ }
+      }
+      this.closeListeners.clear()
     })
   }
 
@@ -148,6 +155,12 @@ export class CdpSession {
       listeners.delete(listener)
       if (listeners.size === 0) this.eventListeners.delete(method)
     }
+  }
+
+  onClose(listener: () => void): () => void {
+    if (this.isClosed()) listener()
+    else this.closeListeners.add(listener)
+    return () => this.closeListeners.delete(listener)
   }
 
   close(): void {

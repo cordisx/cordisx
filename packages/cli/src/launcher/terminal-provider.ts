@@ -1,3 +1,6 @@
+import type { StartupSnapshotV1 } from '@cordisx/protocol/startup/v1'
+import type { StartupProviderAdmission } from './startup-provider-admission.js'
+import type { StartupRequirementsResult } from '../cli/startup-requirements.js'
 import { randomUUID } from 'node:crypto'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeManagedGatewayConnectionSession } from './managed-service-native-connection.js'
@@ -7,11 +10,22 @@ import { nativeProviderConfig, type NativeProviderCredentialLease } from './nati
 
 export type TerminalProviderRequest =
   | { readonly kind: 'list' }
-  | { readonly kind: 'prepare'; readonly providerId: string; readonly model: string; readonly client?: 'claude-code' }
+  | { readonly kind: 'cancel-wait'; readonly waiterId: string }
+  | { readonly kind: 'wait'; readonly providerId?: string; readonly model?: string; readonly waiterId?: string }
+  | {
+    readonly kind: 'prepare'
+    readonly providerId: string
+    readonly model: string
+    readonly client?: 'claude-code'
+    readonly waiterId?: string
+  }
   | { readonly kind: 'renew' | 'release'; readonly leaseId: string }
 export type TerminalProviderResult =
+  | { readonly kind: 'ready' | 'cancelled' }
+  | { readonly kind: 'unavailable'; readonly startup: Exclude<StartupRequirementsResult, { status: 'ready' }> }
   | {
     readonly kind: 'list'
+    readonly startup?: StartupSnapshotV1
     readonly providers: readonly {
       readonly providerId: string
       readonly title: string
@@ -35,13 +49,25 @@ export function parseTerminalProviderRequest(value: unknown): TerminalProviderRe
   const text = (key: string) =>
     typeof item[key] === 'string' && (item[key] as string).length > 0
     && (item[key] as string).length <= 512 && !/[\u0000-\u001f\u007f]/u.test(item[key] as string)
-  const keys = item.kind === 'list'
+  const keys = item.kind === 'cancel-wait'
+    ? ['kind', 'waiterId']
+    : item.kind === 'wait'
+    ? ['kind', 'providerId', 'model', 'waiterId']
+    : item.kind === 'list'
     ? ['kind']
     : item.kind === 'prepare'
-    ? ['kind', 'providerId', 'model', 'client']
+    ? ['kind', 'providerId', 'model', 'client', 'waiterId']
     : ['kind', 'leaseId']
   if (Object.keys(item).some(key => !keys.includes(key))) throw new Error('Invalid terminal provider request fields')
   if (item.client !== undefined && item.client !== 'claude-code') throw new Error('Invalid terminal client')
+  if (item.waiterId !== undefined && !text('waiterId')) throw new Error('Invalid terminal waiter')
+  if (
+    item.kind === 'wait' && (item.providerId === undefined || text('providerId'))
+    && (item.model === undefined || text('model')) && (item.model === undefined || item.providerId !== undefined)
+  ) {
+    return item as unknown as TerminalProviderRequest
+  }
+  if (item.kind === 'cancel-wait' && text('waiterId')) return item as unknown as TerminalProviderRequest
   if (item.kind === 'list') return { kind: 'list' }
   if (item.kind === 'prepare' && text('providerId') && text('model')) return item as unknown as TerminalProviderRequest
   if ((item.kind === 'renew' || item.kind === 'release') && text('leaseId')) {
@@ -52,6 +78,12 @@ export function parseTerminalProviderRequest(value: unknown): TerminalProviderRe
 
 /** Launch-scoped leases reuse the live Host; credentials never leave its existing broker. */
 export function createTerminalProviderAuthority(options: {
+  readonly startup?: StartupProviderAdmission
+  readonly waitRequirements?: (
+    providerId?: string,
+    model?: string,
+    signal?: AbortSignal,
+  ) => Promise<StartupRequirementsResult>
   readonly catalog: () => Promise<readonly NativeModelProviderCatalogEntry[]>
   readonly owns: (providerId: string) => boolean
   readonly resolve: (
@@ -65,10 +97,13 @@ export function createTerminalProviderAuthority(options: {
   const leases = new Map<string, {
     providerId: string
     model: string
+    waiterId?: string
     credential: NativeProviderCredentialLease
     expires: number
   }>()
   let closed = false
+  const lifetime = new AbortController()
+  const waiters = new Map<string, AbortController>()
   const broker = nativeSubmissionCredentialBroker({
     credentials: options.credentials,
     resolveEndpoint: options.resolve,
@@ -109,10 +144,35 @@ export function createTerminalProviderAuthority(options: {
       const request = parseTerminalProviderRequest(raw)
       if (closed) throw new Error('Terminal provider authority retired')
       sweep()
+      if (request.kind === 'cancel-wait') {
+        waiters.get(request.waiterId)?.abort()
+        for (const [id, lease] of leases) if (lease.waiterId === request.waiterId) release(id)
+        return { kind: 'cancelled' }
+      }
+      if (request.kind === 'wait') {
+        if (request.waiterId !== undefined && waiters.has(request.waiterId)) {
+          throw new Error('Terminal waiter already exists')
+        }
+        const waiter = new AbortController()
+        if (request.waiterId !== undefined) waiters.set(request.waiterId, waiter)
+        const abort = () => waiter.abort()
+        lifetime.signal.addEventListener('abort', abort, { once: true })
+        try {
+          const startup = await options.waitRequirements?.(request.providerId, request.model, waiter.signal)
+          if (closed || waiter.signal.aborted) return { kind: 'unavailable', startup: { status: 'cancelled' } }
+          return startup === undefined || startup.status === 'ready'
+            ? { kind: 'ready' }
+            : { kind: 'unavailable', startup }
+        } finally {
+          lifetime.signal.removeEventListener('abort', abort)
+          if (request.waiterId !== undefined) waiters.delete(request.waiterId)
+        }
+      }
       if (request.kind === 'list') {
         const catalog = await options.catalog()
         return {
           kind: 'list',
+          ...(options.startup?.snapshot === undefined ? {} : { startup: await options.startup.snapshot() }),
           providers: catalog.map(provider => ({
             providerId: provider.providerId,
             title: provider.title ?? provider.providerId,
@@ -122,38 +182,62 @@ export function createTerminalProviderAuthority(options: {
         }
       }
       if (request.kind === 'prepare') {
-        if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
-        await validate(request.providerId, request.model)
-        const credential = await broker.prepare(request.providerId)
+        if (request.waiterId !== undefined && waiters.has(request.waiterId)) {
+          throw new Error('Terminal waiter already exists')
+        }
+        const waiter = new AbortController()
+        if (request.waiterId !== undefined) waiters.set(request.waiterId, waiter)
+        const abort = () => waiter.abort()
+        lifetime.signal.addEventListener('abort', abort, { once: true })
         try {
-          await validate(request.providerId, request.model, credential.serviceGeneration)
+          const startup = await options.startup?.wait(request.providerId, request.model, waiter.signal)
+          if (waiter.signal.aborted) return { kind: 'unavailable', startup: { status: 'cancelled' } }
+          if (startup !== undefined && startup.status !== 'ready') return { kind: 'unavailable', startup }
           if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
-          const provider = nativeProviderConfig(credential)
-          // Claude Code can reuse an unauthenticated loopback gateway. Bearer
-          // credentials retain the Codex command broker and are never exported.
-          if (
-            request.client === 'claude-code'
-            && ('auth' in provider || !String(provider.base_url).startsWith('http://127.0.0.1:'))
-          ) {
-            throw new Error(
-              'This managed gateway cannot supply Claude Code authentication; select an anthropic-messages shared service',
-            )
+          await validate(request.providerId, request.model)
+          if (closed || waiter.signal.aborted) return { kind: 'unavailable', startup: { status: 'cancelled' } }
+          const credential = await broker.prepare(request.providerId)
+          try {
+            if (closed || waiter.signal.aborted) {
+              credential.dispose()
+              return { kind: 'unavailable', startup: { status: 'cancelled' } }
+            }
+            await validate(request.providerId, request.model, credential.serviceGeneration)
+            if (closed || waiter.signal.aborted) {
+              credential.dispose()
+              return { kind: 'unavailable', startup: { status: 'cancelled' } }
+            }
+            if (leases.size >= 64) throw new Error('Too many terminal provider sessions')
+            const provider = nativeProviderConfig(credential)
+            // Claude Code can reuse an unauthenticated loopback gateway. Bearer
+            // credentials retain the Codex command broker and are never exported.
+            if (
+              request.client === 'claude-code'
+              && ('auth' in provider || !String(provider.base_url).startsWith('http://127.0.0.1:'))
+            ) {
+              throw new Error(
+                'This managed gateway cannot supply Claude Code authentication; select an anthropic-messages shared service',
+              )
+            }
+            const leaseId = randomUUID()
+            leases.set(leaseId, { ...request, credential, expires: now() + ttlMs })
+            return {
+              kind: 'prepared',
+              leaseId,
+              providerId: request.providerId,
+              model: request.model,
+              provider,
+              ...(request.client === 'claude-code'
+                ? { anthropicBaseUrl: String(provider.base_url).replace(/\/v1\/?$/u, '') }
+                : {}),
+            }
+          } catch (error) {
+            credential.dispose()
+            throw error
           }
-          const leaseId = randomUUID()
-          leases.set(leaseId, { ...request, credential, expires: now() + ttlMs })
-          return {
-            kind: 'prepared',
-            leaseId,
-            providerId: request.providerId,
-            model: request.model,
-            provider,
-            ...(request.client === 'claude-code'
-              ? { anthropicBaseUrl: String(provider.base_url).replace(/\/v1\/?$/u, '') }
-              : {}),
-          }
-        } catch (error) {
-          credential.dispose()
-          throw error
+        } finally {
+          lifetime.signal.removeEventListener('abort', abort)
+          if (request.waiterId !== undefined) waiters.delete(request.waiterId)
         }
       }
       if (request.kind === 'release') {
@@ -174,6 +258,7 @@ export function createTerminalProviderAuthority(options: {
     },
     close() {
       closed = true
+      lifetime.abort()
       clearInterval(timer)
       for (const id of leases.keys()) release(id)
     },

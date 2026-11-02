@@ -1,3 +1,4 @@
+import { snapshotSelectedManagedServiceConfiguration } from '../managed-service-instance-configuration.js'
 import path from 'node:path'
 import { managedServiceResourceMatchesTarget } from '../managed-service-package-resources.js'
 import { loadStagedPluginPackage, stagedPluginServiceModulePath } from '../plugin-package.js'
@@ -14,8 +15,18 @@ export async function managedBackendRuntimeServiceAccess(
   },
   serviceId: string,
   hostGeneration: string,
+  selectedConfiguration?: unknown,
 ): Promise<ManagedBackendRuntimeServiceModuleAccess> {
+  // Capture before I/O, but preserve v14 behavior even when its config is not JSON.
+  let snapshot: unknown
+  let snapshotError: unknown
+  try {
+    snapshot = snapshotSelectedManagedServiceConfiguration(selectedConfiguration)
+  } catch (error) {
+    snapshotError = error
+  }
   const staged = await loadStagedPluginPackage(homeDir, item.digest)
+  if ('startup' in staged.manifest.runtimeManifest && snapshotError !== undefined) throw snapshotError
   const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
   if (service === undefined || service.declaration.kind !== 'managed-backend') {
     throw new PackageLifecycleError(
@@ -49,5 +60,19 @@ export async function managedBackendRuntimeServiceAccess(
     artifactDirectory: path.dirname(path.dirname(servicePath)),
     runtimeEntry: `./services/${serviceId}.mjs`,
     runtimeResources,
+    ...(!('startup' in staged.manifest.runtimeManifest) ? {} : {
+      ...(snapshot === undefined ? {} : { selectedConfiguration: snapshot }),
+      startup: {
+        pluginId: item.id,
+        pluginGeneration: item.moduleGeneration,
+        source: staged.identitySource,
+        sourceRevision: item.digest,
+        startup: staged.manifest.runtimeManifest.startup,
+        dependencies: staged.manifest.dependencies.map(dependency => dependency.id),
+        services: staged.serviceModules.flatMap(module =>
+          module.declaration.kind === 'managed-backend' ? [module.declaration] : []
+        ),
+      },
+    }),
   }
 }

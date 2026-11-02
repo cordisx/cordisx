@@ -1,3 +1,4 @@
+import { nativeModelProviderInteractionAllowed } from './native-model-provider-interaction.js'
 import type { NativeAccountCapabilityDescriptor } from '../../native-account-capability.js'
 
 // authenticated-ready remains readable for older supervisor state; new workspace
@@ -9,6 +10,7 @@ export async function readNativeStartupReadiness(
   descriptor: NativeAccountCapabilityDescriptor | undefined,
   load: (url: string) => Promise<Record<string, unknown>> = url => import(/* @vite-ignore */ url),
   trace?: (phase: string, details?: { durationMs?: number; status?: string }) => void,
+  interactionAllowed: typeof nativeModelProviderInteractionAllowed = nativeModelProviderInteractionAllowed,
 ): Promise<{
   ready: boolean
   reason?: string
@@ -69,9 +71,12 @@ export async function readNativeStartupReadiness(
         visible(element) && !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
       )
     const manager = document.querySelector<HTMLElement>('[data-cordisx-react-manager="true"]')
-    const model = document.querySelector<HTMLElement>('[data-cordisx-model-ready="true"]')
+    const model = document.querySelector<HTMLElement>('.cxmp-selector[data-cordisx-model-selector-ready="true"]')
     const modelReady = model !== null && visible(model)
-      && !model.hasAttribute('disabled') && model.getAttribute('aria-disabled') !== 'true'
+      && interactionAllowed(model)
+      && [...model.querySelectorAll<HTMLElement>('button')].some(control =>
+        visible(control) && !control.hasAttribute('disabled') && control.getAttribute('aria-disabled') !== 'true'
+      )
     const managerReady = manager !== null && visible(manager)
     if (editor) trace?.('editor-observed')
     if (modelReady) trace?.('model-observed')
@@ -226,4 +231,9 @@ export async function readNativeStartupReadiness(
     }
   }
   return { ready: false, reason: 'native-controls-pending' }
+}
+
+/** Both functions cross CDP as source; renderer imports are not available in that realm. */
+export function nativeStartupReadinessSource(): string {
+  return `(descriptor,load,trace)=>(${readNativeStartupReadiness.toString()})(descriptor,load,trace,(${nativeModelProviderInteractionAllowed.toString()}))`
 }

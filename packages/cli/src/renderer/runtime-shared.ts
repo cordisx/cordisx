@@ -269,10 +269,13 @@ export interface CordisXRuntimeMetadata {
     readonly token: string
   }[]
   readonly serviceConfigBridgeToken?: string
+  /** Host-only startup observation; never supplied to plugin Contexts. */
+  readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceCapabilities?: readonly {
     readonly pluginId: string
     readonly pluginGeneration: string
     readonly token: string
+    readonly startup?: boolean
   }[]
   /** Host-private. True only when managed native model requests have a safe routing path. */
   readonly nativeManagedModelRoutingAvailable?: boolean

@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type {
@@ -35,6 +36,7 @@ export interface StagedPluginPackage {
       | CordisXPluginManifestV12
       | CordisXPluginManifestV13
       | PluginRuntimeManifestV14
+      | PluginRuntimeManifestV15
   }
   readonly digest: `sha256:${string}`
   /** Exact downloaded distribution digest, when independently verified by the Host. */

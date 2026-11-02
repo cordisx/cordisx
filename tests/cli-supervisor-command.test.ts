@@ -1,3 +1,4 @@
+import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
@@ -113,37 +114,58 @@ describe('supervisor management commands', () => {
     const paths = supervisorPaths(root, 'codex', 'default')
     let spawned = 0
     const output: string[] = []
-    const runtime = {
-      env: { CORDISX_HOME: root },
-      stdout: (line: string) => output.push(line),
-      internalSpawnSupervisor: (input: { args: readonly string[] }) => {
-        expect(input.args).toContain('--service')
-        expect(input.args).toContain('aiden')
-        expect(input.args).toContain('--model')
-        expect(input.args).toContain('gpt-model')
-        spawned++
-        void (async () => {
-          for (;;) {
-            const state = await readSupervisorState(paths)
-            if (state !== undefined) {
-              await writeSupervisorState(paths, { ...state, phase: 'ready', cdpEndpoint: 'http://127.0.0.1:49999' })
-              return
-            }
-            await new Promise(resolve => setTimeout(resolve, 5))
-          }
-        })()
-        return { pid: process.pid, unref: () => undefined }
+    const waits: unknown[] = []
+    const rpc = await startPluginManagementRpcServer({
+      homeDir: root,
+      appId: 'codex',
+      profileId: 'default',
+      configPath: path.join(root, 'config.json'),
+      generation: 'test-startup',
+      processStartedAt: (await processStartIdentity(process.pid))!,
+      service: {} as never,
+      terminalProvider: async request => {
+        waits.push(request)
+        expect(request).toMatchObject({ kind: 'wait', providerId: 'aiden', model: 'gpt-model' })
+        return { kind: 'ready' }
       },
+    })
+    try {
+      const runtime = {
+        env: { CORDISX_HOME: root },
+        stdout: (line: string) => output.push(line),
+        internalSpawnSupervisor: (input: { args: readonly string[] }) => {
+          expect(input.args).toContain('--service')
+          expect(input.args).toContain('aiden')
+          expect(input.args).toContain('--model')
+          expect(input.args).toContain('gpt-model')
+          spawned++
+          void (async () => {
+            for (;;) {
+              const state = await readSupervisorState(paths)
+              if (state !== undefined) {
+                await writeSupervisorState(paths, { ...state, phase: 'ready', cdpEndpoint: 'http://127.0.0.1:49999' })
+                return
+              }
+              await new Promise(resolve => setTimeout(resolve, 5))
+            }
+          })()
+          return { pid: process.pid, unref: () => undefined }
+        },
+      }
+      await Promise.all([
+        runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
+        runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
+      ])
+      expect(waits).toHaveLength(2)
+      expect(spawned).toBe(1)
+      expect(output.map(line => JSON.parse(line))).toEqual([
+        expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
+        expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
+      ])
+    } finally {
+      await rpc.close()
+      await rm(root, { recursive: true, force: true })
     }
-    await Promise.all([
-      runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
-      runSupervisorCommand(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-model', '--json']), runtime),
-    ])
-    expect(spawned).toBe(1)
-    expect(output.map(line => JSON.parse(line))).toEqual([
-      expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
-      expect.objectContaining({ status: 'ready', pid: process.pid, cdpEndpoint: 'http://127.0.0.1:49999' }),
-    ])
   })
 
   it('publishes the owned Host identity before renderer readiness', async () => {

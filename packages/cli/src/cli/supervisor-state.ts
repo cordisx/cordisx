@@ -69,12 +69,59 @@ async function chmodPrivate(target: string): Promise<void> {
   await chmod(target, 0o700)
 }
 
-export async function writeSupervisorState(paths: SupervisorPaths, state: SupervisorState): Promise<void> {
+async function writeState(paths: SupervisorPaths, state: SupervisorState): Promise<void> {
   await ensureSupervisorDirectory(paths)
   const temporary = path.join(paths.directory, `.state-${randomBytes(12).toString('hex')}.tmp`)
   await writeFile(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 })
   await chmod(temporary, 0o600)
   await rename(temporary, paths.state)
+}
+
+/** Short cross-process transactions, distinct from the long-lived startup lock. */
+async function stateTransaction<T>(paths: SupervisorPaths, action: () => Promise<T>): Promise<T> {
+  await ensureSupervisorDirectory(paths)
+  const deadline = Date.now() + 5_000
+  let release: (() => Promise<void>) | undefined
+  while (release === undefined) {
+    try {
+      release = await acquireKernelOperationLock(path.join(paths.directory, 'state.mutex'))
+    } catch (error) {
+      if (!(error instanceof KernelOperationBusyError) || Date.now() >= deadline) throw error
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+  try {
+    return await action()
+  } finally {
+    await release()
+  }
+}
+
+export async function writeSupervisorState(paths: SupervisorPaths, state: SupervisorState): Promise<void> {
+  await stateTransaction(paths, () => writeState(paths, state))
+}
+
+/** Re-read inside the transaction; never spread a snapshot captured before an await. */
+export async function updateSupervisorState(
+  paths: SupervisorPaths,
+  owner: Pick<SupervisorState, 'instanceToken' | 'pid' | 'processStartedAt'>,
+  update: (current: SupervisorState) => SupervisorState | undefined,
+): Promise<boolean> {
+  return await stateTransaction(paths, async () => {
+    const current = await readSupervisorState(paths)
+    if (
+      !current || current.instanceToken !== owner.instanceToken || current.pid !== owner.pid
+      || current.processStartedAt !== owner.processStartedAt
+    ) return false
+    const next = update(current)
+    if (next === undefined) return false
+    if (
+      next.instanceToken !== current.instanceToken || next.pid !== current.pid
+      || next.processStartedAt !== current.processStartedAt
+    ) throw new Error('Supervisor update changed owner')
+    await writeState(paths, next)
+    return true
+  })
 }
 
 function validState(value: unknown): value is SupervisorState {
@@ -130,11 +177,13 @@ export async function readSupervisorState(paths: SupervisorPaths): Promise<Super
 }
 
 export async function removeSupervisorState(paths: SupervisorPaths): Promise<void> {
-  await Promise.all([
-    rm(paths.state, { force: true }),
-    rm(paths.socket, { force: true }),
-    rm(paths.bootstrapToken, { force: true }),
-  ])
+  await stateTransaction(paths, async () => {
+    await Promise.all([
+      rm(paths.state, { force: true }),
+      rm(paths.socket, { force: true }),
+      rm(paths.bootstrapToken, { force: true }),
+    ])
+  })
 }
 
 export type ProcessIdentityStatus = 'alive' | 'dead' | 'unknown'

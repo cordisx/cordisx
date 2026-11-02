@@ -1,3 +1,4 @@
+import type { StartupCdpTransport } from './startup-cdp-transport.js'
 import { restoreViteLoopbackPermission, type ViteLoopbackPermissionCoordinator } from './loopback-permissions.js'
 export {
   enableViteLoopbackPermission,
@@ -325,6 +326,7 @@ export interface InstalledScript {
   readonly managedServiceUIController?: AbortController
   readonly removeManagedServiceUIBindingListener?: () => void
   readonly managedServiceUIBindingInstalled: boolean
+  readonly startupTransport?: StartupCdpTransport
 }
 
 export async function waitForViteBootstrap(
@@ -760,6 +762,7 @@ export async function uninstall(
   installed: InstalledScript,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
 ): Promise<void> {
+  await installed.startupTransport?.disconnecting(installed.session)
   installed.marketplaceController.abort()
   const nativeCleanup = await Promise.allSettled([
     installed.nativeChannel?.dispose(),

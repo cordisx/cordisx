@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -253,4 +253,16 @@ describe('provider-aware native task operation', () => {
     expect(await f.tasks.create(input, metadata)).toMatchObject({ status: 'created' })
     expect(f.authority.invoke).toHaveBeenCalledTimes(131)
   })
+})
+
+it('returns declared startup failure before native task intent or provisioning writes', async () => {
+  const f = await fixture()
+  const tasks = new NativeAgentTasks({
+    ...f.authority,
+    startup: { availability: () => ({ available: false, reason: 'catalog-empty' }), wait: async () => undefined },
+  })
+  expect(await tasks.create(input, metadata)).toEqual({ status: 'unavailable', reason: 'catalog-empty' })
+  expect(f.authority.invoke).not.toHaveBeenCalled()
+  expect(f.controller.prepareThreadResume).not.toHaveBeenCalled()
+  expect(await readdir(f.authority.directory)).toEqual([])
 })

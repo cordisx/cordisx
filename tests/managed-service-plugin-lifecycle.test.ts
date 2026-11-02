@@ -66,6 +66,7 @@ function fleet(moduleGeneration: string, authState: 'authenticated' | 'missing')
       source: source(moduleGeneration, authState),
     }],
     nativeProviderIds: [`provider-${moduleGeneration}`],
+    subscribeNativeProviders: vi.fn(() => () => {}),
     prepareNativeConnection: vi.fn(() => {
       throw new Error('not used')
     }),
@@ -145,6 +146,63 @@ function request(token: string, pluginGeneration: string, operation: 'get' | 'sn
 }
 
 describe('managed service plugin lifecycle participant', () => {
+  it('forwards background publication and fences replaced subscriptions through rollback', async () => {
+    const created = new Map<
+      string,
+      { value: ManagedServiceNodeActivation; emit: () => void; stop: ReturnType<typeof vi.fn> }
+    >()
+    const runtime = new ManagedServicePluginLifecycleRuntime({
+      runtime: new BaseRuntime(),
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      activate: async record => {
+        const generation = record.plugins[0]!.moduleGeneration
+        const value = fleet(generation, 'missing').value
+        let callback = () => {}
+        const stop = vi.fn()
+        value.subscribeNativeProviders = listener => {
+          callback = listener
+          return stop
+        }
+        created.set(generation, { value, emit: () => callback(), stop })
+        return value
+      },
+    })
+    const first = activation(1, 'old')
+    await runtime.initialize(first)
+    const source = runtime.nativeActivation()
+    const listener = vi.fn()
+    const stop = source.subscribeNativeProviders(listener)
+    created.get('old')!.emit()
+    expect(source.revision).toBe(1)
+    expect(listener).toHaveBeenCalledTimes(1)
+    const second = activation(2, 'new')
+    await runtime.stage({
+      transactionId: second.transactionId!,
+      operation: 'update',
+      previous: first,
+      candidate: second,
+      targetId: 'aiden',
+      affectedPluginIds: ['aiden'],
+    })
+    created.get('new')!.emit()
+    expect(source.revision).toBe(1)
+    await runtime.publish(second.transactionId!)
+    expect(created.get('old')!.stop).toHaveBeenCalledOnce()
+    created.get('old')!.emit()
+    expect(source.revision).toBe(2)
+    created.get('new')!.emit()
+    expect(source.revision).toBe(3)
+    await runtime.rollback(second.transactionId!)
+    expect(created.get('new')!.stop).toHaveBeenCalledOnce()
+    created.get('new')!.emit()
+    expect(source.revision).toBe(4)
+    created.get('old')!.emit()
+    expect(source.revision).toBe(5)
+    stop()
+    await runtime.dispose()
+  })
+
   it('stages isolated owner tokens, publishes the candidate, retires old sources, and restores rollback', async () => {
     const base = new BaseRuntime()
     const activations = new Map<string, ReturnType<typeof fleet>>()
@@ -281,5 +339,67 @@ describe('managed service plugin lifecycle participant', () => {
     expect(old.dispose).not.toHaveBeenCalled()
     await runtime.dispose()
     expect(old.dispose).toHaveBeenCalledOnce()
+  })
+})
+
+it('returns an observed v15 session and owner capability while base adoption is pending', async () => {
+  let finish!: () => void
+  const adopting = new Promise<void>(resolve => {
+    finish = resolve
+  })
+  const first = activation(1, 'one')
+  const runtime = new ManagedServicePluginLifecycleRuntime({
+    runtime: new BaseRuntime(),
+    profileId: 'work',
+    runtimeGeneration: 'runtime-1',
+    readStartupAdmissions: async () => [{
+      pluginId: 'aiden',
+      pluginGeneration: 'one',
+      source: 'https://example.test/plugin',
+      sourceRevision: `sha256:${'1'.repeat(64)}`,
+      services: [],
+      dependencies: [],
+      startup: { contract: 'cordisx.startup-declaration/v1', capabilities: [], pages: [] },
+    }],
+    activate: async () => {
+      await adopting
+      return undefined
+    },
+  })
+  const session = await runtime.initialize(first)
+  expect(session.authority).toBe(runtime.nativeActivation().startup)
+  expect(session.observer).toBe(runtime.nativeActivation().startupObserver)
+  expect((await session.observer.read()).entries).toEqual([])
+  const capability = runtime.capabilities()[0]!
+  expect(capability).toMatchObject({ pluginId: 'aiden', pluginGeneration: 'one', startup: true })
+  const settled = vi.fn()
+  void session.adopted.then(settled)
+  await Promise.resolve()
+  expect(settled).not.toHaveBeenCalled()
+  const host = runtime.hostStartupCapability()
+  expect(host.token).not.toBe(capability.token)
+  finish()
+  await session.adopted
+  expect(runtime.capabilities()[0]!.token).toBe(capability.token)
+  const startupRequest = (token: string) =>
+    JSON.stringify({
+      version: 1,
+      token,
+      requestId: 'observation',
+      operation: 'startupNext',
+      scope: { profileId: 'work', runtimeGeneration: 'runtime-1', pluginGeneration: 'one' },
+      subscriptionId: 'stream',
+    })
+  // Baseline transport does not implement this request; generic errors are not termination.
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest('unknown'))).toMatchObject({ ok: false })
+  await runtime.dispose()
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest(capability.token))).toEqual({
+    requestId: 'observation',
+    ok: true,
+    value: { status: 'startup-terminated', reason: 'host-replaced' },
+  })
+  expect(await runtime.managedServiceUI.handleBindingValue(startupRequest('unknown'))).toMatchObject({
+    ok: false,
+    code: 'owner-unavailable',
   })
 })

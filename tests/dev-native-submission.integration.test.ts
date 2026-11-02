@@ -214,6 +214,7 @@ describe('Vite development native submission assembly', () => {
         source,
       }],
       nativeProviderIds: ['aiden'],
+      subscribeNativeProviders: vi.fn(() => () => undefined),
       prepareNativeConnection: vi.fn(),
       dispose: vi.fn(async () => undefined),
     } as unknown as ManagedServiceNodeActivation

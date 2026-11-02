@@ -15,6 +15,22 @@ remain in `architecture.md`; normative plugin schemas remain in
 See [CLI model-service export](model-service-cli-export.md) for `cordisx model export`,
 portable selection, output privacy and target Manager import.
 
+## Progressive readiness
+
+Host beta.40 separates workspace readiness from admitted provider preparation.
+The core and legacy service dependency closure must adopt before workspace
+readiness is published. Background startup services continue in their owning
+lifecycle. A `start` command additionally waits for its command-mode always
+requirements and an explicitly requested provider/model, including their
+dependency closure. A timeout or cancellation ends that caller's wait without
+stopping the shared preparation or replacing the requested target.
+
+The selector and Model Services page retain pending, authentication-required,
+catalog-pending, failed, and ready states. A usable window does not imply that
+every provider is executable. Login remains an explicit owning-service action.
+See [progressive startup](progressive-startup.md) for state, page-action,
+configuration, cleanup, and native adapter boundaries.
+
 ## Command model
 
 The stable grammar is:

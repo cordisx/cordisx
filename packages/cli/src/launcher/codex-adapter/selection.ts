@@ -1,3 +1,4 @@
+import { TransformMaterializationSession } from './materialization.js'
 import { createHash } from 'node:crypto'
 import type {
   AdapterBundle,
@@ -23,6 +24,7 @@ const digest = (source: string) => createHash('sha256').update(source).digest('h
 export function validateAdapterTransforms(
   transforms: readonly NativeResourceTransform[],
   context: AdapterContext,
+  session = new TransformMaterializationSession(),
 ): void {
   const urls = new Set<string>()
   for (const transform of transforms) {
@@ -36,10 +38,11 @@ export function validateAdapterTransforms(
     ) {
       throw new Error('Adapter task execution resource missing')
     }
-    const result = transform.transform(resource.source)
+    const result = session.materialize(transform, resource.source)
     if (
       result.anchorMatches !== 1 || typeof result.source !== 'string'
-      || !result.acknowledgementExpression || !result.fenceExpression
+      || typeof result.acknowledgementExpression !== 'string' || result.acknowledgementExpression.length === 0
+      || typeof result.fenceExpression !== 'string' || result.fenceExpression.length === 0
     ) {
       throw new Error('Adapter transform lacks unique match, acknowledgement or fence')
     }
@@ -50,6 +53,7 @@ export function validateAdapterTransforms(
 export function selectAdapterModules(
   candidates: readonly AdapterCandidate[],
   input: Omit<AdapterContext, 'transforms'>,
+  session = new TransformMaterializationSession(),
 ): AdapterSelection {
   input = { ...input, resources: Object.freeze(input.resources.map(resource => Object.freeze({ ...resource }))) }
   const rejected: Array<{ id: string; identity: string; reason: string }> = []
@@ -112,9 +116,9 @@ export function selectAdapterModules(
     const context = Object.freeze({ ...input, transforms: state.transforms })
     const result = module.analyze(context)
     const transforms = Object.freeze(
-      [...(result.transforms ?? state.transforms)].map(transform => Object.freeze(transform)),
+      [...(result.transforms ?? state.transforms)].map(transform => session.freeze(transform)),
     )
-    validateAdapterTransforms(transforms, context)
+    validateAdapterTransforms(transforms, context, session)
     // Analyze on immutable original resources; explicit dependencies alone may replace earlier edits.
     const owners = new Map(state.owners)
     for (const transform of transforms) {

@@ -1,11 +1,15 @@
+import type { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { ManagedServiceDefinitionV1, ManagedServiceOwnerV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { managedServiceResourceMatchesTarget } from './managed-service-package-resources.js'
 import { managedServiceEnvironment, managedServiceHome } from './managed-service-process.js'
 import type { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
 import type { ManagedServiceActivationAccess, ManagedServiceRecord } from './managed-service-runtime-record.js'
+import { observeManagedServiceRecord } from './managed-service-runtime-record.js'
 import { managedHandle, managedIdentityKey } from './managed-service-runtime-support.js'
 
 export async function registerManagedService(input: {
+  readonly endpointReservations?: ManagedServiceEndpointReservations
+  readonly signal?: AbortSignal
   readonly access: ManagedServiceActivationAccess
   readonly serviceGeneration: string
   readonly definition: ManagedServiceDefinitionV1
@@ -24,9 +28,12 @@ export async function registerManagedService(input: {
   readonly registrations: Map<string, ManagedServiceRecord>
   readonly pendingRegistrations: Map<string, Promise<ManagedServiceRecord>>
   readonly disposeRecord: (record: ManagedServiceRecord) => Promise<unknown>
+  readonly onRecordChanged?: (record: ManagedServiceRecord) => void
 }): Promise<ManagedServiceRecord> {
   const { access, definition, revision } = input
+  input.signal?.throwIfAborted()
   await input.schemas.validateDefinition(definition)
+  input.signal?.throwIfAborted()
   if (
     (definition.discovery.kind === 'fixed-loopback'
       && input.reservedLoopbackPorts?.includes(definition.discovery.port))
@@ -66,6 +73,7 @@ export async function registerManagedService(input: {
       continue
     }
     const registration = (async (): Promise<ManagedServiceRecord> => {
+      input.signal?.throwIfAborted()
       const prior = input.records.get(key)
       if (prior !== undefined) {
         if (
@@ -91,6 +99,13 @@ export async function registerManagedService(input: {
           throw new Error('managed service operation authorization references an invalid secret slot')
         }
       }
+      const exclusive = definition.discovery.kind !== 'host-assigned-loopback'
+      if (exclusive) {
+        input.endpointReservations?.reserve(access, `service:${access.owner.pluginId}:${definition.serviceId}`)
+      }
+      if (definition.discovery.kind === 'fixed-loopback') {
+        input.endpointReservations?.reserve(access, `port:${definition.discovery.port}`)
+      }
       const registrationHandle = managedHandle('msr') as `msr_${string}`
       const serviceHome = managedServiceHome(input.homeDir, access.owner.pluginId, definition.serviceId)
       const projectedEnvironment = await input.projectEnvironment?.({
@@ -98,6 +113,7 @@ export async function registerManagedService(input: {
         serviceId: definition.serviceId,
         serviceHome,
       })
+      input.signal?.throwIfAborted()
       const runtimeResources = access.runtimeResources
         ?? access.declaration.runtimeResources.filter(resource => managedServiceResourceMatchesTarget(resource))
       const packageSchemas = runtimeResources
@@ -148,10 +164,19 @@ export async function registerManagedService(input: {
         disposal: undefined,
         disposed: false,
       }
+      if (input.onRecordChanged !== undefined) {
+        observeManagedServiceRecord(record, () => input.onRecordChanged!(record))
+      }
       input.records.set(key, record)
       input.registrations.set(registrationHandle, record)
+      input.onRecordChanged?.(record)
       return record
     })()
+    void registration.catch(() => {
+      if (![...input.records.values()].some(record => record.access === access && !record.disposed)) {
+        input.endpointReservations?.release(access)
+      }
+    })
     input.pendingRegistrations.set(key, registration)
     registration.then(
       () => {

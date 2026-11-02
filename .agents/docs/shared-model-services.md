@@ -6,6 +6,18 @@ CordisX starts that app. The same launch connects Codex Desktop and Claude
 Desktop so each can list, read, start, and message the other's
 conversations.
 
+## Plugin startup and model state
+
+Host beta.40 also shows startup-declared plugin providers while preparation is
+in progress. This uses the [progressive startup](progressive-startup.md)
+authority; shared `model-service` declarations below continue to start no
+process. Model Services and the selector distinguish preparation, service
+health, authentication, catalog availability, and executable readiness.
+Login uses the owning provider action. An explicitly selected provider/model
+remains unavailable until its requirements are ready, without substitution.
+Saving configuration retains its documented next-launch or restart apply scope;
+it does not rotate a running service's credential or preparation snapshot.
+
 ## Declaring a model service
 
 Top-level `providers` in `~/.cordisx/config.json` holds two kinds of entry.

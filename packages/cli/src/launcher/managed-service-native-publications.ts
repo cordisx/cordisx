@@ -143,6 +143,12 @@ export class ManagedNativeProviderPublications {
   private readonly providers = new Map<string, PublicationState>()
   private readonly records = new WeakMap<ManagedServiceRecord, Set<PublicationState>>()
   private readonly listeners = new Set<() => void>()
+  private sequence = 0
+  private visible = ''
+
+  get revision(): number {
+    return this.sequence
+  }
 
   publish(
     record: ManagedServiceRecord,
@@ -157,6 +163,9 @@ export class ManagedNativeProviderPublications {
       return { status: 'rejected', diagnostic: diagnostic('invalid-catalog', false) }
     }
     const { providerId, compositionOrigin, catalog } = validated
+    if (record.access.publicationAllowed?.(input, record.binding) === false) {
+      return { status: 'rejected', diagnostic: diagnostic('not-ready', true) }
+    }
     if (!record.definition.compositionOrigins?.some(origin => origin.id === compositionOrigin)) {
       return { status: 'rejected', diagnostic: diagnostic('undeclared-composition-origin', false) }
     }
@@ -196,7 +205,10 @@ export class ManagedNativeProviderPublications {
   listProviderIds(pluginIds?: readonly string[]): readonly string[] {
     return Object.freeze(
       [...this.providers].flatMap(([id, state]) =>
-        pluginIds === undefined || pluginIds.includes(state.projection.owner.pluginId) ? [id] : []
+        (pluginIds === undefined || pluginIds.includes(state.projection.owner.pluginId))
+          && state.record.access.publicationExecutable?.(id) !== false
+          ? [id]
+          : []
       ).sort(),
     )
   }
@@ -211,9 +223,25 @@ export class ManagedNativeProviderPublications {
     readonly projection: ManagedNativeProviderPublicationProjectionV1
   } | undefined {
     const state = this.providers.get(providerId)
-    return state === undefined || state.lifecycle !== 'active'
+    return state === undefined || state.record.access.publicationExecutable?.(providerId) === false
+        || state.lifecycle !== 'active'
       ? undefined
       : Object.freeze({ record: state.record, projection: state.projection })
+  }
+
+  inspect(providerId: string): ManagedNativeProviderPublicationProjectionV1 | undefined {
+    return this.providers.get(providerId)?.projection
+  }
+
+  refresh(): void {
+    const visible = JSON.stringify(this.listProviderIds())
+    if (visible === this.visible) return
+    this.changed()
+  }
+
+  revokeProvider(record: ManagedServiceRecord, providerId: string): void {
+    const state = this.providers.get(providerId)
+    if (state?.record === record) this.revokeState(state)
   }
 
   revoke(record: ManagedServiceRecord): void {
@@ -242,6 +270,8 @@ export class ManagedNativeProviderPublications {
   }
 
   private changed(): void {
+    this.visible = JSON.stringify(this.listProviderIds())
+    this.sequence += 1
     for (const listener of this.listeners) {
       try {
         listener()

@@ -9,6 +9,13 @@ export interface NativeResourceTransformResult {
 }
 
 export interface NativeResourceTransform {
+  /** Optional ABI promise: this object always yields the same complete output for its
+   * sha256 original bytes, independently of later analyze calls or execution context.
+   * Host may materialize once within an analysis session. A newly composed object
+   * is a new identity. Omission retains legacy repeated validation behavior.
+   */
+  readonly outputContract?: 'fixed-original-v1'
+
   /** Host-discovered module used by the supplementary native task capability. */
   readonly taskExecutionUrl?: string
   readonly url: string

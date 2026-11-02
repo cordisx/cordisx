@@ -61,6 +61,7 @@ export interface NativeSubmissionControlServer {
   /** One allowlisted method on the desktop's own app-server; see `native-app-server-protocol.mjs`. */
   nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
   bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
+  bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
   invokeTask(
@@ -80,6 +81,7 @@ export async function startNativeSubmissionControlServer(
   let peer: Socket | undefined
   let authenticated = false
   let prepareConfigured: ((providerId?: string) => Promise<Readonly<Record<string, unknown>>>) | undefined
+  let unmarkedGuard: ((input: { threadId?: string; providerId?: string }) => Promise<boolean>) | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
   let closed = false
@@ -189,6 +191,27 @@ export async function startNativeSubmissionControlServer(
         if (!authenticated) throw new Error('Unauthenticated diagnostic')
         if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
           diagnostic({ ...projectDiagnostic(value as { event: string }), event: value.event, serviceRef: peerRef })
+        }
+        return
+      }
+      if (value.type === 'unmarked-provider') {
+        if (
+          !authenticated || active >= 32 || (value.threadId !== undefined && !valid(value.threadId))
+          || (value.providerId !== undefined && !valid(value.providerId, 128))
+        ) throw new Error('Control unavailable')
+        active++
+        activeIds.add(value.id)
+        try {
+          const allowed = await unmarkedGuard?.({
+            ...(typeof value.threadId === 'string' ? { threadId: value.threadId } : {}),
+            ...(typeof value.providerId === 'string' ? { providerId: value.providerId } : {}),
+          }) ?? true
+          await write(socket, { id: value.id, ok: true, value: allowed })
+        } catch {
+          await write(socket, { id: value.id, ok: true, value: false })
+        } finally {
+          active--
+          activeIds.delete(value.id)
         }
         return
       }
@@ -416,6 +439,9 @@ export async function startNativeSubmissionControlServer(
     },
     async nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>) {
       return await callPeer({ type: 'native-request', method, params })
+    },
+    bindUnmarkedProviderGuard(value: (input: { threadId?: string; providerId?: string }) => Promise<boolean>) {
+      unmarkedGuard = value
     },
     bindConfiguredProvider(value: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>) {
       if (prepareConfigured) throw new Error('Configured provider already bound')

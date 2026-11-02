@@ -1,3 +1,4 @@
+import { fixedNativeTransform } from './fixed-transform.js'
 import { createHash } from 'node:crypto'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeResourceTransform } from './contracts.js'
@@ -253,7 +254,7 @@ export function nativeAgentTaskTransforms(
       else executionEdits(plan)
       const priorIndex = merged.findIndex(transform => transform.url === resource.url)
       const prior = merged[priorIndex]
-      const next: NativeResourceTransform = {
+      const next = fixedNativeTransform({
         url: resource.url,
         sha256: hash(resource.source),
         requiredForDocumentReady: prior?.requiredForDocumentReady ?? false,
@@ -279,7 +280,7 @@ export function nativeAgentTaskTransforms(
               })`,
           }
         },
-      }
+      })
       next.transform(resource.source)
       if (priorIndex < 0) merged.push(next)
       else merged[priorIndex] = next

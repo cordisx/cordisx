@@ -73,6 +73,17 @@ npx cordisx@beta start codex default --recover-startup
 后台启动因上述任一原因失败时，`cordisx start` 和 `cordisx status` 会直接报告
 该原因，而不是笼统的 supervisor 退出信息。
 
+## 窗口已经就绪，为什么某个 Provider 还在准备？
+
+工作区就绪和 Provider 就绪是两个状态。已接入的服务可以在后台继续准备，窗口
+先变得可用。模型选择器和 Model Services 页会显示该 Provider 的准备、认证和
+模型目录状态；只有所需状态都就绪，相关操作才可用。窗口就绪不代表所有
+Provider 都可以执行。
+
+明确指定 Provider 或模型的请求，会在调用者的时间预算内等待对应条件。取消
+该请求只结束它的等待，不会停止共享准备流程。参见
+[渐进式启动参考](progressive-startup.md)。
+
 ## 启动后需要重新登录吗？
 
 默认启动会打开独立的 Codex 窗口，同时沿用已有账号、会话、项目和模型配置。

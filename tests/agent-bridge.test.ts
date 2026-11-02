@@ -291,6 +291,23 @@ describe('agent bridge transport', () => {
     bridge = undefined
   })
 
+  it('serves a long home over a short owned socket and preserves a replacement bridge on close', async () => {
+    const home = path.join(await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-')), 'long-home-'.repeat(18))
+    bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
+    const first = bridge
+    const second = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex() })
+    try {
+      expect(Buffer.byteLength(first.binding.socketPath)).toBeLessThan(100)
+      expect(first.binding.socketPath).not.toBe(second.binding.socketPath)
+      expect((await post(first, '/unknown', {})).status).toBe(404)
+      await first.close()
+      await expect(stat(path.dirname(first.binding.socketPath))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await post(second, '/unknown', {})).status).toBe(404)
+    } finally {
+      await second.close()
+    }
+  })
+
   it('records the Codex profile it runs so Claude can start it again', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'cx-bridge-'))
     bridge = await startAgentBridge({ cordisxHomeDir: home, codex: fakeCodex(), codexProfileId: 'work' })

@@ -39,6 +39,7 @@ export async function prepareProductionHostBootstrap(
   prepared: PreparedRunCommand,
   runtime: CordisXCliRuntime,
   input: Readonly<{
+    signal?: AbortSignal
     prelaunch: boolean
     prepareNativeSubmission: boolean
     mainInspector: boolean
@@ -49,6 +50,7 @@ export async function prepareProductionHostBootstrap(
     ): boolean | void | Promise<boolean | void>
   }>,
 ): Promise<ProductionHostBootstrap> {
+  input.signal?.throwIfAborted()
   const { invocation, selection, adapter, stdout, environment, configPath } = prepared
   if (input.prelaunch) stdout('[cordisx-startup] ' + JSON.stringify({ event: 'prepare-started', at: Date.now() }))
   const resolved = invocation.options.attach
@@ -121,9 +123,14 @@ export async function prepareProductionHostBootstrap(
           {
             ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
             environment: configuredEnvironment,
+            ...(runtime.internalRemoteTerminalProvider === undefined
+              ? {}
+              : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
           },
         )
       } catch (error) {
+        input.signal?.throwIfAborted()
         nativeSubmissionUnavailable = true
         stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
@@ -152,6 +159,7 @@ export async function prepareProductionHostBootstrap(
       selectedId: invocation.options.provider,
       stdout,
     })
+    input.signal?.throwIfAborted()
     const hostEnvironment = {
       ...configuredEnvironment,
       ...nativeSubmissionBootstrap?.environment,

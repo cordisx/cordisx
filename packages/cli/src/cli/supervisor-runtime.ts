@@ -25,7 +25,7 @@ import {
   SupervisorOperationBusyError,
   supervisorPaths,
   type SupervisorState,
-  writeSupervisorState,
+  updateSupervisorState,
 } from './supervisor-state.js'
 
 const SUPERVISOR_PUBLICATION_TIMEOUT_MS = 5_000
@@ -182,10 +182,11 @@ export async function createSupervisorRuntime(
       throw new Error('Startup recovery owner is no longer current')
     }
     if (!waitingForUser) recoveryAttempt++
-    await writeSupervisorState(paths, {
-      ...current,
-      startupRecovery: { waitingForUser, attempt: recoveryAttempt, updatedAt: Date.now() },
-    })
+    await updateSupervisorState(paths, current, latest =>
+      latest.phase !== 'starting' ? undefined : ({
+        ...latest,
+        startupRecovery: { waitingForUser, attempt: recoveryAttempt, updatedAt: Date.now() },
+      }))
   }
   if (home !== undefined && app !== undefined && profile !== undefined && tokenFile !== undefined) {
     if (fingerprint === undefined) throw new Error('missing background supervisor fingerprint')
@@ -296,11 +297,12 @@ export async function createSupervisorRuntime(
       ) throw new Error('background supervisor generation is no longer current')
       const hostProcessStartedAt = await processStartIdentity(pid)
       if (hostProcessStartedAt === undefined) throw new Error('launched Host exited before identity capture')
-      await writeSupervisorState(supervisorPaths(home, app, profile), {
-        ...current,
-        hostPid: pid,
-        hostProcessStartedAt,
-      })
+      const published = await updateSupervisorState(
+        supervisorPaths(home, app, profile),
+        current,
+        latest => latest.phase !== 'starting' ? undefined : ({ ...latest, hostPid: pid, hostProcessStartedAt }),
+      )
+      if (!published) throw new Error('background supervisor generation is no longer starting')
       if (inspectorUrl) {
         if (debugPort === undefined) throw new Error('Owned Host debug port missing')
         if (!supervisorToken) throw new Error('Owned Host main bootstrap missing')
@@ -361,12 +363,16 @@ export async function createSupervisorRuntime(
           : undefined,
         async () => {
           if (signal?.aborted) throw cdpInstallationAborted()
-          await writeSupervisorState(supervisorPaths(home, app, profile), {
-            ...current,
-            phase: 'ready',
-            ...(startupSurface === undefined ? {} : { startupSurface }),
-            cdpEndpoint: `http://127.0.0.1:${debugPort}`,
+          const published = await updateSupervisorState(supervisorPaths(home, app, profile), current, latest => {
+            if (signal?.aborted || latest.phase !== 'starting') return undefined
+            return {
+              ...latest,
+              phase: 'ready',
+              ...(startupSurface === undefined ? {} : { startupSurface }),
+              cdpEndpoint: `http://127.0.0.1:${debugPort}`,
+            }
           })
+          if (!published) throw new Error('background supervisor generation is no longer starting')
         },
       )
       mainAgents = undefined
@@ -384,12 +390,10 @@ export async function createSupervisorRuntime(
         || current.instanceToken !== supervisorToken
         || current.phase === 'failed'
       ) return
-      const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = current
-      await writeSupervisorState(paths, {
-        ...withoutEndpoint,
-        phase: 'failed',
-        failure,
-        failedAt: new Date().toISOString(),
+      await updateSupervisorState(paths, current, latest => {
+        if (latest.phase === 'stopping' || latest.phase === 'failed') return undefined
+        const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = latest
+        return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
       })
     },
     async close(): Promise<void> {

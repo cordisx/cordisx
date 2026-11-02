@@ -33,8 +33,8 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== '0.1.0-beta.8') {
-  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.8')
+if (expectedProtocolSpec !== '0.1.0-beta.9') {
+  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.9')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
@@ -220,6 +220,10 @@ if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
 if ('handle' in hostResult) hostResult.handle.unsubscribe()
 `,
     'utf8',
+  )
+  await copyFile(
+    path.join(repositoryRoot, 'tests', 'fixtures', 'startup-installed-consumer.ts'),
+    path.join(runnerDirectory, 'startup-consumer.ts'),
   )
   await writeFile(
     path.join(runnerDirectory, 'agent-session-consumer.ts'),
@@ -486,6 +490,7 @@ createElement(AgentAvatar, props)
           },
           include: [
             'connector-consumer.ts',
+            'startup-consumer.ts',
             'agent-avatar-ui-consumer.ts',
             'ide-ui-primitives-consumer.tsx',
             'hover-card-consumer.tsx',

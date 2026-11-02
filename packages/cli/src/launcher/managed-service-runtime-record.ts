@@ -1,5 +1,6 @@
 import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type {
+  ManagedNativeProviderPublicationInputV1,
   ManagedServiceBindingV1,
   ManagedServiceControlResultV1,
   ManagedServiceDefinitionV1,
@@ -17,6 +18,11 @@ export interface ManagedServiceActivationAccess {
   readonly source: `https://${string}`
   readonly declaration: PluginManifestManagedBackendServiceV14
   readonly artifactDirectory: string
+  readonly publicationExecutable?: (providerId: string) => boolean
+  readonly publicationAllowed?: (
+    input: ManagedNativeProviderPublicationInputV1,
+    binding: ManagedServiceBindingV1,
+  ) => boolean
   readonly runtimeResources?: readonly {
     readonly path: `./${string}`
     readonly mode: 'executable' | 'data'
@@ -126,4 +132,41 @@ export function projectManagedServiceRecord(record: ManagedServiceRecord): Manag
     ...(record.brokerHandle === undefined ? {} : { connection: { brokerHandle: record.brokerHandle } }),
     ...(record.diagnostic === undefined ? {} : { diagnostic: record.diagnostic }),
   })
+}
+
+/** Coalesce synchronous transitions so observers see a consistent public projection. */
+export function observeManagedServiceRecord(record: ManagedServiceRecord, changed: () => void): void {
+  let scheduled = false
+  const notify = () => {
+    if (scheduled) return
+    scheduled = true
+    queueMicrotask(() => {
+      scheduled = false
+      changed()
+    })
+  }
+  const fields = [
+    'binding',
+    'state',
+    'health',
+    'processOwnership',
+    'diagnostic',
+    'authenticationHandle',
+    'authorizationHandle',
+    'brokerHandle',
+    'selectedMaterialization',
+    'disposed',
+  ] as const
+  for (const field of fields) {
+    let value: unknown = record[field]
+    Object.defineProperty(record, field, {
+      enumerable: true,
+      get: () => value,
+      set: (next: unknown) => {
+        if (Object.is(value, next)) return
+        value = next
+        notify()
+      },
+    })
+  }
 }

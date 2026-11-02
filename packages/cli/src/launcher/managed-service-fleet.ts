@@ -43,11 +43,33 @@ export function managedServiceFleetActivation(
 ): ManagedServiceNodeActivation | undefined {
   if (leases.length === 0) return undefined
   const groups = leases.map(lease => lease.activation)
+  const adopted = Promise.all(groups.map(group => group.adopted)).then(() => undefined)
+  const coreReady = Promise.all(groups.map(group => group.coreReady ?? group.adopted)).then(() => undefined)
+  void adopted.catch(() => undefined)
+  void coreReady.catch(() => undefined)
   return {
     hostGeneration: groups[0]!.hostGeneration,
+    ...(groups[0]!.startup === undefined ? {} : { startup: groups[0]!.startup }),
+    retryStartup(ref) {
+      const group = groups.find(group => group.pluginIds.includes(ref.pluginId))
+      if (group?.retryStartup === undefined) throw new Error('startup retry unavailable')
+      group.retryStartup(ref)
+    },
     groups,
-    authorities: groups.flatMap(group => group.authorities),
-    sources: groups.flatMap(group => group.sources),
+    adopted,
+    coreReady,
+    get authorities() {
+      return groups.flatMap(group => group.authorities)
+    },
+    get sources() {
+      return groups.flatMap(group => group.sources)
+    },
+    subscribeSources(listener) {
+      const unsubscribe = groups.map(group => group.subscribeSources?.(listener))
+      return () => {
+        for (const stop of unsubscribe) stop?.()
+      }
+    },
     get nativeProviderIds() {
       const ids = groups.flatMap(group => group.nativeProviderIds)
       if (new Set(ids).size !== ids.length) throw new Error('managed native provider is duplicated across generations')

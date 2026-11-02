@@ -31,6 +31,17 @@ CLI processes have separate terminal sessions and reuse the same selected
 CordisX gateway. Starting two terminals never restarts two Host services.
 Without service selection the client's own configuration/authentication applies.
 
+## Progressive plugin readiness
+
+From Host beta.40, an admitted startup provider can appear before its service or
+catalog is ready. Explicit CLI selection waits for that exact provider/model and
+the applicable always-required capabilities within one finite startup budget.
+A missing model, authentication requirement, failed capability, or timeout
+reports unavailability; the wrapper does not fall back to another provider.
+Cancelling the caller ends only its wait, leaving shared service preparation
+under its existing owner. Credential leases are acquired only after readiness.
+See [progressive startup](progressive-startup.md).
+
 ## Shared model services
 
 CLI selection also reads the existing

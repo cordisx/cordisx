@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -72,8 +72,8 @@ export { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-pa
  * send returns an `operationId`; the same id answers with the same session
  * instead of starting a second one, and `check_operation` reports progress.
  *
- * The socket and its token live in `<CORDISX_HOME>/run`, readable only by the
- * user. Requests carry the token; nothing here accepts an endpoint or secret.
+ * The token binding lives in `<CORDISX_HOME>/run`; its socket uses a short,
+ * owner-only temporary directory. Requests carry the token; nothing here accepts an endpoint or secret.
  */
 
 export interface AgentBridgeCodexAuthority {
@@ -644,7 +644,8 @@ export async function startAgentBridge(input: {
 }): Promise<AgentBridge> {
   const runDir = path.join(input.cordisxHomeDir, 'run')
   await mkdir(runDir, { recursive: true, mode: 0o700 })
-  const socketPath = path.join(runDir, 'agent-bridge.sock')
+  // The public binding stays with the profile; Unix socket paths have a much
+  // smaller platform limit than arbitrary CordisX home paths.
   const bindingPath = agentBridgeBindingPath(input.cordisxHomeDir)
   const token = randomBytes(32).toString('hex')
   const secret = (name: string) => configuredSecret(input.cordisxHomeDir, input.environment ?? process.env, name)
@@ -792,52 +793,59 @@ export async function startAgentBridge(input: {
     })()
   })
 
-  await rm(socketPath, { force: true })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(socketPath, resolve)
-  })
-  await chmod(socketPath, 0o600)
-  const binding: AgentBridgeBinding = Object.freeze({ version: 1, socketPath, token })
-  await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 })
-  await chmod(bindingPath, 0o600)
-  if (input.codexProfileId !== undefined) {
-    // Kept after this launch ends: it tells the Claude plugin which profile to start.
-    await writeFile(
-      codexLaunchRecordPath(input.cordisxHomeDir),
-      `${
-        JSON.stringify({
-          version: 1,
-          homeDir: input.cordisxHomeDir,
-          profileId: input.codexProfileId,
-          ...(input.codexModelServiceId === undefined ? {} : { modelServiceId: input.codexModelServiceId }),
-        })
-      }\n`,
-      { mode: 0o600 },
-    )
-  }
+  const socketDirectory = await mkdtemp(path.join('/tmp', 'cx-agent-'))
+  const socketPath = path.join(socketDirectory, 'bridge.sock')
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(socketPath, resolve)
+    })
+    await chmod(socketPath, 0o600)
+    const binding: AgentBridgeBinding = Object.freeze({ version: 1, socketPath, token })
+    await writeFile(bindingPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 })
+    await chmod(bindingPath, 0o600)
+    if (input.codexProfileId !== undefined) {
+      // Kept after this launch ends: it tells the Claude plugin which profile to start.
+      await writeFile(
+        codexLaunchRecordPath(input.cordisxHomeDir),
+        `${
+          JSON.stringify({
+            version: 1,
+            homeDir: input.cordisxHomeDir,
+            profileId: input.codexProfileId,
+            ...(input.codexModelServiceId === undefined ? {} : { modelServiceId: input.codexModelServiceId }),
+          })
+        }\n`,
+        { mode: 0o600 },
+      )
+    }
 
-  return Object.freeze({
-    binding,
-    claudeLive,
-    call,
-    status: (args?: unknown) => integrationStatus(args),
-    async close() {
-      if (closed) return
-      closed = true
-      for (const item of queue.splice(0)) {
-        clearTimeout(item.timer)
-        item.reject(new AgentBridgeUnavailable('The CordisX agent bridge closed'))
-      }
-      await new Promise<void>(resolve => server.close(() => resolve()))
-      // Another launch may have taken the well-known path since; only remove our own binding.
-      try {
-        const current = object(JSON.parse(await readFile(bindingPath, 'utf8')))
-        if (current?.token === token) {
-          await rm(bindingPath, { force: true })
-          await rm(socketPath, { force: true })
+    return Object.freeze({
+      binding,
+      claudeLive,
+      call,
+      status: (args?: unknown) => integrationStatus(args),
+      async close() {
+        if (closed) return
+        closed = true
+        for (const item of queue.splice(0)) {
+          clearTimeout(item.timer)
+          item.reject(new AgentBridgeUnavailable('The CordisX agent bridge closed'))
         }
-      } catch { /* already gone */ }
-    },
-  })
+        await new Promise<void>(resolve => server.close(() => resolve()))
+        // Another launch may have taken the well-known path since; only remove our own binding.
+        try {
+          const current = object(JSON.parse(await readFile(bindingPath, 'utf8')))
+          if (current?.token === token) {
+            await rm(bindingPath, { force: true })
+          }
+        } catch { /* already gone */ }
+        await rm(socketDirectory, { recursive: true, force: true })
+      },
+    })
+  } catch (error) {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(socketDirectory, { recursive: true, force: true })
+    throw error
+  }
 }
