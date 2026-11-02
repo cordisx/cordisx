@@ -87,6 +87,7 @@ export class BrowserManagedServiceUIBridge {
   private readonly revokedStartupOwners = new Set<string>()
   private readonly startupObservers = new Map<string, ReturnType<typeof createBrowserStartupObserver>>()
   private closed = false
+  private transportControlSequence = 0
 
   private constructor(
     capabilities: readonly ManagedServiceUICapability[],
@@ -382,6 +383,8 @@ export class BrowserManagedServiceUIBridge {
     } catch {
       return
     }
+    if (response === null || typeof response !== 'object' || Array.isArray(response)) return
+    if (this.receiveTransportControl(response as Record<string, unknown>)) return
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return
@@ -394,6 +397,24 @@ export class BrowserManagedServiceUIBridge {
         new Error(typeof response.code === 'string' ? response.code : 'managed-service-ui-unavailable'),
       )
     }
+  }
+
+  private receiveTransportControl(value: Record<string, unknown>): boolean {
+    if (value.contract !== 'cordisx.startup-transport-control/v1') return false
+    if (this.closed || Object.keys(value).sort().join(',') !== 'contract,phase,scope,sequence,token') return true
+    const host = this.capabilities.get(ownerKey({ kind: 'host', hostGeneration: this.generation }))
+    const scope = value.scope as Record<string, unknown> | undefined
+    if (
+      !host || value.token !== host.token || !scope || Array.isArray(scope)
+      || Object.keys(scope).sort().join(',') !== 'profileId,runtimeGeneration'
+      || scope.profileId !== this.profileId || scope.runtimeGeneration !== this.generation
+      || !Number.isSafeInteger(value.sequence) || (value.sequence as number) <= this.transportControlSequence
+      || (value.phase !== 'disconnected' && value.phase !== 'reconnected')
+    ) return true
+    this.transportControlSequence = value.sequence as number
+    // A recovered CDP transport cannot deliver the old pending RPC; resume from the retained cursor.
+    this.transportDisconnected()
+    return true
   }
 }
 

@@ -220,7 +220,7 @@ export async function prepare(ctx, input) {
     expect(wires.filter(wire => wire.operation === 'startupSubscribe').length).toBeGreaterThanOrEqual(3)
     await lifecycle.dispose()
     await vi.waitFor(() => expect(events.filter(event => event.kind === 'closed')).toHaveLength(1))
-    expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'scope-revoked' })
+    expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'host-replaced' })
     const count = events.length
     subscription.close()
     await Promise.resolve()
