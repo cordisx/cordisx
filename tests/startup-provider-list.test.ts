@@ -26,7 +26,7 @@ it('lists the real startup snapshot separately from an empty execution catalog w
         dependsOn: [],
         wait: { interactive: 'background', command: 'when-selected' },
         milestones: [],
-        success: { allOf: [{ kind: 'catalog-known' }, { kind: 'provider-published' }] },
+        success: { allOf: [{ kind: 'service-ready' }, { kind: 'catalog-known' }, { kind: 'provider-published' }] },
       }],
     },
   }])
