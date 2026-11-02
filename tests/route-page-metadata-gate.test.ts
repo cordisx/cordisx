@@ -76,6 +76,7 @@ const expectedRegistrations = [
   'tests/fixtures/shared-react-page-plugin.tsx|route|overview',
   'tests/fixtures/session-header-sibling-plugin.ts|page|session.sibling',
   'tests/fixtures/session-header-sibling-plugin.ts|route|session.sibling',
+  'tests/fixtures/startup-observer-plugin.ts|page|startup-status',
 ] as const
 
 async function sourceFiles(root: string): Promise<string[]> {

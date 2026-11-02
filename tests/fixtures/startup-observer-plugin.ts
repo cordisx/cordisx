@@ -2,9 +2,20 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { StartupContextV1 } from '@cordisx/protocol/startup/v1'
 import { CORDISX_PAGE_SCHEMA_V4 } from '../../packages/cli/src/contracts.js'
 
-export const inject = ['pages', 'startup', 'modelProviders']
+export const inject = ['i18n', 'pages', 'startup', 'modelProviders']
 
 export function apply(ctx: Context & StartupContextV1): void {
+  ctx.i18n.define({
+    namespace: 'startup-fixture',
+    locale: 'en',
+    default: true,
+    messages: { title: 'Startup status', description: 'Service preparation status' },
+  })
+  ctx.i18n.define({
+    namespace: 'startup-fixture',
+    locale: 'zh-CN',
+    messages: { title: '启动状态', description: '服务准备状态' },
+  })
   ctx.pages.register({
     $schema: CORDISX_PAGE_SCHEMA_V4,
     schemaVersion: 4,
