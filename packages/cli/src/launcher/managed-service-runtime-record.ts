@@ -127,3 +127,40 @@ export function projectManagedServiceRecord(record: ManagedServiceRecord): Manag
     ...(record.diagnostic === undefined ? {} : { diagnostic: record.diagnostic }),
   })
 }
+
+/** Coalesce synchronous transitions so observers see a consistent public projection. */
+export function observeManagedServiceRecord(record: ManagedServiceRecord, changed: () => void): void {
+  let scheduled = false
+  const notify = () => {
+    if (scheduled) return
+    scheduled = true
+    queueMicrotask(() => {
+      scheduled = false
+      changed()
+    })
+  }
+  const fields = [
+    'binding',
+    'state',
+    'health',
+    'processOwnership',
+    'diagnostic',
+    'authenticationHandle',
+    'authorizationHandle',
+    'brokerHandle',
+    'selectedMaterialization',
+    'disposed',
+  ] as const
+  for (const field of fields) {
+    let value: unknown = record[field]
+    Object.defineProperty(record, field, {
+      enumerable: true,
+      get: () => value,
+      set: (next: unknown) => {
+        if (Object.is(value, next)) return
+        value = next
+        notify()
+      },
+    })
+  }
+}

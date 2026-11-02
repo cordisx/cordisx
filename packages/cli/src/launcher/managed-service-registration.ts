@@ -3,6 +3,7 @@ import { managedServiceResourceMatchesTarget } from './managed-service-package-r
 import { managedServiceEnvironment, managedServiceHome } from './managed-service-process.js'
 import type { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
 import type { ManagedServiceActivationAccess, ManagedServiceRecord } from './managed-service-runtime-record.js'
+import { observeManagedServiceRecord } from './managed-service-runtime-record.js'
 import { managedHandle, managedIdentityKey } from './managed-service-runtime-support.js'
 
 export async function registerManagedService(input: {
@@ -24,6 +25,7 @@ export async function registerManagedService(input: {
   readonly registrations: Map<string, ManagedServiceRecord>
   readonly pendingRegistrations: Map<string, Promise<ManagedServiceRecord>>
   readonly disposeRecord: (record: ManagedServiceRecord) => Promise<unknown>
+  readonly onRecordChanged?: (record: ManagedServiceRecord) => void
 }): Promise<ManagedServiceRecord> {
   const { access, definition, revision } = input
   await input.schemas.validateDefinition(definition)
@@ -148,8 +150,12 @@ export async function registerManagedService(input: {
         disposal: undefined,
         disposed: false,
       }
+      if (input.onRecordChanged !== undefined) {
+        observeManagedServiceRecord(record, () => input.onRecordChanged!(record))
+      }
       input.records.set(key, record)
       input.registrations.set(registrationHandle, record)
+      input.onRecordChanged?.(record)
       return record
     })()
     input.pendingRegistrations.set(key, registration)

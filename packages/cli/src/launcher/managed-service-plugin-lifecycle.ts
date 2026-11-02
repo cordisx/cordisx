@@ -65,6 +65,7 @@ export interface ManagedServicePluginLifecycleOptions {
 export interface ManagedServiceNativeActivation
   extends Pick<ManagedServiceNodeActivation, 'nativeProviderIds' | 'prepareNativeConnection'>
 {
+  readonly revision: number
   subscribeNativeProviders(listener: () => void): () => void
 }
 
@@ -84,6 +85,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private readonly transactions = new Map<string, ManagedServiceTransaction>()
   private readonly nativeProviderListeners = new Set<() => void>()
   private active: ManagedServiceFleet | undefined
+  private stopNativeProviders: (() => void) | undefined
+  private nativeRevision = 0
+  private mutation: Promise<unknown> = Promise.resolve()
+  private disposed = false
 
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
     this.runtime = options.runtime
@@ -91,9 +96,13 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async initialize(activation: CordisXPluginActivationRecordV1): Promise<void> {
+    return await this.enqueue(() => this.initializeNow(activation))
+  }
+
+  private async initializeNow(activation: CordisXPluginActivationRecordV1): Promise<void> {
     if (this.active !== undefined) throw new Error('managed service lifecycle is already initialized')
     const fleet = await this.createFleet(activation)
-    this.active = fleet
+    this.setActive(fleet)
     for (const route of fleet.routes.values()) this.routesByToken.set(route.token, route)
   }
 
@@ -113,6 +122,9 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   nativeActivation(): ManagedServiceNativeActivation {
     const owner = this
     return Object.freeze({
+      get revision(): number {
+        return owner.nativeRevision
+      },
       get nativeProviderIds(): readonly string[] {
         return owner.requireActive().activation?.nativeProviderIds ?? []
       },
@@ -142,6 +154,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation> {
+    return await this.enqueue(() => this.stageNow(mutation))
+  }
+
+  private async stageNow(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation> {
     if (this.transactions.size > 0) {
       throw new Error('managed service lifecycle transaction already exists')
     }
@@ -180,9 +196,13 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async publish(transactionId: string): Promise<RuntimePublicationObservation> {
+    return await this.enqueue(() => this.publishNow(transactionId))
+  }
+
+  private async publishNow(transactionId: string): Promise<RuntimePublicationObservation> {
     const transaction = this.transaction(transactionId)
     for (const route of transaction.candidate.routes.values()) this.routesByToken.set(route.token, route)
-    this.active = transaction.candidate
+    this.setActive(transaction.candidate)
     this.changedNativeProviders()
     transaction.published = true
     if (this.runtime.publish === undefined) throw new Error('plugin lifecycle publication is unavailable')
@@ -190,11 +210,19 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async complete(transactionId: string): Promise<RuntimeCleanupObservation> {
+    return await this.enqueue(() => this.completeNow(transactionId))
+  }
+
+  private async completeNow(transactionId: string): Promise<RuntimeCleanupObservation> {
     if (this.runtime.complete === undefined) throw new Error('plugin lifecycle cleanup is unavailable')
     return await this.runtime.complete(transactionId)
   }
 
   async finalize(transactionId: string): Promise<void> {
+    return await this.enqueue(() => this.finalizeNow(transactionId))
+  }
+
+  private async finalizeNow(transactionId: string): Promise<void> {
     const transaction = this.transaction(transactionId)
     await this.runtime.finalize?.(transactionId)
     await this.disposeFleet(transaction.previous, transaction.candidate)
@@ -207,6 +235,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async rollback(transactionId: string): Promise<RuntimeCleanupObservation> {
+    return await this.enqueue(() => this.rollbackNow(transactionId))
+  }
+
+  private async rollbackNow(transactionId: string): Promise<RuntimeCleanupObservation> {
     if (this.runtime.rollback === undefined) throw new Error('plugin lifecycle rollback is unavailable')
     const observation = await this.runtime.rollback(transactionId)
     const transaction = this.transactions.get(transactionId)
@@ -224,9 +256,13 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async commit(transactionId: string): Promise<void> {
+    return await this.enqueue(() => this.commitNow(transactionId))
+  }
+
+  private async commitNow(transactionId: string): Promise<void> {
     const transaction = this.transaction(transactionId)
     for (const route of transaction.candidate.routes.values()) this.routesByToken.set(route.token, route)
-    this.active = transaction.candidate
+    this.setActive(transaction.candidate)
     this.changedNativeProviders()
     transaction.published = true
     await this.runtime.commit(transactionId)
@@ -235,6 +271,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async abort(transactionId: string): Promise<void> {
+    return await this.enqueue(() => this.abortNow(transactionId))
+  }
+
+  private async abortNow(transactionId: string): Promise<void> {
     const transaction = this.transactions.get(transactionId)
     await this.runtime.abort(transactionId)
     if (transaction !== undefined) await this.rollbackManaged(transactionId, transaction)
@@ -249,19 +289,27 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async dispose(): Promise<void> {
+    if (this.disposed) return await this.mutation.then(() => undefined)
+    this.disposed = true
+    const disposal = this.mutation.then(() => this.disposeNow())
+    this.mutation = disposal.catch(() => undefined)
+    return await disposal
+  }
+
+  private async disposeNow(): Promise<void> {
     const fleets = new Set<ManagedServiceFleet>()
     if (this.active !== undefined) fleets.add(this.active)
     for (const transaction of this.transactions.values()) {
       fleets.add(transaction.previous)
       fleets.add(transaction.candidate)
     }
+    this.setActive(undefined)
     this.transactions.clear()
     this.routesByToken.clear()
     const routes = new Set([...fleets].flatMap(fleet => [...fleet.routes.values()]))
     const groups = new Set([...fleets].flatMap(fleet => fleet.leases.map(lease => lease.activation)))
     await Promise.allSettled([...routes].map(async route => await route.handler.dispose()))
     await Promise.allSettled([...groups].map(async group => await group.dispose()))
-    this.active = undefined
     this.changedNativeProviders()
     this.nativeProviderListeners.clear()
   }
@@ -380,7 +428,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       }
     }
     if (transaction.published) {
-      this.active = transaction.previous
+      this.setActive(transaction.previous)
       this.changedNativeProviders()
     }
     await this.disposeFleet(transaction.candidate, transaction.previous)
@@ -400,12 +448,32 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     )
   }
 
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.disposed) return Promise.reject(new Error('managed service lifecycle is disposed'))
+    const next = this.mutation.then(operation)
+    this.mutation = next.catch(() => undefined)
+    return next
+  }
+
   private requireActive(): ManagedServiceFleet {
     if (this.active === undefined) throw new Error('managed service lifecycle is not initialized')
     return this.active
   }
 
+  private setActive(fleet: ManagedServiceFleet | undefined): void {
+    this.stopNativeProviders?.()
+    this.stopNativeProviders = undefined
+    this.active = fleet
+    // Subscribe before readers can take their next snapshot. Retained components
+    // are observed through the new fleet only; late callbacks from old bindings
+    // cannot advance the active revision.
+    this.stopNativeProviders = fleet?.activation?.subscribeNativeProviders?.(() => {
+      if (this.active === fleet) this.changedNativeProviders()
+    })
+  }
+
   private changedNativeProviders(): void {
+    this.nativeRevision += 1
     for (const listener of this.nativeProviderListeners) {
       try {
         listener()

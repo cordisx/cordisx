@@ -143,6 +143,11 @@ export class ManagedNativeProviderPublications {
   private readonly providers = new Map<string, PublicationState>()
   private readonly records = new WeakMap<ManagedServiceRecord, Set<PublicationState>>()
   private readonly listeners = new Set<() => void>()
+  private sequence = 0
+
+  get revision(): number {
+    return this.sequence
+  }
 
   publish(
     record: ManagedServiceRecord,
@@ -242,6 +247,7 @@ export class ManagedNativeProviderPublications {
   }
 
   private changed(): void {
+    this.sequence += 1
     for (const listener of this.listeners) {
       try {
         listener()

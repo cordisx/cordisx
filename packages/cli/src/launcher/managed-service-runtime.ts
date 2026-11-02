@@ -90,6 +90,8 @@ class BorrowedServiceUnavailableError extends Error {
 }
 
 export class ManagedServiceRuntime {
+  private readonly serviceListeners = new Set<() => void>()
+  private serviceSequence = 0
   private readonly schemas: ManagedServiceSchemaRegistry
   private readonly fetch: typeof globalThis.fetch
   private readonly spawn: typeof nodeSpawn
@@ -151,12 +153,37 @@ export class ManagedServiceRuntime {
           registrations: this.registrations,
           pendingRegistrations: this.pendingRegistrations,
           disposeRecord: record => this.disposeRecord(record),
+          onRecordChanged: record => this.changedService(record),
         }),
       registrationHandle: record => this.registrationHandle(record),
       boundClient: state => this.broker.boundClient(state),
       disposeRecord: record => this.disposeRecord(record),
       disposeRecords: records => this.disposeRecords(records),
     })
+  }
+
+  get serviceRevision(): number {
+    return this.serviceSequence
+  }
+
+  subscribeServices(listener: () => void): () => void {
+    this.serviceListeners.add(listener)
+    return () => this.serviceListeners.delete(listener)
+  }
+
+  serviceProjection(identity: ManagedServiceIdentityV1) {
+    const record = this.records.get(managedIdentityKey(identity))
+    return record === undefined ? undefined : this.projection(record)
+  }
+
+  private changedService(record: ManagedServiceRecord): void {
+    if (this.records.get(managedIdentityKey(record.binding.identity)) !== record) return
+    this.serviceSequence += 1
+    for (const listener of this.serviceListeners) {
+      try {
+        listener()
+      } catch { /* Reader isolation. */ }
+    }
   }
 
   prepareNativeConnection(request: NativeManagedGatewayConnectionRequest): NativeManagedGatewayConnectionSession {
@@ -188,6 +215,7 @@ export class ManagedServiceRuntime {
     return [...this.records.values()].flatMap(record => {
       if (record.disposed || !pluginIds.includes(record.access.owner.pluginId)) return []
       if (record.definition.discovery.kind === 'fixed-loopback') return [record.definition.discovery.port]
+      if (record.assignedPort !== undefined) return [record.assignedPort]
       return record.origin === undefined ? [] : [Number(new URL(record.origin).port)]
     })
   }
@@ -815,6 +843,7 @@ export class ManagedServiceRuntime {
       if (failures.length === 1) throw failures[0]
       throw new AggregateError(failures, 'managed service owned child cleanup incomplete')
     }
+    this.changedService(record)
     if (this.records.get(managedIdentityKey(record.binding.identity)) === record) {
       this.records.delete(managedIdentityKey(record.binding.identity))
     }

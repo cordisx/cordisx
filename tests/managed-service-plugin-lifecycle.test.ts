@@ -66,6 +66,7 @@ function fleet(moduleGeneration: string, authState: 'authenticated' | 'missing')
       source: source(moduleGeneration, authState),
     }],
     nativeProviderIds: [`provider-${moduleGeneration}`],
+    subscribeNativeProviders: vi.fn(() => () => {}),
     prepareNativeConnection: vi.fn(() => {
       throw new Error('not used')
     }),
@@ -145,6 +146,63 @@ function request(token: string, pluginGeneration: string, operation: 'get' | 'sn
 }
 
 describe('managed service plugin lifecycle participant', () => {
+  it('forwards background publication and fences replaced subscriptions through rollback', async () => {
+    const created = new Map<
+      string,
+      { value: ManagedServiceNodeActivation; emit: () => void; stop: ReturnType<typeof vi.fn> }
+    >()
+    const runtime = new ManagedServicePluginLifecycleRuntime({
+      runtime: new BaseRuntime(),
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      activate: async record => {
+        const generation = record.plugins[0]!.moduleGeneration
+        const value = fleet(generation, 'missing').value
+        let callback = () => {}
+        const stop = vi.fn()
+        value.subscribeNativeProviders = listener => {
+          callback = listener
+          return stop
+        }
+        created.set(generation, { value, emit: () => callback(), stop })
+        return value
+      },
+    })
+    const first = activation(1, 'old')
+    await runtime.initialize(first)
+    const source = runtime.nativeActivation()
+    const listener = vi.fn()
+    const stop = source.subscribeNativeProviders(listener)
+    created.get('old')!.emit()
+    expect(source.revision).toBe(1)
+    expect(listener).toHaveBeenCalledTimes(1)
+    const second = activation(2, 'new')
+    await runtime.stage({
+      transactionId: second.transactionId!,
+      operation: 'update',
+      previous: first,
+      candidate: second,
+      targetId: 'aiden',
+      affectedPluginIds: ['aiden'],
+    })
+    created.get('new')!.emit()
+    expect(source.revision).toBe(1)
+    await runtime.publish(second.transactionId!)
+    expect(created.get('old')!.stop).toHaveBeenCalledOnce()
+    created.get('old')!.emit()
+    expect(source.revision).toBe(2)
+    created.get('new')!.emit()
+    expect(source.revision).toBe(3)
+    await runtime.rollback(second.transactionId!)
+    expect(created.get('new')!.stop).toHaveBeenCalledOnce()
+    created.get('new')!.emit()
+    expect(source.revision).toBe(4)
+    created.get('old')!.emit()
+    expect(source.revision).toBe(5)
+    stop()
+    await runtime.dispose()
+  })
+
   it('stages isolated owner tokens, publishes the candidate, retires old sources, and restores rollback', async () => {
     const base = new BaseRuntime()
     const activations = new Map<string, ReturnType<typeof fleet>>()
