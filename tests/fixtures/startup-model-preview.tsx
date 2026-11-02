@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'tdesign-react'
 import { ModelServicesPage } from '../../packages/cli/src/renderer/manager/pages/ModelServicesPage.js'
 import { ModelProviderSelector } from '../../packages/cli/src/renderer/model-provider-selector.js'
+import type { ProviderSelectionSnapshot } from '../../packages/cli/src/renderer/model-provider-selector.js'
 import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.js'
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
@@ -60,10 +61,32 @@ const registry = new ModelProviderRegistry(async () =>
   }))
 )
 registry.connectStartup(observer)
-const native = { available: true, busy: false, modelProvider: 'service-3', model: 'preview-model' }
+let native: ProviderSelectionSnapshot = {
+  available: true,
+  busy: false,
+  modelProvider: 'service-3',
+  model: 'preview-model',
+}
+const listeners = new Set<() => void>()
+const publishSelection = () => {
+  for (const listener of listeners) listener()
+}
 const transport = {
   getSnapshot: () => native,
-  subscribe: () => () => {},
+  subscribe: (listener: () => void) => {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  },
+  selectProviderIntent: async (providerId: string) => {
+    native = { ...native, pendingProviderIntent: { providerId, generation: 1 } }
+    publishSelection()
+    return 'accepted' as const
+  },
+  cancelProviderIntent: async () => {
+    native = { ...native, pendingProviderIntent: undefined }
+    publishSelection()
+    return 'accepted' as const
+  },
   select: async () => 'unavailable' as const,
   selectReasoningEffort: async () => 'unavailable' as const,
   selectFastMode: async () => 'unavailable' as const,
