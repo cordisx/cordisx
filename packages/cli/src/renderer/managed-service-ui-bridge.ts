@@ -87,6 +87,7 @@ export class BrowserManagedServiceUIBridge {
   private readonly revokedStartupOwners = new Set<string>()
   private readonly startupObservers = new Map<string, ReturnType<typeof createBrowserStartupObserver>>()
   private closed = false
+  private disposing = false
   private transportControlSequence = 0
 
   private constructor(
@@ -269,13 +270,15 @@ export class BrowserManagedServiceUIBridge {
   }
 
   dispose(): void {
-    if (this.closed) return
+    if (this.closed || this.disposing) return
+    this.disposing = true
+    // Dispatch the owner-bound close requests while the transport can still send them.
+    for (const observer of this.startupObservers.values()) observer.dispose('host-replaced')
+    this.startupObservers.clear()
     this.closed = true
     if (globalThis[MANAGED_SERVICE_UI_RECEIVER] === this.receive) {
       globalThis[MANAGED_SERVICE_UI_RECEIVER] = undefined
     }
-    for (const observer of this.startupObservers.values()) observer.dispose('host-replaced')
-    this.startupObservers.clear()
     for (const pending of this.pending.values()) {
       pending.cleanup?.()
       if (pending.timer !== undefined) clearTimeout(pending.timer)

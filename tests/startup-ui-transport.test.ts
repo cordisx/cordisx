@@ -343,4 +343,17 @@ describe('startup observation transport', () => {
     bridge.dispose()
     await handler.dispose()
   })
+  it('dispatches remote close during bridge disposal before rejecting further requests', async () => {
+    const { observer, source, bridge, handler } = setup()
+    const events: StartupEventV1[] = []
+    await observer.subscribe(event => events.push(event))
+    expect(source.listeners.size).toBe(1)
+    bridge.dispose()
+    await vi.waitFor(() => expect(source.listeners.size).toBe(0))
+    expect(events.filter(event => event.kind === 'closed')).toHaveLength(1)
+    expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'host-replaced' })
+    await expect(observer.read()).rejects.toThrow('unavailable')
+    bridge.dispose()
+    await handler.dispose()
+  })
 })
