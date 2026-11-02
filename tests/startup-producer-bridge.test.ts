@@ -239,3 +239,85 @@ export async function prepare(ctx, input) {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it.each([false, true])(
+  'keeps fast service and startup observation usable while an unrelated %s legacy component is adopting',
+  async legacy => {
+    const { progressiveLifecycleFixture } = await import('./managed-service-progressive-lifecycle-fixture.js')
+    const f = await progressiveLifecycleFixture([{ pluginId: 'slow', slow: true, legacy }, { pluginId: 'fast' }])
+    let bridge: BrowserManagedServiceUIBridge | undefined
+    let hostHandler: ReturnType<typeof createManagedServiceUIBridgeHandler> | undefined
+    try {
+      const session = await f.lifecycle.initialize(f.record())
+      const capabilities = f.lifecycle.capabilities()
+      const fast = capabilities.find(capability => capability.pluginId === 'fast')!
+      const hostCapability = f.lifecycle.hostStartupCapability()
+      hostHandler = createManagedServiceUIBridgeHandler({
+        token: fast.token,
+        profileId: 'work',
+        generation: 'runtime',
+        services: [],
+        hostStartup: hostCapability,
+      })
+      globalThis.__cordisxManagedServiceUIRequestV1 = payload => {
+        const request = JSON.parse(payload)
+        const response = request.token === hostCapability.token
+          ? hostHandler!.hostStartup!.handleBindingValue(payload)
+          : f.lifecycle.managedServiceUI.handleBindingValue(payload)
+        void response.then(value => globalThis.__cordisxManagedServiceUIReceiveV1?.(JSON.stringify(value)))
+      }
+      bridge = BrowserManagedServiceUIBridge.connect(capabilities, 'work', 'runtime', { token: hostCapability.token })
+      const observer = bridge.bindStartup(fast)!
+      const events: StartupEventV1[] = []
+      await bounded(observer.subscribe(event => events.push(event)), 'fast startup observation')
+      const adopted = vi.fn()
+      const core = vi.fn()
+      void session.adopted.then(adopted)
+      void session.coreReady.then(core)
+      await bounded(session.authority.wait({ pluginId: 'fast', capabilityId: 'gateway' }), 'fast capability ready')
+      await vi.waitFor(() =>
+        expect(snapshots(events).at(-1)!.entries[0]).toMatchObject({
+          state: 'ready',
+          actions: { execute: { available: true } },
+        })
+      )
+      expect(adopted).not.toHaveBeenCalled()
+      if (legacy) expect(core).not.toHaveBeenCalled()
+      else await bounded(session.coreReady, 'v15 core readiness')
+      expect(f.observations).toContain('apply:slow:gateway:one')
+      expect(f.nodes[0]!.sources.map(source => source.pluginId)).toEqual(['fast'])
+      const fastService = await bridge.bind(fast)!.get({ serviceId: 'gateway' })
+      expect(fastService).toMatchObject({ status: 'available' })
+      if (fastService.status !== 'available') throw new Error('fast execution binding missing')
+      expect((await fastService.service.snapshot()).status).toBe('available')
+      const slow = capabilities.find(capability => capability.pluginId === 'slow')
+      if (slow) expect((await bridge.bind(slow)!.get({ serviceId: 'gateway' })).status).toBe('unavailable')
+      const connected = events.filter(event =>
+        event.kind === 'connection' && event.connection.state === 'connected'
+      ).length
+      bridge.transportDisconnected()
+      await vi.waitFor(() =>
+        expect(events.filter(event => event.kind === 'connection' && event.connection.state === 'connected'))
+          .toHaveLength(connected + 1)
+      )
+      expect(adopted).not.toHaveBeenCalled()
+      expect(f.lifecycle.capabilities().find(capability => capability.pluginId === 'fast')!.token).toBe(fast.token)
+      f.release.resolve()
+      await bounded(session.adopted, 'all component adoption')
+      await bounded(session.coreReady, 'legacy core readiness')
+      expect(f.nodes[0]!.sources.map(source => source.pluginId).sort()).toEqual(['fast', 'slow'])
+      if (slow) expect((await bridge.bind(slow)!.get({ serviceId: 'gateway' })).status).toBe('available')
+      expect((await bridge.bind(fast)!.get({ serviceId: 'gateway' })).status).toBe('available')
+      await f.lifecycle.dispose()
+      await vi.waitFor(() => expect(events.filter(event => event.kind === 'closed')).toHaveLength(1))
+      expect(events.at(-1)).toMatchObject({ kind: 'closed', reason: 'host-replaced' })
+      expect(f.spawns).not.toHaveBeenCalled()
+    } finally {
+      bridge?.dispose()
+      await hostHandler?.dispose()
+      await f.cleanup()
+      delete globalThis.__cordisxManagedServiceUIRequestV1
+      delete globalThis.__cordisxManagedServiceUIReceiveV1
+    }
+  },
+)

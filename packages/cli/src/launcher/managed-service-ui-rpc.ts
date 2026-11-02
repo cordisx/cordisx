@@ -155,9 +155,14 @@ export interface ManagedServiceUIBridgeHandler {
   readonly generation: string
   readonly hostStartup?: ReturnType<typeof createStartupHostUIBridgeHandler>
   handle(owner: ManagedServiceUIOwner, request: ManagedServiceUIBindingRequest): Promise<unknown>
-  replaceServices(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
+  replaceServices?(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
   disposeOwner(owner: ManagedServiceUIOwner): Promise<void>
   dispose(): Promise<void>
+}
+
+/** Factory-produced broker supports binding replacement; legacy wrappers need not implement it. */
+export interface MutableManagedServiceUIBridgeHandler extends ManagedServiceUIBridgeHandler {
+  replaceServices(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -516,7 +521,7 @@ export function createManagedServiceUIBridgeHandler(input: {
   readonly declaredServices?: readonly (ManagedServiceUIOwner & { readonly serviceId: string })[]
   readonly startupObservers?: readonly StartupUIObserverBinding[]
   readonly readNativeProviders?: () => Promise<readonly unknown[]>
-}): ManagedServiceUIBridgeHandler {
+}): MutableManagedServiceUIBridgeHandler {
   const hostStartup = input.hostStartup === undefined
     ? undefined
     : createStartupHostUIBridgeHandler({
@@ -578,7 +583,7 @@ export function createManagedServiceUIBridgeHandler(input: {
     closedSubscriptions.set(subscriptionId, closed)
     return closed
   }
-  const handler: ManagedServiceUIBridgeHandler = {
+  const handler: MutableManagedServiceUIBridgeHandler = {
     token: input.token,
     profileId: input.profileId,
     generation: input.generation,
