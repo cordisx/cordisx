@@ -356,4 +356,54 @@ describe('startup observation transport', () => {
     bridge.dispose()
     await handler.dispose()
   })
+  it('rejects closed-callback reentry during disposal while dispatching one remote close', async () => {
+    const { observer, source, bridge, handler } = setup()
+    const deliver = globalThis.__cordisxManagedServiceUIRequestV1!
+    const operations: string[] = []
+    globalThis.__cordisxManagedServiceUIRequestV1 = payload => {
+      operations.push(JSON.parse(payload).operation)
+      deliver(payload)
+    }
+    let reentry: Promise<unknown> | undefined
+    let rebound: ReturnType<BrowserManagedServiceUIBridge['bind']>
+    let reboundStartup: ReturnType<BrowserManagedServiceUIBridge['bindStartup']>
+    let stageRejected = false
+    let closedCount = 0
+    await observer.subscribe(event => {
+      if (event.kind !== 'closed') return
+      closedCount++
+      reentry = bridge.request(owner, options.token, {
+        requestId: 'dispose-reentry',
+        operation: 'get',
+        serviceId: 'gateway',
+      }).catch(error => error)
+      rebound = bridge.bind(owner)
+      reboundStartup = bridge.bindStartup(owner)
+      try {
+        bridge.stage('dispose-reentry', ['demo'], [{
+          ...owner,
+          pluginGeneration: 'replacement',
+          token: 'candidate-token',
+          startup: true,
+        }])
+      } catch {
+        stageRejected = true
+      }
+      bridge.dispose()
+    })
+    operations.length = 0
+    try {
+      bridge.dispose()
+      await vi.waitFor(() => expect(source.listeners.size).toBe(0))
+      expect(operations).toEqual(['startupClose'])
+      expect(await reentry).toBeInstanceOf(Error)
+      expect(rebound).toBeUndefined()
+      expect(reboundStartup).toBeUndefined()
+      expect(stageRejected).toBe(true)
+      expect(closedCount).toBe(1)
+    } finally {
+      bridge.dispose()
+      await handler.dispose()
+    }
+  })
 })

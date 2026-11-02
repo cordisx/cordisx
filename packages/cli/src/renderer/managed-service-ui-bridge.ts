@@ -123,6 +123,7 @@ export class BrowserManagedServiceUIBridge {
   }
 
   bind(owner: ManagedServiceUIOwner): ManagedServiceUIRegistryV1 | undefined {
+    if (this.closed || this.disposing) return undefined
     const capability = this.capabilities.get(ownerKey(owner))
     if (capability === undefined) return undefined
     return new BrowserManagedServiceUIRegistry(this, owner, capability.token)
@@ -139,7 +140,7 @@ export class BrowserManagedServiceUIBridge {
   private startupFor(owner: StartupUIPrincipal) {
     const key = ownerKey(owner)
     const capability = this.capabilities.get(key)
-    if (!capability?.startup || this.closed || this.revokedStartupOwners.has(key)) return undefined
+    if (!capability?.startup || this.closed || this.disposing || this.revokedStartupOwners.has(key)) return undefined
     let binding = this.startupObservers.get(key)
     if (!binding) {
       binding = createBrowserStartupObserver(async (request, signal) => {
@@ -176,7 +177,7 @@ export class BrowserManagedServiceUIBridge {
     affectedPluginIds: readonly string[],
     capabilities: readonly ManagedServiceUICapability[],
   ): void {
-    if (this.closed) throw new Error('managed service UI bridge is unavailable')
+    if (this.closed || this.disposing) throw new Error('managed service UI bridge is unavailable')
     if (this.transactions.has(transactionId)) {
       throw new Error('managed service UI capability transaction already exists')
     }
@@ -199,6 +200,7 @@ export class BrowserManagedServiceUIBridge {
   }
 
   publish(transactionId: string): void {
+    if (this.closed || this.disposing) throw new Error('managed service UI bridge is unavailable')
     const transaction = this.transactions.get(transactionId)
     if (transaction === undefined) throw new Error('managed service UI capability transaction is unavailable')
     if (transaction.published) return
@@ -307,7 +309,7 @@ export class BrowserManagedServiceUIBridge {
   ): Promise<unknown> {
     const capability = this.capabilities.get(ownerKey(owner))
     if (signal?.aborted) throw new Error('startup request was aborted')
-    if (this.closed || capability?.token !== token) {
+    if (this.closed || (this.disposing && request.operation !== 'startupClose') || capability?.token !== token) {
       throw new Error('managed service UI bridge is unavailable')
     }
     const binding = globalThis[MANAGED_SERVICE_UI_BINDING]
