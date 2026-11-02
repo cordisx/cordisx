@@ -25,7 +25,7 @@ import {
 } from './model-catalog/CatalogBinding.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { CatalogClientState } from '../../model-catalog-client.js'
-import { modelStartupLabel, ModelStartupStatus } from '../../model-startup-status.js'
+import { ModelStartupIcon, modelStartupLabel } from '../../model-startup-status.js'
 import { startupPageActionAvailable } from '../../model-startup-store.js'
 import { useProgressiveModelRows } from './model-catalog/model-service-list.js'
 import { useModelTransfer } from './model-catalog/useModelTransfer.js'
@@ -533,14 +533,23 @@ function LegacyProvider({
           onClick={() => onExpandedChange(!effectiveExpanded)}
         >
           <span className="cxms-disclosure-mark" aria-hidden="true" />
-          {provider.selectorBrand
-            ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
-            : <HostBrandIcon icon={provider.icon} />}
+          {provider.startup
+            ? (
+              <ModelStartupIcon entry={provider.startup} state={startupState} locale={locale}>
+                {provider.selectorBrand
+                  ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+                  : <HostBrandIcon icon={provider.icon} />}
+              </ModelStartupIcon>
+            )
+            : (
+              <>
+                {provider.selectorBrand
+                  ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+                  : <HostBrandIcon icon={provider.icon} />}
+              </>
+            )}
           <span className="cxms-provider-identity">
             <strong>{provider.title}</strong>
-            {provider.startup
-              ? <ModelStartupStatus entry={provider.startup} state={startupState} locale={locale} />
-              : null}
             {provider.title.toLocaleLowerCase() === provider.providerId.toLocaleLowerCase()
               ? null
               : <code>{provider.providerId}</code>}

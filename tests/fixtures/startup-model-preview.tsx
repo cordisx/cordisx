@@ -7,6 +7,7 @@ import type { ProviderSelectionSnapshot } from '../../packages/cli/src/renderer/
 import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import { HostThemeProjection } from '../../packages/cli/src/renderer/host-theme.js'
 import { REACT_MANAGER_STYLES } from '../../packages/cli/src/renderer/manager/styles.js'
+import { installSharedReactRuntime } from '../../packages/cli/src/renderer/react-runtime.js'
 import type { StartupEventV1, StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/startup/v1'
 
 const states = ['declared', 'auth-required', 'catalog-pending', 'ready', 'failed', 'stopped', 'unknown'] as const
@@ -94,6 +95,7 @@ const transport = {
 let locale = 'en'
 let root: ReturnType<typeof createRoot>
 export async function start() {
+  installSharedReactRuntime(document)
   const seat = document.getElementById('manager')!
   seat.className = 'cxr-root'
   new HostThemeProjection(document).attach(seat)

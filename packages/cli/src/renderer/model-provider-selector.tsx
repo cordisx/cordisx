@@ -18,7 +18,7 @@ import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { resolveTargetReasoning } from './native-model-reasoning.js'
 import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-label.js'
-import { ModelStartupStatus } from './model-startup-status.js'
+import { ModelStartupIcon, ModelStartupStatus } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
 import { managerCopy } from './ui-copy.js'
 
@@ -712,30 +712,33 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       if (model) choose(row.provider, model)
                     }}
                   >
-                    {row.kind === 'official'
-                      ? <CodexBrandIcon />
-                      : row.kind === 'native'
+                    {row.kind === 'catalog' && row.provider.startup
                       ? (
-                        <span className="cxmp-provider-monogram" aria-hidden="true">
-                          {providerLabel.slice(0, 1).toUpperCase()}
-                        </span>
+                        <ModelStartupIcon entry={row.provider.startup} state={catalog.startup} locale={locale}>
+                          {row.provider.selectorBrand !== undefined
+                            ? <ModelBrandIcon brand={row.provider.selectorBrand} kind="provider" />
+                            : <HostBrandIcon icon={row.provider.icon} />}
+                        </ModelStartupIcon>
                       )
-                      : row.provider.selectorBrand !== undefined
-                      ? <ModelBrandIcon brand={row.provider.selectorBrand} kind="provider" />
-                      : <HostBrandIcon icon={row.provider.icon} />}
+                      : (
+                        <>
+                          {row.kind === 'official'
+                            ? <CodexBrandIcon />
+                            : row.kind === 'native'
+                            ? (
+                              <span className="cxmp-provider-monogram" aria-hidden="true">
+                                {providerLabel.slice(0, 1).toUpperCase()}
+                              </span>
+                            )
+                            : row.provider.selectorBrand !== undefined
+                            ? <ModelBrandIcon brand={row.provider.selectorBrand} kind="provider" />
+                            : <HostBrandIcon icon={row.provider.icon} />}
+                        </>
+                      )}
                     {row.kind === 'catalog'
                       ? (
                         <span className="cxmp-provider-summary">
                           <ProviderMenuLabel provider={row.provider} />
-                          {row.provider.startup
-                            ? (
-                              <ModelStartupStatus
-                                entry={row.provider.startup}
-                                state={catalog.startup}
-                                locale={locale}
-                              />
-                            )
-                            : null}
                         </span>
                       )
                       : <span>{row.label}</span>}

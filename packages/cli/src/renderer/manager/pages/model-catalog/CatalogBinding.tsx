@@ -18,7 +18,7 @@ import { ModelEditor } from './ModelEditor.js'
 import { ConnectionEditor } from './ConnectionEditor.js'
 import { ScriptEditor } from './ScriptEditor.js'
 import { useProgressiveModelRows } from './model-service-list.js'
-import { ModelStartupStatus } from '../../../model-startup-status.js'
+import { ModelStartupIcon } from '../../../model-startup-status.js'
 import type { ModelStartupState } from '../../../model-startup-store.js'
 
 type Intent = Exclude<CatalogManagementCommand, { operation: 'createConnection' }> extends infer C
@@ -237,14 +237,23 @@ export function CatalogBinding(
     && view.supplement.length > 0
   const bindingIdentity = (
     <>
-      {provider?.selectorBrand
-        ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
-        : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
+      {provider?.startup
+        ? (
+          <ModelStartupIcon entry={provider.startup} state={startupState} locale={locale}>
+            {provider?.selectorBrand
+              ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+              : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
+          </ModelStartupIcon>
+        )
+        : (
+          <>
+            {provider?.selectorBrand
+              ? <ModelBrandIcon brand={provider.selectorBrand} kind="provider" />
+              : <HostBrandIcon icon={provider?.icon ?? 'host:settings'} />}
+          </>
+        )}
       <span className="cxms-provider-identity">
         <strong>{view.title}</strong>
-        {provider?.startup
-          ? <ModelStartupStatus entry={provider.startup} state={startupState} locale={locale} />
-          : null}
         <code>{view.scopeLabel ?? view.providerId}</code>
       </span>
       <span className="cxms-model-count">
