@@ -1,3 +1,4 @@
+import { managedServiceLiveHandler } from './managed-service-live-handler.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
 import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
 import type { StartupObserverV1 } from '@cordisx/protocol/startup/v1'
@@ -166,7 +167,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       this.setActive({ record: activation, leases: [], activation: undefined, routes })
     }
     // Queue adoption, but return the stable observation authority before it settles.
-    const adopted = this.enqueue(async () => {
+    const published = this.enqueue(async () => {
       const provisional = this.active
       const fleet = await this.createFleet(activation)
       if (provisional !== undefined) {
@@ -176,10 +177,22 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       }
       this.setActive(fleet)
       for (const route of fleet.routes.values()) this.routesByToken.set(route.token, route)
+      if (admissions.length > 0) this.changedNativeProviders()
+      return fleet
     })
+    const coreReady = published.then(async fleet => {
+      await (fleet.activation?.coreReady ?? fleet.activation?.adopted)
+      this.lifecycle.signal.throwIfAborted()
+    })
+    const adopted = this.enqueue(async () => {
+      const fleet = await published
+      await fleet.activation?.adopted
+      this.lifecycle.signal.throwIfAborted()
+    })
+    void coreReady.catch(() => undefined)
     void adopted.catch(() => undefined)
     if (admissions.length === 0) await adopted // Preserve legacy blocking callers.
-    return { authority: this.startup, adopted, observer: this.startupObserver }
+    return { authority: this.startup, coreReady, adopted, observer: this.startupObserver }
   }
 
   private async resolveAdmissions(record: CordisXPluginActivationRecordV1): Promise<readonly StartupPluginAdmission[]> {
@@ -439,6 +452,14 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         reservedServiceKeys: previous.leases.flatMap(lease => lease.activation.exclusiveServiceKeys),
       }),
     })
+    if (previous !== undefined) {
+      try {
+        await activated?.adopted
+      } catch (error) {
+        await activated?.dispose().catch(() => undefined)
+        throw error
+      }
+    }
     const created = managedServiceLeases(activated, changed)
     const leases = [...retained, ...created]
     const activation = managedServiceFleetActivation(leases)
@@ -447,30 +468,20 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     }
     const routes = new Map<string, ManagedServiceOwnerRoute>()
     const readNativeProviders = activation === undefined ? async () => [] : nativeModelProviderCatalog(activation)
-    const sourcesByOwner = new Map<string, ManagedServiceNodeActivation['sources']>()
-    for (const source of activation?.sources ?? []) {
-      const owner = { pluginId: source.pluginId, pluginGeneration: source.pluginGeneration }
-      const key = ownerKey(owner)
-      const sources = sourcesByOwner.get(key) ?? []
-      sourcesByOwner.set(key, [...sources, source])
+    const ownerKeys = new Set((activation?.sources ?? []).map(source => ownerKey(source)))
+    for (const lease of leases) {
+      for (const plugin of lease.plugins) {
+        ownerKeys.add(ownerKey({ pluginId: plugin.id, pluginGeneration: plugin.moduleGeneration }))
+      }
     }
-    for (const admission of admissions) {
-      const key = ownerKey(admission)
-      if (!sourcesByOwner.has(key)) sourcesByOwner.set(key, [])
-    }
+    for (const admission of admissions) ownerKeys.add(ownerKey(admission))
     try {
-      for (const [key, sources] of sourcesByOwner) {
+      for (const key of ownerKeys) {
         const declaration = admissions.find(admission => ownerKey(admission) === key)
-        const owner = declaration === undefined
-          ? { pluginId: sources[0]!.pluginId, pluginGeneration: sources[0]!.pluginGeneration }
-          : { pluginId: declaration.pluginId, pluginGeneration: declaration.pluginGeneration }
-        const observer = declaration === undefined
-          ? undefined
-          : this.startup.observer({
-            scopeId: `plugin:${owner.pluginId}:${owner.pluginGeneration}`,
-            owner,
-            authorize: ref => ref.pluginId === owner.pluginId,
-          })
+        const plugin = record.plugins.find(plugin =>
+          ownerKey({ pluginId: plugin.id, pluginGeneration: plugin.moduleGeneration }) === key
+        )!
+        const owner = { pluginId: plugin.id, pluginGeneration: plugin.moduleGeneration }
         const existing = previous?.routes.get(key)
         if (existing !== undefined && retainedIds.has(owner.pluginId)) {
           routes.set(key, existing)
@@ -479,28 +490,31 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
         const early = previous === undefined
           ? [...this.routesByToken.values()].find(route => route.key === key)
           : undefined
+        const observer = declaration === undefined || early !== undefined
+          ? undefined
+          : this.startup.observer({
+            scopeId: `plugin:${owner.pluginId}:${owner.pluginGeneration}`,
+            owner,
+            authorize: ref => ref.pluginId === owner.pluginId,
+          })
         const token = early?.token ?? this.uniqueToken()
         const handlerOptions = {
           token,
           profileId: this.options.profileId,
           generation: this.options.runtimeGeneration,
           readNativeProviders,
-          services: sources,
+          services: [],
+          ...(declaration === undefined
+            ? {}
+            : { declaredServices: declaration.services.map(service => ({ ...owner, serviceId: service.id })) }),
           ...(observer === undefined ? {} : { startupObservers: [{ ...owner, observer }] }),
         }
-        const executionHandler = createManagedServiceUIBridgeHandler(handlerOptions)
-        const handler: ManagedServiceUIBridgeHandler = early === undefined ? executionHandler : {
-          ...executionHandler,
-          handle: (owner, request) =>
-            String(request.operation).startsWith('startup')
-              ? early.handler.handle(owner, request)
-              : executionHandler.handle(owner, request),
-          dispose: async () => {
-            await early.handler.dispose()
-            await executionHandler.dispose()
-          },
-        }
-        routes.set(key, { key, token, owner, handler, ...(observer === undefined ? {} : { startup: true }) })
+        const handler = managedServiceLiveHandler(
+          early?.handler ?? createManagedServiceUIBridgeHandler(handlerOptions),
+          () => activation?.sources.filter(source => ownerKey(source) === key) ?? [],
+          readNativeProviders,
+        )
+        routes.set(key, { key, token, owner, handler, ...(declaration === undefined ? {} : { startup: true }) })
       }
       void activation?.nativeProviderIds // Reject cross-component provider collisions before publication.
       return { record, activation, leases, routes }

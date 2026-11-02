@@ -34,7 +34,11 @@ export async function readStartupAdmissions(
 
 export interface ManagedServiceStartupSession {
   readonly authority: ManagedServiceStartupAuthority
-  /** Core launcher chooses when to await legacy/base adoption; navigation observes immediately. */
+  /** Activation is published; legacy components and their context dependency closure have adopted.
+   * Launcher combines this with authority always/selected target waits, never full adopted.
+   */
+  readonly coreReady: Promise<void>
+  /** All components finish base adoption. Retained for update/cleanup transaction ordering. */
   readonly adopted: Promise<void>
   readonly observer: StartupObserverV1
 }

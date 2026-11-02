@@ -5,12 +5,8 @@ import type {
   ManagedServiceContextProviderRootV1,
   ManagedServiceContextProviderV1,
   ManagedServiceNodeModuleV1,
-  ManagedServiceNodeUISourceExtensionV1,
 } from '@cordisx/protocol/managed-service-context/v1'
-import type {
-  ManagedServiceIdentityV1,
-  ManagedServiceServiceContextV1,
-} from '@cordisx/protocol/managed-service-runtime/v1'
+import type { ManagedServiceServiceContextV1 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { Context, Inject, type Plugin } from '@deepseek-ai/cordis'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -22,7 +18,8 @@ import {
   type ManagedServiceContextAuthorityV1,
   ManagedServiceRuntime,
 } from './managed-service-runtime.js'
-import { createManagedServiceSource, type ManagedServiceNodeSourceBinding } from './managed-service-ui-source.js'
+import type { ManagedServiceNodeSourceBinding } from './managed-service-ui-source.js'
+import { adoptedManagedServiceSource } from './managed-service-adopted-source.js'
 import { managedServiceStartupGroups } from './managed-service-startup-groups.js'
 import { reportManagedServiceStartup } from './managed-service-startup-diagnostic.js'
 
@@ -52,6 +49,12 @@ export interface ManagedServiceNodeActivationGroup extends Omit<ManagedServiceNo
 export interface ManagedServiceNodeActivation {
   /** Internal dependency-component cleanup boundaries, never renderer capabilities. */
   readonly groups?: readonly ManagedServiceNodeActivationGroup[]
+  /** Full base adoption, including background components; transactions await this. */
+  readonly adopted?: Promise<void>
+  /** Base adoption of legacy components and their atomic context dependency closure. */
+  readonly coreReady?: Promise<void>
+  /** Sources/authorities are live and change atomically per component. */
+  readonly subscribeSources?: (listener: () => void) => () => void
   readonly startup?: ManagedServiceStartupAuthority
   readonly retryStartup?: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => void
   readonly hostGeneration: string
@@ -216,6 +219,7 @@ export class ManagedServiceNodeHost {
         const controller = new AbortController()
         const abort = () => controller.abort(signal.reason)
         signal.addEventListener('abort', abort, { once: true })
+        controller.signal.addEventListener('abort', () => signal.removeEventListener('abort', abort), { once: true })
         cleanup.push(() => signal.removeEventListener('abort', abort))
         const owner = Object.freeze({
           ownerHandle: `mso_${randomUUID().replaceAll('-', '')}` as const,
@@ -299,7 +303,21 @@ export class ManagedServiceNodeHost {
           }),
       )
       const groupDisposals = new Map<readonly ModuleState[], () => Promise<void>>()
-      const failed = new Set<ModuleState>()
+      const adoptedSources = new Map<readonly ModuleState[], readonly ManagedServiceNodeSourceBinding[]>()
+      const sourceListeners = new Set<() => void>()
+      const changedSources = () => {
+        for (const listener of sourceListeners) {
+          try {
+            listener()
+          } catch { /* Reader isolation. */ }
+        }
+      }
+      const subscribeSources = (listener: () => void) => {
+        sourceListeners.add(listener)
+        return () => {
+          sourceListeners.delete(listener)
+        }
+      }
       const pendingGroups = groups.map(async group => {
         const groupProviders = new Map([...providers].filter(([, provider]) => group.includes(provider.module)))
         const groupCleanup: (() => void | Promise<void>)[] = []
@@ -308,6 +326,8 @@ export class ManagedServiceNodeHost {
         const disposeGroup = (): Promise<void> => {
           groupDisposal ??= (async () => {
             for (const state of group) state.controller.abort(new Error('managed service activation disposed'))
+            adoptedSources.delete(group)
+            changedSources()
             await preparation.disposeModules(group)
             await Promise.allSettled([...pending])
             await settleCleanup([
@@ -327,23 +347,36 @@ export class ManagedServiceNodeHost {
         }
         try {
           for (const state of groupProviders.values()) {
-            const root = await state.provider.create({
-              target: state.module.binding.authority,
-              signal: state.module.controller.signal,
-            })
-            if (
-              root === null || typeof root !== 'object' || typeof root.bind !== 'function'
-              || typeof root.dispose !== 'function'
-            ) {
-              if (root !== null && typeof root === 'object' && typeof root.dispose === 'function') await root.dispose()
-              throw new Error(`managed context service ${state.provider.service} returned an invalid root`)
-            }
-            state.root = root
-            groupCleanup.push(async () => await root.dispose())
+            const creating = (async () => {
+              const root = await state.provider.create({
+                target: state.module.binding.authority,
+                signal: state.module.controller.signal,
+              })
+              if (
+                root === null || typeof root !== 'object' || typeof root.bind !== 'function'
+                || typeof root.dispose !== 'function'
+              ) {
+                if (root !== null && typeof root === 'object' && typeof root.dispose === 'function') {
+                  await root.dispose()
+                }
+                throw new Error(`managed context service ${state.provider.service} returned an invalid root`)
+              }
+              state.root = root
+              groupCleanup.push(async () => await root.dispose())
+              state.module.controller.signal.throwIfAborted()
+            })()
+            pending.add(creating)
+            await creating
+            pending.delete(creating)
           }
           const providerOwners = new Set([...groupProviders.values()].map(provider => provider.module))
           await startBatch(group.filter(state => !providerOwners.has(state)))
           for (const batch of this.providerOwnerBatches(group, groupProviders)) await startBatch(batch)
+          for (const state of group) state.controller.signal.throwIfAborted()
+          const sources = group.flatMap(state => {
+            const source = adoptedManagedServiceSource(state, this.runtime, this.profileId, this.runtimeGeneration)
+            return source === undefined ? [] : [source]
+          })
           preparation.adopt(
             group.filter(state =>
               state.access.startup?.startup.capabilities.some(capability =>
@@ -356,11 +389,18 @@ export class ManagedServiceNodeHost {
                 context: state.context!,
               })),
           )
+          adoptedSources.set(group, Object.freeze(sources))
+          changedSources()
         } catch (error) {
+          const canceled = group.some(state => state.controller.signal.aborted)
           await disposeGroup()
+          if (canceled) {
+            for (const state of group) authority.revoke(state.binding.authority)
+            throw error
+          }
+          signal.throwIfAborted()
           if (!isolateStartupFailures) throw error
           for (const state of group) {
-            failed.add(state)
             if (state.access.startup !== undefined) authority.settled(state.binding.authority, true)
             reportManagedServiceStartup({
               pluginId: state.access.pluginIdentity.pluginId,
@@ -371,73 +411,20 @@ export class ManagedServiceNodeHost {
         }
       })
       for (const operation of pendingGroups) inFlight.add(operation)
-      await Promise.all(pendingGroups)
-      signal.throwIfAborted()
-      inFlight.clear()
-      const sources: ManagedServiceNodeSourceBinding[] = []
-      for (const state of states) {
-        if (failed.has(state)) continue
-        const identity: ManagedServiceIdentityV1 = {
-          source: state.access.pluginIdentity.source as `https://${string}`,
-          pluginId: state.access.pluginIdentity.pluginId,
-          serviceId: state.access.declaration.id,
-        }
-        const handle = this.runtime.getRegistrationHandle(identity)
-        if (handle === undefined) continue
-        const authMode = this.runtime.getAuthenticationMode(identity) ?? 'none'
-        const declaration = state.access.declaration
-        const sourceOptions = {
-          profileId: this.profileId,
-          runtimeGeneration: this.runtimeGeneration,
-          registrationHandle: handle,
-          healthIntervalMs: this.runtime.getHealthIntervalMs(identity) ?? 30_000,
-          displayName: declaration.id,
-          serviceKind: 'managed-backend',
-          pluginId: identity.pluginId,
-          pluginGeneration: state.access.pluginIdentity.generation,
-          serviceId: identity.serviceId,
-          source: identity.source,
-          authenticationMode: authMode,
-          logoutAvailable: this.runtime.supportsLogout(identity),
-          ...(state.module!.managedServiceUI === undefined
-            ? {}
-            : {
-              extensionFactory: (
-                binding: Parameters<
-                  NonNullable<ManagedServiceNodeModuleV1['managedServiceUI']>['create']
-                >[0]['binding'],
-              ) => {
-                const ui = state.module!.managedServiceUI!
-                if (ui.serviceId !== identity.serviceId || typeof ui.create !== 'function') {
-                  throw new Error('managed service UI source declaration is invalid')
-                }
-                const extension: ManagedServiceNodeUISourceExtensionV1 = ui.create({
-                  binding,
-                  registration: handle,
-                  client: state.binding.client,
-                  signal: state.binding.signal,
-                })
-                if (extension === null || typeof extension !== 'object') {
-                  throw new Error('managed service UI source extension is invalid')
-                }
-                return extension
-              },
-            }),
-        }
-        const source = createManagedServiceSource(sourceOptions)
-        const loginTimeoutMs = this.runtime.getLoginTimeoutMs(identity)
-        sources.push(Object.freeze({
-          pluginId: identity.pluginId,
-          pluginGeneration: state.access.pluginIdentity.generation,
-          serviceId: identity.serviceId,
-          ...(loginTimeoutMs === undefined ? {} : { loginTimeoutMs }),
-          source,
-        }))
-      }
+      const adopted = Promise.all(pendingGroups).then(() => {
+        signal.throwIfAborted()
+      })
+      const coreReady = Promise.all(
+        pendingGroups.filter((_, index) => groups[index]!.some(state => state.access.startup === undefined)),
+      ).then(() => {
+        signal.throwIfAborted()
+      })
+      void adopted.catch(() => undefined)
+      void coreReady.catch(() => undefined)
 
       const runtime = this.runtime
       let remainingGroups = groups.length
-      const activations = groups.map(group => {
+      const activations = groups.map((group, index) => {
         const pluginIds = Object.freeze([...new Set(group.map(state => state.access.pluginIdentity.pluginId))])
         const nativeSessions = new Set<NativeManagedGatewayConnectionSession>()
         let groupDisposal: Promise<void> | undefined
@@ -450,6 +437,7 @@ export class ManagedServiceNodeHost {
             } finally {
               remainingGroups -= 1
               if (remainingGroups === 0) {
+                sourceListeners.clear()
                 preparation.dispose()
                 if (this.startupAuthority === undefined) authority.dispose()
                 await rootContext.fiber.dispose()
@@ -460,6 +448,11 @@ export class ManagedServiceNodeHost {
         }
         const value: ManagedServiceNodeActivationGroup = Object.freeze({
           pluginIds,
+          adopted: pendingGroups[index]!,
+          coreReady: group.some(state => state.access.startup === undefined)
+            ? pendingGroups[index]!
+            : Promise.resolve(),
+          subscribeSources,
           startup: authority,
           retryStartup: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => preparation.retry(ref),
           get exclusiveServiceKeys() {
@@ -469,15 +462,26 @@ export class ManagedServiceNodeHost {
             return runtime.activeLoopbackPorts(pluginIds)
           },
           hostGeneration: group[0]?.access.hostGeneration ?? randomUUID(),
-          authorities: Object.freeze(group.filter(state => !failed.has(state)).map(state => state.binding.authority)),
-          sources: Object.freeze(sources.filter(source => pluginIds.includes(source.pluginId))),
-          get nativeProviderIds() {
-            return runtime.listNativeProviderIds(pluginIds)
+          get authorities() {
+            return adoptedSources.has(group) ? group.map(state => state.binding.authority) : []
           },
-          subscribeNativeProviders: (listener: () => void) => runtime.subscribeNativeProviders(listener),
+          get sources() {
+            return adoptedSources.get(group) ?? []
+          },
+          get nativeProviderIds() {
+            return adoptedSources.has(group) ? runtime.listNativeProviderIds(pluginIds) : []
+          },
+          subscribeNativeProviders: (listener: () => void) => {
+            const stopRuntime = runtime.subscribeNativeProviders(listener)
+            const stopSources = subscribeSources(listener)
+            return () => {
+              stopRuntime()
+              stopSources()
+            }
+          },
           prepareNativeConnection: (providerId: string) => {
             if (
-              !PROVIDER_ID.test(providerId) || groupDisposal !== undefined
+              !PROVIDER_ID.test(providerId) || groupDisposal !== undefined || !adoptedSources.has(group)
               || !runtime.listNativeProviderIds(pluginIds).includes(providerId)
             ) {
               throw new Error('native managed gateway provider is unavailable')
@@ -499,17 +503,32 @@ export class ManagedServiceNodeHost {
       cleanup.push(async () => {
         await Promise.all(activations.map(group => group.dispose()))
       })
+      if (admissions.length === 0) await adopted
       return Object.freeze({
+        adopted,
+        coreReady,
+        subscribeSources,
         groups: Object.freeze(activations),
         startup: authority,
         retryStartup: (ref: import('@cordisx/protocol/startup/v1').StartupCapabilityRefV1) => preparation.retry(ref),
         hostGeneration: accesses[0]?.hostGeneration ?? randomUUID(),
-        authorities: Object.freeze(activations.flatMap(group => group.authorities)),
-        sources: Object.freeze(sources),
+        get authorities() {
+          return activations.flatMap(group => group.authorities)
+        },
+        get sources() {
+          return activations.flatMap(group => group.sources)
+        },
         get nativeProviderIds() {
           return activations.flatMap(group => group.nativeProviderIds)
         },
-        subscribeNativeProviders: (listener: () => void) => runtime.subscribeNativeProviders(listener),
+        subscribeNativeProviders: (listener: () => void) => {
+          const stopRuntime = runtime.subscribeNativeProviders(listener)
+          const stopSources = subscribeSources(listener)
+          return () => {
+            stopRuntime()
+            stopSources()
+          }
+        },
         prepareNativeConnection: (providerId: string) => {
           const group = activations.find(group => group.nativeProviderIds.includes(providerId))
           if (group === undefined || cleanupPromise !== undefined) {
@@ -576,6 +595,7 @@ export class ManagedServiceNodeHost {
     providers: ReadonlyMap<string, ProviderState>,
     cleanup: (() => void | Promise<void>)[],
   ): Promise<void> {
+    state.controller.signal.throwIfAborted()
     const apply = state.module!.apply
     const requested = injectionNames(apply)
     const values = new Map<string, unknown>([['managedServices', state.binding.registry]])
@@ -614,6 +634,7 @@ export class ManagedServiceNodeHost {
     cleanup.push(async () => await providerFiber.dispose())
     await providerFiber
     const plugin: Plugin.Function = async context => {
+      state.controller.signal.throwIfAborted()
       state.context = context as unknown as ManagedServiceServiceContextV1
       await apply(state.context, {
         owner: state.binding.owner,

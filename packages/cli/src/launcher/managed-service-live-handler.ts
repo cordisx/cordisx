@@ -1,0 +1,41 @@
+import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
+import { createManagedServiceUIBridgeHandler, type ManagedServiceUIBridgeHandler } from './managed-service-ui-rpc.js'
+
+/** Keep the observation handler/token stable while the owner's component adopts. */
+export function managedServiceLiveHandler(
+  observation: ManagedServiceUIBridgeHandler,
+  readSources: () => ManagedServiceNodeActivation['sources'],
+  readNativeProviders: () => Promise<readonly unknown[]>,
+): ManagedServiceUIBridgeHandler {
+  let execution: ManagedServiceUIBridgeHandler | undefined
+  let disposed = false
+  return {
+    token: observation.token,
+    profileId: observation.profileId,
+    generation: observation.generation,
+    async handle(owner, request) {
+      if (disposed) throw new Error('managed service owner disposed')
+      if (String(request.operation).startsWith('startup')) return await observation.handle(owner, request)
+      const services = readSources()
+      if (services.length === 0) throw new Error('managed service owner adoption pending or unavailable')
+      if (execution === undefined) {
+        execution = createManagedServiceUIBridgeHandler({
+          token: observation.token,
+          profileId: observation.profileId,
+          generation: observation.generation,
+          services,
+          readNativeProviders,
+        })
+      }
+      return await execution.handle(owner, request)
+    },
+    async disposeOwner(owner) {
+      disposed = true
+      await Promise.all([observation.disposeOwner(owner), execution?.disposeOwner(owner)])
+    },
+    async dispose() {
+      disposed = true
+      await Promise.all([observation.dispose(), execution?.dispose()])
+    },
+  }
+}
