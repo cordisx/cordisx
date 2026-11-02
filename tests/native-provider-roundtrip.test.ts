@@ -57,6 +57,8 @@ async function harness() {
     rendererGeneration: 'renderer',
   }, channel)
   if (!transport) throw new Error('transport unavailable')
+  // connect installs the transport immediately; these cases require completed initial reads.
+  await new Promise(resolve => setTimeout(resolve, 0))
   const resume = (id: string, provider: string, threadId = 'thread') => {
     dom.window.dispatchEvent(
       new dom.window.CustomEvent('codex-message-from-view', {

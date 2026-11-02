@@ -105,6 +105,8 @@ async function harness(options: {
     rendererGeneration: 'renderer',
   }, channel)
   if (transport === undefined) throw new Error('transport unavailable')
+  // connect installs the transport immediately; these cases require completed initial reads.
+  await new Promise(resolve => setTimeout(resolve, 0))
   const source = () =>
     transport.getSnapshot() as ReturnType<typeof transport.getSnapshot> & {
       readonly nativeModelsProviderId?: string

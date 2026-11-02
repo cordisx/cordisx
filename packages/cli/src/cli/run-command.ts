@@ -978,7 +978,6 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     await supervisorRuntime.close()
     await nativeSubmissionCompletion?.catch(() => undefined)
     await nativeSubmission?.close().catch(() => undefined)
-    await nativeSubmissionBootstrap?.close().catch(() => undefined)
     await serviceCleanup?.catch(() => undefined)
     await pluginGenerationArtifactServer?.close()
     await certifiedPermissionAuthority?.dispose()

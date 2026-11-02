@@ -7,7 +7,7 @@ import {
   NATIVE_STARTUP_MARK_SELECTOR,
   NATIVE_STARTUP_SURFACE,
 } from '../packages/cli/src/renderer/adapter/startup-presentation.js'
-import { readNativeStartupReadiness } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
+import { nativeStartupReadinessSource } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
 import { releaseReadyStartup } from '../packages/cli/src/shortcuts/startup-release.js'
 
 const css = await readFile(new URL('../packages/cli/native/startup-cover.css', import.meta.url), 'utf8')
@@ -74,7 +74,7 @@ test('first native shell removes the cover and input barrier before editor, mode
     root.querySelector('button').addEventListener('click', () => clicks++)
     root.querySelector('button').click()
     assert.equal(clicks, 1)
-    const result = await w.eval(`(${readNativeStartupReadiness.toString()})(undefined)`)
+    const result = await w.eval(`(${nativeStartupReadinessSource()})(undefined)`)
     assert.equal(result.ready, false)
     assert.equal(result.reason, 'native-controls-pending')
     assert.equal(api.release(api.snapshot().receipt, { receipt: api.snapshot().receipt, hostUsable: true }), false)
@@ -145,12 +145,12 @@ test('full runtime readiness remains independent and releases the same presented
     await flush()
     const receipt = api.snapshot().receipt
     root.querySelector('[data-vscode-context]').innerHTML =
-      '<textarea></textarea><button data-cordisx-model-ready="true">Model</button>'
+      '<textarea></textarea><div class="cxmp-selector" data-cordisx-model-selector-ready="true"><button>Model</button></div>'
     w.__cordisxRuntime = {}
     w.__cordisxBoot = Promise.resolve()
     assert.equal(api.release({ ...receipt, nonce: 'stale' }, ready(receipt)), false)
     const result = await w.eval(
-      `(${releaseReadyStartup.toString()})(${readNativeStartupReadiness.toString()},undefined)`,
+      `(${releaseReadyStartup.toString()})(${nativeStartupReadinessSource()},undefined)`,
     )
     assert.equal(result.released, true)
     assert.equal(result.surface, 'workspace-ready')

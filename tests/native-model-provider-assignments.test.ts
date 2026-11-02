@@ -114,6 +114,8 @@ async function harness(catalog: () => string) {
     rendererGeneration: 'renderer',
   }, channel)
   if (transport === undefined) throw new Error('transport unavailable')
+  // connect installs the transport immediately; these cases require completed initial reads.
+  await new Promise(resolve => setTimeout(resolve, 0))
   return { ...control, dom, transport }
 }
 

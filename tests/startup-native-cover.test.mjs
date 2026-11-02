@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
 import { buildCoverSource } from '../packages/cli/native/startup-cover.cjs'
-import { readNativeStartupReadiness } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
+import { nativeStartupReadinessSource } from '../packages/cli/src/renderer/adapter/startup-readiness.js'
 import { releaseReadyStartup } from '../packages/cli/src/shortcuts/startup-release.js'
 import { NATIVE_STARTUP_MARK_SELECTOR } from '../packages/cli/src/renderer/adapter/startup-presentation.js'
 
@@ -31,8 +31,9 @@ test('production workspace proof removes the modal and restores input without re
   const dom = await documentFixture()
   const w = dom.window
   try {
-    w.document.body.innerHTML = '<textarea></textarea><button data-cordisx-model-ready="true">Model</button>'
-    for (const element of w.document.querySelectorAll('textarea,button')) {
+    w.document.body.innerHTML =
+      '<textarea></textarea><div class="cxmp-selector" data-cordisx-model-selector-ready="true"><button>Model</button></div>'
+    for (const element of w.document.querySelectorAll('textarea,button,.cxmp-selector')) {
       element.getBoundingClientRect = () => ({ width: 10, height: 10 })
     }
     w.__cordisxRuntime = {}
@@ -47,7 +48,7 @@ test('production workspace proof removes the modal and restores input without re
     w.document.querySelector('button').addEventListener('click', () => clicks++)
     w.document.querySelector('button').click()
     assert.equal(clicks, 0)
-    const proof = await w.eval(`(${readNativeStartupReadiness.toString()})(undefined)`)
+    const proof = await w.eval(`(${nativeStartupReadinessSource()})(undefined)`)
     assert.equal(proof.ready, true)
     assert.equal(proof.surface, 'workspace-ready')
     assert.equal(Object.hasOwn(proof.observations, 'authenticated'), false)
@@ -55,7 +56,7 @@ test('production workspace proof removes the modal and restores input without re
     assert.equal(api.release(proof.receipt, { ...proof.observations, cordisxReady: false }), false)
     assert.equal(api.release(proof.receipt, { ...proof.observations, receipt: { nonce: 'wrong-document' } }), false)
     const released = await w.eval(
-      `(${releaseReadyStartup.toString()})(${readNativeStartupReadiness.toString()},undefined)`,
+      `(${releaseReadyStartup.toString()})(${nativeStartupReadinessSource()},undefined)`,
     )
     assert.equal(released.released, true)
     assert.ok(released.releasedAt >= w.performance.timeOrigin)
@@ -65,6 +66,38 @@ test('production workspace proof removes the modal and restores input without re
     w.document.querySelector('button').click()
     assert.equal(clicks, 1)
     assert.equal(w.document.querySelector('dialog'), null)
+  } finally {
+    w.close()
+  }
+})
+
+test('serialized workspace proof rejects visible native modals, hidden controls and disconnected selectors', async () => {
+  const dom = await documentFixture()
+  const w = dom.window
+  try {
+    w.document.body.innerHTML =
+      '<textarea></textarea><div class="cxmp-selector" data-cordisx-model-selector-ready="true"><button>Model</button></div>'
+    for (const element of w.document.querySelectorAll('textarea,button,.cxmp-selector')) {
+      element.getBoundingClientRect = () => ({ width: 10, height: 10 })
+    }
+    w.__cordisxRuntime = {}
+    w.__cordisxBoot = Promise.resolve()
+    const read = () => w.eval(`(${nativeStartupReadinessSource()})(undefined)`)
+    assert.equal((await read()).ready, true)
+    const nativeModal = w.document.createElement('div')
+    nativeModal.setAttribute('role', 'dialog')
+    nativeModal.setAttribute('aria-modal', 'true')
+    nativeModal.getClientRects = () => [{ width: 10, height: 10 }]
+    w.document.body.append(nativeModal)
+    assert.equal((await read()).ready, false)
+    nativeModal.remove()
+    const selector = w.document.querySelector('.cxmp-selector')
+    selector.style.visibility = 'hidden'
+    assert.equal((await read()).ready, false)
+    selector.style.visibility = 'visible'
+    assert.equal((await read()).ready, true)
+    selector.remove()
+    assert.equal((await read()).ready, false)
   } finally {
     w.close()
   }

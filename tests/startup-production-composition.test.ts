@@ -26,7 +26,12 @@ it('publishes Host observation and answers ordinary caller requirements before d
       return undefined
     },
   })
-  const record = { schemaVersion: 1, revision: 1, runtimeGeneration: 'host', plugins: [] } as never
+  const record = {
+    schemaVersion: 1,
+    revision: 1,
+    runtimeGeneration: 'host',
+    plugins: [{ id: 'plugin', moduleGeneration: 'plugin-generation', enabled: true }],
+  } as never
   const session = await lifecycle.initialize(record)
   const bridge = createStartupHostBridge(lifecycle, 'profile', 'host')
   try {
