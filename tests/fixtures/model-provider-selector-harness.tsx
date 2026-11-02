@@ -40,6 +40,7 @@ export async function setup(model = 'shared', busy = false, options?: {
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
   readonly liveCatalog?: boolean
+  readonly providerIntentResult?: 'accepted' | 'busy' | 'unavailable'
   readonly firstProviderId?: string
   readonly firstProviderTitle?: string
   readonly secondProviderId?: string
@@ -119,12 +120,26 @@ export async function setup(model = 'shared', busy = false, options?: {
       model: target.model,
       pendingProviderId: undefined,
       pendingModel: undefined,
+      pendingProviderIntent: undefined,
       draftPreference: undefined,
     }
     notify()
     return 'accepted' as const
   })
   const selectReasoningEffort = vi.fn(async () => 'accepted' as const)
+  const selectProviderIntent = vi.fn(async (providerId: string) => {
+    const result = options?.providerIntentResult ?? 'accepted'
+    if (result === 'accepted') {
+      snapshot = { ...snapshot, pendingProviderIntent: { providerId, generation: 1 } }
+      notify()
+    }
+    return result
+  })
+  const cancelProviderIntent = vi.fn(async () => {
+    snapshot = { ...snapshot, pendingProviderIntent: undefined }
+    notify()
+    return 'accepted' as const
+  })
   const selectFastMode = vi.fn(async (enabled: boolean) => {
     snapshot = { ...snapshot, serviceTier: enabled ? 'priority' : null }
     notify()
@@ -146,6 +161,8 @@ export async function setup(model = 'shared', busy = false, options?: {
           select,
           selectReasoningEffort,
           selectFastMode,
+          selectProviderIntent,
+          cancelProviderIntent,
           confirmSubmission,
         }}
       />,
@@ -156,6 +173,8 @@ export async function setup(model = 'shared', busy = false, options?: {
     select,
     selectReasoningEffort,
     selectFastMode,
+    selectProviderIntent,
+    cancelProviderIntent,
     snapshot,
     confirmSubmission,
     update: async (patch: Partial<ProviderSelectionSnapshot>) => {

@@ -1,6 +1,7 @@
 import type { ProductCopyCatalog } from './types.js'
 
 export const MODEL_CATALOG_COPY = {
+  'catalog.startup.cancelIntent': { en: 'Cancel service selection', 'zh-CN': '取消服务选择' },
   'catalog.startup.catalogFailed': { en: 'Failed to load models', 'zh-CN': '模型加载失败' },
   'catalog.startup.authFailed': { en: 'Sign-in failed', 'zh-CN': '登录失败' },
   'catalog.startup.authenticating': { en: 'Signing in…', 'zh-CN': '正在登录…' },

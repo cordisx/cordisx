@@ -17,6 +17,7 @@ import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { resolveTargetReasoning } from './native-model-reasoning.js'
+import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-label.js'
 import { ModelStartupStatus } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
 import { managerCopy } from './ui-copy.js'
@@ -55,6 +56,7 @@ export interface ProviderSelectionSnapshot {
   readonly busy: boolean
   readonly pendingProviderId?: string
   readonly pendingModel?: string
+  readonly pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
   readonly confirmation?: NativeProviderSubmitConfirmation
   readonly submissionError?: NativeSubmissionRejection
   readonly draftPreference?: Readonly<{
@@ -74,6 +76,8 @@ export interface ProviderSelectionTransport {
   ): Promise<'accepted' | 'busy' | 'unavailable'>
   selectReasoningEffort(reasoningEffort: string): Promise<'accepted' | 'busy' | 'unavailable'>
   selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'>
+  selectProviderIntent?(providerId: string): Promise<'accepted' | 'busy' | 'unavailable'>
+  cancelProviderIntent?(): Promise<'accepted' | 'busy' | 'unavailable'>
   confirmSubmission?(confirmed: boolean): void
 }
 
@@ -94,11 +98,7 @@ export function selectionModelForProvider(
   return provider.models.find(model => model.id === provider.defaultModelId) ?? provider.models[0]
 }
 
-export function providerMenuLabel(provider: Pick<ModelProviderV1, 'providerId' | 'title'>): string {
-  if (provider.providerId === 'modelhub' && provider.title === 'ModelHub (Native Direct)') return 'ModelHub'
-  if (provider.providerId === 'openrouter' && provider.title === 'OpenRouter (Native Responses)') return 'OpenRouter'
-  return provider.title ?? provider.providerId
-}
+export { providerMenuLabel } from './model-provider-menu-label.js'
 
 const searchTerms = (value: string, locale: string): readonly string[] =>
   value.trim().toLocaleLowerCase(locale).split(/\s+/).filter(Boolean)
@@ -139,31 +139,6 @@ export function nativeModelsForProvider(
   return models.filter(model => assigned.has(model.id))
 }
 
-function ProviderMenuLabel({ provider }: { readonly provider: Pick<ModelProviderV1, 'providerId' | 'title'> }) {
-  const label = providerMenuLabel(provider)
-  const viewport = useRef<HTMLSpanElement>(null)
-  const text = useRef<HTMLSpanElement>(null)
-  const measureOverflow = () => {
-    const viewportNode = viewport.current
-    const textNode = text.current
-    if (viewportNode === null || textNode === null) return
-    const overflow = Math.max(0, textNode.scrollWidth - viewportNode.clientWidth)
-    viewportNode.dataset.overflow = overflow > 0 ? 'true' : 'false'
-    viewportNode.style.setProperty('--cxmp-label-overflow', `${overflow}px`)
-  }
-  return (
-    <span
-      ref={viewport}
-      className="cxmp-provider-label"
-      title={label}
-      onMouseEnter={measureOverflow}
-      onMouseLeave={measureOverflow}
-    >
-      <span ref={text} className="cxmp-provider-label-text">{label}</span>
-    </span>
-  )
-}
-
 export function ModelProviderSelector({ registry, transport, locale, suspended = false }: {
   readonly registry: ModelProviderRegistry
   readonly transport: ProviderSelectionTransport
@@ -180,7 +155,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const [fastActionPending, setFastActionPending] = useState(false)
   const [error, setError] = useState<string>()
   const [status, setStatus] = useState<string>()
-  const [providerIntent, setProviderIntent] = useState<string>()
   const anchor = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<HTMLButtonElement>(null)
   const providerTrigger = useRef<HTMLButtonElement>(null)
@@ -199,6 +173,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     event.stopPropagation()
   }
   const copy = modelProviderCopy(locale)
+  const providerIntent = native.pendingProviderIntent?.providerId
   const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
   const queued = native.nextSend
@@ -402,7 +377,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         setStatus(undefined)
         setError(result === 'busy' ? copy.busy : copy.failed)
       } else {
-        setProviderIntent(undefined)
         setStatus(undefined)
       }
     } catch {
@@ -418,6 +392,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     // A newly discovered member must not turn a catalog update into a native selection.
     if (!canInteract()) return
     const preference = native.draftPreference
+    if (providerIntent !== undefined) return
     if (registry.hasLiveSource() && preference?.model === undefined) return
     if (preference === undefined || native.threadId !== undefined || pendingProviderId !== undefined) return
     const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
@@ -446,6 +421,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     native.nativeModelAssignments,
     native.nativeModels,
     pendingProviderId,
+    providerIntent,
     native.threadId,
     registry,
     suspended,
@@ -454,6 +430,27 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
 
   const choose = (provider: Pick<ModelProviderV1, 'providerId'>, model: ModelProviderModelV1) => {
     void apply(provider, model)
+  }
+
+  const changeProviderIntent = async (providerId?: string) => {
+    if (!canInteract() || switching) return
+    const run = providerId === undefined
+      ? transport.cancelProviderIntent?.bind(transport)
+      : transport.selectProviderIntent?.bind(transport, providerId)
+    if (!run) return
+    const generation = ++operation.current
+    setSwitching(true)
+    setError(undefined)
+    try {
+      const result = await run()
+      if (generation !== operation.current) return
+      if (result !== 'accepted') setError(result === 'busy' ? copy.busy : copy.failed)
+      else setOpen(providerId === undefined ? 'provider' : 'model')
+    } catch {
+      if (generation === operation.current) setError(copy.failed)
+    } finally {
+      if (generation === operation.current) setSwitching(false)
+    }
   }
 
   const close = () => {
@@ -693,14 +690,18 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     aria-checked={row.provider.providerId === displayedProviderId}
                     data-menu-initial={row.provider.providerId === displayedProviderId || undefined}
                     disabled={switching || native.selectionLocked
-                      || ('intentAvailable' in row && row.intentAvailable ? false : !native.available || !row.usable)}
+                      || ('intentAvailable' in row && row.intentAvailable
+                        ? row.kind === 'catalog' && row.provider.startup
+                            && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))
+                          ? !transport.selectProviderIntent
+                          : !native.available || !row.usable
+                        : !native.available || !row.usable)}
                     onClick={() => {
                       if (
                         row.kind === 'catalog' && row.provider.startup
                         && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))
                       ) {
-                        setProviderIntent(row.provider.providerId)
-                        setOpen('model')
+                        void changeProviderIntent(row.provider.providerId)
                         return
                       }
                       if (row.kind === 'native') {
@@ -760,6 +761,18 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
             )
             : (
               <>
+                {providerIntent && transport.cancelProviderIntent
+                  ? (
+                    <button
+                      type="button"
+                      className="cxmp-menu-heading"
+                      disabled={switching}
+                      onClick={() => void changeProviderIntent()}
+                    >
+                      {managerCopy(locale, 'catalog.startup.cancelIntent')}
+                    </button>
+                  )
+                  : null}
                 {reasoningEfforts.length > 0 || displayedNativeModel !== undefined
                   ? (
                     <div className="cxmp-model-controls">
