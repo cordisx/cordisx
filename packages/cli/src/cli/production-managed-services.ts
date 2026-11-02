@@ -39,6 +39,7 @@ export function createProductionManagedServiceLifecycle(input: {
               },
               service.id,
               input.generation,
+              plugin.config,
             )]
             : []
         )
