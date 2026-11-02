@@ -72,7 +72,10 @@ it('carries startup authorization through the production bundle and registers a 
     __cordisxBoot: Promise<void>
     startupFixture?: StartupObserverV1
     __cordisxRuntime: {
-      snapshot(): { plugins: readonly { id: string; status: string }[]; pages: readonly { id: string }[] }
+      snapshot(): {
+        plugins: readonly { id: string; status: string }[]
+        navigation: { pages: readonly { qualifiedId: string }[] }
+      }
       dispose(): Promise<void>
     }
   }
@@ -95,8 +98,8 @@ it('carries startup authorization through the production bundle and registers a 
       )
     }
     expect(globals.__cordisxRuntime.snapshot().plugins).toMatchObject([{ id: owner.pluginId, status: 'active' }])
-    expect(globals.__cordisxRuntime.snapshot().pages).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'startup-status' })]),
+    expect(globals.__cordisxRuntime.snapshot().navigation.pages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ qualifiedId: `${owner.pluginId}:startup-status` })]),
     )
     expect((await globals.startupFixture!.read()).cursor.scopeId).toBe('startup-owner')
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
