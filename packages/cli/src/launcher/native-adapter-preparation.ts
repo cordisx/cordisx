@@ -132,7 +132,7 @@ export function startNativeAdapterPreparation(
         rejected: result.analysis.rejected,
       }, signal)
       checkPreparationSignal(signal)
-      if (!result.cacheHit) {
+      if (!result.cacheHit && result.cacheable) {
         await writeAnalysisCache(path.join(cacheDirectory, `${result.analysis.identity}.json`), result.analysis, signal)
           .catch(error => {
             checkPreparationSignal(signal)

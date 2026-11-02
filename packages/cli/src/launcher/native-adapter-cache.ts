@@ -9,10 +9,11 @@ import { TransformMaterializationSession } from './codex-adapter/materialization
 import { checkPreparationSignal } from './codex-adapter/preparation-error.js'
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 2
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 11
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 12
 const SHA256 = /^[a-f0-9]{64}$/u
 
 export interface CachedNativeTransform {
+  readonly outputContract?: 'fixed-original-v1'
   readonly taskExecutionUrl?: string
   readonly url: string
   readonly sha256: string
@@ -63,7 +64,8 @@ function validCachedTransform(
   if (!value || typeof value !== 'object') return false
   const transform = value as CachedNativeTransform
   const resource = resources.find(candidate => candidate.url === transform.url)
-  return resource !== undefined
+  return transform.outputContract === 'fixed-original-v1'
+    && resource !== undefined
     && transform.sha256 === digest(resource.source)
     && typeof transform.source === 'string'
     && SHA256.test(transform.sourceSha256)
@@ -192,6 +194,7 @@ function captureTransforms(
       throw new Error(`Native transform is not exact: ${transform.url}`)
     }
     return {
+      ...(transform.outputContract === undefined ? {} : { outputContract: transform.outputContract }),
       url: transform.url,
       sha256: transform.sha256,
       source: result.source,
@@ -210,7 +213,7 @@ export async function discoverNativeAdapterAnalysis(
   cacheDirectory: string,
   adapterIdentity: string,
   candidates: readonly AdapterCandidate[],
-): Promise<{ analysis: NativeSubmissionAnalysisCache; cacheFile: string; cacheHit: boolean }> {
+): Promise<{ analysis: NativeSubmissionAnalysisCache; cacheFile: string; cacheHit: boolean; cacheable: boolean }> {
   const analysisIdentity = cacheIdentity(identity.appVersion, identity.buildNumber, resources, adapterIdentity)
   const cacheFile = path.join(cacheDirectory, `${analysisIdentity}.json`)
   const cached = await readAnalysisCache(cacheFile, analysisIdentity, resources)
@@ -222,13 +225,14 @@ export async function discoverNativeAdapterAnalysis(
         && Array.isArray(candidate.bundle.modules) && candidate.bundle.modules.some(entry => entry.id === module.id)
       )
     )
-  ) return { analysis: cached, cacheFile, cacheHit: true }
+  ) return { analysis: cached, cacheFile, cacheHit: true, cacheable: true }
   const session = new TransformMaterializationSession()
   const discovered = selectAdapterModules(candidates, { ...identity, resources }, session)
   const captured = captureTransforms(discovered.transforms, resources, session)
   return {
     cacheFile,
     cacheHit: false,
+    cacheable: captured.every(transform => transform.outputContract === 'fixed-original-v1'),
     analysis: {
       schemaVersion: NATIVE_SUBMISSION_CACHE_SCHEMA,
       analyzerVersion: NATIVE_SUBMISSION_ANALYZER_VERSION,

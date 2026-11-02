@@ -23,7 +23,7 @@ export async function analyzeNativeAdapterResources(
   cacheDirectory: string,
   runtime: AdapterRuntime,
 ) {
-  const { analysis, cacheFile, cacheHit } = await discoverNativeAdapterAnalysis(
+  const { analysis, cacheFile, cacheHit, cacheable } = await discoverNativeAdapterAnalysis(
     resources,
     identity,
     cacheDirectory,
@@ -36,7 +36,7 @@ export async function analyzeNativeAdapterResources(
     modules: analysis.modules,
     rejected: analysis.rejected,
   })
-  if (!cacheHit) await writeAnalysisCache(cacheFile, analysis).catch(() => undefined)
+  if (!cacheHit && cacheable) await writeAnalysisCache(cacheFile, analysis).catch(() => undefined)
   return {
     transforms,
     adapterLifecycle,

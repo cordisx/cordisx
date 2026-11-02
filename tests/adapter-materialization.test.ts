@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { discoverNativeAdapterAnalysis, writeAnalysisCache } from '../packages/cli/src/launcher/native-adapter-cache.js'
 import { expect, it, vi } from 'vitest'
 import type { AdapterBundle, AdapterModule, NativeResourceTransform } from '../packages/codex-adapter/src/contracts.js'
 import { fixedNativeTransform } from '../packages/codex-adapter/src/fixed-transform.js'
@@ -102,3 +106,34 @@ it('owned task preflight memoizes only the fixed original bytes and freezes the 
   expect(run).toHaveBeenCalledOnce()
   expect(() => fixed.transform(source + ' ')).toThrow('changed')
 })
+
+it.each([false, true])(
+  'does not reuse legacy output or mixed fixed/legacy output across sessions (mixed=%s)',
+  async mixed => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-legacy-materialize-'))
+    const run = vi.fn(output)
+    const { outputContract: _contract, ...legacy } = transform(run)
+    const context = mixed
+      ? { ...input, resources: [...input.resources, { url: 'app://-/assets/b.js', source }] }
+      : input
+    const candidates = [{
+      identity: 'legacy',
+      bundle: bundle([module('submission', () => ({
+        transforms: mixed ? [transform(), { ...legacy, url: 'app://-/assets/b.js' }] : [legacy],
+      }))]),
+    }]
+    try {
+      const first = await discoverNativeAdapterAnalysis(context.resources, context, directory, 'legacy', candidates)
+      expect(first.cacheable).toBe(false)
+      expect(run).toHaveBeenCalledTimes(2)
+      // A captured legacy result is usable for this run but cannot authorize a warm cache hit.
+      await writeAnalysisCache(first.cacheFile, first.analysis)
+      const second = await discoverNativeAdapterAnalysis(context.resources, context, directory, 'legacy', candidates)
+      expect(second.cacheHit).toBe(false)
+      expect(second.cacheable).toBe(false)
+      expect(run).toHaveBeenCalledTimes(4)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  },
+)
