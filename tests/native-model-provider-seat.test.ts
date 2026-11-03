@@ -144,7 +144,36 @@ describe('native model provider seat', () => {
     dom.window.close()
   })
 
-  it('awaits unified menu selection and preserves native rejection', async () => {
+  it.each([true, false])(
+    'awaits unified selection with default action %s and preserves native rejection',
+    async hasDefault => {
+      const dom = new JSDOM('<!doctype html><body></body>')
+      const { trigger } = composer(dom.window.document)
+      const fiber = (trigger as unknown as Record<string, unknown>)['__reactFiber$test'] as {
+        return: { memoizedProps: Record<string, unknown> }
+      }
+      const props = fiber.return.memoizedProps
+      delete props.onSelectReasoningEffort
+      props.onSelectComplete = () => {}
+      props.onBeforeSelectModel = () => true
+      if (hasDefault) props.onSelectDefault = () => {}
+      let finish!: (accepted: boolean) => void
+      props.onSelectModel = vi.fn(() =>
+        new Promise<boolean>(resolve => {
+          finish = resolve
+        })
+      )
+      const control = locateNativeModelSelectionControl(trigger)!
+      const pending = control.selectModel('model-a', 'high')
+      finish(false)
+      await expect(pending).rejects.toThrow('Native model update was rejected')
+      delete props.onBeforeSelectModel
+      expect(locateNativeModelSelectionControl(trigger)).toBeUndefined()
+      dom.window.close()
+    },
+  )
+
+  it('rejects a malformed optional default action in the unified menu owner', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const { trigger } = composer(dom.window.document)
     const fiber = (trigger as unknown as Record<string, unknown>)['__reactFiber$test'] as {
@@ -154,18 +183,7 @@ describe('native model provider seat', () => {
     delete props.onSelectReasoningEffort
     props.onSelectComplete = () => {}
     props.onBeforeSelectModel = () => true
-    props.onSelectDefault = () => {}
-    let finish!: (accepted: boolean) => void
-    props.onSelectModel = vi.fn(() =>
-      new Promise<boolean>(resolve => {
-        finish = resolve
-      })
-    )
-    const control = locateNativeModelSelectionControl(trigger)!
-    const pending = control.selectModel('model-a', 'high')
-    finish(false)
-    await expect(pending).rejects.toThrow('Native model update was rejected')
-    delete props.onSelectDefault
+    props.onSelectDefault = 'invalid'
     expect(locateNativeModelSelectionControl(trigger)).toBeUndefined()
     dom.window.close()
   })
