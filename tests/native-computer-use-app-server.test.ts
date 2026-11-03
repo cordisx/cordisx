@@ -112,6 +112,7 @@ if(m.id!==undefined) console.log(JSON.stringify({id:m.id,result:{method:m.method
         child.stdin.write(`${initialize.slice(31)}\n${JSON.stringify({ method: 'initialized', params: {} })}\n`)
         child.stdin.write(`${JSON.stringify({ id: 2, method: 'configRequirements/read', params: null })}\n`)
         child.stdin.write(`${JSON.stringify({ id: 3, method: 'account/read', params: { refreshToken: false } })}\n`)
+        child.stdin.write(`${JSON.stringify({ id: 7, method: 'config/read', params: { includeLayers: false } })}\n`)
         for (const [id, method] of [[4, 'thread/start'], [5, 'turn/start'], [6, 'config/value/write']] as const) {
           child.stdin.write(`${JSON.stringify({ id, method, params: {} })}\n`)
         }
@@ -122,6 +123,7 @@ if(m.id!==undefined) console.log(JSON.stringify({id:m.id,result:{method:m.method
           'initialize',
           'configRequirements/read',
           'account/read',
+          'config/read',
         ])
         for (const message of messages.filter(m => m.result)) {
           expect(message.result.args).toEqual(args)

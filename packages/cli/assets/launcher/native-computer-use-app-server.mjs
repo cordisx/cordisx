@@ -19,7 +19,14 @@ export function startComputerUseAppServer(args, input) {
     child.stdin.destroy()
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
   }
-  const allowed = new Set(['initialize', 'initialized', 'account/read', 'getAuthStatus', 'configRequirements/read'])
+  const allowed = new Set([
+    'initialize',
+    'initialized',
+    'account/read',
+    'getAuthStatus',
+    'configRequirements/read',
+    'config/read',
+  ])
   const nativeRequests = new Set()
   const forward = line => {
     let message
