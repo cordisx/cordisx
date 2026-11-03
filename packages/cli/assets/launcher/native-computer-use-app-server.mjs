@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
+import { nativeCliPath } from './native-cli-path.mjs'
 
 /** Native identity/policy queries have their own lifetime, never chat's single control peer. */
 export function startComputerUseAppServer(args, input) {
-  const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
-  if (!executable?.startsWith('/')) throw new Error('Native CLI path is not configured')
+  const executable = nativeCliPath()
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('CORDISX_NATIVE_') || key === 'CODEX_CLI_PATH') delete environment[key]

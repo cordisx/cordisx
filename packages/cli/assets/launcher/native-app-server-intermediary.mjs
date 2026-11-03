@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process'
 import { nativeCliInvocation } from './native-cli-invocation.mjs'
 import { isComputerUseHelper, nativeInput } from './native-app-server-input.mjs'
+import { nativeCliPath } from './native-cli-path.mjs'
 
 const args = process.argv.slice(2)
 const appServer = nativeCliInvocation(args) === 'app-server-stdio'
@@ -13,8 +14,7 @@ if (appServer) {
   } else await import('./native-app-server-protocol.mjs')
 } else {
   // Version/help and other ordinary CLI calls must never reserve the single app-server control peer.
-  const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
-  if (!executable?.startsWith('/')) throw new Error('Native CLI path is not configured')
+  const executable = nativeCliPath()
   const environment = { ...process.env }
   for (
     const key of [
