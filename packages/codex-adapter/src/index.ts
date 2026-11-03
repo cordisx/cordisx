@@ -5,6 +5,7 @@ import { legacyNativeSubmissionResources } from './native-submission-legacy-reso
 import { nativeAgentTaskTransforms } from './native-agent-task-transform.js'
 import { discoverNativeAccountCapabilityFromSyntax } from './native-account-structure.js'
 import { parseNativeSource, type SyntaxNode } from './native-source-structure.js'
+import { nativeSideChatTransforms } from './native-side-chat-transform.js'
 import { nativeBrowserSessionTransforms } from './native-browser-session-transform.js'
 export type {
   AdapterBundle,
@@ -37,6 +38,7 @@ export const bundle: AdapterBundle = {
     ['accountInfo', 'readAccountInfo'],
     ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
     ['browser-use-session-route-capture', 'addStreamRoleStateCallback'],
+    ['sideConversationParentNavigationPath', 'attachToSource'],
   ],
   modules: [
     {
@@ -45,10 +47,10 @@ export const bundle: AdapterBundle = {
       composes: [],
       analyze({ resources }) {
         const legacy = legacyNativeSubmissionResources(resources)
-        if (legacy) return { transforms: legacy }
+        if (legacy) return { transforms: [...legacy, ...nativeSideChatTransforms(resources)] }
         const result = analyzeNativeSubmissionTransforms(resources)
         syntaxes.set(resources, result.syntaxByResource)
-        return { transforms: result.transforms.map(fixedNativeTransform) }
+        return { transforms: [...result.transforms.map(fixedNativeTransform), ...nativeSideChatTransforms(resources)] }
       },
     },
     {
@@ -122,3 +124,5 @@ export * from './native-lazy-wire-request.js'
 export * from './native-operation-request-transform.js'
 
 export * from './native-submit-orchestrator-transform.js'
+
+export * from './native-side-chat-transform.js'

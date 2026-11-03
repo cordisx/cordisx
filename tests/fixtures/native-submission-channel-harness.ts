@@ -63,7 +63,10 @@ export async function harness(options: Readonly<{
         if (params.expression.includes('__cordisxNativeAgentTask_initial')) {
           return { result: { value: await options.evaluate?.(params.expression) ?? false } }
         }
-        if (params.expression === 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()') {
+        if (
+          params.expression === 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()'
+          || params.expression.startsWith('globalThis.__cordisxNativeSubmissionAuthority?.resolve?.(')
+        ) {
           return { result: { value: { scope: live } } }
         }
         vm.runInNewContext(params.expression, world)

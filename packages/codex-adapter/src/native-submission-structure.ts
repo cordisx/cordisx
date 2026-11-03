@@ -99,10 +99,16 @@ class ResourcePlan {
     if (node?.type !== 'Identifier') throw new Error(`Native capability ${name}: missing local binding`)
     return node.name
   }
-  serviceTier(object: SyntaxNode): void {
+  serviceTier(object: SyntaxNode, context?: string): void {
     const value = properties(object).get('serviceTier')
     if (!value) throw new Error('Native capability serviceTier: missing request field')
-    this.replace(value, `(${tier}==='priority'?'priority':${tier}==='default'?null:${this.text(value)})`)
+    const selectedTier = context === undefined
+      ? tier
+      : `(${context}.__cordisxServiceTier==='priority'||${context}.__cordisxServiceTier==='default'?${context}.__cordisxServiceTier:${tier})`
+    this.replace(
+      value,
+      `(${selectedTier}==='priority'?'priority':${selectedTier}==='default'?null:${this.text(value)})`,
+    )
   }
   addConfig(object: SyntaxNode, token: string): void {
     const value = properties(object).get('config')
@@ -171,7 +177,7 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
     ), 'submit-context')
   plan.insert(
     context.end - 1,
-    `,...(${decision}.operationToken===void 0?{}:{${carrier}:${decision}.operationToken,...(${
+    `,...(${decision}.serviceTier==='priority'||${decision}.serviceTier==='default'?{__cordisxServiceTier:${decision}.serviceTier}:{}),...(${decision}.operationToken===void 0?{}:{${carrier}:${decision}.operationToken,...(${
       JSON.stringify(modelReasoningEfforts)
     }.includes(${decision}.reasoningEffort)?{${reasoningCarrier}:${decision}.reasoningEffort}:{})})`,
   )
@@ -197,7 +203,7 @@ function draftRequest(plan: ResourcePlan, fn: SyntaxNode): void {
   const metadata = properties(request).get('responsesapiClientMetadata')
   if (metadata) plan.replace(metadata, config(token, plan.text(metadata)))
   else plan.insert(request.end - 1, `,...(${token}===void 0?{}:{responsesapiClientMetadata:${config(token)}})`)
-  plan.serviceTier(request)
+  plan.serviceTier(request, context)
   plan.capabilities.push('draft-request')
 }
 
@@ -211,7 +217,7 @@ function existingRequest(plan: ResourcePlan, fn: SyntaxNode): void {
     'existing-request',
   )
   plan.addConfig(request, valid(`${context}.${carrier}`))
-  plan.serviceTier(request)
+  plan.serviceTier(request, context)
   plan.capabilities.push('existing-request')
 }
 
@@ -245,11 +251,11 @@ function normalizedRequest(plan: ResourcePlan, fn: SyntaxNode): void {
     'normalized-request',
   )
   plan.addConfig(request, valid(`${operation}.request.config?.[${JSON.stringify(TOKEN)}]`))
-  plan.serviceTier(request)
+  plan.serviceTier(request, `(${operation}.context??{})`)
   const params = plan.require(fn.body, n =>
     n.type === 'ObjectExpression' && n !== request
     && has(n, ['model', 'effort', 'multiAgentMode', 'serviceTier']), 'normalized-params')
-  plan.serviceTier(params)
+  plan.serviceTier(params, `(${operation}.context??{})`)
   plan.capabilities.push('normalized-request')
 }
 

@@ -5,6 +5,20 @@ const restoredEndpoints = new Map()
 reader.on('line', async line => {
   const message = JSON.parse(line)
   const threadId = message.params?.threadId
+  if (threadId === 'ephemeral-side' && message.method === 'thread/read') {
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        result: { thread: { id: threadId, ephemeral: true, status: { type: 'idle' } } },
+      }) + '\n',
+    )
+    return
+  }
+  if (threadId === 'ephemeral-side' && ['thread/unsubscribe', 'thread/resume'].includes(message.method)) {
+    process.stderr.write('EPHEMERAL_DESTRUCTIVE_SWITCH\n')
+    process.stdout.write(JSON.stringify({ id: message.id, error: { message: 'no rollout' } }) + '\n')
+    return
+  }
   if (message.method === 'thread/unsubscribe' && String(threadId).startsWith('lost-lifecycle-')) return
   if (message.method === 'thread/unsubscribe' && threadId === 'unloaded-pending-lifecycle') return
   if (String(threadId).startsWith('unloaded-')) {
@@ -205,7 +219,9 @@ reader.on('line', async line => {
         id: message.id,
         result: {
           thread: {
-            id: 'created-thread',
+            id: message.method === 'thread/read' && String(threadId).startsWith('managed-')
+              ? threadId
+              : 'created-thread',
             ...(message.method === 'thread/read' ? { status: { type: message.params.threadId } } : {}),
             ...(message.method === 'thread/read' && String(message.params.threadId).startsWith('managed-')
               ? { modelProvider: 'provider-b', model: 'model-b' }

@@ -33,6 +33,7 @@ export interface NativeSubmissionScope {
   readonly targetId: string
   readonly rendererGeneration: string
   readonly navigationGeneration: number
+  readonly composerId?: string
   readonly threadId?: string
 }
 

@@ -818,6 +818,10 @@ readLines(control, line => {
           return
         }
       }
+      // Ephemeral side chats have no rollout to resume. Unsubscribe would destroy
+      // the only live session even when the following resume fails.
+      const current = await nativeCall('thread/read', { threadId: message.threadId, includeTurns: false })
+      if (current?.thread?.ephemeral === true) throw new Error('Ephemeral provider switching requires a new side chat')
       await nativeCall('thread/unsubscribe', { threadId: message.threadId })
       const result = await nativeCall('thread/resume', {
         threadId: message.threadId,

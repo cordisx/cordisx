@@ -44,6 +44,7 @@ export interface ProviderSelectionSnapshot {
   readonly modelLabel?: string | undefined
   readonly providerLabel?: string | undefined
   readonly nativeModels?: readonly NativeProviderModelOption[]
+  readonly providerSwitchAvailable?: boolean
   readonly nativeModelsScope?: 'active-provider' | 'global'
   readonly nativeModelsProviderId?: string
   readonly nativeModelAssignments?: readonly NativeModelAssignment[]
@@ -690,6 +691,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     aria-checked={row.provider.providerId === displayedProviderId}
                     data-menu-initial={row.provider.providerId === displayedProviderId || undefined}
                     disabled={switching || native.selectionLocked
+                      || (native.providerSwitchAvailable === false && row.provider.providerId !== native.modelProvider)
                       || ('intentAvailable' in row && row.intentAvailable
                         ? row.kind === 'catalog' && row.provider.startup
                             && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))

@@ -10,6 +10,7 @@ export interface NativeSubmissionScope {
   readonly targetId: string
   readonly rendererGeneration: string
   readonly navigationGeneration: number
+  readonly composerId?: string
   readonly threadId?: string
 }
 
@@ -119,7 +120,14 @@ export interface MutableNativeSubmitAuthority {
 
 export type NativeSubmitHookResult =
   | Readonly<{ allow: false }>
-  | Readonly<{ allow: true; operationToken?: string; reasoningEffort?: ModelReasoningEffort }>
+  | Readonly<
+    {
+      allow: true
+      operationToken?: string
+      reasoningEffort?: ModelReasoningEffort
+      serviceTier?: 'priority' | 'default'
+    }
+  >
 export type NativeSubmissionRejection = 'unsupported-submission-intent' | 'submission-rejected'
 
 interface ConfirmationWaiter {
@@ -133,6 +141,7 @@ const validToken = (value: unknown): value is string =>
 const sameScope = (left: NativeSubmissionScope, right: NativeSubmissionScope): boolean =>
   left.targetId === right.targetId && left.rendererGeneration === right.rendererGeneration
   && left.navigationGeneration === right.navigationGeneration && left.threadId === right.threadId
+  && left.composerId === right.composerId
 
 const samePending = (
   left: PendingNativeProviderSelection | undefined,

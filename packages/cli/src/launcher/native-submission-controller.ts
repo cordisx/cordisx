@@ -91,10 +91,18 @@ function scopeKey(scope: NativeSubmissionScope): string {
   if (
     scope.targetId.length === 0 || scope.targetId.length > 512
     || scope.rendererGeneration.length === 0 || scope.rendererGeneration.length > 256
+    || (scope.composerId !== undefined && (scope.composerId.length === 0 || scope.composerId.length > 256
+      || /[\0\r\n]/u.test(scope.composerId)))
     || !Number.isSafeInteger(scope.navigationGeneration) || scope.navigationGeneration < 0
     || scope.threadId?.length === 0 || (scope.threadId?.length ?? 0) > 512
   ) throw new Error('native submission scope is invalid')
-  return JSON.stringify([scope.targetId, scope.rendererGeneration, scope.navigationGeneration, scope.threadId ?? null])
+  return JSON.stringify([
+    scope.targetId,
+    scope.rendererGeneration,
+    scope.navigationGeneration,
+    scope.threadId ?? null,
+    scope.composerId ?? null,
+  ])
 }
 
 function sameScope(left: NativeSubmissionScope, right: NativeSubmissionScope): boolean {

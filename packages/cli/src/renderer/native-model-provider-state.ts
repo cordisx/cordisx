@@ -76,6 +76,7 @@ export function patchNativeSelection(
   return {
     available: next.available ?? suspendedAvailability ?? state.available,
     busy,
+    ...(state.providerSwitchAvailable === undefined ? {} : { providerSwitchAvailable: state.providerSwitchAvailable }),
     ...(threadId === undefined ? {} : { threadId }),
     ...(modelProvider === undefined ? {} : { modelProvider }),
     ...(model === undefined ? {} : { model }),

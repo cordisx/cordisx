@@ -96,19 +96,25 @@ export function nativeModelReasoningCapabilities(model: Record<string, unknown> 
 }
 
 /** Locate the native model control by its semantic ownership, not the surrounding layout. */
-export function locateNativeModelProviderSeat(document: Document): NativeModelProviderSeat | undefined {
-  const seat = locateNativeModelProviderMountSeat(document)
+export function locateNativeModelProviderSeat(
+  document: Document,
+  composer?: Element,
+): NativeModelProviderSeat | undefined {
+  const seat = locateNativeModelProviderMountSeat(document, composer)
   return seat && nativeModelProviderInteractionAllowed(seat.trigger) ? seat : undefined
 }
 
 /** Structural ownership survives the Host temporarily isolating its background. */
-export function locateNativeModelProviderMountSeat(document: Document): NativeModelProviderSeat | undefined {
+export function locateNativeModelProviderMountSeat(
+  document: Document,
+  owner?: Element,
+): NativeModelProviderSeat | undefined {
   const candidates = [...document.querySelectorAll<HTMLElement>(
     'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"]',
   )].flatMap(trigger => {
     const composer = trigger.closest<HTMLElement>('[data-codex-composer-root][data-composer-placement]')
     const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')
-    if (!composer || !footer || !composer.contains(footer)) return []
+    if (!composer || !footer || !composer.contains(footer) || (owner !== undefined && composer !== owner)) return []
     if (!visible(trigger) || !visible(composer) || !visible(footer)) return []
     return [{ trigger, footer }]
   })
@@ -129,9 +135,15 @@ export function locateNativeModelProviderMountSeat(document: Document): NativeMo
   return { trigger, group, parent }
 }
 
+/** One independently owned model seat per visible native composer; ambiguity within a composer stays closed. */
+export function nativeModelProviderComposers(document: Document): readonly HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-codex-composer-root][data-composer-placement]')]
+    .filter(composer => locateNativeModelProviderMountSeat(document, composer) !== undefined)
+}
+
 /** Retained background composers must not supply the foreground submission's thread. */
-export function currentNativeComposerThreadId(document: Document): string | undefined {
-  const composer = locateNativeModelProviderMountSeat(document)?.trigger.closest(
+export function currentNativeComposerThreadId(document: Document, owner?: Element): string | undefined {
+  const composer = locateNativeModelProviderMountSeat(document, owner)?.trigger.closest(
     '[data-codex-composer-root][data-composer-placement]',
   )
   if (!composer) return undefined

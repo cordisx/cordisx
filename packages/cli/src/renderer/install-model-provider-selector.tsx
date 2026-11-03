@@ -7,6 +7,7 @@ import { CodexDesktopNativeModelProviderTransport } from './native-model-provide
 import {
   hideNativeModelProviderTrigger,
   locateNativeModelProviderMountSeat,
+  nativeModelProviderComposers,
 } from './adapter/native-model-provider-seat.js'
 import {
   nativeModelProviderInteractionAllowed,
@@ -24,7 +25,7 @@ export function canReplaceNativeModelProviderTrigger(
   return catalog.startup !== undefined || state.available || catalog.providers.length > 0 || catalog.entries.length > 0
 }
 
-/** One Host-owned seat; native controls are restored whenever this seat retires. */
+/** One independently owned selector per native composer, including side chats. */
 export async function installModelProviderSelector(
   document: Document,
   registry: ModelProviderRegistry,
@@ -34,8 +35,78 @@ export async function installModelProviderSelector(
   commandChannel?: NativeProviderSelectionCommandChannel,
 ) {
   if (!nativeManagedModelRoutingAvailable) return () => {}
+  const entries = new Map<HTMLElement, { disposed: boolean; cleanup?: () => void }>()
+  let disposed = false
+  let scheduled = false
+  const reconcile = () => {
+    scheduled = false
+    if (disposed) return
+    const composers = new Set(nativeModelProviderComposers(document))
+    for (const [composer, entry] of entries) {
+      if (composers.has(composer)) continue
+      entry.disposed = true
+      entry.cleanup?.()
+      entries.delete(composer)
+    }
+    for (const composer of composers) {
+      if (entries.has(composer)) continue
+      const entry: { disposed: boolean; cleanup?: () => void } = { disposed: false }
+      entries.set(composer, entry)
+      void installComposerModelProviderSelector(
+        document,
+        composer,
+        `composer-${crypto.randomUUID()}`,
+        registry,
+        locale,
+        rendererOwner,
+        commandChannel,
+      ).then(cleanup => {
+        if (entry.disposed || disposed) cleanup()
+        else entry.cleanup = cleanup
+      })
+    }
+  }
+  const schedule = () => {
+    if (scheduled || disposed) return
+    scheduled = true
+    queueMicrotask(reconcile)
+  }
+  const observer = new MutationObserver(schedule)
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: [...nativeModelProviderObservedAttributes, 'data-composer-placement'],
+  })
+  const refresh = setInterval(() => {
+    void registry.refresh()
+  }, 5_000)
+  void registry.refresh()
+  reconcile()
+  return () => {
+    if (disposed) return
+    disposed = true
+    observer.disconnect()
+    clearInterval(refresh)
+    for (const entry of entries.values()) {
+      entry.disposed = true
+      entry.cleanup?.()
+    }
+    entries.clear()
+  }
+}
+
+async function installComposerModelProviderSelector(
+  document: Document,
+  composer: HTMLElement,
+  composerId: string,
+  registry: ModelProviderRegistry,
+  locale: () => string,
+  rendererOwner?: NativeProviderSelectionOwner,
+  commandChannel?: NativeProviderSelectionCommandChannel,
+) {
   const transport = await CodexDesktopNativeModelProviderTransport.connect(
-    nativeManagedModelRoutingAvailable,
+    true,
     rendererOwner,
     commandChannel,
     (providerId, modelId) => {
@@ -43,6 +114,8 @@ export async function installModelProviderSelector(
       const model = provider?.models.find(model => model.id === modelId)
       return provider === undefined || model === undefined ? undefined : model.reasoningCapabilities ?? null
     },
+    composer,
+    composerId,
   )
   if (!transport) return () => {}
   let root: Root | undefined
@@ -70,7 +143,7 @@ export async function installModelProviderSelector(
     scheduled = false
     if (disposed) return
     const state = transport.getSnapshot()
-    const seat = locateNativeModelProviderMountSeat(document)
+    const seat = locateNativeModelProviderMountSeat(document, composer)
     const catalog = registry.snapshot()
     if (!seat && root && (transport.hasActiveSubmission() || state.submissionError !== undefined)) {
       root.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} suspended />)
@@ -134,16 +207,10 @@ export async function installModelProviderSelector(
   })
   const stopCatalog = registry.subscribe(schedule)
   const stopSelection = transport.subscribe(schedule)
-  const refresh = setInterval(() => {
-    void registry.refresh()
-  }, 5_000)
-  // Installation is independent of directory discovery; pending services must not block core UI.
-  void registry.refresh()
   reconcile()
   return () => {
     if (disposed) return
     disposed = true
-    clearInterval(refresh)
     observer.disconnect()
     stopCatalog()
     stopSelection()
