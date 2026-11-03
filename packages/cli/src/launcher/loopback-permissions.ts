@@ -58,6 +58,24 @@ async function connectBrowserCdpSession(port: number): Promise<CdpSession> {
 
 type LoopbackPermission = { readonly name: string; readonly origin: string }
 
+/** A failed restoration remains actionable until the grant's own browser process has exited. */
+export class ViteLoopbackPermissionRestoreError extends AggregateError {}
+
+/** Remove only process-scoped permission failures after confirmed ownership and exit. */
+export function cleanupErrorAfterOwnedBrowserExit(error: unknown): unknown | undefined {
+  if (error instanceof ViteLoopbackPermissionRestoreError) return undefined
+  if (error instanceof AggregateError) {
+    const errors = error.errors.map(cleanupErrorAfterOwnedBrowserExit).filter(value => value !== undefined)
+    if (errors.length === 0) return undefined
+    if (errors.length === error.errors.length && errors.every((value, index) => value === error.errors[index])) {
+      return error
+    }
+    return new AggregateError(errors, error.message, { cause: error.cause })
+  }
+  if (error instanceof Error && error.cause instanceof ViteLoopbackPermissionRestoreError) return undefined
+  return error
+}
+
 /** Own grants and per-acquisition leases; serialize CDP writes against acquisition and cleanup retries. */
 export class ViteLoopbackPermissionCoordinator {
   readonly #origins = new Map<string, {
@@ -120,7 +138,7 @@ export class ViteLoopbackPermissionCoordinator {
             return
           }
           // An empty lease set still owns the grant until restoration succeeds.
-          throw new AggregateError(
+          throw new ViteLoopbackPermissionRestoreError(
             [targetError, browserError],
             `CordisX could not restore Vite loopback permission for ${permission.origin}`,
           )

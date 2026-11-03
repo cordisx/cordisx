@@ -27,6 +27,7 @@ import type { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import type { PermissionPersistenceContext } from '../launcher/permission-rpc.js'
 import type { CordisXLauncherOptions } from './parse.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import { cleanupErrorAfterOwnedBrowserExit } from '../launcher/loopback-permissions.js'
 import {
   logHostLifecycle,
   observeHostExit,
@@ -281,6 +282,11 @@ export async function runInjectedHost(input: {
     input.signal?.removeEventListener('abort', abort)
     const launchedHost = launched
     const cleanup = await settleInjectedHostCleanup({
+      recoverAfterHostTermination: error =>
+        !input.launcher.attach && launchedHost !== undefined
+          && (launchedHost.exitCode !== null || launchedHost.signalCode !== null)
+          ? cleanupErrorAfterOwnedBrowserExit(error)
+          : error,
       beforeHostTermination: [
         watcher,
         ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),

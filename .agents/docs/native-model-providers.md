@@ -4,6 +4,25 @@ Experimental Host implementation. This is distinct from Provider Fleet's
 separate conversation surface. The public renderer contract is
 [Model Providers V1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/model-providers-v1.md).
 
+## Side conversations
+
+The native composer selector also operates in side conversations. Each visible
+composer owns its provider/model selection, reasoning effort, Fast setting and
+Send scope independently. Switching a side conversation does not change its
+parent conversation's selection.
+
+On Desktop versions that support attached side chats and paginated parent
+history, CordisX uses the native attached conversation path so the same side
+chat can change providers through the normal resume mechanism. These side chats
+retain their history; they are not ephemeral. Older temporary side chats cannot
+resume a different provider and keep that native limitation. CordisX refuses
+the destructive unsubscribe step for an ephemeral thread.
+
+Selectable providers come from the profile's actual configured and managed
+catalogs. Side chats use the same service health, permission and Responses
+compatibility checks as the main composer. A visible provider is not evidence
+that inference succeeded.
+
 ## Ownership
 
 Managed Node plugins register their own service and publish an accepted native
