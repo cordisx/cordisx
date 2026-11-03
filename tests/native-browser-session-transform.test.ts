@@ -4,12 +4,15 @@ import { nativeBrowserSessionTransforms } from '../packages/codex-adapter/src/na
 
 const source =
   `function integrate(scope,manager,dispatch){const capture=({conversationId:id})=>dispatch('browser-use-session-route-capture',{conversationId:id,browserConversationId:scope.resolve(id)});manager.addNotificationCallback('thread/started',({params:{thread}})=>capture({conversationId:thread.id}));manager.addStreamRoleStateCallback((id,state)=>{state?.role==='owner'&&capture({conversationId:id})})}`
-const resource = { url: 'app://-/assets/browser-session.js', source }
+const resource = {
+  url: 'app://-/assets/browser-session.js',
+  source: `${source}\n//# sourceMappingURL=browser-session.js.map`,
+}
 
 describe('native browser session catch-up', () => {
   it('captures only authoritative owners when the browser module loads after resume', () => {
     const transform = nativeBrowserSessionTransforms([resource])[0]!
-    const result = transform.transform(source)
+    const result = transform.transform(resource.source)
     const callbacks: ((id: string, state: unknown) => void)[] = []
     const routes: unknown[] = []
     const roles = new Map([['owned', 'owner'], ['follower', 'follower']])
@@ -60,7 +63,7 @@ describe('native browser session catch-up', () => {
 
   it('retains exact byte identity and validates replacement syntax', () => {
     const transform = nativeBrowserSessionTransforms([resource])[0]!
-    expect(() => transform.transform(`${source};`)).toThrow('Native resource changed')
-    expect(transform.transform(source).anchorMatches).toBe(1)
+    expect(() => transform.transform(`${resource.source};`)).toThrow('Native resource changed')
+    expect(transform.transform(resource.source).anchorMatches).toBe(1)
   })
 })

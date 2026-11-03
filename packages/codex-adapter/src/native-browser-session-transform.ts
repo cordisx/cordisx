@@ -70,7 +70,7 @@ export function nativeBrowserSessionTransforms(
       return {
         source: applySourceEdits(source, [
           { start: fn.body.end - 1, end: fn.body.end - 1, text: insertion },
-          { start: source.length, end: source.length, text: `;globalThis.${marker}={};` },
+          { start: source.length, end: source.length, text: `\n;globalThis.${marker}={};` },
         ]),
         anchorMatches: 1,
         acknowledgementExpression: `typeof globalThis.${marker}==="object"`,
