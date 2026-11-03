@@ -4,10 +4,33 @@ import {
   currentNativeComposerThreadId,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
+  nativeModelProviderComposers,
 } from '../packages/cli/src/renderer/adapter/native-model-provider-seat.js'
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it('resolves main and side composers independently without choosing an ambiguous page-wide seat', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const main = composer(dom.window.document, 'main-thread').trigger.closest<HTMLElement>(
+      '[data-codex-composer-root]',
+    )!
+    const side = composer(dom.window.document, 'side-thread').trigger.closest<HTMLElement>(
+      '[data-codex-composer-root]',
+    )!
+    dom.window.document.body.prepend(main)
+    expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+    expect(nativeModelProviderComposers(dom.window.document)).toEqual([main, side])
+    expect(currentNativeComposerThreadId(dom.window.document, main)).toBe('main-thread')
+    expect(currentNativeComposerThreadId(dom.window.document, side)).toBe('side-thread')
+    const duplicate = side.querySelector('footer')!.cloneNode(true) as HTMLElement
+    duplicate.getBoundingClientRect = side.getBoundingClientRect
+    duplicate.querySelector<HTMLElement>('button')!.getBoundingClientRect = side.getBoundingClientRect
+    side.append(duplicate)
+    expect(nativeModelProviderComposers(dom.window.document)).toEqual([main])
+    expect(currentNativeComposerThreadId(dom.window.document, side)).toBeUndefined()
+    dom.window.close()
+  })
+
   it.each([null, 'foreground-thread'])(
     'reads only the visible %s composer thread when old composers remain mounted',
     threadId => {

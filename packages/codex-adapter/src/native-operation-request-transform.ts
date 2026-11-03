@@ -49,7 +49,7 @@ const DECLARATION_REPLACEMENT =
 const REQUEST_REPLACEMENT = `${
   REQUEST_ANCHOR.replace(
     'serviceTier:l',
-    'serviceTier:globalThis.__cordisxNativeServiceTierOverride===`priority`?`priority`:globalThis.__cordisxNativeServiceTierOverride===`default`?null:l',
+    'serviceTier:i.__cordisxServiceTier===`priority`?`priority`:i.__cordisxServiceTier===`default`?null:globalThis.__cordisxNativeServiceTierOverride===`priority`?`priority`:globalThis.__cordisxNativeServiceTierOverride===`default`?null:l',
   )
 }...(__cxOperationToken===void 0?{}:{config:{${
   JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
@@ -150,7 +150,7 @@ const NEW_THREAD_DECLARATION_REPLACEMENT_9275 =
   };if(D===\`projectless\``
 const NEW_THREAD_REQUEST_REPLACEMENT_9275 = NEW_THREAD_REQUEST_ANCHOR_9275.replace(
   'serviceTier:g',
-  `serviceTier:${SERVICE_TIER_OVERRIDE_9275}g`,
+  `serviceTier:e.__cordisxServiceTier===\`priority\`?\`priority\`:e.__cordisxServiceTier===\`default\`?null:${SERVICE_TIER_OVERRIDE_9275}g`,
 )
 const NEW_THREAD_CONFIG_REPLACEMENT_9275 =
   `threadSource:T,threadStartKind:E,config:__cxOperationToken===void 0?c:{...c,${
@@ -163,14 +163,14 @@ const EXISTING_THREAD_DECLARATION_REPLACEMENT_9275 =
 const EXISTING_THREAD_REQUEST_REPLACEMENT_9275 = `${
   EXISTING_THREAD_REQUEST_ANCHOR_9275.replace(
     'serviceTier:Te',
-    `serviceTier:${SERVICE_TIER_OVERRIDE_9275}Te`,
+    `serviceTier:__cxOperationContext.__cordisxServiceTier===\`priority\`?\`priority\`:__cxOperationContext.__cordisxServiceTier===\`default\`?null:${SERVICE_TIER_OVERRIDE_9275}Te`,
   )
 }...(__cxOperationToken===void 0?{}:{config:{${
   JSON.stringify(NATIVE_OPERATION_TOKEN_CONFIG_KEY)
 }:__cxOperationToken}}),`
 const EXISTING_THREAD_PARAMS_REPLACEMENT_9275 = EXISTING_THREAD_PARAMS_ANCHOR_9275.replace(
   'serviceTier:Te',
-  `serviceTier:${SERVICE_TIER_OVERRIDE_9275}Te`,
+  `serviceTier:__cxOperationContext.__cordisxServiceTier===\`priority\`?\`priority\`:__cxOperationContext.__cordisxServiceTier===\`default\`?null:${SERVICE_TIER_OVERRIDE_9275}Te`,
 )
 const FINAL_TURN_DECLARATION_REPLACEMENT_9275 =
   `function T$t({manager:e,conversationId:t,operation:n,capabilities:r,origin:i,clientUserMessageId:a,createId:o,ownerWindowError:s,onOutcomeUnknown:c,onMessageAdded:l,onInitialTitleRequested:u,readPersistedValue:d},f){let p=n.request,__cxOperationToken=${

@@ -4,6 +4,38 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
 
 describe('native submission document authority', () => {
+  it('keeps simultaneous draft selections separate and validates the exact live composer owner', async () => {
+    const h = await harness()
+    const main = { ...h.draft, composerId: 'main' }
+    const side = { ...h.draft, composerId: 'side' }
+    try {
+      h.setLive(main)
+      const first = await h.channel.selectionRead({
+        scope: main,
+        effective: { providerId: 'openai', model: 'native-main' },
+      })
+      h.setLive(side)
+      const second = await h.channel.selectionRead({
+        scope: side,
+        effective: { providerId: 'openai', model: 'native-side' },
+      })
+      await h.channel.selectionSelect({
+        scope: side,
+        providerId: 'provider-b',
+        model: 'model-b',
+        expectedRevision: second.revision,
+      })
+      expect(h.authority.selection.snapshot(main)).toMatchObject({ effective: first.effective })
+      expect(h.authority.selection.snapshot(main).pending).toBeUndefined()
+      expect(h.authority.selection.snapshot(side).pending).toMatchObject({ providerId: 'provider-b' })
+      await expect(h.channel.selectionRead({ scope: main })).rejects.toThrow()
+      h.setLive({ ...side, navigationGeneration: side.navigationGeneration + 1 })
+      await expect(h.channel.selectionRead({ scope: side })).rejects.toThrow()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('requires native task markers and imports only the Host-discovered execution module', async () => {
     const url = 'app://-/assets/renamed-execution.js'
     const native: Record<string, any> = {}

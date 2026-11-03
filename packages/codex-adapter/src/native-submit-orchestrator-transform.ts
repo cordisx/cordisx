@@ -31,7 +31,7 @@ if(__cxDecision?.allow!==!0)return;
 if(__cxDecision.operationToken!==void 0&&(typeof __cxDecision.operationToken!==\`string\`||__cxDecision.operationToken.length<16||__cxDecision.operationToken.length>256||/[\\0\\r\\n]/u.test(__cxDecision.operationToken)))return;
 }a();`
 const CONTEXT_REPLACEMENT =
-  ';De={...t,...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),threadReferences:n,'
+  ';De={...t,...(__cxDecision.serviceTier===`priority`||__cxDecision.serviceTier===`default`?{__cordisxServiceTier:__cxDecision.serviceTier}:{}),...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),threadReferences:n,'
 
 export const NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT = `globalThis.${MARKER}===${JSON.stringify(VERSION)}`
 export const NATIVE_SUBMIT_ORCHESTRATOR_FENCE =
@@ -90,7 +90,7 @@ if(__cxDecision?.allow!==!0)return;
 if(__cxDecision.operationToken!==void 0&&(typeof __cxDecision.operationToken!==\`string\`||__cxDecision.operationToken.length<16||__cxDecision.operationToken.length>256||/[\\0\\r\\n]/u.test(__cxDecision.operationToken)))return;
 }a();`
 const CONTEXT_REPLACEMENT_BUILD_9275 =
-  'je={...t,...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),threadReferences:n,'
+  'je={...t,...(__cxDecision.serviceTier===`priority`||__cxDecision.serviceTier===`default`?{__cordisxServiceTier:__cxDecision.serviceTier}:{}),...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),threadReferences:n,'
 
 export const NATIVE_SUBMIT_ORCHESTRATOR_ACKNOWLEDGEMENT_BUILD_9275 = `globalThis.${MARKER_BUILD_9275}===${
   JSON.stringify(VERSION_BUILD_9275)
@@ -156,7 +156,7 @@ if(__cxDecision?.allow!==!0)return;
 if(__cxDecision.operationToken!==void 0&&(typeof __cxDecision.operationToken!==\`string\`||__cxDecision.operationToken.length<16||__cxDecision.operationToken.length>256||/[\\0\\r\\n]/u.test(__cxDecision.operationToken)))return;
 }s();`
 const CONTEXT_REPLACEMENT_BUILD_9647 =
-  'Fe={...t,...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),...ue==null?{}:{turnTrigger:ue},artifactFollowupAttributions:je,threadReferences:n,'
+  'Fe={...t,...(__cxDecision.serviceTier===`priority`||__cxDecision.serviceTier===`default`?{__cordisxServiceTier:__cxDecision.serviceTier}:{}),...(__cxDecision.operationToken===void 0?{}:{__cordisxOperationToken:__cxDecision.operationToken}),...ue==null?{}:{turnTrigger:ue},artifactFollowupAttributions:je,threadReferences:n,'
 const SERVICE_TIER_OVERRIDE_BUILD_9647 =
   'globalThis.__cordisxNativeServiceTierOverride===`priority`?`priority`:globalThis.__cordisxNativeServiceTierOverride===`default`?null:'
 const OPERATION_TOKEN_CONFIG_KEY_BUILD_9647 = 'cordisx.operation_token'
@@ -170,14 +170,14 @@ const NEW_THREAD_CONTEXT_REPLACEMENT_BUILD_9647 =
   }:__cxOperationToken});let x=Net`
 const NEW_THREAD_REQUEST_REPLACEMENT_BUILD_9647 = NEW_THREAD_REQUEST_ANCHOR_BUILD_9647.replace(
   'serviceTier:d',
-  `serviceTier:${SERVICE_TIER_OVERRIDE_BUILD_9647}d`,
+  `serviceTier:t.__cordisxServiceTier===\`priority\`?\`priority\`:t.__cordisxServiceTier===\`default\`?null:${SERVICE_TIER_OVERRIDE_BUILD_9647}d`,
 )
 const EXISTING_THREAD_DECLARATION_REPLACEMENT_BUILD_9647 =
   `let N=f==null||D?null:Ode({config:A,permissionSelection:f,runtimeWorkspaceRoots:_}),__cxOperationToken=${VALID_EXISTING_TOKEN_BUILD_9647},P={request:{`
 const EXISTING_THREAD_REQUEST_REPLACEMENT_BUILD_9647 = `${
   EXISTING_THREAD_REQUEST_ANCHOR_BUILD_9647.replace(
     'serviceTier:l',
-    `serviceTier:${SERVICE_TIER_OVERRIDE_BUILD_9647}l`,
+    `serviceTier:i.__cordisxServiceTier===\`priority\`?\`priority\`:i.__cordisxServiceTier===\`default\`?null:${SERVICE_TIER_OVERRIDE_BUILD_9647}l`,
   )
 }...(__cxOperationToken===void 0?{}:{config:{${
   JSON.stringify(OPERATION_TOKEN_CONFIG_KEY_BUILD_9647)

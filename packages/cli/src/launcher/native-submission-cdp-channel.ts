@@ -45,7 +45,13 @@ import type {
 const BINDING = '__cordisxNativeSubmissionCommand'
 const RECEIVER = '__cordisxNativeSubmissionReceive'
 const key = (scope: NativeSubmissionScope): string =>
-  JSON.stringify([scope.targetId, scope.rendererGeneration, scope.navigationGeneration, scope.threadId ?? null])
+  JSON.stringify([
+    scope.targetId,
+    scope.rendererGeneration,
+    scope.navigationGeneration,
+    scope.threadId ?? null,
+    scope.composerId ?? null,
+  ])
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 const text = (value: unknown, max = 512): value is string =>
@@ -56,11 +62,13 @@ function scopeOf(value: unknown): NativeSubmissionScope {
     !scope || !text(scope.targetId) || !text(scope.rendererGeneration, 256)
     || !Number.isSafeInteger(scope.navigationGeneration) || (scope.navigationGeneration as number) < 0
     || (scope.threadId !== undefined && !text(scope.threadId))
+    || (scope.composerId !== undefined && !text(scope.composerId, 256))
   ) throw new Error('Invalid native scope')
   return {
     targetId: scope.targetId,
     rendererGeneration: scope.rendererGeneration,
     navigationGeneration: scope.navigationGeneration as number,
+    ...(typeof scope.composerId === 'string' ? { composerId: scope.composerId } : {}),
     ...(typeof scope.threadId === 'string' ? { threadId: scope.threadId } : {}),
   }
 }
@@ -207,6 +215,7 @@ export function createNativeSubmissionCdpAuthority(options: {
       if (key(source) === key(target)) return states.has(key(source))
       if (
         source.targetId !== target.targetId || source.rendererGeneration !== target.rendererGeneration
+        || source.composerId !== target.composerId
         || source.threadId === undefined || source.threadId !== target.threadId
         || target.navigationGeneration !== source.navigationGeneration + 1
       ) return false
@@ -267,7 +276,9 @@ export function createNativeSubmissionCdpAuthority(options: {
       return undefined
     }
     const response = await owner.session.send('Runtime.evaluate', {
-      expression: 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()',
+      expression: scope.composerId === undefined
+        ? 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()'
+        : `globalThis.__cordisxNativeSubmissionAuthority?.resolve?.(${JSON.stringify(scope)})`,
       returnByValue: true,
     })
     if (response.exceptionDetails) return undefined
@@ -281,7 +292,10 @@ export function createNativeSubmissionCdpAuthority(options: {
     async resolveCreatedScope(draft, threadId) {
       if (draft.threadId !== undefined || !text(threadId)) return undefined
       const live = await liveScope(draft)
-      if (!live || live.targetId !== draft.targetId || live.rendererGeneration !== draft.rendererGeneration) {
+      if (
+        !live || live.targetId !== draft.targetId || live.rendererGeneration !== draft.rendererGeneration
+        || live.composerId !== draft.composerId
+      ) {
         return undefined
       }
       if (key(live) === key(draft)) return { ...draft, threadId }
@@ -297,6 +311,7 @@ export function createNativeSubmissionCdpAuthority(options: {
             || (createdFrom?.threadId === undefined && createdFrom !== undefined && scope.threadId !== undefined
               && key(value) === key(createdFrom) && scope.targetId === createdFrom.targetId
               && scope.rendererGeneration === createdFrom.rendererGeneration
+              && scope.composerId === createdFrom.composerId
               && scope.navigationGeneration === createdFrom.navigationGeneration))
         if (!matches(live)) return false
         if (!requireIdle || scope.threadId === undefined) return true

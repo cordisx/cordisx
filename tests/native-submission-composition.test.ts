@@ -39,6 +39,24 @@ function dispatchManager(sendRequest = vi.fn(async (_method: string, value: unkn
 }
 
 describe('structure-based native submission composition', () => {
+  it('carries each composer Fast choice with its own operation while unrelated global tier changes', async () => {
+    const run = runtime(async () => ({ allow: true, operationToken: token, serviceTier: 'default' }))
+    run.sandbox.__cordisxNativeServiceTierOverride = 'priority'
+    const context = await run.submit()
+    expect(context.__cordisxServiceTier).toBe('default')
+    const draft = await run.sandbox.draft({ context, prompt: 'side draft', serviceTier: 'priority' })
+    expect(draft.serviceTier).toBeNull()
+    const existing = await run.sandbox.existing({
+      context,
+      targetConversationId: 'side-thread',
+      serviceTier: 'priority',
+    })
+    expect(existing.serviceTier).toBeNull()
+    const normalized = await run.sandbox.normalize({}, 'side-thread', { request: existing, context })
+    expect(normalized.request.serviceTier).toBeNull()
+    expect(normalized.params.serviceTier).toBeNull()
+  })
+
   it('keeps menu completion independent of a submit function moved to another resource', async () => {
     const source = resources()
     const split = source[0]!.source.indexOf('let select;')

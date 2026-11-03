@@ -7,12 +7,15 @@ import type {
   NativeProviderSelectionProjection,
 } from '../../packages/cli/src/renderer/native-provider-selection-client.js'
 
+const transports = new Set<CodexDesktopNativeModelProviderTransport>()
 const originals = new Map<string, PropertyDescriptor | undefined>()
 export function install(name: string, value: unknown): void {
   originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name))
   Object.defineProperty(globalThis, name, { configurable: true, writable: true, value })
 }
 afterEach(() => {
+  for (const transport of transports) transport.dispose()
+  transports.clear()
   vi.restoreAllMocks()
   for (const [name, descriptor] of originals) {
     if (descriptor === undefined) delete (globalThis as Record<string, unknown>)[name]
@@ -149,6 +152,7 @@ export async function harness(
     catalogReasoning,
   )
   if (transport === undefined) throw new Error('transport unavailable')
+  transports.add(transport)
   await settle()
   return { ...control, dom, requests, transport, channel }
 }
