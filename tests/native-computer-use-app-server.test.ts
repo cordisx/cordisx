@@ -56,9 +56,12 @@ setTimeout(()=>{process.stdout.write('{} }\\n');process.stdout.write('{"id":"aut
       await rm(root, { recursive: true, force: true })
     }
   })
-  it.each(['codex-computer-use', 'codex-browser-use'])(
+  it.each([{ clientName: 'codex-computer-use', disablePlugins: true }, {
+    clientName: 'codex-browser-use',
+    disablePlugins: true,
+  }, { clientName: 'codex-browser-use', disablePlugins: false }])(
     '%s queries native policy with an occupied chat peer and rejects inference',
-    async clientName => {
+    async ({ clientName, disablePlugins }) => {
       const h = await harness()
       const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cua-server-'))
       const executable = path.join(root, 'native')
@@ -73,7 +76,12 @@ if(m.id!==undefined) console.log(JSON.stringify({id:m.id,result:{method:m.method
 `,
         { mode: 0o700 },
       )
-      const args = ['app-server', '--listen', 'stdio://', '--config', 'features.plugins=false']
+      const args = [
+        'app-server',
+        '--listen',
+        'stdio://',
+        ...(disablePlugins ? ['--config', 'features.plugins=false'] : []),
+      ]
       const child = spawn(process.execPath, [
         path.resolve('packages/cli/assets/launcher/native-app-server-intermediary.mjs'),
         ...args,

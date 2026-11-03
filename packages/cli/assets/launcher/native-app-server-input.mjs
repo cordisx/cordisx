@@ -2,14 +2,8 @@ import { PassThrough } from 'node:stream'
 
 export let nativeInput = process.stdin
 
-/** Inspect only plugin-disabled native helpers; ordinary Desktop startup keeps its existing path. */
+/** Native browser helpers also start without plugin overrides; client identity selects this query channel. */
 export async function isComputerUseHelper(args) {
-  if (
-    !args.some((value, index) =>
-      value === 'features.plugins=false' && ['-c', '--config'].includes(args[index - 1])
-      || value === '--config=features.plugins=false' || value === '-cfeatures.plugins=false'
-    )
-  ) return false
   const replay = new PassThrough()
   replay.once('close', () => process.stdin.destroy())
   nativeInput = replay
