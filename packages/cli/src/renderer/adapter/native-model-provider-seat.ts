@@ -166,7 +166,7 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
       && (typeof props.onSelectReasoningEffort === 'function'
         || (typeof props.onSelectComplete === 'function'
           && typeof props.onBeforeSelectModel === 'function'
-          && typeof props.onSelectDefault === 'function'))
+          && (props.onSelectDefault === undefined || typeof props.onSelectDefault === 'function')))
       && typeof props.onToggleMenuView === 'function'
     ) {
       const models = props.models
