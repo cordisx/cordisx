@@ -66,7 +66,7 @@ export class ViteLoopbackPermissionCoordinator {
   }>()
   #pending: Promise<void> = Promise.resolve()
 
-  constructor(private readonly port: number) {}
+  constructor(private readonly port: number, private readonly ownedHostExited: () => boolean = () => false) {}
 
   private exclusive<Value>(operation: () => Promise<Value>): Promise<Value> {
     const result = this.#pending.then(operation)
@@ -100,6 +100,10 @@ export class ViteLoopbackPermissionCoordinator {
       if (permission === undefined) return
       const current = this.#origins.get(permission.origin)
       if (current === undefined) return
+      if (this.ownedHostExited()) {
+        this.#origins.clear()
+        return
+      }
       // Retrying a failed release must not consume a subsequently acquired renderer's lease.
       current.leases.delete(permission)
       if (current.leases.size > 0) return
@@ -111,6 +115,10 @@ export class ViteLoopbackPermissionCoordinator {
           browser = await connectBrowserCdpSession(this.port)
           await restoreViteLoopbackPermission(browser, current.permission)
         } catch (browserError) {
+          if (this.ownedHostExited()) {
+            this.#origins.clear()
+            return
+          }
           // An empty lease set still owns the grant until restoration succeeds.
           throw new AggregateError(
             [targetError, browserError],

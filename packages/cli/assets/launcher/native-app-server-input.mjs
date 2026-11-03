@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream'
 
 export let nativeInput = process.stdin
 
-/** Inspect only plugin-disabled helpers; ordinary Desktop startup keeps its existing path. */
+/** Inspect only plugin-disabled native helpers; ordinary Desktop startup keeps its existing path. */
 export async function isComputerUseHelper(args) {
   if (
     !args.some((value, index) =>
@@ -42,7 +42,8 @@ export async function isComputerUseHelper(args) {
       let helper = false
       try {
         const first = JSON.parse(buffer.subarray(0, newline).toString('utf8'))
-        helper = first.method === 'initialize' && first.params?.clientInfo?.name === 'codex-computer-use'
+        helper = first.method === 'initialize'
+          && ['codex-computer-use', 'codex-browser-use'].includes(first.params?.clientInfo?.name)
       } catch {}
       replay.write(buffer)
       process.stdin.pipe(replay)
