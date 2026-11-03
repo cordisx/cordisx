@@ -301,6 +301,8 @@ try {
       'dist/assets/launcher/native-provider-credential-helper.mjs',
       'dist/assets/launcher/native-app-server-intermediary.mjs',
       'dist/assets/launcher/native-app-server-protocol.mjs',
+      'dist/assets/launcher/native-app-server-input.mjs',
+      'dist/assets/launcher/native-computer-use-app-server.mjs',
       'dist/codex-adapter/adapter.mjs',
       'dist/codex-adapter/adapter.d.mts',
       'dist/codex-adapter/THIRD_PARTY_NOTICES.md',

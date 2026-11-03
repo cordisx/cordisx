@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
+import { nativeInput } from './native-app-server-input.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -193,7 +194,7 @@ function stop(reason = 'transport-closed') {
   firstTurns.clear()
   agentFirstTurns.clear()
   control.destroy()
-  process.stdin.destroy()
+  nativeInput.destroy()
   child.stdin.destroy()
   if (child.exitCode === null) child.kill('SIGTERM')
 }
@@ -660,7 +661,7 @@ async function recoverUnloadedTurn(id, params, failureLine) {
   }
 }
 
-readLines(process.stdin, line => {
+readLines(nativeInput, line => {
   try {
     turnDiagnostics.queued(JSON.parse(line))
   } catch {}
@@ -669,7 +670,7 @@ readLines(process.stdin, line => {
     await forward(line)
   }).catch(stop)
 })
-process.stdin.once('end', () => {
+nativeInput.once('end', () => {
   nativeLifecycle('desktop-input-ended')
   void inputQueue.finally(() => child.stdin.end())
 })
