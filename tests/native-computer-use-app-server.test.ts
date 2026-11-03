@@ -7,6 +7,55 @@ import { describe, expect, it, vi } from 'vitest'
 import { harness } from './fixtures/native-intermediary-harness.js'
 
 describe('Computer Use auxiliary app-server', () => {
+  it('keeps fragmented native output separate from local rejections and returns native auth responses', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cua-frame-'))
+    const fixture = path.join(root, 'native.mjs')
+    const executable = path.join(root, 'native')
+    await writeFile(executable, `#!/bin/sh\nexec '${process.execPath}' '${fixture}'\n`, { mode: 0o700 })
+    await writeFile(
+      fixture,
+      `import {createInterface} from 'node:readline';
+createInterface({input:process.stdin}).on('line',line=>{
+const m=JSON.parse(line);
+if(m.method==='initialize') {
+process.stdout.write('{"id":1,"result":');process.stderr.write('partial\\n');
+setTimeout(()=>{process.stdout.write('{} }\\n');process.stdout.write('{"id":"auth-refresh","method":"account/chatgptAuthTokens/refresh","params":{}}\\n');},100);
+} else if(m.id==='auth-refresh') console.log(JSON.stringify({id:2,result:{nativeAuthResponse:m.result}}));
+});`,
+    )
+    const entry = path.join(root, 'entry.mjs')
+    const helper = path.resolve('packages/cli/assets/launcher/native-computer-use-app-server.mjs')
+    await writeFile(
+      entry,
+      `import {startComputerUseAppServer} from ${
+        JSON.stringify(new URL(`file://${helper}`).href)
+      };startComputerUseAppServer([],process.stdin)`,
+    )
+    const child = spawn(process.execPath, [entry], {
+      env: { ...process.env, CORDISX_NATIVE_REAL_CODEX_PATH: executable },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    const closed = once(child, 'close')
+    let output = '', errors = ''
+    child.stdout.on('data', chunk => output += String(chunk))
+    child.stderr.on('data', chunk => errors += String(chunk))
+    try {
+      child.stdin.write('{"id":1,"method":"initialize","params":{}}\n')
+      await vi.waitFor(() => expect(errors).toContain('partial'))
+      child.stdin.write('{"id":3,"method":"turn/start","params":{}}\n')
+      await vi.waitFor(() => expect(output).toContain('auth-refresh'))
+      child.stdin.end('{"id":"auth-refresh","result":{"acknowledged":true}}\n')
+      expect(await closed).toEqual([0, null])
+      const messages = output.trim().split('\n').map(line => JSON.parse(line))
+      expect(messages.find(m => m.id === 1)).toEqual({ id: 1, result: {} })
+      expect(messages.find(m => m.id === 3).error.code).toBe(-32601)
+      expect(messages.find(m => m.id === 2).result.nativeAuthResponse).toEqual({ acknowledged: true })
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+      await closed
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('queries native policy with an occupied chat peer, preserves framing, and rejects inference', async () => {
     const h = await harness()
     const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cua-server-'))

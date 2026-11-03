@@ -20,6 +20,7 @@ export function startComputerUseAppServer(args, input) {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
   }
   const allowed = new Set(['initialize', 'initialized', 'account/read', 'getAuthStatus', 'configRequirements/read'])
+  const nativeRequests = new Set()
   const forward = line => {
     let message
     try {
@@ -28,7 +29,8 @@ export function startComputerUseAppServer(args, input) {
       stop()
       return
     }
-    if (allowed.has(message?.method)) {
+    const nativeResponse = message?.method === undefined && nativeRequests.delete(message?.id)
+    if (allowed.has(message?.method) || nativeResponse) {
       if (!child.stdin.write(`${line}\n`)) {
         input.pause()
         child.stdin.once('drain', () => input.resume())
@@ -64,7 +66,43 @@ export function startComputerUseAppServer(args, input) {
   })
   input.once('end', () => buffer.trim() ? stop() : child.stdin.end())
   input.on('error', stop)
-  child.stdout.pipe(process.stdout, { end: false })
+  // Local method rejections share stdout: only complete native frames may cross,
+  // otherwise a partial child write can interleave with the rejection JSON.
+  let output = ''
+  child.stdout.setEncoding('utf8')
+  child.stdout.on('data', chunk => {
+    output += chunk
+    let newline
+    while ((newline = output.indexOf('\n')) >= 0) {
+      const line = output.slice(0, newline)
+      output = output.slice(newline + 1)
+      if (Buffer.byteLength(line) > frameLimit) {
+        stop()
+        return
+      }
+      try {
+        const message = JSON.parse(line)
+        if (typeof message.method === 'string' && (typeof message.id === 'string' || typeof message.id === 'number')) {
+          if (nativeRequests.size >= 64 || nativeRequests.has(message.id)) {
+            stop()
+            return
+          }
+          nativeRequests.add(message.id)
+        }
+      } catch {
+        stop()
+        return
+      }
+      process.stdout.write(`${line}\n`)
+    }
+    if (Buffer.byteLength(output) > frameLimit) stop()
+  })
+  child.stdout.once('end', () => {
+    if (output.trim()) {
+      process.exitCode = 1
+      stop()
+    }
+  })
   child.stdin.on('error', stop)
   process.stdout.on('error', stop)
   child.on('error', () => {
