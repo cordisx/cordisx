@@ -40,6 +40,7 @@ export function nativeSideChatTransforms(
       })
       if (branch.length === 1) candidates.push(branch[0]!.argument.test)
     })
+    if (candidates.length === 0) return []
     if (candidates.length !== 1) throw new Error('Native attached side chat creation is ambiguous')
     const test = candidates[0]!
     if (test.type !== 'Identifier') throw new Error('Native attached side chat gate changed')
