@@ -9,6 +9,31 @@ import {
 } from './fixtures/native-submission-controller-harness.js'
 
 describe('native app-server intermediary', () => {
+  it('rejects an ephemeral provider switch before destroying its live session', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'initialize-ephemeral', method: 'echo/bytes', params: {} })
+      await h.read()
+      await expect(h.server.existingThread.switch({
+        scope: { targetId: 't', rendererGeneration: 'r', navigationGeneration: 0, threadId: 'ephemeral-side' },
+        threadId: 'ephemeral-side',
+        providerId: 'provider-b',
+        model: 'model-b',
+        serviceGeneration: 'g',
+        configOverrides: {},
+      })).rejects.toThrow('Native switch rejected')
+      h.send({ id: 'still-alive', method: 'thread/read', params: { threadId: 'ephemeral-side' } })
+      expect(JSON.parse(await h.read()).result.thread).toMatchObject({
+        id: 'ephemeral-side',
+        ephemeral: true,
+        status: { type: 'idle' },
+      })
+      expect(h.startupEvents().every(event => event.event !== 'EPHEMERAL_DESTRUCTIVE_SWITCH')).toBe(true)
+    } finally {
+      await h.close()
+    }
+  })
+
   it('routes an unmarked configured start through the authenticated Host without replacing authentication', async () => {
     const h = await harness()
     try {

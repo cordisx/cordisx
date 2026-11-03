@@ -270,7 +270,9 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }
 
   async selectProviderIntent(providerId: string): Promise<'accepted' | 'busy' | 'unavailable'> {
-    if (this.disposed || this.modelControl() === undefined) return 'unavailable'
+    if (this.disposed || this.modelControl() === undefined || this.state.providerSwitchAvailable === false) {
+      return 'unavailable'
+    }
     if (this.selectionClient.submissionActive()) return 'busy'
     return this.selectionClient.selectProviderIntent(providerId)
   }
@@ -289,6 +291,9 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   > {
     if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
     if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
+    if (this.state.providerSwitchAvailable === false && target.providerId !== this.state.modelProvider) {
+      return 'unavailable'
+    }
     if (this.selectionClient.snapshot().pendingProviderIntent !== undefined) {
       if (options !== undefined) return 'unavailable'
       return this.selectionClient.select(target)
@@ -619,6 +624,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.confirmNativeModelAssignment(provider, model, nativeModelsScope, control.models)
       this.replaceState({
         available: true,
+        providerSwitchAvailable: thread?.ephemeral !== true,
         busy,
         ...(threadId === undefined ? {} : { threadId }),
         ...(provider === undefined ? {} : { modelProvider: provider }),
