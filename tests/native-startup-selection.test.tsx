@@ -74,8 +74,11 @@ async function setup(failedRead = false) {
     )
   })
   const hook = page.__cordisxNativeSubmitHook
+  const scope = page.__cordisxNativeSubmissionAuthority.snapshot().scope
+  h.setLive(scope)
   return {
     ...h,
+    scope,
     registry,
     hook,
     requests,
@@ -113,8 +116,7 @@ describe('actual selector installation with deferred native initial reads', () =
       expect(document.body.textContent).toContain('Selected · waiting for models')
       expect(await h.hook(send)).toEqual({ allow: false })
       await h.finish()
-      const scope = { ...h.draft, navigationGeneration: 0, threadId: 'thread-1' }
-      expect(h.authority.selection.snapshot(scope)).toMatchObject({
+      expect(h.authority.selection.snapshot(h.scope)).toMatchObject({
         effective: { providerId: 'openai', model: 'model-a' },
         pendingProviderIntent: { providerId: 'first' },
       })
