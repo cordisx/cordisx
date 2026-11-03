@@ -5,6 +5,7 @@ import { legacyNativeSubmissionResources } from './native-submission-legacy-reso
 import { nativeAgentTaskTransforms } from './native-agent-task-transform.js'
 import { discoverNativeAccountCapabilityFromSyntax } from './native-account-structure.js'
 import { parseNativeSource, type SyntaxNode } from './native-source-structure.js'
+import { nativeBrowserSessionTransforms } from './native-browser-session-transform.js'
 export type {
   AdapterBundle,
   AdapterContext,
@@ -35,6 +36,7 @@ export const bundle: AdapterBundle = {
     ['accessInputs', 'readAccountInfo'],
     ['accountInfo', 'readAccountInfo'],
     ['create_thread', 'argumentsValue', 'sourceThreadId', 'parentTurnId'],
+    ['browser-use-session-route-capture', 'addStreamRoleStateCallback'],
   ],
   modules: [
     {
@@ -89,6 +91,14 @@ export const bundle: AdapterBundle = {
         return { accountCapability: candidates[0]! }
       },
     },
+    {
+      id: 'browser-session',
+      requires: [],
+      composes: [],
+      analyze({ resources, transforms }) {
+        return { transforms: [...transforms, ...nativeBrowserSessionTransforms(resources)] }
+      },
+    },
   ],
 }
 
@@ -103,6 +113,7 @@ export * from './native-agent-task-transform.js'
 export * from './native-agent-task-source.js'
 
 export * from './native-source-structure.js'
+export * from './native-browser-session-transform.js'
 
 export * from './native-source-bindings.js'
 

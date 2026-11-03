@@ -2,11 +2,15 @@
 ':' // ; exec "${CORDISX_NATIVE_NODE_PATH:-${CORDISX_NATIVE_REAL_CODEX_PATH%%/Contents/Resources/*}/Contents/Resources/cua_node/bin/node}" "$0" "$@"
 import { spawn } from 'node:child_process'
 import { nativeCliInvocation } from './native-cli-invocation.mjs'
+import { isComputerUseHelper, nativeInput } from './native-app-server-input.mjs'
 
 const args = process.argv.slice(2)
 const appServer = nativeCliInvocation(args) === 'app-server-stdio'
 if (appServer) {
-  await import('./native-app-server-protocol.mjs')
+  if (await isComputerUseHelper(args)) {
+    const { startComputerUseAppServer } = await import('./native-computer-use-app-server.mjs')
+    startComputerUseAppServer(args, nativeInput)
+  } else await import('./native-app-server-protocol.mjs')
 } else {
   // Version/help and other ordinary CLI calls must never reserve the single app-server control peer.
   const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
