@@ -120,6 +120,8 @@ export interface WatchInjectionOptions {
   readonly hasLoopbackGraph?: boolean
   /** Production compatibility reload is restricted to a Host process launched by this watcher. */
   readonly launcherOwnedNativeTarget?: boolean
+  /** Actual launched child exit, never inferred from an unavailable CDP endpoint. */
+  readonly ownedHostExited?: () => boolean
   /** Exact main-agent-proven seed target whose original app navigation remains held. */
   readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
   /** Rebuild the exact current last-good renderer before the first production browser graph is admitted. */
@@ -208,7 +210,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     priorStageAt = now
     options.onStatus?.(stage)
   }
-  const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port)
+  const ownedHostExited = (): boolean =>
+    options.launcherOwnedNativeTarget === true
+    && options.ownedHostExited?.() === true
+  const viteLoopbackPermissions = new support.ViteLoopbackPermissionCoordinator(options.port, ownedHostExited)
   const hostMutationGate = new support.CdpLifecycleRequestGate()
   let fatalProductionGraphError: unknown
   let latestProductionBootstrap: ProductionGraphBootstrap | undefined
@@ -388,6 +393,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           startupStage('target-list-start')
           const listedTargets = await listTargets(options.port)
           startupStage('target-list-ready')
+          if (options.signal.aborted) return
           const candidates = injectableTargets(listedTargets)
           const pendingStartupNavigation = startupNavigationPending ? startupNavigation : undefined
           let startupSeed: CdpTarget | undefined
@@ -428,7 +434,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           for (const [id, record] of installed) {
             if (live.has(id)) continue
             watcherStage = 'target-retired-cleanup'
-            await support.uninstall(record, viteLoopbackPermissions)
+            await support.uninstall(record, viteLoopbackPermissions, ownedHostExited)
             installed.delete(id)
           }
           for (const target of targets) {
@@ -437,7 +443,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             let stale: support.InstalledScript | undefined
             if (current !== undefined) {
               watcherStage = 'target-reconnect-cleanup'
-              await support.uninstall(current, viteLoopbackPermissions)
+              await support.uninstall(current, viteLoopbackPermissions, ownedHostExited)
               installed.delete(target.id)
               stale = current
             }
@@ -571,7 +577,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     lifecycle('watcher-cleanup-started')
     const cleanup = await hostMutationGate.closeAndDrain(async () =>
       await Promise.allSettled(
-        [...installed.values()].map(record => support.uninstall(record, viteLoopbackPermissions)),
+        [...installed.values()].map(record => support.uninstall(record, viteLoopbackPermissions, ownedHostExited)),
       )
     )
     const failures = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : [])

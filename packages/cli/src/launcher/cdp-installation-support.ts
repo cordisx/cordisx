@@ -761,6 +761,7 @@ export async function sendPluginManagementBindingResponse(
 export async function uninstall(
   installed: InstalledScript,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
+  ownedHostExited: () => boolean = () => false,
 ): Promise<void> {
   await installed.startupTransport?.disconnecting(installed.session)
   installed.marketplaceController.abort()
@@ -808,6 +809,10 @@ export async function uninstall(
         ? [cleanupFailure(index === 0 ? 'native-channel' : 'native-interception', result.reason)]
         : []
     )
+    if (ownedHostExited()) {
+      await viteLoopbackPermissions?.release(installed.session, installed.viteLoopbackPermission)
+      return
+    }
     const attemptCleanup = async (stage: string, operation: Promise<unknown>): Promise<boolean> => {
       try {
         await operation
@@ -906,7 +911,7 @@ export async function uninstall(
         await attemptCleanup('clean-reload', installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
       }
     }
-    if (cleanupFailures.length > 0) {
+    if (cleanupFailures.length > 0 && !ownedHostExited()) {
       throw new AggregateError(
         cleanupFailures,
         `CordisX production renderer cleanup was incomplete: ${cleanupFailures.map(error => error.message).join('; ')}`,

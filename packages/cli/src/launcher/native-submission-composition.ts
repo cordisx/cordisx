@@ -1,4 +1,5 @@
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
+import { createNativeCliEntry } from './native-cli-entry.js'
 import { RemoteTerminalProviderClient } from './remote-terminal-provider-client.js'
 import type { ExistingTerminalProviderSource } from './existing-terminal-provider-rpc.js'
 import { StartupRequirementsCoordinator } from '../cli/startup-requirements.js'
@@ -213,6 +214,10 @@ export async function prepareNativeSubmissionBootstrap(
   const node = await resolveBundledCodexNodePath(contents)
   await access(nativeAppServerIntermediaryPath(), constants.X_OK)
   const control = await startNativeSubmissionControlServer()
+  const nativeEntry = await createNativeCliEntry(node, nativeAppServerIntermediaryPath()).catch(async error => {
+    await control.close()
+    throw error
+  })
   const readThreadProvider = async (threadId: string) => {
     const result = await control.nativeRequest('thread/read', { threadId, includeTurns: false }) as {
       thread?: { modelProvider?: string }
@@ -224,7 +229,11 @@ export async function prepareNativeSubmissionBootstrap(
   }
 
   const agentModels = await startNativeAgentModelsServer().catch(async error => {
-    await control.close()
+    try {
+      await control.close()
+    } finally {
+      await nativeEntry.close()
+    }
     throw error
   })
   const lifetime = new AbortController()
@@ -278,13 +287,17 @@ export async function prepareNativeSubmissionBootstrap(
           try {
             await managed?.close()
           } finally {
-            await control.close()
+            try {
+              await control.close()
+            } finally {
+              await nativeEntry.close()
+            }
           }
         }
       }
     })()
   const environment = {
-    CODEX_CLI_PATH: nativeAppServerIntermediaryPath(),
+    CODEX_CLI_PATH: nativeEntry.executable,
     // Dot must not open a second connection to the chat intermediary's control socket.
     CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH: options.environment?.CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH || cli,
     CORDISX_NATIVE_CONTROL_SOCKET: control.socketPath,

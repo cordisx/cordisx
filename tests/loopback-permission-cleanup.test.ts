@@ -8,6 +8,23 @@ afterEach(() => {
 })
 
 describe('pending loopback permission restoration', () => {
+  it('drops process-scoped grants only after the owning Host exit is confirmed', async () => {
+    let exited = false
+    const send = vi.fn().mockResolvedValue({})
+    const session = { send } as unknown as CdpSession
+    const permissions = new ViteLoopbackPermissionCoordinator(1234, () => exited)
+    const lease = await permissions.acquire(session, {
+      id: 'native',
+      type: 'page',
+      title: 'Codex',
+      url: 'app://-/index.html',
+    })
+    exited = true
+    send.mockRejectedValue(new Error('CDP connection is closed'))
+    await expect(permissions.release(session, lease)).resolves.toBeUndefined()
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
   it('serializes concurrent acquisition so releasing one renderer cannot revoke another grant', async () => {
     let finishGrant!: (value: Record<string, unknown>) => void
     const granting = new Promise<Record<string, unknown>>(resolve => {

@@ -178,6 +178,9 @@ export async function runInjectedHost(input: {
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
     hasLoopbackGraph: input.hasLoopbackGraph,
     launcherOwnedNativeTarget: !input.launcher.attach,
+    ownedHostExited: () =>
+      !input.launcher.attach && launched !== undefined
+      && (launched.exitCode !== null || launched.signalCode !== null),
     ...(input.startupNavigation === undefined ? {} : { startupNavigation: input.startupNavigation }),
     ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
     ...(input.productionGraphBootstrap === undefined
