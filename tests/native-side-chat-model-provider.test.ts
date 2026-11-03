@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
 import { composer } from './fixtures/native-model-provider-composer.js'
-import { harness, settle } from './fixtures/native-model-provider-transport-harness.js'
+import { harness, message, settle } from './fixtures/native-model-provider-transport-harness.js'
 import type { NativeProviderSelectionProjection } from '../packages/cli/src/renderer/native-provider-selection-client.js'
 
 it('keeps main and side native controls, selections and Send scopes independent', async () => {
@@ -66,6 +66,36 @@ it('keeps main and side native controls, selections and Send scopes independent'
   } finally {
     first?.dispose()
     second?.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('preserves the native ephemeral limitation across patches and never attempts a destructive provider switch', async () => {
+  const h = await harness((request, view) => {
+    if (request.method !== 'thread/read') return false
+    queueMicrotask(() =>
+      message(view, {
+        type: 'mcp-response',
+        hostId: 'local',
+        message: {
+          id: request.id,
+          result: {
+            thread: { id: 'thread-1', ephemeral: true, modelProvider: 'provider-a', status: { type: 'idle' } },
+          },
+        },
+      })
+    )
+    return true
+  })
+  try {
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, providerSwitchAvailable: false })
+    h.dom.window.document.body.append(h.dom.window.document.createElement('div'))
+    await settle()
+    expect(h.transport.getSnapshot().providerSwitchAvailable).toBe(false)
+    expect(await h.transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('unavailable')
+    expect(h.channel.selectionSelect).not.toHaveBeenCalled()
+  } finally {
+    h.transport.dispose()
     h.dom.window.close()
   }
 })
