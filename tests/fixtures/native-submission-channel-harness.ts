@@ -11,12 +11,13 @@ import { createNativeSubmissionController } from '../../packages/cli/src/launche
 export async function harness(options: Readonly<{
   controllerOptions?: Pick<
     import('../../packages/cli/src/launcher/native-submission-controller.js').NativeSubmissionControllerOptions,
-    'prepareRemoteProvider' | 'providerSource' | 'validateSelection'
+    'prepareRemoteProvider' | 'providerSource' | 'validateSelection' | 'operationTtlMs' | 'now'
   >
   realController?: boolean
   taskExecutionUrl?: string
   evaluate?: (expression: string) => unknown
   submissionAvailable?: boolean
+  documentTimeOrigin?: () => number
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
   defaultModelId?: string
@@ -60,6 +61,9 @@ export async function harness(options: Readonly<{
       }
       if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' }
       if (method === 'Runtime.evaluate') {
+        if (params.expression === 'performance.timeOrigin') {
+          return { result: { value: options.documentTimeOrigin?.() ?? 1_000 } }
+        }
         if (params.expression.includes('__cordisxNativeAgentTask_initial')) {
           return { result: { value: await options.evaluate?.(params.expression) ?? false } }
         }

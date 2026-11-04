@@ -71,6 +71,7 @@ interface PreparedOperation extends PreparedBase {
     threadId?: string
   }>
   boundScope?: NativeSubmissionScope
+  draftDocumentTimeOrigin?: number
 }
 
 interface ActiveBinding {
@@ -241,6 +242,18 @@ export function createNativeSubmissionController(
       return false
     }
   }
+  const revalidateOperationRuntime = async (
+    operation: PreparedOperation,
+    scope: NativeSubmissionScope,
+    requireIdle: boolean,
+  ): Promise<boolean> =>
+    operation.draftDocumentTimeOrigin !== undefined && options.runtime.revalidateDraftDocument !== undefined
+      ? await options.runtime.revalidateDraftDocument(scope, operation.draftDocumentTimeOrigin, requireIdle)
+      : await options.runtime.revalidate(scope, requireIdle, operation.boundScope ? operation.scope : undefined)
+  const createdOperationScope = async (operation: PreparedOperation, threadId: string) =>
+    !validText(threadId, 512) ? undefined : operation.draftDocumentTimeOrigin !== undefined
+      ? { ...operation.scope, threadId }
+      : await options.runtime.resolveCreatedScope(operation.scope, threadId)
   const prepareOperation = async (prepared: PreparedBase): Promise<PreparedOperation | undefined> => {
     let credential: SubmissionLease | undefined
     try {
@@ -282,6 +295,21 @@ export function createNativeSubmissionController(
         await credential.dispose()
         return undefined
       }
+      const draftDocumentTimeOrigin = prepared.scope.threadId === undefined && prepared.scope.composerId !== undefined
+          && options.runtime.captureDraftDocument !== undefined
+        ? await options.runtime.captureDraftDocument(prepared.scope)
+        : undefined
+      if (
+        prepared.scope.threadId === undefined && prepared.scope.composerId !== undefined
+        && options.runtime.captureDraftDocument !== undefined && draftDocumentTimeOrigin === undefined
+      ) {
+        await credential.dispose()
+        return undefined
+      }
+      if (disposed || !revalidateSelection(prepared) || !await validateLease(credential)) {
+        await credential.dispose()
+        return undefined
+      }
       const token = createId()
       if (!validText(token, 256) || token.length < 16 || operations.has(token)) {
         await credential.dispose()
@@ -295,6 +323,7 @@ export function createNativeSubmissionController(
         credential,
         selectionState: 'pending',
         state: 'available',
+        ...(draftDocumentTimeOrigin === undefined ? {} : { draftDocumentTimeOrigin }),
       }
     } catch {
       await credential?.dispose()
@@ -519,6 +548,16 @@ export function createNativeSubmissionController(
               }
             }
             const token = createId()
+            const draftDocumentTimeOrigin = scope.threadId === undefined && scope.composerId !== undefined
+                && options.runtime.captureDraftDocument !== undefined
+              ? await options.runtime.captureDraftDocument(scope)
+              : undefined
+            if (
+              scope.threadId === undefined && scope.composerId !== undefined
+              && options.runtime.captureDraftDocument !== undefined && draftDocumentTimeOrigin === undefined
+            ) {
+              throw new Error('New draft document changed before admission')
+            }
             operations.set(token, {
               scope,
               scopeKey: key,
@@ -532,6 +571,7 @@ export function createNativeSubmissionController(
               serviceGeneration: credential.serviceGeneration,
               selectionState: 'effective',
               state: 'available',
+              ...(draftDocumentTimeOrigin === undefined ? {} : { draftDocumentTimeOrigin }),
             })
             return { kind: 'allow-original', operationToken: token }
           } catch {
@@ -627,7 +667,7 @@ export function createNativeSubmissionController(
         method: request.method,
         ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
       }
-      if (operation.boundScope?.threadId !== undefined) {
+      if (operation.boundScope?.threadId !== undefined && operation.draftDocumentTimeOrigin === undefined) {
         const adopted = await options.runtime.resolveCreatedScope(operation.scope, operation.boundScope.threadId)
         if (
           !adopted || disposed || operations.get(operation.token) !== operation
@@ -642,11 +682,7 @@ export function createNativeSubmissionController(
       if (
         disposed || operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
         || !await validSelection(operation.pending) || !await validateLease(operation.credential)
-        || !await options.runtime.revalidate(
-          currentScope,
-          true,
-          operation.boundScope === undefined ? undefined : operation.scope,
-        )
+        || !await revalidateOperationRuntime(operation, currentScope, true)
         || disposed || operation.expiresAt <= now()
         || operations.get(operation.token) !== operation || operation.state !== 'reserved'
         || !revalidateOperationSelection(operation, currentScope)
@@ -682,11 +718,7 @@ export function createNativeSubmissionController(
       if (
         operation.expiresAt <= now() || !revalidateOperationSelection(operation, currentScope)
         || !await validSelection(operation.pending) || !await validateLease(operation.credential)
-        || !await options.runtime.revalidate(
-          currentScope,
-          true,
-          operation.boundScope === undefined ? undefined : operation.scope,
-        )
+        || !await revalidateOperationRuntime(operation, currentScope, true)
         || disposed || operation.expiresAt <= now()
         || operations.get(operation.token) !== operation || operation.state !== 'reserved'
         || operation.request.key !== markedRequestKey
@@ -713,14 +745,17 @@ export function createNativeSubmissionController(
         return
       }
       if (operation.state !== 'consumed') return
-      if (operation.selectionState === 'effective') {
+      if (
+        operation.selectionState === 'effective'
+        && (operation.scope.threadId !== undefined || operation.boundScope !== undefined)
+      ) {
         if (operation.credential.validate) {
           const bound = operation.scope.threadId === undefined
             ? input.boundThreadId === undefined
               ? undefined
-              : await options.runtime.resolveCreatedScope(operation.scope, input.boundThreadId)
+              : await createdOperationScope(operation, input.boundThreadId)
             : operation.scope
-          if (bound?.threadId && await options.runtime.revalidate(bound, false, operation.scope)) {
+          if (bound?.threadId && await revalidateOperationRuntime(operation, bound, false)) {
             await replaceBinding({
               threadId: bound.threadId,
               selection: operation.pending,
@@ -735,11 +770,11 @@ export function createNativeSubmissionController(
       const boundScope = operation.scope.threadId === undefined
         ? input.boundThreadId === undefined
           ? undefined
-          : await options.runtime.resolveCreatedScope(operation.scope, input.boundThreadId)
+          : await createdOperationScope(operation, input.boundThreadId)
         : operation.scope
       if (
         boundScope?.threadId === undefined
-        || !await options.runtime.revalidate(boundScope, false, operation.scope)
+        || !await revalidateOperationRuntime(operation, boundScope, false)
       ) {
         await operation.credential.dispose()
         operations.delete(operation.token)
