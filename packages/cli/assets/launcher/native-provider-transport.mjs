@@ -49,6 +49,10 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
           })
         }
         if (!message.error && pending.method === 'thread/unsubscribe') owners.delete(pending.threadId)
+        if (!message.error && pending.method === 'turn/start' && message.result?.turn?.id) {
+          const owner = owners.get(pending.threadId)
+          if (owner?.connection === connection) owner.turn = message.result.turn
+        }
       }
       if (Array.isArray(message.result?.data)) {
         for (const thread of message.result.data) {
@@ -61,16 +65,28 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       }
     } else if (message.id !== undefined && connection !== primary) {
       const id = `cordisx-provider-request-${randomUUID()}`
-      serverRequests.set(id, { connection, id: message.id })
+      serverRequests.set(id, { connection, id: message.id, threadId: message.params?.threadId })
       message = { ...message, id }
       original = undefined
     } else if (connection !== primary) {
+      if (message.method === 'serverRequest/resolved') {
+        const requestId = message.params?.requestId
+        const request = [...serverRequests].find(([, entry]) =>
+          entry.connection === connection && key(entry.id) === key(requestId)
+        )
+        if (!request) return
+        serverRequests.delete(request[0])
+        message = { ...message, params: { ...message.params, requestId: request[0] } }
+        original = undefined
+      }
       const threadId = message.params?.threadId ?? message.params?.thread?.id
       // Global account/config notifications still belong to the primary Host.
-      if (typeof threadId !== 'string') return
+      if (typeof threadId !== 'string' && message.method !== 'serverRequest/resolved') return
       const owner = owners.get(threadId)
       if (owner?.connection === connection) {
         if (message.method === 'thread/status/changed') owner.status = message.params.status
+        if (message.method === 'turn/started') owner.turn = message.params.turn
+        if (message.method === 'turn/completed') delete owner.turn
         if (message.method === 'thread/closed') owners.delete(threadId)
       }
     }
@@ -157,9 +173,28 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
           })
         }
         worker.pending.clear()
-        for (const [threadId, owner] of owners) if (owner.connection === worker) owners.delete(threadId)
+        for (const [threadId, owner] of owners) {
+          if (owner.connection !== worker) continue
+          if (owner.turn?.id) {
+            emit({
+              method: 'turn/completed',
+              params: {
+                threadId,
+                turn: {
+                  ...owner.turn,
+                  status: 'failed',
+                  error: { message: 'Native provider connection closed. Check thread history before retrying.' },
+                },
+              },
+            })
+          }
+          emit({ method: 'thread/status/changed', params: { threadId, status: { type: 'systemError' } } })
+          owners.delete(threadId)
+        }
         for (const [requestId, request] of serverRequests) {
-          if (request.connection === worker) serverRequests.delete(requestId)
+          if (request.connection !== worker) continue
+          emit({ method: 'serverRequest/resolved', params: { requestId, threadId: request.threadId } })
+          serverRequests.delete(requestId)
         }
       }
       child.once('error', failed)
@@ -184,6 +219,10 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       serverRequests.delete(message.id)
       return await send(request.connection.write, { ...message, id: request.id })
     }
+    if (
+      message.method === undefined && typeof message.id === 'string'
+      && message.id.startsWith('cordisx-provider-request-')
+    ) return
     const params = object(message.params)
     let connection = owners.get(params?.threadId)?.connection ?? primary
     if (initializeParams && ['thread/start', 'thread/resume'].includes(message.method)) {

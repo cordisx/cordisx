@@ -54,6 +54,18 @@ it('keeps native provider identity per connection, preserves history ids and nam
       approvalIds.push(approval.id)
       send({ id: approval.id, result: { decision: 'decline' } })
       expect((await read()).result).toEqual({ current: provider, approved: { decision: 'decline' } })
+      send({ id: `cancelled-approval-${provider}`, method: 'fixture/approval', params: { threadId } })
+      const cancelledApproval = await read()
+      send({ id: `cancel-${provider}`, method: 'fixture/cancel-approval', params: { threadId } })
+      expect(await read()).toEqual({
+        method: 'serverRequest/resolved',
+        params: { requestId: cancelledApproval.id, threadId },
+      })
+      expect((await read()).error.message).toBe('approval cancelled')
+      expect((await read()).result).toEqual({ cancelled: true })
+      send({ id: cancelledApproval.id, result: { decision: 'accept' } })
+      send({ id: `after-cancel-${provider}`, method: 'config/read', params: {} })
+      expect((await read()).id).toBe(`after-cancel-${provider}`)
       send({
         id: `resume-${provider}`,
         method: 'thread/resume',
@@ -70,8 +82,27 @@ it('keeps native provider identity per connection, preserves history ids and nam
     expect(transport.workers().map((worker: { providerId: string }) => worker.providerId))
       .toEqual(['provider-a', 'provider.b'])
     const workerPids = transport.workers().map((worker: { pid: number }) => worker.pid)
+    send({ id: 'active-turn', method: 'turn/start', params: { threadId: 'saved-provider-a', input: [] } })
+    const activeTurn = (await read()).result.turn
+    send({ id: 'active-approval', method: 'fixture/approval', params: { threadId: 'saved-provider-a' } })
+    const activeApproval = await read()
     send({ id: 'exit-worker', method: 'fixture/exit', params: { threadId: 'saved-provider-a' } })
     expect((await read()).error.message).toContain('Check thread history')
+    expect((await read()).error.message).toContain('Check thread history')
+    expect(await read()).toMatchObject({
+      method: 'turn/completed',
+      params: { threadId: 'native-provider-a-1', turn: { status: 'failed' } },
+    })
+    expect(await read()).toMatchObject({ method: 'thread/status/changed', params: { status: { type: 'systemError' } } })
+    expect(await read()).toMatchObject({
+      method: 'turn/completed',
+      params: { threadId: 'saved-provider-a', turn: { id: activeTurn.id, status: 'failed' } },
+    })
+    expect(await read()).toMatchObject({ method: 'thread/status/changed', params: { status: { type: 'systemError' } } })
+    expect(await read()).toEqual({
+      method: 'serverRequest/resolved',
+      params: { requestId: activeApproval.id, threadId: 'saved-provider-a' },
+    })
     expect(transport.workers().map((worker: { providerId: string }) => worker.providerId)).toEqual(['provider.b'])
     send({ id: 'primary-after-exit', method: 'config/read', params: {} })
     expect((await read()).result.current).toBe('openai')

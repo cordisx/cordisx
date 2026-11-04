@@ -610,6 +610,7 @@ async function recoverUnloadedTurn(id, params, failureLine, expectedProvider) {
       || typeof thread.modelProvider !== 'string' || thread.modelProvider === 'openai'
       || (expectedProvider !== undefined && expectedProvider !== thread.modelProvider)
       || typeof thread.model !== 'string' || thread.model === ''
+      || thread.ephemeral === true
     ) throw new Error('Missing thread is not an unloaded managed session')
     const prepared = await controlCall('resume', {
       threadId,

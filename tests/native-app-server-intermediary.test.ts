@@ -34,6 +34,20 @@ describe('native app-server intermediary', () => {
     }
   })
 
+  it('preserves a live ephemeral thread when automatic provider mismatch recovery cannot resume it', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'ephemeral-turn', method: 'turn/start', params: { threadId: 'ephemeral-side', input: [] } })
+      expect(JSON.parse(await h.read()).error.data.type).toBe('modelProviderMismatch')
+      expect(h.prepareThreadResume).not.toHaveBeenCalled()
+      h.send({ id: 'still-live', method: 'thread/read', params: { threadId: 'ephemeral-side' } })
+      expect(JSON.parse(await h.read()).result.thread.ephemeral).toBe(true)
+      expect(h.startupEvents().every(event => event.event !== 'EPHEMERAL_DESTRUCTIVE_SWITCH')).toBe(true)
+    } finally {
+      await h.close()
+    }
+  })
+
   it('routes an unmarked configured start through the authenticated Host without replacing authentication', async () => {
     const h = await harness()
     try {

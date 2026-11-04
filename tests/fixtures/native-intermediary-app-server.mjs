@@ -9,7 +9,27 @@ reader.on('line', async line => {
     process.stdout.write(
       JSON.stringify({
         id: message.id,
-        result: { thread: { id: threadId, ephemeral: true, status: { type: 'idle' } } },
+        result: {
+          thread: {
+            id: threadId,
+            ephemeral: true,
+            modelProvider: 'provider-b',
+            model: 'model-b',
+            status: { type: 'idle' },
+          },
+        },
+      }) + '\n',
+    )
+    return
+  }
+  if (threadId === 'ephemeral-side' && message.method === 'turn/start') {
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        error: {
+          code: -32600,
+          data: { type: 'modelProviderMismatch', modelProvider: 'provider-b', currentModelProvider: 'openai' },
+        },
       }) + '\n',
     )
     return

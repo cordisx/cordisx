@@ -10,6 +10,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line)
   const params = message.params ?? {}
   if (message.method === undefined) {
+    if (typeof message.id === 'string' && message.id.startsWith('cordisx-provider-request-')) {
+      emit({ id: message.id, result: { unexpectedStaleApproval: true } })
+    }
     const pending = approvals.get(message.id)
     if (pending) {
       approvals.delete(message.id)
@@ -64,5 +67,11 @@ createInterface({ input: process.stdin }).on('line', line => {
   } else if (message.method === 'fixture/approval') {
     approvals.set(1, message.id)
     emit({ id: 1, method: 'item/commandExecution/requestApproval', params: { threadId: params.threadId } })
+  } else if (message.method === 'fixture/cancel-approval') {
+    const pending = approvals.get(1)
+    approvals.delete(1)
+    emit({ method: 'serverRequest/resolved', params: { requestId: 1, threadId: params.threadId } })
+    emit({ id: pending, error: { code: -32000, message: 'approval cancelled' } })
+    emit({ id: message.id, result: { cancelled: true } })
   } else emit({ id: message.id, result: { current } })
 })
