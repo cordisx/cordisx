@@ -584,6 +584,10 @@ export function createNativeSubmissionCdpAuthority(options: {
             if (!state || input?.expectedRevision !== state.revision || state.pending && !state.pending.sendOnly) {
               throw new Error('Stale selection discard')
             }
+            if (state.pending?.blockedReason) {
+              await respond(requestId, projection(state))
+              return
+            }
             if (state.pending) {
               delete state.pending
               state.revision++
@@ -705,7 +709,7 @@ export function createNativeSubmissionCdpAuthority(options: {
               throw new Error('Concurrent next-send selection')
             }
             if (
-              !stageSend && state.pending?.blockedReason && state.pending.providerId === selected.providerId
+              state.pending?.blockedReason && state.pending.providerId === selected.providerId
               && state.pending.model === selected.model
             ) {
               await respond(requestId, { status: 'reject', reason: state.pending.blockedReason, ...projection(state) })
@@ -773,11 +777,18 @@ export function createNativeSubmissionCdpAuthority(options: {
           } else if (envelope.operation === 'submissionPrepare') {
             const beforePending = state?.pending
             const result = await controller!.prepareSubmission(scope, actionOf(input?.action))
+            let rejectedProjection
             if (
               result.kind === 'reject' && state?.pending && state.pending === beforePending
               && (result.reason === 'provider-switch-unsupported'
                 || result.reason === 'provider-switch-reconciliation-required')
-            ) state.pending = { ...state.pending, blockedReason: result.reason }
+            ) {
+              if (state.pending.blockedReason !== result.reason) {
+                state.pending = { ...state.pending, blockedReason: result.reason }
+                state.revision++
+              }
+              rejectedProjection = projection(state)
+            }
             await respond(
               requestId,
               result.kind === 'confirm'
@@ -786,7 +797,7 @@ export function createNativeSubmissionCdpAuthority(options: {
                   confirmationId: result.confirmationId,
                   expectedSelectionRevision: result.selectionRevision,
                 }
-                : { ...result, status: result.kind },
+                : { ...result, status: result.kind, ...(rejectedProjection ? { projection: rejectedProjection } : {}) },
             )
           } else if (envelope.operation === 'submissionConfirm') {
             if (!text(input?.confirmationId, 256) || !Number.isSafeInteger(input?.expectedSelectionRevision)) {
@@ -798,12 +809,23 @@ export function createNativeSubmissionCdpAuthority(options: {
               confirmationId: input.confirmationId,
               expectedSelectionRevision: input.expectedSelectionRevision as number,
             })
+            let rejectedProjection
             if (
               result.kind === 'reject' && state?.pending && state.pending === beforePending
               && (result.reason === 'provider-switch-unsupported'
                 || result.reason === 'provider-switch-reconciliation-required')
-            ) state.pending = { ...state.pending, blockedReason: result.reason }
-            await respond(requestId, { ...result, status: result.kind })
+            ) {
+              if (state.pending.blockedReason !== result.reason) {
+                state.pending = { ...state.pending, blockedReason: result.reason }
+                state.revision++
+              }
+              rejectedProjection = projection(state)
+            }
+            await respond(requestId, {
+              ...result,
+              status: result.kind,
+              ...(rejectedProjection ? { projection: rejectedProjection } : {}),
+            })
           } else if (envelope.operation === 'submissionCancel') {
             if (!text(input?.id, 256)) throw new Error('Invalid cancellation')
             await respond(requestId, await controller!.cancel({ scope, id: input.id }))

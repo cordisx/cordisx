@@ -9,6 +9,10 @@ import {
 } from './fixtures/native-submission-controller-harness.js'
 import { harness as channelHarness } from './fixtures/native-submission-channel-harness.js'
 import { modelProviderCopy } from '../packages/cli/src/renderer/model-provider-copy.js'
+import {
+  NativeProviderSelectionClient,
+  type NativeProviderSelectionCommandChannel,
+} from '../packages/cli/src/renderer/native-provider-selection-client.js'
 import { switchNativeThread } from '../packages/cli/assets/launcher/native-thread-switch.mjs'
 
 const config = (providerId: string) => ({
@@ -506,6 +510,153 @@ describe('native switch controller regression', () => {
 })
 
 describe('native switch channel regression', () => {
+  it('R1 permits an explicit replacement of a rejected next-Send target with the restored effective service', async () => {
+    const h = await channelHarness({
+      realController: true,
+      catalog: () => [{
+        providerId: 'provider-b',
+        pluginId: 'plugin-b',
+        label: 'Provider B',
+        models: [{ id: 'model-b', label: 'Model B' }],
+      }],
+    })
+    const scope = { ...h.draft, threadId: 'R1-replace-thread' }
+    h.setLive(scope)
+    let idle = false
+    const effective = { providerId: 'provider-b', model: 'model-b' }
+    const sync = vi.fn(async () => undefined)
+    h.switchThread.mockRejectedValue(new NativeThreadSwitchError('provider-switch-unsupported'))
+    const client = new NativeProviderSelectionClient(
+      h.channel as NativeProviderSelectionCommandChannel,
+      () => ({ scope, idle, effective }),
+      vi.fn(),
+      sync,
+    )
+    const send = {
+      target: 'local',
+      thread: scope.threadId,
+      response: false,
+      followUp: 'local',
+      followUpThread: scope.threadId,
+      defaultAction: undefined,
+      explicitAction: undefined,
+      edit: undefined,
+      promptOverride: false,
+    }
+    try {
+      await client.refresh()
+      expect(client.stageNextSend({ providerId: 'openai', model: 'official-model' })).toBe(true)
+      idle = true
+      expect(await client.submitHook(send)).toEqual({ allow: false })
+      expect(client.snapshot().pending?.blockedReason).toBe('provider-switch-unsupported')
+      expect(client.stageNextSend(effective)).toBe(true)
+      expect(await client.submitHook(send)).toMatchObject({ allow: true, operationToken: expect.any(String) })
+      expect(sync).toHaveBeenLastCalledWith(effective, undefined)
+      expect(client.snapshot().nextSend).toBeUndefined()
+      expect(h.switchThread).toHaveBeenCalledTimes(1)
+    } finally {
+      client.dispose()
+      await h.actual.dispose()
+      await h.installed.dispose()
+    }
+  })
+
+  it.each(['provider-switch-unsupported', 'provider-switch-reconciliation-required'] as const)(
+    'R1 retains a rejected busy next-Send target after %s without repeating its native switch',
+    async reason => {
+      const h = await channelHarness({
+        realController: true,
+        catalog: () => [{
+          providerId: 'provider-b',
+          pluginId: 'plugin-b',
+          label: 'Provider B',
+          models: [{ id: 'model-b', label: 'Model B' }],
+        }],
+      })
+      const scope = { ...h.draft, threadId: 'R1-thread' }
+      h.setLive(scope)
+      let idle = false
+      const effective = { providerId: 'provider-b', model: 'model-b' }
+      const target = { providerId: 'openai', model: 'official-model', reasoningEffort: 'high' as const }
+      const notice = vi.fn()
+      const sync = vi.fn(async () => undefined)
+      const discard = vi.fn<NativeProviderSelectionCommandChannel['selectionDiscard']>(async input =>
+        await h.channel.selectionDiscard(input)
+      )
+      h.switchThread.mockRejectedValue(new NativeThreadSwitchError(reason))
+      const client = new NativeProviderSelectionClient(
+        { ...h.channel, selectionDiscard: discard } as NativeProviderSelectionCommandChannel,
+        () => ({ scope, idle, effective }),
+        notice,
+        sync,
+      )
+      const descriptor = {
+        target: 'local',
+        thread: scope.threadId,
+        response: false,
+        followUp: 'local',
+        followUpThread: scope.threadId,
+        defaultAction: undefined,
+        explicitAction: undefined,
+        edit: undefined,
+        promptOverride: false,
+      }
+      try {
+        await client.refresh()
+        expect(client.stageNextSend(target)).toBe(true)
+        expect(h.switchThread).not.toHaveBeenCalled()
+        idle = true
+        const first = await client.submitHook(descriptor)
+        const firstProjection = client.snapshot()
+        const second = await client.submitHook(descriptor)
+        expect({ first, second, nativeSwitches: h.switchThread.mock.calls.length }).toEqual({
+          first: { allow: false },
+          second: { allow: false },
+          nativeSwitches: 1,
+        })
+        expect(firstProjection).toMatchObject({
+          effective,
+          nextSend: target,
+          pending: { providerId: target.providerId, model: target.model, sendOnly: true, blockedReason: reason },
+        })
+        expect(client.snapshot().pending?.blockedReason).toBe(reason)
+        expect(h.authority.selection.snapshot(scope).pending?.blockedReason).toBe(reason)
+        expect(discard).not.toHaveBeenCalled()
+        expect(notice).toHaveBeenLastCalledWith(reason)
+        expect(sync).not.toHaveBeenCalled()
+        const projection = client.snapshot()
+        expect(await h.channel.selectionDiscard({ scope, expectedRevision: projection.revision })).toMatchObject({
+          pending: { blockedReason: reason },
+        })
+        expect(
+          await h.channel.selectionSelect({
+            scope,
+            ...target,
+            mode: 'stage-send',
+            expectedRevision: projection.revision,
+          }),
+        ).toMatchObject({ status: 'reject', reason })
+        if (reason === 'provider-switch-unsupported') {
+          expect(await client.cancelProviderIntent()).toBe('accepted')
+          expect(client.snapshot().nextSend).toBeUndefined()
+          expect(client.snapshot().pending).toBeUndefined()
+          expect(await client.submitHook(descriptor)).toEqual({ allow: true })
+        } else {
+          expect(await client.cancelProviderIntent()).toBe('unavailable')
+          expect(client.stageNextSend(effective)).toBe(false)
+          expect(await client.select(effective)).toBe('unavailable')
+          expect(client.snapshot()).toMatchObject({ nextSend: target, pending: { blockedReason: reason } })
+          expect(await client.submitHook(descriptor)).toEqual({ allow: false })
+        }
+        expect(h.switchThread).toHaveBeenCalledTimes(1)
+      } finally {
+        client.dispose()
+        await h.actual.dispose()
+        await h.installed.dispose()
+      }
+    },
+  )
+
   it('reports native provider rejection without acknowledging or repeatedly retrying the target', async () => {
     const h = await channelHarness({ realController: true })
     const scope = { ...h.draft, threadId: 'thread' }

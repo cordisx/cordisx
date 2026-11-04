@@ -98,7 +98,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
     | Readonly<{ status: 'pass-through' }>
     | Readonly<{ status: 'confirm'; confirmationId: string; expectedSelectionRevision: number }>
     | Readonly<{ status: 'allow-original'; operationToken: string; projection?: NativeProviderSelectionProjection }>
-    | Readonly<{ status: 'reject'; reason: string }>
+    | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
   >
   submissionConfirm(
     input: Readonly<{
@@ -108,7 +108,7 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
     }>,
   ): Promise<
     | Readonly<{ status: 'allow-original'; operationToken: string; projection: NativeProviderSelectionProjection }>
-    | Readonly<{ status: 'reject'; reason: string }>
+    | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
   >
   submissionCancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<unknown>
 }
@@ -207,6 +207,7 @@ export class NativeProviderSelectionClient {
     if (
       this.disposed || generation !== this.draftEditGeneration || this.submissionActive() || this.intentUnacknowledged
       || this.projection.pendingProviderIntent !== undefined || !this.projection.available
+      || this.projection.pending?.blockedReason === 'provider-switch-reconciliation-required'
     ) return false
     this.nextSend = Object.freeze({ ...target })
     this.emit()
@@ -279,6 +280,10 @@ export class NativeProviderSelectionClient {
   }
 
   private async changeProviderIntent(providerId?: string): Promise<'accepted' | 'unavailable'> {
+    if (this.projection.pending?.blockedReason === 'provider-switch-reconciliation-required') {
+      this.notice(this.projection.pending.blockedReason)
+      return 'unavailable'
+    }
     if (
       this.disposed || this.submissionActive()
       || [...this.selectionOperations].some(operation =>
@@ -294,7 +299,6 @@ export class NativeProviderSelectionClient {
     const generation = ++this.projectionGeneration
     const expectedRevision = this.projection.revision
     this.intentUnacknowledged = true
-    this.nextSend = undefined
     this.draftEditGeneration++
     this.confirmSubmission(false)
     this.selectionOperations.add(operation)
@@ -312,6 +316,7 @@ export class NativeProviderSelectionClient {
           : next.pendingProviderIntent?.providerId !== providerId
       ) return 'unavailable'
       this.intentUnacknowledged = false
+      this.nextSend = undefined
       this.replace(next)
       if (!next.available && this.authority().effective) void this.refresh()
       return 'accepted'
@@ -354,6 +359,8 @@ export class NativeProviderSelectionClient {
       const selected = result.pending ?? result.effective
       if (selected.providerId !== target.providerId || selected.model !== target.model) return 'unavailable'
       this.intentUnacknowledged = false
+      this.nextSend = undefined
+      this.draftEditGeneration++
       this.replace({
         available: true,
         revision: result.revision,
@@ -410,6 +417,14 @@ export class NativeProviderSelectionClient {
     const before = this.authority()
     const intent = normalizeNativeSubmissionAction({ operationId: this.createId(), operationGeneration: 0 }, descriptor)
     if (intent.intent !== 'ordinary-send') return this.submitCurrent(descriptor)
+    const blocked = this.projection.pending
+    if (
+      blocked?.blockedReason && (blocked.blockedReason === 'provider-switch-reconciliation-required'
+        || blocked.providerId === draft.providerId && blocked.model === draft.model)
+    ) {
+      this.notice(blocked.blockedReason)
+      return { allow: false }
+    }
     if (!before.idle) return this.submitCurrent(descriptor)
     if (this.submissionActive()) return { allow: false }
     const lifetime = this.lifetimeGeneration
@@ -478,6 +493,7 @@ export class NativeProviderSelectionClient {
     } finally {
       if (
         !released && stagedPending && stagedRevision !== undefined
+        && this.projection.pending?.blockedReason === undefined
         && (!this.scopeCurrent(before.scope, lifetime) || this.projection.pending !== undefined
           || this.projection.revision < stagedRevision)
       ) {
@@ -565,6 +581,27 @@ export class NativeProviderSelectionClient {
     }
     const revision = this.projection.revision
     if (pending !== undefined) this.admission = sequence
+    const rejected = (result: { reason: string; projection?: NativeProviderSelectionProjection }): void => {
+      if (
+        pending && (result.reason === 'provider-switch-unsupported'
+          || result.reason === 'provider-switch-reconciliation-required')
+        && this.scopeCurrent(before.scope, lifetime) && this.projectionGeneration === projectionGeneration
+        && this.projection.revision === revision && samePending(this.projection.pending, pending)
+      ) {
+        const next = result.projection
+        this.projectionGeneration++
+        this.replace(
+          next?.available && Number.isSafeInteger(next.revision) && next.revision >= revision
+            && samePending(next.pending, pending) && next.pending?.blockedReason === result.reason
+            && next.pending.sendOnly === pending.sendOnly
+            && next.effective?.providerId === this.projection.effective?.providerId
+            && next.effective?.model === this.projection.effective?.model
+            ? next
+            : { ...this.projection, pending: { ...pending, blockedReason: result.reason } },
+        )
+      }
+      this.notice(result.reason)
+    }
     let cancelId: string | undefined
     try {
       const prepared = await this.channel.submissionPrepare({ scope: before.scope, action })
@@ -582,7 +619,7 @@ export class NativeProviderSelectionClient {
           : { allow: false }
       }
       if (prepared.status === 'reject') {
-        this.notice(prepared.reason)
+        rejected(prepared)
         return { allow: false }
       }
       cancelId = prepared.status === 'confirm' ? prepared.confirmationId : prepared.operationToken
@@ -614,7 +651,7 @@ export class NativeProviderSelectionClient {
           expectedSelectionRevision: prepared.expectedSelectionRevision,
         })
         if (result.status === 'reject') {
-          this.notice(result.reason)
+          rejected(result)
           return { allow: false }
         }
         token = result.operationToken
