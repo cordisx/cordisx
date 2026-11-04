@@ -55,8 +55,10 @@ async function bundle(incompatible = false, scripts = resources(), entryHtml?: s
     '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>unknown-version</string><key>CFBundleVersion</key><string>unknown-build</string></dict></plist>',
   )
   for (const resource of scripts) {
+    const file = path.join(source, 'webview', new URL(resource.url).pathname)
+    await mkdir(path.dirname(file), { recursive: true })
     await writeFile(
-      path.join(source, 'webview/assets', path.basename(resource.url)),
+      file,
       incompatible ? 'export {}' : resource.source,
     )
   }
@@ -180,6 +182,21 @@ it('uses the application HTML entry when the bundler changes every chunk prefix'
   const f = await bundle(false, scripts, '<script type="module" src="./assets/new-entry.js"></script>')
   expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
     .toEqual(scripts.map(resource => resource.url).sort())
+})
+
+it('reads finite async chunk tables from the real ASAR and preserves nested resource URLs', async () => {
+  const scripts = resources().map((resource, index) => ({
+    ...resource,
+    url: `app://-/assets/async/${index + 12}.fixture.js`,
+  }))
+  scripts.push({
+    url: 'app://-/assets/runtime.js',
+    source: `r.u=id=>'assets/async/'+id+'.'+({12:'fixture',13:'fixture',14:'absent'})[id]+'.js'`,
+  })
+  scripts.push({ url: 'app://-/assets/async/99.unreachable.js', source: scripts[0]!.source })
+  const f = await bundle(false, scripts, '<script type="module" src="./assets/runtime.js"></script>')
+  expect(readNativeSubmissionResources(f.contents).map(resource => resource.url).sort())
+    .toEqual([scripts[0]!.url, scripts[1]!.url, scripts[2]!.url].sort())
 })
 
 it.skipIf(process.platform !== 'darwin').each([false, true])(

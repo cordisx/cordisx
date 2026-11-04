@@ -135,7 +135,19 @@ export async function prepareProductionHostBootstrap(
         stdout(`[cordisx] native Desktop model providers unavailable: ${String(error)}`)
       }
     }
-    if (!input.prelaunch) {
+    const mainInspector = input.prelaunch && input.mainInspector
+      && await supportsOwnedMainInspector(plan.executable)
+    if (input.prelaunch) {
+      diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector, verified: mainInspector })
+    }
+    // Early startup relies on holding the native document until its graph and
+    // interception are ready. Without that capability, preparing first lets the
+    // normal watcher arm before the App starts instead of reloading a live boot.
+    const deferOrdinaryLaunch = input.prelaunch && input.mainInspector && !mainInspector
+    if (deferOrdinaryLaunch) {
+      stdout('[cordisx] same-window startup unavailable; preparing before the ordinary Host launch')
+    }
+    if (!input.prelaunch || deferOrdinaryLaunch) {
       return {
         plan,
         debugPort,
@@ -144,11 +156,6 @@ export async function prepareProductionHostBootstrap(
         ...(nativeSubmissionBootstrap === undefined ? {} : { nativeSubmissionBootstrap }),
         ...(nativeSubmissionUnavailable ? { nativeSubmissionUnavailable: true as const } : {}),
       }
-    }
-    const mainInspector = input.mainInspector && await supportsOwnedMainInspector(plan.executable)
-    diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector, verified: mainInspector })
-    if (input.mainInspector && !mainInspector) {
-      stdout('[cordisx] same-window startup unavailable; using an ordinary isolated Host window')
     }
     stdout(`[cordisx] launching ${plan.executable} with CDP 127.0.0.1:${debugPort}`)
     // Model-service declarations become the provider entries this host reads at

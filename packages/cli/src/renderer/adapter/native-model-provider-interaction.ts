@@ -53,4 +53,7 @@ export const nativeModelProviderObservedAttributes = [
   'style',
   'class',
   'data-state',
+  'data-codex-intelligence-trigger',
+  'data-composer-navigation-target',
+  'data-selected-reasoning-effort',
 ]

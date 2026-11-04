@@ -122,6 +122,7 @@ export async function harness(options: Readonly<{
   const draft: NativeSubmissionScope = { ...world.__cordisxNativeProviderOwner, navigationGeneration: 3 }
   live = draft
   return {
+    session,
     authority,
     actual,
     prepare,

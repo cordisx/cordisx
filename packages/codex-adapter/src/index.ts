@@ -126,3 +126,4 @@ export * from './native-operation-request-transform.js'
 export * from './native-submit-orchestrator-transform.js'
 
 export * from './native-side-chat-transform.js'
+export * from './native-chunk-structure.js'

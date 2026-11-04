@@ -64,6 +64,10 @@ function nativeAppTarget(target: CdpTarget): boolean {
   return target.url === 'app://-' || target.url.startsWith('app://-/')
 }
 
+function nativeWorkspaceTarget(target: CdpTarget): boolean {
+  return nativeAppTarget(target) && new URL(target.url).pathname === '/index.html'
+}
+
 function targetScore(target: CdpTarget): number {
   const label = `${target.title} ${target.url}`.toLowerCase()
   return label.includes('codex') ? 10 : label.includes('chatgpt') ? 5 : 0
@@ -136,7 +140,7 @@ export interface WatchInjectionOptions {
   readonly newDocumentSource?: string | (() => string)
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
-  /** Called after the first renderer accepts the CordisX bootstrap. */
+  /** Called after the first workspace renderer accepts the CordisX bootstrap. */
   readonly onReady?: () => void | Promise<void>
   readonly providerFleet?: support.ProviderFleet
   readonly providerBridgeToken?: string
@@ -328,6 +332,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     | undefined
   const readinessOperations = new Set<Promise<void>>()
   let readinessTail = Promise.resolve()
+  let ownedWorkspaceInstalled = false
   const beginReadiness = (
     target: CdpTarget,
     attemptedReloadTarget: 'Vite' | 'production' | undefined,
@@ -336,7 +341,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     operation = readinessTail
       .then(async () => {
         if (readinessFailure !== undefined) return
-        await options.onReady?.()
+        // A detached helper can finish while the actual workspace is still
+        // booting or about to fail. It cannot publish an owned native launch as ready.
+        if (
+          options.launcherOwnedNativeTarget !== true || !nativeAppTarget(target)
+          || nativeWorkspaceTarget(target)
+        ) await options.onReady?.()
         options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
       })
       .catch(error => {
@@ -423,9 +433,17 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           }
           const browserGraphTransport = options.hasLoopbackGraph === true
             || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
-          const targets = options.viteDevelopment === true || browserGraphTransport
+          let targets = options.viteDevelopment === true || browserGraphTransport
             ? candidates.filter(nativeAppTarget)
             : candidates
+          if (options.launcherOwnedNativeTarget === true) {
+            // Helper documents use the same title as the workspace and CDP does
+            // not order them. Their bootstrap must not occupy the serial install
+            // slot before the owned workspace has had its first installation.
+            targets = targets.filter(target =>
+              ownedWorkspaceInstalled || !nativeAppTarget(target) || nativeWorkspaceTarget(target)
+            ).sort((left, right) => Number(nativeWorkspaceTarget(right)) - Number(nativeWorkspaceTarget(left)))
+          }
           if (browserGraphTransport && candidates.length > 0 && targets.length === 0) {
             attemptedReloadTarget = 'production'
             throw new Error('production loopback graph requires a native app:// renderer target')
@@ -517,6 +535,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               activateStartupDocument,
             )
             installed.set(target.id, record)
+            if (nativeWorkspaceTarget(target)) ownedWorkspaceInstalled = true
             beginReadiness(target, attemptedReloadTarget)
           }
         })

@@ -34,7 +34,7 @@ export interface NativeAgentModelsAuthority {
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   controller: Pick<NativeSubmissionController, 'prepareThreadResume' | 'completeThreadResume'>
   switchThread(input: Selection & { configOverrides: Readonly<Record<string, unknown>> }): Promise<void>
-  reserve(threadId: string): boolean
+  reserve(threadId: string): boolean | Promise<boolean>
   commit(input: Selection): void
   release(threadId: string): void
   createTask?(input: unknown, metadata: unknown): Promise<unknown>
@@ -128,7 +128,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
         provider.providerId === target.providerId && provider.models.some(model => model.id === target.model)
       )
     ) return { status: 'rejected', reason: 'selection-outside-catalog' }
-    if (!authority.reserve(target.threadId)) return { status: 'rejected', reason: 'selection-busy' }
+    if (!await authority.reserve(target.threadId)) return { status: 'rejected', reason: 'selection-busy' }
     let token: string | undefined
     let attempted = false
     try {

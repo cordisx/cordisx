@@ -108,6 +108,22 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 }
 
 describe('built-in CordisX Skill deployment', () => {
+  it('preserves a busy Skill without delaying the other startup deployments', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-busy-'))
+    const home = path.join(root, 'home')
+    const sourceRootDir = await createSkillBundleSource(root, 'bundle-one')
+    const skillsDir = path.join(home, '.agents', 'skills')
+    const lockDir = path.join(skillsDir, '.cordisx.deployment-lock')
+    await mkdir(lockDir, { recursive: true })
+    await writeFile(path.join(lockDir, 'owner-sentinel'), 'unknown owner\n')
+    const result = await deployBundledCordisXSkills(sharedPlan(home), { sourceRootDir })
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0]!.targetDir).toBe(path.join(skillsDir, 'cordisx'))
+    expect(result.deployments).toHaveLength(CORDISX_BUNDLED_SKILL_NAMES.length - 1)
+    await expect(access(path.join(skillsDir, 'cordisx'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(path.join(lockDir, 'owner-sentinel'), 'utf8')).resolves.toBe('unknown owner\n')
+  }, 2_000)
+
   it('installs all bundled Skills with their own provenance and management markers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skills-'))
     const home = path.join(root, 'home')

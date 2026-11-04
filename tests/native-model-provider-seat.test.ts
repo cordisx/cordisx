@@ -9,6 +9,25 @@ import {
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it('mounts the unified reasoning trigger through deep native wrappers and rejects reasoning-only controls', () => {
+    const dom = new JSDOM('<!doctype html><body></body>')
+    const { trigger } = composer(dom.window.document)
+    const key = '__reactFiber$test'
+    const element = trigger as unknown as Record<string, unknown>
+    const root = element[key] as { return: unknown }
+    let fiber = root.return
+    for (let depth = 0; depth < 45; depth++) fiber = { return: fiber }
+    root.return = fiber
+    delete trigger.dataset.codexIntelligenceTrigger
+    trigger.dataset.composerNavigationTarget = 'reasoning'
+    trigger.dataset.selectedReasoningEffort = 'high'
+    expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
+    expect(locateNativeModelSelectionControl(trigger)?.model).toBe('model-a')
+    root.return = { memoizedProps: { reasoningEffort: 'high', onSelectReasoningEffort() {} } }
+    expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
+
   it('resolves main and side composers independently without choosing an ambiguous page-wide seat', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const main = composer(dom.window.document, 'main-thread').trigger.closest<HTMLElement>(

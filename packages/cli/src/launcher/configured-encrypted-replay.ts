@@ -21,6 +21,12 @@ export function configuredEncryptedReplay(codexHome: string, route: (url: string
     const definition = provider as Record<string, unknown>
     if (definition.wire_api !== undefined && definition.wire_api !== 'responses') return {}
     if (typeof definition.base_url !== 'string') return {}
-    return { [`model_providers.${selected}.base_url`]: route(definition.base_url) }
+    return {
+      [`model_providers.${selected}`]: {
+        ...definition,
+        wire_api: 'responses',
+        base_url: route(definition.base_url),
+      },
+    }
   }
 }

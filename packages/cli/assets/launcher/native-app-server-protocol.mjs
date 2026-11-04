@@ -6,12 +6,30 @@ import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
+import { createNativeProviderTransport } from './native-provider-transport.mjs'
+import { nativeProviderFailure } from './native-provider-errors.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
 const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
 const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
+function configuredOverrides(existing, overrides) {
+  const merged = { ...existing, ...overrides }
+  for (const [name, definition] of Object.entries(overrides)) {
+    if (!name.startsWith('model_providers.') || !object(definition)) continue
+    const id = name.slice('model_providers.'.length)
+    merged[name] = {
+      ...definition,
+      ...object(object(existing?.model_providers)?.[id]),
+      ...object(existing?.[name]),
+      base_url: definition.base_url,
+      wire_api: definition.wire_api,
+    }
+    if (Object.hasOwn(merged, `${name}.base_url`)) merged[`${name}.base_url`] = definition.base_url
+  }
+  return merged
+}
 // Native history and plugin catalogs can exceed the small private control-message budget.
 const maxNativeLineBytes = 64 * 1024 * 1024
 const maxControlLineBytes = 8 * 1024 * 1024
@@ -48,6 +66,7 @@ if (agentModelsBinding && nativeArgs.includes('app-server')) {
   )
 }
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
+const nativeTransport = createNativeProviderTransport(child, { executable, args: nativeArgs, env: process.env })
 const control = net.connect(socketPath)
 const controlCalls = new Map()
 const privateCalls = new Map()
@@ -154,7 +173,7 @@ const write = (stream, value) =>
       reject(new Error('Native transport is closed'))
       return
     }
-    if (stream === child.stdin) {
+    if (stream === nativeTransport.stdin) {
       try {
         const message = typeof value === 'string' ? JSON.parse(value) : value
         if (message?.method === 'initialize') {
@@ -195,7 +214,8 @@ function stop(reason = 'transport-closed') {
   agentFirstTurns.clear()
   control.destroy()
   nativeInput.destroy()
-  child.stdin.destroy()
+  nativeTransport.stdin.destroy()
+  nativeTransport.close()
   if (child.exitCode === null) child.kill('SIGTERM')
 }
 function call(stream, calls, request, timeout = 30_000) {
@@ -218,7 +238,7 @@ function controlCall(type, input = {}) {
   return call(control, controlCalls, { type, ...input })
 }
 function nativeCall(method, params) {
-  return call(child.stdin, privateCalls, { method, params })
+  return call(nativeTransport.stdin, privateCalls, { method, params })
 }
 function settle(calls, message, isControl) {
   const pending = calls.get(message.id)
@@ -235,6 +255,8 @@ function settle(calls, message, isControl) {
 }
 
 function missingManagedProvider(message) {
+  const structured = nativeProviderFailure(message)
+  if (structured !== undefined) return structured
   if (message?.error?.code !== -32600 || typeof message.error.message !== 'string') return undefined
   const match = /^failed to load configuration: Model provider `([^`\0\r\n]{1,128})` not found$/u.exec(
     message.error.message,
@@ -298,7 +320,7 @@ child.on('error', error => {
   nativeLifecycle('child-spawn-failed', { errorCode: nativeErrorCode(error) })
   stop(error)
 })
-child.stdin.on('error', error => {
+nativeTransport.stdin.on('error', error => {
   nativeLifecycle('child-input-error', { errorCode: nativeErrorCode(error) })
   stop(error)
 })
@@ -320,7 +342,7 @@ async function forward(line) {
   try {
     message = JSON.parse(line)
   } catch {
-    await write(child.stdin, line)
+    await write(nativeTransport.stdin, line)
     return
   }
   const params = object(message?.params)
@@ -433,7 +455,7 @@ async function forward(line) {
       if (prepared) {
         preparedResumes.set(message.id, { threadId: prepared.threadId, resumeToken: prepared.resumeToken })
         // A failed native write must not cause a second attempt with the original request.
-        await write(child.stdin, prepared.message)
+        await write(nativeTransport.stdin, prepared.message)
         return
       }
     }
@@ -448,13 +470,13 @@ async function forward(line) {
           ...(typeof providerId === 'string' ? { providerId } : {}),
         })
         if (object(overrides) && Object.keys(overrides).length) {
-          params.config = { ...object(params.config), ...overrides }
-          await write(child.stdin, message)
+          params.config = configuredOverrides(object(params.config), overrides)
+          await write(nativeTransport.stdin, message)
           return
         }
       } catch {}
     }
-    await write(child.stdin, line)
+    await write(nativeTransport.stdin, line)
     return
   }
   let admitted = false
@@ -480,7 +502,9 @@ async function forward(line) {
     if (message.method === 'thread/start') {
       params.modelProvider = dispatch.providerId
       params.model = dispatch.model
-      params.config = { ...nextConfig, ...dispatch.configOverrides }
+      params.config = dispatch.providerSource === 'config'
+        ? configuredOverrides(nextConfig, dispatch.configOverrides)
+        : { ...nextConfig, ...dispatch.configOverrides }
       if (typeof dispatch.reasoningEffort === 'string') {
         params.config.model_reasoning_effort = dispatch.reasoningEffort
       }
@@ -511,7 +535,7 @@ async function forward(line) {
       firstTurns.delete(params.threadId)
       agentFirstTurns.delete(params.threadId)
     }
-    await write(child.stdin, JSON.stringify(message))
+    await write(nativeTransport.stdin, JSON.stringify(message))
   } catch {
     desktopCalls.delete(message?.id)
     if (admitted) {
@@ -583,7 +607,7 @@ async function recoverResume(id, params, providerId, failureLine) {
 
 // A persisted history can exist after its executable session has been unloaded.
 // Replay only the exact missing-thread rejection, never a timeout or failed turn.
-async function recoverUnloadedTurn(id, params, failureLine) {
+async function recoverUnloadedTurn(id, params, failureLine, expectedProvider) {
   const threadId = params.threadId
   if (recoveringTurns.has(threadId) || switching.has(threadId) || lifecyclePending(threadId)) {
     await write(process.stdout, failureLine)
@@ -597,9 +621,14 @@ async function recoverUnloadedTurn(id, params, failureLine) {
     const read = await nativeCall('thread/read', { threadId, includeTurns: false })
     const thread = object(read?.thread)
     if (
-      thread?.id !== threadId || thread.status?.type !== 'notLoaded'
+      thread?.id !== threadId
+      || !(expectedProvider === undefined ? ['notLoaded'] : ['idle', 'notLoaded', 'systemError']).includes(
+        thread.status?.type,
+      )
       || typeof thread.modelProvider !== 'string' || thread.modelProvider === 'openai'
+      || (expectedProvider !== undefined && expectedProvider !== thread.modelProvider)
       || typeof thread.model !== 'string' || thread.model === ''
+      || thread.ephemeral === true
     ) throw new Error('Missing thread is not an unloaded managed session')
     const prepared = await controlCall('resume', {
       threadId,
@@ -610,6 +639,9 @@ async function recoverUnloadedTurn(id, params, failureLine) {
       throw new Error('Managed recovery rejected')
     }
     resumeToken = prepared.resumeToken
+    if (expectedProvider !== undefined && thread.status.type !== 'notLoaded') {
+      await nativeCall('thread/unsubscribe', { threadId })
+    }
     const resumed = await nativeCall('thread/resume', {
       threadId,
       modelProvider: thread.modelProvider,
@@ -672,10 +704,10 @@ readLines(nativeInput, line => {
 })
 nativeInput.once('end', () => {
   nativeLifecycle('desktop-input-ended')
-  void inputQueue.finally(() => child.stdin.end())
+  void inputQueue.finally(() => nativeTransport.stdin.end())
 })
 
-readLines(child.stdout, line => {
+readLines(nativeTransport.stdout, line => {
   let message
   try {
     message = JSON.parse(line)
@@ -694,6 +726,11 @@ readLines(child.stdout, line => {
   if (message.method === undefined) lifecycleCalls.delete(message.id)
   const turnParams = message.method === undefined ? unmarkedTurns.take(message.id) : undefined
   if (turnParams !== undefined) {
+    const providerId = nativeProviderFailure(message)
+    if (providerId !== undefined && providerId !== 'openai') {
+      void recoverUnloadedTurn(message.id, turnParams, line, providerId).catch(stop)
+      return
+    }
     if (message.error?.code === -32600 && message.error.message === `thread not found: ${turnParams.threadId}`) {
       void recoverUnloadedTurn(message.id, turnParams, line).catch(stop)
       return

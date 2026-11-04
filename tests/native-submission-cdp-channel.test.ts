@@ -4,6 +4,64 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NativeSubmissionController } from '../packages/cli/src/launcher/native-submission-controller.js'
 
 describe('native submission document authority', () => {
+  it('ignores confirmed retired selection intents without releasing their source state or leases', async () => {
+    const h = await harness()
+    const old = { ...h.draft, composerId: 'old', threadId: 'thread' }
+    try {
+      h.setLive(old)
+      const initial = await h.channel.selectionRead({
+        scope: old,
+        effective: { providerId: 'openai', model: 'native' },
+      })
+      await h.channel.selectionProviderIntent({
+        scope: old,
+        providerId: 'provider-b',
+        expectedRevision: initial.revision,
+      })
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(false)
+      h.setLive({ ...old, composerId: 'new', navigationGeneration: old.navigationGeneration + 1 })
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(true)
+      expect(h.authority.selection.snapshot(old).pendingProviderIntent?.providerId).toBe('provider-b')
+      expect(h.controller.releaseScope).not.toHaveBeenCalled()
+      h.authority.agentSelection.commit({ threadId: 'thread', providerId: 'provider-b', model: 'model-b' })
+      expect(h.authority.selection.snapshot(old).pendingProviderIntent).toBeUndefined()
+      h.authority.agentSelection.release('thread')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
+  it('keeps uncertain scope probes closed and serializes reservations while probing a retired intent', async () => {
+    const h = await harness()
+    const old = { ...h.draft, composerId: 'old', threadId: 'thread' }
+    try {
+      h.setLive(old)
+      const initial = await h.channel.selectionRead({
+        scope: old,
+        effective: { providerId: 'openai', model: 'native' },
+      })
+      await h.channel.selectionProviderIntent({
+        scope: old,
+        providerId: 'provider-b',
+        expectedRevision: initial.revision,
+      })
+      h.session.send.mockRejectedValueOnce(new Error('CDP unavailable'))
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(false)
+      let resolve!: (value: unknown) => void
+      h.session.send.mockImplementationOnce(async () =>
+        await new Promise(done => {
+          resolve = done
+        }) as any
+      )
+      const first = h.authority.agentSelection.reserve('thread')
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(false)
+      resolve({ result: { type: 'undefined' } })
+      expect(await first).toBe(true)
+      h.authority.agentSelection.release('thread')
+    } finally {
+      await h.installed.dispose()
+    }
+  })
   it('keeps simultaneous draft selections separate and validates the exact live composer owner', async () => {
     const h = await harness()
     const main = { ...h.draft, composerId: 'main' }
@@ -118,8 +176,8 @@ describe('native submission document authority', () => {
     h.setLive(scope)
     try {
       await h.channel.selectionRead({ scope, effective: { providerId: 'openai', model: 'native-model' } })
-      expect(h.authority.agentSelection.reserve('thread')).toBe(true)
-      expect(h.authority.agentSelection.reserve('thread')).toBe(false)
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(true)
+      expect(await h.authority.agentSelection.reserve('thread')).toBe(false)
       await expect(h.channel.selectionSelect({ scope, providerId: 'provider-b', model: 'model-b' })).rejects.toThrow()
       h.authority.agentSelection.commit({ threadId: 'thread', providerId: 'provider-b', model: 'model-b' })
       h.authority.agentSelection.release('thread')
