@@ -454,7 +454,21 @@ async function forward(line) {
           ...(typeof providerId === 'string' ? { providerId } : {}),
         })
         if (object(overrides) && Object.keys(overrides).length) {
-          params.config = { ...object(params.config), ...overrides }
+          const existing = object(params.config)
+          const merged = { ...existing, ...overrides }
+          for (const [name, definition] of Object.entries(overrides)) {
+            if (!name.startsWith('model_providers.') || !object(definition)) continue
+            const id = name.slice('model_providers.'.length)
+            merged[name] = {
+              ...definition,
+              ...object(object(existing?.model_providers)?.[id]),
+              ...object(existing?.[name]),
+              base_url: definition.base_url,
+              wire_api: definition.wire_api,
+            }
+            if (Object.hasOwn(merged, `${name}.base_url`)) merged[`${name}.base_url`] = definition.base_url
+          }
+          params.config = merged
           await write(nativeTransport.stdin, message)
           return
         }

@@ -14,8 +14,15 @@ describe('configured encrypted replay routing', () => {
         'model_provider="modelhub"\n[model_providers.modelhub]\nbase_url="https://example.com/v1"\nenv_key="ORIGINAL_KEY"\n[model_providers.chat]\nbase_url="https://other.example/v1"\nwire_api="chat-completions"\n',
       )
       const prepare = configuredEncryptedReplay(home, route)
-      expect(await prepare()).toEqual({ 'model_providers.modelhub.base_url': 'http://127.0.0.1:1234/opaque' })
-      expect(await prepare('modelhub')).toEqual({ 'model_providers.modelhub.base_url': 'http://127.0.0.1:1234/opaque' })
+      const expected = {
+        'model_providers.modelhub': {
+          base_url: 'http://127.0.0.1:1234/opaque',
+          env_key: 'ORIGINAL_KEY',
+          wire_api: 'responses',
+        },
+      }
+      expect(await prepare()).toEqual(expected)
+      expect(await prepare('modelhub')).toEqual(expected)
       expect(await prepare('openai')).toEqual({})
       expect(await prepare('chat')).toEqual({})
       expect(await prepare('missing')).toEqual({})

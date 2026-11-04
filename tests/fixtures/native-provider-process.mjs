@@ -33,6 +33,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         modelProvider,
         model: 'test-model',
         argvHasSecret: process.argv.some(arg => arg.includes('test-private-token')),
+        receivedConfig: params.config,
       },
     })
   } else if (message.method === 'thread/read') {
