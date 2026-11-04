@@ -22,6 +22,7 @@ export interface NativeProviderSelection {
 export interface PendingNativeProviderSelection extends NativeProviderSelection {
   readonly generation: number
   readonly sendOnly?: boolean
+  readonly blockedReason?: import('../launcher/native-thread-switch-error.js').NativeThreadSwitchReason
 }
 
 export interface NativeProviderSelectionProjection {
@@ -72,12 +73,18 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
       expectedRevision?: number
     }>,
   ): Promise<
-    Readonly<{
+    | Readonly<{
       status: 'accepted'
       revision: number
       effective: NativeProviderSelection
       pending?: PendingNativeProviderSelection
     }>
+    | Readonly<
+      NativeProviderSelectionProjection & {
+        status: 'reject'
+        reason: import('../launcher/native-thread-switch-error.js').NativeThreadSwitchReason
+      }
+    >
   >
   selectionDiscard(
     input: Readonly<{ scope: NativeSubmissionScope; expectedRevision: number }>,
@@ -128,7 +135,10 @@ export type NativeSubmitHookResult =
       serviceTier?: 'priority' | 'default'
     }
   >
-export type NativeSubmissionRejection = 'unsupported-submission-intent' | 'submission-rejected'
+export type NativeSubmissionRejection =
+  | 'unsupported-submission-intent'
+  | 'submission-rejected'
+  | import('../launcher/native-thread-switch-error.js').NativeThreadSwitchReason
 
 interface ConfirmationWaiter {
   readonly confirmation: NativeProviderSubmitConfirmation
@@ -330,6 +340,14 @@ export class NativeProviderSelectionClient {
     this.emit()
     try {
       const result = await this.channel.selectionSelect({ scope, ...target, expectedRevision, ...options })
+      if (result.status === 'reject') {
+        if (this.projectionCurrent(scope, generation, result.revision)) {
+          this.intentUnacknowledged = false
+          this.replace(result)
+          this.notice(result.reason)
+        }
+        return 'unavailable'
+      }
       if (!this.projectionCurrent(scope, generation, result.revision) || result.revision <= expectedRevision) {
         return 'unavailable'
       }
@@ -418,6 +436,14 @@ export class NativeProviderSelectionClient {
         mode: 'stage-send',
         expectedRevision: revision,
       })
+      if (selected.status === 'reject') {
+        if (current()) {
+          this.projectionGeneration++
+          this.replace(selected)
+          this.notice(selected.reason)
+        }
+        return { allow: false }
+      }
       stagedRevision = selected.revision
       stagedPending = selected.pending !== undefined
       if (!current()) return { allow: false }
@@ -494,6 +520,10 @@ export class NativeProviderSelectionClient {
     const pending = this.projection.pending?.sendOnly && actionIntent !== 'ordinary-send'
       ? undefined
       : this.projection.pending
+    if (pending?.blockedReason) {
+      this.notice(pending.blockedReason)
+      return { allow: false }
+    }
     if (this.selectionActive()) {
       this.notice('submission-rejected')
       return { allow: false }
@@ -713,7 +743,14 @@ export class NativeProviderSelectionClient {
   }
 
   private notice(reason: string): void {
-    if (!this.disposed) this.rejected(reason === 'unsupported-submission-intent' ? reason : 'submission-rejected')
+    if (!this.disposed) {
+      this.rejected(
+        reason === 'unsupported-submission-intent' || reason === 'provider-switch-unsupported'
+          || reason === 'provider-switch-reconciliation-required'
+          ? reason
+          : 'submission-rejected',
+      )
+    }
   }
 
   private replace(next: NativeProviderSelectionProjection): void {

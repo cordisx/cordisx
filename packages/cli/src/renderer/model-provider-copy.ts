@@ -35,6 +35,9 @@ export function modelProviderCopy(locale: string) {
       actions: '服务操作',
       unsupportedIntent: '当前操作暂不支持切换模型服务。请使用普通发送，或选回当前服务。',
       submitRejected: '此次发送未执行，模型服务状态已变化，请重试。',
+      switchUnsupported:
+        '当前 Codex 无法在这个对话中切换模型服务。原对话和草稿已保留，请选回当前服务继续，或在新对话使用目标服务。',
+      switchReconciliation: '模型服务切换未完成，原连接状态尚未确认。草稿已保留，请重新打开这个对话后确认服务再发送。',
       switching: '正在切换模型服务…',
       accepted: '正在同步模型服务…',
       switched: '模型服务已切换',
@@ -82,6 +85,10 @@ export function modelProviderCopy(locale: string) {
       unsupportedIntent:
         'This action does not support switching model services yet. Use Send or select the current service.',
       submitRejected: 'Send was not run because the model service state changed. Try again.',
+      switchUnsupported:
+        'This Codex cannot change the model service for this conversation. The conversation and draft are preserved. Select the current service to continue, or use the target service in a new conversation.',
+      switchReconciliation:
+        'The model service switch did not complete, and the original connection is not confirmed. Your draft is preserved. Reopen this conversation and confirm the service before sending.',
       switching: 'Switching model service…',
       accepted: 'Synchronizing model service…',
       switched: 'Model service switched',
@@ -93,4 +100,25 @@ export function modelProviderCopy(locale: string) {
       active: 'Current',
       unknown: 'Choose provider',
     }
+}
+
+export function nativeSubmissionFeedback(copy: ReturnType<typeof modelProviderCopy>, reason?: string): string {
+  return reason === 'unsupported-submission-intent'
+    ? copy.unsupportedIntent
+    : reason === 'provider-switch-unsupported'
+    ? copy.switchUnsupported
+    : reason === 'provider-switch-reconciliation-required'
+    ? copy.switchReconciliation
+    : copy.submitRejected
+}
+
+export function clearNativeSubmissionFeedback(
+  copy: ReturnType<typeof modelProviderCopy>,
+  current?: string,
+): string | undefined {
+  return [copy.unsupportedIntent, copy.submitRejected, copy.switchUnsupported, copy.switchReconciliation].includes(
+      current ?? '',
+    )
+    ? undefined
+    : current
 }

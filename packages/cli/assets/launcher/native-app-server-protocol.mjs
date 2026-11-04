@@ -8,6 +8,7 @@ import { prepareManagedResume } from './native-managed-resume.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
 import { nativeProviderFailure } from './native-provider-errors.mjs'
+import { switchNativeThread } from './native-thread-switch.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -76,6 +77,8 @@ const preparedResumes = new Map()
 const unmarkedTurns = new NativeRequestTracker()
 // An unacknowledged lifecycle mutation stays uncertain; retain its fence, not its payload.
 const lifecycleCalls = new Map()
+const uncertainSwitches = new Map()
+const switchReconciliations = new NativeRequestTracker()
 // If the bounded map loses a mutation, its safety fence lasts until this process restarts.
 // Ordinary native requests still pass through; only automatic recovery/Host switching stops.
 let lifecycleUncertain = false
@@ -166,7 +169,9 @@ const nativeErrorCode = error =>
   ['ENOENT', 'EACCES', 'EPERM', 'EPIPE', 'ECONNRESET', 'ECONNREFUSED'].includes(error?.code) ? error.code : 'unknown'
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.test(value)
-const lifecyclePending = threadId => lifecycleUncertain || [...lifecycleCalls.values()].includes(threadId)
+const lifecyclePending = threadId =>
+  lifecycleUncertain || uncertainSwitches.has(threadId)
+  || [...lifecycleCalls.values()].includes(threadId)
 const write = (stream, value) =>
   new Promise((resolve, reject) => {
     if (stream.destroyed) {
@@ -210,6 +215,9 @@ function stop(reason = 'transport-closed') {
   recoveringTurns.clear()
   cancelledRecovery.clear()
   lifecycleCalls.clear()
+  uncertainSwitches.clear()
+  switchReconciliations.clear()
+  switchRequests.clear()
   firstTurns.clear()
   agentFirstTurns.clear()
   control.destroy()
@@ -239,6 +247,18 @@ function controlCall(type, input = {}) {
 }
 function nativeCall(method, params) {
   return call(nativeTransport.stdin, privateCalls, { method, params })
+}
+function acknowledgedSwitchResume(message, expected) {
+  return expected && message.error === undefined && message.result?.thread?.id === expected.threadId
+    && message.result.thread.status?.type === 'idle' && message.result.modelProvider === expected.providerId
+    && message.result.model === expected.model
+}
+function reconcileSwitch(message, expected, hostAdmitted = false) {
+  if (
+    acknowledgedSwitchResume(message, expected) && uncertainSwitches.get(expected.threadId) === expected
+    && (expected.providerId === 'openai' || hostAdmitted) && !lifecycleUncertain
+    && ![...lifecycleCalls.values()].includes(expected.threadId)
+  ) uncertainSwitches.delete(expected.threadId)
 }
 function settle(calls, message, isControl) {
   const pending = calls.get(message.id)
@@ -382,10 +402,24 @@ async function forward(line) {
   const managed = config !== undefined && Object.hasOwn(config, marker)
   if (message?.method === 'turn/interrupt' && typeof params?.threadId === 'string') {
     unmarkedTurns.retireThread(params.threadId)
-    if (recoveringTurns.has(params.threadId)) cancelledRecovery.add(params.threadId)
+    if (recoveringTurns.has(params.threadId) || switching.has(params.threadId)) cancelledRecovery.add(params.threadId)
   }
   const mutatesThread = ['turn/start', 'turn/addUserMessage', 'turn/steer', 'thread/resume', 'thread/unsubscribe']
     .includes(message?.method)
+  if (
+    uncertainSwitches.has(params?.threadId)
+    && ['thread/resume', 'thread/unsubscribe', 'turn/interrupt'].includes(message?.method)
+  ) uncertainSwitches.set(params.threadId, undefined)
+  if (
+    uncertainSwitches.has(params?.threadId)
+    && ['turn/start', 'turn/addUserMessage', 'turn/steer'].includes(message?.method)
+  ) {
+    await write(process.stdout, {
+      id: message.id,
+      error: { code: -32000, message: 'Provider switch status is uncertain. Reopen this conversation before sending.' },
+    })
+    return
+  }
   if (
     mutatesThread && (recoveringTurns.has(params?.threadId) || switching.has(params?.threadId))
   ) {
@@ -428,7 +462,37 @@ async function forward(line) {
     if (
       message?.method === 'thread/resume' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
-    ) trackedResume = resumeCalls.track(message.id, params)
+    ) {
+      trackedResume = resumeCalls.track(message.id, params)
+      if (uncertainSwitches.has(params.threadId)) {
+        let expected
+        try {
+          const before = await nativeCall('thread/read', { threadId: params.threadId, includeTurns: false })
+          const thread = before?.thread
+          if (
+            thread?.id === params.threadId && typeof thread.modelProvider === 'string'
+            && typeof thread.model === 'string'
+            && ['idle', 'notLoaded', 'systemError'].includes(thread.status?.type)
+            && params.path == null && params.history == null
+            && (params.modelProvider == null || params.modelProvider === thread.modelProvider)
+            && (params.config?.model_provider === undefined || params.config.model_provider === thread.modelProvider)
+            && (params.model == null || params.model === thread.model)
+          ) expected = { threadId: params.threadId, providerId: thread.modelProvider, model: thread.model }
+        } catch {}
+        if (!expected || !switchReconciliations.track(message.id, expected)) {
+          resumeCalls.take(message.id)
+          await write(process.stdout, {
+            id: message.id,
+            error: {
+              code: -32000,
+              message: 'Provider switch status is uncertain. Reopen the original conversation and service.',
+            },
+          })
+          return
+        }
+        uncertainSwitches.set(params.threadId, expected)
+      }
+    }
     if (
       message?.method === 'turn/start' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
@@ -450,7 +514,11 @@ async function forward(line) {
     ) {
       let prepared
       try {
-        prepared = await prepareManagedResume(message, { nativeCall, controlCall })
+        prepared = await prepareManagedResume(message, {
+          nativeCall,
+          controlCall,
+          allowConfigured: uncertainSwitches.has(params.threadId),
+        })
       } catch {}
       if (prepared) {
         preparedResumes.set(message.id, { threadId: prepared.threadId, resumeToken: prepared.resumeToken })
@@ -458,6 +526,21 @@ async function forward(line) {
         await write(nativeTransport.stdin, prepared.message)
         return
       }
+    }
+    const reconciliation = uncertainSwitches.get(params?.threadId)
+    if (message?.method === 'thread/resume' && reconciliation && reconciliation.providerId !== 'openai') {
+      resumeCalls.take(message.id)
+      switchReconciliations.take(message.id)
+      lifecycleCalls.delete(message.id)
+      uncertainSwitches.set(params.threadId, undefined)
+      await write(process.stdout, {
+        id: message.id,
+        error: {
+          code: -32000,
+          message: 'Provider switch status is uncertain. Original service preparation was not admitted.',
+        },
+      })
+      return
     }
     if (['thread/start', 'thread/resume'].includes(message?.method) && params) {
       try {
@@ -724,6 +807,7 @@ readLines(nativeTransport.stdout, line => {
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return
   if (message.method === undefined) lifecycleCalls.delete(message.id)
+  const reconciliation = message.method === undefined ? switchReconciliations.take(message.id) : undefined
   const turnParams = message.method === undefined ? unmarkedTurns.take(message.id) : undefined
   if (turnParams !== undefined) {
     const providerId = nativeProviderFailure(message)
@@ -741,8 +825,14 @@ readLines(nativeTransport.stdout, line => {
     preparedResumes.delete(message.id)
     resumeCalls.take(message.id)
     const succeeded = message.error === undefined && message.result?.thread?.id === preparedResume.threadId
+      && (reconciliation === undefined
+        || (acknowledgedSwitchResume(message, reconciliation)
+          && uncertainSwitches.get(reconciliation.threadId) === reconciliation))
     void controlCall('resume-complete', { ...preparedResume, succeeded })
-      .then(() => write(process.stdout, line)).catch(stop)
+      .then(completed => {
+        if (completed === true) reconcileSwitch(message, reconciliation, true)
+        return write(process.stdout, line)
+      }).catch(stop)
     return
   }
   const resumeParams = message.method === undefined ? resumeCalls.take(message?.id) : undefined
@@ -753,6 +843,7 @@ readLines(nativeTransport.stdout, line => {
       return
     }
   }
+  reconcileSwitch(message, reconciliation)
   const operation = desktopCalls.get(message?.id)
   if (!operation || message.method !== undefined) {
     void write(process.stdout, line).catch(stop)
@@ -780,6 +871,7 @@ readLines(nativeTransport.stdout, line => {
 })
 
 const switching = new Set()
+const switchRequests = new Map()
 const BRIDGE_NATIVE_METHODS = new Set([
   'thread/list',
   'thread/read',
@@ -798,6 +890,14 @@ readLines(control, line => {
     return
   }
   if (settle(controlCalls, message, true)) return
+  if (
+    message.type === 'switch-cancel' && typeof message.switchId === 'string'
+    && switchRequests.get(message.switchId) === message.threadId
+  ) {
+    cancelledRecovery.add(message.threadId)
+    uncertainSwitches.set(message.threadId, undefined)
+    return
+  }
   if (message.type === 'task-create' && typeof message.id === 'string') {
     void nativeCall('mcpServer/tool/call', {
       server: 'codex_app',
@@ -821,6 +921,13 @@ readLines(control, line => {
       void write(control, { id: message.id, ok: false }).catch(stop)
       return
     }
+    if (uncertainSwitches.has(params.threadId) && message.method === 'turn/start') {
+      void write(control, { id: message.id, ok: false, reason: 'provider-switch-reconciliation-required' }).catch(stop)
+      return
+    }
+    if (
+      uncertainSwitches.has(params.threadId) && ['thread/resume', 'turn/interrupt'].includes(message.method)
+    ) uncertainSwitches.set(params.threadId, undefined)
     void nativeCall(message.method, params)
       .then(value => write(control, { id: message.id, ok: true, value }))
       .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
@@ -846,34 +953,24 @@ readLines(control, line => {
     return
   }
   switching.add(message.threadId)
+  switchRequests.set(message.id, message.threadId)
   void (async () => {
     try {
-      if (message.requireIdle === true) {
-        const before = await nativeCall('thread/read', { threadId: message.threadId, includeTurns: false })
-        if (before?.thread?.id !== message.threadId || before?.thread?.status?.type !== 'idle') {
-          await write(control, { id: message.id, ok: true, value: { status: 'rejected', reason: 'thread-not-idle' } })
-          return
-        }
-      }
-      // Ephemeral side chats have no rollout to resume. Unsubscribe would destroy
-      // the only live session even when the following resume fails.
-      const current = await nativeCall('thread/read', { threadId: message.threadId, includeTurns: false })
-      if (current?.thread?.ephemeral === true) throw new Error('Ephemeral provider switching requires a new side chat')
-      await nativeCall('thread/unsubscribe', { threadId: message.threadId })
-      const result = await nativeCall('thread/resume', {
-        threadId: message.threadId,
-        model: message.model,
-        modelProvider: message.providerId,
-        config: message.config,
-        excludeTurns: true,
+      const result = await switchNativeThread(message, {
+        nativeCall,
+        controlCall,
+        current: () => !closed && !cancelledRecovery.has(message.threadId) && !lifecyclePending(message.threadId),
       })
-      const ok = result?.thread?.id === message.threadId && result?.modelProvider === message.providerId
-        && result?.model === message.model
-      await write(control, { id: message.id, ok })
+      if (result.reason === 'provider-switch-reconciliation-required') {
+        uncertainSwitches.set(message.threadId, undefined)
+      }
+      await write(control, { id: message.id, ...result })
     } catch {
       await write(control, { id: message.id, ok: false })
     } finally {
       switching.delete(message.threadId)
+      switchRequests.delete(message.id)
+      cancelledRecovery.delete(message.threadId)
     }
   })().catch(stop)
 }, maxControlLineBytes)

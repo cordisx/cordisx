@@ -86,6 +86,27 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
 }
 
 describe('native provider selection client', () => {
+  it('retains a specific unsupported switch outcome without synchronizing labels or allowing a Send', async () => {
+    const h = await harness(false, true)
+    h.synchronizeEffective.mockClear()
+    h.channel.selectionSelect.mockResolvedValueOnce({
+      status: 'reject',
+      reason: 'provider-switch-unsupported',
+      available: true,
+      revision: 3,
+      effective: { providerId: 'a', model: 'a-model' },
+      pending: { ...pending, blockedReason: 'provider-switch-unsupported' },
+    })
+    expect(await h.client.select({ providerId: 'b', model: 'b-model' })).toBe('unavailable')
+    expect(h.client.snapshot()).toMatchObject({ effective: { providerId: 'a' }, pending: { providerId: 'b' } })
+    expect(await h.client.submitHook({ ...descriptor, thread: 'thread-1' })).toEqual({ allow: false })
+    expect(h.notice).toHaveBeenLastCalledWith('provider-switch-unsupported')
+    expect(h.channel.submissionPrepare).not.toHaveBeenCalled()
+    expect(h.synchronizeEffective).not.toHaveBeenCalled()
+    expect(await h.client.select({ providerId: 'a', model: 'a-model' })).toBe('accepted')
+    expect(h.client.snapshot().pending).toBeUndefined()
+    h.client.dispose()
+  })
   it.each([true, false])('adds target effort only for a pending ordinary send (%s)', async hasPending => {
     const h = await harness(hasPending, false, 'max')
     await h.client.submitHook(descriptor)

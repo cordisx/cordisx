@@ -8,7 +8,7 @@ import { HostIcon } from './host-ui/HostIcon.js'
 import { HostMenuSurface } from './host-ui/HostMenu.js'
 import { ModelBrandIcon } from './host-ui/ModelBrandIcon.js'
 import { ProviderAction } from './model-provider-actions.js'
-import { modelProviderCopy } from './model-provider-copy.js'
+import { clearNativeSubmissionFeedback, modelProviderCopy, nativeSubmissionFeedback } from './model-provider-copy.js'
 import { friendlyModelLabel } from './adapter/native-model-provider-seat.js'
 import { nativeModelProviderInteractionAllowed } from './adapter/native-model-provider-interaction.js'
 import { ProviderReasoningSlider } from './model-provider-reasoning.js'
@@ -275,13 +275,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   useEffect(() => {
     if (native.submissionError !== undefined) {
       setStatus(undefined)
-      setError(
-        native.submissionError === 'unsupported-submission-intent' ? copy.unsupportedIntent : copy.submitRejected,
-      )
+      setError(nativeSubmissionFeedback(copy, native.submissionError))
     } else {
-      setError(current => current === copy.unsupportedIntent || current === copy.submitRejected ? undefined : current)
+      setError(current => clearNativeSubmissionFeedback(copy, current))
     }
-  }, [native.submissionError, copy.unsupportedIntent, copy.submitRejected])
+  }, [native.submissionError, locale])
 
   const runReasoningEffort = async (effort: string) => {
     if (!canInteract()) return
@@ -376,7 +374,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       if (generation !== operation.current) return
       if (result !== 'accepted') {
         setStatus(undefined)
-        setError(result === 'busy' ? copy.busy : copy.failed)
+        const reason = transport.getSnapshot().submissionError
+        setError(
+          reason === undefined ? result === 'busy' ? copy.busy : copy.failed : nativeSubmissionFeedback(copy, reason),
+        )
       } else {
         setStatus(undefined)
       }
