@@ -407,11 +407,12 @@ async function withSkillDeploymentLock<T>(
   skillName: CordisXBundledSkillName,
   testHooks: CordisXSkillDeploymentTestHooks | undefined,
   operation: () => Promise<T>,
+  preserveBusyLock = false,
 ): Promise<T> {
   await mkdir(skillsDir, { recursive: true })
   const lockDir = path.join(skillsDir, `.${skillName}.deployment-lock`)
   const deadline = Date.now()
-    + (testHooks?.deploymentLockTimeoutMs ?? CORDISX_SKILL_DEPLOYMENT_LOCK_TIMEOUT_MS)
+    + (preserveBusyLock ? 0 : testHooks?.deploymentLockTimeoutMs ?? CORDISX_SKILL_DEPLOYMENT_LOCK_TIMEOUT_MS)
   while (true) {
     try {
       await mkdir(lockDir)
@@ -539,7 +540,7 @@ export async function deployBundledCordisXSkillToHome(
 async function deployBundledCordisXNamedSkillToHome(
   rawEffectiveHome: string,
   skillName: CordisXBundledSkillName,
-  options: DeployBundledCordisXSkillToHomeOptions = {},
+  options: DeployBundledCordisXSkillToHomeOptions & { readonly preserveBusyLock?: true } = {},
 ): Promise<CordisXSkillDeploymentResult> {
   const effectiveHome = absoluteHome(rawEffectiveHome, 'Host launch')
   const targetDir = path.join(effectiveHome, '.agents', 'skills', skillName)
@@ -608,7 +609,7 @@ async function deployBundledCordisXNamedSkillToHome(
     } finally {
       if (stageExists) await rm(stageDir, { recursive: true, force: true })
     }
-  })
+  }, options.preserveBusyLock === true)
 }
 
 /** Deploy every release-bundled CordisX Skill and report user-owned conflicts without hiding partial results. */
@@ -623,6 +624,9 @@ export async function deployBundledCordisXSkillsToHome(
     try {
       deployments.push(
         await deployBundledCordisXNamedSkillToHome(effectiveHome, skillName, {
+          // Optional help updates do not delay the workspace behind a live or
+          // unidentifiable legacy writer. Preserve its target and lock instead.
+          preserveBusyLock: true,
           ...(options.sourceRootDir === undefined
             ? {}
             : { sourceDir: path.join(path.resolve(options.sourceRootDir), skillName) }),

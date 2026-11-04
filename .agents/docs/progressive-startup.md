@@ -19,6 +19,23 @@ renderer, and publishes workspace readiness. Progressive managed services
 continue their preparation in the owning lifecycle. A slow or unavailable
 provider does not become available merely because the Host window is ready.
 
+For an owned native launch, the main workspace renderer must accept the
+bootstrap before the CLI publishes readiness. A detached helper window cannot
+satisfy this requirement or occupy the serial installation slot before the
+workspace's first installation; CDP list order and shared window titles do not
+establish startup priority. Early App launch additionally requires the verified
+main-inspector capability that holds the initial native document. If that
+capability is unavailable, the launcher prepares the graph and adapter first,
+then starts the ordinary App with its watcher already armed. Renderer CDP remains
+the integration path; the unavailable main inspector is not enabled by changing
+the installed App or its Electron fuses.
+
+Bundled Skill updates are optional startup maintenance. A busy deployment lock
+preserves the affected Skill and reports its conflict while other Skills and
+workspace preparation continue; startup does not wait out that lock's timeout or
+delete an unidentifiable writer's lock. Explicit single-Skill deployment retains
+its serialized wait behavior.
+
 The Host owns one startup authority for the admitted capabilities. It combines
 service health, authentication, catalog, provider publication, and declared
 milestones. A provider is executable only after all required evidence is ready.
