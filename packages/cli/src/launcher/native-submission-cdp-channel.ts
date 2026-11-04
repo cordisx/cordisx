@@ -127,7 +127,7 @@ export interface NativeSubmissionCdpAuthority {
   readonly selection: NativeSubmissionSelectionAuthority
   readonly runtime: NativeSubmissionRuntimeAuthority
   readonly agentSelection: {
-    reserve(threadId: string): boolean
+    reserve(threadId: string): Promise<boolean>
     commit(input: Readonly<{ threadId: string; providerId: string; model: string }>): void
     release(threadId: string): void
   }
@@ -374,15 +374,42 @@ export function createNativeSubmissionCdpAuthority(options: {
       return false
     },
     agentSelection: {
-      reserve(threadId) {
-        if (
-          agentSelections.has(threadId)
-          || [...states.values()].some(state =>
-            state.scope.threadId === threadId && (state.pending || state.pendingProviderIntent)
-          )
-        ) return false
+      async reserve(threadId) {
+        if (agentSelections.has(threadId)) return false
         agentSelections.add(threadId)
-        return true
+        let reserved = false
+        try {
+          const candidates = [...states.values()].filter(state => state.scope.threadId === threadId)
+          const revisions = candidates.map(state => state.revision)
+          for (const state of candidates) {
+            if (!state.pending && !state.pendingProviderIntent) continue
+            const scope = state.scope
+            const owner = documents.get(scope.targetId)
+            if (!owner || owner.disposed || owner.generation !== scope.rendererGeneration) continue
+            if (owner.session.isClosed()) return false
+            const response = await owner.session.send('Runtime.evaluate', {
+              expression: scope.composerId === undefined
+                ? 'globalThis.__cordisxNativeSubmissionAuthority?.snapshot?.()'
+                : `globalThis.__cordisxNativeSubmissionAuthority?.resolve?.(${JSON.stringify(scope)})`,
+              returnByValue: true,
+            })
+            if (response.exceptionDetails || !record(response.result)) return false
+            const value = record(response.result)!.value
+            if (value === undefined) continue
+            if (key(scopeOf(record(value)?.scope)) === key(scope)) return false
+          }
+          const current = [...states.values()].filter(state => state.scope.threadId === threadId)
+          if (
+            current.length !== candidates.length
+            || current.some((state, index) => state !== candidates[index] || state.revision !== revisions[index])
+          ) return false
+          reserved = true
+          return true
+        } catch {
+          return false
+        } finally {
+          if (!reserved) agentSelections.delete(threadId)
+        }
       },
       commit(input) {
         const selection = { providerId: input.providerId, model: input.model }
@@ -391,6 +418,7 @@ export function createNativeSubmissionCdpAuthority(options: {
           if (state.scope.threadId !== input.threadId) continue
           state.effective = selection
           delete state.pending
+          delete state.pendingProviderIntent
           state.revision++
         }
       },
