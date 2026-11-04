@@ -137,4 +137,110 @@ describe('Host model API transport', () => {
       await rm(home, { recursive: true, force: true })
     }
   })
+
+  it('exposes Agent paging, messages, interruption and terminating operation streams over HTTP', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'cordisx-agent-api-'))
+    const calls: Array<{ app: string; operation: string; args: unknown }> = []
+    const interrupts: unknown[] = []
+    let reads = 0
+    const api = await startModelApiServer({
+      homeDir: home,
+      profileId: 'agents',
+      port: 0,
+      catalog: async () => [],
+      connect: async () => {
+        throw new Error('Agent tests must not call inference')
+      },
+      agents: async (app, operation, args) => {
+        calls.push({ app, operation, args })
+        if (operation === 'read_session') {
+          return {
+            sessionId: 'session/one',
+            messages: [{ text: 'mock command output', role: 'tool' }],
+            nextCursor: 'opaque-cursor',
+          }
+        }
+        if (operation === 'check_operation') {
+          return { operationId: 'operation/one', state: ++reads === 1 ? 'running' : 'done' }
+        }
+        return { status: 'done' }
+      },
+      interrupt: async (sessionId, turnId) => {
+        interrupts.push({ sessionId, turnId })
+        return { status: 'interrupted' }
+      },
+    })
+    const headers = {
+      authorization: `Bearer ${(await readFile(api.accessKeyFile, 'utf8')).trim()}`,
+      'content-type': 'application/json',
+    }
+    const root = api.agentUrl
+    try {
+      await fetch(root + '/sessions?app=claude&limit=7&search=needle', { headers }).then(r => r.json())
+      expect(calls.at(-1)).toEqual({
+        app: 'claude',
+        operation: 'list_sessions',
+        args: { limit: 7, searchTerm: 'needle' },
+      })
+      const transcript = await fetch(root + '/sessions/session%2Fone?cursor=opaque-cursor', { headers })
+        .then(r => r.json())
+      expect(transcript.messages[0]).toMatchObject({ role: 'tool', text: 'mock command output' })
+      expect(calls.at(-1)).toMatchObject({
+        app: 'codex',
+        operation: 'read_session',
+        args: { sessionId: 'session/one', cursor: 'opaque-cursor' },
+      })
+      await fetch(root + '/sessions/session%2Fone/messages?app=claude', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ prompt: 'continue mock' }),
+      }).then(r => r.json())
+      expect(calls.at(-1)).toEqual({
+        app: 'claude',
+        operation: 'send_message',
+        args: { sessionId: 'session/one', prompt: 'continue mock' },
+      })
+      const interrupted = await fetch(root + '/sessions/session%2Fone/interrupt', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ turnId: 'turn-one' }),
+      }).then(r => r.json())
+      expect(interrupted.status).toBe('interrupted')
+      expect(interrupts).toEqual([{ sessionId: 'session/one', turnId: 'turn-one' }])
+      expect(
+        (await fetch(root + '/sessions/session%2Fone/interrupt?app=claude', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ turnId: 'turn-one' }),
+        })).status,
+      ).toBe(400)
+      expect(
+        (await fetch(root + '/rpc', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ app: 'codex', operation: 'invented' }),
+        })).status,
+      ).toBe(400)
+      await fetch(root + '/rpc', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ app: 'claude', operation: 'list_model_providers', args: {} }),
+      }).then(r => r.json())
+      expect(calls.at(-1)).toEqual({ app: 'claude', operation: 'list_model_providers', args: {} })
+      const operation = await fetch(root + '/operations/operation%2Fone/events', { headers })
+      const events = await operation.text()
+      expect(events).toContain('"state":"running"')
+      expect(events).toContain('"state":"done"')
+      expect(reads).toBe(2)
+      const abort = new AbortController()
+      const stream = await fetch(root + '/sessions/session%2Fone/events', { headers, signal: abort.signal })
+      const reader = stream.body!.getReader()
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('mock command output')
+      abort.abort()
+      await reader.cancel().catch(() => undefined)
+    } finally {
+      await api.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 })
