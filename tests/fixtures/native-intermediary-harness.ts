@@ -7,7 +7,10 @@ import { startNativeSubmissionControlServer } from '../../packages/cli/src/launc
 import type { NativeSubmissionController } from '../../packages/cli/src/launcher/native-submission-controller.js'
 import { NativeAgentTaskRouting } from '../../packages/cli/src/launcher/native-agent-task-routing.js'
 
-export async function harness(controller?: NativeSubmissionController) {
+export async function harness(
+  controller?: NativeSubmissionController,
+  nativeFixture = 'native-intermediary-app-server.mjs',
+) {
   const server = await startNativeSubmissionControlServer()
   const consume = vi.fn(async (input: { operationToken: string }) =>
     input.operationToken === 'rejected-operation-token'
@@ -21,7 +24,11 @@ export async function harness(controller?: NativeSubmissionController) {
         configOverrides: {
           model_provider: 'provider-b',
           model: 'model-b',
-          'model_providers.provider-b': { base_url: 'http://127.0.0.1/v1', requires_openai_auth: false },
+          'model_providers.provider-b': {
+            base_url: 'http://127.0.0.1/v1',
+            ...(nativeFixture === 'native-provider-process.mjs' ? { wire_api: 'responses' } : {}),
+            requires_openai_auth: false,
+          },
         },
       }
   )
@@ -34,7 +41,11 @@ export async function harness(controller?: NativeSubmissionController) {
         kind: 'resume',
         resumeToken: `resume-token-${input.threadId}`,
         configOverrides: {
-          'model_providers.provider-b': { base_url: 'http://127.0.0.1/v1', requires_openai_auth: false },
+          'model_providers.provider-b': {
+            base_url: 'http://127.0.0.1/v1',
+            ...(nativeFixture === 'native-provider-process.mjs' ? { wire_api: 'responses' } : {}),
+            requires_openai_auth: false,
+          },
         },
       }
   )
@@ -53,7 +64,7 @@ export async function harness(controller?: NativeSubmissionController) {
     } as unknown as NativeSubmissionController,
   )
   const intermediary = path.resolve('packages/cli/assets/launcher/native-app-server-protocol.mjs')
-  const nativeArguments = [path.resolve('tests/fixtures/native-intermediary-app-server.mjs'), 'app-server']
+  const nativeArguments = [path.resolve('tests/fixtures', nativeFixture), 'app-server']
   const child = spawn(process.execPath, [
     intermediary,
     ...nativeArguments,

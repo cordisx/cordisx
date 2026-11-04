@@ -4,6 +4,7 @@ import path from 'node:path'
 import { initSync, parse } from 'es-module-lexer'
 import { literal, parseNativeSource } from './native-source-structure.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
+import { nativeChunkPaths } from '@cordisx/codex-adapter'
 
 /** Read installed resources without extracting, modifying, or launching the App. */
 export function readNativeSubmissionResources(
@@ -14,7 +15,7 @@ export function readNativeSubmissionResources(
   const archive = path.join(contents, 'Resources', 'app.asar')
   const packageEntries = listPackage(archive, { isPack: false })
   const assets = new Set(
-    packageEntries.filter(entry => /^\/webview\/assets\/[^/]+\.js$/u.test(entry)),
+    packageEntries.filter(entry => /^\/webview\/assets\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9._-]+\.js$/u.test(entry)),
   )
   const entries = packageEntries.includes('/webview/index.html')
     ? [...extractFile(archive, 'webview/index.html').toString('utf8').matchAll(/<script\b[^>]*>/giu)]
@@ -38,7 +39,11 @@ export function readNativeSubmissionResources(
       entries.includes(entry) || /^\/webview\/assets\/app-shared-[^/]+\.js$/u.test(entry)
       || resourceHints.some(keys => keys.every(key => source.includes(key)))
     ) {
-      resources.push({ url: `app://-/assets/${path.basename(entry)}`, source })
+      resources.push({ url: `app://-${entry.slice('/webview'.length)}`, source })
+    }
+    for (const chunk of nativeChunkPaths(source)) {
+      const target = `/webview/${chunk}`
+      if (assets.has(target)) discovered.add(target)
     }
     const [imports] = parse(source)
     for (const dependency of imports) {

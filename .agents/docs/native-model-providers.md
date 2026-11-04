@@ -107,6 +107,33 @@ An action may open authentication, API-key setup or plugin settings; the Host
 does not prescribe a login flow. Plugins remove the supplemental row when it is
 no longer needed. Branding does not register an endpoint or establish readiness.
 
+### Native connection identity
+
+Desktop builds that validate the process-level provider need more than a
+per-thread configuration override. After the Host admits a configured or
+managed Responses provider, its intermediary opens a native app-server
+connection with that provider identity. The connection uses an inert loopback
+default; the admitted thread request supplies the actual endpoint and
+authentication in memory. Credentials are not put in process arguments or
+persisted by this transport.
+
+Thread IDs and native history stay unchanged. Subsequent turns, interrupts and
+approval replies follow the thread's connection, while global account and
+configuration requests stay on the original connection. A failed connection
+does not select another provider or replay an uncertain turn. The intermediary
+owns these processes and terminates them on disposal. Native permission and
+Send authorization checks remain in force.
+
+### Native resource compatibility
+
+Resource discovery follows static imports, literal dynamic imports and finite
+Rspack async filename tables within the installed application archive. It does
+not execute application code or modify the signed App. Repeated copies of one
+exported module factory can be adapted together; competing capability owners
+and changed resource bytes still reject adaptation. Lazy resources are fenced
+and acknowledged when they load. Each composer uses the runtime's existing
+model registry, including plugin-owned titles, icons and startup state.
+
 ### Selector icons
 
 The Host may infer a provider brand from its structured endpoint and then a

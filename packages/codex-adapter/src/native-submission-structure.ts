@@ -3,6 +3,7 @@ import type { NativeResourceTransform } from './contracts.js'
 import { modelReasoningEfforts } from './reasoning.js'
 import { resolveNativeVariable } from './native-source-bindings.js'
 import { nativeLazyRequestSource, resolveNativeLazyWireRequest } from './native-lazy-wire-request.js'
+import { nativeModuleFactories } from './native-chunk-structure.js'
 import {
   applySourceEdits,
   literal,
@@ -62,10 +63,17 @@ class ResourcePlan {
   readonly capabilities: string[] = []
   readonly functions: SyntaxNode[] = []
   readonly declarations = new Map<SyntaxNode, SyntaxNode[]>()
+  readonly owners = new Map<SyntaxNode, string>()
+  readonly capabilityOwners = new Map<string, string>()
   constructor(readonly resource: NativeScriptResource) {
     this.ast = parseNativeSource(resource.source)
+    const factories = nativeModuleFactories(this.ast)
     visitSyntax(this.ast, (node, parents) => {
-      if (isFunction(node)) this.functions.push(node)
+      if (isFunction(node)) {
+        this.functions.push(node)
+        const factory = parents.find(parent => factories.has(parent))
+        if (factory) this.owners.set(node, factories.get(factory)!)
+      }
       if (node.type !== 'VariableDeclarator') return
       const fn = parents.findLast(isFunction)
       if (!fn) return
@@ -73,6 +81,16 @@ class ResourcePlan {
       entries.push(node)
       this.declarations.set(fn, entries)
     })
+  }
+
+  claimCapability(capability: string, fn: SyntaxNode): void {
+    if (this.capabilityOwners.has(capability)) {
+      throw new Error(`Native capability ${capability}: duplicate structure`)
+    }
+    this.capabilityOwners.set(
+      capability,
+      this.owners.has(fn) ? `factory:${this.owners.get(fn)}` : this.resource.url,
+    )
   }
   text(node: SyntaxNode): string {
     return this.resource.source.slice(node.start, node.end)
@@ -440,6 +458,7 @@ function modelCompletion(plan: ResourcePlan): void {
     throw new Error('Native capability model-completion: native update completion is unavailable')
   }
   plan.capabilities.push('model-completion')
+  plan.claimCapability('model-completion', fn)
 }
 
 /** Compatibility is a complete set of structural capabilities, never an App identity. */
@@ -449,6 +468,7 @@ export function analyzeNativeSubmissionTransforms(
   const plans = resources.map(resource => new ResourcePlan(resource))
   for (const plan of plans) {
     for (const fn of plan.functions) {
+      const before = plan.capabilities.length
       if (inputPattern(plan, fn, ['submitTarget', 'isResponseInProgress', 'options'])) {
         submitGuard(plan, fn)
       }
@@ -498,6 +518,9 @@ export function analyzeNativeSubmissionTransforms(
           ])
         )
       ) firstTurn(plan, fn)
+      for (const capability of plan.capabilities.slice(before)) {
+        plan.claimCapability(capability, fn)
+      }
     }
     if (plan.resource.source.includes('onSelectModelOption')) modelCompletion(plan)
   }
@@ -512,7 +535,12 @@ export function analyzeNativeSubmissionTransforms(
     'first-turn',
   ]
   for (const capability of required) {
-    one(plans.flatMap(plan => plan.capabilities.filter(c => c === capability)), capability)
+    one([
+      ...new Set(plans.flatMap(plan =>
+        plan.capabilities.filter(c => c === capability)
+          .map(c => plan.capabilityOwners.get(c) ?? plan.resource.url)
+      )),
+    ], capability)
   }
   const transforms = plans.filter(plan => plan.edits.length > 0).map(plan => {
     const sha256 = hash(plan.resource.source)
@@ -524,7 +552,7 @@ export function analyzeNativeSubmissionTransforms(
     return Object.freeze({
       url: plan.resource.url,
       sha256,
-      requiredForDocumentReady: plan.capabilities.includes('submit-guard'),
+      requiredForDocumentReady: plan.capabilities.includes('submit-guard') && plan.owners.size === 0,
       transform: (observed: string) => {
         if (hash(observed) !== sha256) {
           throw new Error(`Native resource changed after capability discovery: ${plan.resource.url}`)

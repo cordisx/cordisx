@@ -110,12 +110,16 @@ export function locateNativeModelProviderMountSeat(
   owner?: Element,
 ): NativeModelProviderSeat | undefined {
   const candidates = [...document.querySelectorAll<HTMLElement>(
-    'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"]',
+    'button[data-codex-intelligence-trigger="true"][aria-haspopup="menu"],'
+      + 'button[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort][aria-haspopup="menu"]',
   )].flatMap(trigger => {
     const composer = trigger.closest<HTMLElement>('[data-codex-composer-root][data-composer-placement]')
     const footer = trigger.closest<HTMLElement>('[data-composer-footer-responsive]')
     if (!composer || !footer || !composer.contains(footer) || (owner !== undefined && composer !== owner)) return []
     if (!visible(trigger) || !visible(composer) || !visible(footer)) return []
+    // The current reasoning trigger also owns the unified model menu. A plain
+    // reasoning-only control must never be replaced by the provider selector.
+    if (trigger.dataset.codexIntelligenceTrigger !== 'true' && !locateNativeModelSelectionControl(trigger)) return []
     return [{ trigger, footer }]
   })
   if (candidates.length !== 1) return undefined
@@ -159,7 +163,7 @@ export function currentNativeComposerThreadId(document: Document, owner?: Elemen
 /** Native menu owner contracts: separate effort selection and unified model/effort selection. */
 export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeModelSelectionControl | undefined {
   let fiber: ReactFiber | null | undefined = reactFiber(trigger)
-  for (let depth = 0; fiber !== undefined && fiber !== null && depth < 40; depth += 1, fiber = fiber.return) {
+  for (let depth = 0; fiber !== undefined && fiber !== null && depth < 64; depth += 1, fiber = fiber.return) {
     const props = record(fiber.memoizedProps)
     const model = props?.model
     const reasoningEffort = props?.reasoningEffort
