@@ -31,6 +31,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       result: {
         thread: { id, modelProvider, model: 'test-model', status: { type: 'idle' } },
         modelProvider,
+        current,
         model: 'test-model',
         argvHasSecret: process.argv.some(arg => arg.includes('test-private-token')),
         receivedConfig: params.config,

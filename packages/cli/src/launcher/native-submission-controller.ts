@@ -692,6 +692,9 @@ export function createNativeSubmissionController(
       }
       return {
         kind: 'dispatch',
+        ...(options.providerSource?.(operation.pending.providerId) === 'config'
+          ? { providerSource: 'config' as const }
+          : {}),
         configOverrides: operation.configOverrides,
         providerId: operation.pending.providerId,
         model: operation.pending.model,

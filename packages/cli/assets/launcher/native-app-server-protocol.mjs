@@ -14,6 +14,22 @@ const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
 const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
 const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
+function configuredOverrides(existing, overrides) {
+  const merged = { ...existing, ...overrides }
+  for (const [name, definition] of Object.entries(overrides)) {
+    if (!name.startsWith('model_providers.') || !object(definition)) continue
+    const id = name.slice('model_providers.'.length)
+    merged[name] = {
+      ...definition,
+      ...object(object(existing?.model_providers)?.[id]),
+      ...object(existing?.[name]),
+      base_url: definition.base_url,
+      wire_api: definition.wire_api,
+    }
+    if (Object.hasOwn(merged, `${name}.base_url`)) merged[`${name}.base_url`] = definition.base_url
+  }
+  return merged
+}
 // Native history and plugin catalogs can exceed the small private control-message budget.
 const maxNativeLineBytes = 64 * 1024 * 1024
 const maxControlLineBytes = 8 * 1024 * 1024
@@ -454,21 +470,7 @@ async function forward(line) {
           ...(typeof providerId === 'string' ? { providerId } : {}),
         })
         if (object(overrides) && Object.keys(overrides).length) {
-          const existing = object(params.config)
-          const merged = { ...existing, ...overrides }
-          for (const [name, definition] of Object.entries(overrides)) {
-            if (!name.startsWith('model_providers.') || !object(definition)) continue
-            const id = name.slice('model_providers.'.length)
-            merged[name] = {
-              ...definition,
-              ...object(object(existing?.model_providers)?.[id]),
-              ...object(existing?.[name]),
-              base_url: definition.base_url,
-              wire_api: definition.wire_api,
-            }
-            if (Object.hasOwn(merged, `${name}.base_url`)) merged[`${name}.base_url`] = definition.base_url
-          }
-          params.config = merged
+          params.config = configuredOverrides(object(params.config), overrides)
           await write(nativeTransport.stdin, message)
           return
         }
@@ -500,7 +502,9 @@ async function forward(line) {
     if (message.method === 'thread/start') {
       params.modelProvider = dispatch.providerId
       params.model = dispatch.model
-      params.config = { ...nextConfig, ...dispatch.configOverrides }
+      params.config = dispatch.providerSource === 'config'
+        ? configuredOverrides(nextConfig, dispatch.configOverrides)
+        : { ...nextConfig, ...dispatch.configOverrides }
       if (typeof dispatch.reasoningEffort === 'string') {
         params.config.model_reasoning_effort = dispatch.reasoningEffort
       }

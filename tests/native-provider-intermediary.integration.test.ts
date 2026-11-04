@@ -4,6 +4,56 @@ import { configuredEncryptedReplay } from '../packages/cli/src/launcher/configur
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import {
+  draftAction,
+  draftScope,
+  harness as submissionHarness,
+  pendingDraft,
+} from './fixtures/native-submission-controller-harness.js'
+
+it('preserves request auth for a marked configured start through the real submission controller', async () => {
+  const configured = {
+    'model_providers.configured': {
+      wire_api: 'responses',
+      base_url: 'http://127.0.0.1:1234/opaque',
+      env_key: 'DISK_KEY',
+    },
+  }
+  const controller = submissionHarness({
+    pending: { ...pendingDraft, providerId: 'configured' },
+    providerSource: () => 'config',
+    prepareConfiguredProvider: async () => configured,
+  })
+  const h = await harness(controller.controller, 'native-provider-process.mjs')
+  try {
+    h.send({ id: 'init', method: 'initialize', params: { clientInfo: { name: 'fixture', version: '1' } } })
+    await h.read()
+    const prepared = await controller.controller.prepareSubmission(draftScope, draftAction)
+    if (prepared.kind !== 'allow-original') throw new Error('Configured draft rejected')
+    h.send({
+      id: 'marked-configured',
+      method: 'thread/start',
+      params: {
+        modelProvider: 'openai',
+        config: {
+          'cordisx.operation_token': prepared.operationToken,
+          'model_providers.configured': { env_key: 'REQUEST_KEY', requires_openai_auth: true },
+        },
+      },
+    })
+    const result = JSON.parse(await h.read()).result
+    expect(result.current).toBe('configured')
+    expect(result.receivedConfig['model_providers.configured']).toEqual({
+      wire_api: 'responses',
+      base_url: 'http://127.0.0.1:1234/opaque',
+      env_key: 'REQUEST_KEY',
+      requires_openai_auth: true,
+    })
+  } finally {
+    await h.close()
+    await controller.controller.dispose()
+  }
+})
 
 it('composes configured Responses identity routing with its original authentication and request overrides', async () => {
   const home = await mkdtemp(path.join(tmpdir(), 'configured-provider-'))
@@ -31,6 +81,7 @@ it('composes configured Responses identity routing with its original authenticat
     })
     const result = JSON.parse(await h.read()).result
     expect(result.modelProvider).toBe('configured')
+    expect(result.current).toBe('configured')
     expect(result.argvHasSecret).toBe(false)
     expect(result.receivedConfig).toEqual({
       'model_providers.configured.env_key': 'DOTTED_KEY',

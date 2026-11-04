@@ -137,6 +137,7 @@ export interface NativeReservedRequest {
 export type NativeMarkedRequestConsumption =
   | Readonly<{
     kind: 'dispatch'
+    providerSource?: 'managed' | 'config' | 'remote'
     configOverrides: Readonly<Record<string, unknown>>
     providerId: string
     model: string

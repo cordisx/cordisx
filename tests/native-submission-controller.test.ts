@@ -28,6 +28,7 @@ describe('native submission controller', () => {
     })
     expect(consumed).toMatchObject({
       kind: 'dispatch',
+      providerSource: 'config',
       configOverrides: { ...overrides, model_provider: 'modelhub', model: pendingDraft.model },
     })
     const resumed = await fixture.controller.prepareThreadResume({
