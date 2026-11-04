@@ -289,6 +289,39 @@ export function createNativeSubmissionCdpAuthority(options: {
     }
   }
   const runtime: NativeSubmissionRuntimeAuthority = {
+    async captureDraftDocument(scope) {
+      if (scope.threadId !== undefined || scope.composerId === undefined) return undefined
+      const live = await liveScope(scope)
+      if (!live || key(live) !== key(scope)) return undefined
+      const owner = documents.get(scope.targetId)!
+      const response = await owner.session.send('Runtime.evaluate', {
+        expression: 'performance.timeOrigin',
+        returnByValue: true,
+      })
+      const timeOrigin = record(response.result)?.value
+      const after = await liveScope(scope)
+      return !response.exceptionDetails && typeof timeOrigin === 'number' && Number.isFinite(timeOrigin)
+          && timeOrigin > 0 && after !== undefined && key(after) === key(scope)
+        ? timeOrigin
+        : undefined
+    },
+    async revalidateDraftDocument(scope, timeOrigin, requireIdle) {
+      const check = async () => {
+        const owner = documents.get(scope.targetId)
+        if (!owner || owner.disposed || owner.generation !== scope.rendererGeneration || owner.session.isClosed()) {
+          return false
+        }
+        const response = await owner.session.send('Runtime.evaluate', {
+          expression: 'performance.timeOrigin',
+          returnByValue: true,
+        })
+        return !response.exceptionDetails && record(response.result)?.value === timeOrigin
+          && documents.get(scope.targetId) === owner && !owner.disposed && !owner.session.isClosed()
+      }
+      if (!await check()) return false
+      if (!requireIdle || scope.threadId === undefined) return true
+      return await options.isThreadIdle(scope.threadId) && await check()
+    },
     async resolveCreatedScope(draft, threadId) {
       if (draft.threadId !== undefined || !text(threadId)) return undefined
       const live = await liveScope(draft)

@@ -66,6 +66,10 @@ export interface NativeSubmissionSelectionAuthority {
 }
 
 export interface NativeSubmissionRuntimeAuthority {
+  /** Host-private document witness captured while the exact new composer is still live. */
+  captureDraftDocument?(scope: NativeSubmissionScope): Promise<number | undefined>
+  /** An admitted first-send may outlive its composer, but never its native document. */
+  revalidateDraftDocument?(scope: NativeSubmissionScope, timeOrigin: number, requireIdle: boolean): Promise<boolean>
   /** Revalidates the exact target generation and, when requested, authoritative thread idleness. */
   revalidate(scope: NativeSubmissionScope, requireIdle: boolean, createdFrom?: NativeSubmissionScope): Promise<boolean>
   resolveCreatedScope(draft: NativeSubmissionScope, threadId: string): Promise<NativeSubmissionScope | undefined>
