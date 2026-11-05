@@ -55,6 +55,12 @@ describe('model selector branding', () => {
       ['moonshotai/kimi-k2.5', 'Other', 'kimi'],
       ['x-ai/grok-4', 'Other', 'xai'],
       ['z-ai/glm-5', 'Other', 'zai'],
+      ['seed-2.1-pro', 'Other', 'doubao'],
+      ['doubao-1.5-pro', 'Other', 'doubao'],
+      ['bytedance/seed-2.1-lite', 'Other', 'doubao'],
+      ['cxw/workspace/doubao/account/gpt-6.1-sol', 'Other', 'openai'],
+      ['cxw/workspace/doubao/account/seed-2.1-pro', 'Other', 'doubao'],
+      ['cxw/workspace/doubao/account/deepseek-v4.1-flash', 'Other', 'deepseek'],
     ] as const,
   )('uses exact or namespaced model identity before label for %s', (id, label, brand) => {
     expect(inferModelBrand(id, label)).toBe(brand)
@@ -65,5 +71,8 @@ describe('model selector branding', () => {
     expect(inferModelBrand('openai/custom', 'Claude Sonnet 4')).toBeUndefined()
     expect(inferModelBrand('deployment-west', 'GPT 5')).toBeUndefined()
     expect(inferModelBrand('private', 'Unknown')).toBeUndefined()
+    expect(inferModelBrand('cxw/workspace/doubao/account/auto', 'GPT 6')).toBeUndefined()
+    expect(inferModelBrand('seedling', 'Other')).toBeUndefined()
+    expect(inferModelBrand('model-42', 'Seed 2.1 Lite')).toBe('doubao')
   })
 })
