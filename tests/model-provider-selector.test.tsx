@@ -94,7 +94,7 @@ describe('provider selection interaction', () => {
   it('shows the built-in Codex choice and theme-inheriting icon without a configured provider', async () => {
     const { update, select } = await setup()
     await update({
-      modelProvider: undefined,
+      modelProvider: 'openai',
       model: 'gpt-6-astra',
       nativeModels: [
         { id: 'gpt-6-astra', label: 'GPT-6-Astra', disabled: false },

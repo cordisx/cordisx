@@ -1,6 +1,7 @@
 import { type SyntheticEvent, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelProviderModelV1, ModelProviderV1 } from '@cordisx/protocol/model-providers/v1'
-import { equivalentModel, type ModelProviderRegistry } from './model-providers.js'
+import type { ModelProviderRegistry } from './model-providers.js'
+import { selectionModelForProvider } from './model-provider-selection.js'
 import { HostBrandIcon } from './host-ui/HostBrandIcon.js'
 import { BrainIcon } from './host-ui/BrainIcon.js'
 import { CodexBrandIcon } from './host-ui/CodexBrandIcon.js'
@@ -82,23 +83,7 @@ export interface ProviderSelectionTransport {
   confirmSubmission?(confirmed: boolean): void
 }
 
-export function selectionModelForProvider(
-  current: ModelProviderModelV1 | undefined,
-  provider: Pick<ModelProviderV1, 'models' | 'defaultModelId'>,
-  locale: string,
-): ModelProviderModelV1 | undefined {
-  const equivalent = current === undefined ? undefined : equivalentModel(current, provider.models)
-  if (equivalent !== undefined) return equivalent
-  if (current !== undefined) {
-    const currentName = friendlyModelLabel(current.label).toLocaleLowerCase(locale)
-    const sameName = provider.models.filter(model =>
-      friendlyModelLabel(model.label).toLocaleLowerCase(locale) === currentName
-    )
-    if (sameName.length === 1) return sameName[0]
-  }
-  return provider.models.find(model => model.id === provider.defaultModelId) ?? provider.models[0]
-}
-
+export { selectionModelForProvider } from './model-provider-selection.js'
 export { providerMenuLabel } from './model-provider-menu-label.js'
 
 const searchTerms = (value: string, locale: string): readonly string[] =>
@@ -174,6 +159,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     event.stopPropagation()
   }
   const copy = modelProviderCopy(locale)
+  const preference = native.threadId === undefined ? native.draftPreference : undefined
   const providerIntent = native.pendingProviderIntent?.providerId
   const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
@@ -191,7 +177,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     : { id: native.model, label: native.modelLabel ?? copy.choose })
   const selectedModelLabel = friendlyModelLabel(effectiveModel?.label ?? copy.choose)
   const providerLabel = selected?.title
-    ?? (native.modelProvider === undefined || native.modelProvider === 'openai'
+    ?? (native.modelProvider === 'openai'
       ? copy.official
       : native.providerLabel ?? copy.unknown)
   const intentProvider = catalog.providers.find(provider => provider.providerId === providerIntent)
@@ -199,18 +185,27 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     ? intentProvider
     : pendingProviderId !== undefined
     ? pendingProvider
-    : selected
-  const displayedProviderId = providerIntent ?? pendingProviderId ?? native.modelProvider ?? 'openai'
+    : preference === undefined
+    ? selected
+    : catalog.providers.find(provider => provider.providerId === preference.providerId)
+  const displayedProviderId = providerIntent ?? pendingProviderId ?? preference?.providerId
+    ?? native.modelProvider ?? ''
   const displayedProviderLabel = displayedProviderId === 'openai'
     ? copy.official
-    : displayedProvider?.title ?? providerIntent ?? pendingProviderId ?? providerLabel
+    : displayedProvider?.title ?? providerIntent ?? pendingProviderId ?? preference?.providerId
+      ?? providerLabel
   const displayedModel = providerIntent === undefined
-    ? pendingModel ?? (pendingModelId === undefined ? effectiveModel : { id: pendingModelId, label: pendingModelId })
+    ? pendingModel ?? (pendingModelId !== undefined
+      ? { id: pendingModelId, label: pendingModelId }
+      : preference === undefined
+      ? effectiveModel
+      : displayedProvider?.models.find(model => model.id === preference.model)
+        ?? (preference.model === undefined ? undefined : { id: preference.model, label: preference.model }))
     : undefined
   const displayedModelId = providerIntent === undefined ? pendingModelId ?? displayedModel?.id : undefined
   const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
   const menuProvider = providerIntent === undefined
-    ? pendingProviderId === undefined ? selected : pendingProvider
+    ? displayedProvider
     : intentProvider
   const menuModels = menuProvider?.models
     ?? (displayedProviderId === 'openai'
@@ -407,7 +402,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       : catalog.providers.find(candidate => candidate.providerId === preference.providerId)
     if (provider === undefined) return
     const model = preference.model === undefined
-      ? selectionModelForProvider(displayedModel, provider, locale)
+      ? selectionModelForProvider(effectiveModel, provider, locale)
       : provider.models.find(model => model.id === preference.model && (!('disabled' in model) || !model.disabled))
     if (model === undefined) return
     attemptedDraftPreference.current = key
@@ -417,7 +412,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     )
   }, [
     catalog.providers,
-    displayedModel,
+    effectiveModel,
     locale,
     native.draftPreference,
     native.nativeModelAssignments,

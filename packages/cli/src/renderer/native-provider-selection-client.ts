@@ -248,9 +248,8 @@ export class NativeProviderSelectionClient {
     this.notice('submission-rejected')
   }
 
-  async refresh(): Promise<void> {
+  async refresh(authority = this.authority(), ready?: () => void): Promise<void> {
     if (this.disposed) return
-    const authority = this.authority()
     const scope = authority.scope
     const operation = { scope, read: true as const }
     const generation = ++this.projectionGeneration
@@ -269,6 +268,8 @@ export class NativeProviderSelectionClient {
       if (this.projectionCurrent(scope, generation, next.revision)) {
         this.replace(next)
         if (!this.projectionCurrent(scope, generation, next.revision)) return
+        // A native refresh can publish its read-only fields before model synchronization begins.
+        ready?.()
         if (synchronize && next.effective && next.pending === undefined && next.pendingProviderIntent === undefined) {
           try {
             await this.synchronizeEffective(next.effective)
