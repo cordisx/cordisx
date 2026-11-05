@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
+import { createHash } from 'node:crypto'
 import {
   encryptedContentError,
   encryptedReplay,
@@ -43,6 +44,44 @@ async function fixture(handler: Parameters<typeof createServer>[0]) {
 }
 
 describe('encrypted Responses replay', () => {
+  for (const bytes of [17 * 1024 * 1024, 64 * 1024 * 1024, 64 * 1024 * 1024 + 1]) {
+    it(`bounds image-bearing request bodies at 64 MiB (${bytes} bytes)`, async () => {
+      const imageRequest = {
+        model: 'test-model',
+        input: [{
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_image', image_url: 'data:image/png;base64,' }],
+        }],
+      }
+      const overhead = Buffer.byteLength(JSON.stringify(imageRequest))
+      imageRequest.input[0]!.content[0]!.image_url += 'A'.repeat(bytes - overhead)
+      const payload = JSON.stringify(imageRequest)
+      const received: { bytes: number; digest: string }[] = []
+      const { url } = await fixture(async (request, response) => {
+        let bytes = 0
+        const digest = createHash('sha256')
+        for await (const chunk of request) {
+          bytes += chunk.length
+          digest.update(chunk)
+        }
+        received.push({ bytes, digest: digest.digest('hex') })
+        response.writeHead(200).end('forwarded')
+      })
+      const result = await fetch(url, { method: 'POST', body: payload })
+      expect(Buffer.byteLength(payload)).toBe(bytes)
+      if (bytes <= 64 * 1024 * 1024) {
+        expect(result.status).toBe(200)
+        expect(await result.text()).toBe('forwarded')
+        expect(received).toEqual([{ bytes, digest: createHash('sha256').update(payload).digest('hex') }])
+      } else {
+        expect(result.status).toBe(502)
+        expect(await result.json()).toEqual({ error: { message: 'Provider transport unavailable' } })
+        expect(received).toHaveLength(0)
+      }
+    })
+  }
+
   it('keeps original history, visible messages, tool associations and request fields', () => {
     const original = JSON.stringify(body)
     const replay = encryptedReplay(body)!
