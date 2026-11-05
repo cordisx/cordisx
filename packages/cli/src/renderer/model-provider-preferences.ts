@@ -5,6 +5,7 @@ export interface PreferenceProviderModel {
 export interface PreferenceProvider<Model extends PreferenceProviderModel = PreferenceProviderModel> {
   readonly providerId: string
   readonly pluginId: string
+  readonly managementOwner?: 'remote'
   readonly managementBindingRef?: string
   readonly providerFavorite?: boolean
   readonly models: readonly Model[]
@@ -32,6 +33,9 @@ export function applyCatalogManagementPreferences<Provider extends PreferencePro
   if (management === undefined) return providers
   const views = management.connected === false ? [] : management.views
   return Object.freeze(providers.map(provider => {
+    // The explicit remote catalog carries its owner's already filtered source
+    // membership. Local preferences cannot disable or replace that authority.
+    if (provider.managementOwner === 'remote') return provider
     const view = provider.managementBindingRef === undefined
       ? views.find(view => view.sourceKind !== 'plugin' && view.providerId === provider.providerId)
       : views.find(view => view.sourceKind === 'plugin' && view.bindingRef === provider.managementBindingRef)

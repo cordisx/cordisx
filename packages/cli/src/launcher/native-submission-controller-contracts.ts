@@ -63,6 +63,16 @@ export interface NativeSubmissionSelectionAuthority {
       pendingGeneration: number
     }>,
   ): boolean
+  /** Commit a real fork destination without changing the original thread's provider. */
+  commitContinuation?(
+    input: Readonly<{
+      sourceScope: NativeSubmissionScope
+      threadId: string
+      expectedRevision: number
+      pendingGeneration: number
+      selection: NativeProviderSelection
+    }>,
+  ): boolean
 }
 
 export interface NativeSubmissionRuntimeAuthority {
@@ -73,6 +83,7 @@ export interface NativeSubmissionRuntimeAuthority {
   /** Revalidates the exact target generation and, when requested, authoritative thread idleness. */
   revalidate(scope: NativeSubmissionScope, requireIdle: boolean, createdFrom?: NativeSubmissionScope): Promise<boolean>
   resolveCreatedScope(draft: NativeSubmissionScope, threadId: string): Promise<NativeSubmissionScope | undefined>
+  revalidateContinuation?(source: NativeSubmissionScope, threadId: string, requireIdle: boolean): Promise<boolean>
 }
 
 export interface NativeExistingThreadSwitch {
@@ -90,6 +101,19 @@ export interface NativeExistingThreadSwitch {
       revalidateRestoration?: () => Promise<boolean>
     }>,
   ): Promise<void>
+  /** Normal persistent native fork; source history and subscription are retained. */
+  continue?(
+    input: Readonly<{
+      scope: NativeSubmissionScope
+      threadId: string
+      providerId: string
+      model: string
+      configOverrides: Readonly<Record<string, unknown>>
+      operationToken: string
+    }>,
+  ): Promise<Readonly<{ threadId: string }>>
+  /** Retires only the unused fork issued for this exact operation, never the source. */
+  discardContinuation?(input: Readonly<{ threadId: string; operationToken: string }>): Promise<void>
 }
 
 export type NativeSubmissionPreparation =
@@ -99,6 +123,7 @@ export type NativeSubmissionPreparation =
       kind: 'allow-original'
       operationToken: string
       projection?: NativeSubmissionSelectionSnapshot & { available: boolean }
+      continuation?: Readonly<{ sourceThreadId: string; threadId: string }>
     }
   >
   | Readonly<{ kind: 'confirm'; confirmationId: string; selectionRevision: number }>
@@ -122,6 +147,7 @@ export type NativeSubmissionConfirmation =
       revision: number
       effective: NativeProviderSelection
     }>
+    continuation?: Readonly<{ sourceThreadId: string; threadId: string }>
   }>
   | Readonly<{
     kind: 'reject'
@@ -174,6 +200,7 @@ export type NativeThreadResumePreparation =
 
 export interface NativeSubmissionController {
   readonly nativeManagedModelRoutingAvailable: false
+  readonly nativeProviderContinuationAvailable?: boolean
   commitSelection(scope: NativeSubmissionScope): Promise<
     | Readonly<{
       kind: 'accepted'

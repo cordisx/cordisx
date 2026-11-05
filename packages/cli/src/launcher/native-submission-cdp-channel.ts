@@ -85,6 +85,7 @@ function actionOf(value: unknown): NormalizedNativeSubmissionAction {
     !action || !text(action.operationId, 256) || !Number.isSafeInteger(action.operationGeneration)
     || (action.operationGeneration as number) < 1 || (action.threadId !== undefined && !text(action.threadId))
     || (action.reasoningEffort !== undefined && !isModelReasoningEffort(action.reasoningEffort))
+    || (action.continuationAvailable !== undefined && typeof action.continuationAvailable !== 'boolean')
     || !['ordinary-send', 'steer', 'queue', 'edit-retry', 'unknown-submission', 'non-submission'].includes(
       String(action.intent),
     )
@@ -270,6 +271,20 @@ export function createNativeSubmissionCdpAuthority(options: {
       state.revision++
       return true
     },
+    commitContinuation(input) {
+      const state = states.get(key(input.sourceScope))
+      if (
+        !state || !text(input.threadId) || input.threadId === input.sourceScope.threadId
+        || state.revision !== input.expectedRevision
+        || state.pending?.selectionGeneration !== input.pendingGeneration
+        || state.pending.providerId !== input.selection.providerId || state.pending.model !== input.selection.model
+      ) return false
+      threadSelections.set(input.threadId, { providerId: input.selection.providerId, model: input.selection.model })
+      delete state.pending
+      delete state.pendingProviderIntent
+      state.revision++
+      return true
+    },
   }
   const liveScope = async (scope: NativeSubmissionScope): Promise<NativeSubmissionScope | undefined> => {
     const owner = documents.get(scope.targetId)
@@ -290,6 +305,10 @@ export function createNativeSubmissionCdpAuthority(options: {
     }
   }
   const runtime: NativeSubmissionRuntimeAuthority = {
+    async revalidateContinuation(source, threadId, requireIdle) {
+      if (!text(threadId) || threadId === source.threadId || !await runtime.revalidate(source, false)) return false
+      return (!requireIdle || await options.isThreadIdle(threadId)) && await runtime.revalidate(source, false)
+    },
     async captureDraftDocument(scope) {
       if (scope.threadId !== undefined || scope.composerId === undefined) return undefined
       const live = await liveScope(scope)
@@ -726,9 +745,14 @@ export function createNativeSubmissionCdpAuthority(options: {
                 ...selected,
                 ...(scope.threadId === undefined ? {} : { threadId: scope.threadId }),
                 selectionGeneration: state.nextGeneration++,
-                ...(stageSend ? { sendOnly: true } : {}),
+                ...(stageSend || scope.threadId !== undefined && controller!.nativeProviderContinuationAvailable
+                  ? { sendOnly: true }
+                  : {}),
               }}
-            if (!stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined) {
+            if (
+              !stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined
+              && !controller!.nativeProviderContinuationAvailable
+            ) {
               const revision = state.revision
               const committed = await controller!.commitSelection(scope)
               if (committed.kind === 'accepted') {

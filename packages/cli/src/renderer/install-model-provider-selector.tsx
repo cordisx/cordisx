@@ -33,6 +33,7 @@ export async function installModelProviderSelector(
   nativeManagedModelRoutingAvailable = false,
   rendererOwner?: NativeProviderSelectionOwner,
   commandChannel?: NativeProviderSelectionCommandChannel,
+  navigateContinuation?: (threadId: string) => void | Promise<void>,
 ) {
   if (!nativeManagedModelRoutingAvailable) return () => {}
   const entries = new Map<HTMLElement, { disposed: boolean; cleanup?: () => void }>()
@@ -60,6 +61,7 @@ export async function installModelProviderSelector(
         locale,
         rendererOwner,
         commandChannel,
+        navigateContinuation,
       ).then(cleanup => {
         if (entry.disposed || disposed) cleanup()
         else entry.cleanup = cleanup
@@ -104,6 +106,7 @@ async function installComposerModelProviderSelector(
   locale: () => string,
   rendererOwner?: NativeProviderSelectionOwner,
   commandChannel?: NativeProviderSelectionCommandChannel,
+  navigateContinuation?: (threadId: string) => void | Promise<void>,
 ) {
   const transport = await CodexDesktopNativeModelProviderTransport.connect(
     true,
@@ -116,6 +119,7 @@ async function installComposerModelProviderSelector(
     },
     composer,
     composerId,
+    navigateContinuation,
   )
   if (!transport) return () => {}
   let root: Root | undefined

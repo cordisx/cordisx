@@ -115,6 +115,7 @@ export class RemoteTerminalProviderClient {
             providerId: provider.providerId,
             // Explicit catalog provenance; this is not a local plugin/service identity.
             pluginId: 'remote-terminal-provider',
+            managementOwner: 'remote' as const,
             title: provider.title,
             models: Object.freeze(provider.models.map(model => {
               if (!model.id || models.has(model.id)) throw new Error('Invalid remote model')

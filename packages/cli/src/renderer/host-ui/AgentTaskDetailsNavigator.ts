@@ -124,8 +124,8 @@ export function createHostAgentTaskDetailsNavigator(
   return new HostAgentTaskDetailsNavigator({
     navigateHost: value => {
       if (history instanceof CodexRouterHistoryAdapter) {
-        history.navigateHost(value)
-        return
+        const transition = history.navigateHost(value)
+        return transition instanceof Promise ? transition.then(() => {}) : undefined
       }
       navigateHostTaskDetailsSameDocument(view, value)
     },

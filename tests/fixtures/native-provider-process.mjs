@@ -22,8 +22,16 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (message.method === 'initialized') return
   if (message.method === 'fixture/exit') process.exit(7)
-  if (message.method === 'thread/start' || message.method === 'thread/resume') {
-    const id = params.threadId ?? `native-${current}-${++sequence}`
+  if (['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
+    const fork = message.method === 'thread/fork'
+    if (fork && params.modelProvider !== current) {
+      emit({
+        id: message.id,
+        error: { code: -32600, data: { type: 'modelProviderMismatch', currentModelProvider: current } },
+      })
+      return
+    }
+    const id = fork ? `fork-${current}-${++sequence}` : params.threadId ?? `native-${current}-${++sequence}`
     const modelProvider = params.modelProvider ?? current
     threads.set(id, modelProvider)
     emit({
@@ -35,6 +43,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         model: 'test-model',
         argvHasSecret: process.argv.some(arg => arg.includes('test-private-token')),
         receivedConfig: params.config,
+        ...(fork ? { sourceThreadId: params.threadId, thread: { id, modelProvider, status: { type: 'idle' } } } : {}),
       },
     })
   } else if (message.method === 'thread/read') {

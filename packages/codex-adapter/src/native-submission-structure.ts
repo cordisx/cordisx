@@ -4,6 +4,7 @@ import { modelReasoningEfforts } from './reasoning.js'
 import { resolveNativeVariable } from './native-source-bindings.js'
 import { nativeLazyRequestSource, resolveNativeLazyWireRequest } from './native-lazy-wire-request.js'
 import { nativeModuleFactories } from './native-chunk-structure.js'
+import { continuationComposerSend, continuationLocalSend } from './native-provider-continuation-structure.js'
 import {
   applySourceEdits,
   literal,
@@ -171,6 +172,7 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
   const follow = bind('followUp')
   const raw = plan.binding(declaration.id, 'promptRawOverride')
   const persisted = plan.binding(declaration.id, 'persistedPromptRawOverride')
+  const continuationContext = continuationComposerSend(plan, fn, input, decision)
   plan.insert(
     optionsStatement.end,
     `;let ${decision}={allow:true};if(typeof globalThis.__cordisxNativeSubmitHook==='function'){
@@ -182,10 +184,17 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
       bind('defaultFollowUpSubmitAction')
     },explicitAction:${options}.followUpSubmitAction,edit:${
       bind('editingQueuedMessagePosition')
-    },promptOverride:${raw}!=null||${persisted}!=null});
+    },promptOverride:${raw}!=null||${persisted}!=null,continuationAvailable:${continuationContext !== undefined}
+      &&globalThis.__cordisxNativeContinuationLocalSendReady===true
+      &&typeof globalThis.__cordisxNativeContinuationComplete==='function'});
     if(${decision}?.allow!==true)return;if(${decision}.operationToken!==void 0&&${
       valid(`${decision}.operationToken`)
     }===void 0)return;
+    if(${decision}.continuation!==void 0&&(${continuationContext === undefined}
+      ||${decision}.continuation.sourceThreadId!==${bind('conversationId')}
+      ||typeof ${decision}.continuation.threadId!=='string'||!${decision}.continuation.threadId
+      ||${decision}.continuation.threadId.length>512||/[\\0\\r\\n]/u.test(${decision}.continuation.threadId)
+      ||${decision}.continuation.threadId===${bind('conversationId')}||${decision}.operationToken===void 0))return;
   }`,
   )
   const context = plan.require(fn.body, n =>
@@ -197,7 +206,9 @@ function submitGuard(plan: ResourcePlan, fn: SyntaxNode): void {
     context.end - 1,
     `,...(${decision}.serviceTier==='priority'||${decision}.serviceTier==='default'?{__cordisxServiceTier:${decision}.serviceTier}:{}),...(${decision}.operationToken===void 0?{}:{${carrier}:${decision}.operationToken,...(${
       JSON.stringify(modelReasoningEfforts)
-    }.includes(${decision}.reasoningEffort)?{${reasoningCarrier}:${decision}.reasoningEffort}:{})})`,
+    }.includes(${decision}.reasoningEffort)?{${reasoningCarrier}:${decision}.reasoningEffort}:{})})${
+      continuationContext ?? ''
+    }`,
   )
   plan.capabilities.push('submit-guard')
 }
@@ -234,7 +245,13 @@ function existingRequest(plan: ResourcePlan, fn: SyntaxNode): void {
       && has(n, ['threadId', 'turnTrigger', 'clientUserMessageId', 'input', 'multiAgentMode', 'serviceTier']),
     'existing-request',
   )
-  plan.addConfig(request, valid(`${context}.${carrier}`))
+  const token = valid(`${context}.${carrier}`)
+  plan.addConfig(request, token)
+  // The primary runtime rebuilds follow-up config too. Its retained metadata
+  // carries this exact admission through either native execution owner.
+  const metadata = properties(request).get('responsesapiClientMetadata')
+  if (metadata) plan.replace(metadata, config(token, plan.text(metadata)))
+  else plan.insert(request.end - 1, `,...(${token}===void 0?{}:{responsesapiClientMetadata:${config(token)}})`)
   plan.serviceTier(request, context)
   plan.capabilities.push('existing-request')
 }
@@ -268,7 +285,11 @@ function normalizedRequest(plan: ResourcePlan, fn: SyntaxNode): void {
       && has(n, ['input', 'model', 'effort', 'multiAgentMode', 'serviceTier', 'cyberAccessProgram']),
     'normalized-request',
   )
-  plan.addConfig(request, valid(`${operation}.request.config?.[${JSON.stringify(TOKEN)}]`))
+  const token = valid(`${operation}.request.config?.[${JSON.stringify(TOKEN)}]`)
+  plan.addConfig(request, token)
+  const metadata = properties(request).get('responsesapiClientMetadata')
+  if (metadata) plan.replace(metadata, config(token, plan.text(metadata)))
+  else plan.insert(request.end - 1, `,...(${token}===void 0?{}:{responsesapiClientMetadata:${config(token)}})`)
   plan.serviceTier(request, `(${operation}.context??{})`)
   const params = plan.require(fn.body, n =>
     n.type === 'ObjectExpression' && n !== request
@@ -467,6 +488,7 @@ export function analyzeNativeSubmissionTransforms(
 ): NativeSubmissionTransformAnalysis {
   const plans = resources.map(resource => new ResourcePlan(resource))
   for (const plan of plans) {
+    continuationLocalSend(plan)
     for (const fn of plan.functions) {
       const before = plan.capabilities.length
       if (inputPattern(plan, fn, ['submitTarget', 'isResponseInProgress', 'options'])) {
@@ -548,6 +570,10 @@ export function analyzeNativeSubmissionTransforms(
     const source = applySourceEdits(plan.resource.source, plan.edits)
       + `\n;globalThis.${marker}=true;${
         plan.capabilities.includes('submit-guard') ? 'globalThis.__cordisxNativeSubmissionActivate?.(true);' : ''
+      }${
+        plan.capabilities.includes('continuation-local-send')
+          ? 'globalThis.__cordisxNativeContinuationLocalSendReady=true;'
+          : ''
       }`
     return Object.freeze({
       url: plan.resource.url,
@@ -561,7 +587,8 @@ export function analyzeNativeSubmissionTransforms(
           source,
           anchorMatches: 1,
           acknowledgementExpression: `globalThis.${marker}===true`,
-          fenceExpression: `(delete globalThis.${marker},delete globalThis.__cordisxNativeSubmitHook,true)`,
+          fenceExpression:
+            `(delete globalThis.${marker},delete globalThis.__cordisxNativeSubmitHook,delete globalThis.__cordisxNativeContinuationLocalSendReady,true)`,
         }
       },
     })

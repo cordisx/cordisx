@@ -9,6 +9,7 @@ import {
   nativeModelProviderObservedAttributes,
 } from './adapter/native-model-provider-interaction.js'
 import { registerNativeComposerSubmission } from './native-composer-submission-router.js'
+import { nativeComposerContinuation } from './native-composer-submission-router.js'
 import { NativeModelSource } from './adapter/native-model-list.js'
 import type { ProviderSelectionSnapshot, ProviderSelectionTransport } from './model-provider-selector.js'
 import {
@@ -96,6 +97,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     private readonly catalogReasoning: CatalogReasoningLookup,
     private readonly composer?: HTMLElement,
     private readonly composerId?: string,
+    navigateContinuation?: (threadId: string) => void | Promise<void>,
   ) {
     this.requestClient = new NativeMcpRequestClient(bridge, hostId)
     this.visibleThreadId = currentThreadId(document, this.composer)
@@ -179,6 +181,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       composer: () => this.composer ?? this.visibleTrigger?.closest<HTMLElement>('[data-codex-composer-root]'),
       submit: this.selectionClient.submitHook,
       serviceTier: () => this.state.serviceTier === 'priority' ? 'priority' : 'default',
+      ...nativeComposerContinuation(this.selectionClient, navigateContinuation),
     })
     window.addEventListener('message', this.receive, true)
     window.addEventListener('codex-message-from-view', this.observeNativeRequest as EventListener, true)
@@ -215,6 +218,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     catalogReasoning: CatalogReasoningLookup = () => undefined,
     composer?: HTMLElement,
     composerId?: string,
+    navigateContinuation?: (threadId: string) => void | Promise<void>,
   ): Promise<CodexDesktopNativeModelProviderTransport | undefined> {
     if (
       !nativeManagedModelRoutingAvailable || !rendererOwner?.targetId || !rendererOwner.rendererGeneration
@@ -242,6 +246,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         catalogReasoning,
         composer,
         composerId,
+        navigateContinuation,
       )
       void transport.refreshComposer()
       return transport

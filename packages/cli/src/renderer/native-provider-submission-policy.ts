@@ -64,6 +64,7 @@ export interface NormalizedNativeSubmissionAction {
   readonly intent: NativeSubmissionIntent
   readonly threadId?: string
   readonly reasoningEffort?: ModelReasoningEffort
+  readonly continuationAvailable?: boolean
 }
 
 export interface PendingNativeProviderChange extends NativeProviderSelection {

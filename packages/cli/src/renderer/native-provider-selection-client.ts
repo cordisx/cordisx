@@ -19,6 +19,11 @@ export interface NativeProviderSelection {
   readonly model: string
 }
 
+export interface NativeProviderContinuation {
+  readonly sourceThreadId: string
+  readonly threadId: string
+}
+
 export interface PendingNativeProviderSelection extends NativeProviderSelection {
   readonly generation: number
   readonly sendOnly?: boolean
@@ -97,7 +102,12 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
   ): Promise<
     | Readonly<{ status: 'pass-through' }>
     | Readonly<{ status: 'confirm'; confirmationId: string; expectedSelectionRevision: number }>
-    | Readonly<{ status: 'allow-original'; operationToken: string; projection?: NativeProviderSelectionProjection }>
+    | Readonly<{
+      status: 'allow-original'
+      operationToken: string
+      projection?: NativeProviderSelectionProjection
+      continuation?: NativeProviderContinuation
+    }>
     | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
   >
   submissionConfirm(
@@ -107,7 +117,12 @@ export interface NativeProviderSelectionCommandChannel extends Partial<CatalogMa
       expectedSelectionRevision: number
     }>,
   ): Promise<
-    | Readonly<{ status: 'allow-original'; operationToken: string; projection: NativeProviderSelectionProjection }>
+    | Readonly<{
+      status: 'allow-original'
+      operationToken: string
+      projection: NativeProviderSelectionProjection
+      continuation?: NativeProviderContinuation
+    }>
     | Readonly<{ status: 'reject'; reason: string; projection?: NativeProviderSelectionProjection }>
   >
   submissionCancel(input: Readonly<{ scope: NativeSubmissionScope; id: string }>): Promise<unknown>
@@ -133,6 +148,7 @@ export type NativeSubmitHookResult =
       operationToken?: string
       reasoningEffort?: ModelReasoningEffort
       serviceTier?: 'priority' | 'default'
+      continuation?: NativeProviderContinuation
     }
   >
 export type NativeSubmissionRejection =
@@ -226,6 +242,10 @@ export class NativeProviderSelectionClient {
   subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  reportContinuationFailure(): void {
+    this.notice('submission-rejected')
   }
 
   async refresh(): Promise<void> {
@@ -668,6 +688,23 @@ export class NativeProviderSelectionClient {
         return { allow: false }
       }
       if (!this.managedCurrent(before.scope, lifetime, sequence, revision, pending, action)) return { allow: false }
+      if (prepared.status === 'allow-original' && prepared.continuation !== undefined) {
+        const continuation = prepared.continuation
+        if (
+          pending === undefined || action.intent !== 'ordinary-send'
+          || continuation.sourceThreadId !== before.scope.threadId
+          || typeof continuation.threadId !== 'string' || continuation.threadId.length < 1
+          || continuation.threadId.length > 512 || /[\0\r\n]/u.test(continuation.threadId)
+          || continuation.threadId === continuation.sourceThreadId
+        ) return { allow: false }
+        cancelId = undefined
+        return {
+          allow: true,
+          operationToken: prepared.operationToken,
+          continuation,
+          ...(action.reasoningEffort === undefined ? {} : { reasoningEffort: action.reasoningEffort }),
+        }
+      }
       if (committed !== undefined) {
         const effective = committed.effective
         if (

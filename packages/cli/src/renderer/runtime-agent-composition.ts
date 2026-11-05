@@ -893,6 +893,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
         nativeReady,
         native.__cordisxNativeProviderOwner,
         native.__cordisxNativeProviderCommandChannel,
+        threadId => {
+          return runtimeScope.agentDetailNavigator().navigate({
+            target: 'host',
+            url: `app://-/local/${encodeURIComponent(threadId)}`,
+          })
+        },
       )
       runtimeScope.registrySubscriptions()!.push(disposeModelProviderSelector)
     }

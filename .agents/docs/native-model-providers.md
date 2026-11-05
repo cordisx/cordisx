@@ -409,7 +409,7 @@ delivery gates. No provider API request is made by enabling the local-file flag.
 
 Provider changes prefer an exact model ID, then a unique explicit alias. An
 ambiguous or absent match opens the provider's model submenu; labels are never
-used to guess equivalence. Existing-thread provider choices use the native guarded transition.
+used to guess equivalence. Existing-thread provider choices are staged for the next ordinary Send.
 During an active turn, provider, model, and reasoning choices are retained as a
 renderer-only next-Send draft. The current native selection and response remain
 unchanged, and completion or cancellation of the response does not apply the draft.
@@ -422,13 +422,15 @@ action without consuming the draft. Same-provider model/effort Send uses the exi
 marked-request authorization without resuming the thread. Edit/retry, steer, queue,
 and previously queued messages do not consume the draft. Navigation, reload, and
 renderer disposal clear it; it is never transferred to another thread.
-An active turn is not interrupted automatically. The Host
-does not create a replacement thread or automatically compact history.
+An active turn is not interrupted automatically. A cross-provider ordinary Send
+uses the persistent continuation described below; it does not automatically
+compact history.
 
-The capability-checked Codex adapter synchronizes the native composer selection and
-uses native session operations to change an idle thread's effective provider.
-The effective response, not the historical provider embedded in thread metadata,
-is the transition receipt. New drafts use the private configuration defaults.
+The capability-checked Codex adapter synchronizes the native composer selection.
+Same-provider changes retain the thread; cross-provider continuation uses a new
+native thread with the selected provider. The accepted native operation and its
+destination selection establish the effective provider. New drafts use the
+private configuration defaults.
 Within one App/profile launch, the Provider explicitly selected in a new draft
 becomes the default Provider for later new drafts. Before that first explicit
 draft selection, `apps.<app>.profiles.<profile>.defaultModelProvider` is used
@@ -526,15 +528,60 @@ native OpenAI remains a UI operation.
 
 ## Desktop Compatibility
 
+### Bidirectional provider continuation
+
+On native builds whose complete local Composer submission and navigation paths
+are supported, selecting another provider stages a choice without changing the
+source conversation. The next ordinary idle Send creates a normal persistent
+`thread/fork` from the currently displayed conversation, with the target provider
+and model, and sends the captured input through the original native Composer
+operation to that branch. The Host navigates to the destination only after native
+acceptance and Composer cleanup. Selecting the original provider before Send
+clears the pending change and preserves the draft.
+
+Every subsequent switch forks the current branch. For example, official → A →
+official → B carries the turns added in A and in the second official branch; it
+does not reopen an older official ancestor. Original histories retain their IDs
+and providers, and each accepted destination has a new native chat ID. This
+supports continued conversation across providers without claiming that native
+same-ID cross-provider resume is available.
+
+The native operation retains the draft input, attachments, work directory,
+explicit permission selection, model and reasoning choice. Native Stop interrupts
+the destination turn normally. A definite preparation failure preserves the
+source and draft; an acknowledged fork that never dispatches can be archived by
+its exact owning operation. A dispatched or uncertain request is retained and is
+never automatically replayed, archived, or sent through another provider. A
+navigation failure reports the failed navigation without sending again.
+
+Continuation uses the existing admitted Responses catalog and credential
+lifecycle for configured, managed, and explicitly shared remote providers. A
+remote provider's catalog retains its remote Host's management ownership; local
+views do not replace that catalog or its service preparation. Unsupported or
+ephemeral source conversations, missing native capabilities, unavailable
+providers, and incompatible models remain unavailable. Agent provider-selection
+tools retain their existing same-thread semantics; they do not acquire Composer
+continuation behavior.
+
+Independent native Composer verification on Desktop build 24614 with native
+`0.166.0-alpha.6` covered all six directions between official, Aiden and TraeX,
+using their catalogued GPT-6.1-Sol models. It included latest-history inheritance,
+an image attachment, an explicit request-approval selection, cancellation and
+Stop. Native persistence after restart was verified separately. These results
+do not establish inference acceptance for every provider/model or side-chat
+layout, and do not establish publication, installation or user acceptance.
+
 ### Rejected provider changes
 
 Native app-server versions may bind a saved conversation to its original
 provider and reject `thread/resume` with `modelProviderMismatch` or
 `modelProviderNotConfigured` before applying a requested provider override.
 The installed `0.166.0-alpha.6` app-server was observed to reject an existing
-managed-provider conversation switching to built-in OpenAI, and the reverse
-direction follows the same admission boundary. This is distinct from selecting
-a model in the current provider or choosing a provider for a new conversation.
+managed-provider conversation resuming under built-in OpenAI. Persistent
+Composer continuation above avoids that same-ID operation; the rejection
+handling below still applies to direct native changes and the agent selection
+tool. This is distinct from selecting a model in the current provider or choosing
+a provider for a new conversation.
 
 After a definite native switch rejection, CordisX checks that the same saved
 conversation still has its prior provider and model and is unloaded. It then

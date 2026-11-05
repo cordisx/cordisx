@@ -19,6 +19,7 @@ import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from
 export interface NativeProviderProjection {
   readonly providerId: string
   readonly pluginId: string
+  readonly managementOwner?: 'remote'
   /** Exact Host-private management identity for plugin-owned catalog sources. */
   readonly managementBindingRef?: string
   readonly providerFavorite?: boolean
@@ -251,6 +252,7 @@ export class ModelProviderRegistry {
         Object.freeze({
           providerId: label(provider.providerId),
           pluginId: label(provider.pluginId),
+          ...(provider.managementOwner === 'remote' ? { managementOwner: 'remote' as const } : {}),
           ...(provider.managementBindingRef === undefined
             ? {}
             : { managementBindingRef: label(provider.managementBindingRef, 512) }),

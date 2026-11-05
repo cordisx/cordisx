@@ -1,11 +1,22 @@
 import type { NativeSubmissionOrchestratorDescriptor } from './adapter/native-submission-action-normalizer.js'
 import type { NativeProviderSelectionClient, NativeSubmissionScope } from './native-provider-selection-client.js'
+import { createNativeContinuationCompletion, type NativeContinuationOwner } from './native-provider-continuation.js'
 
-interface ComposerSubmission {
-  snapshot(): { scope: NativeSubmissionScope; idle: boolean }
-  composer(): HTMLElement | null | undefined
+interface ComposerSubmission extends NativeContinuationOwner {
   submit: NativeProviderSelectionClient['submitHook']
   serviceTier(): 'priority' | 'default'
+}
+
+/** Success refresh belongs to the initiating composer and completes before native navigation. */
+export function nativeComposerContinuation(
+  selection: NativeProviderSelectionClient,
+  navigateContinuation?: NativeContinuationOwner['navigateContinuation'],
+): Pick<NativeContinuationOwner, 'navigateContinuation' | 'refreshSelection' | 'continuationFailed'> {
+  return navigateContinuation === undefined ? {} : {
+    navigateContinuation,
+    refreshSelection: () => selection.refresh(),
+    continuationFailed: () => selection.reportContinuationFailure(),
+  }
 }
 
 type Hook = NativeProviderSelectionClient['submitHook']
@@ -21,6 +32,7 @@ type NativePage = typeof globalThis & {
 
 /** Renderer-local dispatcher; each composer retains its own authoritative selection and lifetime. */
 const owners = new Set<ComposerSubmission>()
+const continuations = createNativeContinuationCompletion()
 let restore: (() => void) | undefined
 
 function liveOwners(): ComposerSubmission[] {
@@ -53,7 +65,11 @@ function forDescriptor(descriptor: NativeSubmissionOrchestratorDescriptor): Comp
 const submit: Hook = async descriptor => {
   const owner = forDescriptor(descriptor)
   if (!owner) return { allow: false }
-  const result = await owner.submit(descriptor)
+  const result = await owner.submit({
+    ...descriptor,
+    continuationAvailable: descriptor.continuationAvailable === true && continuations.available(owner),
+  })
+  if (result.allow) continuations.admitted(owner, result)
   return result.allow && owner.snapshot().scope.composerId !== undefined
     ? { ...result, serviceTier: owner.serviceTier() }
     : result
@@ -78,9 +94,11 @@ export function registerNativeComposerSubmission(owner: ComposerSubmission): () 
     const previousHook = page.__cordisxNativeSubmitHook
     const previousAuthority = page.__cordisxNativeSubmissionAuthority
     const previousTier = page.__cordisxNativeServiceTierOverride
+    const restoreContinuations = continuations.install()
     page.__cordisxNativeSubmitHook = submit
     page.__cordisxNativeSubmissionAuthority = authority
     restore = () => {
+      restoreContinuations()
       if (page.__cordisxNativeSubmitHook === submit) {
         if (previousHook) page.__cordisxNativeSubmitHook = previousHook
         else delete page.__cordisxNativeSubmitHook
@@ -103,6 +121,7 @@ export function registerNativeComposerSubmission(owner: ComposerSubmission): () 
   return () => {
     if (disposed) return
     disposed = true
+    continuations.release(owner)
     owners.delete(owner)
     if (owners.size === 0) {
       restore?.()

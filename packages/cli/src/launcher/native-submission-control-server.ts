@@ -150,11 +150,13 @@ export async function startNativeSubmissionControlServer(
         pending.delete(id)
         clearTimeout(item.timer)
         retireSwitchResumes(id)
-        if (request.type === 'switch') {
+        if (request.type === 'switch' || request.type === 'continuation-fork') {
           void write(socket, { type: 'switch-cancel', switchId: id, threadId: request.threadId }).catch(() => undefined)
         }
         reject(
-          request.type === 'switch' ? new NativeThreadSwitchError('provider-switch-reconciliation-required') : error,
+          request.type === 'switch' || request.type === 'continuation-fork'
+            ? new NativeThreadSwitchError('provider-switch-reconciliation-required')
+            : error,
         )
       }
       const timer = setTimeout(() => {
@@ -177,6 +179,25 @@ export async function startNativeSubmissionControlServer(
         threadId: input.threadId,
         ...(input.revalidateRestoration ? { revalidate: input.revalidateRestoration } : {}),
       })
+    },
+    async continue(input) {
+      const result = record(
+        await callPeer({
+          type: 'continuation-fork',
+          threadId: input.threadId,
+          providerId: input.providerId,
+          model: input.model,
+          config: input.configOverrides,
+          operationToken: input.operationToken,
+        }, { threadId: input.threadId }),
+      )
+      if (!valid(result?.threadId) || result.threadId === input.threadId) {
+        throw new NativeThreadSwitchError('provider-switch-reconciliation-required')
+      }
+      return { threadId: result.threadId }
+    },
+    async discardContinuation(input) {
+      await callPeer({ type: 'continuation-discard', ...input })
     },
   }
   const server = createServer(socket => {

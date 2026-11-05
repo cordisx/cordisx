@@ -1,20 +1,30 @@
-import {
-  combinedNativeModelProviderCatalog,
-  type NativeModelProviderCatalogEntry,
-} from './native-model-provider-catalog.js'
+import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { RemoteTerminalProviderClient } from './remote-terminal-provider-client.js'
 
-/** One precedence rule for display, validation, and execution; local ownership never changes on remote refresh. */
+/** Local service owners precede the explicit remote service owner; native tables are projections, not ownership. */
 export function nativeRemoteProviderSource(options: {
   readonly localSource: (id: string) => 'managed' | 'config' | undefined
   readonly localCatalog: () => Promise<readonly NativeModelProviderCatalogEntry[]>
   readonly validateLocal: (selection: { providerId: string; model: string }) => Promise<boolean>
   readonly remote?: RemoteTerminalProviderClient
 }) {
-  const source = (id: string) => options.localSource(id) ?? (options.remote?.owns(id) ? 'remote' : undefined)
+  const source = (id: string) => {
+    const local = options.localSource(id)
+    if (local === 'managed') return local
+    // The existing Host attests managed service IDs. A shared native table can
+    // outlive its owner and must not shadow that Host's catalog or credentials.
+    if (options.remote?.owns(id)) return 'remote'
+    return local
+  }
   return {
     source,
-    catalog: combinedNativeModelProviderCatalog(options.localCatalog, async () => options.remote?.catalog() ?? []),
+    catalog: async (): Promise<readonly NativeModelProviderCatalogEntry[]> => {
+      const [local, remote] = await Promise.all([options.localCatalog(), options.remote?.catalog() ?? []])
+      return Object.freeze([
+        ...local.filter(provider => source(provider.providerId) !== 'remote'),
+        ...remote.filter(provider => source(provider.providerId) === 'remote'),
+      ])
+    },
     validate: async (selection: { providerId: string; model: string }) =>
       source(selection.providerId) === 'remote'
         ? await options.remote!.validateSelection(selection)

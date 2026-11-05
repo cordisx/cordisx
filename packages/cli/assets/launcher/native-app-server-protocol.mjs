@@ -9,6 +9,7 @@ import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
 import { nativeProviderFailure } from './native-provider-errors.mjs'
 import { switchNativeThread } from './native-thread-switch.mjs'
+import { createNativeProviderContinuation, dispatchNativeSelectionMutation } from './native-provider-continuation.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -618,6 +619,7 @@ async function forward(line) {
       firstTurns.delete(params.threadId)
       agentFirstTurns.delete(params.threadId)
     }
+    if (message.method === 'turn/start') continuation.dispatched(token, params.threadId)
     await write(nativeTransport.stdin, JSON.stringify(message))
   } catch {
     desktopCalls.delete(message?.id)
@@ -872,6 +874,11 @@ readLines(nativeTransport.stdout, line => {
 
 const switching = new Set()
 const switchRequests = new Map()
+const continuation = createNativeProviderContinuation({
+  nativeCall,
+  lifecyclePending,
+  current: threadId => !closed && !cancelledRecovery.has(threadId) && !lifecyclePending(threadId),
+})
 const BRIDGE_NATIVE_METHODS = new Set([
   'thread/list',
   'thread/read',
@@ -944,33 +951,20 @@ readLines(control, line => {
     }).catch(() => write(control, { id: message.id, ok: false }).catch(stop))
     return
   }
-  if (
-    message.type !== 'switch' || typeof message.id !== 'string'
-    || switching.has(message.threadId) || recoveringTurns.has(message.threadId)
-    || lifecyclePending(message.threadId)
-  ) {
-    if (message.type === 'switch') void write(control, { id: message.id, ok: false }).catch(stop)
-    return
-  }
-  switching.add(message.threadId)
-  switchRequests.set(message.id, message.threadId)
-  void (async () => {
-    try {
-      const result = await switchNativeThread(message, {
-        nativeCall,
-        controlCall,
-        current: () => !closed && !cancelledRecovery.has(message.threadId) && !lifecyclePending(message.threadId),
-      })
-      if (result.reason === 'provider-switch-reconciliation-required') {
-        uncertainSwitches.set(message.threadId, undefined)
-      }
-      await write(control, { id: message.id, ...result })
-    } catch {
-      await write(control, { id: message.id, ok: false })
-    } finally {
-      switching.delete(message.threadId)
-      switchRequests.delete(message.id)
-      cancelledRecovery.delete(message.threadId)
-    }
-  })().catch(stop)
+  dispatchNativeSelectionMutation(message, {
+    switching,
+    switchRequests,
+    recoveringTurns,
+    lifecyclePending,
+    cancelledRecovery,
+    uncertainSwitches,
+    nativeCall,
+    controlCall,
+    switchNativeThread,
+    continuation,
+    write,
+    control,
+    closed: () => closed,
+    stop,
+  })
 }, maxControlLineBytes)

@@ -11,6 +11,8 @@ import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities
 export interface NativeModelProviderCatalogEntry {
   readonly providerId: string
   readonly pluginId: string
+  /** This catalog is already filtered by the remote Host's preferences, not this profile's management views. */
+  readonly managementOwner?: 'remote'
   readonly title?: string
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly {

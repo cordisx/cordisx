@@ -40,7 +40,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       if (pending) {
         connection.pending.delete(key(message.id))
         const thread = message.result?.thread
-        if (!message.error && thread?.id && ['thread/start', 'thread/resume'].includes(pending.method)) {
+        if (!message.error && thread?.id && ['thread/start', 'thread/resume', 'thread/fork'].includes(pending.method)) {
           owners.set(thread.id, {
             connection,
             status: thread.status,
@@ -225,7 +225,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
     ) return
     const params = object(message.params)
     let connection = owners.get(params?.threadId)?.connection ?? primary
-    if (initializeParams && ['thread/start', 'thread/resume'].includes(message.method)) {
+    if (initializeParams && ['thread/start', 'thread/resume', 'thread/fork'].includes(message.method)) {
       const config = object(params?.config)
       const tables = config ? Object.keys(config).filter(name => name.startsWith('model_providers.')) : []
       const id = provider(params?.modelProvider) ?? provider(config?.model_provider)

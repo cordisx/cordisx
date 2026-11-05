@@ -16,6 +16,7 @@ export interface NativeSubmissionOrchestratorDescriptor {
   readonly explicitAction: unknown
   readonly edit: unknown
   readonly promptOverride: unknown
+  readonly continuationAvailable?: boolean
 }
 
 function explicitIntent(action: unknown): NativeSubmissionIntent | undefined {
@@ -73,6 +74,9 @@ export function normalizeNativeSubmissionAction(
   return {
     ...identity,
     intent: normalizedIntent(descriptor),
+    ...(descriptor.continuationAvailable === undefined ? {} : {
+      continuationAvailable: descriptor.continuationAvailable === true,
+    }),
     ...(threadId === undefined ? {} : { threadId }),
   }
 }
