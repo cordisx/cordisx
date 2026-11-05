@@ -8,6 +8,10 @@ import { PluginPackageSourceSnapshotter } from '../packages/cli/src/launcher/pac
 import { ownedDirectory, writePrivateJson } from '../packages/cli/src/launcher/codex-adapter/files.js'
 import { resources } from './fixtures/native-submission-structure.js'
 
+const adapterVersion = JSON.parse(
+  await readFile(new URL('../packages/codex-adapter/package.json', import.meta.url), 'utf8'),
+).version as string
+
 const roots: string[] = []
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
@@ -36,7 +40,7 @@ it('uses an independent npm artifact through compiled production analysis, parti
   await writePrivateJson(path.join(snapshot.stagingDirectory, 'receipt.json'), {
     schema: 1,
     id,
-    version: '0.1.0-beta.2',
+    version: adapterVersion,
     treeHash: snapshot.digest,
     entryHash: createHash('sha256').update(await readFile(path.join(snapshot.payloadDirectory, 'dist/adapter.mjs')))
       .digest('hex'),
@@ -54,7 +58,7 @@ it('uses an independent npm artifact through compiled production analysis, parti
     '-e',
     'import {bundle} from "@cordisx/codex-adapter"; import {parseNativeSource} from "@cordisx/codex-adapter/native-source-structure"; console.log(JSON.stringify({version:bundle.version,type:parseNativeSource("export const value=1").type}))',
   ], { cwd: root, encoding: 'utf8' })
-  expect(JSON.parse(standalone)).toEqual({ version: '0.1.0-beta.2', type: 'Program' })
+  expect(JSON.parse(standalone)).toEqual({ version: adapterVersion, type: 'Program' })
   const shippedChecks = execFileSync(process.execPath, ['--test', '--test-reporter=tap', 'tests/checks.mjs'], {
     cwd: path.join(store, 'packages', id, 'payload'),
     encoding: 'utf8',

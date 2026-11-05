@@ -18,6 +18,10 @@ import { writePrivateJson } from '../packages/cli/src/launcher/codex-adapter/fil
 import { hashPackageTree } from '../packages/cli/src/launcher/packages/integrity.js'
 import { resources } from './fixtures/native-submission-structure.js'
 
+const adapterVersion = JSON.parse(
+  await readFile(new URL('../packages/codex-adapter/package.json', import.meta.url), 'utf8'),
+).version as string
+
 const roots: string[] = []
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
@@ -45,7 +49,7 @@ async function candidate(f: Awaited<ReturnType<typeof fixture>>, source: string,
   await writePrivateJson(path.join(f.store, 'packages', id, 'receipt.json'), {
     schema: 1,
     id,
-    version: '0.1.0-beta.2',
+    version: adapterVersion,
     treeHash: await hashPackageTree(payload),
     entryHash: createHash('sha256').update(source).digest('hex'),
     trust: 'npm-sigstore-v1',
@@ -107,7 +111,7 @@ it.skipIf(process.platform !== 'darwin')(
   'skips an incompatible preferred candidate and continues through a good rollback in the Worker',
   async () => {
     const f = await fixture()
-    const bad = await candidate(f, 'export const bundle={version:"0.1.0-beta.2",apiVersion:99}', 'bad')
+    const bad = await candidate(f, `export const bundle={version:${JSON.stringify(adapterVersion)},apiVersion:99}`, 'bad')
     // Real owned packed entry: this candidate must beat builtin fallback.
     const good = await candidate(f, await readFile('packages/codex-adapter/dist/adapter.mjs', 'utf8'), 'good')
     await writePrivateJson(path.join(f.store, 'state.json'), state([bad], [good]))
@@ -135,7 +139,7 @@ it('protects every frozen candidate from prune and rejects revocation before sel
   await expect(
     runtime.selected({
       transforms: [],
-      modules: [{ id: 'submission', identity: id, version: '0.1.0-beta.2' }],
+      modules: [{ id: 'submission', identity: id, version: adapterVersion }],
       rejected: [],
     }),
   ).rejects.toThrow('revoked')
