@@ -19,6 +19,37 @@ import {
 } from './fixtures/native-model-provider-transport-harness.js'
 
 describe('native model provider transport', () => {
+  it('preserves native provider-switch rejection in the visible transport while keeping the original model', async () => {
+    const { dom, transport, channel, selectModel } = await harness()
+    try {
+      const current = transport.getSnapshot()
+      channel.selectionSelect.mockResolvedValueOnce({
+        status: 'reject',
+        reason: 'provider-switch-unsupported',
+        available: true,
+        revision: 100,
+        effective: { providerId: current.modelProvider!, model: current.model! },
+        pending: {
+          providerId: 'provider-b',
+          model: 'model-b',
+          generation: 1,
+          blockedReason: 'provider-switch-unsupported',
+        },
+      })
+      selectModel.mockClear()
+      expect(await transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('unavailable')
+      expect(transport.getSnapshot()).toMatchObject({
+        modelProvider: current.modelProvider,
+        model: current.model,
+        submissionError: 'provider-switch-unsupported',
+        pendingProviderId: 'provider-b',
+      })
+      expect(selectModel).not.toHaveBeenCalled()
+    } finally {
+      transport.dispose()
+      dom.window.close()
+    }
+  })
   it('admits a home send without borrowing the retained hidden thread scope', async () => {
     const { dom, transport, channel } = await harness()
     const retained = dom.window.document.querySelector<HTMLElement>('[data-codex-composer-root]')!

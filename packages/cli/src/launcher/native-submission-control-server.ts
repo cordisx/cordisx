@@ -8,6 +8,7 @@ import path from 'node:path'
 import type { NativeExistingThreadSwitch, NativeSubmissionController } from './native-submission-controller.js'
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
+import { NativeThreadSwitchError } from './native-thread-switch-error.js'
 
 // Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
@@ -94,8 +95,25 @@ export async function startNativeSubmissionControlServer(
   }
   const pending = new Map<
     string,
-    { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
+    {
+      resolve(value: unknown): void
+      reject(error: Error): void
+      timer: NodeJS.Timeout
+      restoration?: Readonly<{ threadId: string; revalidate?: () => Promise<boolean> }>
+    }
   >()
+  const switchResumes = new Map<string, Readonly<{ switchId: string; threadId: string }>>()
+  const retireSwitchResumes = (switchId?: string): void => {
+    for (const [resumeToken, resume] of switchResumes) {
+      if (switchId !== undefined && resume.switchId !== switchId) continue
+      switchResumes.delete(resumeToken)
+      void controller?.completeThreadResume({
+        threadId: resume.threadId,
+        resumeToken,
+        succeeded: false,
+      }).catch(() => undefined)
+    }
+  }
   const write = (socket: Socket, value: unknown): Promise<void> =>
     new Promise((resolve, reject) => {
       if (socket.destroyed) {
@@ -107,11 +125,19 @@ export async function startNativeSubmissionControlServer(
   const failPending = (): void => {
     for (const item of pending.values()) {
       clearTimeout(item.timer)
-      item.reject(new Error('Native intermediary disconnected'))
+      item.reject(
+        item.restoration
+          ? new NativeThreadSwitchError('provider-switch-reconciliation-required')
+          : new Error('Native intermediary disconnected'),
+      )
     }
     pending.clear()
+    retireSwitchResumes()
   }
-  const callPeer = async (request: Record<string, unknown>): Promise<unknown> => {
+  const callPeer = async (
+    request: Record<string, unknown>,
+    restoration?: Readonly<{ threadId: string; revalidate?: () => Promise<boolean> }>,
+  ): Promise<unknown> => {
     const socket = peer
     if (closed || !authenticated || socket === undefined || pending.size >= 32) {
       throw new Error('Native intermediary unavailable')
@@ -123,13 +149,19 @@ export async function startNativeSubmissionControlServer(
         if (!item) return
         pending.delete(id)
         clearTimeout(item.timer)
-        reject(error)
+        retireSwitchResumes(id)
+        if (request.type === 'switch') {
+          void write(socket, { type: 'switch-cancel', switchId: id, threadId: request.threadId }).catch(() => undefined)
+        }
+        reject(
+          request.type === 'switch' ? new NativeThreadSwitchError('provider-switch-reconciliation-required') : error,
+        )
       }
       const timer = setTimeout(() => {
         rememberExpired(id)
         fail(new Error('Native switch timed out'))
       }, options.requestTimeoutMs ?? TIMEOUT)
-      pending.set(id, { resolve, reject, timer })
+      pending.set(id, { resolve, reject, timer, ...(restoration ? { restoration } : {}) })
       void write(socket, { ...request, id }).catch(fail)
     })
   }
@@ -141,6 +173,9 @@ export async function startNativeSubmissionControlServer(
         providerId: input.providerId,
         model: input.model,
         config: input.configOverrides,
+      }, {
+        threadId: input.threadId,
+        ...(input.revalidateRestoration ? { revalidate: input.revalidateRestoration } : {}),
       })
     },
   }
@@ -184,7 +219,76 @@ export async function startNativeSubmissionControlServer(
         }
         pending.delete(value.id)
         clearTimeout(item.timer)
-        value.ok ? item.resolve(value.value) : item.reject(new Error('Native switch rejected'))
+        retireSwitchResumes(value.id)
+        value.ok
+          ? item.resolve(value.value)
+          : item.reject(
+            value.reason === 'provider-switch-unsupported' || value.reason === 'provider-switch-reconciliation-required'
+              ? new NativeThreadSwitchError(value.reason)
+              : new Error('Native switch rejected'),
+          )
+        return
+      }
+      if (value.type === 'switch-resume' || value.type === 'switch-resume-complete') {
+        if (
+          !authenticated || !controller || active >= 32 || !valid(value.switchId, 256)
+          || !valid(value.threadId) || !valid(value.providerId, 128) || !valid(value.model)
+        ) throw new Error('Control unavailable')
+        const item = pending.get(value.switchId)
+        const current = async (): Promise<boolean> => {
+          const restoration = item?.restoration
+          if (!restoration || restoration.threadId !== value.threadId) return false
+          const valid = await restoration.revalidate?.() ?? true
+          return valid && !closed && pending.get(value.switchId as string) === item
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          if (value.type === 'switch-resume-complete') {
+            let accepted = await current() && value.succeeded === true
+            if (value.providerId !== 'openai') {
+              if (!valid(value.resumeToken, 256)) throw new Error('Invalid native thread resume completion')
+              const resume = switchResumes.get(value.resumeToken)
+              if (resume?.switchId !== value.switchId || resume.threadId !== value.threadId) {
+                throw new Error('Invalid native thread resume completion')
+              }
+              switchResumes.delete(value.resumeToken)
+              accepted = await controller.completeThreadResume({
+                threadId: value.threadId,
+                resumeToken: value.resumeToken,
+                succeeded: accepted,
+              }) && accepted
+            }
+            accepted = accepted && await current()
+            await write(socket, { id: value.id, ok: true, value: accepted })
+          } else {
+            if (!await current()) throw new Error('Native restoration was stale')
+            const result = value.providerId === 'openai'
+              ? { kind: 'native', configOverrides: { model_provider: 'openai', model: value.model } }
+              : await controller.prepareThreadResume({
+                threadId: value.threadId,
+                providerId: value.providerId,
+                model: value.model,
+              })
+            if ('resumeToken' in result) {
+              if (!await current()) {
+                await controller.completeThreadResume({
+                  threadId: value.threadId,
+                  resumeToken: result.resumeToken,
+                  succeeded: false,
+                })
+                throw new Error('Native restoration was stale')
+              }
+              switchResumes.set(result.resumeToken, { switchId: value.switchId, threadId: value.threadId })
+            }
+            await write(socket, { id: value.id, ok: true, value: result })
+          }
+        } catch {
+          await write(socket, { id: value.id, ok: false })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
         return
       }
       if (value.type === 'diagnostic') {
@@ -429,7 +533,7 @@ export async function startNativeSubmissionControlServer(
         providerId: input.providerId,
         model: input.model,
         config: input.configOverrides,
-      })
+      }, { threadId: input.threadId })
       if (record(result)?.status === 'rejected') {
         throw new NativeAgentModelSelectionRejected('The target thread is not idle')
       }

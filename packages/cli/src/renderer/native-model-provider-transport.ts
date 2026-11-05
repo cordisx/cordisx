@@ -318,7 +318,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       if (!this.isCurrent(navigation, threadId)) return 'unavailable'
       if (result === 'accepted') this.retireNativeResumes(threadId)
       if (result !== 'accepted' && options?.source === 'preference') await this.selectionClient.refresh()
-      this.publishPatch({ error: null, submissionError: null })
+      this.publishPatch({ error: null, ...(result === 'accepted' ? { submissionError: null } : {}) })
       return result
     }
     // Returning to the effective provider cancels a pending cross-provider choice.

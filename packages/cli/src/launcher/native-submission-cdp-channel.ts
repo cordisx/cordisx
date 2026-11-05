@@ -114,6 +114,7 @@ const projection = (state: State) => ({
         model: state.pending.model,
         generation: state.pending.selectionGeneration,
         ...(state.pending.sendOnly ? { sendOnly: true } : {}),
+        ...(state.pending.blockedReason ? { blockedReason: state.pending.blockedReason } : {}),
       },
     }),
   ...(state.draftPreference === undefined ? {} : { draftPreference: state.draftPreference }),
@@ -583,6 +584,10 @@ export function createNativeSubmissionCdpAuthority(options: {
             if (!state || input?.expectedRevision !== state.revision || state.pending && !state.pending.sendOnly) {
               throw new Error('Stale selection discard')
             }
+            if (state.pending?.blockedReason) {
+              await respond(requestId, projection(state))
+              return
+            }
             if (state.pending) {
               delete state.pending
               state.revision++
@@ -622,6 +627,9 @@ export function createNativeSubmissionCdpAuthority(options: {
               states.set(key(scope), state)
             }
             if (!state || input?.expectedRevision !== state.revision) throw new Error('Stale provider intent')
+            if (state.pending?.blockedReason === 'provider-switch-reconciliation-required') {
+              throw new Error('Native provider connection requires reconciliation')
+            }
             if (envelope.operation === 'selectionProviderIntent') {
               if (!text(input?.providerId, 128)) throw new Error('Invalid provider intent')
               state.pendingProviderIntent = Object.freeze({
@@ -636,6 +644,10 @@ export function createNativeSubmissionCdpAuthority(options: {
             await respond(requestId, projection(state))
           } else if (envelope.operation === 'selectionSelect') {
             if (!state?.effective) throw new Error('Native selection not initialized')
+            if (state.pending?.blockedReason === 'provider-switch-reconciliation-required') {
+              await respond(requestId, { status: 'reject', reason: state.pending.blockedReason, ...projection(state) })
+              return
+            }
             const expectedRevision = state.revision
             if (input?.expectedRevision !== undefined && input.expectedRevision !== expectedRevision) {
               throw new Error('Stale selection')
@@ -696,6 +708,13 @@ export function createNativeSubmissionCdpAuthority(options: {
             if (stageSend && input?.expectedRevision !== state.revision) {
               throw new Error('Concurrent next-send selection')
             }
+            if (
+              state.pending?.blockedReason && state.pending.providerId === selected.providerId
+              && state.pending.model === selected.model
+            ) {
+              await respond(requestId, { status: 'reject', reason: state.pending.blockedReason, ...projection(state) })
+              return
+            }
             delete state.draftPreference
             state.revision++
             if (!stageSend && selected.providerId === state.effective.providerId) {
@@ -715,6 +734,19 @@ export function createNativeSubmissionCdpAuthority(options: {
               if (committed.kind === 'accepted') {
                 await respond(requestId, { status: 'accepted', ...committed.projection })
               } else {
+                if (
+                  committed.reason === 'provider-switch-unsupported'
+                  || committed.reason === 'provider-switch-reconciliation-required'
+                ) {
+                  if (
+                    state.revision !== revision || owner.disposed || !await runtime.revalidate(scope, true)
+                    || state.pending?.providerId !== selected.providerId || state.pending.model !== selected.model
+                  ) throw new Error('Stale native provider switch')
+                  state.pending = { ...state.pending, blockedReason: committed.reason }
+                  state.revision++
+                  await respond(requestId, { status: 'reject', reason: committed.reason, ...projection(state) })
+                  return
+                }
                 if (state.pendingProviderIntent) {
                   throw new Error('Provider intent requires successful model acknowledgement')
                 }
@@ -743,7 +775,20 @@ export function createNativeSubmissionCdpAuthority(options: {
               await respond(requestId, { status: 'accepted', ...projection(state) })
             }
           } else if (envelope.operation === 'submissionPrepare') {
+            const beforePending = state?.pending
             const result = await controller!.prepareSubmission(scope, actionOf(input?.action))
+            let rejectedProjection
+            if (
+              result.kind === 'reject' && state?.pending && state.pending === beforePending
+              && (result.reason === 'provider-switch-unsupported'
+                || result.reason === 'provider-switch-reconciliation-required')
+            ) {
+              if (state.pending.blockedReason !== result.reason) {
+                state.pending = { ...state.pending, blockedReason: result.reason }
+                state.revision++
+              }
+              rejectedProjection = projection(state)
+            }
             await respond(
               requestId,
               result.kind === 'confirm'
@@ -752,18 +797,35 @@ export function createNativeSubmissionCdpAuthority(options: {
                   confirmationId: result.confirmationId,
                   expectedSelectionRevision: result.selectionRevision,
                 }
-                : { ...result, status: result.kind },
+                : { ...result, status: result.kind, ...(rejectedProjection ? { projection: rejectedProjection } : {}) },
             )
           } else if (envelope.operation === 'submissionConfirm') {
             if (!text(input?.confirmationId, 256) || !Number.isSafeInteger(input?.expectedSelectionRevision)) {
               throw new Error('Invalid confirmation')
             }
+            const beforePending = state?.pending
             const result = await controller!.confirmSubmission({
               scope,
               confirmationId: input.confirmationId,
               expectedSelectionRevision: input.expectedSelectionRevision as number,
             })
-            await respond(requestId, { ...result, status: result.kind })
+            let rejectedProjection
+            if (
+              result.kind === 'reject' && state?.pending && state.pending === beforePending
+              && (result.reason === 'provider-switch-unsupported'
+                || result.reason === 'provider-switch-reconciliation-required')
+            ) {
+              if (state.pending.blockedReason !== result.reason) {
+                state.pending = { ...state.pending, blockedReason: result.reason }
+                state.revision++
+              }
+              rejectedProjection = projection(state)
+            }
+            await respond(requestId, {
+              ...result,
+              status: result.kind,
+              ...(rejectedProjection ? { projection: rejectedProjection } : {}),
+            })
           } else if (envelope.operation === 'submissionCancel') {
             if (!text(input?.id, 256)) throw new Error('Invalid cancellation')
             await respond(requestId, await controller!.cancel({ scope, id: input.id }))

@@ -10,8 +10,10 @@ import { NativeAgentTaskRouting } from '../../packages/cli/src/launcher/native-a
 export async function harness(
   controller?: NativeSubmissionController,
   nativeFixture = 'native-intermediary-app-server.mjs',
+  serverOptions?: Parameters<typeof startNativeSubmissionControlServer>[0],
 ) {
-  const server = await startNativeSubmissionControlServer()
+  const server = await startNativeSubmissionControlServer(serverOptions)
+  const providerProcess = ['native-provider-process.mjs', 'native-provider-switch-process.mjs'].includes(nativeFixture)
   const consume = vi.fn(async (input: { operationToken: string }) =>
     input.operationToken === 'rejected-operation-token'
       ? { kind: 'reject', reason: 'unknown-token' }
@@ -26,7 +28,7 @@ export async function harness(
           model: 'model-b',
           'model_providers.provider-b': {
             base_url: 'http://127.0.0.1/v1',
-            ...(nativeFixture === 'native-provider-process.mjs' ? { wire_api: 'responses' } : {}),
+            ...(providerProcess ? { wire_api: 'responses' } : {}),
             requires_openai_auth: false,
           },
         },
@@ -43,7 +45,7 @@ export async function harness(
         configOverrides: {
           'model_providers.provider-b': {
             base_url: 'http://127.0.0.1/v1',
-            ...(nativeFixture === 'native-provider-process.mjs' ? { wire_api: 'responses' } : {}),
+            ...(providerProcess ? { wire_api: 'responses' } : {}),
             requires_openai_auth: false,
           },
         },

@@ -12,11 +12,12 @@ Send scope independently. Switching a side conversation does not change its
 parent conversation's selection.
 
 On Desktop versions that support attached side chats and paginated parent
-history, CordisX uses the native attached conversation path so the same side
-chat can change providers through the normal resume mechanism. These side chats
-retain their history; they are not ephemeral. Older temporary side chats cannot
-resume a different provider and keep that native limitation. CordisX refuses
-the destructive unsubscribe step for an ephemeral thread.
+history, CordisX uses the native attached conversation path. These side chats
+retain their history; they are not ephemeral. A persisted history does not by
+itself establish cross-provider resume support: native versions can reject a
+provider change for either a main or attached conversation. Older temporary
+side chats cannot resume a different provider. CordisX refuses the destructive
+unsubscribe step for an ephemeral thread.
 
 Selectable providers come from the profile's actual configured and managed
 catalogs. Side chats use the same service health, permission and Responses
@@ -524,6 +525,35 @@ This initial path supports switching to a catalogued CordisX provider; selecting
 native OpenAI remains a UI operation.
 
 ## Desktop Compatibility
+
+### Rejected provider changes
+
+Native app-server versions may bind a saved conversation to its original
+provider and reject `thread/resume` with `modelProviderMismatch` or
+`modelProviderNotConfigured` before applying a requested provider override.
+The installed `0.166.0-alpha.6` app-server was observed to reject an existing
+managed-provider conversation switching to built-in OpenAI, and the reverse
+direction follows the same admission boundary. This is distinct from selecting
+a model in the current provider or choosing a provider for a new conversation.
+
+After a definite native switch rejection, CordisX checks that the same saved
+conversation still has its prior provider and model and is unloaded. It then
+restores that exact session through fresh Host provider preparation. Restoration
+commits a candidate credential lease only after the native process acknowledges
+the same idle conversation, provider and model, and the initiating document and
+selection remain current. It never submits a message or applies the rejected
+target. An unsupported change stays visibly rejected; the original effective
+provider and the user's pending choice and draft remain available. Ordinary
+Send does not repeatedly attempt a change already rejected by this runtime.
+The user can cancel the choice or select the current provider to continue.
+
+A timeout, cancelled selection, changed native identity or failed restoration
+reports that the connection needs reconciliation. CordisX does not claim the
+old session was restored, automatically replay the switch, create a replacement
+conversation, or rewrite saved history. A new conversation can independently
+select the target provider. Process fixtures prove rejection handling and lease
+cleanup; they do not establish same-conversation cross-provider support or real
+Desktop acceptance of a new candidate.
 
 The app-server intermediary uses the selected Desktop app's bundled Node runtime,
 so the native app-tool peer identity checks retain the app's signed process chain.

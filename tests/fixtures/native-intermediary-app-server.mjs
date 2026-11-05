@@ -223,7 +223,7 @@ reader.on('line', async line => {
         JSON.stringify({
           id: message.id,
           result: {
-            thread: { id: message.params.threadId },
+            thread: { id: message.params.threadId, status: { type: 'idle' } },
             modelProvider: message.params.modelProvider,
             model: message.params.model,
             received: message.params,

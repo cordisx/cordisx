@@ -86,6 +86,54 @@ async function harness(hasPending = true, existing = false, effort?: 'low' | 'hi
 }
 
 describe('native provider selection client', () => {
+  it('retains a native rejection of the next Send when an older channel returns no projection', async () => {
+    const h = await harness(false, true)
+    const target = { providerId: 'b', model: 'b-model', reasoningEffort: 'high' as const }
+    h.setAuthority({ scope: { ...scope, threadId: 'thread-1' }, idle: false })
+    h.channel.selectionSelect.mockResolvedValueOnce({
+      status: 'accepted',
+      revision: 3,
+      effective: { providerId: 'a', model: 'a-model' },
+      pending: { ...pending, sendOnly: true },
+    })
+    h.channel.submissionPrepare.mockResolvedValueOnce({ status: 'reject', reason: 'provider-switch-unsupported' })
+    expect(h.client.stageNextSend(target)).toBe(true)
+    h.setAuthority({ scope: { ...scope, threadId: 'thread-1' }, idle: true })
+    const send = { ...descriptor, target: 'local', thread: 'thread-1', followUp: 'local', followUpThread: 'thread-1' }
+    expect(await h.client.submitHook(send)).toEqual({ allow: false })
+    expect(await h.client.submitHook(send)).toEqual({ allow: false })
+    expect(h.client.snapshot()).toMatchObject({
+      nextSend: target,
+      pending: { ...pending, sendOnly: true, blockedReason: 'provider-switch-unsupported' },
+    })
+    expect(h.channel.selectionSelect).toHaveBeenCalledTimes(1)
+    expect(h.channel.submissionPrepare).toHaveBeenCalledTimes(1)
+    expect(h.channel.selectionDiscard).not.toHaveBeenCalled()
+    expect(h.notice).toHaveBeenLastCalledWith('provider-switch-unsupported')
+    h.client.dispose()
+  })
+
+  it('retains a specific unsupported switch outcome without synchronizing labels or allowing a Send', async () => {
+    const h = await harness(false, true)
+    h.synchronizeEffective.mockClear()
+    h.channel.selectionSelect.mockResolvedValueOnce({
+      status: 'reject',
+      reason: 'provider-switch-unsupported',
+      available: true,
+      revision: 3,
+      effective: { providerId: 'a', model: 'a-model' },
+      pending: { ...pending, blockedReason: 'provider-switch-unsupported' },
+    })
+    expect(await h.client.select({ providerId: 'b', model: 'b-model' })).toBe('unavailable')
+    expect(h.client.snapshot()).toMatchObject({ effective: { providerId: 'a' }, pending: { providerId: 'b' } })
+    expect(await h.client.submitHook({ ...descriptor, thread: 'thread-1' })).toEqual({ allow: false })
+    expect(h.notice).toHaveBeenLastCalledWith('provider-switch-unsupported')
+    expect(h.channel.submissionPrepare).not.toHaveBeenCalled()
+    expect(h.synchronizeEffective).not.toHaveBeenCalled()
+    expect(await h.client.select({ providerId: 'a', model: 'a-model' })).toBe('accepted')
+    expect(h.client.snapshot().pending).toBeUndefined()
+    h.client.dispose()
+  })
   it.each([true, false])('adds target effort only for a pending ordinary send (%s)', async hasPending => {
     const h = await harness(hasPending, false, 'max')
     await h.client.submitHook(descriptor)

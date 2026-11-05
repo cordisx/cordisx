@@ -70,6 +70,7 @@ export interface PendingNativeProviderChange extends NativeProviderSelection {
   readonly threadId?: string
   readonly selectionGeneration: number
   readonly sendOnly?: boolean
+  readonly blockedReason?: import('../launcher/native-thread-switch-error.js').NativeThreadSwitchReason
 }
 
 export interface PreparedNativeProviderChange {

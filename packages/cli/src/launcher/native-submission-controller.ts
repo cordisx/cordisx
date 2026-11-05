@@ -2,6 +2,7 @@ import type { RemotePreparedProvider } from './remote-terminal-provider-client.j
 import { nativeProviderConfig } from './native-provider-config.js'
 export { nativeProviderConfig } from './native-provider-config.js'
 import { randomUUID } from 'node:crypto'
+import { nativeThreadSwitchReason } from './native-thread-switch-error.js'
 
 import {
   decideNativeProviderSubmission,
@@ -357,6 +358,9 @@ export function createNativeSubmissionController(
         model: prepared.pending.model,
         configOverrides: operation.configOverrides,
         serviceGeneration: operation.serviceGeneration,
+        revalidateRestoration: async () =>
+          !disposed && revalidateSelection(prepared)
+          && await options.runtime.revalidate(prepared.scope, true),
       })
       // Resume already changed the live thread, even if its subsequent Send is cancelled.
       await replaceBinding({
@@ -393,11 +397,11 @@ export function createNativeSubmissionController(
           effective: effective.effective,
         },
       }
-    } catch {
+    } catch (error) {
       if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
         await operation.credential.dispose()
       }
-      return { kind: 'reject', reason: 'thread-switch-failed' }
+      return { kind: 'reject', reason: nativeThreadSwitchReason(error) ?? 'thread-switch-failed' }
     }
   }
   return {
@@ -407,6 +411,7 @@ export function createNativeSubmissionController(
       await expire()
       const snapshot = options.selection.snapshot(scope)
       const pending = snapshot.pending
+      if (pending?.blockedReason) return { kind: 'reject', reason: pending.blockedReason }
       const selected = pending ?? snapshot.effective
       const startup = options.startup?.availability(selected.providerId, selected.model)
       if (startup !== undefined && !startup.available) {
@@ -461,6 +466,9 @@ export function createNativeSubmissionController(
           model: pending.model,
           configOverrides: operation.configOverrides,
           serviceGeneration: operation.serviceGeneration,
+          revalidateRestoration: async () =>
+            !disposed && revalidateSelection(prepared)
+            && await options.runtime.revalidate(scope, true),
         })
         await replaceBinding({
           threadId: scope.threadId,
@@ -486,12 +494,12 @@ export function createNativeSubmissionController(
           kind: 'accepted',
           projection: { available: true, revision: effective.revision, effective: effective.effective },
         }
-      } catch {
+      } catch (error) {
         if (disposed || !revalidateSelection(prepared) || !await validSelection(pending)) clearSelection()
         if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
           await operation.credential.dispose()
         }
-        return { kind: 'reject', reason: 'thread-switch-failed' }
+        return { kind: 'reject', reason: nativeThreadSwitchReason(error) ?? 'thread-switch-failed' }
       }
     },
     async prepareSubmission(scope, action) {
@@ -512,6 +520,7 @@ export function createNativeSubmissionController(
       if (snapshot.pending !== undefined && snapshot.pending.threadId !== scope.threadId) {
         return { kind: 'reject', reason: 'scope-mismatch' }
       }
+      if (snapshot.pending?.blockedReason) return { kind: 'reject', reason: snapshot.pending.blockedReason }
       const decision = decideNativeProviderSubmission(snapshot.pending, action)
       if (decision.kind === 'pass-through') {
         if (options.providerSource?.(snapshot.effective.providerId) === 'remote') {
@@ -613,7 +622,13 @@ export function createNativeSubmissionController(
       }
       if (decision.prepared.pending.sendOnly) {
         const result = await applyPreparedThreadSelection(prepared)
-        return result.kind === 'allow-original' ? result : { kind: 'reject', reason: 'provider-preparation-failed' }
+        return result.kind === 'allow-original' ? result : {
+          kind: 'reject',
+          reason: result.reason === 'provider-switch-unsupported'
+              || result.reason === 'provider-switch-reconciliation-required'
+            ? result.reason
+            : 'provider-preparation-failed',
+        }
       }
       const confirmationId = createId()
       if (!validText(confirmationId, 256) || confirmationId.length < 16 || confirmations.has(confirmationId)) {

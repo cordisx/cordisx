@@ -86,6 +86,8 @@ export interface NativeExistingThreadSwitch {
       /** Host-private only. Never return this value through the renderer command API. */
       configOverrides: Readonly<Record<string, unknown>>
       serviceGeneration: string
+      /** Revalidate the initiating document/selection before restoring a rejected native switch. */
+      revalidateRestoration?: () => Promise<boolean>
     }>,
   ): Promise<void>
 }
@@ -103,7 +105,12 @@ export type NativeSubmissionPreparation =
   | Readonly<{
     kind: 'reject'
     startupReason?: StartupActionReasonV1
-    reason: 'unsupported-submission-intent' | 'scope-mismatch' | 'stale-operation' | 'provider-preparation-failed'
+    reason:
+      | 'unsupported-submission-intent'
+      | 'scope-mismatch'
+      | 'stale-operation'
+      | 'provider-preparation-failed'
+      | import('./native-thread-switch-error.js').NativeThreadSwitchReason
   }>
 
 export type NativeSubmissionConfirmation =
@@ -118,7 +125,12 @@ export type NativeSubmissionConfirmation =
   }>
   | Readonly<{
     kind: 'reject'
-    reason: 'unknown-confirmation' | 'expired-confirmation' | 'stale-operation' | 'thread-switch-failed'
+    reason:
+      | 'unknown-confirmation'
+      | 'expired-confirmation'
+      | 'stale-operation'
+      | 'thread-switch-failed'
+      | import('./native-thread-switch-error.js').NativeThreadSwitchReason
   }>
 
 export interface NativeMarkedRequest {
@@ -172,7 +184,14 @@ export interface NativeSubmissionController {
       }>
     }>
     | Readonly<
-      { kind: 'reject'; reason: 'stale-operation' | 'thread-switch-failed'; startupReason?: StartupActionReasonV1 }
+      {
+        kind: 'reject'
+        reason:
+          | 'stale-operation'
+          | 'thread-switch-failed'
+          | import('./native-thread-switch-error.js').NativeThreadSwitchReason
+        startupReason?: StartupActionReasonV1
+      }
     >
   >
   prepareSubmission(
