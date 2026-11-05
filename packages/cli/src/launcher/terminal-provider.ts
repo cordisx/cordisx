@@ -7,6 +7,7 @@ import type { NativeManagedGatewayConnectionSession } from './managed-service-na
 import { nativeSubmissionCredentialBroker } from './native-submission-credentials.js'
 import type { NativeProviderCredentialBroker } from './native-provider-credential-broker.js'
 import { nativeProviderConfig, type NativeProviderCredentialLease } from './native-submission-controller.js'
+import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
 
 export type TerminalProviderRequest =
   | { readonly kind: 'list' }
@@ -30,6 +31,7 @@ export type TerminalProviderResult =
       readonly providerId: string
       readonly title: string
       readonly managed: boolean
+      readonly display?: ModelProviderDisplay
       readonly models: readonly { readonly id: string; readonly label: string }[]
     }[]
   }
@@ -85,6 +87,7 @@ export function createTerminalProviderAuthority(options: {
     signal?: AbortSignal,
   ) => Promise<StartupRequirementsResult>
   readonly catalog: () => Promise<readonly NativeModelProviderCatalogEntry[]>
+  readonly display?: () => Promise<readonly ModelProviderDisplay[]>
   readonly owns: (providerId: string) => boolean
   readonly resolve: (
     providerId: string,
@@ -170,15 +173,24 @@ export function createTerminalProviderAuthority(options: {
       }
       if (request.kind === 'list') {
         const catalog = await options.catalog()
+        const displays = modelProviderDisplays(await options.display?.().catch(() => []) ?? [])
+        if (closed) throw new Error('Terminal provider authority retired')
         return {
           kind: 'list',
           ...(options.startup?.snapshot === undefined ? {} : { startup: await options.startup.snapshot() }),
-          providers: catalog.map(provider => ({
-            providerId: provider.providerId,
-            title: provider.title ?? provider.providerId,
-            managed: options.owns(provider.providerId),
-            models: provider.models.map(model => ({ id: model.id, label: model.label })),
-          })),
+          providers: catalog.map(provider => {
+            const display = options.owns(provider.providerId)
+              ? displays.find(display => display.providerId === provider.providerId)
+                ?? modelProviderDisplays([provider.display]).find(display => display.providerId === provider.providerId)
+              : undefined
+            return {
+              providerId: provider.providerId,
+              title: display?.title ?? provider.title ?? provider.providerId,
+              managed: options.owns(provider.providerId),
+              ...(display === undefined ? {} : { display }),
+              models: provider.models.map(model => ({ id: model.id, label: model.label })),
+            }
+          }),
         }
       }
       if (request.kind === 'prepare') {

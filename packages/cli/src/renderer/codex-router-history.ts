@@ -1,4 +1,9 @@
 import type { CordisXJsonScalar } from '../contracts.js'
+import {
+  type CodexRouterLocation,
+  type CodexRouterNavigator,
+  findCodexRouterNavigator,
+} from './codex-router-navigator.js'
 
 const CORDISX_ROUTE_STATE_KEY = '__cordisxRouteV1'
 // Build 7982 declares '/' as home; native thread active/selected selectors return no thread there.
@@ -53,8 +58,8 @@ interface BrowserRouteReloadRecord {
 export interface CodexRouteHistoryAdapter {
   snapshot(): CodexRouteHistorySnapshot
   subscribe(listener: () => void): () => void
-  push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot
-  replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot
+  push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot>
+  replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot>
   deepLink(entry: CodexRouteHistoryEntry): string
   go(delta: -1 | 1): Promise<CodexRouteHistorySnapshot>
   dispose(): void
@@ -174,79 +179,12 @@ function urlWithoutRouteDeepLink(view: Window): string {
   return url.href
 }
 
-interface CodexRouterLocation {
-  readonly pathname: string
-  readonly search: string
-  readonly hash: string
-  readonly state: unknown
-  readonly key: string
-}
-
-interface CodexRouterNavigator {
-  readonly index: number
-  readonly action: string
-  readonly location: CodexRouterLocation
-  push(to: Readonly<Pick<CodexRouterLocation, 'pathname' | 'search' | 'hash'>>, state?: unknown): void
-  replace(to: Readonly<Pick<CodexRouterLocation, 'pathname' | 'search' | 'hash'>>, state?: unknown): void
-  go(delta: number): void
-  listen(listener: (update: unknown) => void): () => void
-}
-
-interface ReactFiberLike {
-  readonly child?: ReactFiberLike | null
-  readonly sibling?: ReactFiberLike | null
-  readonly memoizedProps?: unknown
-}
-
 interface RouteReloadCheckpoint {
   readonly schemaVersion: 1
   readonly pathname: string
   readonly search: string
   readonly hash: string
   readonly entry: CodexRouteHistoryEntry
-}
-
-function routerNavigator(value: unknown): CodexRouterNavigator | undefined {
-  if (
-    !isRecord(value)
-    || !Number.isSafeInteger(value.index)
-    || (value.index as number) < 0
-    || typeof value.action !== 'string'
-    || !isRecord(value.location)
-    || typeof value.location.pathname !== 'string'
-    || typeof value.location.search !== 'string'
-    || typeof value.location.hash !== 'string'
-    || typeof value.location.key !== 'string'
-    || value.location.key.length === 0
-    || typeof value.push !== 'function'
-    || typeof value.replace !== 'function'
-    || typeof value.go !== 'function'
-    || typeof value.listen !== 'function'
-  ) return undefined
-  return value as unknown as CodexRouterNavigator
-}
-
-function findCodexRouterNavigator(document: Document): CodexRouterNavigator | undefined {
-  const root = document.getElementById('root')
-  if (root === null) return undefined
-  const containerKey = Object.keys(root).find(key => key.startsWith('__reactContainer$'))
-  if (containerKey === undefined) return undefined
-  const start = (root as unknown as Record<string, unknown>)[containerKey] as ReactFiberLike | undefined
-  if (start === undefined) return undefined
-  const pending: ReactFiberLike[] = [start]
-  const seen = new Set<ReactFiberLike>()
-  while (pending.length > 0) {
-    const fiber = pending.pop()!
-    if (seen.has(fiber)) continue
-    seen.add(fiber)
-    const props = isRecord(fiber.memoizedProps) ? fiber.memoizedProps : undefined
-    const value = props === undefined || !isRecord(props.value) ? undefined : props.value
-    const navigator = routerNavigator(value?.navigator)
-    if (navigator !== undefined) return navigator
-    if (fiber.sibling !== undefined && fiber.sibling !== null) pending.push(fiber.sibling)
-    if (fiber.child !== undefined && fiber.child !== null) pending.push(fiber.child)
-  }
-  return undefined
 }
 
 function routerTarget(
@@ -293,7 +231,7 @@ function parseReloadCheckpoint(value: unknown): RouteReloadCheckpoint | undefine
 }
 
 /**
- * Private adapter for the MemoryHistory navigator owned by Codex React Router.
+ * Private adapter for the router owned by Codex React Router.
  *
  * Codex Desktop 26.818.61809 keeps its actionable back/forward history in a
  * React Router Context navigator; `window.history` remains length 1 with null
@@ -305,7 +243,9 @@ function parseReloadCheckpoint(value: unknown): RouteReloadCheckpoint | undefine
  * Browser history stores one current-route reload checkpoint only. It is not a
  * stack and is never used for back/forward. The checkpoint is bound to the
  * native pathname/search/hash and is replaced or cleared after every Codex
- * navigator transition.
+ * navigator transition. Current data routers expose multi-subscriber state and
+ * async navigate; those are observed through the same adapter without inventing
+ * a history index or replacing the native router.
  */
 export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   private readonly listeners = new Set<() => void>()
@@ -323,6 +263,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   private ownWrite = false
   private scheduled = false
   private disposed = false
+  private unsubscribe: (() => void) | undefined
 
   constructor(private readonly view: Window) {
     this.install()
@@ -338,8 +279,8 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     }
     const location = this.navigator.location
     if (
-      !Number.isSafeInteger(this.navigator.index)
-      || this.navigator.index < 0
+      (this.navigator.index !== undefined
+        && (!Number.isSafeInteger(this.navigator.index) || this.navigator.index < 0))
       || typeof location.key !== 'string'
       || location.key.length === 0
     ) {
@@ -352,7 +293,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     return Object.freeze({
       available: true,
       key: location.key,
-      index: this.navigator.index,
+      ...(this.navigator.index === undefined ? {} : { index: this.navigator.index }),
       nativeLocation: routerTarget(location),
       ...(entry === undefined ? {} : { entry }),
     })
@@ -363,32 +304,32 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     return () => this.listeners.delete(listener)
   }
 
-  push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
+  push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot> {
     const navigator = this.requireNavigator()
     const location = navigator.location
     const destination = entry.outlet === 'main' ? CODEX_PLUGIN_MAIN_LOCATION : routerTarget(location)
-    this.transition(
+    const transition = this.transition(
       { ...location, ...destination },
       entry,
       () => navigator.push(destination, stateWithEntry(location.state, entry)),
     )
-    return this.snapshot()
+    return this.afterTransition(transition)
   }
 
-  replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
+  replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot> {
     const navigator = this.requireNavigator()
     const location = navigator.location
     const destination = entry?.outlet === 'main' ? CODEX_PLUGIN_MAIN_LOCATION : routerTarget(location)
-    this.transition(
+    const transition = this.transition(
       { ...location, ...destination },
       entry,
       () => navigator.replace(destination, stateWithEntry(location.state, entry)),
     )
-    return this.snapshot()
+    return this.afterTransition(transition)
   }
 
   /** Enter a validated Host task using the already observed native router. */
-  navigateHost(value: string): CodexRouteHistorySnapshot {
+  navigateHost(value: string): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot> {
     if (this.disposed) throw new Error('Codex React Router history adapter is disposed')
     const target = new URL(value)
     if (
@@ -397,15 +338,14 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     ) throw new Error('Host task details URL is unavailable')
     const navigator = this.requireNavigator()
     const location = navigator.location
-    this.transition(location, undefined, () =>
+    const transition = this.transition(location, undefined, () =>
       navigator.push(
         { pathname: target.pathname, search: '', hash: '' },
         stateWithEntry(location.state),
       ))
     // This entry originates outside the plugin Route service. Publish the same
     // native transition so its current-route projection and subscribers agree.
-    this.afterNativeTransition()
-    return this.snapshot()
+    return this.afterTransition(transition, true)
   }
 
   deepLink(entry: CodexRouteHistoryEntry): string {
@@ -414,7 +354,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
 
   async go(delta: -1 | 1): Promise<CodexRouteHistorySnapshot> {
     const navigator = this.requireNavigator()
-    this.write(() => navigator.go(delta))
+    await this.write(() => navigator.go(delta))
     const snapshot = this.snapshot()
     this.persistCurrentLocation()
     return snapshot
@@ -423,6 +363,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.unsubscribe?.()
     const navigator = this.navigator
     if (navigator !== undefined) {
       if (navigator.push === this.wrappedPush) this.restoreMethod(navigator, 'push', this.originalPushDescriptor)
@@ -456,17 +397,14 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     this.originalPushDescriptor = Object.getOwnPropertyDescriptor(navigator, 'push')
     this.originalReplaceDescriptor = Object.getOwnPropertyDescriptor(navigator, 'replace')
     this.originalGoDescriptor = Object.getOwnPropertyDescriptor(navigator, 'go')
-    this.wrappedPush = function push(to, state): void {
-      adapter.originalPush!.call(this, to, state)
-      if (!adapter.ownWrite) adapter.afterNativeTransition()
+    this.wrappedPush = function push(to, state) {
+      return adapter.observeTransition(adapter.originalPush!.call(this, to, state))
     }
-    this.wrappedReplace = function replace(to, state): void {
-      adapter.originalReplace!.call(this, to, state)
-      if (!adapter.ownWrite) adapter.afterNativeTransition()
+    this.wrappedReplace = function replace(to, state) {
+      return adapter.observeTransition(adapter.originalReplace!.call(this, to, state))
     }
-    this.wrappedGo = function go(delta): void {
-      adapter.originalGo!.call(this, delta)
-      if (!adapter.ownWrite) adapter.afterNativeTransition()
+    this.wrappedGo = function go(delta) {
+      return adapter.observeTransition(adapter.originalGo!.call(this, delta))
     }
     try {
       navigator.push = this.wrappedPush
@@ -484,8 +422,15 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       return
     }
     this.navigator = navigator
+    this.unsubscribe = navigator.subscribe?.(() => this.afterNativeTransition())
     this.installReason = undefined
-    this.restoreReloadCheckpoint()
+    const restored = this.restoreReloadCheckpoint()
+    if (restored instanceof Promise) {
+      void restored.catch(error => {
+        this.installReason = error instanceof Error ? error.message : String(error)
+        this.scheduleNotify()
+      })
+    }
   }
 
   private requireNavigator(): CodexRouterNavigator {
@@ -494,25 +439,42 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     return this.navigator
   }
 
-  private write(operation: () => void): void {
+  private write(operation: () => void | Promise<void>): void | Promise<void> {
     this.ownWrite = true
     try {
-      operation()
+      return operation()
     } finally {
       this.ownWrite = false
     }
   }
 
+  private observeTransition(transition: void | Promise<void>): void | Promise<void> {
+    const notify = () => {
+      if (!this.ownWrite && !this.disposed) this.afterNativeTransition()
+    }
+    if (transition instanceof Promise) return transition.then(notify)
+    notify()
+  }
+
+  private afterTransition(
+    transition: void | Promise<void>,
+    notify = false,
+  ): CodexRouteHistorySnapshot | Promise<CodexRouteHistorySnapshot> {
+    const snapshot = () => {
+      if (notify && !this.disposed) this.afterNativeTransition()
+      return this.snapshot()
+    }
+    return transition instanceof Promise ? transition.then(snapshot) : snapshot()
+  }
+
   private transition(
     location: CodexRouterLocation,
     entry: CodexRouteHistoryEntry | undefined,
-    operation: () => void,
-  ): void {
+    operation: () => void | Promise<void>,
+  ): void | Promise<void> {
     const previousBrowserState: unknown = this.view.history.state
     this.writeCheckpoint(location, entry)
-    try {
-      this.write(operation)
-    } catch (error) {
+    const rollback = (error: unknown): never => {
       try {
         this.view.history.replaceState(previousBrowserState, '')
       } catch {
@@ -520,6 +482,12 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
         // if the renderer invalidates that seam during the transition.
       }
       throw error
+    }
+    try {
+      const transition = this.write(operation)
+      return transition instanceof Promise ? transition.catch(rollback) : transition
+    } catch (error) {
+      return rollback(error)
     }
   }
 
@@ -567,7 +535,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     else Object.defineProperty(navigator, name, descriptor)
   }
 
-  private restoreReloadCheckpoint(): void {
+  private restoreReloadCheckpoint(): void | Promise<void> {
     const navigator = this.navigator!
     const location = navigator.location
     const current = isRecord(location.state) ? parseEntry(location.state[CORDISX_ROUTE_STATE_KEY]) : undefined
@@ -578,10 +546,9 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     const deepLink = parseRouteDeepLink(this.view)
     if (deepLink !== undefined) {
       this.view.history.replaceState(this.view.history.state, '', urlWithoutRouteDeepLink(this.view))
-      this.write(() =>
+      return this.write(() =>
         navigator.replace({ ...routerTarget(location), hash: '' }, stateWithEntry(location.state, deepLink))
       )
-      return
     }
     const checkpoint = isRecord(this.view.history.state)
       ? parseReloadCheckpoint(this.view.history.state[CORDISX_ROUTE_RELOAD_KEY])
@@ -595,7 +562,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       this.writeCheckpoint(location)
       return
     }
-    this.write(() => navigator.replace(routerTarget(location), stateWithEntry(location.state, checkpoint.entry)))
+    return this.write(() => navigator.replace(routerTarget(location), stateWithEntry(location.state, checkpoint.entry)))
   }
 
   private scheduleNotify(): void {

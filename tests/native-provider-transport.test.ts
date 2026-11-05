@@ -77,6 +77,49 @@ it('keeps native provider identity per connection, preserves history ids and nam
       expect((await read()).result.thread.id).toBe(`saved-${provider}`)
     }
     expect(new Set(approvalIds).size).toBe(2)
+    // Fork uses the destination connection even though the source belongs to another one.
+    // Subsequent native requests must use the new owner without carrying another config override.
+    send({ id: 'official-source', method: 'thread/start', params: { modelProvider: 'openai' } })
+    const originalThreadId = (await read()).result.thread.id
+    let latestThreadId = originalThreadId
+    for (const provider of ['provider-a', 'provider.b', 'openai', 'provider.b', 'provider-a', 'openai']) {
+      const sourceThreadId = latestThreadId
+      send({
+        id: `fork-${sourceThreadId}`,
+        method: 'thread/fork',
+        params: {
+          threadId: sourceThreadId,
+          modelProvider: provider,
+          model: 'test-model',
+          ephemeral: false,
+          excludeTurns: true,
+          deferGoalContinuation: true,
+          config: provider === 'openai' ? {} : {
+            [`model_providers.${provider}`]: {
+              wire_api: 'responses',
+              base_url: 'http://127.0.0.1:1234/v1',
+              experimental_bearer_token: 'test-private-token',
+            },
+          },
+        },
+      })
+      const fork = await read()
+      expect(fork.error).toBeUndefined()
+      expect(fork.result).toMatchObject({ current: provider, modelProvider: provider, sourceThreadId })
+      expect(fork.result.argvHasSecret).toBe(false)
+      latestThreadId = fork.result.thread.id
+      expect(latestThreadId).not.toBe(sourceThreadId)
+      send({
+        id: `branch-turn-${latestThreadId}`,
+        method: 'turn/start',
+        params: { threadId: latestThreadId, input: [] },
+      })
+      expect((await read()).result.current).toBe(provider)
+      send({ id: `branch-read-${latestThreadId}`, method: 'thread/read', params: { threadId: latestThreadId } })
+      expect((await read()).result.thread).toMatchObject({ id: latestThreadId, modelProvider: provider })
+    }
+    send({ id: 'unchanged-original', method: 'thread/read', params: { threadId: originalThreadId } })
+    expect((await read()).result.thread).toMatchObject({ id: originalThreadId, modelProvider: 'openai' })
     send({ id: 'primary', method: 'config/read', params: {} })
     expect((await read()).result.current).toBe('openai')
     expect(transport.workers().map((worker: { providerId: string }) => worker.providerId))
@@ -99,7 +142,11 @@ it('keeps native provider identity per connection, preserves history ids and nam
       params: { threadId: 'saved-provider-a', turn: { id: activeTurn.id, status: 'failed' } },
     })
     expect(await read()).toMatchObject({ method: 'thread/status/changed', params: { status: { type: 'systemError' } } })
-    expect(await read()).toEqual({
+    let resolvedApproval = await read()
+    while (resolvedApproval.method === 'turn/completed' || resolvedApproval.method === 'thread/status/changed') {
+      resolvedApproval = await read()
+    }
+    expect(resolvedApproval).toEqual({
       method: 'serverRequest/resolved',
       params: { requestId: activeApproval.id, threadId: 'saved-provider-a' },
     })

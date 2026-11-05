@@ -6,6 +6,7 @@ import {
   requestPluginManagementRpc,
 } from './management-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from './terminal-provider.js'
+import { existingModelProviderDisplays } from './existing-model-provider-display.js'
 
 export interface ExistingTerminalProviderSource {
   readonly homeDir: string
@@ -38,8 +39,28 @@ export async function connectExistingTerminalProvider(source: ExistingTerminalPr
   }
   return async (request: TerminalProviderRequest): Promise<TerminalProviderResult> => {
     await check()
-    const result = await requestPluginManagementRpc(paths, endpoint, { kind: 'terminal-provider', request })
+    const result = await requestPluginManagementRpc(paths, endpoint, {
+      kind: 'terminal-provider',
+      request,
+    }) as TerminalProviderResult
+    if (
+      request.kind === 'list' && result.kind === 'list'
+      && result.providers.some(provider => provider.managed && provider.display === undefined)
+    ) {
+      // Optional metadata only. A legacy UI read failure cannot retire a healthy service catalog.
+      const displays = await existingModelProviderDisplays(source, endpoint).catch(() => [])
+      await check()
+      return {
+        ...result,
+        providers: result.providers.map(provider => {
+          const display = provider.managed && provider.display === undefined
+            ? displays.find(display => display.providerId === provider.providerId)
+            : undefined
+          return display === undefined ? provider : { ...provider, title: display.title, display }
+        }),
+      }
+    }
     await check()
-    return result as TerminalProviderResult
+    return result
   }
 }

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
+import { modelProviderDisplayExpression } from '../renderer/adapter/model-provider-display.js'
 import type {
   CatalogManagementCommand,
   CatalogManagementResult,
@@ -85,6 +87,7 @@ function actionOf(value: unknown): NormalizedNativeSubmissionAction {
     !action || !text(action.operationId, 256) || !Number.isSafeInteger(action.operationGeneration)
     || (action.operationGeneration as number) < 1 || (action.threadId !== undefined && !text(action.threadId))
     || (action.reasoningEffort !== undefined && !isModelReasoningEffort(action.reasoningEffort))
+    || (action.continuationAvailable !== undefined && typeof action.continuationAvailable !== 'boolean')
     || !['ordinary-send', 'steer', 'queue', 'edit-retry', 'unknown-submission', 'non-submission'].includes(
       String(action.intent),
     )
@@ -134,6 +137,7 @@ export interface NativeSubmissionCdpAuthority {
   }
   bindController(controller: NativeSubmissionController): void
   taskCreationAvailable(): Promise<boolean>
+  providerDisplays(): Promise<readonly ModelProviderDisplay[]>
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(): Promise<void> }>
 }
 
@@ -270,6 +274,20 @@ export function createNativeSubmissionCdpAuthority(options: {
       state.revision++
       return true
     },
+    commitContinuation(input) {
+      const state = states.get(key(input.sourceScope))
+      if (
+        !state || !text(input.threadId) || input.threadId === input.sourceScope.threadId
+        || state.revision !== input.expectedRevision
+        || state.pending?.selectionGeneration !== input.pendingGeneration
+        || state.pending.providerId !== input.selection.providerId || state.pending.model !== input.selection.model
+      ) return false
+      threadSelections.set(input.threadId, { providerId: input.selection.providerId, model: input.selection.model })
+      delete state.pending
+      delete state.pendingProviderIntent
+      state.revision++
+      return true
+    },
   }
   const liveScope = async (scope: NativeSubmissionScope): Promise<NativeSubmissionScope | undefined> => {
     const owner = documents.get(scope.targetId)
@@ -290,6 +308,10 @@ export function createNativeSubmissionCdpAuthority(options: {
     }
   }
   const runtime: NativeSubmissionRuntimeAuthority = {
+    async revalidateContinuation(source, threadId, requireIdle) {
+      if (!text(threadId) || threadId === source.threadId || !await runtime.revalidate(source, false)) return false
+      return (!requireIdle || await options.isThreadIdle(threadId)) && await runtime.revalidate(source, false)
+    },
     async captureDraftDocument(scope) {
       if (scope.threadId !== undefined || scope.composerId === undefined) return undefined
       const live = await liveScope(scope)
@@ -357,6 +379,20 @@ export function createNativeSubmissionCdpAuthority(options: {
     },
   }
   return {
+    async providerDisplays() {
+      const owners = [...documents.values()].filter(owner => !owner.disposed && !owner.session.isClosed())
+      if (owners.length !== 1) return []
+      const owner = owners[0]!
+      const result = await owner.session.send('Runtime.evaluate', {
+        expression: modelProviderDisplayExpression(),
+        returnByValue: true,
+      }, 2_000)
+      if (
+        owner.disposed || owner.session.isClosed() || result.exceptionDetails
+        || ![...documents.values()].includes(owner)
+      ) return []
+      return modelProviderDisplays((result.result as { value?: unknown } | undefined)?.value)
+    },
     selection,
     runtime,
     async taskCreationAvailable() {
@@ -602,18 +638,19 @@ export function createNativeSubmissionCdpAuthority(options: {
           }
           let state = states.get(key(scope))
           if (envelope.operation === 'selectionRead') {
-            const supplied = selectionOf(input?.effective)
+            const supplied = input?.effective === undefined ? undefined : selectionOf(input.effective)
             if (!state?.effective) {
               const preference = scope.threadId === undefined ? await draftPreference() : undefined
               const current = await liveScope(scope)
               if (!current || key(current) !== key(scope) || owner.disposed) throw new Error('Stale initialization')
               const before = states.get(key(scope))
+              const initialEffective = scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied
               state = before?.effective ? before : {
                 ...before,
                 scope,
                 revision: before ? before.revision + 1 : 1,
                 nextGeneration: before?.nextGeneration ?? 1,
-                effective: scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied,
+                ...(initialEffective === undefined ? {} : { effective: initialEffective }),
                 ...(preference === undefined || before?.draftUserSelected ? {} : { draftPreference: preference }),
               }
               states.set(key(scope), state)
@@ -726,9 +763,14 @@ export function createNativeSubmissionCdpAuthority(options: {
                 ...selected,
                 ...(scope.threadId === undefined ? {} : { threadId: scope.threadId }),
                 selectionGeneration: state.nextGeneration++,
-                ...(stageSend ? { sendOnly: true } : {}),
+                ...(stageSend || scope.threadId !== undefined && controller!.nativeProviderContinuationAvailable
+                  ? { sendOnly: true }
+                  : {}),
               }}
-            if (!stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined) {
+            if (
+              !stageSend && selected.providerId !== state.effective.providerId && scope.threadId !== undefined
+              && !controller!.nativeProviderContinuationAvailable
+            ) {
               const revision = state.revision
               const committed = await controller!.commitSelection(scope)
               if (committed.kind === 'accepted') {

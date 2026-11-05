@@ -3,6 +3,7 @@ import { nativeProviderConfig } from './native-provider-config.js'
 export { nativeProviderConfig } from './native-provider-config.js'
 import { randomUUID } from 'node:crypto'
 import { nativeThreadSwitchReason } from './native-thread-switch-error.js'
+import { prepareNativeContinuation } from './native-submission-continuation.js'
 
 import {
   decideNativeProviderSubmission,
@@ -35,98 +36,27 @@ import type {
   NativeSubmissionConfirmation,
   NativeSubmissionController,
   NativeSubmissionControllerOptions,
+  NativeSubmissionPreparation,
   NativeSubmissionScope,
   NativeSubmissionSelectionSnapshot,
 } from './native-submission-controller-contracts.js'
 
-type SubmissionLease =
-  & Pick<NativeProviderCredentialLease, 'serviceGeneration' | 'dispose'>
-  & Partial<Pick<RemotePreparedProvider, 'validate' | 'provider'>>
-
-interface PreparedBase {
-  readonly intentGeneration?: number
-  readonly scope: NativeSubmissionScope
-  readonly scopeKey: string
-  readonly action: NormalizedNativeSubmissionAction
-  readonly pending: PendingNativeProviderChange
-  readonly selectionRevision: number
-  readonly expiresAt: number
-}
-
-interface Confirmation extends PreparedBase {
-  readonly id: string
-}
-
-interface PreparedOperation extends PreparedBase {
-  readonly token: string
-  readonly configOverrides: Readonly<Record<string, unknown>>
-  readonly serviceGeneration: string
-  readonly credential: SubmissionLease
-  selectionRevision: number
-  expiresAt: number
-  selectionState: 'pending' | 'effective'
-  state: 'available' | 'reserved' | 'consumed'
-  request?: Readonly<{
-    key: string
-    method: NativeMarkedRequest['method']
-    threadId?: string
-  }>
-  boundScope?: NativeSubmissionScope
-  draftDocumentTimeOrigin?: number
-}
-
-interface ActiveBinding {
-  readonly threadId: string
-  readonly selection: NativeProviderSelection
-  readonly serviceGeneration: string
-  readonly credential: SubmissionLease
-}
-
-interface PreparedThreadResume extends ActiveBinding {
-  readonly token: string
-}
+import {
+  type ActiveBinding,
+  bindingKey,
+  type Confirmation,
+  type PreparedBase,
+  type PreparedOperation,
+  type PreparedThreadResume,
+  requestKey,
+  sameScope,
+  scopeKey,
+  type SubmissionLease,
+  validText,
+} from './native-submission-records.js'
 
 const DEFAULT_OPERATION_TTL_MS = 120_000
 const DEFAULT_CONFIRMATION_TTL_MS = 300_000
-
-function scopeKey(scope: NativeSubmissionScope): string {
-  if (
-    scope.targetId.length === 0 || scope.targetId.length > 512
-    || scope.rendererGeneration.length === 0 || scope.rendererGeneration.length > 256
-    || (scope.composerId !== undefined && (scope.composerId.length === 0 || scope.composerId.length > 256
-      || /[\0\r\n]/u.test(scope.composerId)))
-    || !Number.isSafeInteger(scope.navigationGeneration) || scope.navigationGeneration < 0
-    || scope.threadId?.length === 0 || (scope.threadId?.length ?? 0) > 512
-  ) throw new Error('native submission scope is invalid')
-  return JSON.stringify([
-    scope.targetId,
-    scope.rendererGeneration,
-    scope.navigationGeneration,
-    scope.threadId ?? null,
-    scope.composerId ?? null,
-  ])
-}
-
-function sameScope(left: NativeSubmissionScope, right: NativeSubmissionScope): boolean {
-  return scopeKey(left) === scopeKey(right)
-}
-
-function validText(value: string, max: number): boolean {
-  return value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
-}
-
-function requestKey(requestId: string | number): string {
-  if (
-    (typeof requestId === 'string' && validText(requestId, 512))
-    || (typeof requestId === 'number' && Number.isSafeInteger(requestId))
-  ) return JSON.stringify([typeof requestId, requestId])
-  throw new Error('native request id is invalid')
-}
-
-function bindingKey(threadId: string): string {
-  if (!validText(threadId, 512)) throw new Error('native thread binding is invalid')
-  return threadId
-}
 
 function requestConfig(
   pending: PendingNativeProviderChange,
@@ -201,8 +131,18 @@ export function createNativeSubmissionController(
   const releaseOperation = async (operation: PreparedOperation): Promise<void> => {
     if (operations.get(operation.token) !== operation) return
     operations.delete(operation.token)
-    if ([...bindings.values()].some(binding => binding.credential === operation.credential)) return
-    await operation.credential.dispose()
+    try {
+      if (operation.continuationThreadId !== undefined && operation.state !== 'consumed') {
+        await options.existingThread.discardContinuation?.({
+          threadId: operation.continuationThreadId,
+          operationToken: operation.token,
+        })
+      }
+    } finally {
+      if (![...bindings.values()].some(binding => binding.credential === operation.credential)) {
+        await operation.credential.dispose()
+      }
+    }
   }
   const replaceBinding = async (binding: ActiveBinding): Promise<void> => {
     const key = bindingKey(binding.threadId)
@@ -248,7 +188,10 @@ export function createNativeSubmissionController(
     scope: NativeSubmissionScope,
     requireIdle: boolean,
   ): Promise<boolean> =>
-    operation.draftDocumentTimeOrigin !== undefined && options.runtime.revalidateDraftDocument !== undefined
+    operation.continuationThreadId !== undefined
+      ? await options.runtime.revalidateContinuation?.(operation.scope, operation.continuationThreadId, requireIdle)
+        ?? false
+      : operation.draftDocumentTimeOrigin !== undefined && options.runtime.revalidateDraftDocument !== undefined
       ? await options.runtime.revalidateDraftDocument(scope, operation.draftDocumentTimeOrigin, requireIdle)
       : await options.runtime.revalidate(scope, requireIdle, operation.boundScope ? operation.scope : undefined)
   const createdOperationScope = async (operation: PreparedOperation, threadId: string) =>
@@ -341,6 +284,19 @@ export function createNativeSubmissionController(
     })
   }
 
+  const prepareContinuation = (prepared: PreparedBase): Promise<NativeSubmissionPreparation> =>
+    prepareNativeContinuation(prepared, {
+      options,
+      operations,
+      operationTtlMs,
+      now,
+      disposed: () => disposed,
+      prepare: prepareOperation,
+      revalidate: revalidateSelection,
+      validateLease: operation => validateLease(operation.credential),
+      release: releaseOperation,
+    })
+
   const applyPreparedThreadSelection = async (prepared: PreparedBase): Promise<NativeSubmissionConfirmation> => {
     const operation = await prepareOperation(prepared)
     if (operation === undefined) return { kind: 'reject', reason: 'stale-operation' }
@@ -406,6 +362,8 @@ export function createNativeSubmissionController(
   }
   return {
     nativeManagedModelRoutingAvailable: false,
+    nativeProviderContinuationAvailable: options.existingThread.continue !== undefined
+      && options.selection.commitContinuation !== undefined,
     async commitSelection(scope) {
       if (disposed || scope.threadId === undefined) return { kind: 'reject', reason: 'stale-operation' }
       await expire()
@@ -620,6 +578,9 @@ export function createNativeSubmissionController(
         operations.set(operation.token, operation)
         return { kind: 'allow-original', operationToken: operation.token }
       }
+      if (options.existingThread.continue && options.selection.commitContinuation) {
+        return await prepareContinuation(prepared)
+      }
       if (decision.prepared.pending.sendOnly) {
         const result = await applyPreparedThreadSelection(prepared)
         return result.kind === 'allow-original' ? result : {
@@ -668,7 +629,7 @@ export function createNativeSubmissionController(
         return { kind: 'reject', reason: 'expired-token' }
       }
       const newThread = operation.scope.threadId === undefined && operation.boundScope === undefined
-      const threadId = operation.boundScope?.threadId ?? operation.scope.threadId
+      const threadId = operation.continuationThreadId ?? operation.boundScope?.threadId ?? operation.scope.threadId
       if (
         (newThread && (request.method !== 'thread/start' || request.threadId !== undefined))
         || (!newThread && (request.method !== 'turn/start' || request.threadId !== threadId))
@@ -763,6 +724,25 @@ export function createNativeSubmissionController(
         return
       }
       if (operation.state !== 'consumed') return
+      if (operation.continuationThreadId !== undefined) {
+        const committed = options.selection.commitContinuation?.({
+          sourceScope: operation.scope,
+          threadId: operation.continuationThreadId,
+          expectedRevision: operation.selectionRevision,
+          pendingGeneration: operation.pending.selectionGeneration,
+          selection: operation.pending,
+        })
+        if (committed) {
+          await replaceBinding({
+            threadId: operation.continuationThreadId,
+            selection: operation.pending,
+            serviceGeneration: operation.serviceGeneration,
+            credential: operation.credential,
+          })
+        } else await operation.credential.dispose()
+        operations.delete(operation.token)
+        return
+      }
       if (
         operation.selectionState === 'effective'
         && (operation.scope.threadId !== undefined || operation.boundScope !== undefined)

@@ -298,7 +298,7 @@ export class NavigationRegistryBase {
       && candidate.qualifiedId === projected.routeId
     )
     if (record === undefined) {
-      this.history.replace()
+      await this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
@@ -306,7 +306,7 @@ export class NavigationRegistryBase {
     try {
       path = buildPath(record, projected.params)
     } catch {
-      this.history.replace()
+      await this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
@@ -334,7 +334,7 @@ export class NavigationRegistryBase {
       || projected.outlet !== record.definition.outlet
       || projected.path !== path
     ) {
-      this.history.replace()
+      await this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
@@ -359,12 +359,12 @@ export class NavigationRegistryBase {
       return
     }
     if (state.contextKey !== undefined && state.contextKey !== host.contextKey) {
-      this.history.replace()
+      await this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
     if (record.definition.outlet === 'session.content' && String(projected.params.sessionId) !== host.nativeSessionId) {
-      this.history.replace()
+      await this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
@@ -397,7 +397,7 @@ export class NavigationRegistryBase {
       if (next.entry === undefined && focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
       return
     }
-    const next = this.history.replace()
+    const next = await this.history.replace()
     await this.applyHistorySnapshot(next)
     if (focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
   }
@@ -457,7 +457,7 @@ export class NavigationRegistryBase {
         `session route ${record.qualifiedId} does not match native session ${host.nativeSessionId ?? '<none>'}`,
       )
     }
-    const next = this.history.push(Object.freeze({
+    const next = await this.history.push(Object.freeze({
       schemaVersion: 1,
       owner: record.owner,
       routeId: record.qualifiedId,

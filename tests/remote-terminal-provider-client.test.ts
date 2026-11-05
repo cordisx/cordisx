@@ -4,6 +4,8 @@ import {
 } from '../packages/cli/src/launcher/native-remote-provider-source.js'
 import { harness as channelHarness } from './fixtures/native-submission-channel-harness.js'
 import { harness as intermediaryHarness } from './fixtures/native-intermediary-harness.js'
+import { nativeModelProviderRegistry } from '../packages/cli/src/renderer/model-providers.js'
+import { catalogFixture, catalogView } from './helpers/catalog-management-fixture.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -301,28 +303,138 @@ describe('remote native provider consumer over private management RPC', () => {
     expect(f.calls.filter(call => call.kind === 'release')).toHaveLength(1)
   })
 
-  it.each(['managed', 'config'] as const)(
-    'keeps local %s ownership on a colliding remote ID in catalog and validation',
-    async localSource => {
+  it.each([false, true])(
+    'keeps a local managed owner on a colliding remote ID even when its catalog is empty=%s',
+    async empty => {
       const f = await fixture()
       const validateLocal = vi.fn(async () => true)
       const source = nativeRemoteProviderSource({
         remote: f.client,
-        localSource: () => localSource,
+        localSource: () => 'managed',
         localCatalog: async () => [{
           ...selection,
           pluginId: 'local',
-          models: [{ id: 'local-model', label: 'Local', aliases: [] }],
+          models: empty ? [] : [{ id: 'local-model', label: 'Local', aliases: [] }],
         }],
         validateLocal,
       })
-      expect((await source.catalog())[0]?.models[0]?.id).toBe('local-model')
-      expect(source.source('provider-b')).toBe(localSource)
+      expect((await source.catalog())[0]?.models.map(model => model.id)).toEqual(empty ? [] : ['local-model'])
+      expect(source.source('provider-b')).toBe('managed')
       expect(await source.validate({ providerId: 'provider-b', model: 'local-model' })).toBe(true)
       expect(validateLocal).toHaveBeenCalledOnce()
       expect(f.calls.every(call => call.kind === 'list')).toBe(true)
     },
   )
+
+  it.each([false, true])(
+    'uses the explicit remote owner instead of a shared native table with empty=%s models',
+    async empty => {
+      const f = await fixture()
+      const validateLocal = vi.fn(async () => true)
+      const source = nativeRemoteProviderSource({
+        remote: f.client,
+        localSource: () => 'config',
+        localCatalog: async () => [{
+          providerId: selection.providerId,
+          pluginId: 'cordisx.codex-config',
+          models: empty ? [] : [{ id: 'stale-model', label: 'Stale', aliases: [] }],
+        }, {
+          providerId: 'configured-only',
+          pluginId: 'cordisx.codex-config',
+          models: [{ id: 'local-model', label: 'Local', aliases: [] }],
+        }],
+        validateLocal,
+      })
+      const catalog = await source.catalog()
+      expect(catalog.find(provider => provider.providerId === selection.providerId)?.models.map(model => model.id))
+        .toEqual(['model-b'])
+      expect(catalog.filter(provider => provider.providerId === selection.providerId)).toHaveLength(1)
+      expect(source.source(selection.providerId)).toBe('remote')
+      expect(await source.validate(selection)).toBe(true)
+      expect(await source.validate({ ...selection, model: 'stale-model' })).toBe(false)
+      expect(validateLocal).not.toHaveBeenCalled()
+      const guard = nativeRemoteUnmarkedGuard({
+        localSource: id => source.source(id) === 'remote' ? undefined : 'config',
+        readThreadProvider: async () => selection.providerId,
+      })
+      expect(await guard({ threadId: 'thread-1' })).toBe(false)
+      expect(await source.validate({ providerId: 'configured-only', model: 'local-model' })).toBe(true)
+      expect(validateLocal).toHaveBeenCalledOnce()
+
+      // A known remote service becoming unavailable must not borrow the old
+      // native route as an automatic fallback, even if it still lists models.
+      f.removeModel()
+      await f.client.refresh()
+      expect((await source.catalog()).find(provider => provider.providerId === selection.providerId)?.models)
+        .toEqual([])
+      expect(await source.validate(selection)).toBe(false)
+      await f.client.close()
+      expect((await source.catalog()).some(provider => provider.providerId === selection.providerId)).toBe(false)
+      expect(source.source(selection.providerId)).toBe('remote')
+      expect(await source.validate(selection)).toBe(false)
+      expect(validateLocal).toHaveBeenCalledOnce()
+      expect(f.calls.every(call => call.kind === 'list')).toBe(true)
+    },
+  )
+
+  it('keeps the remote catalog selectable through the production registry with local management attached', async () => {
+    const f = await fixture()
+    const source = nativeRemoteProviderSource({
+      remote: f.client,
+      localSource: () => 'config',
+      localCatalog: async () => [{
+        providerId: selection.providerId,
+        pluginId: 'cordisx.codex-config',
+        models: [{ id: 'stale-model', label: 'Stale', aliases: [] }],
+      }, {
+        providerId: 'configured-only',
+        pluginId: 'cordisx.codex-config',
+        models: [{ id: 'local-model', label: 'Local', aliases: [] }],
+      }],
+      validateLocal: async () => true,
+    })
+    const management = catalogFixture([catalogView({
+      providerId: selection.providerId,
+      bindingRef: `codex-config:${selection.providerId}`,
+      sourceKind: 'native',
+      rows: [],
+    })])
+    const channel = {
+      catalogRead: source.catalog,
+      catalogSnapshotRead: async () => ({ epoch: 'test-remote', sequence: 1, providers: await source.catalog() }),
+      catalogSubscribe: f.client.subscribe,
+      ...management.channel,
+    }
+    const page = globalThis as typeof globalThis & { __cordisxNativeProviderCommandChannel?: typeof channel }
+    const previous = page.__cordisxNativeProviderCommandChannel
+    page.__cordisxNativeProviderCommandChannel = channel
+    const registry = nativeModelProviderRegistry()
+    try {
+      await registry.management!.refresh()
+      await registry.refresh()
+      expect(registry.snapshot().providers.find(provider => provider.providerId === selection.providerId)?.models)
+        .toEqual([{ id: 'model-b', label: 'model-b', aliases: [] }])
+      // An unrelated local source still requires its own management view.
+      expect(registry.snapshot().providers.find(provider => provider.providerId === 'configured-only')?.models)
+        .toEqual([])
+      expect(await source.validate(selection)).toBe(true)
+      f.removeModel()
+      await f.client.refresh()
+      await vi.waitFor(() => {
+        expect(registry.snapshot().providers.find(provider => provider.providerId === selection.providerId)?.models)
+          .toEqual([])
+      })
+      await f.client.close()
+      await registry.refresh()
+      expect(registry.snapshot().providers.some(provider => provider.providerId === selection.providerId)).toBe(false)
+      expect(f.calls.every(call => call.kind === 'list')).toBe(true)
+    } finally {
+      registry.dispose()
+      management.client.dispose()
+      if (previous === undefined) delete page.__cordisxNativeProviderCommandChannel
+      else page.__cordisxNativeProviderCommandChannel = previous
+    }
+  })
 
   it('installs the real private selection channel while the first remote list is unresolved, then sends only an exact choice', async () => {
     const f = await fixture()

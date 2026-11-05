@@ -7,11 +7,15 @@ import {
   type ProviderBrandProjection,
 } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import type { ModelProviderDisplay } from '../model-provider-display.js'
 
 export interface NativeModelProviderCatalogEntry {
   readonly providerId: string
   readonly pluginId: string
+  /** This catalog is already filtered by the remote Host's preferences, not this profile's management views. */
+  readonly managementOwner?: 'remote'
   readonly title?: string
+  readonly display?: ModelProviderDisplay
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly {
     readonly id: string
