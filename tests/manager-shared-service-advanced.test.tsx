@@ -31,7 +31,7 @@ const service: ModelServiceView = {
   },
 }
 
-function bridge() {
+function bridge(savedService = service) {
   const modelServicesSave = vi.fn(async (_request: ModelServicesSaveRequest) => ({
     status: 'applied' as const,
     applies: 'app-restart' as const,
@@ -40,7 +40,7 @@ function bridge() {
   return {
     client: {
       modelServicesAvailable: true,
-      modelServicesRead: async () => ({ status: 'ok', revision: 'rev-1', services: [service] }),
+      modelServicesRead: async () => ({ status: 'ok', revision: 'rev-1', services: [savedService] }),
       modelServicesSave,
     } as unknown as ModelCatalogClient,
     modelServicesSave,
@@ -200,6 +200,22 @@ describe('Shared model service advanced settings', () => {
       await fixture.click('[data-config-path="fixedHeaders"] button[aria-label="Delete item"]')
       await fixture.click('.cxmc-editor .cxf-form-page-root .cxf-form-page-footer button:last-child')
       expect(modelServicesSave.mock.calls[0]![0].services[0]).toMatchObject({ httpHeadersPatch: { 'X-Saved': null } })
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('takes ownership when the user explicitly resets a legacy service with blank advanced fields', async () => {
+    const fixture = reactManagerFixture()
+    const { runtimeOptions: _runtimeOptions, httpHeaderNames: _headerNames, ...legacy } = service
+    const { client, modelServicesSave } = bridge(legacy)
+    try {
+      await openEditor(fixture, client)
+      await fixture.click('[data-shared-service-advanced] .cxf-form-action-buttons button')
+      await fixture.click('.cxmc-editor .cxf-form-page-root .cxf-form-page-footer button:last-child')
+      const saved = modelServicesSave.mock.calls[0]?.[0].services[0]
+      expect(saved?.runtimeOptions).toEqual({ codex: {} })
+      expect(saved).not.toHaveProperty('httpHeadersPatch')
     } finally {
       await fixture.dispose()
     }

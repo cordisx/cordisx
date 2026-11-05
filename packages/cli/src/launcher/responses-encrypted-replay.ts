@@ -251,6 +251,7 @@ export async function startResponsesEncryptedReplay() {
       closed || !route?.websocket || request.method !== 'GET' || request.headers.upgrade?.toLowerCase() !== 'websocket'
       || controllers.size + tunnels.size >= 32
     ) {
+      downstream.once('error', () => downstream.destroy())
       downstream.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
       return
     }

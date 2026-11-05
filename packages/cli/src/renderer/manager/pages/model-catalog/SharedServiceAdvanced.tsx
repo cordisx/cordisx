@@ -32,6 +32,7 @@ export interface SharedServiceAdvancedDraft extends Record<string, unknown> {
   streamIdleTimeout?: number | undefined
   fixedHeaders: FixedHeader[]
   environmentHeaders: EnvironmentHeader[]
+  resetRuntime?: boolean
 }
 
 export function sharedServiceAdvancedDraft(service: ModelServiceView | undefined): SharedServiceAdvancedDraft {
@@ -52,7 +53,7 @@ export function sharedServiceAdvancedInput(
   service: ModelServiceView | undefined,
 ): Pick<ModelServiceInput, 'runtimeOptions' | 'httpHeadersPatch'> {
   const baseline = sharedServiceAdvancedDraft(service)
-  const runtimeChanged = draft.websockets !== baseline.websockets
+  const runtimeChanged = draft.resetRuntime === true || draft.websockets !== baseline.websockets
     || draft.requestRetries !== baseline.requestRetries || draft.streamRetries !== baseline.streamRetries
     || draft.streamIdleTimeout !== baseline.streamIdleTimeout
     || JSON.stringify(draft.environmentHeaders) !== JSON.stringify(baseline.environmentHeaders)
@@ -229,7 +230,7 @@ export function SharedServiceAdvanced({ draft, service, locale, disabled, onChan
             tag="button"
             variant="text"
             disabled={disabled}
-            onClick={() => onChange(sharedServiceAdvancedDraft(undefined))}
+            onClick={() => onChange({ ...sharedServiceAdvancedDraft(undefined), resetRuntime: true })}
           >
             {t('catalog.sharedServiceResetAdvanced')}
           </Button>
