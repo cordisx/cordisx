@@ -24,7 +24,7 @@ const syntaxes = new WeakMap<readonly NativeScriptResource[], ReadonlyMap<Native
 export const bundle: AdapterBundle = {
   apiVersion: 1,
   relayContract: 1,
-  version: '0.1.0-beta.2',
+  version: '0.1.0-beta.3',
   resourceHints: [
     ['submitTarget', 'options', 'openingPromptForHistory'],
     ['context', 'configOverrides', 'requiresThreadReferences'],
