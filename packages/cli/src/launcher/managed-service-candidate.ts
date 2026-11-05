@@ -16,6 +16,7 @@ export async function activateManagedServiceCandidate(
     readonly profileId: string
     readonly runtimeGeneration: string
     readonly isolateStartupFailures: boolean
+    readonly requireOwnedProcess?: true
     readonly reservedLoopbackPorts?: readonly number[]
     readonly reservedServiceKeys?: readonly string[]
   },

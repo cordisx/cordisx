@@ -316,7 +316,7 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     const targetUsesIsolatedWorker = usesIsolatedWorker(runtimeManifest)
     let fence: RuntimeGenerationFence
     try {
-      fence = input.staged?.browserArtifact !== undefined
+      fence = !this.options.headless && input.staged?.browserArtifact !== undefined
           && !targetUsesIsolatedWorker
           && runtime.prepareBrowserGraph !== undefined
         ? await runtime.prepareBrowserGraph(transactionId, input.active)
@@ -376,7 +376,7 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
       let runtimeArtifactLease: PluginGenerationGraphLease | undefined
       const runtimeArtifactLeases: PluginGenerationGraphLease[] = []
       let stageResolutionFailure: unknown
-      for (const pluginId of resolvedStage.activationOrder) {
+      for (const pluginId of this.options.headless ? [] : resolvedStage.activationOrder) {
         const candidatePlugin = resolvedStage.after.plugins.find(plugin => plugin.id === pluginId)
         if (candidatePlugin?.enabled === true && resolvedStage.affectedPluginIds.includes(pluginId)) {
           try {

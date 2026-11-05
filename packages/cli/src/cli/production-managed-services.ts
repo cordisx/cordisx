@@ -13,6 +13,7 @@ export function createProductionManagedServiceLifecycle(input: {
   environment: NodeJS.ProcessEnv
   store: PluginActivationStore
   dryRun: boolean
+  requireOwnedProcess?: true
 }) {
   return new ManagedServicePluginLifecycleRuntime({
     runtime: input.runtime,
@@ -51,6 +52,7 @@ export function createProductionManagedServiceLifecycle(input: {
         profileId: input.profileId,
         runtimeGeneration: input.generation,
         ...options,
+        ...(input.requireOwnedProcess ? { requireOwnedProcess: true as const } : {}),
       })
     },
   })

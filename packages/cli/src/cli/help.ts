@@ -15,7 +15,8 @@ export const HELP = `Usage:
   cordisx adapter [status|install|use|pin|unpin|revoke|prune]
 
 Options:
-  -M, --mode app|cli       start: desktop App (default) or original terminal client
+  -M, --mode app|cli|service  start: desktop App, original terminal client, or standalone services
+                             service also supports status, logs, stop, and restart
   -s, --service <id>       Select model service (use together with --model)
   -m, --model <id>         Select exact service model for this launch
   --attach                 Attach to an existing loopback CDP endpoint

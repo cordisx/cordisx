@@ -44,6 +44,7 @@ import { ManagedServiceRuntimeProcess } from './managed-service-runtime-process.
 import {
   diagnoseManagedServiceStartup,
   type ManagedServiceStartupDiagnostic,
+  ManagedServiceStartupError,
 } from './managed-service-startup-diagnostic.js'
 import {
   managedBindingCurrent,
@@ -61,6 +62,8 @@ export type {
 
 export interface ManagedServiceRuntimeOptions {
   readonly homeDir: string
+  /** Standalone owners start their own backend and never adopt an existing process. */
+  readonly requireOwnedProcess?: true
   /** Active prior-generation endpoints must never be borrowed by a candidate. */
   readonly reservedLoopbackPorts?: readonly number[]
   readonly reservedServiceKeys?: readonly string[]
@@ -429,6 +432,12 @@ export class ManagedServiceRuntime {
       const discovered = await this.process.discoverExisting(record, signal)
       this.assertOperationActive(record, signal)
       if (discovered !== undefined) {
+        if (this.options.requireOwnedProcess) {
+          throw new ManagedServiceStartupError({
+            reason: 'loopback-port-in-use',
+            port: Number(new URL(discovered).port),
+          })
+        }
         record.processOwnership = 'borrowed'
         record.origin = discovered
       } else if (takeoverBlocked) {
@@ -816,7 +825,11 @@ export class ManagedServiceRuntime {
     if (child === undefined || record.processOwnership !== 'host-owned') return
     managedServiceDiagnostic(record, 'managed-service-cleanup-start', { pid: child.pid })
     try {
-      await terminateManagedServiceChild(child, this.options.childTerminationTimeouts)
+      await terminateManagedServiceChild(
+        child,
+        this.options.childTerminationTimeouts,
+        this.options.spawn === undefined && process.platform !== 'win32',
+      )
       if (record.child === child) record.child = undefined
       managedServiceDiagnostic(record, 'managed-service-cleanup-complete', { pid: child.pid })
     } catch (error) {

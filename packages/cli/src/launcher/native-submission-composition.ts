@@ -46,6 +46,8 @@ import { combinedNativeModelProviderCatalog } from './native-model-provider-cata
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
+import { startModelApiServer } from './model-api-server.js'
+import { nativeProviderConfig } from './native-provider-config.js'
 import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
 import type { ModelSelectorIconOverrides } from '../model-selector-branding.js'
@@ -263,12 +265,17 @@ export async function prepareNativeSubmissionBootstrap(
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
   let agentBridge: AgentBridge | undefined
+  let modelApi: Awaited<ReturnType<typeof startModelApiServer>> | undefined
+  const apiAgentCredentials = new Map<string, { dispose(): void }>()
   const close = (): Promise<void> =>
     closePromise ??= (async () => {
       lifetime.abort()
       options.signal?.removeEventListener('abort', abort)
       await preparation.close()
       await completion?.catch(() => undefined)
+      await modelApi?.close()
+      apiAgentCredentials.forEach(lease => lease.dispose())
+      apiAgentCredentials.clear()
       await agentBridge?.close()
       await agentModels.close()
       await taskRouting?.close()
@@ -707,7 +714,59 @@ export async function prepareNativeSubmissionBootstrap(
           // only leaves the cross-app tools unavailable.
           agentBridge = await startAgentBridge({
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
-            codex: { nativeRequest: (method, params) => control.nativeRequest(method, params), catalog },
+            codex: {
+              catalog,
+              nativeRequest: async (method, params) => {
+                let providerId = typeof params.modelProvider === 'string' ? params.modelProvider : undefined
+                if (method === 'turn/start' && typeof params.threadId === 'string') {
+                  const persisted = await control.nativeRequest('thread/read', {
+                    threadId: params.threadId,
+                    includeTurns: false,
+                  }) as { thread?: { modelProvider?: string } }
+                  providerId = persisted.thread?.modelProvider
+                }
+                if (!['thread/start', 'turn/start'].includes(method) || !providerId) {
+                  const result = await control.nativeRequest(method, params)
+                  if (method === 'thread/read' && typeof params.threadId === 'string') {
+                    const status = (result as { thread?: { status?: { type?: string } } }).thread?.status?.type
+                    if (status && status !== 'active') {
+                      apiAgentCredentials.get(params.threadId)?.dispose()
+                      apiAgentCredentials.delete(params.threadId)
+                    }
+                  }
+                  return result
+                }
+                let config: Readonly<Record<string, unknown>>
+                let lease: { dispose(): void } | undefined
+                if (managed?.owns(providerId) || hasPluginProvider(providerId)) {
+                  const broker = nativeSubmissionCredentialBroker({
+                    credentials: credentials!,
+                    resolveEndpoint: resolveConnection,
+                    routeEndpoint: encryptedReplay!.route,
+                  })
+                  const prepared = await broker.prepare(providerId)
+                  lease = prepared
+                  config = { [`model_providers.${providerId}`]: nativeProviderConfig(prepared) }
+                } else config = await prepareConfiguredProvider(providerId)
+                try {
+                  const result = await control.nativeRequest(method, {
+                    ...params,
+                    config: { ...params.config as Record<string, unknown>, ...config },
+                  })
+                  const threadId = method === 'thread/start'
+                    ? (result as { thread?: { id?: string } }).thread?.id
+                    : params.threadId
+                  if (typeof threadId === 'string' && lease) {
+                    apiAgentCredentials.get(threadId)?.dispose()
+                    apiAgentCredentials.set(threadId, lease)
+                    lease = undefined
+                  }
+                  return result
+                } finally {
+                  lease?.dispose()
+                }
+              },
+            },
             codexProfileId: completeOptions.managedCatalog.profileId,
             // Recorded for `integration_status`: which service this launch was started on.
             ...(completeOptions.defaultProviderId === undefined
@@ -727,6 +786,65 @@ export async function prepareNativeSubmissionBootstrap(
             },
           }).catch(error => {
             console.warn(`[cordisx] agent bridge unavailable: ${String(error)}`)
+            return undefined
+          })
+        }
+        lifetime.signal.throwIfAborted()
+        if (completeOptions.managedCatalog !== undefined) {
+          modelApi = await startModelApiServer({
+            homeDir: completeOptions.managedCatalog.homeDir,
+            profileId: completeOptions.managedCatalog.profileId,
+            port: Number(options.environment?.CORDISX_MODEL_API_PORT ?? process.env.CORDISX_MODEL_API_PORT ?? 8398),
+            catalog,
+            invocation: providerId =>
+              managed?.owns(providerId) || hasPluginProvider(providerId)
+                || completeOptions.declaredProviders?.some(p =>
+                  p.id === providerId && p.kind === 'model-service' && p.enabled !== false
+                )
+                ? 'model'
+                : 'agent',
+            connect: async (providerId, modelId, signal) => {
+              signal.throwIfAborted()
+              if (managed?.owns(providerId) || hasPluginProvider(providerId)) {
+                const session = await resolveConnection(providerId)
+                if (!session.value.models.aliases.some(model => model.gatewayModelId === modelId)) {
+                  session.dispose()
+                  throw new Error('Model catalog changed; refresh /v1/models')
+                }
+                const endpoint = session.value.endpoint
+                return {
+                  baseUrl: `${endpoint.origin}${endpoint.apiPath}`,
+                  headers: endpoint.auth.scheme === 'bearer' ? { authorization: `Bearer ${endpoint.auth.token}` } : {},
+                  // Managed publication guarantees Responses. Other paths are forwarded
+                  // to the gateway, which returns its own unsupported-protocol response.
+                  dispose: () => session.dispose(),
+                }
+              }
+              const declared = completeOptions.declaredProviders?.find(p =>
+                p.id === providerId && p.kind === 'model-service' && p.enabled !== false
+              )
+              if (declared?.kind !== 'model-service') {
+                throw new Error('This provider is available through /agents, with the app account and tools')
+              }
+              const home = await loadHomeConfig(path.join(completeOptions.managedCatalog!.homeDir, 'config.json'))
+              const token = completeOptions.nativeDiscoveryEnvironment?.[declared.apiKeyEnv]
+                ?? home.environmentVariables.find(entry => entry.name === declared.apiKeyEnv)?.value
+                ?? process.env[declared.apiKeyEnv]
+              if (!token) throw new Error(`Provider credential is unavailable: ${declared.apiKeyEnv}`)
+              return {
+                baseUrl: declared.baseUrl,
+                headers: { authorization: `Bearer ${token}` },
+                protocols: declared.protocols,
+                dispose() {},
+              }
+            },
+            agents: async (app, operation, input) => {
+              if (!agentBridge) throw new Error('The CordisX agent bridge is unavailable')
+              return agentBridge.call(app, operation, input)
+            },
+            interrupt: (threadId, turnId) => control.nativeRequest('turn/interrupt', { threadId, turnId }),
+          }).catch(error => {
+            console.warn(`[cordisx] model API unavailable: ${String(error)}`)
             return undefined
           })
         }

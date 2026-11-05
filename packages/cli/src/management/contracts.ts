@@ -95,11 +95,11 @@ export interface PluginManagementMigrationState {
 }
 
 export type PluginManagementRuntimeState =
-  | { readonly kind: 'active'; readonly runtimeGeneration: string }
+  | { readonly kind: 'active'; readonly runtimeGeneration: string; readonly mode?: 'service' }
   | { readonly kind: 'inactive'; readonly pendingActivation: boolean }
 
 export interface PluginManagementPlugin extends Omit<CordisXPluginRuntimeItemV1, 'status'> {
-  readonly status: CordisXPluginRuntimeItemV1['status'] | 'pending-activation'
+  readonly status: CordisXPluginRuntimeItemV1['status'] | 'pending-activation' | 'unavailable-in-service-mode'
 }
 
 export interface PluginManagementSnapshot {

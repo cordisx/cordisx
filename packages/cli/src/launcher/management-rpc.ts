@@ -201,7 +201,11 @@ export async function startPluginManagementRpcServer(input: {
   await mkdir(paths.socketDirectory, { recursive: true, mode: 0o700 })
   await chmod(paths.socketDirectory, 0o700)
   await rm(paths.socket, { force: true })
+  const sockets = new Set<Socket>()
   const server: Server = createServer({ allowHalfOpen: true }, socket => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+    socket.on('error', () => socket.destroy())
     let payload = ''
     socket.setEncoding('utf8')
     socket.on('data', chunk => {
@@ -263,6 +267,7 @@ export async function startPluginManagementRpcServer(input: {
   }
   return {
     async close(): Promise<void> {
+      for (const socket of sockets) socket.destroy()
       await new Promise<void>(resolve => server.close(() => resolve()))
       const current = await readPluginManagementRpcEndpoint(paths)
       if (current?.token === token) await rm(paths.state, { force: true })

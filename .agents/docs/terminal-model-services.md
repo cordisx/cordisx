@@ -2,6 +2,8 @@
 
 Available from Host beta.37. Plugin service selection requires a compatible
 running Host; shared declarations can launch the CLI without a desktop App.
+For HTTP clients that need plugin services without a local Agent, use
+[standalone services](standalone-services.md).
 
 `cordisx cli` starts the original Codex CLI with inherited terminal input and
 output. It preserves its terminal UI, tools, approval controls, `exec`, `resume`,

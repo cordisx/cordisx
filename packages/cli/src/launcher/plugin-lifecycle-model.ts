@@ -208,6 +208,8 @@ export interface RuntimeCleanupObservation extends RuntimePublicationObservation
 }
 
 export interface CoordinatorOptions {
+  /** The runtime has no browser graph; the package and Node permissions still use the shared authority. */
+  readonly headless?: true
   readonly homeDir: string
   readonly profileId: string
   readonly runtimeGeneration: string

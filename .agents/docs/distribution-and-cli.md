@@ -50,6 +50,8 @@ cordisx plugin list|search|info|install|update|enable|disable|uninstall|hide|unh
 cordisx source list|add|edit|enable|disable|remove|refresh [arguments] [options]
 ```
 
+Use [service mode](standalone-services.md) to run plugin backends and the model API without a desktop App or local Agent.
+
 Examples:
 
 ```bash

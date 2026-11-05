@@ -145,7 +145,12 @@ export function threadEntries(value: unknown): readonly TranscriptEntry[] {
       } else if (entry.type === 'plan' && typeof entry.text === 'string') {
         entries.push({ role: 'plan', text: entry.text })
       } else if (entry.type === 'commandExecution' && typeof entry.command === 'string') {
-        entries.push({ role: 'command', text: entry.command })
+        entries.push({
+          role: 'command',
+          text: entry.command + (typeof entry.aggregatedOutput === 'string' ? '\n' + entry.aggregatedOutput : ''),
+        })
+      } else if (['mcpToolCall', 'dynamicToolCall', 'fileChange'].includes(String(entry.type))) {
+        entries.push({ role: 'tool', text: JSON.stringify(entry) })
       }
     }
   }
