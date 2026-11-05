@@ -576,7 +576,6 @@ function LegacyProvider({
               <ModelBrandIcon brand={model.selectorBrand ?? inferModelBrand(model.id, model.label)} kind="model" />
               <span className="cxms-model-identity">
                 <strong>{model.label}</strong>
-                {model.label.toLocaleLowerCase() === model.id.toLocaleLowerCase() ? null : <code>{model.id}</code>}
               </span>
               {model.group ? <small>{model.group}</small> : null}
             </li>

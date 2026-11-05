@@ -37,7 +37,8 @@ describe('Manager model services catalog', () => {
       expect(provider.querySelector('.cxms-model-count')?.textContent).toBe('Models: 2')
       const models = [...provider.querySelectorAll('.cxms-model-identity')]
       expect(models[0]?.querySelector('code')).toBeNull()
-      expect(models[1]?.querySelector('code')?.textContent).toBe('model-b')
+      expect(models[1]?.querySelector('code')).toBeNull()
+      expect(models[1]?.textContent).toBe('Readable model')
       expect(provider.querySelector('ul')?.getAttribute('aria-label')).toBe('Provider A · Models')
     } finally {
       await fixture.dispose()
