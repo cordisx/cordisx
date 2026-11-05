@@ -5,6 +5,7 @@ import {
 } from './existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from './terminal-provider.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
+import { modelProviderDisplays } from '../model-provider-display.js'
 
 export interface RemotePreparedProvider {
   readonly provider: Readonly<Record<string, unknown>>
@@ -111,12 +112,16 @@ export class RemoteTerminalProviderClient {
           ) throw new Error('Invalid remote catalog')
           ids.add(provider.providerId)
           const models = new Set<string>()
+          const display = modelProviderDisplays([provider.display]).find(display =>
+            display.providerId === provider.providerId
+          )
           return Object.freeze({
             providerId: provider.providerId,
             // Explicit catalog provenance; this is not a local plugin/service identity.
             pluginId: 'remote-terminal-provider',
             managementOwner: 'remote' as const,
             title: provider.title,
+            ...(display === undefined ? {} : { display }),
             models: Object.freeze(provider.models.map(model => {
               if (!model.id || models.has(model.id)) throw new Error('Invalid remote model')
               models.add(model.id)

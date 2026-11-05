@@ -1,4 +1,5 @@
 import { nativeRemoteProviderSource, nativeRemoteUnmarkedGuard } from './native-remote-provider-source.js'
+import type { ModelProviderDisplay } from '../model-provider-display.js'
 import { createNativeCliEntry } from './native-cli-entry.js'
 import { RemoteTerminalProviderClient } from './remote-terminal-provider-client.js'
 import type { ExistingTerminalProviderSource } from './existing-terminal-provider-rpc.js'
@@ -255,6 +256,7 @@ export async function prepareNativeSubmissionBootstrap(
   let agentTasks: NativeAgentTasks | undefined
   let credentials: ReturnType<typeof createNativeProviderCredentialBroker> | undefined
   let terminalProviders: ReturnType<typeof createTerminalProviderAuthority> | undefined
+  let terminalProviderDisplays: () => Promise<readonly ModelProviderDisplay[]> = async () => []
   let managed: ManagedCatalogComposition | undefined
   let dynamic: ReturnType<typeof dynamicConfiguredCatalog> | undefined
   let nativeDiscovery: NativeConfigCatalogDiscovery | undefined
@@ -612,6 +614,7 @@ export async function prepareNativeSubmissionBootstrap(
               })
           },
           catalog,
+          display: () => terminalProviderDisplays(),
           owns: id => managed?.owns(id) === true || hasPluginProvider(id),
           resolve: resolveConnection,
           credentials,
@@ -708,6 +711,7 @@ export async function prepareNativeSubmissionBootstrap(
           invoke: input => control.invokeTask(input),
         })
         cdp.bindController(controller)
+        terminalProviderDisplays = () => cdp.providerDisplays()
         if (completeOptions.managedCatalog !== undefined) {
           // The agent bridge lets Claude Code sessions read and start threads in this
           // app-server, and lets this app's agents reach Claude. Failing to start it

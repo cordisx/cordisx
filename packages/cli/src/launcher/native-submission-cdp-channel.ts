@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
+import { modelProviderDisplayExpression } from '../renderer/adapter/model-provider-display.js'
 import type {
   CatalogManagementCommand,
   CatalogManagementResult,
@@ -135,6 +137,7 @@ export interface NativeSubmissionCdpAuthority {
   }
   bindController(controller: NativeSubmissionController): void
   taskCreationAvailable(): Promise<boolean>
+  providerDisplays(): Promise<readonly ModelProviderDisplay[]>
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(): Promise<void> }>
 }
 
@@ -376,6 +379,20 @@ export function createNativeSubmissionCdpAuthority(options: {
     },
   }
   return {
+    async providerDisplays() {
+      const owners = [...documents.values()].filter(owner => !owner.disposed && !owner.session.isClosed())
+      if (owners.length !== 1) return []
+      const owner = owners[0]!
+      const result = await owner.session.send('Runtime.evaluate', {
+        expression: modelProviderDisplayExpression(),
+        returnByValue: true,
+      }, 2_000)
+      if (
+        owner.disposed || owner.session.isClosed() || result.exceptionDetails
+        || ![...documents.values()].includes(owner)
+      ) return []
+      return modelProviderDisplays((result.result as { value?: unknown } | undefined)?.value)
+    },
     selection,
     runtime,
     async taskCreationAvailable() {

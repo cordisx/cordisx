@@ -15,6 +15,7 @@ import type { StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/s
 import { type ModelStartupState, ModelStartupStore } from './model-startup-store.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
 import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
 
 export interface NativeProviderProjection {
   readonly providerId: string
@@ -24,6 +25,7 @@ export interface NativeProviderProjection {
   readonly managementBindingRef?: string
   readonly providerFavorite?: boolean
   readonly title?: string
+  readonly display?: ModelProviderDisplay
   readonly selectorBrand?: ProviderBrandProjection
   readonly models: readonly HostModelProviderModel[]
   readonly defaultModelId?: string
@@ -257,6 +259,12 @@ export class ModelProviderRegistry {
             ? {}
             : { managementBindingRef: label(provider.managementBindingRef, 512) }),
           ...(provider.title === undefined ? {} : { title: label(provider.title) }),
+          ...(() => {
+            const display = modelProviderDisplays([provider.display]).find(display =>
+              display.providerId === provider.providerId
+            )
+            return display === undefined ? {} : { display }
+          })(),
           ...(isProviderBrandChoice(provider.selectorBrand?.brand)
               && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
             ? { selectorBrand: Object.freeze({ ...provider.selectorBrand }) }
@@ -473,6 +481,9 @@ export class ModelProviderRegistry {
           const presentation = [...this.presentations.values()].find(item =>
             item.key === key && (this.visibility?.visible(item.generation) ?? true)
           )?.value
+          const display = modelProviderDisplays([provider.display]).find(display =>
+            display.providerId === provider.providerId
+          )
           const projectedBrand = isProviderBrandChoice(provider.selectorBrand?.brand)
               && (provider.selectorBrand?.source === 'override' || provider.selectorBrand?.source === 'inferred')
             ? provider.selectorBrand
@@ -480,13 +491,13 @@ export class ModelProviderRegistry {
           const selectorBrand = projectedBrand?.source === 'override'
             ? projectedBrand.brand
             : presentation === undefined
-            ? projectedBrand?.brand
+            ? display === undefined ? projectedBrand?.brand : display.selectorBrand
             : undefined
           return Object.freeze({
             ...(progress === undefined ? {} : { startup: progress }),
             providerId: provider.providerId,
-            title: presentation?.title ?? provider.title ?? provider.providerId,
-            icon: presentation?.icon ?? 'host:settings',
+            title: presentation?.title ?? display?.title ?? provider.title ?? provider.providerId,
+            icon: presentation?.icon ?? display?.icon ?? 'host:settings',
             providerFavorite: provider.providerFavorite === true,
             ...(selectorBrand === undefined ? {} : { selectorBrand }),
             models: Object.freeze(
