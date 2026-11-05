@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 
-const MAX_BODY = 16 * 1024 * 1024
+const MAX_BODY = 64 * 1024 * 1024
 const MAX_PRELUDE = 1024 * 1024
 const MAX_ROUTES = 128
 const HOP_HEADERS = new Set([
