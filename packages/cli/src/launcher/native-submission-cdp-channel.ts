@@ -638,18 +638,19 @@ export function createNativeSubmissionCdpAuthority(options: {
           }
           let state = states.get(key(scope))
           if (envelope.operation === 'selectionRead') {
-            const supplied = selectionOf(input?.effective)
+            const supplied = input?.effective === undefined ? undefined : selectionOf(input.effective)
             if (!state?.effective) {
               const preference = scope.threadId === undefined ? await draftPreference() : undefined
               const current = await liveScope(scope)
               if (!current || key(current) !== key(scope) || owner.disposed) throw new Error('Stale initialization')
               const before = states.get(key(scope))
+              const initialEffective = scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied
               state = before?.effective ? before : {
                 ...before,
                 scope,
                 revision: before ? before.revision + 1 : 1,
                 nextGeneration: before?.nextGeneration ?? 1,
-                effective: scope.threadId ? threadSelections.get(scope.threadId) ?? supplied : supplied,
+                ...(initialEffective === undefined ? {} : { effective: initialEffective }),
                 ...(preference === undefined || before?.draftUserSelected ? {} : { draftPreference: preference }),
               }
               states.set(key(scope), state)

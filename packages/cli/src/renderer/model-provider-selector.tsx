@@ -1,7 +1,11 @@
 import { type SyntheticEvent, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelProviderModelV1, ModelProviderV1 } from '@cordisx/protocol/model-providers/v1'
 import type { ModelProviderRegistry } from './model-providers.js'
-import { selectionModelForProvider } from './model-provider-selection.js'
+import {
+  modelProviderSelectionDisplay,
+  nativeModelsForProvider,
+  selectionModelForProvider,
+} from './model-provider-selection.js'
 import { HostBrandIcon } from './host-ui/HostBrandIcon.js'
 import { BrainIcon } from './host-ui/BrainIcon.js'
 import { CodexBrandIcon } from './host-ui/CodexBrandIcon.js'
@@ -17,7 +21,6 @@ import type { NativeProviderSubmitConfirmation, NativeSubmissionRejection } from
 import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
-import { resolveTargetReasoning } from './native-model-reasoning.js'
 import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-label.js'
 import { ModelStartupIcon, ModelStartupStatus } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
@@ -61,6 +64,8 @@ export interface ProviderSelectionSnapshot {
   readonly pendingProviderIntent?: Readonly<{ providerId: string; generation: number }>
   readonly confirmation?: NativeProviderSubmitConfirmation
   readonly submissionError?: NativeSubmissionRejection
+  readonly pendingCreation?: import('./adapter/native-composer-creation.js').NativeComposerCreationSelection | undefined
+  readonly creationDisplay?: import('./native-composer-creation-handoff.js').NativeComposerCreationDisplay | undefined
   readonly draftPreference?: Readonly<{
     readonly model?: string
     readonly providerId: string
@@ -108,22 +113,7 @@ export function orderProviderRows<Row extends ProviderDisplayOrder>(rows: readon
   ]
 }
 
-export function nativeModelsForProvider(
-  snapshot: ProviderSelectionSnapshot,
-  providerId: string,
-): readonly NativeProviderModelOption[] {
-  const models = snapshot.nativeModels ?? []
-  if (snapshot.nativeModelsScope === 'active-provider') {
-    return providerId === snapshot.nativeModelsProviderId ? models : []
-  }
-  if (snapshot.nativeModelsScope !== 'global') return models
-  const assigned = new Set(
-    (snapshot.nativeModelAssignments ?? [])
-      .filter(assignment => assignment.providerId === providerId)
-      .map(assignment => assignment.model),
-  )
-  return models.filter(model => assigned.has(model.id))
-}
+export { nativeModelsForProvider } from './model-provider-selection.js'
 
 export function ModelProviderSelector({ registry, transport, locale, suspended = false }: {
   readonly registry: ModelProviderRegistry
@@ -152,67 +142,37 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const reasoningInFlight = useRef<Promise<void> | undefined>(undefined)
   const fastActionInFlight = useRef<number | undefined>(undefined)
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
-  const canInteract = () => !suspended && nativeModelProviderInteractionAllowed(anchor.current)
+  const creationReadOnly = native.pendingCreation !== undefined || native.creationDisplay !== undefined
+  const canInteract = () => !suspended && !creationReadOnly && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
     if (canInteract()) return
     event.preventDefault()
     event.stopPropagation()
   }
   const copy = modelProviderCopy(locale)
-  const preference = native.threadId === undefined ? native.draftPreference : undefined
-  const providerIntent = native.pendingProviderIntent?.providerId
-  const selected = catalog.providers.find(provider => provider.providerId === native.modelProvider)
-  const selectedModel = selected?.models.find(model => model.id === native.model)
-  const queued = native.nextSend
-  const pendingProviderId = queued?.providerId ?? native.pendingProviderId
-  const pendingModelId = queued?.model ?? native.pendingModel
-  const pendingEffort = queued?.reasoningEffort ?? native.pendingReasoningEffort
-  const pendingProvider = catalog.providers.find(provider => provider.providerId === pendingProviderId)
-  const pendingModel = pendingProvider?.models.find(model => model.id === pendingModelId)
-    ?? (pendingProviderId === 'openai'
-      ? nativeModelsForProvider(native, 'openai')?.find(model => model.id === pendingModelId)
-      : undefined)
-  const effectiveModel = selectedModel ?? (native.model === undefined
-    ? undefined
-    : { id: native.model, label: native.modelLabel ?? copy.choose })
-  const selectedModelLabel = friendlyModelLabel(effectiveModel?.label ?? copy.choose)
-  const providerLabel = selected?.title
-    ?? (native.modelProvider === 'openai'
-      ? copy.official
-      : native.providerLabel ?? copy.unknown)
-  const intentProvider = catalog.providers.find(provider => provider.providerId === providerIntent)
-  const displayedProvider = providerIntent !== undefined
-    ? intentProvider
-    : pendingProviderId !== undefined
-    ? pendingProvider
-    : preference === undefined
-    ? selected
-    : catalog.providers.find(provider => provider.providerId === preference.providerId)
-  const displayedProviderId = providerIntent ?? pendingProviderId ?? preference?.providerId
-    ?? native.modelProvider ?? ''
-  const displayedProviderLabel = displayedProviderId === 'openai'
-    ? copy.official
-    : displayedProvider?.title ?? providerIntent ?? pendingProviderId ?? preference?.providerId
-      ?? providerLabel
-  const displayedModel = providerIntent === undefined
-    ? pendingModel ?? (pendingModelId !== undefined
-      ? { id: pendingModelId, label: pendingModelId }
-      : preference === undefined
-      ? effectiveModel
-      : displayedProvider?.models.find(model => model.id === preference.model)
-        ?? (preference.model === undefined ? undefined : { id: preference.model, label: preference.model }))
-    : undefined
-  const displayedModelId = providerIntent === undefined ? pendingModelId ?? displayedModel?.id : undefined
-  const displayedModelLabel = friendlyModelLabel(displayedModel?.label ?? copy.choose)
-  const menuProvider = providerIntent === undefined
-    ? displayedProvider
-    : intentProvider
-  const menuModels = menuProvider?.models
-    ?? (displayedProviderId === 'openai'
-      ? nativeModelsForProvider(native, 'openai')
-      : [])
-  const disclosedModel = menuModels.find(model => model.id === displayedModelId)
-  const disclosedModelLabel = friendlyModelLabel(disclosedModel?.label ?? copy.choose)
+  const {
+    selected,
+    providerIntent,
+    effectiveModel,
+    selectedModelLabel,
+    providerLabel,
+    pendingProviderId,
+    pendingModelId,
+    queued,
+    displayedProvider,
+    displayedProviderId,
+    displayedProviderLabel,
+    displayedModel,
+    displayedModelId,
+    displayedModelLabel,
+    menuProvider,
+    menuModels,
+    disclosedModel,
+    disclosedModelLabel,
+    displayedNativeModel,
+    reasoningEfforts,
+    reasoningEffort,
+  } = modelProviderSelectionDisplay(native, catalog.providers, copy)
   const showModelSearch = menuModels.length > 8
   const modelTerms = showModelSearch ? searchTerms(modelQuery, locale) : []
   const filteredModels = open === 'model'
@@ -225,8 +185,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const visibleMenuFeedback = open === 'model'
     ? error === copy.busy ? undefined : error
     : feedback
-  const displayedNativeModel = nativeModelsForProvider(native, displayedProviderId)
-    ?.find(model => model.id === displayedModelId)
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
   const fastMode = supportsFastMode && native.serviceTier === 'priority'
   const canQueueFast = reasoningInFlight.current !== undefined
@@ -238,8 +196,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     && (native.nativeModels?.length ?? 0) === 0
 
   useEffect(() => {
-    if (suspended) setOpen(undefined)
-  }, [suspended])
+    if (suspended || creationReadOnly) setOpen(undefined)
+  }, [suspended, creationReadOnly])
 
   useEffect(() => {
     operation.current++
@@ -506,32 +464,12 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     matchesTerms([row.label, row.provider.providerId], providerTerms, locale)
   )
   const showProviderSearch = providerRows.length > 5
-  const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
-  const selectedReasoningEffort = pendingProviderId === undefined
-    ? native.reasoningEffort
-    : pendingEffort
-  // Model availability stays provider-scoped; reasoning metadata can still describe
-  // the pending model before its provider switch has reached the native control.
-  const reasoning = resolveTargetReasoning(
-    { providerId: displayedProviderId, model: displayedModelId ?? '' },
-    selectedReasoningEffort,
-    native.nativeModels ?? [],
-    () => disclosedModel?.reasoningCapabilities ?? (catalogBacked ? null : undefined),
-  )
-  const reasoningEfforts = reasoning.efforts.length > 0
-    ? reasoning.efforts
-    : !reasoning.catalogBacked || displayedNativeModel?.id === native.model && native.model !== undefined
-    ? native.reasoningEfforts ?? []
-    : []
-  const reasoningEffort = reasoningEfforts.includes(selectedReasoningEffort ?? '')
-    ? selectedReasoningEffort
-    : reasoning.effort
   return (
     <div
       className="cxmp-selector"
       data-cordisx-model-selector-ready={!suspended ? 'true' : undefined}
       data-cordisx-model-send-eligible={Boolean(
-        native.available && displayedModelId
+        !creationReadOnly && native.available && displayedModelId
           && (!catalog.startup || displayedProviderId === 'openai' || displayedProvider !== undefined)
           && (displayedProviderId === 'openai' || disclosedModel !== undefined)
           && (!displayedProvider?.startup || startupExecutionAvailable(catalog.startup, displayedProvider.startup)),
@@ -562,7 +500,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         ref={providerTrigger}
         type="button"
         className="cxmp-trigger cxmp-provider-trigger"
-        disabled={suspended}
+        disabled={suspended || creationReadOnly}
         aria-label={`${copy.providers}: ${displayedProviderLabel}`}
         title={queued
           ? `${copy.nextSend}: ${displayedProviderLabel}. ${copy.active}: ${providerLabel}`
@@ -599,7 +537,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
             aria-label={copy.disableFastMode}
             title={copy.disableFastMode}
             aria-pressed="true"
-            disabled={suspended || fastDisabled}
+            disabled={suspended || creationReadOnly || fastDisabled}
             aria-busy={fastActionPending}
             onClick={() => void selectFastMode(false)}
           >
@@ -611,8 +549,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         ref={modelTrigger}
         type="button"
         className="cxmp-trigger cxmp-model-trigger"
-        disabled={suspended}
-        data-cordisx-model-ready={native.available && displayedModel !== undefined && !switching ? 'true' : undefined}
+        disabled={suspended || creationReadOnly}
+        data-cordisx-model-ready={!creationReadOnly && native.available
+            && displayedModel !== undefined && !switching
+          ? 'true'
+          : undefined}
         aria-label={`${queued ? copy.nextSend : copy.models}: ${displayedModelLabel}`}
         title={queued
           ? `${copy.nextSend}: ${displayedModelLabel}. ${copy.active}: ${selectedModelLabel}`
@@ -634,7 +575,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       </button>
       {feedback ? <span role={error ? 'alert' : 'status'} className="cxmp-announcement">{feedback}</span> : null}
       <HostMenuSurface
-        open={!suspended && open !== undefined}
+        open={!suspended && !creationReadOnly && open !== undefined}
         canFocus={canInteract}
         label={open === 'provider' ? copy.providers : copy.models}
         anchorRef={anchor}

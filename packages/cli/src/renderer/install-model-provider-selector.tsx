@@ -4,6 +4,8 @@ import { ModelProviderSelector } from './model-provider-selector.js'
 import type { ProviderSelectionSnapshot } from './model-provider-selector.js'
 import type { ModelProviderRegistry } from './model-providers.js'
 import { CodexDesktopNativeModelProviderTransport } from './native-model-provider-transport.js'
+import { NativeComposerCreationHandoff } from './native-composer-creation-handoff.js'
+import { nativeComposerCreationPending } from './adapter/native-composer-creation.js'
 import {
   hideNativeModelProviderTrigger,
   locateNativeModelProviderMountSeat,
@@ -36,6 +38,7 @@ export async function installModelProviderSelector(
   navigateContinuation?: (threadId: string) => void | Promise<void>,
 ) {
   if (!nativeManagedModelRoutingAvailable) return () => {}
+  const creationHandoff = rendererOwner === undefined ? undefined : new NativeComposerCreationHandoff(rendererOwner)
   const entries = new Map<HTMLElement, { disposed: boolean; cleanup?: () => void }>()
   let disposed = false
   let scheduled = false
@@ -62,6 +65,7 @@ export async function installModelProviderSelector(
         rendererOwner,
         commandChannel,
         navigateContinuation,
+        creationHandoff,
       ).then(cleanup => {
         if (entry.disposed || disposed) cleanup()
         else entry.cleanup = cleanup
@@ -95,6 +99,7 @@ export async function installModelProviderSelector(
       entry.cleanup?.()
     }
     entries.clear()
+    creationHandoff?.dispose()
   }
 }
 
@@ -107,6 +112,7 @@ async function installComposerModelProviderSelector(
   rendererOwner?: NativeProviderSelectionOwner,
   commandChannel?: NativeProviderSelectionCommandChannel,
   navigateContinuation?: (threadId: string) => void | Promise<void>,
+  creationHandoff?: NativeComposerCreationHandoff,
 ) {
   const transport = await CodexDesktopNativeModelProviderTransport.connect(
     true,
@@ -120,6 +126,7 @@ async function installComposerModelProviderSelector(
     composer,
     composerId,
     navigateContinuation,
+    creationHandoff,
   )
   if (!transport) return () => {}
   let root: Root | undefined
@@ -157,6 +164,9 @@ async function installComposerModelProviderSelector(
       unmount()
       return
     }
+    // Keep the native control until this exact creation has its display tuple.
+    // Catalog availability alone must not replace it with empty choice labels.
+    if (!root && state.creationDisplay === undefined && nativeComposerCreationPending(composer)) return
     if (trigger !== seat.trigger || group !== seat.group) {
       unmount()
       trigger = seat.trigger

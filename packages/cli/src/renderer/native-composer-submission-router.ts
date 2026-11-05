@@ -5,6 +5,10 @@ import { createNativeContinuationCompletion, type NativeContinuationOwner } from
 interface ComposerSubmission extends NativeContinuationOwner {
   submit: NativeProviderSelectionClient['submitHook']
   serviceTier(): 'priority' | 'default'
+  creationAdmitted?(
+    result: Awaited<ReturnType<NativeProviderSelectionClient['submitHook']>>,
+    descriptor: NativeSubmissionOrchestratorDescriptor,
+  ): void
 }
 
 /** Success refresh belongs to the initiating composer and completes before native navigation. */
@@ -69,7 +73,10 @@ const submit: Hook = async descriptor => {
     ...descriptor,
     continuationAvailable: descriptor.continuationAvailable === true && continuations.available(owner),
   })
-  if (result.allow) continuations.admitted(owner, result)
+  if (result.allow) {
+    continuations.admitted(owner, result)
+    owner.creationAdmitted?.(result, descriptor)
+  }
   return result.allow && owner.snapshot().scope.composerId !== undefined
     ? { ...result, serviceTier: owner.serviceTier() }
     : result

@@ -466,6 +466,24 @@ describe('native submission document authority', () => {
     }
   })
 
+  it('allows a fresh creation projection without an effective selection and retains unavailable authority', async () => {
+    const h = await harness()
+    try {
+      await expect(h.channel.selectionRead({ scope: h.draft })).resolves.toMatchObject({
+        available: false,
+        revision: 1,
+      })
+      expect(() => h.authority.selection.snapshot(h.draft)).toThrow('Native selection scope unavailable')
+      await expect(h.channel.selectionRead({
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'actual-native-model' },
+      })).resolves.toMatchObject({ available: true, effective: { providerId: 'openai', model: 'actual-native-model' } })
+      expect(h.controller.commitSelection).not.toHaveBeenCalled()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('keeps an explicit launch model on new drafts without changing existing threads', async () => {
     const h = await harness({ defaultProviderId: 'provider-b', defaultModelId: 'model-b' })
     try {
