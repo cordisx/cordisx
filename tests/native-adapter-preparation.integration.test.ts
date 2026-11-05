@@ -111,7 +111,11 @@ it.skipIf(process.platform !== 'darwin')(
   'skips an incompatible preferred candidate and continues through a good rollback in the Worker',
   async () => {
     const f = await fixture()
-    const bad = await candidate(f, `export const bundle={version:${JSON.stringify(adapterVersion)},apiVersion:99}`, 'bad')
+    const bad = await candidate(
+      f,
+      `export const bundle={version:${JSON.stringify(adapterVersion)},apiVersion:99}`,
+      'bad',
+    )
     // Real owned packed entry: this candidate must beat builtin fallback.
     const good = await candidate(f, await readFile('packages/codex-adapter/dist/adapter.mjs', 'utf8'), 'good')
     await writePrivateJson(path.join(f.store, 'state.json'), state([bad], [good]))
