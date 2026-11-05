@@ -113,7 +113,23 @@ function nativeControlStyleAllowed(
   kind: ManagerTitlebarLease['kind'],
   seatRight: number,
 ): boolean {
-  if (region(style) !== 'no-drag') return false
+  if (region(style) !== 'no-drag') {
+    // Native browser tabs inherit no-drag from their tab-strip container.
+    // Only that exact right controller may supply the inherited region.
+    const controller = element.closest<HTMLElement>('[data-app-shell-tab-controller="right"][data-tab-id]')
+    if (kind !== 'split' || controller === null || region(style) !== 'none') return false
+    const view = element.ownerDocument.defaultView
+    let inherited = false
+    for (let node = element.parentElement; node !== null; node = node.parentElement) {
+      const value = view === null ? '' : region(view.getComputedStyle(node))
+      if (value === 'no-drag') {
+        inherited = true
+        break
+      }
+      if (value === 'drag' || node.matches('header[data-app-shell-titlebar]')) break
+    }
+    if (!inherited) return false
+  }
   if (style.pointerEvents === 'auto') return true
   // In the split tab strip, an inactive tab's close button can be hidden from
   // pointer input. It remains wholly outside the Host's left title seat, after
@@ -384,7 +400,7 @@ export function resolveManagerTitlebarContinuation(
   ) return undefined
   const right = baseline.bounds.left + baseline.bounds.width
   const left = Math.max(baseline.bounds.left, mainRect.left)
-  if (right - left < 320) return undefined
+  if (right - left < 200) return undefined
   for (let x = baseline.bounds.left + 8; x < right; x += 16) {
     const hit = document.elementFromPoint(x, headerRect.top + headerRect.height / 2)
     if (hit === null || (header.contains(hit) && !owner.titlebarSeat.contains(hit))) return undefined

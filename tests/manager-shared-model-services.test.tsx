@@ -55,6 +55,21 @@ function client(available = true) {
 }
 
 describe('Manager shared model services', () => {
+  it('omits the empty supplemental section', async () => {
+    const fixture = reactManagerFixture()
+    const { value } = client()
+    value.modelServicesRead = vi.fn(async () => ({ ...read, services: [] }))
+    try {
+      const { SharedModelServices } = await import(
+        '../packages/cli/src/renderer/manager/pages/model-catalog/SharedModelServices.js'
+      )
+      await fixture.render(<SharedModelServices client={value} locale="zh-CN" />)
+      await vi.waitFor(() => expect(value.modelServicesRead).toHaveBeenCalled())
+      expect(fixture.document.querySelector('[data-shared-model-services]')).toBeNull()
+    } finally {
+      await fixture.dispose()
+    }
+  })
   it('lists each declaration with its apps, model counts, and key state', async () => {
     const fixture = reactManagerFixture()
     try {

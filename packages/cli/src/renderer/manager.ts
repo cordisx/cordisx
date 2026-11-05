@@ -321,6 +321,7 @@ export interface ManagerModel {
     navigation: {
       readonly navigate: (reference: CordisXRouteReference) => Promise<void>
       readonly back: () => Promise<void>
+      readonly headerActions?: HTMLElement
     },
   ): Promise<ManagedManagerPageMount>
   closeManagerContent?(): Promise<void>

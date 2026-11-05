@@ -64,7 +64,7 @@ function fixture() {
         : target.matches('button')
         ? 'no-drag'
         : 'none'
-      Object.defineProperty(style, 'webkitAppRegion', { value: region })
+      Object.defineProperty(style, 'webkitAppRegion', { value: region, configurable: true })
       return style
     },
   })
@@ -177,5 +177,28 @@ describe('26.924 split-tab Manager titlebar seat', () => {
     f.setRect('#second-tab', f.rect(1095, 6, 17, 32))
     expect(resolveManagerSplitTitlebarSeat(f.document)).toBeDefined()
     expect(captureManagerTitlebarLease(f.document, 'split', f.pane)?.seat.provenance).toBe('split')
+  })
+})
+
+describe('native browser tab drag inheritance', () => {
+  it('admits a right tab inheriting no-drag from its bounded native controller', () => {
+    const f = fixture()
+    const controller = f.element('[data-app-shell-tab-controller="right"]')
+    const tab = f.element('[role="tab"]')
+    const original = f.document.defaultView!.getComputedStyle.bind(f.document.defaultView)
+    Object.defineProperty(f.document.defaultView, 'getComputedStyle', {
+      configurable: true,
+      value: (element: Element) => {
+        const style = original(element)
+        if (element === tab || element === controller) {
+          Object.defineProperty(style, 'webkitAppRegion', {
+            configurable: true,
+            value: element === tab ? 'none' : 'no-drag',
+          })
+        }
+        return style
+      },
+    })
+    expect(captureManagerTitlebarLease(f.document, 'split', f.pane)).toBeDefined()
   })
 })

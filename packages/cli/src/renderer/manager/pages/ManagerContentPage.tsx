@@ -7,7 +7,12 @@ import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 
 export function ManagerContentPage(
-  { model, router, locale }: { readonly model: ManagerModel; readonly router: ManagerRouter; readonly locale: string },
+  { model, router, locale, headerActionsSeat }: {
+    readonly model: ManagerModel
+    readonly router: ManagerRouter
+    readonly locale: string
+    readonly headerActionsSeat?: HTMLElement | null
+  },
 ) {
   const seat = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -31,6 +36,7 @@ export function ManagerContentPage(
     void model.mountManagerContent(route.id, route.reference, seat.current, {
       navigate: async reference => router.navigate({ kind: 'manager-content', id: route.id, reference }),
       back: async () => router.back(),
+      ...(headerActionsSeat == null ? {} : { headerActions: headerActionsSeat }),
     }).then(value => {
       if (disposed) value.abort()
       else {
@@ -45,7 +51,7 @@ export function ManagerContentPage(
       mount?.abort()
       void model.closeManagerContent?.()
     }
-  }, [model, route, router])
+  }, [model, route, router, headerActionsSeat])
   const activateTab = (index: number) => {
     if (presentation === undefined || contributionId === undefined) return
     const tab = presentation.tabs[index]

@@ -376,3 +376,51 @@
   color: var(--cx-muted, #9ca5b5);
   font-size: 11px;
 }
+
+/* Edge-to-edge embedded pages use the metadata-selected Host body seat. */
+.cxr-content[data-content-layout="embedded"] {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.cxr-content[data-content-layout="embedded"] > .cxr-manager-content-page {
+  flex: 1;
+}
+.cxr-content[data-content-layout="embedded"] .cxr-manager-content-panel {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.cxr-content[data-content-layout="embedded"] .cxr-manager-content-seat {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.cxr-content[data-content-layout="embedded"] [data-cordisx-manager-page] {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.cxr-content[data-content-layout="embedded"] [data-cordisx-manager-page-body] {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+.cxr-header:has([data-manager-page-header-actions]) {
+  grid-template-columns:
+    32px calc(var(--cx-control-text-inset) - 32px) minmax(0, 1fr) var(
+      --cx-control-gap
+    ) auto;
+}
+.cxr-titlebar-root .cxr-header:has([data-manager-page-header-actions]) {
+  grid-template-columns: var(--cx-titlebar-control-size) minmax(0, 1fr) auto;
+}
+.cxr-titlebar-root
+  .cxr-header:has([data-manager-page-header-actions])
+  > .cxr-titlebar-actions {
+  grid-column: 3;
+}

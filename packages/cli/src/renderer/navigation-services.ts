@@ -295,8 +295,16 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     contributionId: string,
     container: HTMLElement,
     managerNavigation?: CordisXPageNavigation,
+    headerActions?: HTMLElement,
   ): Promise<ManagedManagerPageMount> {
-    return this.registry.mountManagerContent(owner, reference, contributionId, container, managerNavigation)
+    return this.registry.mountManagerContent(
+      owner,
+      reference,
+      contributionId,
+      container,
+      managerNavigation,
+      headerActions,
+    )
   }
 
   closeManagerSettings(): Promise<void> {

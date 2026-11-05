@@ -724,6 +724,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
         back: () => navigation.back(),
         close: () => navigation.back(),
       },
+      navigation.headerActions,
     )
   },
   closeManagerContent: () => runtimeScope.routeService?.closeManagerContent() ?? Promise.resolve(),

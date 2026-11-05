@@ -264,12 +264,13 @@ export function SharedModelServices({ client, locale }: {
   }
   const editingService = editing?.id === undefined ? undefined : services.find(service => service.id === editing.id)
 
+  if (services.length === 0 && editing === undefined) return null
+
   return (
     <section className="cxms-shared" aria-label={t('catalog.sharedServices')} data-shared-model-services="true">
       <header className="cxms-shared-header">
         <div>
           <h3>{t('catalog.sharedServices')}</h3>
-          <p>{t('catalog.sharedServicesDescription')}</p>
         </div>
         {editing === undefined
           ? (

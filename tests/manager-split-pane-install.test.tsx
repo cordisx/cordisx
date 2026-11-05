@@ -86,7 +86,9 @@ describe('Manager installation beside native right tabs', () => {
         configurable: true,
         value: (node: Element) => {
           const style = nativeStyle(node)
-          if (node === tab) Object.defineProperty(style, 'webkitAppRegion', { value: 'no-drag', configurable: true })
+          if (node.matches('[data-app-shell-tab-controller="right"] [role="tab"]')) {
+            Object.defineProperty(style, 'webkitAppRegion', { value: 'no-drag', configurable: true })
+          }
           return style
         },
       })
@@ -125,6 +127,23 @@ describe('Manager installation beside native right tabs', () => {
         expect(tab.getAttribute('aria-selected')).toBe('true')
         expect(draft.value).toBe('unsent draft')
         expect(route.key).toBe('thread')
+        // The native right controller is replaced when a browser tab opens.
+        // Keep the same Manager React tree and draft across that geometry lease.
+        const controller = element('[data-app-shell-tab-controller="right"]')
+        const replacement = controller.cloneNode(true) as HTMLElement
+        controller.replaceWith(replacement)
+        setRect(replacement, rect(858, 6, 240, 32))
+        const replacementTab = replacement.querySelector<HTMLElement>('[role="tab"]')!
+        setRect(replacementTab, rect(858, 6, 210, 32))
+        replacementTab.style.setProperty('-webkit-app-region', 'no-drag')
+        await act(async () => {
+          await new Promise(resolve => setTimeout(resolve, 0))
+        })
+        await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
+        expect(document.querySelector('[data-cordisx-react-manager]')).toBe(manager)
+        expect(frame.inert).toBe(true)
+        expect(browser.getAttribute('src')).toBe(sourceBefore)
+        expect(draft.value).toBe('unsent draft')
         await act(async () => trigger.click())
         expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
         expect(frame.inert).toBeFalsy()

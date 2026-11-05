@@ -735,8 +735,15 @@ export function installReactCordisXManager(
         || titlebar.native.length !== pane.titlebarNative.length
         || pane.titlebarNative.some((node, index) => node !== titlebar.native[index])
       ) {
+        // Opening or closing a native right tab changes titlebar identities
+        // without leaving the current page. Restore and recapture the native
+        // layout while retaining the mounted Manager tree and its draft state.
+        const sameRoute = options.nativeRouteHistory !== undefined
+          && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === pane.nativeRouteIdentity
+        const samePage = seat !== undefined && seat.rail === pane.rail
+          && seat.main.anchor === pane.mainAnchor
         deactivatePane()
-        paneLossHandler?.()
+        if (!sameRoute || !samePage || !activatePane()) paneLossHandler?.()
       } else if (titlebar !== undefined) {
         placeTitlebarSeat(titlebar)
       }
