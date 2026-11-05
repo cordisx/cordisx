@@ -1,4 +1,5 @@
 import type { HomeConfig, HomeConfigIconThemePreference } from './home-config.js'
+import { modelServiceRuntimeOptionsView } from './model-service-runtime-options.js'
 import {
   type ManagedProviderRecord,
   parseManagedProviderRecord,
@@ -44,10 +45,19 @@ export function parseManagedProviders(value: unknown, label: string): readonly M
   return records
 }
 
-/** Return a printable home-config projection without managed Provider credentials or references. */
+/** Return a printable home-config projection without managed credentials or fixed model-service header values. */
 export function redactedHomeConfig(config: HomeConfig): unknown {
   return {
     ...config,
+    providers: config.providers.map(provider => {
+      if (provider.kind !== 'model-service') return provider
+      const { runtimeOptions, ...declaration } = provider
+      return {
+        ...declaration,
+        ...modelServiceRuntimeOptionsView(runtimeOptions),
+        ...(runtimeOptions === null ? { runtimeOptions: null } : {}),
+      }
+    }),
     environmentVariables: config.environmentVariables.map(({ value, generator, ...entry }) => ({
       ...entry,
       valueState: value === '' ? 'empty' : 'set',

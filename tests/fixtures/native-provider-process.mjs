@@ -41,6 +41,11 @@ createInterface({ input: process.stdin }).on('line', line => {
         modelProvider,
         current,
         model: 'test-model',
+        workerInert: process.argv.some(argument => argument.includes('base_url="http://127.0.0.1:0/v1"')),
+        runtimeHeaderResolved: Object.values(
+          params.config?.[`model_providers.${modelProvider}`]?.env_http_headers ?? {},
+        )
+          .every(name => process.env[name] === 'test-private-token'),
         argvHasSecret: process.argv.some(arg => arg.includes('test-private-token')),
         receivedConfig: params.config,
         ...(fork ? { sourceThreadId: params.threadId, thread: { id, modelProvider, status: { type: 'idle' } } } : {}),

@@ -4,7 +4,7 @@
  * declared environment variable has a value.
  */
 
-/** Codex-only provider options. Omission retains native defaults, including false and zero. */
+/** Codex-only provider options. Omission uses native defaults; false and zero are explicit values. */
 export interface ModelServiceCodexOptions {
   readonly http_headers?: Readonly<Record<string, string>>
   readonly env_http_headers?: Readonly<Record<string, string>>

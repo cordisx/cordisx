@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import {
   type HomeConfig,
   type HomeConfigModelServiceProvider,
@@ -9,11 +9,17 @@ import {
 import {
   type ModelServiceInput,
   modelServiceKeyEnv,
+  type ModelServiceRuntimeOptions,
   type ModelServicesReadResult,
   type ModelServicesSaveRequest,
   type ModelServicesSaveResult,
   type ModelServiceView,
 } from '../model-service-contracts.js'
+import {
+  modelServiceRuntimeOptionsView,
+  parseModelServiceHeaders,
+  parseModelServiceRuntimeOptions,
+} from '../config/model-service-runtime-options.js'
 import { modelServicesOf } from './model-service-projection.js'
 
 /**
@@ -23,8 +29,10 @@ import { modelServicesOf } from './model-service-projection.js'
  * and are never read back.
  */
 
+// The revision protects CAS without publishing an offline verifier for write-only headers.
+const revisionKey = randomBytes(32)
 function revisionOf(config: HomeConfig): string {
-  return createHash('sha256').update(JSON.stringify(modelServicesOf(config.providers))).digest('hex')
+  return createHmac('sha256', revisionKey).update(JSON.stringify(modelServicesOf(config.providers))).digest('hex')
 }
 
 function keyConfigured(
@@ -51,6 +59,7 @@ function view(
     codexModels: [...provider.models?.codex ?? []],
     claudeModels: [...provider.models?.claude ?? []],
     enabled: provider.enabled !== false,
+    ...modelServiceRuntimeOptionsView(provider.runtimeOptions),
     keyConfigured: keyConfigured(config, provider.apiKeyEnv, environment),
   }
 }
@@ -80,6 +89,28 @@ function declaration(
   const models: Record<string, readonly string[]> = {}
   if (input.codexModels.length > 0) models.codex = [...input.codexModels]
   if (input.claudeModels.length > 0) models.claude = [...input.claudeModels]
+  let runtimeOptions: ModelServiceRuntimeOptions | null | undefined = input.runtimeOptions === undefined
+    ? previous?.runtimeOptions
+    : input.runtimeOptions
+  const headers: Record<string, string> = Object.assign(
+    Object.create(null),
+    input.runtimeOptions === null ? undefined : previous?.runtimeOptions?.codex?.http_headers,
+  )
+  if (input.httpHeadersPatch !== undefined) {
+    for (const [name, value] of Object.entries(input.httpHeadersPatch)) {
+      for (const previousName of Object.keys(headers)) {
+        if (previousName.toLowerCase() === name.toLowerCase()) delete headers[previousName]
+      }
+      if (value !== null) headers[name] = value
+    }
+  }
+  if (
+    Object.keys(headers).length > 0 || runtimeOptions != null
+    || runtimeOptions !== null && Object.keys(input.httpHeadersPatch ?? {}).length > 0
+  ) {
+    const { http_headers: _fixed, ...codex } = runtimeOptions?.codex ?? {}
+    runtimeOptions = { codex: { ...codex, ...(Object.keys(headers).length === 0 ? {} : { http_headers: headers }) } }
+  }
   return {
     id: input.id,
     kind: 'model-service',
@@ -88,6 +119,7 @@ function declaration(
     // A declaration keeps the variable it already names; a new one gets a CordisX-owned name.
     apiKeyEnv: previous?.apiKeyEnv ?? modelServiceKeyEnv(input.id),
     protocols: [...input.protocols],
+    ...(runtimeOptions === undefined ? {} : { runtimeOptions }),
     ...(Object.keys(models).length === 0 ? {} : { models }),
     ...(previous?.appliesTo === undefined ? {} : { appliesTo: [...previous.appliesTo] }),
     ...(previous?.timeoutMs === undefined ? {} : { timeoutMs: previous.timeoutMs }),
@@ -116,7 +148,18 @@ export function parseModelServicesSaveRequest(value: unknown): ModelServicesSave
     if (
       !service
       || Object.keys(service).some(key =>
-        !['id', 'displayName', 'baseUrl', 'protocols', 'codexModels', 'claudeModels', 'enabled', 'apiKey'].includes(key)
+        ![
+          'id',
+          'displayName',
+          'baseUrl',
+          'protocols',
+          'codexModels',
+          'claudeModels',
+          'enabled',
+          'apiKey',
+          'runtimeOptions',
+          'httpHeadersPatch',
+        ].includes(key)
       )
       || !bounded(service.id, 96) || !bounded(service.displayName, 200) || !bounded(service.baseUrl, 2048)
       || !Array.isArray(service.protocols) || service.protocols.length === 0
@@ -127,6 +170,21 @@ export function parseModelServicesSaveRequest(value: unknown): ModelServicesSave
     const codexModels = modelIds(service.codexModels)
     const claudeModels = modelIds(service.claudeModels)
     if (codexModels === undefined || claudeModels === undefined) return undefined
+    let runtimeOptions: ModelServiceInput['runtimeOptions']
+    let httpHeadersPatch: ModelServiceInput['httpHeadersPatch']
+    try {
+      if (service.runtimeOptions === null) runtimeOptions = null
+      else if (service.runtimeOptions !== undefined) {
+        const parsed = parseModelServiceRuntimeOptions(service.runtimeOptions)
+        if (parsed.codex?.http_headers !== undefined) return undefined
+        runtimeOptions = parsed
+      }
+      if (service.httpHeadersPatch !== undefined) {
+        httpHeadersPatch = parseModelServiceHeaders(service.httpHeadersPatch, 'httpHeadersPatch', true)
+      }
+    } catch {
+      return undefined
+    }
     services.push({
       id: service.id,
       displayName: service.displayName,
@@ -135,6 +193,8 @@ export function parseModelServicesSaveRequest(value: unknown): ModelServicesSave
       codexModels,
       claudeModels,
       enabled: service.enabled,
+      ...(runtimeOptions === undefined ? {} : { runtimeOptions }),
+      ...(httpHeadersPatch === undefined ? {} : { httpHeadersPatch }),
       ...(service.apiKey === undefined ? {} : { apiKey: service.apiKey as string }),
     })
   }
@@ -146,6 +206,9 @@ export async function saveModelServices(
   configPath: string,
   request: ModelServicesSaveRequest,
 ): Promise<ModelServicesSaveResult> {
+  const parsed = parseModelServicesSaveRequest(request)
+  if (!parsed) return { status: 'rejected', code: 'invalid' }
+  request = parsed
   const ids = new Set<string>()
   for (const service of request.services) {
     if (ids.has(service.id)) return { status: 'rejected', code: 'invalid', message: `duplicate id: ${service.id}` }

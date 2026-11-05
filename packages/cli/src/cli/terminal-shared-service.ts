@@ -1,5 +1,6 @@
 import type { HomeConfig } from '../config/home-config.js'
 import { mergeHomeEnvironment } from '../config/home-config-environment.js'
+import { modelServiceCodexProvider, modelServiceRuntimeEnvironment } from '../launcher/model-service-runtime.js'
 import { modelsForApp, servicesForApp } from '../launcher/model-service-projection.js'
 
 export function sharedTerminalServices(config: HomeConfig, client: 'codex' | 'claude-code') {
@@ -36,7 +37,10 @@ export function prepareSharedTerminalService(
   const merged = mergeHomeEnvironment(base, config.environmentVariables)
   const key = merged[service.apiKeyEnv]
   if (!key) throw new Error(`Service ${id} requires configured environment variable ${service.apiKeyEnv}`)
-  const environment = { ...base, [service.apiKeyEnv]: key }
+  const environment = {
+    ...(client === 'codex' ? modelServiceRuntimeEnvironment([service], merged) : base),
+    [service.apiKeyEnv]: key,
+  }
   if (client === 'claude-code') {
     environment.ANTHROPIC_BASE_URL = service.baseUrl
     environment.ANTHROPIC_AUTH_TOKEN = key
@@ -46,12 +50,7 @@ export function prepareSharedTerminalService(
     environment,
     providerId: id,
     model,
-    provider: {
-      name: service.displayName,
-      base_url: service.baseUrl,
-      wire_api: 'responses',
-      env_key: service.apiKeyEnv,
-      requires_openai_auth: false,
-    },
+    runtimeOptionsOwned: service.runtimeOptions !== undefined,
+    provider: client === 'codex' ? modelServiceCodexProvider(service) : undefined,
   }
 }

@@ -661,7 +661,12 @@ export async function runDevelopment(
           ? {}
           : {
             environment: {
-              ...hostModelServiceEnvironment(environment, homeConfig.environmentVariables),
+              ...hostModelServiceEnvironment(
+                environment,
+                homeConfig.environmentVariables,
+                undefined,
+                homeConfig.providers,
+              ),
               ...(entry === undefined
                 ? {}
                 : {

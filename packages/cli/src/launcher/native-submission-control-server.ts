@@ -60,7 +60,11 @@ export interface NativeSubmissionControlServer {
   ): Promise<void>
   isThreadIdle(threadId: string): Promise<boolean>
   /** One allowlisted method on the desktop's own app-server; see `native-app-server-protocol.mjs`. */
-  nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
+  nativeRequest(
+    method: NativeBridgeMethod,
+    params: Readonly<Record<string, unknown>>,
+    configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>
   bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
   bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
@@ -562,8 +566,12 @@ export async function startNativeSubmissionControlServer(
     async isThreadIdle(threadId: string) {
       return await callPeer({ type: 'idle', threadId }) === true
     },
-    async nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>) {
-      return await callPeer({ type: 'native-request', method, params })
+    async nativeRequest(
+      method: NativeBridgeMethod,
+      params: Readonly<Record<string, unknown>>,
+      configuredProviderOverrides?: Readonly<Record<string, unknown>>,
+    ) {
+      return await callPeer({ type: 'native-request', method, params, configuredProviderOverrides })
     },
     bindUnmarkedProviderGuard(value: (input: { threadId?: string; providerId?: string }) => Promise<boolean>) {
       unmarkedGuard = value

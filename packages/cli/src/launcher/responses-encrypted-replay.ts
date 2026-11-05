@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { tunnelResponsesWebSocket } from './responses-websocket-tunnel.js'
+
+export interface ResponsesReplayRouteOptions {
+  readonly websocket?: boolean
+  /** Explicit runtime idle policy belongs to Codex, including values above the legacy proxy limit. */
+  readonly nativeStreamIdlePolicy?: boolean
+}
 
 const MAX_BODY = 64 * 1024 * 1024
 const MAX_PRELUDE = 1024 * 1024
@@ -168,19 +175,20 @@ async function recoverable(
 }
 
 export async function startResponsesEncryptedReplay() {
-  const routes = new Map<string, string>()
+  const routes = new Map<string, { target: string; websocket: boolean; nativeStreamIdlePolicy: boolean }>()
+  const tunnels = new Set<() => void>()
   const controllers = new Set<AbortController>()
   let closed = false
   const server = createServer(async (request, response) => {
-    const target = routes.get(request.url ?? '')
-    if (closed || request.method !== 'POST' || !target || controllers.size >= 32) {
+    const route = routes.get(request.url ?? '')
+    if (closed || request.method !== 'POST' || !route || controllers.size + tunnels.size >= 32) {
       response.writeHead(404).end()
       return
     }
     const controller = new AbortController()
     controllers.add(controller)
-    const timer = setTimeout(() => controller.abort(), 300_000)
-    timer.unref()
+    const timer = route.nativeStreamIdlePolicy ? undefined : setTimeout(() => controller.abort(), 300_000)
+    timer?.unref()
     response.on('close', () => controller.abort())
     request.on('aborted', () => controller.abort())
     try {
@@ -199,7 +207,7 @@ export async function startResponsesEncryptedReplay() {
         }
       }
       const send = (payload: string) =>
-        fetch(target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: controller.signal })
+        fetch(route.target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: controller.signal })
       const upstream = await send(bytes.toString('utf8'))
       if (upstream.status >= 300 && upstream.status < 400) {
         await upstream.body?.cancel()
@@ -237,6 +245,17 @@ export async function startResponsesEncryptedReplay() {
       controllers.delete(controller)
     }
   })
+  server.on('upgrade', (request, downstream, head) => {
+    const route = routes.get(request.url ?? '')
+    if (
+      closed || !route?.websocket || request.method !== 'GET' || request.headers.upgrade?.toLowerCase() !== 'websocket'
+      || controllers.size + tunnels.size >= 32
+    ) {
+      downstream.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+      return
+    }
+    tunnelResponsesWebSocket(request, downstream, head, route.target, tunnels, HOP_HEADERS)
+  })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
@@ -247,7 +266,7 @@ export async function startResponsesEncryptedReplay() {
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Provider transport unavailable')
   return {
-    route(baseUrl: string): string {
+    route(baseUrl: string, options: ResponsesReplayRouteOptions = {}): string {
       if (closed) throw new Error('Provider transport closed')
       const upstream = new URL(baseUrl)
       if (
@@ -256,11 +275,16 @@ export async function startResponsesEncryptedReplay() {
         || (upstream.protocol === 'http:' && !['127.0.0.1', 'localhost', '[::1]'].includes(upstream.hostname))
       ) throw new Error('Invalid provider endpoint')
       upstream.pathname = `${upstream.pathname.replace(/\/$/u, '')}/responses`
-      const existing = [...routes].find(([, value]) => value === upstream.href)
+      const websocket = options.websocket === true
+      const nativeStreamIdlePolicy = options.nativeStreamIdlePolicy === true
+      const existing = [...routes].find(([, value]) =>
+        value.target === upstream.href && value.websocket === websocket
+        && value.nativeStreamIdlePolicy === nativeStreamIdlePolicy
+      )
       if (existing) return `http://127.0.0.1:${address.port}${existing[0].slice(0, -'/responses'.length)}`
       if (routes.size >= MAX_ROUTES) throw new Error('Provider transport route limit')
       const route = `/${randomBytes(32).toString('hex')}/responses`
-      routes.set(route, upstream.href)
+      routes.set(route, { target: upstream.href, websocket, nativeStreamIdlePolicy })
       return `http://127.0.0.1:${address.port}${route.slice(0, -'/responses'.length)}`
     },
     async close(): Promise<void> {
@@ -268,6 +292,7 @@ export async function startResponsesEncryptedReplay() {
       closed = true
       routes.clear()
       for (const controller of controllers) controller.abort()
+      for (const close of tunnels) close()
       server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
     },

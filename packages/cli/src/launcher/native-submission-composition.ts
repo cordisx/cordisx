@@ -655,7 +655,11 @@ export async function prepareNativeSubmissionBootstrap(
           ...(completeOptions.defaultModelId === undefined ? {} : { defaultModelId: completeOptions.defaultModelId }),
         })
         encryptedReplay = await startResponsesEncryptedReplay()
-        const prepareConfiguredProvider = configuredEncryptedReplay(codexHome, encryptedReplay.route)
+        const prepareConfiguredProvider = configuredEncryptedReplay(
+          codexHome,
+          encryptedReplay.route,
+          completeOptions.declaredProviders,
+        )
         control.bindConfiguredProvider(prepareConfiguredProvider)
         controller = createNativeSubmissionController({
           ...(startup === undefined ? {} : { startup }),
@@ -751,7 +755,10 @@ export async function prepareNativeSubmissionBootstrap(
                   const prepared = await broker.prepare(providerId)
                   lease = prepared
                   config = { [`model_providers.${providerId}`]: nativeProviderConfig(prepared) }
-                } else config = await prepareConfiguredProvider(providerId)
+                } else {
+                  const configuredProvider = await prepareConfiguredProvider(providerId)
+                  return await control.nativeRequest(method, params, configuredProvider)
+                }
                 try {
                   const result = await control.nativeRequest(method, {
                     ...params,

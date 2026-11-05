@@ -12,6 +12,12 @@ import type {
 import { HostSchemaFormPage, schemaFormSnapshot } from '../../../host-ui/SchemaForm.js'
 import type { ModelCatalogClient } from '../../../model-catalog-client.js'
 import { managerCopy } from '../../../ui-copy.js'
+import {
+  SharedServiceAdvanced,
+  sharedServiceAdvancedDraft,
+  sharedServiceAdvancedInput,
+  validSharedServiceAdvanced,
+} from './SharedServiceAdvanced.js'
 
 /**
  * The top-level `model-service` declarations in the CordisX home config: one
@@ -148,6 +154,7 @@ function ServiceEditor({ service, locale, save, close }: {
   const t = (key: Parameters<typeof managerCopy>[1]) => managerCopy(locale, key)
   const creating = service === undefined
   const [draft, setDraft] = useState<Draft>(() => draftOf(service))
+  const [advanced, setAdvanced] = useState(() => sharedServiceAdvancedDraft(service))
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>()
   const schema = useMemo(() => serviceSchema(locale, draft, creating), [
@@ -157,6 +164,7 @@ function ServiceEditor({ service, locale, save, close }: {
     draft.forClaude,
   ])
   const valid = schemaFormSnapshot(schema, draft, locale).valid && validDraft(draft)
+    && validSharedServiceAdvanced(advanced)
   const mounted = useRef(true)
   useEffect(() => () => {
     mounted.current = false
@@ -165,7 +173,7 @@ function ServiceEditor({ service, locale, save, close }: {
     if (busy || !valid) return
     setBusy(true)
     setFailure(undefined)
-    const error = await save(inputFromDraft(draft))
+    const error = await save({ ...inputFromDraft(draft), ...sharedServiceAdvancedInput(advanced, service) })
     if (!mounted.current) return
     setBusy(false)
     if (error === undefined) close()
@@ -195,7 +203,18 @@ function ServiceEditor({ service, locale, save, close }: {
           </div>
         }
       >
-        {!valid && (draft.id !== '' || draft.baseUrl !== '')
+        {draft.forCodex
+          ? (
+            <SharedServiceAdvanced
+              draft={advanced}
+              service={service}
+              locale={locale}
+              disabled={busy}
+              onChange={setAdvanced}
+            />
+          )
+          : null}
+        {!validDraft(draft) && (draft.id !== '' || draft.baseUrl !== '')
           ? <p role="status">{t('catalog.sharedServiceInvalid')}</p>
           : null}
         {failure === undefined ? null : <p role="status">{failure}</p>}
@@ -233,7 +252,7 @@ export function SharedModelServices({ client, locale }: {
     return result.code === 'conflict'
       ? t('catalog.sharedServiceConflict')
       : result.code === 'invalid'
-      ? result.message ?? t('catalog.sharedServiceInvalid')
+      ? t('catalog.sharedServiceInvalid')
       : t('catalog.failed')
   }
   const saveOne = async (input: ModelServiceInput) => {

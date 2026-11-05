@@ -107,6 +107,7 @@ export async function prepareProductionHostBootstrap(
       environment,
       configured.environmentVariables,
       plan.environment,
+      configured.providers,
     )
     if (
       input.prepareNativeSubmission

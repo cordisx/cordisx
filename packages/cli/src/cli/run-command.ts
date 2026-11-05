@@ -13,7 +13,7 @@ import {
   NativeSubmissionCompatibilityError,
   type NativeSubmissionComposition,
 } from '../launcher/native-submission-composition.js'
-import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
 import { codexHomeOfPlan, modelServiceLaunchHook } from '../launcher/model-service-projection.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
@@ -955,7 +955,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         environment: {
-          ...hostModelServiceEnvironment(environment, currentHomeConfig.environmentVariables, plan.environment),
+          ...nativeCatalogOptions.nativeDiscoveryEnvironment,
           ...nativeSubmission?.environment,
         },
         stdout,

@@ -11,6 +11,7 @@ export async function harness(
   controller?: NativeSubmissionController,
   nativeFixture = 'native-intermediary-app-server.mjs',
   serverOptions?: Parameters<typeof startNativeSubmissionControlServer>[0],
+  environment?: Readonly<Record<string, string | undefined>>,
 ) {
   const server = await startNativeSubmissionControlServer(serverOptions)
   const providerProcess = ['native-provider-process.mjs', 'native-provider-switch-process.mjs'].includes(nativeFixture)
@@ -73,6 +74,7 @@ export async function harness(
   ], {
     env: {
       ...process.env,
+      ...environment,
       CODEX_CLI_PATH: 'must-not-leak',
       CORDISX_NATIVE_CONTROL_SOCKET: server.socketPath,
       CORDISX_NATIVE_CONTROL_NONCE: server.nonce,

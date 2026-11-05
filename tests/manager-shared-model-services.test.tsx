@@ -19,6 +19,10 @@ const read: ModelServicesReadResult = {
       claudeModels: ['claude-opus-5-5', 'claude-sonnet-5-5'],
       enabled: true,
       keyConfigured: true,
+      httpHeaderNames: ['X-Private'],
+      runtimeOptions: {
+        codex: { supports_websockets: false, request_max_retries: 0, env_http_headers: { 'X-Token': 'SERVICE_TOKEN' } },
+      },
     },
     {
       id: 'deepseek',

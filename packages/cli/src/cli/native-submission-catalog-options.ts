@@ -1,13 +1,15 @@
 import type { HomeConfigProfile, HomeConfigProvider } from '../config/home-config.js'
 import { type HomeConfigEnvironmentVariable, mergeHomeEnvironment } from '../config/home-config-environment.js'
+import { modelServiceRuntimeEnvironment } from '../launcher/model-service-runtime.js'
 import { servicesForApp } from '../launcher/model-service-projection.js'
 
 export function hostModelServiceEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
   entries: readonly HomeConfigEnvironmentVariable[],
   planEnvironment?: Readonly<Record<string, string>>,
+  providers: readonly HomeConfigProvider[] = [],
 ): Readonly<Record<string, string | undefined>> {
-  return mergeHomeEnvironment(environment, entries, planEnvironment)
+  return modelServiceRuntimeEnvironment(providers, mergeHomeEnvironment(environment, entries, planEnvironment))
 }
 
 export function nativeDiscoveryEnvironment(
@@ -37,7 +39,7 @@ export function nativeSubmissionCatalogOptions(
   providers: readonly HomeConfigProvider[] = [],
   launch?: Readonly<{ service?: string; model?: string }>,
 ) {
-  const nativeEnvironment = hostModelServiceEnvironment(environment, environmentVariables, planEnvironment)
+  const nativeEnvironment = hostModelServiceEnvironment(environment, environmentVariables, planEnvironment, providers)
   const declared = servicesForApp(providers, 'codex')
   return {
     managedCatalog: {

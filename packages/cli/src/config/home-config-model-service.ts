@@ -1,3 +1,6 @@
+import type { ModelServiceRuntimeOptions } from '../model-service-contracts.js'
+import { MODEL_SERVICE_HEADER_ENV_PREFIX, parseModelServiceRuntimeOptions } from './model-service-runtime-options.js'
+
 /** Validation for `model-service` provider declarations in the CordisX home config. */
 
 export type HomeConfigProviderProtocol = 'anthropic-messages' | 'openai-responses'
@@ -15,6 +18,7 @@ export interface HomeConfigModelServiceProvider {
   /** App ids this service is projected into. Omitted means every app it has a protocol for. */
   readonly appliesTo?: readonly string[]
   readonly enabled?: boolean
+  readonly runtimeOptions?: ModelServiceRuntimeOptions | null
   readonly timeoutMs?: number
 }
 
@@ -98,6 +102,7 @@ export function parseModelServiceProvider(
     'appliesTo',
     'enabled',
     'timeoutMs',
+    'runtimeOptions',
   ], label)
   const { nonEmptyString } = context
   const id = nonEmptyString(provider.id, `${label}.id`)
@@ -105,7 +110,9 @@ export function parseModelServiceProvider(
   const displayName = nonEmptyString(provider.displayName, `${label}.displayName`)
   const baseUrl = parseEndpoint(provider.baseUrl, `${label}.baseUrl`, nonEmptyString)
   const apiKeyEnv = nonEmptyString(provider.apiKeyEnv, `${label}.apiKeyEnv`)
-  if (!ENVIRONMENT_KEY.test(apiKeyEnv)) throw new Error(`${label}.apiKeyEnv must be an environment name`)
+  if (!ENVIRONMENT_KEY.test(apiKeyEnv) || apiKeyEnv.startsWith(MODEL_SERVICE_HEADER_ENV_PREFIX)) {
+    throw new Error(`${label}.apiKeyEnv must be an environment name`)
+  }
   const protocols = parseProtocols(provider.protocols, `${label}.protocols`)
   const models = parseModels(provider.models, `${label}.models`, context)
   let appliesTo: readonly string[] | undefined
@@ -126,6 +133,9 @@ export function parseModelServiceProvider(
   if (provider.timeoutMs !== undefined && !Number.isInteger(provider.timeoutMs)) {
     throw new Error(`${label}.timeoutMs must be an integer`)
   }
+  const runtimeOptions = provider.runtimeOptions == null
+    ? provider.runtimeOptions
+    : parseModelServiceRuntimeOptions(provider.runtimeOptions, `${label}.runtimeOptions`)
   return Object.freeze({
     id,
     kind: 'model-service',
@@ -133,6 +143,7 @@ export function parseModelServiceProvider(
     baseUrl,
     apiKeyEnv,
     protocols: Object.freeze(protocols),
+    ...(runtimeOptions === undefined ? {} : { runtimeOptions }),
     ...(models === undefined ? {} : { models }),
     ...(appliesTo === undefined ? {} : { appliesTo }),
     ...(provider.enabled === undefined ? {} : { enabled: provider.enabled }),

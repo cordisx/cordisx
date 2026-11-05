@@ -1,3 +1,5 @@
+import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
+
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const validToken = value => typeof value === 'string' && /^[^\0\r\n]{16,256}$/u.test(value)
 
@@ -24,9 +26,14 @@ export async function prepareManagedResume(message, { nativeCall, controlCall, a
   if (prepared?.kind !== 'resume' || !validToken(prepared.resumeToken) || !object(prepared.configOverrides)) {
     return undefined
   }
+  const overrides = prepared.configOverrides
+  const existing = object(params.config)
+  const config = overrides[optionsAuthority] === undefined
+    ? { ...existing, ...overrides }
+    : configuredOverrides(existing, overrides)
   return {
     threadId: params.threadId,
     resumeToken: prepared.resumeToken,
-    message: { ...message, params: { ...params, config: { ...object(params.config), ...prepared.configOverrides } } },
+    message: { ...message, params: { ...params, config } },
   }
 }
