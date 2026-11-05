@@ -16,6 +16,7 @@ export interface ProductionPluginManagementComposition {
   close(): Promise<void>
 }
 export async function openProductionPluginManagementComposition(input: {
+  readonly mode?: 'service'
   readonly configPath: string
   readonly homeDir: string
   readonly appId: string
@@ -32,7 +33,11 @@ export async function openProductionPluginManagementComposition(input: {
     homeDir: input.homeDir,
     appId: input.appId,
     profileId: input.profileId,
-    lifecycle: { coordinator: input.coordinator, runtimeGeneration: input.runtimeGeneration },
+    lifecycle: {
+      coordinator: input.coordinator,
+      runtimeGeneration: input.runtimeGeneration,
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
+    },
   })
   let server: PluginManagementRpcServer
   try {

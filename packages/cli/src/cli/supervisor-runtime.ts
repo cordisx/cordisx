@@ -101,6 +101,7 @@ export async function createSupervisorRuntime(
     account?: NativeAccountCapabilityDescriptor,
     signal?: AbortSignal,
   ) => Promise<void>
+  readonly markServiceReady: (modelApiUrl: string, signal: AbortSignal) => Promise<void>
   readonly markHostLaunched: (pid: number, inspectorUrl?: Promise<string>, debugPort?: number) => Promise<boolean>
   /** Record why this generation is exiting while its published record is still current. */
   readonly markFailed: (failure: string) => Promise<void>
@@ -379,6 +380,25 @@ export async function createSupervisorRuntime(
       await releaseStartupOperation?.()
       releaseStartupOperation = undefined
     },
+    async markServiceReady(modelApiUrl, signal) {
+      if (!home || !app || !profile || !supervisorToken || !control) throw new Error('Missing service supervisor owner')
+      const paths = supervisorPaths(home, app, profile)
+      const owner = await readSupervisorState(paths)
+      if (!owner || owner.pid !== process.pid || owner.instanceToken !== supervisorToken || owner.mode !== 'service') {
+        throw new Error('Service supervisor generation is no longer current')
+      }
+      signal.throwIfAborted()
+      if (
+        !await updateSupervisorState(
+          paths,
+          owner,
+          latest =>
+            latest.phase === 'starting' && !signal.aborted ? { ...latest, phase: 'ready', modelApiUrl } : undefined,
+        )
+      ) throw new Error('Service supervisor is no longer starting')
+      await releaseStartupOperation?.()
+      releaseStartupOperation = undefined
+    },
     async markFailed(failure): Promise<void> {
       if (home === undefined || app === undefined || profile === undefined || fingerprint === undefined) return
       const paths = supervisorPaths(home, app, profile)
@@ -392,7 +412,7 @@ export async function createSupervisorRuntime(
       ) return
       await updateSupervisorState(paths, current, latest => {
         if (latest.phase === 'stopping' || latest.phase === 'failed') return undefined
-        const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = latest
+        const { cdpEndpoint: _cdpEndpoint, modelApiUrl: _modelApiUrl, ...withoutEndpoint } = latest
         return { ...withoutEndpoint, phase: 'failed', failure, failedAt: new Date().toISOString() }
       })
     },

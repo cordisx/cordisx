@@ -22,9 +22,9 @@ export interface ModelApiServerOptions {
   readonly port?: number
   readonly catalog: () => Promise<readonly NativeModelProviderCatalogEntry[]>
   readonly connect: (providerId: string, modelId: string, signal: AbortSignal) => Promise<ModelApiConnection>
-  readonly agents: (app: BridgeApp, operation: BridgeOperation, args: unknown) => Promise<unknown>
+  readonly agents?: (app: BridgeApp, operation: BridgeOperation, args: unknown) => Promise<unknown>
   readonly invocation?: (providerId: string) => 'model' | 'agent'
-  readonly interrupt: (threadId: string, turnId: string) => Promise<unknown>
+  readonly interrupt?: (threadId: string, turnId: string) => Promise<unknown>
 }
 
 function json(res: ServerResponse, status: number, value: unknown) {
@@ -128,6 +128,7 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
             const provider = (await options.catalog()).find(p => p.providerId === providerId)
             if (!provider?.models.some(m => m.id === modelId)) throw new Error('Unknown provider/model')
             connection = await options.connect(providerId, modelId, abort.signal)
+            abort.signal.throwIfAborted()
             if (connection.protocols && !connection.protocols.includes('openai-responses')) {
               throw new Error('Responses unavailable')
             }
@@ -170,7 +171,11 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
     }
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname === '/healthz' && req.method === 'GET') {
-      json(res, 200, { status: 'ok', profile: options.profileId })
+      json(res, 200, {
+        status: 'ok',
+        profile: options.profileId,
+        ...(options.agents ? {} : { mode: 'service', agents: 'unavailable' }),
+      })
       return
     }
     if (!authorized(req, key)) {
@@ -196,13 +201,19 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
       })
       return
     }
+    if (!options.agents && (url.pathname === '/agents' || url.pathname.startsWith('/agents/'))) {
+      json(res, 503, {
+        error: { code: 'agent-unavailable', message: 'Desktop and Agent capabilities are unavailable in service mode' },
+      })
+      return
+    }
     if (url.pathname === '/agents/sessions' && req.method === 'GET') {
       const app = url.searchParams.get('app') ?? 'codex'
       if (!isBridgeApp(app)) throw new Error('Unknown agent app')
       json(
         res,
         200,
-        await options.agents(app, 'list_sessions', {
+        await options.agents!(app, 'list_sessions', {
           limit: Number(url.searchParams.get('limit') ?? 20),
           searchTerm: url.searchParams.get('search') ?? undefined,
         }),
@@ -214,13 +225,13 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
       const app = input.app ?? 'codex'
       if (!isBridgeApp(app)) throw new Error('Unknown agent app')
       const { app: ignored, ...args } = input
-      json(res, 200, await options.agents(app, 'start_session', args))
+      json(res, 200, await options.agents!(app, 'start_session', args))
       return
     }
     if (url.pathname === '/agents/rpc' && req.method === 'POST') {
       const input = await body(req)
       if (!isBridgeApp(input.app) || !isBridgeOperation(input.operation)) throw new Error('Unknown agent operation')
-      json(res, 200, await options.agents(input.app, input.operation, input.args))
+      json(res, 200, await options.agents!(input.app, input.operation, input.args))
       return
     }
     const session = /^\/agents\/sessions\/([^/]+)(?:\/(messages|interrupt|events))?$/.exec(url.pathname)
@@ -232,7 +243,7 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
         let previous = ''
         while (!signal.aborted) {
-          const snapshot = await options.agents(app, 'read_session', { sessionId, limit: 200 })
+          const snapshot = await options.agents!(app, 'read_session', { sessionId, limit: 200 })
           const encoded = JSON.stringify(snapshot)
           if (encoded !== previous) {
             res.write(`event: transcript\ndata: ${encoded}\n\n`)
@@ -254,14 +265,17 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
         json(
           res,
           200,
-          await options.agents(app, 'read_session', { sessionId, cursor: url.searchParams.get('cursor') ?? undefined }),
+          await options.agents!(app, 'read_session', {
+            sessionId,
+            cursor: url.searchParams.get('cursor') ?? undefined,
+          }),
         )
       } else if (session[2] === 'messages' && req.method === 'POST') {
-        json(res, 200, await options.agents(app, 'send_message', { ...await body(req), sessionId }))
+        json(res, 200, await options.agents!(app, 'send_message', { ...await body(req), sessionId }))
       } else if (session[2] === 'interrupt' && req.method === 'POST') {
         const input = await body(req)
         if (app !== 'codex' || typeof input.turnId !== 'string') throw new Error('Codex turnId required')
-        json(res, 200, await options.interrupt(sessionId, input.turnId))
+        json(res, 200, await options.interrupt!(sessionId, input.turnId))
       } else json(res, 405, { error: { message: 'Method unavailable' } })
       return
     }
@@ -271,13 +285,13 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
       if (!isBridgeApp(app)) throw new Error('Unknown agent app')
       const operationId = decodeURIComponent(operation[1]!)
       if (!operation[2]) {
-        json(res, 200, await options.agents(app, 'check_operation', { operationId }))
+        json(res, 200, await options.agents!(app, 'check_operation', { operationId }))
         return
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
       let previous = ''
       while (!signal.aborted) {
-        const status = await options.agents(app, 'check_operation', { operationId }) as Record<string, unknown>
+        const status = await options.agents!(app, 'check_operation', { operationId }) as Record<string, unknown>
         const encoded = JSON.stringify(status)
         if (encoded !== previous) {
           res.write(`event: status\ndata: ${encoded}\n\n`)
@@ -396,13 +410,21 @@ export async function startModelApiServer(options: ModelApiServerOptions) {
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(options.port ?? 8398, '127.0.0.1', resolve)
+  }).catch((error: NodeJS.ErrnoException) => {
+    sockets.close()
+    if (error.code === 'EADDRINUSE') {
+      throw new Error(`Model API port 127.0.0.1:${options.port ?? 8398} is already in use (EADDRINUSE)`, {
+        cause: error,
+      })
+    }
+    throw error
   })
   const port = (server.address() as { port: number }).port
   const binding = {
     pid: process.pid,
     profileId: options.profileId,
     baseUrl: `http://127.0.0.1:${port}/v1`,
-    agentUrl: `http://127.0.0.1:${port}/agents`,
+    ...(options.agents ? { agentUrl: `http://127.0.0.1:${port}/agents` } : { mode: 'service' as const }),
     accessKeyFile: keyFile,
   }
   try {

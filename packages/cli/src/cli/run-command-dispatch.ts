@@ -10,7 +10,7 @@ import {
 import { type CordisXCliInvocation, parseCordisXCli } from './parse.js'
 import { runFeedbackCommand } from './feedback-command.js'
 import { runManagementCommand } from './management-command.js'
-import { isSupervisorCommand, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
+import { isSupervisorCommand, runSupervisorCommand, runSupervisorCommandWithStartupGate } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
 import { runAppCheckCommand, runAppCommand, runAppUpdateCommand } from './app-command.js'
@@ -111,6 +111,11 @@ export async function prepareCliCommand(
   argv: readonly string[],
   runtime: CordisXCliRuntime,
 ): Promise<PreparedRunCommand | undefined> {
+  if (argv[0] === 'service-owner') {
+    const { runServiceOwner } = await import('./service-owner.js')
+    await runServiceOwner(runtime)
+    return
+  }
   if (argv[0] === 'adapter') {
     const { runAdapterCommand } = await import('./adapter-command.js')
     await runAdapterCommand(argv.slice(1), {
@@ -154,6 +159,10 @@ export async function prepareCliCommand(
     if (parsedInvocation.subcommand === 'check') await runAppCheckCommand(runtime)
     else if (parsedInvocation.subcommand === 'update') await runAppUpdateCommand(runtime)
     else await runAppCommand(runtime)
+    return
+  }
+  if ('mode' in parsedInvocation && parsedInvocation.mode === 'service') {
+    await runSupervisorCommand(parsedInvocation, runtime)
     return
   }
   if (

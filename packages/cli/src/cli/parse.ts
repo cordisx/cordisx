@@ -65,6 +65,7 @@ export interface CordisXRunInvocation extends Omit<CordisXLaunchInvocation, 'act
 
 export interface CordisXManagedInvocation {
   readonly action: 'start' | 'status' | 'logs' | 'stop' | 'restart'
+  readonly mode?: 'service'
   readonly app?: string
   readonly profile?: string
   readonly dataMode?: CordisXDataMode
@@ -570,7 +571,8 @@ function parseFeedbackCli(argv: readonly string[]): CordisXFeedbackInvocation {
  * in `hostArgs` and is never interpreted as a CordisX option.
  */
 export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
-  argv = normalizeStartMode(argv)
+  const mode = normalizeStartMode(argv)
+  argv = mode.argv
   if (argv[0] === 'cli') return parseTerminalCli(argv)
   if (argv[0] === 'model') return parseModelExport(argv)
   if (argv[0] === 'feedback') return parseFeedbackCli(argv)
@@ -582,6 +584,14 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
 
   if (options.help || positionals[0] === 'help') return { action: 'help' }
 
+  if (
+    mode.service && (boundary !== -1 || options.attach || options.system || options.isolated
+      || options.profileDir !== undefined || options.executable !== undefined || options.debugPort !== undefined
+      || options.provider !== undefined || options.service !== undefined || options.model !== undefined
+      || options.onlineDevtools || options.dryRun || options.createShortcut || options.dataMode !== undefined)
+  ) {
+    throw new CordisXCliParseError('unsupported-option', 'Service mode does not accept App or Agent launch options')
+  }
   const first = positionals[0]
   const hasCommandPrefix = first !== undefined && COMMANDS.has(first)
   // The bare command (including its optional app/profile) is intentionally the
@@ -734,6 +744,7 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   }
   return {
     action: action as 'launch' | 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart',
+    ...(mode.service ? { mode: 'service' as const } : {}),
     ...(app === undefined ? {} : { app }),
     ...(profile === undefined ? {} : { profile }),
     ...(options.dataMode === undefined ? {} : { dataMode: options.dataMode }),

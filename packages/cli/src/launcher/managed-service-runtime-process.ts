@@ -114,9 +114,11 @@ export class ManagedServiceRuntimeProcess {
     }
     const started = performance.now()
     const timeoutMs = record.definition.launch.startupTimeoutMs
+    let conflictPort: number | undefined
     const failure = (reason: 'startup-timeout' | 'spawn-error' | 'process-exited', child?: ChildProcess) =>
       new ManagedServiceStartupError({
-        reason,
+        reason: conflictPort === undefined ? reason : 'loopback-port-in-use',
+        ...(conflictPort === undefined ? {} : { port: conflictPort }),
         elapsedMs: Math.round(performance.now() - started),
         timeoutMs,
         ...(child?.exitCode == null ? {} : { exitCode: child.exitCode }),
@@ -127,12 +129,27 @@ export class ManagedServiceRuntimeProcess {
       child = this.options.spawn(executable, arguments_, {
         cwd: record.access.artifactDirectory,
         env: record.environment,
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
         detached: process.platform !== 'win32',
       })
     } catch {
       throw failure('spawn-error')
     }
+    // Keep only a bounded suffix in memory during startup. Never persist backend
+    // output: the only projected evidence is a recognized numeric loopback port.
+    let stderr = ''
+    const captureBindFailure = (chunk: Buffer) => {
+      stderr = (stderr + chunk.subarray(-1024).toString('utf8')).slice(-1024)
+      const port = Number(/\bEADDRINUSE: [^\r\n]{0,160}\b127\.0\.0\.1:(\d{1,5})\b/u.exec(stderr)?.[1])
+      if (port >= 1 && port <= 65535) conflictPort = port
+    }
+    child.stderr?.on('data', captureBindFailure)
+    const releaseStderr = () => {
+      child.stderr?.off('data', captureBindFailure)
+      child.stderr?.resume()
+      stderr = ''
+    }
+    child.once('close', releaseStderr)
     record.child = child
     managedServiceDiagnostic(record, 'managed-service-spawn', {
       pid: child.pid,
@@ -166,6 +183,7 @@ export class ManagedServiceRuntimeProcess {
             throw failure(childError === undefined ? 'process-exited' : 'spawn-error', child)
           }
           if (performance.now() >= deadline) throw failure('startup-timeout')
+          releaseStderr()
           return origin
         }
       }

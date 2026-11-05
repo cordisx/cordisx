@@ -75,6 +75,13 @@ async function selectionFor(
   const configPath = resolveHomeConfigPath(options)
   const config = await ensureHomeConfig(options)
   const appId = invocation.app ?? config.defaultApp
+  if (
+    invocation.mode === 'service' && ['start', 'restart'].includes(invocation.action) && appId !== config.defaultApp
+  ) {
+    throw new Error(
+      'Service mode uses the default App namespace for plugin management; omit the App or use ' + config.defaultApp,
+    )
+  }
   const selection = await resolveProfileSelection({
     config,
     configPath,
@@ -89,7 +96,12 @@ async function selectionFor(
     configPath,
     appId,
     selection,
-    fingerprint: launchFingerprint({
+    journalDirectory: journalDirectory(
+      path.dirname(configPath),
+      invocation.mode === 'service' ? 'service:' + appId : appId,
+      selection.profileId,
+    ),
+    fingerprint: invocation.mode === 'service' ? 'service' : launchFingerprint({
       source,
       options: invocation.options,
       hostArgs: invocation.hostArgs,
@@ -344,6 +356,7 @@ async function readMutableSupervisorState(
 }
 
 function childArgs(invocation: Extract<CordisXCliInvocation, { readonly action: ManagedAction }>): string[] {
+  if (invocation.mode === 'service') return ['service-owner']
   const args = ['run']
   if (invocation.app !== undefined) args.push(invocation.app)
   if (invocation.profile !== undefined) args.push(invocation.profile)
@@ -370,6 +383,9 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
     uptime: Math.max(0, Date.now() - Date.parse(state.createdAt)),
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
+    ...(state.mode === 'service'
+      ? { mode: state.mode, modelApiUrl: state.modelApiUrl ?? null, desktop: 'unavailable', agents: 'unavailable' }
+      : {}),
     ...(state.startupSurface === undefined ? {} : { startupSurface: state.startupSurface }),
     ...(state.failure === undefined ? {} : { failure: state.failure }),
   }
@@ -379,6 +395,7 @@ async function followLog(
   paths: ReturnType<typeof supervisorPaths>,
   runtime: CordisXCliRuntime,
   directory: string,
+  includeLegacy = true,
 ): Promise<void> {
   const stdout = runtime.stdout ?? console.log
   let offset = 0
@@ -397,7 +414,8 @@ async function followLog(
       from = Math.max(from, latest - 1000)
       for (const [line, at] of seen) if (at < from) seen.delete(line)
       if (journal.truncated) stdout('[cordisx] diagnostic-evidence-gap: log view reached its export bound')
-    } else {try {
+    } else if (includeLegacy) {
+      try {
         const contents = await readFile(paths.log, 'utf8')
         if (contents.length < offset) offset = 0
         if (contents.length > offset) {
@@ -407,7 +425,8 @@ async function followLog(
         }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }}
+      }
+    }
     await new Promise(resolve => setTimeout(resolve, journal.text ? 1000 : 100))
   }
 }
@@ -437,6 +456,10 @@ async function finishReady(
   runtime: CordisXCliRuntime,
   ready: ReadyLaunchResult,
 ): Promise<ReadyLaunchResult> {
+  if (invocation.mode === 'service') {
+    output(runtime, display(ready.state), invocation.options.json)
+    return ready
+  }
   if (
     invocation.createShortcut || runtime.internalShortcutDockRecordPath
     || (process.platform === 'darwin' && ready.target.appId === 'codex')
@@ -518,7 +541,7 @@ export async function runSupervisorCommand(
   }
   const launchId = diagnosticId()
   const journal = new LocalJournal({
-    directory: journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+    directory: target.journalDirectory,
     version: VERSION,
     launchId,
   })
@@ -556,18 +579,23 @@ async function runSelectedSupervisorCommand(
     state = {
       ...state,
       phase: 'failed',
-      failure: 'CordisX background supervisor exited before renderer readiness',
+      failure: state.mode === 'service'
+        ? 'CordisX service owner exited'
+        : 'CordisX background supervisor exited before renderer readiness',
       failedAt: new Date().toISOString(),
     }
   }
   if (invocation.action === 'status') {
     output(
       runtime,
-      state === undefined
+      state === undefined || (invocation.mode === 'service' && state.mode !== 'service')
         ? {
           app: target.appId,
           profile: target.selection.profileId,
           status: 'stopped',
+          ...(invocation.mode === 'service'
+            ? { mode: 'service', ...(state === undefined ? {} : { occupiedBy: 'app' }) }
+            : {}),
           pid: null,
           uptime: 0,
           version: VERSION,
@@ -584,16 +612,17 @@ async function runSelectedSupervisorCommand(
       await followLog(
         paths,
         runtime,
-        journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+        target.journalDirectory,
+        invocation.mode !== 'service',
       )
       return
     }
     try {
       const journal = await readJournal(
-        journalDirectory(path.dirname(target.configPath), target.appId, target.selection.profileId),
+        target.journalDirectory,
         { from: Date.now() - 72 * 60 * 60 * 1000, until: Date.now(), maxBytes: 512 * 1024 },
       )
-      output(runtime, journal.text || await readFile(paths.log, 'utf8'), json)
+      output(runtime, journal.text || (invocation.mode === 'service' ? '' : await readFile(paths.log, 'utf8')), json)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') output(runtime, '', json)
       else throw error
@@ -625,6 +654,21 @@ async function runSelectedSupervisorCommand(
       if (identity === 'dead') {
         await markSupervisorFailed(paths, state, 'CordisX background supervisor exited before renderer readiness')
         state = await readMutableSupervisorState(paths)
+      }
+    }
+    if (state !== undefined && state.mode !== invocation.mode) {
+      if (
+        state.phase === 'failed' && await processIdentityStatus(state.pid, state.processStartedAt) === 'dead'
+        && await hostStatus(state) === 'dead'
+      ) {
+        await removeSupervisorState(paths)
+        state = undefined
+      } else {
+        throw new Error(
+          state.mode === 'service'
+            ? 'This profile is owned by service mode; use cordisx stop --mode service first'
+            : 'This profile is owned by App mode; stop the App instance first',
+        )
       }
     }
     if (invocation.action === 'stop' || invocation.action === 'restart') {
@@ -692,8 +736,8 @@ async function runSelectedSupervisorCommand(
       CORDISX_SUPERVISOR_TOKEN_FILE: paths.bootstrapToken,
     }
     if (
-      invocation.createShortcut || runtime.internalShortcutDockRecordPath
-      || (process.platform === 'darwin' && target.appId === 'codex')
+      invocation.mode !== 'service' && (invocation.createShortcut || runtime.internalShortcutDockRecordPath
+        || (process.platform === 'darwin' && target.appId === 'codex'))
     ) {
       const home = await realpath(path.dirname(target.configPath))
       const presentation = presentationOutput(invocation, runtime, home)
@@ -719,6 +763,7 @@ async function runSelectedSupervisorCommand(
       appId: target.appId,
       profileId: target.selection.profileId,
       phase: 'starting',
+      ...(invocation.mode === 'service' ? { mode: 'service' as const } : {}),
       pid: child.pid!,
       processStartedAt: startedAt,
       instanceToken,

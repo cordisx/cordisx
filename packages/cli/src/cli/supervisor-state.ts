@@ -9,6 +9,8 @@ export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
 /** Durable, deliberately non-secret projection of one transient Host owner. */
 export interface SupervisorState {
   readonly schemaVersion: 1
+  readonly mode?: 'service'
+  readonly modelApiUrl?: string
   readonly appId: string
   readonly profileId: string
   readonly phase: SupervisorPhase
@@ -128,6 +130,8 @@ function validState(value: unknown): value is SupervisorState {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const item = value as Record<string, unknown>
   return item.schemaVersion === 1
+    && (item.mode === undefined || item.mode === 'service')
+    && (item.modelApiUrl === undefined || typeof item.modelApiUrl === 'string')
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
     && (item.phase === 'starting' || item.phase === 'ready' || item.phase === 'stopping' || item.phase === 'failed')

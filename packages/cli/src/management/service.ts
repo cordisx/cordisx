@@ -47,6 +47,7 @@ import {
 } from './persistence.js'
 
 export interface ActivePluginManagementLifecycle {
+  readonly mode?: 'service'
   readonly coordinator: PluginLifecycleCoordinator
   readonly runtimeGeneration: string
 }
@@ -115,13 +116,18 @@ async function runtimeItem(
   homeDir: string,
   item: CordisXPluginActivationItemV1,
   plugins: readonly CordisXPluginActivationItemV1[],
-  activeRuntime: boolean,
+  runtime: ActivePluginManagementLifecycle | undefined,
 ): Promise<PluginManagementPlugin> {
   const staged = await loadStagedPluginPackage(homeDir, item.digest).catch(() => undefined)
   const status = staged === undefined
     ? 'failed'
     : item.enabled
-    ? (activeRuntime ? 'active' : 'pending-activation')
+    ? runtime === undefined
+      ? 'pending-activation'
+      : runtime.mode === 'service'
+          && !staged.serviceModules.some(module => module.declaration.kind === 'managed-backend')
+      ? 'unavailable-in-service-mode'
+      : 'active'
     : 'disabled'
   return {
     id: item.id,
@@ -229,7 +235,7 @@ export async function openPluginManagementService(
       (options.lifecycle?.coordinator.store ?? initialStore).loadActive(),
     ])
     const plugins = await Promise.all(
-      activation.plugins.map(item => runtimeItem(homeDir, item, activation.plugins, options.lifecycle !== undefined)),
+      activation.plugins.map(item => runtimeItem(homeDir, item, activation.plugins, options.lifecycle)),
     )
     return {
       profileId: options.profileId,
@@ -239,7 +245,7 @@ export async function openPluginManagementService(
       migrations: { legacyBrowserSourcesV2: management.migrations?.legacyBrowserSourcesV2 === true },
       runtime: options.lifecycle === undefined
         ? { kind: 'inactive', pendingActivation: activation.plugins.some(plugin => plugin.enabled) }
-        : { kind: 'active', runtimeGeneration },
+        : { kind: 'active', runtimeGeneration, ...(options.lifecycle.mode ? { mode: options.lifecycle.mode } : {}) },
       activationRevision: activation.revision,
       plugins,
     }

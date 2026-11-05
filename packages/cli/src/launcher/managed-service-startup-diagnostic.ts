@@ -3,7 +3,14 @@ import { diagnostic as emitStartup, diagnosticRef } from '../diagnostics/context
 export interface ManagedServiceStartupDiagnostic {
   readonly pluginId: string
   readonly serviceId: string
-  readonly reason: 'startup-timeout' | 'process-exited' | 'spawn-error' | 'preparation-failed' | 'activation-failed'
+  readonly reason:
+    | 'startup-timeout'
+    | 'process-exited'
+    | 'spawn-error'
+    | 'preparation-failed'
+    | 'activation-failed'
+    | 'loopback-port-in-use'
+  readonly port?: number
   readonly elapsedMs?: number
   readonly timeoutMs?: number
   readonly exitCode?: number

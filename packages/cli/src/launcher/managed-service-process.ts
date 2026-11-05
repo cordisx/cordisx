@@ -45,11 +45,18 @@ async function waitForExit(child: ChildProcess, timeoutMs: number): Promise<bool
 export async function terminateManagedServiceChild(
   child: ChildProcess,
   timeouts: ManagedServiceChildTerminationTimeouts = { gracefulMs: 2_000, forceMs: 1_000 },
+  forceProcessGroup = false,
 ): Promise<void> {
   if (child.pid === undefined || exited(child)) return
   child.kill('SIGTERM')
   if (await waitForExit(child, timeouts.gracefulMs)) return
-  child.kill('SIGKILL')
+  if (forceProcessGroup) {
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    }
+  } else child.kill('SIGKILL')
   if (!await waitForExit(child, timeouts.forceMs)) throw new Error('managed service child did not exit after SIGKILL')
 }
 

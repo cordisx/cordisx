@@ -1,12 +1,11 @@
 # Local model and Agent API
 
-Experimental candidate implementation. When a compatible Codex Host launch
-initializes its native model composition, CordisX starts an authenticated
-loopback API alongside that launch. The default port is 8398; a launch
+CordisX starts an authenticated loopback API in [standalone service mode](standalone-services.md)
+and alongside compatible Codex launches that initialize the native model composition. The default port is 8398; a launch
 `CORDISX_MODEL_API_PORT` selects another port (0 requests a free port).
 
 Read `<CORDISX_HOME>/run/model-api/<profile>/server.json` for the actual
-`baseUrl`, `agentUrl` and `accessKeyFile`. The access key persists as a private
+`baseUrl` and `accessKeyFile`. App mode also publishes `agentUrl`. The access key persists as a private
 0600 file. Send `Authorization: Bearer <key>` or `x-api-key: <key>`.
 `GET /healthz` needs no key. Cross-origin browser requests are rejected.
 
@@ -29,7 +28,8 @@ supply their own response for additional protocol routes. Model presence does
 not promise all modalities or protocols; upstream errors retain their status.
 Function/tool and image payloads pass through to the selected service.
 
-The Agent routes use the existing Codex/Claude bridge:
+The Agent routes use the existing Codex/Claude bridge in App mode.
+In service mode, authenticated Agent requests return `503 agent-unavailable`.
 
 - `GET/POST /agents/sessions`; POST accepts `app`, `prompt`, `cwd`, optional
   `providerId`, `model`, `title`, and bridge context fields.

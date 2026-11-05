@@ -325,7 +325,6 @@ export class ManagedServiceNodeHost {
           providers.set(provider.service, { module: state, provider, root: undefined })
         }
       }
-      this.validateDependencies(states, providers)
       const groups = managedServiceStartupGroups(
         states,
         state => `${state.access.pluginIdentity.source}\u0000${state.access.pluginIdentity.pluginId}`,
@@ -379,6 +378,7 @@ export class ManagedServiceNodeHost {
           for (const operation of operations) pending.delete(operation)
         }
         try {
+          this.validateDependencies(group, groupProviders)
           for (const state of groupProviders.values()) {
             const creating = (async () => {
               const root = await state.provider.create({

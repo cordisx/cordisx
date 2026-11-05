@@ -21,6 +21,7 @@ const NUMBERS = new Set([
   'childPid',
   'parentPid',
   'debugPort',
+  'port',
   'exitCode',
   'statusCode',
   'count',

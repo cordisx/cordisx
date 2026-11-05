@@ -14,6 +14,19 @@ describe('parseCordisXCli', () => {
     expect(() => parseCordisXCli(['start', '-M', 'cli', '--mode', 'cli'])).toThrow(CordisXCliParseError)
     expect(parseCordisXCli(['start', '--', '-M', 'cli'])).toMatchObject({ action: 'start', hostArgs: ['-M', 'cli'] })
   })
+  it('parses service lifecycle without accepting App or terminal arguments', () => {
+    for (const action of ['start', 'status', 'logs', 'stop', 'restart']) {
+      expect(parseCordisXCli([action, '-M', 'service', 'codex', 'work'])).toMatchObject({
+        action,
+        mode: 'service',
+        profile: 'work',
+      })
+    }
+    for (const args of [['--attach'], ['--debug-port', '9222'], ['--', '--version'], ['-s', 'test', '-m', 'test']]) {
+      expect(() => parseCordisXCli(['start', '--mode=service', ...args])).toThrow('does not accept')
+    }
+  })
+
   it('unifies app and terminal launch without passing mode to the native client', () => {
     expect(parseCordisXCli(['start', '-s', 'aiden', '-m', 'gpt-6.1-sol'])).toMatchObject({
       action: 'start',

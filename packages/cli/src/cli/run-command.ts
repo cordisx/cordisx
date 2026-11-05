@@ -2,6 +2,7 @@ import { productionStartupReady } from './production-startup-ready.js'
 import { startupTerminalRequests } from '../launcher/startup-provider-admission.js'
 import { abortable } from '../launcher/cdp-session.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
+import { acquireProfileRuntimeOwner } from '../launcher/profile-runtime-owner.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createStartupHostBridge } from './startup-host-bridge.js'
 import { recordRuntimeGeneration, runWithLaunchDiagnostics } from './launch-diagnostics.js'
@@ -152,11 +153,6 @@ import {
   type ProductionPluginManagementComposition,
 } from './production-plugin-management.js'
 
-export {
-  openProductionPluginManagementComposition,
-  type ProductionPluginManagementComposition,
-} from './production-plugin-management.js'
-
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
   await runWithLaunchDiagnostics(argv, runtime, runPreparedCordisXCli)
 }
@@ -165,6 +161,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const startupLifetime = createStartupLifetime(runtime.internalSignal)
   const supervisorRuntime = await createSupervisorRuntime(environment)
+  let releaseRuntimeOwner: (() => Promise<void>) | undefined
   let startupBridge: ReturnType<typeof createStartupHostBridge> | undefined
   const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
   let bootstrap: ProductionHostBootstrap | undefined
@@ -186,6 +183,12 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
   let profileLeaseHandedOff = false
   let prelaunchedHostHandedOff = false
   try {
+    if (
+      runHost === runInjectedHost && !invocation.options.dryRun
+      && (process.platform === 'darwin' || process.platform === 'linux')
+    ) {
+      releaseRuntimeOwner = await acquireProfileRuntimeOwner(rootFromConfigPath(configPath), selection.profileId)
+    }
     bootstrap = await prepareProductionHostBootstrap(prepared, runtime, {
       prelaunch: runHost === runInjectedHost && supervisorRuntime.mainInspector
         && (selection.profile.providerBindings?.length ?? 0) === 0
@@ -971,22 +974,26 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     await supervisorRuntime.markFailed(error instanceof Error ? error.message : String(error)).catch(() => undefined)
     throw error
   } finally {
-    startupLifetime.abort()
-    const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
-    await nativeSubmissionBootstrap?.close().catch(() => undefined)
-    if (prelaunchedHost !== undefined && !prelaunchedHostHandedOff) {
-      await terminateIsolatedCodex(prelaunchedHost.child, profile).catch(() => undefined)
+    try {
+      startupLifetime.abort()
+      const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
+      await nativeSubmissionBootstrap?.close().catch(() => undefined)
+      if (prelaunchedHost !== undefined && !prelaunchedHostHandedOff) {
+        await terminateIsolatedCodex(prelaunchedHost.child, profile).catch(() => undefined)
+      }
+      if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release().catch(() => undefined)
+      await productionPluginManagement?.close().catch(() => undefined)
+      await rendererComposition?.close().catch(() => undefined)
+      await supervisorRuntime.close()
+      await nativeSubmissionCompletion?.catch(() => undefined)
+      await nativeSubmission?.close().catch(() => undefined)
+      await serviceCleanup?.catch(() => undefined)
+      await pluginGenerationArtifactServer?.close()
+      await certifiedPermissionAuthority?.dispose()
+      await startupBridge?.close()
+    } finally {
+      await releaseRuntimeOwner?.()
+      startupLifetime.close()
     }
-    if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release().catch(() => undefined)
-    await productionPluginManagement?.close().catch(() => undefined)
-    await rendererComposition?.close().catch(() => undefined)
-    await supervisorRuntime.close()
-    await nativeSubmissionCompletion?.catch(() => undefined)
-    await nativeSubmission?.close().catch(() => undefined)
-    await serviceCleanup?.catch(() => undefined)
-    await pluginGenerationArtifactServer?.close()
-    await certifiedPermissionAuthority?.dispose()
-    await startupBridge?.close()
-    startupLifetime.close()
   }
 }
