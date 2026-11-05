@@ -306,6 +306,13 @@ export function installReactCordisXManager(
     saveWidth(pane.width)
   })
   let paneLossHandler: (() => void) | undefined
+  let paneRecapture: {
+    readonly route: string | undefined
+    readonly rail: HTMLElement
+    readonly main: HTMLElement
+    readonly deadline: number
+  } | undefined
+  let paneRecaptureTimer: ReturnType<typeof setTimeout> | undefined
   let paneSeatMissingSince: number | undefined
   let paneSeatRetryTimer: ReturnType<typeof setTimeout> | undefined
   const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory, {
@@ -389,6 +396,9 @@ export function installReactCordisXManager(
     return true
   }
   const deactivatePane = () => {
+    paneRecapture = undefined
+    clearTimeout(paneRecaptureTimer)
+    paneRecaptureTimer = undefined
     const current = pane
     if (current === undefined) return
     paneSeatMissingSince = undefined
@@ -702,6 +712,25 @@ export function installReactCordisXManager(
   let scheduled = false
   const reconcile = () => {
     scheduled = false
+    if (paneRecapture !== undefined) {
+      const pending = paneRecapture
+      const seat = resolveManagerPaneSeat(document)
+      const sameRoute = options.nativeRouteHistory !== undefined
+        && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === pending.route
+      const samePage = seat !== undefined && seat.rail === pending.rail && seat.main.anchor === pending.main
+      if (sameRoute && samePage && activatePane()) {
+        paneRecapture = undefined
+        clearTimeout(paneRecaptureTimer)
+        paneRecaptureTimer = undefined
+      } else if (!sameRoute || Date.now() >= pending.deadline) {
+        deactivatePane()
+        paneLossHandler?.()
+      } else {
+        clearTimeout(paneRecaptureTimer)
+        paneRecaptureTimer = setTimeout(schedule, 25)
+        return
+      }
+    }
     if (pane !== undefined) {
       const seat = resolveManagerPaneSeat(document)
       if (seat === undefined) {
@@ -742,8 +771,20 @@ export function installReactCordisXManager(
           && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === pane.nativeRouteIdentity
         const samePage = seat !== undefined && seat.rail === pane.rail
           && seat.main.anchor === pane.mainAnchor
+        const pending = {
+          route: pane.nativeRouteIdentity,
+          rail: pane.rail,
+          main: pane.mainAnchor,
+          deadline: Date.now() + 1000,
+        }
         deactivatePane()
-        if (!sameRoute || !samePage || !activatePane()) paneLossHandler?.()
+        if (!sameRoute || !samePage) paneLossHandler?.()
+        else if (!activatePane()) {
+          // Native split animations temporarily invalidate titlebar geometry.
+          // Recapture the same page after it settles, without unmounting React.
+          paneRecapture = pending
+          paneRecaptureTimer = setTimeout(schedule, 25)
+        }
       } else if (titlebar !== undefined) {
         placeTitlebarSeat(titlebar)
       }

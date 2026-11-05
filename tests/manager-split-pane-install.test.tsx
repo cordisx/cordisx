@@ -132,12 +132,15 @@ describe('Manager installation beside native right tabs', () => {
         const controller = element('[data-app-shell-tab-controller="right"]')
         const replacement = controller.cloneNode(true) as HTMLElement
         controller.replaceWith(replacement)
-        setRect(replacement, rect(858, 6, 240, 32))
+        setRect(replacement, rect(858, 6, 0, 32))
         const replacementTab = replacement.querySelector<HTMLElement>('[role="tab"]')!
         setRect(replacementTab, rect(858, 6, 210, 32))
         replacementTab.style.setProperty('-webkit-app-region', 'no-drag')
         await act(async () => {
-          await new Promise(resolve => setTimeout(resolve, 0))
+          // The controller is temporarily unmeasurable during the native split animation.
+          await new Promise(resolve => setTimeout(resolve, 80))
+          setRect(replacement, rect(858, 6, 240, 32))
+          await new Promise(resolve => setTimeout(resolve, 40))
         })
         await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
         expect(document.querySelector('[data-cordisx-react-manager]')).toBe(manager)
