@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
+import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
 import { nativeProviderFailure } from './native-provider-errors.mjs'
@@ -16,22 +17,6 @@ const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
 const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
 const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
-function configuredOverrides(existing, overrides) {
-  const merged = { ...existing, ...overrides }
-  for (const [name, definition] of Object.entries(overrides)) {
-    if (!name.startsWith('model_providers.') || !object(definition)) continue
-    const id = name.slice('model_providers.'.length)
-    merged[name] = {
-      ...definition,
-      ...object(object(existing?.model_providers)?.[id]),
-      ...object(existing?.[name]),
-      base_url: definition.base_url,
-      wire_api: definition.wire_api,
-    }
-    if (Object.hasOwn(merged, `${name}.base_url`)) merged[`${name}.base_url`] = definition.base_url
-  }
-  return merged
-}
 // Native history and plugin catalogs can exceed the small private control-message budget.
 const maxNativeLineBytes = 64 * 1024 * 1024
 const maxControlLineBytes = 8 * 1024 * 1024
@@ -247,6 +232,9 @@ function controlCall(type, input = {}) {
   return call(control, controlCalls, { type, ...input })
 }
 function nativeCall(method, params) {
+  if (object(params?.config)?.[optionsAuthority] !== undefined) {
+    params = { ...params, config: configuredOverrides(undefined, params.config) }
+  }
   return call(nativeTransport.stdin, privateCalls, { method, params })
 }
 function acknowledgedSwitchResume(message, expected) {
@@ -660,7 +648,12 @@ async function recoverResume(id, params, providerId, failureLine) {
     }
     let result
     try {
-      result = await nativeCall('thread/resume', { ...params, config: { ...object(params.config), ...overrides } })
+      result = await nativeCall('thread/resume', {
+        ...params,
+        config: overrides[optionsAuthority] === undefined
+          ? { ...object(params.config), ...overrides }
+          : configuredOverrides(object(params.config), overrides),
+      })
       if (result?.thread?.id !== params.threadId) throw new Error('Managed resume returned another thread')
     } catch (error) {
       await controlCall('resume-complete', {
@@ -935,7 +928,11 @@ readLines(control, line => {
     if (
       uncertainSwitches.has(params.threadId) && ['thread/resume', 'turn/interrupt'].includes(message.method)
     ) uncertainSwitches.set(params.threadId, undefined)
-    void nativeCall(message.method, params)
+    const overrides = object(message.configuredProviderOverrides)
+    const request = overrides
+      ? { ...params, config: configuredOverrides(object(params.config), overrides) }
+      : params
+    void nativeCall(message.method, request)
       .then(value => write(control, { id: message.id, ok: true, value }))
       .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
     return

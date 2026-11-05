@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { HomeConfigApp, HomeConfigModelServiceProvider, HomeConfigProvider } from '../config/home-config.js'
 import type { CodexConfigModelProviderProjection } from './codex-config-model-providers.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
+import { projectModelServiceCodexOptions } from './model-service-codex-options-projection.js'
 import { applyCodexProviderTargetPlans, readCodexProviderTarget } from './provider-profile-sync-codex-target.js'
 
 /**
@@ -192,11 +193,11 @@ export async function projectModelServicesBeforeLaunch(input: {
   readonly stdout: (line: string) => void
 }): Promise<void> {
   const { selectedId, stdout } = input
-  if (modelServicesOf(input.providers).length === 0) {
+  const noDeclarations = modelServicesOf(input.providers).length === 0
+  if (noDeclarations) {
     if (selectedId !== undefined) {
       stdout(`[cordisx] --provider ${selectedId}: no model service is declared in the CordisX configuration`)
     }
-    return
   }
   if (input.codexHome === undefined) return
   try {
@@ -208,7 +209,7 @@ export async function projectModelServicesBeforeLaunch(input: {
     for (const diagnostic of result.diagnostics) {
       stdout(`[cordisx] model service ${diagnostic.providerId}: ${diagnostic.code}`)
     }
-    if (selectedId !== undefined && result.selectedProviderId !== selectedId) {
+    if (!noDeclarations && selectedId !== undefined && result.selectedProviderId !== selectedId) {
       const reachable = result.providerIds.length === 0 ? 'none' : result.providerIds.join(', ')
       stdout(`[cordisx] --provider ${selectedId}: not available for Codex (declared: ${reachable})`)
     } else if (result.selectedProviderId !== undefined) {
@@ -259,9 +260,6 @@ export async function projectModelServicesToCodex(
     if (provider.enabled === false || !applies(provider, 'codex') || codexSpeaks(provider)) continue
     diagnostics.push({ appId: 'codex', providerId: provider.id, code: 'protocol-unsupported' })
   }
-  if (applicable.length === 0) {
-    return Object.freeze({ appId: 'codex', providerIds: Object.freeze([]), diagnostics: Object.freeze(diagnostics) })
-  }
 
   const target = {
     adapterId: 'codex',
@@ -296,6 +294,7 @@ export async function projectModelServicesToCodex(
         },
       })),
     )
+    raw = projectModelServiceCodexOptions(raw, applicable)
   } catch {
     diagnostics.push({ appId: 'codex', providerId: '*', code: 'codex-config-unwritable' })
     return Object.freeze({ appId: 'codex', providerIds: Object.freeze([]), diagnostics: Object.freeze(diagnostics) })
@@ -310,8 +309,10 @@ export async function projectModelServicesToCodex(
   }
 
   const file = path.join(codexHome, 'config.toml')
-  await mkdir(codexHome, { recursive: true, mode: 0o700 })
-  await writeFile(file, raw, { mode: 0o600 })
+  if (raw !== base.raw) {
+    await mkdir(codexHome, { recursive: true, mode: 0o700 })
+    await writeFile(file, raw, { mode: 0o600 })
+  }
   return Object.freeze({
     appId: 'codex',
     providerIds: Object.freeze(applicable.map(provider => provider.id)),

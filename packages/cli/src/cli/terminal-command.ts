@@ -4,10 +4,12 @@ import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import { MODEL_SERVICE_HEADER_ENV_PREFIX } from '../config/model-service-runtime-options.js'
 import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
 import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
+import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-layer.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
@@ -25,6 +27,7 @@ export function terminalCodexArguments(
   invocation: TerminalInvocation,
   prepared?: Pick<Extract<TerminalProviderResult, { kind: 'prepared' }>, 'providerId' | 'model' | 'provider'>,
   instructionsFile?: string,
+  nativeProfile?: string,
 ): readonly string[] {
   const reserved = (key: string) =>
     key === 'model' || key === 'model_provider' || key === 'model_providers'
@@ -46,7 +49,7 @@ export function terminalCodexArguments(
       }
     }
   }
-  const result: string[] = []
+  const result: string[] = nativeProfile === undefined ? [] : ['--profile', nativeProfile]
   if (prepared) {
     result.push(
       '-c',
@@ -93,6 +96,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   for (const key of Object.keys(environment)) {
     if (
       key.startsWith('CORDISX_SUPERVISOR_') || key.startsWith('CORDISX_NATIVE_')
+      || key.startsWith(MODEL_SERVICE_HEADER_ENV_PREFIX)
       || key === 'CORDISX_DOCK_ENTRY' || key === 'CORDISX_DOCK_RECORD'
       || [
         'CODEX_CLI_PATH',
@@ -163,6 +167,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   }
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
   let child: ChildProcess | undefined
+  let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
   let timer: ReturnType<typeof setInterval> | undefined
   let renewing = false, failure: Error | undefined
   try {
@@ -226,8 +231,15 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       delete environment.ANTHROPIC_AUTH_TOKEN
       delete environment.ANTHROPIC_API_KEY
     }
+    const sharedCodex = shared?.provider === undefined ? undefined : { ...shared, provider: shared.provider }
+    if (client === 'codex' && sharedCodex) {
+      nativeLayer = await prepareTerminalCodexProviderLayer(sharedCodex, environment, invocation.codexArgs)
+    }
+    const effectiveShared = nativeLayer && sharedCodex
+      ? { ...sharedCodex, provider: nativeLayer.provider }
+      : sharedCodex
     const args = client === 'codex'
-      ? terminalCodexArguments(invocation, prepared ?? shared, instructionsFile)
+      ? terminalCodexArguments(invocation, prepared ?? effectiveShared, instructionsFile, nativeLayer?.name)
       : [
         ...terminalClaudeArguments(invocation, instructionsFile),
         ...(claudeSettings ? ['--settings', claudeSettings] : []),
@@ -284,5 +296,6 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   } finally {
     clearInterval(timer)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
+    await nativeLayer?.close()
   }
 }

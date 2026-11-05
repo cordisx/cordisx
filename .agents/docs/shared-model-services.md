@@ -68,6 +68,77 @@ The Codex model selector and the agent tools (`list_model_providers`,
 `create_thread_with_provider`) read the native tables merged with the
 declarations; a declaration wins over a table of the same id.
 
+### Codex request options
+
+A declaration may explicitly own Codex provider request settings through
+`runtimeOptions.codex`. These settings apply to Codex Desktop and the Codex
+terminal client. Claude, the standalone model API, and the general `timeoutMs`
+setting are unaffected.
+Omitted values leave Codex defaults in effect. `false` and `0` are explicit
+values and survive saving and projection.
+
+```json
+{
+  "runtimeOptions": {
+    "codex": {
+      "http_headers": { "X-Client": "my-client" },
+      "env_http_headers": { "X-Access-Token": "SERVICE_EXTRA_TOKEN" },
+      "supports_websockets": false,
+      "request_max_retries": 0,
+      "stream_max_retries": 3,
+      "stream_idle_timeout_ms": 300000
+    }
+  }
+}
+```
+
+- `http_headers` supplies fixed request headers. Values remain in the private
+  CordisX source config. Launchers translate nonempty values into opaque
+  environment header references; child environments carry those values. An
+  explicitly empty fixed header is passed as an empty native literal because
+  Codex skips empty environment references. Manager still reads header names only.
+- `env_http_headers` maps header names to environment variable names. Use this
+  for secrets supplied through CordisX environment entries or the launch
+  environment. Manager can show and edit variable names without reading values.
+- `supports_websockets` enables or disables the Responses WebSocket transport.
+- CordisX stores and passes through retry counts from `0` to `4294967295`.
+  Codex can apply its own effective retry limit.
+  `stream_idle_timeout_ms` accepts integers from `0` to `9007199254740991` and
+  controls inactivity between stream events, rather than total request time.
+- Header names use HTTP token syntax, are unique ignoring case across both
+  maps, and have at most 256 characters. Each map has at most 64 entries. Fixed
+  values have at most 16384 characters and reject control characters, including
+  CR and LF. Environment names use uppercase letters, digits, and underscores,
+  beginning with a letter or underscore.
+
+Manager fixed-header values are write-only. Editing another field preserves
+stored headers; changing or removing a header sends an explicit sparse edit.
+Saving continues to apply after an app restart. No masked placeholder is saved
+as a header value.
+
+A declaration without `runtimeOptions` retains existing native provider
+options. Explicit `runtimeOptions: { "codex": {} }` takes ownership of the six
+settings and restores their native defaults. A source value of
+`runtimeOptions: null` records an explicit clear, including for services used
+only by terminal Codex. Once a native table has been owned, clearing or removing
+options, disabling the declaration, or removing it clears the owned settings.
+A comment records the clear so reopening a thread after a restart cannot restore
+stale overrides. Unrelated native options remain. When the declaration no longer
+owns these settings, deliberate later edits in native config take effect.
+Admitted source settings override stale nested and dotted
+request overrides.
+The isolated native provider worker starts with an inert process default and
+receives its full safe provider table in the admitted request in memory.
+
+Terminal Codex keeps the original provider ID and native data root. If the
+native file has old header entries that would be merged into a CordisX-owned
+map, CordisX supplies a temporary native profile containing only the map
+replacement markers. It removes that file when Codex exits and leaves the
+original `config.toml` untouched. CordisX-owned options cannot be combined with
+a separate native `--profile` for the same invocation. This conflict handling
+requires a Codex CLI that supports V2 profiles. It was verified with bundled
+Codex `0.166.0-alpha.6`.
+
 ## Claude
 
 ```sh
