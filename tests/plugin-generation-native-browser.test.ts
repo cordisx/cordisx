@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { type ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { build as viteBuild } from 'vite'
-import { waitForChromeDebugPort } from './fixtures/chrome-debug-port.js'
+import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import {
   type PluginGenerationArtifactServer,
@@ -70,71 +70,6 @@ function chromeExecutable(): string | undefined {
     }
   }
   return undefined
-}
-
-/** Shared isolated browser policy keeps native fixtures equivalent on macOS and Linux CI. */
-function chromeLaunchArguments(profile: string): string[] {
-  return [
-    '--headless=new',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-networking',
-    '--disable-component-update',
-    '--disable-sync',
-    '--disable-gpu',
-    '--disable-dev-shm-usage',
-    '--no-sandbox',
-    '--remote-allow-origins=*',
-    '--remote-debugging-address=127.0.0.1',
-    '--remote-debugging-port=0',
-    `--user-data-dir=${profile}`,
-    'about:blank',
-  ]
-}
-
-function launchChrome(executable: string, profile: string) {
-  const browser = spawn(executable, chromeLaunchArguments(profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-  let stderr = ''
-  const append = (text: string) => {
-    stderr = (stderr + text).slice(-8_192)
-  }
-  browser.stderr?.on('data', data => append(data.toString()))
-  browser.on('error', error => append(error.message))
-  return { browser, stderr: () => stderr }
-}
-
-async function waitForChromeTarget(
-  profile: string,
-  process: ChildProcess,
-  stderr: () => string,
-): Promise<string> {
-  const deadline = Date.now() + 15_000
-  // Chrome binds its own port and publishes it in this browser's private profile.
-  const port = await waitForChromeDebugPort(
-    process,
-    () => readFile(path.join(profile, 'DevToolsActivePort'), 'utf8'),
-    stderr,
-    Math.max(0, deadline - Date.now()),
-  )
-  while (Date.now() < deadline) {
-    if (process.exitCode !== null || process.signalCode !== null) {
-      throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
-    }
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) })
-      if (response.ok) {
-        const targets = await response.json() as Array<
-          { readonly type?: string; readonly url?: string; readonly webSocketDebuggerUrl?: string }
-        >
-        const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl !== undefined)
-        if (target?.webSocketDebuggerUrl !== undefined) return target.webSocketDebuggerUrl
-      }
-    } catch {
-      // Chrome has not bound its loopback endpoint yet.
-    }
-    await new Promise(resolve => setTimeout(resolve, 50))
-  }
-  throw new Error(`timed out waiting for Chrome CDP: ${stderr()}`)
 }
 
 const chrome = chromeExecutable()
