@@ -18,7 +18,13 @@ createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line)
   const params = message.params ?? {}
   const id = params.threadId
-  requests.push({ method: message.method, providerId: params.modelProvider })
+  requests.push({
+    method: message.method,
+    providerId: params.modelProvider,
+    model: params.model,
+    configProvider: params.config?.model_provider,
+    configModel: params.config?.model,
+  })
   if (message.method === 'initialized') return
   if (message.method === 'thread/start') {
     const created = params.id ?? `locked-${current}`
@@ -67,7 +73,13 @@ createInterface({ input: process.stdin }).on('line', line => {
     }
     const persisted = historical(id)
     const target = params.modelProvider ?? persisted
-    if (current !== persisted || current !== target) {
+    const configTarget = params.config?.model_provider
+    const selectedModel = params.model ?? params.config?.model
+    if (
+      current !== persisted || current !== target
+      || configTarget !== undefined && configTarget !== persisted
+      || selectedModel !== undefined && selectedModel !== 'test-model'
+    ) {
       const table = params.config?.[`model_providers.${persisted}`]
       emit({
         id: message.id,

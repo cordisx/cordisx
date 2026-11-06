@@ -648,11 +648,18 @@ async function recoverResume(id, params, providerId, failureLine) {
     }
     let result
     try {
+      const config = overrides[optionsAuthority] === undefined
+        ? { ...object(params.config), ...overrides, model_provider: providerId, model }
+        : configuredOverrides(object(params.config), {
+          ...overrides,
+          model_provider: providerId,
+          model,
+        })
       result = await nativeCall('thread/resume', {
         ...params,
-        config: overrides[optionsAuthority] === undefined
-          ? { ...object(params.config), ...overrides }
-          : configuredOverrides(object(params.config), overrides),
+        modelProvider: providerId,
+        model,
+        config,
       })
       if (result?.thread?.id !== params.threadId) throw new Error('Managed resume returned another thread')
     } catch (error) {

@@ -6,6 +6,63 @@ import { harness } from './fixtures/native-intermediary-harness.js'
 // Regression: a recognized historical provider table must also acquire the
 // current managed routing lease, not only a missing-provider resume.
 describe('persisted managed provider resume routing', () => {
+  it('retries a historical provider with its persisted selection instead of the current dropdown selection', async () => {
+    const h = await harness(undefined, 'native-provider-switch-process.mjs')
+    try {
+      h.send({ id: 'initialize', method: 'initialize', params: { clientInfo: { name: 'fixture', version: '1' } } })
+      await h.read()
+      h.send({ method: 'initialized', params: {} })
+      h.send({
+        id: 'resume-historical-provider',
+        method: 'thread/resume',
+        params: {
+          threadId: 'locked-provider-b',
+          modelProvider: 'provider-a',
+          model: 'provider-a-model',
+          config: {
+            model_provider: 'provider-a',
+            model: 'provider-a-model',
+            'model_providers.provider-a': {
+              base_url: 'http://127.0.0.1:0/v1',
+              wire_api: 'responses',
+              requires_openai_auth: false,
+            },
+          },
+        },
+      })
+      const resumed = JSON.parse(await h.read())
+      expect(resumed, JSON.stringify(resumed)).toMatchObject({
+        id: 'resume-historical-provider',
+        result: {
+          current: 'provider-b',
+          modelProvider: 'provider-b',
+          model: 'test-model',
+          thread: { id: 'locked-provider-b' },
+        },
+      })
+      expect(h.prepareThreadResume).toHaveBeenCalledWith({
+        threadId: 'locked-provider-b',
+        providerId: 'provider-b',
+        model: 'test-model',
+      })
+      expect(h.completeThreadResume).toHaveBeenCalledWith({
+        threadId: 'locked-provider-b',
+        resumeToken: 'resume-token-locked-provider-b',
+        succeeded: true,
+      })
+      h.send({ id: 'metadata', method: 'fixture/metadata', params: { threadId: 'locked-provider-b' } })
+      expect(JSON.parse(await h.read()).result.requests).toContainEqual({
+        method: 'thread/resume',
+        providerId: 'provider-b',
+        model: 'test-model',
+        configProvider: 'provider-b',
+        configModel: 'test-model',
+      })
+    } finally {
+      await h.close()
+    }
+  })
+
   it('refreshes a recognized persisted managed endpoint before native resume', async () => {
     const h = await harness()
     try {
