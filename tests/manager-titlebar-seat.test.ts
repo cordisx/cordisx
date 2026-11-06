@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { resolveManagerTitlebarSeat } from '../packages/cli/src/renderer/host-probes.js'
 import { managerHeaderBackRoute } from '../packages/cli/src/renderer/manager/model/header-navigation.js'
+import { insetNativeWorkspaceTitle, placeNativeWorkspaceTitlebar } from './helpers/native-viewport-titlebar.js'
 
 function titlebarFixture() {
   const document = new JSDOM(`<!doctype html><body>
@@ -74,6 +75,50 @@ describe('26.924 Manager titlebar seat', () => {
     })
     fixture.end.getBoundingClientRect = () => fixture.rect(1600, 119)
     expect(resolveManagerTitlebarSeat(fixture.document)).toBeUndefined()
+  })
+
+  it('accepts the exact compact workspace title inset while keeping the native end action outside Host bounds', () => {
+    const f = titlebarFixture()
+    const title = f.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    title.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.getBoundingClientRect = () => f.rect(290, 1429)
+    placeNativeWorkspaceTitlebar(f.bar)
+    insetNativeWorkspaceTitle(f.bar)
+    const before = f.document.body.innerHTML
+    expect(resolveManagerTitlebarSeat(f.document)).toEqual({
+      slot: f.slot,
+      native: [f.native, f.end],
+      bounds: { left: 290, top: 0, width: 1393, height: 44 },
+    })
+    expect(f.document.body.innerHTML).toBe(before)
+    f.end.querySelector('button')!.removeAttribute('data-app-shell-workspace-layout-toggle')
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    f.end.querySelector('button')!.setAttribute('data-app-shell-workspace-layout-toggle', 'main')
+    f.slot.parentElement!.removeAttribute('data-app-shell-header-obstacle')
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    f.slot.parentElement!.dataset.appShellHeaderObstacle = 'true'
+    f.slot.getBoundingClientRect = () => f.rect(290, 1409)
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+  })
+
+  it('rejects unrelated partial end overlap or extra native controls outside the inset slot', () => {
+    const f = titlebarFixture()
+    f.slot.getBoundingClientRect = () => f.rect(290, 1423)
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    const title = f.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    title.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.getBoundingClientRect = () => f.rect(290, 1429)
+    placeNativeWorkspaceTitlebar(f.bar)
+    insetNativeWorkspaceTitle(f.bar)
+    const button = f.document.createElement('button')
+    button.textContent = 'Unrelated action'
+    button.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.append(button)
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    button.remove()
+    expect(resolveManagerTitlebarSeat(f.document)).toBeDefined()
+    f.end.insertAdjacentHTML('beforeend', '<button>Extra end control</button>')
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
   })
 
   it('leases only the right page-action group and end control beside the Host title seat', () => {

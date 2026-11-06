@@ -6,6 +6,7 @@ import { captureManagerTitlebarLease } from '../packages/cli/src/renderer/adapte
 import { installReactCordisXManager } from '../packages/cli/src/renderer/manager/install.js'
 import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
 import { installNativeManagerShell } from './fixtures/native-manager-shell.js'
+import { insetNativeWorkspaceTitle, placeNativeWorkspaceTitlebar } from './helpers/native-viewport-titlebar.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
   BrandMark: () => <span data-brand-mark="true" />,
@@ -137,4 +138,72 @@ describe('Manager installation beside native right tabs', () => {
       }
     },
   )
+})
+
+describe('Manager installation in the 26.1103 compact workspace', () => {
+  it('opens and normally closes through the production entry while preserving the native title, draft, and route', async () => {
+    const f = reactManagerFixture()
+    const { document, dom } = f
+    installNativeManagerShell(dom)
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
+      configurable: true,
+      writable: true,
+      value: () => ({ length: 1 }) as DOMRectList,
+    })
+    const element = (selector: string) => document.querySelector<HTMLElement>(selector)!
+    const header = element('header[data-app-shell-titlebar]')
+    const { workspace } = placeNativeWorkspaceTitlebar(header, 1290)
+    insetNativeWorkspaceTitle(header)
+    const main = element('[data-app-shell-main-content-layout]')
+    const frame = element('[data-app-shell-thread-edge-divider]')
+    workspace.append(element('aside[data-app-shell-left-panel-appearance]'), main)
+    frame.insertAdjacentHTML('beforeend', '<input id="native-draft" value="unsent draft" />')
+    const draft = element('#native-draft') as HTMLInputElement
+    const nativeTitle = element('[data-app-shell-titlebar-slot="main"]')
+    const end = element('[data-app-shell-header-slot="end"]')
+    const nativeTitleChildren = [...nativeTitle.childNodes]
+    const nativeTitleStyle = nativeTitle.style.cssText
+    const endChildren = [...end.childNodes]
+    const endStyle = end.style.cssText
+    const endAriaHidden = end.getAttribute('aria-hidden')
+    const route = {
+      available: true as const,
+      key: 'native-home',
+      nativeLocation: { pathname: '/', search: '', hash: '' },
+    }
+    let dispose: (() => void) | undefined
+    try {
+      const pane = resolveManagerPaneSeat(document)
+      expect(pane).toBeDefined()
+      expect(captureManagerTitlebarLease(document, 'native', pane!)).toBeDefined()
+      await act(async () => {
+        dispose = installReactCordisXManager(document, managerModel(), {
+          presentationMode: 'workspace',
+          nativeRouteHistory: { snapshot: () => route, subscribe: () => () => {} },
+        })
+      })
+      await f.click('[data-cordisx-manager-trigger]')
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+      expect(element('[data-cordisx-react-manager]').parentElement).toBe(main)
+      expect(frame.inert).toBe(true)
+      expect(end.inert).toBe(true)
+      expect(document.querySelector('[data-cordisx-manager-pane="true"] button:not(:disabled)')).not.toBeNull()
+      await f.click('[data-cordisx-manager-trigger]')
+      expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
+      expect(frame.inert).toBeFalsy()
+      expect(frame.style.visibility).toBe('')
+      expect([...nativeTitle.childNodes]).toEqual(nativeTitleChildren)
+      expect(nativeTitle.style.cssText).toBe(nativeTitleStyle)
+      expect([...end.childNodes]).toEqual(endChildren)
+      expect(end.style.cssText).toBe(endStyle)
+      expect(end.inert).toBeFalsy()
+      expect(end.getAttribute('aria-hidden')).toBe(endAriaHidden)
+      expect(draft.isConnected).toBe(true)
+      expect(draft.value).toBe('unsent draft')
+      expect(route.key).toBe('native-home')
+    } finally {
+      await act(async () => dispose?.())
+      await f.dispose()
+    }
+  })
 })

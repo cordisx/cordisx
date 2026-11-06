@@ -357,6 +357,9 @@ export function resolveManagerTitlebarContinuation(
     viewportOwner?.position !== baseline.viewportOwner.position
     || viewportOwner?.surface !== baseline.viewportOwner.surface
     || viewportOwner?.frame !== baseline.viewportOwner.frame
+    || viewportOwner?.activePage !== baseline.viewportOwner.activePage
+    || viewportOwner?.workspace !== baseline.viewportOwner.workspace
+    || viewportOwner?.workspaceRow !== baseline.viewportOwner.workspaceRow
     || headerStyle.pointerEvents !== 'none' || region(headerStyle) !== 'drag'
     || titleStyle.pointerEvents !== 'none' || region(titleStyle) !== baseline.titleRegion
     || hostStyle.pointerEvents !== 'none' || region(hostStyle) === 'no-drag'

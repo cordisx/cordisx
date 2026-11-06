@@ -1,7 +1,7 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { resolveNativeViewportTitlebarOwner } from '../packages/cli/src/renderer/adapter/native-viewport-titlebar.js'
-import { placeNativeViewportTitlebar } from './helpers/native-viewport-titlebar.js'
+import { placeNativeViewportTitlebar, placeNativeWorkspaceTitlebar } from './helpers/native-viewport-titlebar.js'
 
 function fixture() {
   const document = new JSDOM('<!doctype html><body><header style="position:fixed"></header></body>').window.document
@@ -54,5 +54,40 @@ describe('native viewport titlebar positioning', () => {
     frame.getBoundingClientRect = () => initial
     header.remove()
     expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+  })
+
+  it('recognizes the captured workspace viewport inside its compact outer frame without writes', () => {
+    const { document, header } = fixture()
+    const owners = placeNativeWorkspaceTitlebar(header)
+    const before = document.body.innerHTML
+    expect(resolveNativeViewportTitlebarOwner(header)).toEqual({ position: 'absolute', ...owners })
+    expect(document.body.innerHTML).toBe(before)
+  })
+
+  it('rejects arbitrary workspace wrappers, inactive pages, and excess compact gutters', () => {
+    const { header } = fixture()
+    const { frame, surface, activePage, workspace, workspaceRow } = placeNativeWorkspaceTitlebar(header)
+    activePage.dataset.appShellActivePage = 'false'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    activePage.dataset.appShellActivePage = 'true'
+    activePage.style.display = 'block'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    activePage.style.display = 'contents'
+    workspace.removeAttribute('data-app-shell-workspace')
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    workspace.dataset.appShellWorkspace = 'true'
+    const wrapper = header.ownerDocument.createElement('div')
+    activePage.append(wrapper)
+    wrapper.append(surface)
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    activePage.append(surface)
+    workspaceRow.style.position = 'static'
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    workspaceRow.style.position = 'relative'
+    const original = frame.getBoundingClientRect()
+    frame.getBoundingClientRect = () => ({ ...original, right: original.right + 20 }) as DOMRect
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeUndefined()
+    frame.getBoundingClientRect = () => original
+    expect(resolveNativeViewportTitlebarOwner(header)).toBeDefined()
   })
 })

@@ -6,7 +6,11 @@ import {
   releaseManagerTitlebarLease,
   resolveManagerTitlebarContinuation,
 } from '../packages/cli/src/renderer/adapter/manager-titlebar-continuation.js'
-import { placeNativeViewportTitlebar } from './helpers/native-viewport-titlebar.js'
+import {
+  insetNativeWorkspaceTitle,
+  placeNativeViewportTitlebar,
+  placeNativeWorkspaceTitlebar,
+} from './helpers/native-viewport-titlebar.js'
 
 type Kind = 'native' | 'settings'
 
@@ -115,6 +119,24 @@ function fixture(kind: Kind) {
 }
 
 describe('26.924 Manager titlebar continuation', () => {
+  it('revokes the compact workspace lease when the captured containing workspace is replaced', () => {
+    const f = fixture('native')
+    const { workspace, activePage } = placeNativeWorkspaceTitlebar(f.header)
+    insetNativeWorkspaceTitle(f.header)
+    const lease = captureManagerTitlebarLease(f.document, 'native', f.pane)!
+    expect(lease).toBeDefined()
+    const owner = f.mount(420)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+    const replacement = workspace.cloneNode(false) as HTMLElement
+    f.setRect(replacement, workspace.getBoundingClientRect())
+    workspace.replaceWith(replacement)
+    replacement.append(activePage)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+    replacement.replaceWith(workspace)
+    workspace.append(activePage)
+    expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+  })
+
   it.each(['settings', 'native'] as const)(
     'retains an absolute viewport %s titlebar only while its captured native owners remain',
     kind => {
