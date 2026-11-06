@@ -6,6 +6,16 @@ const MAX_RENDERER_DIAGNOSTIC_BYTES = 8_192
 
 export class CdpInstallationAbortedError extends Error {}
 
+export class CdpConnectionClosedError extends Error {}
+
+/** Only the inspected target's explicit retirement notification establishes this state. */
+export class CdpTargetClosedError extends CdpConnectionClosedError {
+  constructor() {
+    super('CDP target closed')
+    this.name = 'CdpTargetClosedError'
+  }
+}
+
 export function cdpInstallationAborted(): CdpInstallationAbortedError {
   return new CdpInstallationAbortedError('CordisX CDP installation aborted')
 }
@@ -41,6 +51,7 @@ export class CdpSession {
   private readonly connectionRef = diagnosticId()
   private nextId = 1
   private closed = false
+  private targetClosed = false
   private readonly closeListeners = new Set<() => void>()
   private readonly pending = new Map<number, {
     readonly resolve: (value: Record<string, unknown>) => void
@@ -56,6 +67,16 @@ export class CdpSession {
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as CdpResponse
       if (message.method !== undefined) {
+        if (message.method === 'Inspector.detached' && message.params?.reason === 'target_closed') {
+          this.targetClosed = true
+          this.emitDiagnostic({
+            event: 'cdp-target-closed',
+            requestRef: this.connectionRef,
+            ...this.endpoint,
+            count: this.pending.size,
+          })
+          this.finishClose(new CdpTargetClosedError())
+        }
         for (const listener of this.eventListeners.get(message.method) ?? []) listener(message.params ?? {})
       }
       if (message.id === undefined) return
@@ -72,16 +93,22 @@ export class CdpSession {
         ...this.endpoint,
         count: this.pending.size,
       })
-      this.closed = true
-      for (const callback of this.pending.values()) callback.reject(new Error('CDP connection closed'))
-      this.pending.clear()
-      for (const listener of [...this.closeListeners]) {
-        try {
-          listener()
-        } catch { /* Transport observers cannot affect socket cleanup. */ }
-      }
-      this.closeListeners.clear()
+      this.finishClose(
+        this.targetClosed ? new CdpTargetClosedError() : new CdpConnectionClosedError('CDP connection closed'),
+      )
     })
+  }
+
+  private finishClose(error: CdpConnectionClosedError): void {
+    this.closed = true
+    for (const callback of this.pending.values()) callback.reject(error)
+    this.pending.clear()
+    for (const listener of [...this.closeListeners]) {
+      try {
+        listener()
+      } catch { /* Transport observers cannot affect socket cleanup. */ }
+    }
+    this.closeListeners.clear()
   }
 
   static async connect(url: string): Promise<CdpSession> {
@@ -111,8 +138,9 @@ export class CdpSession {
     params: Record<string, unknown> = {},
     timeoutMs = CDP_REQUEST_TIMEOUT_MS,
   ): Promise<Record<string, unknown>> {
+    if (this.targetClosed) return Promise.reject(new CdpTargetClosedError())
     if (this.closed || this.socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('CDP connection is closed'))
+      return Promise.reject(new CdpConnectionClosedError('CDP connection is closed'))
     }
     const id = this.nextId++
     return new Promise((resolve, reject) => {
@@ -142,7 +170,7 @@ export class CdpSession {
         if (error == null) return
         this.pending.delete(id)
         clearTimeout(timer)
-        reject(error)
+        reject(this.targetClosed ? new CdpTargetClosedError() : error)
       })
     })
   }
@@ -170,6 +198,10 @@ export class CdpSession {
 
   isClosed(): boolean {
     return this.closed || this.socket.readyState !== WebSocket.OPEN
+  }
+
+  isTargetClosed(): boolean {
+    return this.targetClosed
   }
 }
 

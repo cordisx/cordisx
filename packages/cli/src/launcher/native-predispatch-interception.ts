@@ -2,7 +2,7 @@ import { bindDiagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 
-import { CDP_REQUEST_TIMEOUT_MS } from './cdp-session.js'
+import { CDP_REQUEST_TIMEOUT_MS, CdpConnectionClosedError, CdpTargetClosedError } from './cdp-session.js'
 
 const SHA256 = /^[a-f0-9]{64}$/u
 const ACKNOWLEDGEMENT_POLL_MS = 25
@@ -21,6 +21,7 @@ export const CODEX_BUILD_8109_NATIVE_RESOURCE_PINS = Object.freeze({
 export interface NativeResourceInterceptionSession {
   send(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>
   onEvent(method: string, listener: (params: Record<string, unknown>) => void): () => void
+  isTargetClosed?(): boolean
 }
 
 export interface NativeResourceTransformResult {
@@ -267,6 +268,19 @@ export async function installNativeResourceInterception(
   }
   let cleanupPromise: Promise<void> | undefined
   let cleanupFinalStatus: 'unavailable' | 'disposed' = 'unavailable'
+  let firstFailure: unknown
+  const targetClosed = (): boolean => options.session.isTargetClosed?.() === true
+  const throwIfTargetClosed = (): void => {
+    if (targetClosed()) throw firstFailure ?? new CdpTargetClosedError()
+  }
+  const documentOperation = async (operation: () => Promise<unknown>): Promise<void> => {
+    if (targetClosed()) return
+    try {
+      await operation()
+    } catch (error) {
+      if (!targetClosed() || !(error instanceof CdpConnectionClosedError)) throw error
+    }
+  }
 
   const settleRequest = async (
     requestId: string,
@@ -290,7 +304,7 @@ export async function installNativeResourceInterception(
     const failures: unknown[] = []
     for (const expression of state.fences) {
       await settle(
-        (async () => {
+        documentOperation(async () => {
           const response = await options.session.send('Runtime.evaluate', {
             expression,
             returnByValue: true,
@@ -299,7 +313,7 @@ export async function installNativeResourceInterception(
           if (response.exceptionDetails !== undefined) {
             throw new Error('native resource interception fence threw in the renderer')
           }
-        })(),
+        }),
         failures,
       )
     }
@@ -324,13 +338,28 @@ export async function installNativeResourceInterception(
       state.removeAbortListener?.()
       state.removeAbortListener = undefined
       await Promise.allSettled([...state.operations])
-      for (const requestId of state.requests.keys()) await settle(continueOriginal(requestId), failures)
-      if (state.fetchEnabled) await settle(options.session.send('Fetch.disable', {}, timeoutMs), failures)
+      for (const requestId of state.requests.keys()) {
+        await settle(documentOperation(async () => await continueOriginal(requestId)), failures)
+      }
+      if (state.fetchEnabled) {
+        await settle(
+          documentOperation(async () => await options.session.send('Fetch.disable', {}, timeoutMs)),
+          failures,
+        )
+      }
       state.fetchEnabled = false
       if (state.cacheDisabled) {
-        await settle(options.session.send('Network.setCacheDisabled', { cacheDisabled: false }, timeoutMs), failures)
+        await settle(
+          documentOperation(async () =>
+            await options.session.send('Network.setCacheDisabled', { cacheDisabled: false }, timeoutMs)
+          ),
+          failures,
+        )
         state.cacheDisabled = false
       }
+      state.requests.clear()
+      state.acknowledgements.clear()
+      state.fences.clear()
       publish(cleanupFinalStatus)
       if (failures.length > 0) {
         throw new AggregateError(failures, 'native resource interception cleanup was incomplete')
@@ -339,7 +368,8 @@ export async function installNativeResourceInterception(
     await cleanupPromise
   }
   const handle = new Handle(options.target, [...evidence.values()], state, cleanup)
-  const unavailable = (item: NativeResourceEvidence, reason: string): void => {
+  const unavailable = (item: NativeResourceEvidence, reason: string, error: unknown = new Error(reason)): void => {
+    firstFailure ??= error
     item.state = 'unavailable'
     item.reason = reason
     const category = reason.includes('aborted')
@@ -380,7 +410,7 @@ export async function installNativeResourceInterception(
     let acknowledged = false
     while (
       generation === state.documentGeneration && expression !== undefined
-      && Date.now() < deadline && !aborted()
+      && Date.now() < deadline && !aborted() && !state.disposed && !targetClosed()
       && !(acknowledged = await evaluateBoolean(
         options.session,
         expression,
@@ -388,6 +418,7 @@ export async function installNativeResourceInterception(
       ).catch(() => false))
     ) await delay(ACKNOWLEDGEMENT_POLL_MS)
     if (generation !== state.documentGeneration) return
+    throwIfTargetClosed()
     if (state.disposed || aborted()) {
       throw new Error('native resource interception was disposed during acknowledgement')
     }
@@ -403,11 +434,11 @@ export async function installNativeResourceInterception(
     while (
       generation === state.documentGeneration
       && [...evidence.values()].some(item => requiredUrls.has(item.url) && item.state === 'pending')
-      && Date.now() < deadline && !aborted()
+      && Date.now() < deadline && !aborted() && !state.disposed && !targetClosed()
     ) await delay(ACKNOWLEDGEMENT_POLL_MS)
     if (generation !== state.documentGeneration) return
+    throwIfTargetClosed()
     if (state.disposed || aborted()) {
-      await cleanup('unavailable')
       return
     }
     for (const item of evidence.values()) {
@@ -484,7 +515,7 @@ export async function installNativeResourceInterception(
       item.state = 'fulfilled'
       resourceDiagnostic('resource-injected', item)
     } catch (error) {
-      if (item.state !== 'unavailable') unavailable(item, message(error))
+      if (item.state !== 'unavailable') unavailable(item, message(error), error)
       await continueOriginal(event.requestId).catch(() => undefined)
     }
   }
@@ -516,7 +547,7 @@ export async function installNativeResourceInterception(
     state.operations.add(operation)
     void operation.catch(error => {
       for (const item of evidence.values()) {
-        if (item.state !== 'unavailable') unavailable(item, message(error))
+        if (item.state !== 'unavailable') unavailable(item, message(error), error)
       }
       void cleanup('unavailable').catch(() => undefined)
     }).finally(() => state.operations.delete(operation))
@@ -552,7 +583,18 @@ export async function installNativeResourceInterception(
     await acknowledgeDocument(generation)
   } catch (error) {
     for (const item of evidence.values()) {
-      if (item.state !== 'acknowledged' && item.state !== 'unavailable') unavailable(item, message(error))
+      if (item.state !== 'acknowledged' && item.state !== 'unavailable') unavailable(item, message(error), error)
+    }
+    if (targetClosed() && error instanceof CdpConnectionClosedError) {
+      try {
+        await cleanup('unavailable')
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'native resource interception retirement cleanup was incomplete',
+        )
+      }
+      throw error
     }
     await cleanup('unavailable').catch(() => undefined)
   }

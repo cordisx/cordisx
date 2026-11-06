@@ -7,9 +7,10 @@ import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
 import { createDocumentInstallationState, installDocumentBootstrap } from './cdp-installation-bootstrap.js'
+import { failInstallation } from './cdp-installation-cleanup.js'
 import * as support from './cdp-installation-support.js'
 import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
-import { installManagementCdpBinding } from './management-cdp-binding.js'
+import { installManagementCdpBinding, type ManagementCdpBinding } from './management-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 
 export async function install(
@@ -110,6 +111,7 @@ export async function install(
   const documentInstallation = createDocumentInstallationState()
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
   let nativeChannel: { dispose(): Promise<void> } | undefined
+  let managementBinding: ManagementCdpBinding | undefined
   try {
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new support.CdpCertifiedPermissionChannel(session, {
@@ -194,7 +196,7 @@ export async function install(
         signal: marketplaceController.signal,
       })
     }
-    const managementBinding = await installManagementCdpBinding(session, management, lifecycleRequests)
+    managementBinding = await installManagementCdpBinding(session, management, lifecycleRequests)
     let activeProviderRequests = 0
     if (provider !== undefined) {
       removeProviderBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
@@ -849,6 +851,7 @@ export async function install(
       generationJoin = undefined
     }
     await managedServiceUI?.transport?.connected(session)
+    if (session.isTargetClosed()) throw new support.CdpTargetClosedError()
     return {
       target,
       ...(viteDevelopment ? { viteDevelopment: true } : {}),
@@ -910,88 +913,54 @@ export async function install(
         : { nativeInterception: documentInstallation.nativeInterception }),
     }
   } catch (error) {
-    await nativeChannel?.dispose().catch(() => undefined)
-    await documentInstallation.nativeInterception?.dispose().catch(() => undefined)
-    const strictProductionCleanup = loopbackModules && !viteDevelopment
-    const cleanupFailures: unknown[] = []
-    const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
-      try {
-        await operation
-        return true
-      } catch (cleanupError) {
-        if (strictProductionCleanup) cleanupFailures.push(cleanupError)
-        return false
-      }
-    }
-    marketplaceController.abort()
-    providerController?.abort()
-    historyController?.abort()
-    configController?.abort()
-    ownerDocumentController?.abort()
-    serviceConfigController?.abort()
-    credentialController?.abort()
-    actionsController?.abort()
-    permissionController?.abort()
-    iconThemePreferenceController?.abort()
-    lifecycleController?.abort()
-    publisherGrantController?.abort()
-    managedServiceUIController?.abort()
-    removeBindingListener()
-    removeMarketplaceArtifactBindingListener()
-    removeProviderBindingListener()
-    removeHistoryBindingListener()
-    removeConfigBindingListener()
-    removeOwnerDocumentBindingListener()
-    removeServiceConfigBindingListener()
-    removeCredentialBindingListener()
-    removeActionsBindingListener()
-    removePermissionBindingListener()
-    removeIconThemePreferenceBindingListener()
-    unregisterIconThemePreferenceBroadcast?.()
-    removeLifecycleBindingListener()
-    generationJoin?.abort()
-    unregisterLifecycleSession()
-    removePublisherGrantBindingListener()
-    removeManagedServiceUIBindingListener()
-    await certifiedPermissionChannel?.dispose()
-    const scriptRemoved = documentInstallation.identifier === undefined
-      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', {
-        identifier: documentInstallation.identifier,
-      }))
-    if (viteDevelopment) {
-      await attemptCleanup(session.send('Runtime.evaluate', {
-        expression: support.VITE_DISPOSE_EXPRESSION,
-        awaitPromise: true,
-        allowUnsafeEvalBlockedByCSP: true,
-      }))
-    } else if (loopbackModules) {
-      await attemptCleanup(
-        support.evaluateRuntimeOperation(
-          session,
-          support.RENDERER_DISPOSE_EXPRESSION,
-          support.CDP_INJECTION_TIMEOUT_MS,
-        ),
-      )
-    }
-    const cspRestored = !loopbackModules
-      || await attemptCleanup(session.send('Page.setBypassCSP', { enabled: false }))
-    if (viteLoopbackPermissions === undefined) {
-      await attemptCleanup(support.restoreViteLoopbackPermission(session, viteLoopbackPermission))
-    } else await attemptCleanup(viteLoopbackPermissions.release(session, viteLoopbackPermission))
-    if (
-      loopbackModules && !viteDevelopment && documentInstallation.loopbackReloadStarted && scriptRemoved && cspRestored
-    ) {
-      await attemptCleanup(session.send('Page.reload', {}, support.CDP_INJECTION_TIMEOUT_MS))
-    }
-    session.close()
-    if (cleanupFailures.length > 0) {
-      throw new AggregateError(
-        [error, ...cleanupFailures],
-        `CordisX production renderer installation failed and cleanup was incomplete: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      )
-    }
-    throw error
+    return await failInstallation({
+      error,
+      session,
+      target,
+      document: documentInstallation,
+      viteDevelopment,
+      loopbackModules,
+      timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
+      ...(nativeChannel === undefined ? {} : { nativeChannel }),
+      ...(viteLoopbackPermission === undefined ? {} : { permission: viteLoopbackPermission }),
+      ...(viteLoopbackPermissions === undefined ? {} : { permissions: viteLoopbackPermissions }),
+      disposeHost: async () => {
+        marketplaceController.abort()
+        providerController?.abort()
+        historyController?.abort()
+        configController?.abort()
+        ownerDocumentController?.abort()
+        serviceConfigController?.abort()
+        credentialController?.abort()
+        actionsController?.abort()
+        permissionController?.abort()
+        iconThemePreferenceController?.abort()
+        lifecycleController?.abort()
+        managementBinding?.controller?.abort()
+        publisherGrantController?.abort()
+        managedServiceUIController?.abort()
+        removeBindingListener()
+        removeMarketplaceArtifactBindingListener()
+        removeProviderBindingListener()
+        removeHistoryBindingListener()
+        removeConfigBindingListener()
+        removeOwnerDocumentBindingListener()
+        removeServiceConfigBindingListener()
+        removeCredentialBindingListener()
+        removeActionsBindingListener()
+        removePermissionBindingListener()
+        removeIconThemePreferenceBindingListener()
+        unregisterIconThemePreferenceBroadcast?.()
+        removeLifecycleBindingListener()
+        managementBinding?.removeBindingListener()
+        managementBinding?.unsubscribe()
+        generationJoin?.abort()
+        unregisterLifecycleSession()
+        removePublisherGrantBindingListener()
+        removeManagedServiceUIBindingListener()
+        await managedServiceUI?.transport?.disconnecting(session)
+        await certifiedPermissionChannel?.dispose()
+      },
+    })
   }
 }

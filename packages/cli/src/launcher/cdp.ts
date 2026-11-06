@@ -3,6 +3,7 @@ import { bindDiagnostic, diagnosticError, diagnosticRef } from '../diagnostics/c
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
+import { CdpInstallationTargetRetiredError } from './cdp-installation-cleanup.js'
 import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
@@ -333,6 +334,9 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   const readinessOperations = new Set<Promise<void>>()
   let readinessTail = Promise.resolve()
   let ownedWorkspaceInstalled = false
+  const retiredStartupTargets = new Set<string>()
+  let startupInstallationDeadline: number | undefined
+  let awaitingStartupReplacement = false
   const beginReadiness = (
     target: CdpTarget,
     attemptedReloadTarget: 'Vite' | 'production' | undefined,
@@ -393,6 +397,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             attemptedReloadTarget = 'production'
             throw fatalProductionGraphError
           }
+          if (awaitingStartupReplacement && Date.now() >= startupInstallationDeadline!) {
+            attemptedReloadTarget = 'production'
+            throw new Error('Owned native workspace replacement exceeded the renderer installation deadline')
+          }
           watcherStage = 'target-list'
           if (startupNavigation === undefined && options.startupNavigation !== undefined) {
             startupStage('startup-handoff-wait')
@@ -404,7 +412,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const listedTargets = await listTargets(options.port)
           startupStage('target-list-ready')
           if (options.signal.aborted) return
-          const candidates = injectableTargets(listedTargets)
+          const candidates = injectableTargets(listedTargets).filter(target => !retiredStartupTargets.has(target.id))
           const pendingStartupNavigation = startupNavigationPending ? startupNavigation : undefined
           let startupSeed: CdpTarget | undefined
           if (pendingStartupNavigation !== undefined) {
@@ -444,7 +452,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ownedWorkspaceInstalled || !nativeAppTarget(target) || nativeWorkspaceTarget(target)
             ).sort((left, right) => Number(nativeWorkspaceTarget(right)) - Number(nativeWorkspaceTarget(left)))
           }
-          if (browserGraphTransport && candidates.length > 0 && targets.length === 0) {
+          if (browserGraphTransport && candidates.length > 0 && targets.length === 0 && !awaitingStartupReplacement) {
             attemptedReloadTarget = 'production'
             throw new Error('production loopback graph requires a native app:// renderer target')
           }
@@ -499,6 +507,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               state: startupSeed?.id === target.id ? 'owned-startup-seed' : 'native-document',
             })
             startupStage('renderer-install-start')
+            if (
+              options.launcherOwnedNativeTarget === true && nativeWorkspaceTarget(target) && !ownedWorkspaceInstalled
+            ) {
+              startupInstallationDeadline ??= Date.now() + support.CDP_INJECTION_TIMEOUT_MS
+            }
             const activateStartupDocument = startupSeed?.id === target.id && pendingStartupNavigation !== undefined
               ? async (identifier: string): Promise<void> => {
                 await pendingStartupNavigation.activate(identifier)
@@ -528,14 +541,22 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.viteDevelopment,
               options.viteDevelopment === true || browserGraphTransport,
               viteLoopbackPermissions,
-              options.signal,
+              awaitingStartupReplacement
+                ? AbortSignal.any([
+                  options.signal,
+                  AbortSignal.timeout(Math.max(1, startupInstallationDeadline! - Date.now())),
+                ])
+                : options.signal,
               hostMutationGate,
               options.managedServiceUI,
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
               activateStartupDocument,
             )
             installed.set(target.id, record)
-            if (nativeWorkspaceTarget(target)) ownedWorkspaceInstalled = true
+            if (nativeWorkspaceTarget(target)) {
+              ownedWorkspaceInstalled = true
+              awaitingStartupReplacement = false
+            }
             beginReadiness(target, attemptedReloadTarget)
           }
         })
@@ -549,6 +570,25 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           if (error instanceof support.CdpInstallationAbortedError) break
           throw error
         }
+        if (
+          error instanceof CdpInstallationTargetRetiredError
+          && options.launcherOwnedNativeTarget === true && nativeWorkspaceTarget(error.target)
+          && !ownedWorkspaceInstalled && !ownedHostExited()
+          && retiredStartupTargets.size < 3 && Date.now() < startupInstallationDeadline!
+        ) {
+          retiredStartupTargets.add(error.target.id)
+          awaitingStartupReplacement = true
+          if (startupNavigation?.target.id === error.target.id) startupNavigationPending = false
+          diagnostic({
+            event: 'cdp-installation-target-retired',
+            phase: 'installation',
+            resourceRef: diagnosticRef(error.target.id),
+            count: retiredStartupTargets.size,
+            deadline: startupInstallationDeadline,
+          })
+          options.onStatus?.('native workspace replaced during startup; waiting for its new renderer')
+          continue
+        }
         if (attemptedReloadTarget !== undefined) {
           throw new AggregateError(
             [error],
@@ -557,6 +597,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             }`,
           )
         }
+        if (error instanceof CdpInstallationTargetRetiredError) throw error
         const detail = diagnosticError(error)
         const fingerprint = `${watcherStage}:${detail.errorCode}:${detail.statusCode ?? ''}`
         retryCount++

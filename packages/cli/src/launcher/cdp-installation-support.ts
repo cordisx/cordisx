@@ -151,6 +151,7 @@ export {
   abortable,
   CdpInstallationAbortedError,
   CdpSession,
+  CdpTargetClosedError,
   evaluateRuntimeOperation,
   runtimeEvaluationException,
 } from './cdp-session.js'
