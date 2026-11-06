@@ -1,4 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
+import { resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
 
 /**
  * Host-private seat for the native full-bleed Settings layout. 26.930 uses the
@@ -54,7 +55,7 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   if (
     headerRect === undefined || !near(headerRect.left, 0) || !near(headerRect.top, 0)
     || headerRect.height < 40 || headerRect.height > 48
-    || headerStyle.position !== 'fixed' || headerStyle.pointerEvents !== 'none'
+    || resolveNativeViewportTitlebarOwner(header) === undefined || headerStyle.pointerEvents !== 'none'
     || region(headerStyle) !== 'drag'
   ) return undefined
 

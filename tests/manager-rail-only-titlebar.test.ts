@@ -1,6 +1,7 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { resolveManagerRailOnlyTitlebarSeat } from '../packages/cli/src/renderer/adapter/manager-rail-only-titlebar.js'
+import { placeNativeViewportTitlebar } from './helpers/native-viewport-titlebar.js'
 
 function fixture(layout: 'default' | 'custom-titlebar' = 'default') {
   const dom = new JSDOM(`<!doctype html><body>
@@ -75,6 +76,14 @@ function fixture(layout: 'default' | 'custom-titlebar' = 'default') {
 }
 
 describe('26.924 rail-only native titlebar safety probe', () => {
+  it('uses the same measured blank span for an absolute native viewport header', () => {
+    const f = fixture()
+    const { surface } = placeNativeViewportTitlebar(f.header)
+    expect(resolveManagerRailOnlyTitlebarSeat(f.document)?.bounds.left).toBe(166)
+    surface.style.display = 'block'
+    expect(resolveManagerRailOnlyTitlebarSeat(f.document)).toBeUndefined()
+  })
+
   it.each(['default', 'custom-titlebar'] as const)(
     'returns the measured y=0 blank span for %s without changing native DOM',
     layout => {

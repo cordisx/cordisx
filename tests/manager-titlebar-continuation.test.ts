@@ -6,6 +6,7 @@ import {
   releaseManagerTitlebarLease,
   resolveManagerTitlebarContinuation,
 } from '../packages/cli/src/renderer/adapter/manager-titlebar-continuation.js'
+import { placeNativeViewportTitlebar } from './helpers/native-viewport-titlebar.js'
 
 type Kind = 'native' | 'settings'
 
@@ -114,6 +115,30 @@ function fixture(kind: Kind) {
 }
 
 describe('26.924 Manager titlebar continuation', () => {
+  it.each(['settings', 'native'] as const)(
+    'retains an absolute viewport %s titlebar only while its captured native owners remain',
+    kind => {
+      const f = fixture(kind)
+      const { frame, surface } = placeNativeViewportTitlebar(f.header)
+      const lease = captureManagerTitlebarLease(f.document, kind, f.pane)!
+      expect(lease).toBeDefined()
+      const owner = f.mount(420)
+      expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+      const replacement = surface.cloneNode(false) as HTMLElement
+      surface.replaceWith(replacement)
+      replacement.append(f.header)
+      expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+      replacement.replaceWith(surface)
+      surface.append(f.header)
+      expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeDefined()
+      f.header.style.position = 'fixed'
+      expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+      f.header.style.position = 'absolute'
+      frame.style.position = 'static'
+      expect(resolveManagerTitlebarContinuation(f.document, lease, owner)).toBeUndefined()
+    },
+  )
+
   it.each(['settings', 'native'] as const)('retains a %s lease with an explicitly inactive native page', kind => {
     const f = fixture(kind)
     const page = f.document.createElement('div')
