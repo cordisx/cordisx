@@ -14,6 +14,10 @@ export class ManagedServiceEndpointReservations {
     this.owners.set(owner, keys)
   }
 
+  owns(owner: object, key: string): boolean {
+    return this.held.get(key) === owner
+  }
+
   release(owner: object): void {
     for (const key of this.owners.get(owner) ?? []) if (this.held.get(key) === owner) this.held.delete(key)
     this.owners.delete(owner)

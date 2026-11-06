@@ -1,3 +1,12 @@
+import {
+  createBrowserManagedServiceWebEntry,
+  type ManagedServiceWebEntryDescriptor,
+} from './managed-service-web-entry.js'
+import type {
+  ManagedServiceWebEntryUIGetResultV1,
+  ManagedServiceWebEntryUIRegistryV1,
+  ManagedServiceWithWebEntryV1,
+} from '@cordisx/protocol/managed-service-web-entry/v1'
 import { createBrowserStartupObserver, StartupObservationTerminated } from './startup-ui-observer.js'
 import type {
   ManagedServiceBindingV1,
@@ -12,7 +21,6 @@ import type {
   ManagedServiceSubscriptionPageV1,
   ManagedServiceSubscriptionV1,
   ManagedServiceUIGetResultV1,
-  ManagedServiceUIRegistryV1,
   ManagedServiceV1,
 } from '@cordisx/protocol/managed-service-ui/v1'
 import type { StartupUIPrincipal } from '../launcher/startup-ui-rpc.js'
@@ -27,6 +35,8 @@ const AUTHENTICATION_RESPONSE_GRACE_MS = REQUEST_TIMEOUT_MS
 
 type Binding = (payload: string) => void
 interface Pending {
+  readonly webEntryOwner?: string
+  readonly cancel?: () => void
   readonly observation: boolean
   readonly resolve: (value: unknown) => void
   readonly reject: (error: Error) => void
@@ -45,6 +55,7 @@ interface AvailableServiceDescriptor {
   readonly schemaVersion: 1
   readonly binding: ManagedServiceBindingV1
   readonly authenticationTimeoutMs?: number
+  readonly webEntry?: ManagedServiceWebEntryDescriptor
   readonly capabilities: {
     readonly logout: boolean
     readonly readCatalog: boolean
@@ -122,7 +133,7 @@ export class BrowserManagedServiceUIBridge {
     return new BrowserManagedServiceUIBridge(capabilities, profileId, generation, hostCapability)
   }
 
-  bind(owner: ManagedServiceUIOwner): ManagedServiceUIRegistryV1 | undefined {
+  bind(owner: ManagedServiceUIOwner): ManagedServiceWebEntryUIRegistryV1 | undefined {
     if (this.closed || this.disposing) return undefined
     const capability = this.capabilities.get(ownerKey(owner))
     if (capability === undefined) return undefined
@@ -167,6 +178,14 @@ export class BrowserManagedServiceUIBridge {
   }
 
   private removeCapability(key: string): void {
+    for (const [id, pending] of this.pending) {
+      if (pending.webEntryOwner !== key) continue
+      pending.cancel?.()
+      pending.cleanup?.()
+      if (pending.timer !== undefined) clearTimeout(pending.timer)
+      this.pending.delete(id)
+      pending.reject(new Error('managed service UI owner is unavailable'))
+    }
     this.startupObservers.get(key)?.dispose()
     this.startupObservers.delete(key)
     this.capabilities.delete(key)
@@ -282,6 +301,7 @@ export class BrowserManagedServiceUIBridge {
       globalThis[MANAGED_SERVICE_UI_RECEIVER] = undefined
     }
     for (const pending of this.pending.values()) {
+      pending.cancel?.()
       pending.cleanup?.()
       if (pending.timer !== undefined) clearTimeout(pending.timer)
       pending.reject(new Error('managed service UI bridge was disposed'))
@@ -292,7 +312,8 @@ export class BrowserManagedServiceUIBridge {
   /** Host/CDP transport owner signals a real disconnect; idle observation never expires. */
   transportDisconnected(): void {
     for (const [id, pending] of this.pending) {
-      if (!pending.observation) continue
+      if (!pending.observation && pending.webEntryOwner === undefined) continue
+      pending.cancel?.()
       pending.cleanup?.()
       if (pending.timer !== undefined) clearTimeout(pending.timer)
       this.pending.delete(id)
@@ -338,6 +359,28 @@ export class BrowserManagedServiceUIBridge {
         timer,
         cleanup,
         observation: request.operation.startsWith('startup'),
+        ...(request.operation !== 'readWebEntry' ? {} : {
+          webEntryOwner: ownerKey(owner),
+          cancel: () => {
+            try {
+              binding(JSON.stringify({
+                version: 1,
+                token,
+                requestId: nextRequestId(),
+                operation: 'cancelWebEntry',
+                scope: {
+                  profileId: this.profileId,
+                  runtimeGeneration: this.generation,
+                  ...('kind' in owner ? {} : { pluginGeneration: owner.pluginGeneration }),
+                },
+                serviceId: request.serviceId,
+                binding: request.binding,
+                request: request.request,
+                targetRequestId: request.requestId,
+              }))
+            } catch { /* A disconnected transport cannot receive cancellation; the Host deadline still applies. */ }
+          },
+        }),
       })
       try {
         const payload: Record<string, unknown> = {
@@ -369,8 +412,10 @@ export class BrowserManagedServiceUIBridge {
           request.operation === 'authenticate' || request.operation === 'logout'
           || request.operation === 'toggleAccount'
           || request.operation === 'startOAuth' || request.operation === 'cancelOAuth'
+          || request.operation === 'readWebEntry' || request.operation === 'cancelWebEntry'
         ) payload.request = request.request
         if (request.operation === 'pollOAuth') payload.sessionId = request.sessionId
+        if (request.operation === 'cancelWebEntry') payload.targetRequestId = request.targetRequestId
         binding(JSON.stringify(payload))
       } catch (error) {
         cleanup()
@@ -423,14 +468,14 @@ export class BrowserManagedServiceUIBridge {
   }
 }
 
-class BrowserManagedServiceUIRegistry implements ManagedServiceUIRegistryV1 {
+class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistryV1 {
   constructor(
     private readonly bridge: BrowserManagedServiceUIBridge,
     private readonly owner: ManagedServiceUIOwner,
     private readonly token: string,
   ) {}
 
-  async get(request: { readonly serviceId: string }): Promise<ManagedServiceUIGetResultV1> {
+  async get(request: { readonly serviceId: string }): Promise<ManagedServiceWebEntryUIGetResultV1> {
     try {
       const result = await this.bridge.request(this.owner, this.token, {
         requestId: nextRequestId(),
@@ -451,7 +496,7 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceUIRegistryV1 {
     }
   }
 
-  private service(serviceId: string, descriptor: AvailableServiceDescriptor): ManagedServiceV1 {
+  private service(serviceId: string, descriptor: AvailableServiceDescriptor): ManagedServiceWithWebEntryV1 {
     const invoke = async (request: ManagedServiceUIBindingRequest, timeoutMs?: number): Promise<unknown> =>
       await this.bridge.request(this.owner, this.token, request, timeoutMs)
     const authenticationActionTimeoutMs = Number.isSafeInteger(descriptor.authenticationTimeoutMs)
@@ -561,7 +606,14 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceUIRegistryV1 {
         }
         : {}),
       ...(accountControl === undefined ? {} : { accountControl }),
-    } as ManagedServiceV1
+      ...(descriptor.webEntry?.contract !== 'cordisx.managed-service-web-entry/v1' ? {} : {
+        webEntry: createBrowserManagedServiceWebEntry(
+          descriptor.webEntry,
+          nextRequestId,
+          (request, timeoutMs, signal) => this.bridge.request(this.owner, this.token, request, timeoutMs, signal),
+        ),
+      }),
+    } as ManagedServiceWithWebEntryV1
   }
 
   private subscription(
