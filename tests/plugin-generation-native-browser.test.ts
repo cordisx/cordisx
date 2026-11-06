@@ -2,12 +2,12 @@ import { createHash, randomUUID } from 'node:crypto'
 import { accessSync, constants, statSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
-import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { build as viteBuild } from 'vite'
+import { waitForChromeDebugPort } from './fixtures/chrome-debug-port.js'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import {
   type PluginGenerationArtifactServer,
@@ -73,7 +73,7 @@ function chromeExecutable(): string | undefined {
 }
 
 /** Shared isolated browser policy keeps native fixtures equivalent on macOS and Linux CI. */
-function chromeLaunchArguments(port: number, profile: string): string[] {
+function chromeLaunchArguments(profile: string): string[] {
   return [
     '--headless=new',
     '--no-first-run',
@@ -86,31 +86,36 @@ function chromeLaunchArguments(port: number, profile: string): string[] {
     '--no-sandbox',
     '--remote-allow-origins=*',
     '--remote-debugging-address=127.0.0.1',
-    `--remote-debugging-port=${port}`,
+    '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
     'about:blank',
   ]
 }
 
-async function unusedPort(): Promise<number> {
-  const server = createServer()
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => resolve())
-  })
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('Chrome test could not reserve a CDP port')
-  await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
-  return address.port
+function launchChrome(executable: string, profile: string) {
+  const browser = spawn(executable, chromeLaunchArguments(profile), { stdio: ['ignore', 'ignore', 'pipe'] })
+  let stderr = ''
+  const append = (text: string) => {
+    stderr = (stderr + text).slice(-8_192)
+  }
+  browser.stderr?.on('data', data => append(data.toString()))
+  browser.on('error', error => append(error.message))
+  return { browser, stderr: () => stderr }
 }
 
 async function waitForChromeTarget(
-  port: number,
+  profile: string,
   process: ChildProcess,
   stderr: () => string,
-  expectedUrl?: string,
 ): Promise<string> {
   const deadline = Date.now() + 15_000
+  // Chrome binds its own port and publishes it in this browser's private profile.
+  const port = await waitForChromeDebugPort(
+    process,
+    () => readFile(path.join(profile, 'DevToolsActivePort'), 'utf8'),
+    stderr,
+    Math.max(0, deadline - Date.now()),
+  )
   while (Date.now() < deadline) {
     if (process.exitCode !== null || process.signalCode !== null) {
       throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
@@ -121,10 +126,7 @@ async function waitForChromeTarget(
         const targets = await response.json() as Array<
           { readonly type?: string; readonly url?: string; readonly webSocketDebuggerUrl?: string }
         >
-        const target = targets.find(item =>
-          item.type === 'page' && item.webSocketDebuggerUrl !== undefined
-          && (expectedUrl === undefined || item.url?.startsWith(expectedUrl))
-        )
+        const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl !== undefined)
         if (target?.webSocketDebuggerUrl !== undefined) return target.webSocketDebuggerUrl
       }
     } catch {
@@ -175,6 +177,7 @@ describe('plugin generation native browser graph', () => {
         }
       } else response.end('<!doctype html><title>manifest fixture</title>')
     })
+    const profile = path.join(root, 'profile')
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
     try {
@@ -182,9 +185,9 @@ describe('plugin generation native browser graph', () => {
       const address = server.address()
       if (address === null || typeof address === 'string') throw Error('No server address')
       const base = `http://127.0.0.1:${address.port}`
-      const port = await unusedPort()
-      browser = spawn(chrome, chromeLaunchArguments(port, path.join(root, 'profile')), { stdio: 'ignore' })
-      cdp = await CdpClient.connect(await waitForChromeTarget(port, browser, () => ''))
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      cdp = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
       await cdp.send('Page.enable')
       await cdp.send('Page.navigate', { url: base })
       await expect.poll(() => cdp!.evaluate('document.readyState')).toBe('complete')
@@ -251,19 +254,15 @@ describe('plugin generation native browser graph', () => {
         }),
       ),
     ])
-    const port = await unusedPort()
     const profile = path.join(root, 'chrome')
     let server: Awaited<ReturnType<typeof startVitePlayground>> | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
-    let browserStderr = ''
     try {
       // Use the same isolated Linux-compatible launch policy as the other native fixtures.
-      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-      browser.stderr?.on('data', data => {
-        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
-      })
-      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      const target = await waitForChromeTarget(profile, browser, launched.stderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
       await cdp.send('Network.enable')
@@ -333,7 +332,6 @@ describe('plugin generation native browser graph', () => {
     let documentServer: HttpServer | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
-    let browserStderr = ''
     try {
       documentServer = createHttpServer((_request, response) => {
         response.writeHead(200, {
@@ -351,12 +349,9 @@ describe('plugin generation native browser graph', () => {
       const address = documentServer.address()
       if (address === null || typeof address === 'string') throw new Error('strict CSP fixture did not bind')
       const documentUrl = `http://127.0.0.1:${address.port}/`
-      const port = await unusedPort()
-      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-      browser.stderr?.on('data', data => {
-        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
-      })
-      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      const target = await waitForChromeTarget(profile, browser, launched.stderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
       await cdp.send('Page.enable')
@@ -444,7 +439,6 @@ describe('plugin generation native browser graph', () => {
     let documentServer: HttpServer | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
-    let browserStderr = ''
     try {
       artifactServer = await startPluginGenerationArtifactServer()
       const lease = await artifactServer.lease(
@@ -475,12 +469,9 @@ describe('plugin generation native browser graph', () => {
       if (address === null || typeof address === 'string') throw new Error('strict CSP fixture did not bind')
       const documentUrl = `http://127.0.0.1:${address.port}/`
 
-      const port = await unusedPort()
-      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-      browser.stderr?.on('data', data => {
-        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
-      })
-      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      const target = await waitForChromeTarget(profile, browser, launched.stderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
       await cdp.send('Page.enable')
@@ -647,14 +638,10 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
 
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
-    let browserStderr = ''
     try {
-      const port = await unusedPort()
-      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-      browser.stderr?.on('data', data => {
-        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
-      })
-      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      const target = await waitForChromeTarget(profile, browser, launched.stderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
 
@@ -839,7 +826,6 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
     let artifactServer: PluginGenerationArtifactServer | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
-    let browserStderr = ''
     try {
       artifactServer = await startPluginGenerationArtifactServer()
       const lease = await artifactServer.lease({
@@ -851,12 +837,9 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
         artifactDirectory: output,
         runtimeEntry: './module.js',
       }, 'native-browser-generation')
-      const port = await unusedPort()
-      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
-      browser.stderr?.on('data', data => {
-        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
-      })
-      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      const launched = launchChrome(chrome, profile)
+      browser = launched.browser
+      const target = await waitForChromeTarget(profile, browser, launched.stderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
 
