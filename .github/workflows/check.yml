@@ -176,11 +176,22 @@ jobs:
         with:
           node-version: 22
       - uses: ./.github/actions/restore-prepared-host
-      - name: Require Chrome only for the browser group
+      - name: Install the exact Chrome for Testing browser
         if: matrix.project == 'browser'
         run: |
-          chrome=$(command -v google-chrome || command -v chromium)
-          test -n "$chrome"
+          browser_root=$(mktemp -d "$RUNNER_TEMP/cordisx-chrome-XXXXXX")
+          archive="$browser_root/chrome-linux64.zip"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.80/linux64/chrome-linux64.zip \
+            --output "$archive"
+          test "$(stat -c %s "$archive")" = 201329937
+          echo "6a158ba7e01da016f1988bae0643d9e5  $archive" | md5sum --check
+          sha256sum "$archive"
+          unzip -q "$archive" -d "$browser_root"
+          chrome="$browser_root/chrome-linux64/chrome"
+          test -x "$chrome"
+          # Keep the first fixture launch as the first browser execution.
+          echo "Chrome for Testing 156.0.8078.80 at $chrome"
           echo "CHROME_PATH=$chrome" >> "$GITHUB_ENV"
           echo "RESTRICTED_CHROME_EXECUTABLE=$chrome" >> "$GITHUB_ENV"
       - name: Run the selected test group
