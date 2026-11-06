@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   scope:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
@@ -54,7 +54,7 @@ jobs:
 
   changed-quality:
     needs: scope
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -80,7 +80,7 @@ jobs:
   prepare:
     if: github.event_name == 'push' || needs.scope.outputs.docs_only != 'true' || needs.scope.outputs.skill_changed == 'true'
     needs: scope
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -146,7 +146,7 @@ jobs:
   typecheck:
     if: github.event_name == 'push' || needs.scope.outputs.docs_only != 'true'
     needs: [scope, prepare]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -161,7 +161,7 @@ jobs:
   tests:
     if: github.event_name == 'push' || needs.scope.outputs.docs_only != 'true'
     needs: [scope, prepare]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -230,7 +230,7 @@ jobs:
   package:
     if: github.event_name == 'push' || needs.scope.outputs.full == 'true' || needs.scope.outputs.package_checks == 'true' || needs.scope.outputs.skill_changed == 'true'
     needs: [scope, prepare, native-helpers]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -267,7 +267,7 @@ jobs:
   installed:
     if: github.event_name == 'push' || needs.scope.outputs.full == 'true'
     needs: [scope, prepare, package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -297,7 +297,7 @@ jobs:
     # Stable aggregate status: a failed/cancelled prerequisite cannot appear green.
     if: ${{ !cancelled() && always() }}
     needs: [scope, changed-quality, prepare, native-helpers, typecheck, tests, package, installed]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -396,7 +396,7 @@ jobs:
           test -n "$GROUPS" || GROUPS='{}'
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
             --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v4' \
-            --arg environment 'github-hosted/ubuntu-latest/node22' --argjson fullGate "$FULL_GATE" \
+            --arg environment 'github-hosted/ubuntu-24.04/node22' --argjson fullGate "$FULL_GATE" \
             --argjson groups "$GROUPS" --argjson outcomes "$OUTCOMES" \
             --arg result "$RESULT" --arg evidenceUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:(if $fullGate and (($groups.project // []) | index("browser") != null) then "full" else "affected" end),environment:$environment,groups:$groups,outcomes:$outcomes,job:"full",result:$result,evidenceUrl:$evidenceUrl}' \
