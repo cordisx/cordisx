@@ -1,5 +1,5 @@
 import { build } from 'esbuild'
-import { type ChildProcess, spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { once } from 'node:events'
 import { expect, it } from 'vitest'
 import { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import { waitForChromeDebugPort } from './fixtures/chrome-debug-port.js'
+import { launchObservedChrome, observeChromeReadiness } from './fixtures/chrome-launch-diagnostics.js'
 
 const executable = process.env.CHROME_PATH ?? process.env.RESTRICTED_CHROME_EXECUTABLE
 
@@ -41,7 +43,7 @@ it.skipIf(!executable)(
     let chrome: ChildProcess | undefined
     let cdp: CdpSession | undefined
     try {
-      chrome = spawn(executable!, [
+      const launched = launchObservedChrome(executable!, [
         '--headless=new',
         ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
         `--user-data-dir=${profile}`,
@@ -51,15 +53,29 @@ it.skipIf(!executable)(
         '--disable-background-networking',
         '--window-size=1000,800',
         'about:blank',
-      ], { stdio: 'ignore' })
-      let debuggingPort = 0
-      for (let attempt = 0; attempt < 100; attempt++) {
-        try {
-          debuggingPort = Number((await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0])
-          break
-        } catch {
-          await new Promise(resolve => setTimeout(resolve, 50))
-        }
+      ], 4_096)
+      chrome = launched.browser
+      const diagnostics = observeChromeReadiness(chrome, [0, 2_000, 4_000])
+      const deadline = Date.now() + 5_000
+      let debuggingPort: number
+      try {
+        debuggingPort = await waitForChromeDebugPort(
+          chrome,
+          async () => {
+            const contents = await diagnostics.readActivePort(() =>
+              readFile(join(profile, 'DevToolsActivePort'), 'utf8')
+            )
+            return Date.now() < deadline ? contents : ''
+          },
+          launched.stderr,
+          Math.max(0, deadline - Date.now()),
+        )
+        diagnostics.activePort(debuggingPort)
+        diagnostics.ready('port')
+      } catch (error) {
+        throw await diagnostics.failure(error)
+      } finally {
+        await diagnostics.dispose()
       }
       expect(debuggingPort).toBeGreaterThan(0)
       const targets = await (await fetch(`http://127.0.0.1:${debuggingPort}/json/list`)).json() as {

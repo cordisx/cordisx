@@ -49,7 +49,11 @@ to integration when its actual setup requires processes, bundling, or installs.
 For local browser evidence, set `CHROME_PATH` and
 `RESTRICTED_CHROME_EXECUTABLE` to the same Chrome/Chromium executable. The
 restricted-content fixture skips without its variable; a skipped fixture is
-not browser evidence. CI sets both and fails if Chrome is unavailable.
+not browser evidence. CI installs the exact official Chrome for Testing
+156.0.8078.80 Linux archive into a private runner directory, checks its size and
+checksum, and sets both variables to that executable. Setup does not execute the
+browser; the first fixture retains the first launch and its original readiness
+budget. A missing or invalid archive fails the browser job.
 Native App smoke remains a separate explicit command, not an ordinary test
 prerequisite. Missing local Chrome does not block unrelated Node/service work.
 
@@ -70,10 +74,12 @@ and package checks restore it instead of independently installing and building.
 The lightweight quality job uses installation without lifecycle scripts, and
 can run for documentation-only changes without preparing the Host.
 
-Tests run in separate runners with at most three groups active at once; each
-group retains one worker to preserve existing port/process assumptions. Browser
-CI explicitly locates Chrome and supplies both browser fixtures' environment
-variables. Per-group JSON reports include test durations for later balancing.
+Tests run in separate runners with at most four groups active at once; each
+group retains one worker to preserve existing port/process assumptions. Linux
+preparation, checks, and release consumption use the explicit Ubuntu 24.04
+runner generation. Browser CI supplies both executable environment variables
+from the checked test archive. Per-group JSON reports include test durations for
+later balancing.
 The `full` status aggregates selected jobs; failures and cancellations cannot
 be reported as successful coverage. An excluded group is not a passing result
 for that group. Release/Mono evidence must include the complete selected set.
