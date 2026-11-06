@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { type Context, createContext, runInContext } from 'node:vm'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import WebSocket, { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
-import { watchAndInject } from '../packages/cli/src/launcher/cdp.js'
+import { watchAndInject, type WatchInjectionOptions } from '../packages/cli/src/launcher/cdp.js'
+import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
 import type { CdpSession, CdpTarget } from '../packages/cli/src/launcher/cdp-session.js'
 import type { PluginManagementService } from '../packages/cli/src/management/service.js'
 
@@ -19,6 +21,7 @@ async function fixture(options: {
   deniedRestore?: boolean
   heldSeed?: boolean
   replacements?: number
+  lifecycle?: WatchInjectionOptions['pluginLifecycle']
 } = {}) {
   const calls: string[] = []
   const scopes = new Map<string, { socket: WebSocket; context: Context; scripts: Map<string, string> }>()
@@ -188,6 +191,7 @@ async function fixture(options: {
     hasLoopbackGraph: true,
     pluginArtifactOrigin: 'http://127.0.0.1:47123',
     pluginManagement: management,
+    ...(options.lifecycle === undefined ? {} : { pluginLifecycle: options.lifecycle }),
     ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
     ...(options.heldSeed
       ? {
@@ -326,6 +330,70 @@ describe('owned workspace replacement during production installation', () => {
       expect(app.ready).not.toHaveBeenCalled()
     } finally {
       clock.mockRestore()
+      await app.stop()
+    }
+  })
+
+  it('expires the original replacement deadline during recovery after its bootstrap has completed', async () => {
+    let releaseRecovery!: () => void
+    const recovery = new Promise<void>(resolve => releaseRecovery = resolve)
+    let recoveryStarted = false
+    const runtime = new CdpPluginLifecycleRuntime()
+    const recoveredProjection = vi.spyOn(runtime, 'synchronizeRecoveredActivation')
+    const statusProjection = vi.spyOn(runtime, 'synchronizeDevelopmentStatus')
+    const lifecycle = {
+      runtime,
+      handler: {
+        token: 'fixture-lifecycle',
+        profileId: 'fixture',
+        generation: 'fixture-generation',
+        coordinator: {
+          recover: async () => {
+            recoveryStarted = true
+            await recovery
+          },
+        } as never,
+      },
+    }
+    const app = await fixture({ lifecycle })
+    const deadline = new AbortController()
+    const timeouts: number[] = []
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    // Keep target discovery's real timeout; manually expire the actual signal
+    // the production watcher creates for the replacement's remaining deadline.
+    const replacementTimeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      if (milliseconds === 2_000) return timeout(milliseconds)
+      timeouts.push(milliseconds)
+      return deadline.signal
+    })
+    try {
+      const watching = app.start()
+      await vi.waitFor(() => expect(recoveryStarted).toBe(true), { timeout: 3_000 })
+      expect(app.scopes.get('workspace-1')?.context.__cordisxRuntime).toMatchObject({ ready: true })
+      expect(timeouts).toHaveLength(1)
+      expect(timeouts[0]).toBeGreaterThan(0)
+      expect(timeouts[0]).toBeLessThan(60_000)
+      expect(app.ready).not.toHaveBeenCalled()
+      deadline.abort()
+      const result = await watching
+      expect(String(result.error)).toContain('renderer installation failed')
+      expect(app.ready).not.toHaveBeenCalled()
+      expect(app.unsubscribe).toHaveBeenCalledTimes(2)
+      expect(app.calls.filter(call => call.endsWith(':Browser.setPermission:prompt'))).toHaveLength(2)
+      expect(app.calls).toContain('workspace-1:Page.removeScriptToEvaluateOnNewDocument')
+      // Cancellation releases the reservation before durable recovery finishes.
+      const replacementJoin = runtime.beginJoin({} as CdpSession)
+      replacementJoin.abort()
+      releaseRecovery()
+      await nextTurn()
+      expect(recoveredProjection).not.toHaveBeenCalled()
+      expect(statusProjection).not.toHaveBeenCalled()
+      expect(app.ready).not.toHaveBeenCalled()
+    } finally {
+      replacementTimeout.mockRestore()
+      releaseRecovery()
+      recoveredProjection.mockRestore()
+      statusProjection.mockRestore()
       await app.stop()
     }
   })

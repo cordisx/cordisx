@@ -31,19 +31,23 @@ export class NativeMcpRequestClient {
       }, 30_000)
       this.pending.set(requestId, { resolve, reject, timer })
     })
+    const pending = this.pending.get(requestId)!
+    const rejectSend = (error: unknown): void => {
+      if (this.pending.get(requestId) !== pending) return
+      this.pending.delete(requestId)
+      clearTimeout(pending.timer)
+      pending.reject(error instanceof Error ? error : new Error(`Codex Desktop ${method} rejected`))
+    }
     try {
-      await this.bridge.sendMessageFromView({
+      // Native response, timeout and disposal own completion even if dispatch never settles.
+      void Promise.resolve(this.bridge.sendMessageFromView({
         type: 'mcp-request',
         hostId: this.hostId,
         request: { id: requestId, method, params: structuredClone(params) },
-      })
+        coalesce: false,
+      })).catch(rejectSend)
     } catch (error) {
-      const pending = this.pending.get(requestId)
-      if (pending !== undefined) {
-        this.pending.delete(requestId)
-        clearTimeout(pending.timer)
-        pending.reject(error instanceof Error ? error : new Error(`Codex Desktop ${method} rejected`))
-      }
+      rejectSend(error)
     }
     return await response
   }
