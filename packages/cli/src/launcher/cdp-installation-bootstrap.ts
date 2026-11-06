@@ -75,6 +75,7 @@ async function waitForActivatedDocument(options: RendererBootstrapOptions): Prom
 async function bootstrapInstalledDocument(
   options: RendererBootstrapOptions,
   observeProductionGraph: boolean,
+  state: DocumentInstallationState,
 ): Promise<NativeResourceInterception | undefined> {
   const { session, target, nativeSubmission, signal, activateDocument } = options
   const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
@@ -103,6 +104,7 @@ async function bootstrapInstalledDocument(
         timeoutMs: support.CDP_INJECTION_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal }),
       })
+      state.nativeInterception = nativeInterception
       if (nativeInterception.status !== 'active') {
         throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
       }
@@ -192,15 +194,19 @@ export async function installDocumentBootstrap(
     if (exception !== undefined) throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
     return
   }
-  state.nativeInterception = await bootstrapInstalledDocument({
-    session,
-    target,
-    installId: reloadInstallId!,
-    documentSource: productionDocumentSource ?? documentSource,
-    evaluationSource,
-    viteDevelopment,
-    ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
-    ...(signal === undefined ? {} : { signal }),
-    ...(activateDocument === undefined ? {} : { activateDocument: async () => await activateDocument(identifier) }),
-  }, loopbackModules && !viteDevelopment)
+  state.nativeInterception = await bootstrapInstalledDocument(
+    {
+      session,
+      target,
+      installId: reloadInstallId!,
+      documentSource: productionDocumentSource ?? documentSource,
+      evaluationSource,
+      viteDevelopment,
+      ...(nativeSubmission === undefined ? {} : { nativeSubmission }),
+      ...(signal === undefined ? {} : { signal }),
+      ...(activateDocument === undefined ? {} : { activateDocument: async () => await activateDocument(identifier) }),
+    },
+    loopbackModules && !viteDevelopment,
+    state,
+  )
 }

@@ -1,6 +1,7 @@
 import { isRetainedInactiveNativePage, resolveManagerTitlebarSeat } from '../host-probes.js'
 import { clippedTabSpan, resolveManagerSplitTitlebarSeat } from './manager-split-titlebar.js'
 import { resolveManagerSettingsTitlebarSeat } from './manager-settings-titlebar.js'
+import { type NativeViewportTitlebarOwner, resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
 
 type Bounds = Readonly<{ left: number; top: number; width: number; height: number }>
 
@@ -36,6 +37,7 @@ interface NativeControl {
 interface Baseline {
   readonly document: Document
   readonly header: HTMLElement
+  readonly viewportOwner: NativeViewportTitlebarOwner
   readonly start: HTMLElement
   end: HTMLElement
   readonly title: HTMLElement
@@ -176,10 +178,11 @@ export function captureManagerTitlebarLease(
     || header.querySelector('[data-cordisx-manager-titlebar-seat]') !== null
   ) return undefined
   const controls = nativeControls(header, seat.native)
+  const viewportOwner = resolveNativeViewportTitlebarOwner(header)
   const headerStyle = view.getComputedStyle(header)
   const titleStyle = view.getComputedStyle(title)
   if (
-    headerStyle.position !== 'fixed' || headerStyle.pointerEvents !== 'none'
+    viewportOwner === undefined || headerStyle.pointerEvents !== 'none'
     || region(headerStyle) !== 'drag' || titleStyle.pointerEvents !== 'none'
     || controls.length < 2 || controls[0]!.bounds.left < headerRect.left + 80
     || controls[1]!.bounds.right > headerRect.left + 170
@@ -199,6 +202,7 @@ export function captureManagerTitlebarLease(
   issued.set(lease, {
     document,
     header,
+    viewportOwner,
     start,
     end,
     title,
@@ -346,10 +350,17 @@ export function resolveManagerTitlebarContinuation(
     || !near((handleRect.left + handleRect.right) / 2, navRect.right)
   ) return undefined
   const headerStyle = view.getComputedStyle(header)
+  const viewportOwner = resolveNativeViewportTitlebarOwner(header)
   const titleStyle = view.getComputedStyle(title)
   const hostStyle = view.getComputedStyle(owner.titlebarSeat)
   if (
-    headerStyle.position !== 'fixed' || headerStyle.pointerEvents !== 'none' || region(headerStyle) !== 'drag'
+    viewportOwner?.position !== baseline.viewportOwner.position
+    || viewportOwner?.surface !== baseline.viewportOwner.surface
+    || viewportOwner?.frame !== baseline.viewportOwner.frame
+    || viewportOwner?.activePage !== baseline.viewportOwner.activePage
+    || viewportOwner?.workspace !== baseline.viewportOwner.workspace
+    || viewportOwner?.workspaceRow !== baseline.viewportOwner.workspaceRow
+    || headerStyle.pointerEvents !== 'none' || region(headerStyle) !== 'drag'
     || titleStyle.pointerEvents !== 'none' || region(titleStyle) !== baseline.titleRegion
     || hostStyle.pointerEvents !== 'none' || region(hostStyle) === 'no-drag'
     || hostRect.left < baseline.bounds.left - 2

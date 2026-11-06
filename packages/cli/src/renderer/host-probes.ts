@@ -1,3 +1,5 @@
+import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
+
 function visible(element: Element): element is HTMLElement {
   const ElementClass = element.ownerDocument.defaultView?.HTMLElement
   if (ElementClass === undefined || !(element instanceof ElementClass)) return false
@@ -270,6 +272,37 @@ function isTabRowTitle(bar: HTMLElement, title: HTMLElement | undefined, slot: H
   return contents.length === 1 && contents[0]!.contains(slot) && rows?.length === 1 && visible(rows[0]!)
 }
 
+/** 26.1103 insets the ordinary main title 6px beneath its single 36px layout action. */
+function isInsetWorkspaceTitle(bar: HTMLElement, title: HTMLElement, slot: HTMLElement, end: HTMLElement): boolean {
+  const view = bar.ownerDocument.defaultView
+  const owner = resolveNativeViewportTitlebarOwner(bar)
+  const wrapper = slot.parentElement
+  const buttons = end.querySelectorAll('button')
+  if (
+    view === null || owner?.workspace === undefined
+    || bar.getAttribute('data-app-shell-header-layout') !== 'default'
+    || owner.surface?.getAttribute('data-app-shell-unified-tab-strip') !== 'false'
+    || wrapper?.getAttribute('data-app-shell-header-obstacle') !== 'true' || wrapper.parentElement !== title
+    || !visible(wrapper) || buttons.length !== 1
+    || buttons[0]?.getAttribute('data-app-shell-workspace-layout-toggle') !== 'main'
+    || view.getComputedStyle(title).position !== 'absolute'
+    || [...title.querySelectorAll('button,a[href],input,select,textarea,[role="button"]')].some(element =>
+      !slot.contains(element) && visible(element) && view.getComputedStyle(element).visibility === 'visible'
+    )
+  ) return false
+  const barRect = bar.getBoundingClientRect()
+  const titleRect = title.getBoundingClientRect()
+  const slotRect = slot.getBoundingClientRect()
+  const wrapperRect = wrapper.getBoundingClientRect()
+  const endRect = end.getBoundingClientRect()
+  const near = (a: number, b: number) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 2
+  return near(titleRect.left, slotRect.left) && near(titleRect.top, barRect.top)
+    && near(titleRect.right, barRect.right) && near(titleRect.bottom, barRect.bottom)
+    && near(titleRect.right - slotRect.right, 6) && near(endRect.width, 36)
+    && near(wrapperRect.left, slotRect.left) && near(wrapperRect.top, slotRect.top)
+    && near(wrapperRect.right, slotRect.right) && near(wrapperRect.bottom, slotRect.bottom)
+}
+
 /** 26.924 exposes one title surface between its native start and end controls. */
 export function resolveManagerTitlebarSeat(document: Document): {
   readonly slot: HTMLElement
@@ -314,7 +347,8 @@ export function resolveManagerTitlebarSeat(document: Document): {
     || Math.abs(endRect.top - barRect.top) > 2 || endRect.width <= 0 || endRect.width > (endToolbar ? 120 : 64)
     || Math.abs(endRect.right - barRect.right) > 2
     || slotRect.right > barRect.right + 2 || endRect.left < slotRect.left
-    || (slotRect.right > endRect.left + 2 && endRect.right > slotRect.right + 2)
+    || (slotRect.right > endRect.left + 2 && endRect.right > slotRect.right + 2
+      && !isInsetWorkspaceTitle(bar, titles[0]!, slot, ends[0]!))
   ) return undefined
 
   const ElementClass = document.defaultView?.HTMLElement

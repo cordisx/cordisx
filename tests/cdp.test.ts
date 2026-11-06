@@ -2,6 +2,7 @@ import { once } from 'node:events'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -34,6 +35,8 @@ import {
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 import { OwnerDocumentLeaseRegistry } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import type { PluginGenerationGraphLease } from '../packages/cli/src/launcher/plugin-generation-loader.js'
+import { admitBootstrappedRenderer } from '../packages/cli/src/launcher/cdp-renderer-admission.js'
+import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
 
 function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
   return { id, title, url, type: 'page', webSocketDebuggerUrl: `ws://127.0.0.1/${id}` }
@@ -135,26 +138,67 @@ describe('CDP injection timeout configuration', () => {
   })
 
   it('preserves Runtime.evaluate exceptions and awaits the outer composition boot', async () => {
-    expect(runtimeEvaluationException({
+    const exception = {
       exceptionDetails: {
         text: 'Uncaught',
         lineNumber: 8,
         columnNumber: 2,
         exception: { description: 'SyntaxError: fixture graph bootstrap failed' },
       },
-    })).toBe('SyntaxError: fixture graph bootstrap failed (line 9, column 3)')
+    }
+    expect(runtimeEvaluationException(exception)).toBe('SyntaxError: fixture graph bootstrap failed (line 9, column 3)')
 
     const [installationSource, bootstrapSource] = await Promise.all([
       readFile(new URL('../packages/cli/src/launcher/cdp-installation.ts', import.meta.url), 'utf8'),
       readFile(new URL('../packages/cli/src/launcher/cdp-installation-bootstrap.ts', import.meta.url), 'utf8'),
     ])
     expect(bootstrapSource).toContain('CordisX renderer injection evaluation failed:')
-    expect(installationSource).toContain('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')
-    expect(installationSource).toContain(
+    expect(installationSource).toContain('unregisterLifecycleSession = await admitBootstrappedRenderer(')
+    const admit = (session: CdpSession) =>
+      admitBootstrappedRenderer({
+        session,
+        waitForRuntimeBoot: true,
+        timeoutMs: 1_000,
+      })
+    const renderer = (scope: Record<string, unknown>): CdpSession =>
+      ({
+        send: async (_method: string, params: Record<string, unknown>) => ({
+          result: { value: await Function('globalThis', `return ${String(params.expression)}`)(scope) },
+        }),
+      }) as unknown as CdpSession
+    const outerBoot = deferred()
+    const ready = vi.fn()
+    const admission = admit(renderer({
+      __cordisxCompositionBoot: outerBoot.promise,
+      __cordisxBoot: Promise.resolve(),
+      __cordisxRuntime: {},
+    })).then(ready)
+    try {
+      await nextTurn()
+      expect(ready).not.toHaveBeenCalled()
+      outerBoot.resolve()
+      await admission
+      expect(ready).toHaveBeenCalledOnce()
+    } finally {
+      outerBoot.resolve()
+      await admission
+    }
+    await expect(admit(renderer({}))).rejects.toThrow(
       'CordisX renderer composition and runtime boot promises are undefined after injection',
     )
-    expect(installationSource).toContain('CordisX renderer runtime is undefined after boot')
-    expect(installationSource).toContain('error.stack ?? error.message')
+    await expect(admit(renderer({ __cordisxBoot: Promise.resolve() }))).rejects.toThrow(
+      'CordisX renderer runtime is undefined after boot',
+    )
+    const bootFailure = new Error('fixture outer composition failure')
+    bootFailure.stack = 'SyntaxError: fixture outer composition failure\n    at composition boot'
+    await expect(admit(renderer({
+      __cordisxCompositionBoot: Promise.reject(bootFailure),
+      __cordisxBoot: Promise.resolve(),
+      __cordisxRuntime: {},
+    }))).rejects.toThrow(bootFailure.stack)
+    await expect(admit({ send: async () => exception } as unknown as CdpSession)).rejects.toThrow(
+      'renderer lifecycle evaluation failed: SyntaxError: fixture graph bootstrap failed (line 9, column 3)',
+    )
   })
 
   it('emits an executable renderer cleanup that reports failures after clearing production markers', async () => {

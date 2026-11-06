@@ -440,8 +440,12 @@ describe('native app-server intermediary', () => {
       expect(resumed).toMatchObject({ id: 'resume-1', result: { thread: { id: 'managed-thread' } } })
       expect(resumed.result.received).toEqual({
         threadId: 'managed-thread',
+        modelProvider: 'provider-b',
+        model: 'model-b',
         config: {
           keep: 1,
+          model_provider: 'provider-b',
+          model: 'model-b',
           'model_providers.provider-b': { base_url: 'http://127.0.0.1/v1', requires_openai_auth: false },
         },
       })

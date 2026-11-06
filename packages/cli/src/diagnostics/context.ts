@@ -62,6 +62,9 @@ function classifyDiagnosticError(
   depth: number,
 ): { errorCode: string; errorClass: string; statusCode?: number } {
   if (error instanceof Error) {
+    if (error.message === 'CDP target closed') {
+      return { errorCode: 'CDP_TARGET_CLOSED', errorClass: 'local-cdp' }
+    }
     if (error.message === 'CDP connection closed' || error.message === 'CDP connection is closed') {
       return { errorCode: 'CDP_CLOSED', errorClass: 'local-cdp' }
     }

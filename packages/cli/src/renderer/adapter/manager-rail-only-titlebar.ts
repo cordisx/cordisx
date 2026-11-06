@@ -1,4 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
+import { resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
 
 /** Host-private 26.924 probe for destinations with a rail and no native sidebar. */
 export interface ManagerRailOnlyTitlebarSeat {
@@ -46,7 +47,7 @@ export function resolveManagerRailOnlyTitlebarSeat(document: Document): ManagerR
   if (
     headerRect === undefined || !near(headerRect.left, 0) || !near(headerRect.top, 0)
     || headerRect.height < 40 || headerRect.height > 48
-    || headerStyle.position !== 'fixed' || headerStyle.pointerEvents !== 'none'
+    || resolveNativeViewportTitlebarOwner(header) === undefined || headerStyle.pointerEvents !== 'none'
     || region(headerStyle) !== 'drag'
   ) return undefined
 

@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
-import { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import { CdpSession, CdpTargetClosedError } from '../packages/cli/src/launcher/cdp-session.js'
 
 async function fixtureServer(): Promise<{
   readonly server: WebSocketServer
@@ -84,10 +84,43 @@ describe('CdpSession transport authority', () => {
       await expect(session.send('Runtime.neverCompletes')).rejects.toThrow('CDP connection closed')
       await expect(session.send('Runtime.afterClose')).rejects.toThrow('CDP connection is closed')
       expect(session.isClosed()).toBe(true)
+      expect(session.isTargetClosed()).toBe(false)
     } finally {
       session.close()
       server.close()
       await once(server, 'close')
     }
   })
+
+  it.each(['target_closed', 'replaced_with_devtools'])(
+    'distinguishes explicit target retirement from %s detachment',
+    async reason => {
+      const { server, url } = await fixtureServer()
+      server.on('connection', socket => {
+        socket.on('message', () => {
+          socket.send(JSON.stringify({ method: 'Inspector.detached', params: { reason } }))
+          if (reason !== 'target_closed') socket.close()
+        })
+      })
+      const session = await CdpSession.connect(url)
+      const closed = vi.fn()
+      session.onClose(closed)
+      try {
+        const pending = session.send('Runtime.pending')
+        if (reason === 'target_closed') {
+          await expect(pending).rejects.toBeInstanceOf(CdpTargetClosedError)
+          await expect(session.send('Runtime.retired')).rejects.toBeInstanceOf(CdpTargetClosedError)
+          expect(session.isTargetClosed()).toBe(true)
+        } else {
+          await expect(pending).rejects.toThrow('CDP connection closed')
+          expect(session.isTargetClosed()).toBe(false)
+        }
+        expect(closed).toHaveBeenCalledOnce()
+      } finally {
+        session.close()
+        server.close()
+        await once(server, 'close')
+      }
+    },
+  )
 })
