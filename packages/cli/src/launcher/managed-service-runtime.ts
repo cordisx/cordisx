@@ -1,4 +1,5 @@
 import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
+import { createManagedServiceWebEntryReader } from './managed-service-web-entry.js'
 import { bindDiagnostic } from '../diagnostics/context.js'
 import type {
   ManagedServiceControlResultV1,
@@ -247,6 +248,29 @@ export class ManagedServiceRuntime {
     const record = this.records.get(managedIdentityKey(identity))
     if (record === undefined) return undefined
     return this.registrationHandle(record)
+  }
+
+  /** Only the admitted Node module composition can bind this dedicated reader. */
+  bindWebEntry(
+    identity: ManagedServiceIdentityV1,
+    owner: ManagedServiceOwnerV1,
+    declaration: unknown,
+    signal: AbortSignal,
+  ) {
+    const key = managedIdentityKey(identity)
+    const record = this.records.get(key)
+    if (!record || record.access.owner !== owner || record.disposed || signal.aborted) {
+      throw new Error('web entry registration owner is unavailable')
+    }
+    return createManagedServiceWebEntryReader({
+      record,
+      declaration,
+      signal,
+      fetch: this.fetch,
+      current: () => this.records.get(key) === record && this.registrations.get(record.registrationHandle) === record,
+      endpointOwned: origin => this.endpointReservations.owns(record.access, `port:${new URL(origin).port}`),
+      subscribe: listener => this.subscribeServices(listener),
+    })
   }
 
   listRegistrationIdentities(): readonly ManagedServiceIdentityV1[] {

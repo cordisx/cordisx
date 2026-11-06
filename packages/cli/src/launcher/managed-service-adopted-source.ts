@@ -3,6 +3,7 @@ import type {
   ManagedServiceNodeUISourceExtensionV1,
 } from '@cordisx/protocol/managed-service-context/v1'
 import type { ManagedServiceIdentityV1 } from '@cordisx/protocol/managed-service-runtime/v1'
+import type { ManagedServiceWebEntryNodeModuleV1 } from '@cordisx/protocol/managed-service-web-entry-runtime/v1'
 import type { ManagedServiceActivationBinding, ManagedServiceRuntime } from './managed-service-runtime.js'
 import type { ManagedBackendRuntimeServiceModuleAccess } from './packages/authority-access.js'
 import { createManagedServiceSource, type ManagedServiceNodeSourceBinding } from './managed-service-ui-source.js'
@@ -66,6 +67,10 @@ export function adoptedManagedServiceSource(
       }),
   }
   const source = createManagedServiceSource(sourceOptions)
+  const webEntryDeclaration = (state.module as ManagedServiceWebEntryNodeModuleV1 | undefined)?.managedServiceWebEntry
+  const webEntry = webEntryDeclaration === undefined
+    ? undefined
+    : runtime.bindWebEntry(identity, state.binding.owner, webEntryDeclaration, state.binding.signal)
   const loginTimeoutMs = runtime.getLoginTimeoutMs(identity)
   return Object.freeze({
     pluginId: identity.pluginId,
@@ -73,5 +78,6 @@ export function adoptedManagedServiceSource(
     serviceId: identity.serviceId,
     ...(loginTimeoutMs === undefined ? {} : { loginTimeoutMs }),
     source,
+    ...(webEntry === undefined ? {} : { webEntry }),
   })
 }

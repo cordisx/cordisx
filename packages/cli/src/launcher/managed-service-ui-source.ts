@@ -28,6 +28,7 @@ import type {
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import type { ManagedServiceNodeUISourceExtensionV1 } from '@cordisx/protocol/managed-service-context/v1'
 import { randomUUID } from 'node:crypto'
+import type { ManagedServiceWebEntryReader } from './managed-service-web-entry.js'
 
 const SUBSCRIPTION_PAGE_MAX_UPDATES = 32
 
@@ -37,6 +38,7 @@ export interface ManagedServiceNodeSourceBinding {
   readonly serviceId: string
   readonly loginTimeoutMs?: number
   readonly source: ManagedServiceSourceV1
+  readonly webEntry?: ManagedServiceWebEntryReader
 }
 
 export interface ManagedServiceSourceOptions {
