@@ -1,3 +1,4 @@
+import { registerManagedConsoleSeat } from './managed-console-seats.js'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -194,6 +195,7 @@ export class NavigationRegistry extends NavigationRegistryRouting {
       collectionRoot.dataset.cordisxManagerCollectionRoot = 'true'
       const pageBody = content.ownerDocument.createElement('div')
       pageBody.dataset.cordisxManagerPageBody = 'true'
+      registerManagedConsoleSeat(pageBody, page.owner, abortController.signal)
       pageBody.dataset.cordisxPageContentInset = page.metadata.contentInset ?? 'standard'
       content.append(collectionRoot, pageBody)
       const controls = new HostPageControls(content.ownerDocument, pageBody)

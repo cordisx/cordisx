@@ -59,6 +59,12 @@ export class ManagedServiceWebEntryRPC {
     for (const source of sources) this.sources.set(serviceKey(source, source.serviceId), source)
   }
 
+  reader(owner: ManagedServiceUIOwner, serviceId: string) {
+    return !this.disposed && !this.revoked.has(ownerKey(owner))
+      ? this.sources.get(serviceKey(owner, serviceId))?.webEntry
+      : undefined
+  }
+
   descriptor(owner: ManagedServiceUIOwner, serviceId: string) {
     const key = serviceKey(owner, serviceId)
     const source = this.sources.get(key)

@@ -4,9 +4,17 @@ export async function readWebEntryJSON(
   url: URL,
   signal: AbortSignal,
   headers: Readonly<Record<string, string>> = {},
+  body?: object,
 ): Promise<unknown> {
   signal.throwIfAborted()
-  const response = await fetch(url, { method: 'GET', headers, signal, redirect: 'error', credentials: 'omit' })
+  const response = await fetch(url, {
+    method: body === undefined ? 'GET' : 'POST',
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    headers,
+    signal,
+    redirect: 'error',
+    credentials: 'omit',
+  })
   if (signal.aborted || !response.ok || response.redirected) {
     await response.body?.cancel().catch(() => undefined)
     throw new Error('web entry response unavailable')

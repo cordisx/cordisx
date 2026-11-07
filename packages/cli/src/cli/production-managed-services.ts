@@ -14,12 +14,14 @@ export function createProductionManagedServiceLifecycle(input: {
   store: PluginActivationStore
   dryRun: boolean
   requireOwnedProcess?: true
+  nativeManagedConsole?: ConstructorParameters<typeof ManagedServicePluginLifecycleRuntime>[0]['nativeManagedConsole']
 }) {
   return new ManagedServicePluginLifecycleRuntime({
     runtime: input.runtime,
     homeDir: input.homeDir,
     profileId: input.profileId,
     runtimeGeneration: input.generation,
+    ...(input.nativeManagedConsole === undefined ? {} : { nativeManagedConsole: input.nativeManagedConsole }),
     activate: async (activation, options) => {
       if (input.dryRun) return undefined
       const plugins = await loadPluginComposition(input.store, activation)

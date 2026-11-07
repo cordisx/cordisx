@@ -256,6 +256,7 @@ export class ManagedServiceRuntime {
     owner: ManagedServiceOwnerV1,
     declaration: unknown,
     signal: AbortSignal,
+    consoleDeclaration?: unknown,
   ) {
     const key = managedIdentityKey(identity)
     const record = this.records.get(key)
@@ -265,6 +266,7 @@ export class ManagedServiceRuntime {
     return createManagedServiceWebEntryReader({
       record,
       declaration,
+      consoleDeclaration,
       signal,
       fetch: this.fetch,
       current: () => this.records.get(key) === record && this.registrations.get(record.registrationHandle) === record,
