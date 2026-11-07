@@ -1,3 +1,4 @@
+import { MANAGED_CONSOLE_RESULT_SCHEMA } from './managed-service-console-broker.js'
 import type {
   ManagedServiceAcquireResultV1,
   ManagedServiceBoundClientV1,
@@ -113,7 +114,10 @@ export class ManagedServiceRuntimeBroker {
     const { record, state } = acquired
     if (!state.lease.operations.includes(operationId)) return managedFailure('unavailable', 'unsupported', false)
     const operation = record.definition.operations.find(item => item.operationId === operationId)
-    if (operation === undefined || record.origin === undefined) {
+    if (
+      operation === undefined || operation.responseSchema === MANAGED_CONSOLE_RESULT_SCHEMA
+      || record.origin === undefined
+    ) {
       return managedFailure('unavailable', 'unsupported', false)
     }
     try {

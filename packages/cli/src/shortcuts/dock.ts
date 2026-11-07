@@ -1,3 +1,4 @@
+import { installNativeManagedConsoleAdapter, type NativeManagedConsoleAdapter } from './managed-console-agent.js'
 import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import { connect, createConnection } from 'node:net'
 import { chmod, lstat, open, realpath, rename, rm } from 'node:fs/promises'
@@ -232,6 +233,7 @@ async function inspectorClosed(port: number): Promise<boolean> {
 }
 
 export interface HostMainAgentController {
+  readonly managedConsole?: NativeManagedConsoleAdapter
   readonly startupNavigation: StartupNavigationHandoff
   revealAndClose(account?: NativeAccountCapabilityDescriptor, signal?: AbortSignal): Promise<StartupSurface>
   close(): Promise<void>
@@ -297,6 +299,7 @@ export async function installHostMainAgents(input: {
   readyInstanceToken: string
   onStartupRecovery?: (waiting: boolean) => Promise<void>
   dock?: { readonly scope: DockScope; readonly token: string }
+  enableManagedConsole?: boolean
 }): Promise<HostMainAgentController> {
   const emitDiagnostic = bindDiagnostic()
   const matched = /^ws:\/\/127\.0\.0\.1:(\d+)\/[a-f0-9-]+$/u.exec(input.inspectorUrl)
@@ -306,6 +309,7 @@ export async function installHostMainAgents(input: {
   const port = Number(matched[1])
   let session: CdpSession | undefined
   let startup: StartupCoverController | undefined
+  let managedConsole: NativeManagedConsoleAdapter | undefined
   let closed = false
   const startedAt = Date.now()
   let stage: MainAgentStage | 'inspector-connect' = 'inspector-connect'
@@ -408,6 +412,9 @@ export async function installHostMainAgents(input: {
     )
     stage = 'cover-connected'
     mainAgentStage(input.hostPid, startedAt, stage, emitDiagnostic)
+    if (input.enableManagedConsole) {
+      managedConsole = await installNativeManagedConsoleAdapter(session, input.hostPid).catch(() => undefined)
+    }
     if (input.dock) {
       // All code and arguments are selected by the owning launcher. No socket
       // request can provide JavaScript, a module path, or an image path.
@@ -458,11 +465,13 @@ export async function installHostMainAgents(input: {
     )
     // The caller owns process-tree cleanup. Do not disconnect/resume a paused
     // main before that cleanup: its first document may not have a cover yet.
+    await managedConsole?.dispose().catch(() => undefined)
     await startup?.close()
     throw error
   }
   return {
     startupNavigation: startup.startupNavigation,
+    ...(managedConsole === undefined ? {} : { managedConsole }),
     async revealAndClose(account, signal): Promise<StartupSurface> {
       if (!startup) throw new Error('Owned startup surface unavailable')
       const surface = await startup.reveal(account, signal)
@@ -470,6 +479,7 @@ export async function installHostMainAgents(input: {
       return surface
     },
     async close() {
+      await managedConsole?.dispose().catch(() => undefined)
       await startup?.close()
       await closeInspector()
     },

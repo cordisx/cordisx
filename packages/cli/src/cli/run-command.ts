@@ -160,7 +160,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
 async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: CordisXCliRuntime): Promise<void> {
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const startupLifetime = createStartupLifetime(runtime.internalSignal)
-  const supervisorRuntime = await createSupervisorRuntime(environment)
+  let hasManagedBackends = false
+  const supervisorRuntime = await createSupervisorRuntime(environment, {
+    enableManagedConsole: () => hasManagedBackends,
+  })
   let releaseRuntimeOwner: (() => Promise<void>) | undefined
   let startupBridge: ReturnType<typeof createStartupHostBridge> | undefined
   const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
@@ -253,6 +256,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       generation: lifecycleGeneration,
       environment: runtime.env ?? process.env,
       store: lifecycleStore,
+      nativeManagedConsole: supervisorRuntime.managedConsole,
       dryRun: invocation.options.dryRun,
     })
     const lifecycleTransactionRuntime = managedServiceLifecycleRuntime
@@ -313,6 +317,10 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       artifactServer: activePluginGenerationArtifactServer,
       lifecycleRuntime,
     })
+    hasManagedBackends = activatedPlugins.some(plugin =>
+      plugin.enabled && (plugin.manifest?.schemaVersion === 14 || plugin.manifest?.schemaVersion === 15)
+      && plugin.manifest.services.some(service => service.kind === 'managed-backend')
+    )
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
     const startupSession = await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     startupBridge = createStartupHostBridge(managedServiceLifecycleRuntime, selection.profileId, lifecycleGeneration)

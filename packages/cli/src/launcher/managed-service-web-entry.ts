@@ -7,6 +7,10 @@ import type {
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { ManagedServiceRecord } from './managed-service-runtime-record.js'
 import { managedBindingCurrent } from './managed-service-runtime-support.js'
+import {
+  createManagedServiceConsoleBroker,
+  type ManagedServiceConsoleBroker,
+} from './managed-service-console-broker.js'
 import { readWebEntryJSON } from './managed-service-web-entry-http.js'
 
 const SCHEMAS = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/'
@@ -23,6 +27,7 @@ export type ManagedServiceWebEntryValue =
 export interface ManagedServiceWebEntryReader {
   readonly serviceGeneration: string
   readonly timeoutMs: number
+  readonly authenticatedConsole?: ManagedServiceConsoleBroker
   read(serviceGeneration: string, signal: AbortSignal): Promise<ManagedServiceWebEntryValue>
 }
 
@@ -92,6 +97,7 @@ function admittedSource(record: ManagedServiceRecord, value: unknown): ManagedSe
 export function createManagedServiceWebEntryReader(input: {
   readonly record: ManagedServiceRecord
   readonly declaration: unknown
+  readonly consoleDeclaration?: unknown
   readonly signal: AbortSignal
   readonly current: () => boolean
   readonly endpointOwned: (origin: string) => boolean
@@ -101,7 +107,7 @@ export function createManagedServiceWebEntryReader(input: {
   const { record } = input
   const source = admittedSource(record, input.declaration)
   const operation = record.definition.operations.find(item => item.operationId === source.operationId)!
-  return Object.freeze({
+  const entry: ManagedServiceWebEntryReader = {
     get serviceGeneration() {
       return record.binding.serviceGeneration
     },
@@ -220,5 +226,20 @@ export function createManagedServiceWebEntryReader(input: {
         lifecycle.abort()
       }
     },
+  }
+  if (input.consoleDeclaration === undefined) return Object.freeze(entry)
+  const authenticatedConsole = createManagedServiceConsoleBroker({
+    ...input,
+    declaration: input.consoleDeclaration,
+    ownerSignal: input.signal,
+    entry,
+  })
+  return Object.freeze({
+    get serviceGeneration() {
+      return entry.serviceGeneration
+    },
+    timeoutMs: entry.timeoutMs,
+    read: entry.read,
+    authenticatedConsole,
   })
 }

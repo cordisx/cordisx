@@ -31,6 +31,8 @@ export const NATIVE_HELPERS = {
 }
 export const NATIVE_RESOURCES = [
   'dock-agent.cjs',
+  'managed-console-agent.cjs',
+  'managed-console-view.cjs',
   'startup-cover.cjs',
   'startup-cover.css',
   'startup-loading.html',

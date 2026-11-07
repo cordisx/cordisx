@@ -1,3 +1,5 @@
+import { type ManagedConsoleViewRequest, ManagedServiceConsoleRPC } from './managed-service-console-rpc.js'
+import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { ManagedServiceWebEntryRPC, type ManagedServiceWebEntryRPCRequest } from './managed-service-web-entry-rpc.js'
 import type { ManagedServiceWebEntryReader } from './managed-service-web-entry.js'
 import { managedServiceUIBindingEqual as bindingEqual } from './managed-service-ui-binding.js'
@@ -41,6 +43,13 @@ export interface ManagedServiceUISourceBinding extends ManagedServiceUIOwner {
 export type ManagedServiceUIBindingRequest =
   | StartupUIRequest
   | ManagedServiceWebEntryRPCRequest
+  | {
+    readonly requestId: string
+    readonly operation: 'consoleView'
+    readonly serviceId: string
+    readonly binding: ManagedServiceBindingV1
+    readonly request: ManagedConsoleViewRequest
+  }
   | { readonly requestId: string; readonly operation: 'nativeProviders'; readonly serviceId: string }
   | { readonly requestId: string; readonly operation: 'get'; readonly serviceId: string }
   | {
@@ -187,6 +196,7 @@ export function createManagedServiceUIBridgeHandler(input: {
   readonly declaredServices?: readonly (ManagedServiceUIOwner & { readonly serviceId: string })[]
   readonly startupObservers?: readonly StartupUIObserverBinding[]
   readonly readNativeProviders?: () => Promise<readonly unknown[]>
+  readonly nativeManagedConsole?: () => NativeManagedConsoleAdapter | undefined
 }): MutableManagedServiceUIBridgeHandler {
   const hostStartup = input.hostStartup === undefined
     ? undefined
@@ -197,6 +207,7 @@ export function createManagedServiceUIBridgeHandler(input: {
     })
   const startup = createStartupUIRPC(input.startupObservers ?? [])
   const webEntries = new ManagedServiceWebEntryRPC(input.services)
+  const consoleViews = new ManagedServiceConsoleRPC(input.nativeManagedConsole ?? (() => undefined))
   const services = new Map<string, ManagedServiceSourceV1>()
   const declaredServices = new Set(
     (input.declaredServices ?? input.services).map(service => serviceKey(service, service.serviceId)),
@@ -284,6 +295,10 @@ export function createManagedServiceUIBridgeHandler(input: {
       }
       if (!('serviceId' in request)) throw new Error('managed service UI operation is invalid')
       const resolved = resolve(owner, request.serviceId, request.operation === 'get' ? undefined : request.binding)
+      const reader = webEntries.reader(owner, request.serviceId)
+      if (request.operation === 'consoleView') {
+        return clone(await consoleViews.handle(ownerKey(owner), reader, request.request))
+      }
       if (request.operation === 'get') {
         return clone({
           status: 'available',
@@ -293,6 +308,12 @@ export function createManagedServiceUIBridgeHandler(input: {
             contract: 'cordisx.managed-service/v1',
             schemaVersion: 1,
             binding: resolved.source.binding,
+            ...(!reader?.authenticatedConsole || !input.nativeManagedConsole?.() ? {} : {
+              authenticatedConsole: {
+                contract: 'cordisx.managed-service-console/v1',
+                serviceGeneration: reader.serviceGeneration,
+              },
+            }),
             ...(webEntries.descriptor(owner, request.serviceId) === undefined ? {} : {
               webEntry: webEntries.descriptor(owner, request.serviceId),
             }),
@@ -414,6 +435,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       const revision = (ownerRevisions.get(key) ?? 0) + 1
       ownerRevisions.set(key, revision)
       webEntries.replace(owner, [])
+      await consoleViews.disposeOwner(key)
       for (const service of services.keys()) if (service.startsWith(`${key}\u0000`)) services.delete(service)
       const owned = [...subscriptions.entries()].filter(([, state]) => state.ownerKey === key).map(([id]) => id)
       await Promise.allSettled(owned.map(id => unsubscribe(id)))
@@ -432,6 +454,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       startup.disposeOwner(owner)
       const key = ownerKey(owner)
       revokedOwners.add(key)
+      await consoleViews.disposeOwner(key)
       ownerRevisions.set(key, (ownerRevisions.get(key) ?? 0) + 1)
       for (const service of declaredServices) if (service.startsWith(`${key}\u0000`)) declaredServices.delete(service)
       for (const service of services.keys()) {
@@ -444,6 +467,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       if (disposed) return
       disposed = true
       webEntries.dispose()
+      await consoleViews.dispose()
       startup.dispose()
       hostStartup?.dispose()
       await Promise.allSettled([...subscriptions.keys()].map(async subscriptionId => await unsubscribe(subscriptionId)))

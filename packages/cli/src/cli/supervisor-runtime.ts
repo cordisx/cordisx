@@ -1,3 +1,4 @@
+import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { bindDiagnostic, bindDiagnosticContext, diagnostic, diagnosticRef } from '../diagnostics/context.js'
 import { appendFile, lstat, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -91,6 +92,7 @@ export async function createSupervisorRuntime(
   environment: NodeJS.ProcessEnv,
   options: {
     readonly publicationTimeoutMs?: number
+    readonly enableManagedConsole?: () => boolean
     /** Host-private seams for deterministic supervisor runtime tests. */
     readonly platform?: NodeJS.Platform
     readonly installMainAgents?: typeof installHostMainAgents
@@ -107,6 +109,7 @@ export async function createSupervisorRuntime(
   readonly markFailed: (failure: string) => Promise<void>
   readonly close: () => Promise<void>
   readonly mainInspector: boolean
+  readonly managedConsole: () => NativeManagedConsoleAdapter | undefined
   readonly startupNavigation?: Promise<StartupNavigationHandoff | undefined>
 }> {
   const emitDiagnostic = bindDiagnostic()
@@ -144,6 +147,7 @@ export async function createSupervisorRuntime(
   let releaseStartupOperation: (() => Promise<void>) | undefined
   let inspectorUrl: Promise<string> | undefined
   let mainAgents: HostMainAgentController | undefined
+  let managedConsole: NativeManagedConsoleAdapter | undefined
   let resolveStartupNavigation: ((handoff: StartupNavigationHandoff | undefined) => void) | undefined
   let rejectStartupNavigation: ((error: unknown) => void) | undefined
   const startupNavigation = selectedHome === undefined
@@ -284,6 +288,7 @@ export async function createSupervisorRuntime(
   }
   const runtime: Awaited<ReturnType<typeof createSupervisorRuntime>> = {
     mainInspector: selectedHome !== undefined,
+    managedConsole: () => managedConsole,
     ...(startupNavigation === undefined ? {} : { startupNavigation }),
     async markHostLaunched(pid, hostInspectorUrl, debugPort): Promise<boolean> {
       inspectorUrl = hostInspectorUrl
@@ -317,8 +322,10 @@ export async function createSupervisorRuntime(
           readyStatePath: supervisorPaths(home, app, profile).state,
           readyInstanceToken: supervisorToken,
           onStartupRecovery,
+          enableManagedConsole: options.enableManagedConsole?.() === true,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        managedConsole = mainAgents.managedConsole
         publishStartupNavigation(mainAgents.startupNavigation, pid)
         dockAgentInstalled = dock !== undefined
       } else {
@@ -350,8 +357,10 @@ export async function createSupervisorRuntime(
           readyStatePath: supervisorPaths(home, app, profile).state,
           readyInstanceToken: supervisorToken,
           onStartupRecovery,
+          enableManagedConsole: options.enableManagedConsole?.() === true,
           ...(dock ? { dock: { scope: dock, token: supervisorToken } } : {}),
         })
+        managedConsole = mainAgents.managedConsole
         publishStartupNavigation(mainAgents.startupNavigation, current.hostPid)
         dockAgentInstalled = dock !== undefined
       }
@@ -420,6 +429,8 @@ export async function createSupervisorRuntime(
       rejectStartupNavigation?.(new Error('Owned startup navigation closed before handoff'))
       resolveStartupNavigation = undefined
       rejectStartupNavigation = undefined
+      await managedConsole?.dispose().catch(() => undefined)
+      managedConsole = undefined
       await mainAgents?.close().catch(() => undefined)
       await control?.close().catch(() => undefined)
       await releaseStartupOperation?.().catch(() => undefined)

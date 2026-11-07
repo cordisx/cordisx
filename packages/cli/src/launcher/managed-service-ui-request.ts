@@ -224,7 +224,7 @@ function operationEnvelope(value: unknown, operation: unknown): void {
   const common = ['version', 'token', 'requestId', 'operation', 'scope', 'serviceId']
   const allowed = operation === 'get' || operation === 'nativeProviders'
     ? common
-    : operation === 'readWebEntry'
+    : operation === 'readWebEntry' || operation === 'consoleView'
     ? [...common, 'binding', 'request']
     : operation === 'cancelWebEntry'
     ? [...common, 'binding', 'request', 'targetRequestId']
@@ -294,6 +294,26 @@ export function parseManagedServiceUIBindingRequest(
   const currentBinding = binding(envelope.binding, handler, owner)
   if (currentBinding.identity.serviceId !== common.serviceId) {
     throw new Error('managed service UI binding service is stale or spoofed')
+  }
+  if (envelope.operation === 'consoleView') {
+    const raw = exact(envelope.request, ['viewId', 'serviceGeneration', 'action', 'bounds'], 'managed console view')
+    const viewId = requestId(raw.viewId)
+    const serviceGeneration = requestId(raw.serviceGeneration)
+    const base = { ...common, operation: 'consoleView' as const, binding: currentBinding }
+    if ((raw.action === 'mount' || raw.action === 'dispose') && !Object.hasOwn(raw, 'bounds')) {
+      return { ...base, request: { action: raw.action, viewId, serviceGeneration } }
+    }
+    if (raw.action !== 'update') throw new Error('Managed console action is invalid')
+    const bounds = raw.bounds === null
+      ? null
+      : exact(raw.bounds, ['x', 'y', 'width', 'height'], 'managed console bounds')
+    const parsed = bounds === null ? null : {
+      x: sequence(bounds.x, 'console x'),
+      y: sequence(bounds.y, 'console y'),
+      width: sequence(bounds.width, 'console width'),
+      height: sequence(bounds.height, 'console height'),
+    }
+    return { ...base, request: { action: 'update', viewId, serviceGeneration, bounds: parsed } }
   }
   if (envelope.operation === 'readWebEntry' || envelope.operation === 'cancelWebEntry') {
     const read = exact(envelope.request, ['contract', 'binding', 'serviceGeneration'], 'web entry read')

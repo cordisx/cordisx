@@ -1,3 +1,5 @@
+import { createBrowserManagedServiceConsole, type ManagedConsoleDescriptor } from './managed-service-console-view.js'
+import type { ManagedServiceWithConsoleV1 } from '@cordisx/protocol/managed-service-console/v1'
 import {
   createBrowserManagedServiceWebEntry,
   type ManagedServiceWebEntryDescriptor,
@@ -5,7 +7,6 @@ import {
 import type {
   ManagedServiceWebEntryUIGetResultV1,
   ManagedServiceWebEntryUIRegistryV1,
-  ManagedServiceWithWebEntryV1,
 } from '@cordisx/protocol/managed-service-web-entry/v1'
 import { createBrowserStartupObserver, StartupObservationTerminated } from './startup-ui-observer.js'
 import type {
@@ -56,6 +57,7 @@ interface AvailableServiceDescriptor {
   readonly binding: ManagedServiceBindingV1
   readonly authenticationTimeoutMs?: number
   readonly webEntry?: ManagedServiceWebEntryDescriptor
+  readonly authenticatedConsole?: ManagedConsoleDescriptor
   readonly capabilities: {
     readonly logout: boolean
     readonly readCatalog: boolean
@@ -413,6 +415,7 @@ export class BrowserManagedServiceUIBridge {
           || request.operation === 'toggleAccount'
           || request.operation === 'startOAuth' || request.operation === 'cancelOAuth'
           || request.operation === 'readWebEntry' || request.operation === 'cancelWebEntry'
+          || request.operation === 'consoleView'
         ) payload.request = request.request
         if (request.operation === 'pollOAuth') payload.sessionId = request.sessionId
         if (request.operation === 'cancelWebEntry') payload.targetRequestId = request.targetRequestId
@@ -496,7 +499,7 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
     }
   }
 
-  private service(serviceId: string, descriptor: AvailableServiceDescriptor): ManagedServiceWithWebEntryV1 {
+  private service(serviceId: string, descriptor: AvailableServiceDescriptor): ManagedServiceWithConsoleV1 {
     const invoke = async (request: ManagedServiceUIBindingRequest, timeoutMs?: number): Promise<unknown> =>
       await this.bridge.request(this.owner, this.token, request, timeoutMs)
     const authenticationActionTimeoutMs = Number.isSafeInteger(descriptor.authenticationTimeoutMs)
@@ -606,6 +609,15 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
         }
         : {}),
       ...(accountControl === undefined ? {} : { accountControl }),
+      ...(descriptor.authenticatedConsole?.contract !== 'cordisx.managed-service-console/v1' ? {} : {
+        authenticatedConsole: createBrowserManagedServiceConsole({
+          descriptor: descriptor.authenticatedConsole,
+          binding: descriptor.binding,
+          owner: this.owner.pluginId,
+          nextId: nextRequestId,
+          invoke,
+        }),
+      }),
       ...(descriptor.webEntry?.contract !== 'cordisx.managed-service-web-entry/v1' ? {} : {
         webEntry: createBrowserManagedServiceWebEntry(
           descriptor.webEntry,
@@ -613,7 +625,7 @@ class BrowserManagedServiceUIRegistry implements ManagedServiceWebEntryUIRegistr
           (request, timeoutMs, signal) => this.bridge.request(this.owner, this.token, request, timeoutMs, signal),
         ),
       }),
-    } as ManagedServiceWithWebEntryV1
+    } as ManagedServiceWithConsoleV1
   }
 
   private subscription(

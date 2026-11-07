@@ -1,3 +1,4 @@
+import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { managedServiceLiveHandler } from './managed-service-live-handler.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
 import { ManagedServiceEndpointReservations } from './managed-service-endpoint-reservations.js'
@@ -80,6 +81,7 @@ export interface ManagedServicePluginLifecycleOptions {
     },
   ) => Promise<ManagedServiceNodeActivation | undefined>
   readonly createToken?: () => string
+  readonly nativeManagedConsole?: () => NativeManagedConsoleAdapter | undefined
 }
 
 export interface ManagedServiceNativeActivation
@@ -150,6 +152,9 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
           token,
           profileId: this.options.profileId,
           generation: this.options.runtimeGeneration,
+          ...(this.options.nativeManagedConsole === undefined
+            ? {}
+            : { nativeManagedConsole: this.options.nativeManagedConsole }),
           services: [],
           declaredServices: admission.services.map(service => ({ ...owner, serviceId: service.id })),
           startupObservers: [{ ...owner, observer }],
@@ -503,6 +508,9 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
           profileId: this.options.profileId,
           generation: this.options.runtimeGeneration,
           readNativeProviders,
+          ...(this.options.nativeManagedConsole === undefined
+            ? {}
+            : { nativeManagedConsole: this.options.nativeManagedConsole }),
           services: [],
           ...(declaration === undefined
             ? {}
