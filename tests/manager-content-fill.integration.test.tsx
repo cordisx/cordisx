@@ -1,5 +1,5 @@
 import { cssDeclarations } from './helpers/css-declarations.js'
-import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
+import { CORDISX_PAGE_SCHEMA_V4, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import React from 'react'
 import { PanZoomCanvas } from '../packages/cli/src/renderer/host-ui/PanZoomCanvas.js'
 import { ManagerContentPage } from '../packages/cli/src/renderer/manager/pages/ManagerContentPage.js'
@@ -37,7 +37,13 @@ function TeamFillFixture() {
 }
 
 describe('Manager content fill layout', () => {
-  it.each(['canvas', 'stack'] as const)('preserves the Manager mount chain for a fill %s', async kind => {
+  it.each(
+    [
+      { kind: 'canvas', contentInset: 'standard' },
+      { kind: 'stack', contentInset: 'standard' },
+      { kind: 'stack', contentInset: 'none' },
+    ] as const,
+  )('preserves the Manager mount chain for a fill $kind with $contentInset inset', async ({ kind, contentInset }) => {
     const fixture = reactManagerFixture()
     const style = fixture.document.createElement('style')
     style.textContent = `${REACT_MANAGER_STYLES}\n${TEAM_FIXTURE_STYLES}`
@@ -80,8 +86,9 @@ describe('Manager content fill layout', () => {
     pages.register(
       'team',
       {
-        $schema: CORDISX_PAGE_SCHEMA_V3,
-        schemaVersion: 3,
+        $schema: CORDISX_PAGE_SCHEMA_V4,
+        schemaVersion: 4,
+        contentInset,
         id: 'architecture',
         title: { key: 'team.title', fallback: 'Team architecture' },
         description: { key: 'team.description', fallback: 'Team hierarchy' },
@@ -126,8 +133,8 @@ describe('Manager content fill layout', () => {
     })
     try {
       await fixture.render(
-        <div className="cxr-root">
-          <main className="cxr-content" style={{ height: 767, padding: 0 }}>
+        <div className="cxr-root" data-manager-surface="pane">
+          <main className="cxr-content" style={{ height: 767 }}>
             <ManagerContentPage model={model} router={router} locale="en" />
           </main>
         </div>,
@@ -162,6 +169,17 @@ describe('Manager content fill layout', () => {
       expect(fixture.dom.window.getComputedStyle(page).height).toBe('100%')
       expect(fixture.dom.window.getComputedStyle(body).height).toBe('100%')
       expect(fixture.dom.window.getComputedStyle(canvas).height).toBe('100%')
+      expect(body.dataset.cordisxPageContentInset).toBe(contentInset)
+      const contentStyle = fixture.dom.window.getComputedStyle(fixture.element('.cxr-content'))
+      const panelStyle = fixture.dom.window.getComputedStyle(panel)
+      if (contentInset === 'none') {
+        expect(contentStyle.padding).toBe('0px')
+        expect(panelStyle.padding).toBe('0px')
+        expect(panelStyle.marginInline).toBe('0')
+      } else {
+        expect(contentStyle.padding).not.toBe('0px')
+        expect(panelStyle.paddingTop).toBe('1px')
+      }
     } finally {
       await fixture.render(null)
       await navigation.dispose()
