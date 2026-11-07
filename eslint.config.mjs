@@ -40,6 +40,19 @@ export default defineConfig([
       }, {
         selector: 'JSXExpressionContainer > Identifier[name=/^(error|status|feedback|visibleMenuFeedback)$/]',
         message: 'Do not restore inline feedback or local live regions in the selector.',
+      }, {
+        selector: 'JSXAttribute[name.name=/^(aria-live|dangerouslySetInnerHTML)$/]',
+        message: 'Model menus must not own live announcements or raw HTML; use common notifications.',
+      }, {
+        selector: 'JSXAttribute[name.name="role"][value.value="alert"]',
+        message: 'Operation alerts belong to common notifications, never the model selector.',
+      }, {
+        selector:
+          'CallExpression[callee.property.name=/^(createElement|append|appendChild|insertBefore|insertAdjacentElement|insertAdjacentHTML|replaceChildren)$/]',
+        message: 'Do not inject ad-hoc message nodes into the selector; author controls in JSX and use notifications.',
+      }, {
+        selector: 'AssignmentExpression[left.property.name=/^(innerHTML|outerHTML|textContent)$/]',
+        message: 'Do not inject message content into model-menu DOM; use common notifications.',
       }],
     },
   },

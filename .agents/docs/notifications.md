@@ -101,9 +101,12 @@ If notification support is unavailable, do not reconstruct an inline fallback.
 When changing these menus, keep the negative rendering checks in
 `tests/model-provider-notifications.test.tsx` and the selection interaction
 coverage. A new operation must use this boundary instead of JSX message text.
-The selector-scoped ESLint policy blocks readiness-row imports and operation
-copy in JSX; `tests/model-provider-feedback-policy.test.ts` keeps this guard
-executable. Do not weaken it to restore a message row or a local live region.
+The selector-scoped ESLint policy blocks readiness-row imports, operation copy
+in JSX, local alerts/live regions and imperative message-node insertion.
+`tests/model-provider-feedback-policy.test.ts` checks both regression examples
+and the actual selector source in CI, including when changed-file lint only
+checks additions. Do not weaken it to restore a message row or a local live
+region. Search empty results and normal focus controls remain supported.
 
 Technical details are optional, bounded, plain text and redacted by the plugin.
 Use readable localized messages instead of raw `denied`, stack traces or backend
