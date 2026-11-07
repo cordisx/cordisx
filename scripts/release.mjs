@@ -180,6 +180,7 @@ try {
       publish: pkg =>
         runNpm([
           'publish',
+          '--loglevel=error',
           `--workspace=${pkg.workspace}`,
           '--ignore-scripts',
           `--tag=${distTag}`,
