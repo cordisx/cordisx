@@ -318,30 +318,31 @@ writeFileSync(${JSON.stringify(environmentPath)}, JSON.stringify({
     'retains the lease until a verified shutdown',
     async () => {
       const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-launch-group-test-'))
-      const executable = path.join(directory, 'fake-host')
+      const program = path.join(directory, 'fake-host.cjs')
       const descendantPidPath = path.join(directory, 'descendant.pid')
       const profile = { userDataDir: path.join(directory, 'profile'), cleanupOwned: true }
       let launched: ReturnType<typeof launchCodex> | undefined
       let descendantPid: number | undefined
       try {
         await writeFile(
-          executable,
-          `#!/usr/bin/env node
-const { spawn } = require('node:child_process')
+          program,
+          `const { spawn } = require('node:child_process')
 const { writeFileSync } = require('node:fs')
 if (process.argv.includes('--descendant')) setInterval(() => {}, 1000)
 else {
-const child = spawn(process.argv[1], ['--descendant', '--database=${profile.userDataDir}/Crashpad'], { stdio: 'ignore', detached: true })
+const child = spawn(process.execPath, [process.argv[1], '--descendant'], { stdio: 'ignore', detached: true })
 writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))
 setInterval(() => {}, 1000)
 }
 `,
         )
-        await chmod(executable, 0o755)
-        launched = launchCodex(executable, 43123, [], profile)
-        for (let attempt = 0; attempt < 50; attempt += 1) {
-          descendantPid = Number(await readFile(descendantPidPath, 'utf8').catch(() => '0'))
-          if (Number.isInteger(descendantPid) && descendantPid > 0) break
+        launched = launchCodex(process.execPath, 43123, [program], profile)
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const candidate = Number(await readFile(descendantPidPath, 'utf8').catch(() => '0'))
+          if (Number.isInteger(candidate) && candidate > 1) {
+            descendantPid = candidate
+            break
+          }
           await new Promise(resolve => setTimeout(resolve, 20))
         }
         expect(descendantPid).toBeGreaterThan(0)
