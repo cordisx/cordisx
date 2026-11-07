@@ -55,6 +55,7 @@ describe('managed service UI runtime', () => {
         pluginId: plugin.id,
         pluginGeneration: plugin.package.moduleGeneration,
         token: `${plugin.id}-token`,
+        startup: true,
       })),
     })
     const dom = new JSDOM(
@@ -148,6 +149,7 @@ describe('managed service UI runtime', () => {
         pluginId: plugin.id,
         pluginGeneration: plugin.package.moduleGeneration,
         token: 'old-managed-token',
+        startup: true,
       }],
     })
     const dom = new JSDOM(
