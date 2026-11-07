@@ -8,7 +8,7 @@ import { type CordisXConfig, loadConfig } from '../launcher/config.js'
 import { HostGenerationGraphOwner, type HostGenerationGraphSource } from '../launcher/host-generation-graph.js'
 import { equivalentPluginActivation, type PluginActivationStore } from '../launcher/plugin-activation.js'
 import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
-import { loadPluginComposition } from '../launcher/plugin-composition.js'
+import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import type { PluginGenerationArtifactServer } from '../launcher/plugin-generation-loader.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
@@ -334,6 +334,22 @@ function usesIsolatedPackageWorker(plugin: CordisXConfig['plugins'][number]): bo
       && manifest.capabilities.some(capability => (
         capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
       )))
+}
+
+export async function loadActiveBrowserGraphs(
+  store: PluginActivationStore,
+  activation: CordisXPluginActivationRecordV1 | undefined,
+  options: Omit<Parameters<typeof attachActiveBrowserGraphs>[0], 'plugins'>,
+) {
+  const plugins = activation === undefined
+    ? await loadActivatedPluginComposition(store)
+    : await loadPluginComposition(store, activation)
+  const activatedPlugins = await attachActiveBrowserGraphs({ ...options, plugins })
+  const hasManagedBackends = activatedPlugins.some(plugin =>
+    plugin.enabled && (plugin.manifest?.schemaVersion === 14 || plugin.manifest?.schemaVersion === 15)
+    && plugin.manifest.services.some(service => service.kind === 'managed-backend')
+  )
+  return { activatedPlugins, hasManagedBackends }
 }
 
 export async function attachActiveBrowserGraphs(input: {

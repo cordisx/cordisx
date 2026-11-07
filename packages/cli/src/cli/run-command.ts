@@ -83,7 +83,6 @@ import { type PermissionPersistenceContext, PluginPermissionIdentityRegistry } f
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { IconThemePreferencePersistenceContext } from '../launcher/icon-theme-rpc.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
-import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
 import {
@@ -136,10 +135,10 @@ import {
   waitForHostExitAfterReadiness,
 } from './run-support.js'
 import {
-  attachActiveBrowserGraphs,
   buildRendererComposition,
   createProductionGraphBootstrap,
   createRendererLifecycleProjection,
+  loadActiveBrowserGraphs,
   type RendererComposition,
 } from './renderer-composition.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
@@ -308,19 +307,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const initialActivation = recoveryPlan === undefined
       ? undefined
       : recoveredActivation(recoveryPlan, lifecycleGeneration)
-    const activatedPackagePlugins = initialActivation === undefined
-      ? await loadActivatedPluginComposition(lifecycleStore)
-      : await loadPluginComposition(lifecycleStore, initialActivation)
-    const activatedPlugins = await attachActiveBrowserGraphs({
-      plugins: activatedPackagePlugins,
+    const packageGraphs = await loadActiveBrowserGraphs(lifecycleStore, initialActivation, {
       homeDir: rootFromConfigPath(configPath),
       artifactServer: activePluginGenerationArtifactServer,
       lifecycleRuntime,
     })
-    hasManagedBackends = activatedPlugins.some(plugin =>
-      plugin.enabled && (plugin.manifest?.schemaVersion === 14 || plugin.manifest?.schemaVersion === 15)
-      && plugin.manifest.services.some(service => service.kind === 'managed-backend')
-    )
+    const { activatedPlugins } = packageGraphs
+    hasManagedBackends = packageGraphs.hasManagedBackends
     const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
     const startupSession = await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     startupBridge = createStartupHostBridge(managedServiceLifecycleRuntime, selection.profileId, lifecycleGeneration)
