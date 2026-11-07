@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { installModelProviderSelector } from '../../packages/cli/src/renderer/install-model-provider-selector.js'
 import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import { CodexDesktopNativeModelProviderTransport } from '../../packages/cli/src/renderer/native-model-provider-transport.js'
+import { installNotificationHost } from '../../packages/cli/src/renderer/notifications/host.js'
 
 let openModal: (value: boolean) => void
 let replaceAnchor: () => void
@@ -67,6 +68,12 @@ const registry = new ModelProviderRegistry(async () => {
         title: 'Gateway',
         pluginId: 'fixture',
         models: [{ id: 'gateway-model', label: 'Gateway Model' }],
+      },
+      {
+        providerId: 'additional',
+        title: 'Additional',
+        pluginId: 'fixture',
+        models: [{ id: 'additional-model', label: 'Additional Model' }],
       },
     ]
   }
@@ -143,6 +150,7 @@ function Host() {
 }
 
 export async function start() {
+  const disposeNotifications = installNotificationHost(document, 'model-selector-browser-test')
   // Only the transport is a fixture; React, portals, installer and DOM probes are production code.
   CodexDesktopNativeModelProviderTransport.connect = async () =>
     ({
@@ -194,6 +202,7 @@ export async function start() {
     dispose()
     registry.dispose()
     native.unmount()
+    disposeNotifications()
   }
 }
 

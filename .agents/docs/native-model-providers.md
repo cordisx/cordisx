@@ -4,6 +4,10 @@ Experimental Host implementation. This is distinct from Provider Fleet's
 separate conversation surface. The public renderer contract is
 [Model Providers V1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/model-providers-v1.md).
 
+Composer provider/model menus are selection surfaces. Readiness and operation
+feedback must not be inserted as message rows; use the
+[common notification boundary](notifications.md#composer-model-menus).
+
 ## Side conversations
 
 The native composer selector also operates in side conversations. Each visible

@@ -82,6 +82,29 @@ remain business content. They must not become duplicate transient notifications.
 Avoid success notifications when the completed action already makes the result
 obvious. Never toast each polling failure; notify on a meaningful transition.
 
+### Composer model menus
+
+Provider, model and reasoning popovers contain choices, controls and search or
+empty-result content. Never insert readiness, switching, queued-send, success
+or error message rows into these menus, including hidden local live regions.
+Use the common bottom-right notification viewport for operation feedback;
+its accessibility and lifetime are owned by the notification Host.
+
+`renderer/model-provider-notifications.ts` is the selector's notification-only
+boundary. It exposes no renderable feedback, suppresses unchanged catalog
+errors, and disposes notices on chat changes and unmount. Preserve the selected
+tuple in trigger labels and titles, and pending state on the relevant controls.
+Provider status dots and their deliberate hover descriptions remain object
+state; opening a menu or receiving a readiness poll must not create a toast.
+If notification support is unavailable, do not reconstruct an inline fallback.
+
+When changing these menus, keep the negative rendering checks in
+`tests/model-provider-notifications.test.tsx` and the selection interaction
+coverage. A new operation must use this boundary instead of JSX message text.
+The selector-scoped ESLint policy blocks readiness-row imports and operation
+copy in JSX; `tests/model-provider-feedback-policy.test.ts` keeps this guard
+executable. Do not weaken it to restore a message row or a local live region.
+
 Technical details are optional, bounded, plain text and redacted by the plugin.
 Use readable localized messages instead of raw `denied`, stack traces or backend
 payloads. Copying details happens only on an explicit user action.
