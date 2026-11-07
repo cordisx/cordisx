@@ -23,3 +23,11 @@ export async function settleInjectedHostCleanup(
     : beforeHostTermination
   return [...recovered, ...hostTermination]
 }
+
+/** Keep the profile fenced when the termination of a prelaunched Host is unverified. */
+export async function releaseHostProfileLease(
+  release: (() => Promise<void>) | undefined,
+  termination: PromiseSettledResult<unknown> | undefined,
+): Promise<void> {
+  if (termination?.status !== 'rejected') await release?.()
+}

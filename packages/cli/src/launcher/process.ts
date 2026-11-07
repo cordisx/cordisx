@@ -597,14 +597,14 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
     throw new Error(`failed to stop launched host process${child.pid === undefined ? '' : ` ${child.pid}`}`)
   }
   const ownedProcesses = ownership?.stop() ?? []
-  launchedProcessOwnership.delete(child)
-  pendingHiddenOwnership.delete(child)
   if (
     profile?.cleanupOwned === true || ownership?.usesDarwinSnapshot() === true
     || (ownership !== undefined && ownership.pid !== child.pid)
   ) {
     await terminateOwnedProcesses(ownedProcesses, child.pid)
   }
+  launchedProcessOwnership.delete(child)
+  pendingHiddenOwnership.delete(child)
 }
 
 /** Stop the verified Host group, or its exact PID when Launch Services chose another group. */
