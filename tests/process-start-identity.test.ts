@@ -4,10 +4,11 @@ import {
   compareProcessStartTimes,
   processIdentityEnvironment,
 } from '../packages/cli/src/launcher/process-start-identity.js'
+import { parseDarwinProcessIdentities } from '../packages/cli/src/launcher/darwin-process-identity.js'
 import { liveProcessStartedAt, recordedProcessStatus } from '../packages/cli/src/launcher/process-identity.js'
 import { processIdentityStatus, processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 
-const fixture = vi.hoisted(() => ({ present: true, failure: false }))
+const fixture = vi.hoisted(() => ({ present: true, failure: false, permissionDenied: false, nativeUnavailable: false }))
 const canonical = 'Tue Oct 27 20:38:49 2026'
 const localized = '二 10月/27 20:38:49 2026'
 const anotherStart = 'Tue Nov  3 20:38:49 2026'
@@ -18,6 +19,7 @@ vi.mock('node:child_process', async importOriginal => {
   type Options = { env?: NodeJS.ProcessEnv }
   type Callback = (error: Error | null, stdout: string, stderr: string) => void
   const output = (options?: Options): string => {
+    if (fixture.permissionDenied) throw Object.assign(new Error('synthetic ps denial'), { code: 'EPERM' })
     if (fixture.failure) throw new Error('synthetic ps failure')
     if (!fixture.present) return ''
     const environment = options?.env ?? process.env
@@ -28,6 +30,15 @@ vi.mock('node:child_process', async importOriginal => {
   return {
     ...actual,
     execFileSync: vi.fn((file: string, args: readonly string[], options?: Options) => {
+      if (file.endsWith('/CordisXProcessIdentity')) {
+        return fixture.nativeUnavailable
+          ? JSON.stringify({ version: 1, status: 'unavailable', reason: 'identity-unavailable' })
+          : JSON.stringify({
+            version: 1,
+            status: 'complete',
+            processes: [{ pid: process.pid, parentPid: 1, startedAt: canonical }],
+          })
+      }
       if (file !== 'ps' || !args.includes('pid=,ppid=,lstart=')) throw new Error('unexpected fixture command')
       const start = output(options)
       return start === '' ? '' : '  ' + process.pid + ' 1 ' + start + '\n'
@@ -48,6 +59,8 @@ vi.mock('node:child_process', async importOriginal => {
 beforeEach(() => {
   fixture.present = true
   fixture.failure = false
+  fixture.permissionDenied = false
+  fixture.nativeUnavailable = false
   vi.clearAllMocks()
 })
 
@@ -155,4 +168,52 @@ describe.skipIf(process.platform === 'win32')('identity collection through both 
     fixture.present = false
     expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
   })
+})
+
+describe('Darwin native process identity fallback', () => {
+  const row = { pid: 27, parentPid: 5, startedAt: canonical }
+  const snapshot = (processes: unknown[]) => JSON.stringify({ version: 1, status: 'complete', processes })
+
+  it('accepts a complete versioned snapshot with the exact launcher identity', () => {
+    expect(parseDarwinProcessIdentities(snapshot([row]), row.pid)).toEqual([row])
+  })
+
+  it.each([
+    { rows: [] },
+    { rows: [row, row] },
+    { rows: [{ ...row, pid: 0 }] },
+    { rows: [{ ...row, parentPid: -1 }] },
+    { rows: [{ ...row, parentPid: row.pid }] },
+    { rows: [{ ...row, startedAt: 'unknown' }] },
+  ])('rejects incomplete or malformed rows rather than returning an empty table', ({ rows }) => {
+    expect(() => parseDarwinProcessIdentities(snapshot(rows), row.pid)).toThrow()
+  })
+
+  it.each(['empty', 'truncated', 'enumeration-denied', 'identity-unavailable'])(
+    'reports native %s as unavailable',
+    reason => {
+      const text = JSON.stringify({ version: 1, status: 'unavailable', reason })
+      expect(() => parseDarwinProcessIdentities(text, row.pid)).toThrow(reason)
+    },
+  )
+
+  it('rejects the wrong version and a table that omits the expected launcher', () => {
+    expect(() => parseDarwinProcessIdentities('{"version":2,"status":"complete","processes":[]}', row.pid)).toThrow()
+    expect(() => parseDarwinProcessIdentities(snapshot([row]), row.pid + 1)).toThrow(/omitted the launcher/)
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'shares the fallback for lease, supervisor and recorded status',
+    async () => {
+      fixture.permissionDenied = true
+      expect(liveProcessStartedAt(process.pid)).toBe(canonical)
+      expect(await processStartIdentity(process.pid)).toBe(canonical)
+      expect(recordedProcessStatus(process.pid, localized)).toBe('alive')
+      expect(await processIdentityStatus(process.pid, anotherStart)).toBe('dead')
+      expect(recordedProcessStatus(absentPid, canonical)).toBe('dead')
+      fixture.nativeUnavailable = true
+      expect(recordedProcessStatus(process.pid, canonical)).toBe('unknown')
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
+    },
+  )
 })

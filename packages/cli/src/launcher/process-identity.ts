@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import path from 'node:path'
+import { darwinProcessIdentities } from './darwin-process-identity.js'
 import { compareProcessStartTimes, processIdentityEnvironment } from './process-start-identity.js'
 
 export interface ProcessIdentity {
@@ -35,25 +36,53 @@ export interface UserDataDirProcessInspection {
 
 export const PROCESS_TABLE_MAX_BUFFER_BYTES = 64 * 1024 * 1024
 
-/** Snapshot of every visible process with its parent and start time; empty where `ps` is unavailable. */
-export function processTable(): readonly ProcessIdentity[] {
-  if (process.platform === 'win32') return []
-  return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], {
-    encoding: 'utf8',
-    maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
-    env: processIdentityEnvironment(),
-  })
-    .split('\n')
-    .flatMap(line => {
-      const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line)
-      if (match === null) return []
-      const pid = Number(match[1])
-      const parentPid = Number(match[2])
-      const startedAt = match[3] ?? ''
-      return Number.isInteger(pid) && pid > 0 && Number.isInteger(parentPid) && parentPid >= 0
-        ? [{ pid, parentPid, startedAt }]
-        : []
+export interface ProcessIdentitySnapshot {
+  readonly source: 'system-ps' | 'darwin-same-uid'
+  readonly processes: readonly ProcessIdentity[]
+}
+
+/** Darwin Seatbelt can refuse the system ps executable because it is setuid. */
+export function processIdentitiesAfterPsDenied(error: unknown): ProcessIdentitySnapshot | undefined {
+  if (process.platform !== 'darwin' || (error as NodeJS.ErrnoException | null)?.code !== 'EPERM') return undefined
+  return { source: 'darwin-same-uid', processes: darwinProcessIdentities(PROCESS_TABLE_MAX_BUFFER_BYTES) }
+}
+
+export function processTable(): ProcessIdentitySnapshot {
+  if (process.platform === 'win32') return { source: 'system-ps', processes: [] }
+  let output: string
+  try {
+    output = execFileSync('ps', ['-axo', 'pid=,ppid=,lstart='], {
+      encoding: 'utf8',
+      maxBuffer: PROCESS_TABLE_MAX_BUFFER_BYTES,
+      env: processIdentityEnvironment(),
     })
+  } catch (error) {
+    const fallback = processIdentitiesAfterPsDenied(error)
+    if (fallback === undefined) throw error
+    return fallback
+  }
+  const processes = output.split('\n').flatMap(line => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line)
+    if (match === null) return []
+    const pid = Number(match[1])
+    const parentPid = Number(match[2])
+    const startedAt = match[3] ?? ''
+    return Number.isInteger(pid) && pid > 0 && Number.isInteger(parentPid) && parentPid >= 0
+      ? [{ pid, parentPid, startedAt }]
+      : []
+  })
+  return { source: 'system-ps', processes }
+}
+
+export function unobservedProcessStatus(source: ProcessIdentitySnapshot['source'], pid: number): 'dead' | 'unknown' {
+  if (source === 'system-ps') return 'dead'
+  // A same-UID snapshot cannot rule out a live PID outside its scope.
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'dead'
+  }
+  return 'unknown'
 }
 
 /** Start time of one live process, or undefined once it is gone. */
@@ -66,7 +95,7 @@ export function liveProcessStartedAt(pid: number): string | undefined {
       return undefined
     }
   }
-  return processTable().find(item => item.pid === pid)?.startedAt
+  return processTable().processes.find(item => item.pid === pid)?.startedAt
 }
 
 /**
@@ -83,14 +112,14 @@ export function recordedProcessStatus(pid: number, startedAt: string): RecordedP
       return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown'
     }
   }
-  let table: readonly ProcessIdentity[]
+  let snapshot: ProcessIdentitySnapshot
   try {
-    table = processTable()
+    snapshot = processTable()
   } catch {
     return 'unknown'
   }
-  const current = table.find(item => item.pid === pid)
-  if (current === undefined) return 'dead'
+  const current = snapshot.processes.find(item => item.pid === pid)
+  if (current === undefined) return unobservedProcessStatus(snapshot.source, pid)
   return compareProcessStartTimes(current.startedAt, startedAt)
 }
 
