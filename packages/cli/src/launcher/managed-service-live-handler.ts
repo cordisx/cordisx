@@ -1,3 +1,4 @@
+import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import { createManagedServiceUIBridgeHandler, type ManagedServiceUIBridgeHandler } from './managed-service-ui-rpc.js'
 
@@ -6,6 +7,7 @@ export function managedServiceLiveHandler(
   observation: ManagedServiceUIBridgeHandler,
   readSources: () => ManagedServiceNodeActivation['sources'],
   readNativeProviders: () => Promise<readonly unknown[]>,
+  nativeManagedConsole?: () => NativeManagedConsoleAdapter | undefined,
 ): ManagedServiceUIBridgeHandler {
   let execution: ManagedServiceUIBridgeHandler | undefined
   let disposed = false
@@ -25,6 +27,7 @@ export function managedServiceLiveHandler(
           generation: observation.generation,
           services,
           readNativeProviders,
+          ...(nativeManagedConsole === undefined ? {} : { nativeManagedConsole }),
         })
       }
       return await execution.handle(owner, request)

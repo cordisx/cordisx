@@ -1,3 +1,6 @@
+import { managedServiceLiveHandler } from '../packages/cli/src/launcher/managed-service-live-handler.js'
+import { createManagedServiceUIBridgeHandler } from '../packages/cli/src/launcher/managed-service-ui-rpc.js'
+import type { ManagedServiceSourceV1 } from '@cordisx/protocol/managed-service-ui/v1'
 import { describe, expect, it, vi } from 'vitest'
 import { ManagedServiceConsoleRPC } from '../packages/cli/src/launcher/managed-service-console-rpc.js'
 import type { ManagedConsolePreparation } from '../packages/cli/src/launcher/managed-service-console-broker.js'
@@ -36,6 +39,42 @@ function fixture() {
 }
 
 describe('managed console view broker RPC', () => {
+  it('preserves the native adapter when a startup observation route adopts its live service', async () => {
+    const { adapter, reader } = fixture()
+    const owner = { pluginId: 'owner', pluginGeneration: 'plugin-generation' }
+    const serviceId = 'gateway'
+    const binding = {
+      bindingId: 'binding',
+      identity: { pluginId: owner.pluginId, serviceId },
+      scope: { profileId: 'profile', generation: 'host-generation' },
+    }
+    const observation = createManagedServiceUIBridgeHandler({
+      token: 'fixture-token',
+      profileId: 'profile',
+      generation: 'host-generation',
+      services: [],
+    })
+    const route = managedServiceLiveHandler(
+      observation,
+      () => [{ ...owner, serviceId, source: { binding } as ManagedServiceSourceV1, webEntry: reader }],
+      async () => [],
+      () => adapter,
+    )
+    try {
+      await expect(route.handle(owner, { requestId: 'request', operation: 'get', serviceId }))
+        .resolves.toMatchObject({ service: { authenticatedConsole: { serviceGeneration: request.serviceGeneration } } })
+      await expect(route.handle(owner, {
+        requestId: 'mount',
+        operation: 'consoleView',
+        serviceId,
+        binding,
+        request: { ...request, action: 'mount' },
+      })).resolves.toEqual({ status: 'mounted' })
+    } finally {
+      await route.dispose()
+    }
+  })
+
   it('never prepares credentials if the adapter is unavailable or the service generation changed', async () => {
     const { adapter, reader, prepare } = fixture()
     const unavailable = new ManagedServiceConsoleRPC(() => undefined)

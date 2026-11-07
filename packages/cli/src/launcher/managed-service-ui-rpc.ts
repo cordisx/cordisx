@@ -26,7 +26,7 @@ export const MAX_MANAGED_SERVICE_UI_REQUEST_BYTES = 256 * 1024
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/
 const PROHIBITED_RESPONSE_KEYS =
-  /^(?:secret|secrets|password|credential|credentials|port|runtimeHandle|runtimeHandles)$/iu
+  /^(?:secret|secrets|password|credential|credentials|cookie|cookies|port|runtimeHandle|runtimeHandles)$/iu
 
 export interface ManagedServiceUIOwner {
   readonly pluginId: string

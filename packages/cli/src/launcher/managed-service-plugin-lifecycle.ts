@@ -521,6 +521,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
           early?.handler ?? createManagedServiceUIBridgeHandler(handlerOptions),
           () => activation?.sources.filter(source => ownerKey(source) === key) ?? [],
           readNativeProviders,
+          this.options.nativeManagedConsole,
         )
         routes.set(key, { key, token, owner, handler, ...(declaration === undefined ? {} : { startup: true }) })
       }
