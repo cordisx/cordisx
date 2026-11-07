@@ -14,9 +14,8 @@ import {
   launchCodex,
   launchCodexHidden,
   retainProfileLeaseAfterHiddenHostFailure,
-  terminateIsolatedCodex,
 } from '../launcher/process.js'
-import { releaseHostProfileLease, settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import { releaseHostProfileLease, stopPrelaunchedHost } from './injected-host-cleanup.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
@@ -213,11 +212,7 @@ export async function prepareProductionHostBootstrap(
       prelaunchedHost: { child, hostPid, ...(inspectorUrl === undefined ? {} : { inspectorUrl }) },
     }
   } catch (error) {
-    const launched = child
-    const [termination] = await settleInjectedHostCleanup({
-      beforeHostTermination: [],
-      ...(launched === undefined ? {} : { terminateHost: () => terminateIsolatedCodex(launched, profile) }),
-    })
+    const termination = await stopPrelaunchedHost(child, profile)
     await nativeSubmissionBootstrap?.close().catch(() => undefined)
     if (!retainProfileLeaseAfterHiddenHostFailure(error)) {
       await releaseHostProfileLease(profileLease?.release, termination).catch(() => undefined)

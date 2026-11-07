@@ -4,7 +4,11 @@ import { execFileSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { releaseHostProfileLease, settleInjectedHostCleanup } from '../packages/cli/src/cli/injected-host-cleanup.js'
+import {
+  cleanupPrelaunch,
+  releaseHostProfileLease,
+  stopPrelaunchedHost,
+} from '../packages/cli/src/cli/injected-host-cleanup.js'
 import { PROCESS_TABLE_MAX_BUFFER_BYTES } from '../packages/cli/src/launcher/process-identity.js'
 import {
   acquireCodexProfileLaunchLease,
@@ -363,9 +367,8 @@ setInterval(() => {}, 1000)
           }
           return original(...args)
         })
-        const terminateHost = () => terminateIsolatedCodex(host, profile)
         try {
-          const [failed] = await settleInjectedHostCleanup({ beforeHostTermination: [], terminateHost })
+          const failed = await stopPrelaunchedHost(host, profile)
           expect(failed).toMatchObject({
             status: 'rejected',
             reason: new Error(
@@ -380,9 +383,7 @@ setInterval(() => {}, 1000)
         } finally {
           ps.mockImplementation(original)
         }
-        const [terminated] = await settleInjectedHostCleanup({ beforeHostTermination: [], terminateHost })
-        expect(terminated?.status).toBe('fulfilled')
-        await releaseHostProfileLease(lease.release, terminated)
+        await cleanupPrelaunch(host, profile, lease.release)
         await expect(readFile(owner, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
         for (let attempt = 0; attempt < 50 && descendantPid !== undefined; attempt += 1) {
           try {

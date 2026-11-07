@@ -49,7 +49,7 @@ import {
   resolveCodexExecutable,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
-import { releaseHostProfileLease, settleInjectedHostCleanup } from './injected-host-cleanup.js'
+import { cleanupPrelaunch } from './injected-host-cleanup.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
@@ -979,13 +979,8 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       startupLifetime.abort()
       const serviceCleanup = managedServiceLifecycleRuntime?.dispose()
       await nativeSubmissionBootstrap?.close().catch(() => undefined)
-      const prelaunch = prelaunchedHostHandedOff ? undefined : prelaunchedHost
-      const [termination] = await settleInjectedHostCleanup({
-        beforeHostTermination: [],
-        ...(prelaunch === undefined ? {} : { terminateHost: () => terminateIsolatedCodex(prelaunch.child, profile) }),
-      })
-      await releaseHostProfileLease(profileLeaseHandedOff ? undefined : profileLease?.release, termination)
-        .catch(() => undefined)
+      const host = prelaunchedHostHandedOff ? undefined : prelaunchedHost
+      await cleanupPrelaunch(host?.child, profile, profileLeaseHandedOff ? undefined : profileLease?.release)
       await productionPluginManagement?.close().catch(() => undefined)
       await rendererComposition?.close().catch(() => undefined)
       await supervisorRuntime.close()
