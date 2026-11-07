@@ -7,6 +7,7 @@ export function isolateRuntimeOwnerServices(ctx: Context): Context {
       'connectors',
       'agentLoop',
       'managedServices',
+      'startup',
       'modelProviders',
       'agents',
       'sessions',
