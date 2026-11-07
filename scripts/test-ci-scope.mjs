@@ -80,6 +80,18 @@ test('bundled Skill content selects documentation plus shipped Skill checks', ()
   assert.equal(result.skill_changed, 'true')
 })
 
+test('shipped Skill package gates prepare the Creator as well as Host for pure and mixed changes', () => {
+  for (const extra of [{}, { 'tests/manager-form-admission.test.ts': 'export {}\n' }]) {
+    const result = classify({
+      changes: { 'skills/cordisx-plugin-development/references/ui-system.md': '# Guide\n', ...extra },
+    })
+    assert.equal(result.skill_changed, 'true')
+    assert.equal(result.cli_only, 'false')
+    assert.equal(result.full, 'false')
+    assert.equal(result.docs_only, Object.keys(extra).length ? 'false' : 'true')
+  }
+})
+
 for (
   const file of [
     'packages/cli/src/launcher/main.ts',

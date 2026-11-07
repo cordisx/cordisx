@@ -12,6 +12,8 @@ For current product facts and version compatibility, read
 known pitfalls, or recording a Q&A entry, read
 [cordisx-qa](../cordisx-qa/SKILL.md). Do not copy either source into this Skill.
 
+For Manager editing forms or form dialogs, read [schema-configuration.md](references/schema-configuration.md) and [ui-system.md](references/ui-system.md) before implementation.
+
 ## Read the relevant references
 
 - Assess any requested product behavior before scaffolding or editing: [feasibility-assessment.md](references/feasibility-assessment.md)

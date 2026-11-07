@@ -46,6 +46,8 @@ An older Host without the service requires a supported SDK upgrade or honest
 capability unavailability, never a private DOM or home-grown notification fallback.
 See the [Host notification reference](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).
 
+For durable Manager create/edit forms, first read [schema configuration](schema-configuration.md) and the linked surface-selection table. Dialog JSX support does not replace page selection.
+
 ## Dialogs and complex JSX
 
 Use `Dialog`/`DialogProvider` from `cordisx/ui` or the owner-bound `ctx.dialogs`
