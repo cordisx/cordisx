@@ -355,7 +355,12 @@ setInterval(() => {}, 1000)
         const original = ps.getMockImplementation()!
         let reads = 0
         ps.mockImplementation((...args) => {
-          if (++reads === 3) throw new Error('final process identity unavailable')
+          if (args[0] === 'ps' && ++reads === 3) {
+            throw Object.assign(new Error('final process identity unavailable'), { code: 'EPERM' })
+          }
+          if (args[0].endsWith('/CordisXProcessIdentity')) {
+            return JSON.stringify({ version: 1, status: 'unavailable', reason: 'identity-unavailable' })
+          }
           return original(...args)
         })
         const terminateHost = () => terminateIsolatedCodex(host, profile)
@@ -363,7 +368,11 @@ setInterval(() => {}, 1000)
           const [failed] = await settleInjectedHostCleanup({ beforeHostTermination: [], terminateHost })
           expect(failed).toMatchObject({
             status: 'rejected',
-            reason: new Error('final process identity unavailable'),
+            reason: new Error(
+              process.platform === 'darwin'
+                ? 'Darwin process identity snapshot is unavailable (identity-unavailable)'
+                : 'final process identity unavailable',
+            ),
           })
           await releaseHostProfileLease(lease.release, failed)
           expect(await readFile(owner, 'utf8')).toBe(before)
