@@ -99,7 +99,7 @@ async function setup(failedRead = false) {
 }
 
 describe('actual selector installation with deferred native initial reads', () => {
-  it('mounts the core marker before bridge reads finish, keeps Host intent through read completion, and rejects send', async () => {
+  it('mounts the core marker before bridge reads finish and keeps unready providers out of the menu', async () => {
     const h = await setup()
     try {
       expect(h.requests.map(request => request.method)).toEqual(['thread/read'])
@@ -112,15 +112,14 @@ describe('actual selector installation with deferred native initial reads', () =
       expect(await readNativeStartupReadiness(undefined)).toMatchObject({ ready: true, surface: 'workspace-ready' })
       expect(await h.hook(send)).toEqual({ allow: false })
       await act(async () => document.querySelector<HTMLButtonElement>('.cxmp-provider-trigger')!.click())
-      await act(async () => document.querySelector<HTMLButtonElement>('[data-provider-id="first"]')!.click())
-      expect(document.body.textContent).toContain('Selected · waiting for models')
+      expect(document.querySelector('[data-provider-id="first"]')).toBeNull()
       expect(await h.hook(send)).toEqual({ allow: false })
       await h.finish()
       expect(h.authority.selection.snapshot(h.scope)).toMatchObject({
         effective: { providerId: 'openai', model: 'model-a' },
-        pendingProviderIntent: { providerId: 'first' },
       })
-      expect(await h.hook(send)).toEqual({ allow: false })
+      expect(h.authority.selection.snapshot(h.scope).pendingProviderIntent).toBeUndefined()
+      expect(await h.hook(send)).toMatchObject({ allow: true })
       expect(h.prepare).not.toHaveBeenCalled()
       expect(h.switchThread).not.toHaveBeenCalled()
       const marker = document.querySelector<HTMLElement>('.cxmp-selector')!

@@ -43,8 +43,10 @@ An empty catalog is unavailable. Authentication-required, failed, stopped,
 revoked, and stale-generation states retain their explicit unavailable reason.
 
 The model selector and Model Services page observe this authority through the
-Host bridge. Pending providers can be shown before their model catalog is ready;
-their actions remain governed by the current availability projection. A broken
+Host bridge. Model Services shows declared providers and their preparation state.
+The Composer provider menu requires executable readiness and a nonempty current
+catalog. If a selection loses readiness, its identity remains visible and Send
+checks the exact selected gateway model against the current publication. A broken
 observation connection is shown separately from the provider's last-known state.
 The Host retains the existing selector, Manager header, tabs, and navigation.
 Declared pages observe their scoped entries; page actions additionally require

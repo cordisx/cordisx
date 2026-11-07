@@ -8,11 +8,11 @@ conversations.
 
 ## Plugin startup and model state
 
-Host beta.40 also shows startup-declared plugin providers while preparation is
-in progress. This uses the [progressive startup](progressive-startup.md)
-authority; shared `model-service` declarations below continue to start no
-process. Model Services and the selector distinguish preparation, service
-health, authentication, catalog availability, and executable readiness.
+Model Services shows startup-declared plugin providers during preparation. The
+Composer menu lists providers with executable readiness and a nonempty model
+catalog. The [progressive startup](progressive-startup.md) authority tracks
+preparation, service health, authentication, catalog availability, and executable
+readiness. Shared `model-service` declarations below continue to start no process.
 Login uses the owning provider action. An explicitly selected provider/model
 remains unavailable until its requirements are ready, without substitution.
 Saving configuration retains its documented next-launch or restart apply scope;

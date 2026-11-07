@@ -21,6 +21,7 @@ export async function harness(options: Readonly<{
   management?: Parameters<typeof createNativeSubmissionCdpAuthority>[0]['management']
   defaultProviderId?: string
   defaultModelId?: string
+  isStartupProvider?: (id: string) => boolean
   catalogSubscribe?: (listener: () => void) => () => void
   catalog?: () => readonly {
     providerId: string
@@ -46,6 +47,7 @@ export async function harness(options: Readonly<{
         models: [{ id: 'model-b', label: 'Model B', aliases: [] }],
       }],
     isThreadIdle: idle,
+    ...(options.isStartupProvider === undefined ? {} : { isStartupProvider: options.isStartupProvider }),
     ...(options.defaultProviderId === undefined ? {} : { defaultProviderId: options.defaultProviderId }),
     ...(options.defaultModelId === undefined ? {} : { defaultModelId: options.defaultModelId }),
   })

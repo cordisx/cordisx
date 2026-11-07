@@ -248,6 +248,11 @@
 .cxr-content:has(> .cxr-manager-content-page) {
   overflow: hidden;
 }
+.cxr-content:has(> .cxr-manager-content-page
+  [data-cordisx-manager-page-body][data-cordisx-page-content-inset="none"]) {
+  padding: 0;
+  scrollbar-gutter: auto;
+}
 .cxr-manager-content-page {
   display: flex;
   height: 100%;
@@ -326,6 +331,11 @@
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+.cxr-manager-content-panel:has(> .cxr-manager-content-seat
+  [data-cordisx-manager-page-body][data-cordisx-page-content-inset="none"]) {
+  margin-inline: 0;
+  padding: 0;
 }
 .cxr-manager-content-seat:has(.cxr-ui-pan-zoom-canvas[data-fill="true"], .cxr-ui-stack[data-fill="true"])
   > [data-cordisx-manager-page] {

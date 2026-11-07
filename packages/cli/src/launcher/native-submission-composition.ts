@@ -463,7 +463,9 @@ export async function prepareNativeSubmissionBootstrap(
         if (completeOptions.remoteTerminalProvider) {
           remote = new RemoteTerminalProviderClient(completeOptions.remoteTerminalProvider)
         }
-        const hasPluginProvider = (providerId: string) => activation.nativeProviderIds.includes(providerId)
+        const startupAuthority = activation.startup
+        const hasPluginProvider = (providerId: string) =>
+          startupAuthority?.hasProvider(providerId) === true || activation.nativeProviderIds.includes(providerId)
         let lastDiagnostic: string | undefined
         const loadConfigured = async () => {
           let projection
@@ -560,15 +562,37 @@ export async function prepareNativeSubmissionBootstrap(
             if (selection.providerId.startsWith('cordisx-')) {
               return await managed?.validateSelection(selection.providerId, selection.model) ?? false
             }
-            if (selection.providerId === 'openai' || hasPluginProvider(selection.providerId)) return true
+            if (selection.providerId === 'openai') return true
+            if (hasPluginProvider(selection.providerId)) {
+              const providers = await pluginCatalog()
+              return providers.some(provider =>
+                provider.providerId === selection.providerId
+                && provider.models.some(model => model.id === selection.model)
+              )
+            }
             return nativeManagement!.validateSelection(selection.providerId, selection.model)
           },
           ...(remote === undefined ? {} : { remote }),
         })
-        const catalog = providerSources.catalog
+        const catalog = async () =>
+          (await providerSources.catalog()).flatMap(provider => {
+            if (!startupAuthority?.hasProvider(provider.providerId)) return [provider]
+            const target = startupAuthority.providerReference(provider.providerId)
+            if (target?.pluginId !== provider.pluginId) return []
+            const admission = startupAuthority.nativeCatalogAdmission(target)
+            if (!admission.available) return []
+            const models = provider.models.filter(model => admission.modelIds.has(model.id))
+            if (models.length === 0) return []
+            const defaultModelId = models.find(model => model.id === provider.defaultModelId)?.id ?? models[0]!.id
+            return [{ ...provider, models, defaultModelId }]
+          })
         if (remote) {
           control.bindUnmarkedProviderGuard(nativeRemoteUnmarkedGuard({
             localSource: id => {
+              if (startupAuthority?.hasProvider(id)) {
+                const target = startupAuthority.providerReference(id)
+                if (!target || !startupAuthority.availability(target).available) return undefined
+              }
               const source = providerSources.source(id)
               return source === 'remote' ? undefined : source
             },
@@ -643,11 +667,13 @@ export async function prepareNativeSubmissionBootstrap(
               remote?.subscribe(listener),
               managed?.subscribe(listener),
               pluginManagement?.catalogSubscribe(listener),
+              startupAuthority?.subscribeProviderAvailability(listener),
             ]
             return () => subscriptions.forEach(unsubscribe => unsubscribe?.())
           },
           management,
           catalog,
+          isStartupProvider: id => startupAuthority?.hasProvider(id) === true,
           isThreadIdle: id => control.isThreadIdle(id),
           ...(completeOptions.defaultProviderId === undefined
             ? {}

@@ -12,7 +12,7 @@ import { harness } from './fixtures/native-submission-channel-harness.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
 import { startupObserver, startupProvider, startupSnapshot } from './helpers/startup-model-fixture.js'
 
-it('routes selector intent, cancel and explicit model acknowledgement through the actual Host client/channel/controller', async () => {
+it('lists only executable providers and rechecks the selected model through the Host client and Send channel', async () => {
   const fixture = reactManagerFixture()
   const native = { providerId: 'openai', model: 'native-model' }
   let ready = false
@@ -53,7 +53,6 @@ it('routes selector intent, cancel and explicit model acknowledgement through th
       return () => listeners.delete(listener)
     },
     select: (target: { providerId: string; model: string }) => client.select(target),
-    selectProviderIntent: (providerId: string) => client.selectProviderIntent(providerId),
     cancelProviderIntent: () => client.cancelProviderIntent(),
     selectReasoningEffort: async () => 'unavailable' as const,
     selectFastMode: async () => 'unavailable' as const,
@@ -80,16 +79,19 @@ it('routes selector intent, cancel and explicit model acknowledgement through th
     update()
     await fixture.render(<ModelProviderSelector registry={registry} transport={transport} locale="en" />)
     await click('.cxmp-provider-trigger')
-    await click('[data-provider-id="first"]')
+    expect(document.querySelector('[data-provider-id="first"]')).toBeNull()
+    await act(async () => {
+      expect(await client.selectProviderIntent('first')).toBe('accepted')
+    })
     expect(scopeIntent()?.providerId).toBe('first')
     expect(await submit()).toEqual({ allow: false })
     expect(h.prepare).not.toHaveBeenCalled()
     expect(h.switchThread).not.toHaveBeenCalled()
+    await click('.cxmp-model-trigger')
     await click('button.cxmp-menu-heading')
     expect(scopeIntent()).toBeUndefined()
     expect(client.snapshot().effective).toEqual(native)
 
-    await click('[data-provider-id="first"]')
     await act(async () => {
       ready = true
       source.emit({
@@ -113,15 +115,23 @@ it('routes selector intent, cancel and explicit model acknowledgement through th
       await registry.refresh()
       await client.refresh()
     })
-    expect(scopeIntent()?.providerId).toBe('first')
-    expect(await submit()).toEqual({ allow: false })
-    expect(h.prepare).not.toHaveBeenCalled()
-    expect(fixture.element('.cxmp-selector').dataset.cordisxModelSendEligible).toBe('false')
-    await click('.cxmp-model-disclosure')
-    await click('.cxmp-model-choice')
+    await click('[data-provider-id="first"]')
     expect(scopeIntent()).toBeUndefined()
     expect(client.snapshot().pending).toMatchObject({ providerId: 'first', model: 'real-model' })
     expect(await submit()).toMatchObject({ allow: true })
+    expect(h.prepare).toHaveBeenCalledOnce()
+    await act(async () => {
+      ready = false
+      source.emit({
+        kind: 'snapshot',
+        reason: 'update',
+        snapshot: startupSnapshot([startupProvider({ authentication: 'logged-out' })], 'epoch-1', 3),
+      })
+      await registry.refresh()
+    })
+    expect(fixture.element('.cxmp-selector').dataset.cordisxModelSendEligible).toBe('false')
+    expect(await submit()).toEqual({ allow: false })
+    expect(client.snapshot().pending).toMatchObject({ providerId: 'first', model: 'real-model' })
     expect(h.prepare).toHaveBeenCalledOnce()
   } finally {
     detach()

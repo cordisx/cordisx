@@ -53,6 +53,45 @@ describe('shared model startup projection', () => {
     await vi.waitFor(() => expect(registry.snapshot().providers).toEqual([]))
     registry.dispose()
   })
+  it('invalidates the old exact route on source notification even when the alias is reused', async () => {
+    const pending = startupProvider()
+    const source = startupObserver(startupSnapshot([startupProvider({
+      state: 'ready',
+      catalog: { state: 'known', generation: 'same-generation', modelIds: ['Alias'] },
+      actions: { ...pending.actions, execute: { available: true } },
+    })]))
+    const provider = (id: string) => ({
+      providerId: 'first',
+      pluginId: 'p',
+      models: [{ id, label: 'Alias', aliases: ['Alias'] }],
+    })
+    let complete!: (projections: ReturnType<typeof provider>[]) => void
+    let notify!: () => void
+    let replace = false
+    const registry = new ModelProviderRegistry(async () =>
+      replace
+        ? await new Promise(resolve => {
+          complete = resolve
+        })
+        : [provider('old/model')]
+    )
+    registry.connectStartup(source.observer)
+    registry.connectSource(listener => {
+      notify = listener
+      return () => {}
+    })
+    try {
+      await vi.waitFor(() => expect(registry.snapshot().providers[0]?.models[0]?.id).toBe('old/model'))
+      replace = true
+      notify()
+      expect(registry.snapshot().providers[0]?.models).toEqual([])
+      complete([provider('new/model')])
+      await vi.waitFor(() => expect(registry.snapshot().providers[0]?.models[0]?.id).toBe('new/model'))
+    } finally {
+      registry.dispose()
+    }
+  })
+
   it('uses explicit page action availability independently from service execution', () => {
     const snapshot = {
       ...startupSnapshot(),
