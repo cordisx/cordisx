@@ -380,7 +380,6 @@ it.skipIf(!executable)(
           rowHeight:label.closest('button').getBoundingClientRect().height
         }))`),
         ).toEqual([
-          { text: 'Empty adapter', singleLine: true, rowHeight: 30 },
           { text: 'ModelHub', singleLine: true, rowHeight: 30 },
           { text: 'OpenRouter', singleLine: true, rowHeight: 30 },
           {
@@ -389,7 +388,9 @@ it.skipIf(!executable)(
             rowHeight: 30,
           },
           { text: 'Gateway', singleLine: true, rowHeight: 30 },
+          { text: 'Additional', singleLine: true, rowHeight: 30 },
         ])
+        expect(await evaluate('document.querySelector("[data-provider-id=\\"empty-adapter\\"]")===null')).toBe(true)
         expect(await evaluate(`document.querySelector('[aria-label="Search model services"]')!==null`)).toBe(true)
         expect(
           await evaluate(
@@ -613,6 +614,20 @@ it.skipIf(!executable)(
       slider.dispatchEvent(new Event('input',{bubbles:true}));
       slider.dispatchEvent(new KeyboardEvent('keyup',{key:'End',bubbles:true}));
       await new Promise(resolve=>setTimeout(resolve,30))`)
+      // Production selector installation must use the existing common viewport;
+      // pending feedback cannot change model-menu geometry or steal slider focus.
+      expect(await evaluate('document.querySelector(".cxmp-menu").textContent.includes("Switching model service")'))
+        .toBe(false)
+      expect(await evaluate('document.querySelectorAll("[data-cordisx-notifications=\\"v1\\"]").length')).toBe(1)
+      expect(
+        await evaluate(`(() => {
+        const root=document.querySelector('[data-cordisx-notifications]'),style=getComputedStyle(root.querySelector('.cxn-stack'));
+        const message=root.querySelector('[role="status"]');
+        return {position:style.position,bottom:parseFloat(style.bottom)>0,right:parseFloat(style.right)>0,
+          text:message?.querySelector('strong')?.textContent,
+          inline:!!document.querySelector('.cxmp-model-menu-body [role="alert"],.cxmp-announcement')};
+      })()`),
+      ).toEqual({ position: 'fixed', bottom: true, right: true, text: 'Switching model service…', inline: false })
       expect(await evaluate('document.querySelector(".cxmp-fast-toggle").disabled')).toBe(false)
       await run(`document.querySelector('.cxmp-fast-toggle').click();
       await new Promise(resolve=>setTimeout(resolve,30))`)
@@ -648,6 +663,7 @@ it.skipIf(!executable)(
       await evaluate('disposeFixture()')
       expect(await evaluate('document.querySelectorAll(".cxmp-menu,[data-cordisx-model-provider-selector]").length'))
         .toBe(0)
+      expect(await evaluate('document.querySelector("[data-cordisx-notifications]")===null')).toBe(true)
     } finally {
       cdp?.close()
       if (chrome && chrome.exitCode === null && chrome.signalCode === null) {

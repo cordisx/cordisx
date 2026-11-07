@@ -83,10 +83,11 @@ export function ModelStartupStatus({ entry, state, locale, dot = false }: {
   readonly dot?: boolean
 }) {
   const connection = state?.connection
+  // Dots describe provider objects; polling them must not create a live message.
   return (
     <small
       className={dot ? 'cxmp-startup-dot' : 'cxmp-startup-status'}
-      role="status"
+      role={dot ? undefined : 'status'}
       data-startup-state={entry.state}
       data-startup-connection={connection}
     >

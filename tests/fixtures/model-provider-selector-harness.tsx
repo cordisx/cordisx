@@ -8,19 +8,25 @@ import {
 } from '../../packages/cli/src/renderer/model-provider-selector.js'
 import { ModelProviderRegistry } from '../../packages/cli/src/renderer/model-providers.js'
 import type { ModelReasoningCapabilities } from '../../packages/cli/src/model-reasoning-capabilities.js'
+import { installNotificationHost } from '../../packages/cli/src/renderer/notifications/host.js'
 const globals = Object.fromEntries(
   ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver', 'IS_REACT_ACT_ENVIRONMENT']
     .map(key => [key, Reflect.get(globalThis, key)]),
 )
 let root: Root | undefined
+let disposeNotifications: (() => void) | undefined
 export let dom: JSDOM | undefined
 afterEach(async () => {
   await act(async () => root?.unmount())
+  await act(async () => disposeNotifications?.())
+  disposeNotifications = undefined
   dom?.window.close()
   Object.assign(globalThis, globals)
 })
 export async function setup(model = 'shared', busy = false, options?: {
   readonly firstLabel?: string
+  readonly notifications?: boolean
+  readonly locale?: string
   readonly firstAliases?: readonly string[]
   readonly firstModels?: readonly {
     readonly id: string
@@ -65,6 +71,11 @@ export async function setup(model = 'shared', busy = false, options?: {
   }
   // React was imported before JSDOM and selected its legacy input-event adapter.
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} })
+  if (options?.notifications !== false) {
+    await act(async () => {
+      disposeNotifications = installNotificationHost(document, 'model-selector-test')
+    })
+  }
   const registry = new ModelProviderRegistry(async () => [
     {
       providerId: options?.firstProviderId ?? 'first',
@@ -125,7 +136,7 @@ export async function setup(model = 'shared', busy = false, options?: {
     notify()
     return 'accepted' as const
   })
-  const selectReasoningEffort = vi.fn(async () => 'accepted' as const)
+  const selectReasoningEffort = vi.fn(async (): Promise<'accepted' | 'busy' | 'unavailable'> => 'accepted')
   const cancelProviderIntent = vi.fn(async () => {
     snapshot = { ...snapshot, pendingProviderIntent: undefined }
     notify()
@@ -142,7 +153,7 @@ export async function setup(model = 'shared', busy = false, options?: {
     root!.render(
       <ModelProviderSelector
         registry={registry}
-        locale="en"
+        locale={options?.locale ?? 'en'}
         transport={{
           getSnapshot: () => snapshot,
           subscribe: listener => {
@@ -166,6 +177,10 @@ export async function setup(model = 'shared', busy = false, options?: {
     cancelProviderIntent,
     snapshot,
     confirmSubmission,
+    unmount: async () => {
+      await act(async () => root?.unmount())
+      root = undefined
+    },
     update: async (patch: Partial<ProviderSelectionSnapshot>) => {
       await act(async () => {
         snapshot = { ...snapshot, ...patch }

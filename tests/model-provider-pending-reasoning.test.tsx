@@ -79,7 +79,10 @@ describe('pending model reasoning slider', () => {
       slider.dispatchEvent(new dom!.window.KeyboardEvent('keyup', { key: 'End', bubbles: true }))
     })
     expect(selectReasoningEffort).toHaveBeenCalledWith('max')
-    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Reasoning effort updated')
+    expect(document.querySelector('[data-cordisx-notifications] [role="status"]')?.textContent)
+      .toContain('Reasoning effort updated')
+    expect(document.querySelector('.cxmp-announcement')).toBeNull()
+    expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Reasoning effort updated')
     expect(slider.value).toBe('2')
   })
 

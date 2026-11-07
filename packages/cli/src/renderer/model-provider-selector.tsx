@@ -13,7 +13,8 @@ import { HostIcon } from './host-ui/HostIcon.js'
 import { HostMenuSurface } from './host-ui/HostMenu.js'
 import { ModelBrandIcon } from './host-ui/ModelBrandIcon.js'
 import { ProviderAction } from './model-provider-actions.js'
-import { clearNativeSubmissionFeedback, modelProviderCopy, nativeSubmissionFeedback } from './model-provider-copy.js'
+import { modelProviderCopy } from './model-provider-copy.js'
+import { useModelProviderNotifications } from './model-provider-notifications.js'
 import { friendlyModelLabel } from './adapter/native-model-provider-seat.js'
 import { nativeModelProviderInteractionAllowed } from './adapter/native-model-provider-interaction.js'
 import { ProviderReasoningSlider } from './model-provider-reasoning.js'
@@ -22,7 +23,7 @@ import css from './model-providers.css?inline'
 import { inferModelBrand } from '../model-selector-branding.js'
 import type { ModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { ProviderMenuLabel, providerMenuLabel } from './model-provider-menu-label.js'
-import { ModelStartupIcon, ModelStartupStatus } from './model-startup-status.js'
+import { ModelStartupIcon } from './model-startup-status.js'
 import { startupExecutionAvailable, startupPageActionAvailable } from './model-startup-store.js'
 import { managerCopy } from './ui-copy.js'
 
@@ -128,9 +129,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const [modelExpanded, setModelExpanded] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [fastActionPending, setFastActionPending] = useState(false)
-  const [error, setError] = useState<string>()
-  const [status, setStatus] = useState<string>()
   const anchor = useRef<HTMLDivElement>(null)
+  const feedback = useModelProviderNotifications(anchor, locale, native.threadId)
   const returnFocus = useRef<HTMLButtonElement>(null)
   const providerTrigger = useRef<HTMLButtonElement>(null)
   const modelTrigger = useRef<HTMLButtonElement>(null)
@@ -180,19 +180,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       return modelTerms.every(term => label.includes(term))
     })
     : []
-  const feedback = error ?? status
-  const visibleMenuFeedback = open === 'model'
-    ? error === copy.busy ? undefined : error
-    : feedback
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
   const fastMode = supportsFastMode && native.serviceTier === 'priority'
   const canQueueFast = reasoningInFlight.current !== undefined
   const fastDisabled = !native.available || !supportsFastMode || fastActionPending
     || ((native.busy || switching) && !canQueueFast)
-  const showInitialLoading = catalog.loading
-    && catalog.providers.length === 0
-    && catalog.entries.length === 0
-    && (native.nativeModels?.length ?? 0) === 0
 
   useEffect(() => {
     if (suspended || creationReadOnly) setOpen(undefined)
@@ -205,8 +197,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     setSwitching(false)
     setFastActionPending(false)
     setOpen(undefined)
-    setError(undefined)
-    setStatus(undefined)
     return () => {
       operation.current++
       reasoningInFlight.current = undefined
@@ -226,36 +216,44 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
 
   useEffect(() => {
     if (native.submissionError !== undefined) {
-      setStatus(undefined)
-      setError(nativeSubmissionFeedback(copy, native.submissionError))
+      feedback.clear('selection')
+      feedback.show('submission.rejected', native.submissionError)
     } else {
-      setError(current => clearNativeSubmissionFeedback(copy, current))
+      feedback.clear('submission')
     }
-  }, [native.submissionError, locale])
+  }, [native.submissionError, native.threadId, feedback.show, feedback.clear])
+
+  useEffect(() => {
+    if (catalog.error === undefined) feedback.clear('catalog')
+    else if (open !== undefined) feedback.show('catalog.failed')
+  }, [catalog.error, open, native.threadId, feedback.show, feedback.clear])
+
+  useEffect(() => {
+    if (native.available) feedback.clear('availability')
+    else if (open !== undefined) feedback.show('routing.unavailable')
+  }, [native.available, open, native.threadId, feedback.show, feedback.clear])
 
   const runReasoningEffort = async (effort: string) => {
     if (!canInteract()) return
     const generation = ++operation.current
     setSwitching(true)
-    setError(undefined)
-    setStatus(copy.switching)
+    feedback.clear('submission')
+    feedback.show('selection.pending')
     try {
       const result = await transport.selectReasoningEffort(effort)
       if (generation !== operation.current) return
       if (result !== 'accepted') {
-        setStatus(undefined)
-        setError(result === 'busy' ? copy.busy : copy.failed)
+        feedback.show(result === 'busy' ? 'selection.busy' : 'selection.failed')
       } else {
         const current = transport.getSnapshot()
         const selectedEffort = current.nextSend === undefined && current.pendingProviderId === undefined
           ? current.reasoningEffort
           : current.nextSend?.reasoningEffort ?? current.pendingReasoningEffort
-        setStatus(selectedEffort === effort ? copy.updated : copy.accepted)
+        feedback.show(selectedEffort === effort ? 'reasoning.updated' : 'selection.synchronizing')
       }
     } catch {
       if (generation !== operation.current) return
-      setStatus(undefined)
-      setError(copy.failed)
+      feedback.show('selection.failed')
     } finally {
       if (generation === operation.current) setSwitching(false)
     }
@@ -278,16 +276,16 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     fastActionInFlight.current = generation
     setFastActionPending(true)
     setSwitching(true)
-    setError(undefined)
-    setStatus(undefined)
+    feedback.clear('selection')
+    feedback.clear('submission')
     try {
       if (pendingReasoning !== undefined) await pendingReasoning
       if (generation !== operation.current || !canInteract()) return
       const result = await transport.selectFastMode(enabled)
       if (generation !== operation.current) return
-      if (result !== 'accepted') setError(result === 'busy' ? copy.busy : copy.failed)
+      if (result !== 'accepted') feedback.show(result === 'busy' ? 'selection.busy' : 'selection.failed')
     } catch {
-      if (generation === operation.current) setError(copy.failed)
+      if (generation === operation.current) feedback.show('selection.failed')
     } finally {
       if (fastActionInFlight.current === generation) {
         fastActionInFlight.current = undefined
@@ -303,8 +301,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     if (progress && !startupExecutionAvailable(registry.snapshot().startup, progress)) return
     const generation = ++operation.current
     setSwitching(true)
-    setError(undefined)
-    setStatus(copy.switching)
+    feedback.clear('submission')
+    feedback.show('selection.pending')
     setOpen(undefined)
     returnFocus.current?.focus({ preventScroll: true })
     try {
@@ -325,18 +323,21 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       const result = await transport.select({ providerId: provider.providerId, model: model.id })
       if (generation !== operation.current) return
       if (result !== 'accepted') {
-        setStatus(undefined)
         const reason = transport.getSnapshot().submissionError
-        setError(
-          reason === undefined ? result === 'busy' ? copy.busy : copy.failed : nativeSubmissionFeedback(copy, reason),
-        )
+        if (reason === undefined) feedback.show(result === 'busy' ? 'selection.busy' : 'selection.failed')
+        else {
+          feedback.clear('selection')
+          feedback.show('submission.rejected', reason)
+        }
       } else {
-        setStatus(undefined)
+        const selected = transport.getSnapshot()
+        if (selected.pendingProviderIntent) feedback.show('intent.pending')
+        else if (selected.nextSend || selected.pendingProviderId) feedback.show('selection.queued')
+        else feedback.clear('selection')
       }
     } catch {
       if (generation !== operation.current) return
-      setStatus(undefined)
-      setError(copy.failed)
+      feedback.show('selection.failed')
     } finally {
       if (generation === operation.current) setSwitching(false)
     }
@@ -395,14 +396,15 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     if (!transport.cancelProviderIntent) return
     const generation = ++operation.current
     setSwitching(true)
-    setError(undefined)
+    feedback.clear('selection')
+    feedback.clear('submission')
     try {
       const result = await transport.cancelProviderIntent()
       if (generation !== operation.current) return
-      if (result !== 'accepted') setError(result === 'busy' ? copy.busy : copy.failed)
+      if (result !== 'accepted') feedback.show(result === 'busy' ? 'selection.busy' : 'selection.failed')
       else setOpen('provider')
     } catch {
-      if (generation === operation.current) setError(copy.failed)
+      if (generation === operation.current) feedback.show('selection.failed')
     } finally {
       if (generation === operation.current) setSwitching(false)
     }
@@ -483,18 +485,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       onKeyDown={event => event.stopPropagation()}
     >
       <style>{css}</style>
-      {providerIntent
-        ? <span className="cxmp-announcement" role="status">{managerCopy(locale, 'catalog.startup.intent')}</span>
-        : null}
-
-      {queued
-        ? (
-          <span className="cxmp-announcement" role="status">
-            {copy.nextSend}: {displayedProviderLabel} / {displayedModelLabel}. {copy.active}: {providerLabel} /{' '}
-            {selectedModelLabel}
-          </span>
-        )
-        : null}
       <button
         ref={providerTrigger}
         type="button"
@@ -555,7 +545,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           : undefined}
         aria-label={`${queued ? copy.nextSend : copy.models}: ${displayedModelLabel}`}
         title={queued
-          ? `${copy.nextSend}: ${displayedModelLabel}. ${copy.active}: ${selectedModelLabel}`
+          ? `${copy.nextSend}: ${displayedProviderLabel} / ${displayedModelLabel}. ${copy.active}: ${providerLabel} / ${selectedModelLabel}`
           : displayedModelLabel}
         aria-haspopup="menu"
         aria-expanded={open === 'model'}
@@ -572,7 +562,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         <span className="cxmp-model-separator" aria-hidden="true" />
         <span className="cxmp-effort-label">{copy.reasoningEffortLabel(reasoningEffort)}</span>
       </button>
-      {feedback ? <span role={error ? 'alert' : 'status'} className="cxmp-announcement">{feedback}</span> : null}
+      {
+        /* Selection-only surface: no readiness rows, operation alerts or live announcements.
+          Route messages through useModelProviderNotifications, never an inline fallback.
+          Search/empty-result content and actual selection controls belong in the menu. */
+      }
       <HostMenuSurface
         open={!suspended && !creationReadOnly && open !== undefined}
         canFocus={canInteract}
@@ -597,20 +591,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
           }
         }}
       >
-        {visibleMenuFeedback
-          ? (
-            <div className={error ? 'cxmp-menu-heading cxmp-error' : 'cxmp-menu-heading'}>
-              {visibleMenuFeedback}
-            </div>
-          )
-          : null}
-        <div className={open === 'provider' ? 'cxmp-menu-scroll' : 'cxmp-model-menu-body'}>
-          {!native.available ? <div className="cxmp-menu-heading" role="status">{copy.unavailable}</div> : null}
-          {showInitialLoading ? <div className="cxmp-menu-heading" role="status">{copy.loading}</div> : null}
+        <div className={open === 'provider' ? 'cxmp-menu-scroll' : 'cxmp-model-menu-body'} aria-busy={catalog.loading}>
           {catalog.error
             ? (
               <button type="button" role="menuitem" className="cxmp-retry" onClick={() => void registry.refresh()}>
-                {copy.loadFailed}
+                {copy.refresh}
               </button>
             )
             : null}
@@ -700,17 +685,6 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     >
                       {managerCopy(locale, 'catalog.startup.cancelIntent')}
                     </button>
-                  )
-                  : null}
-                {menuProvider?.startup
-                  ? (
-                    <div className="cxmp-menu-heading">
-                      <ModelStartupStatus
-                        entry={menuProvider.startup}
-                        state={catalog.startup}
-                        locale={locale}
-                      />
-                    </div>
                   )
                   : null}
                 {reasoningEfforts.length > 0 || displayedNativeModel !== undefined
@@ -816,13 +790,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       {filteredModels.length === 0
                         ? (
                           <div className="cxmp-menu-heading" role="status">
-                            {modelTerms.length ? copy.noMatches : providerIntent && !menuProvider
-                              ? managerCopy(locale, 'catalog.startup.unknown')
-                              : menuProvider?.startup
-                                  && (menuProvider.startup.catalog.state === 'pending'
-                                    || menuProvider.startup.catalog.state === 'unknown')
-                              ? copy.loading
-                              : copy.emptyModels}
+                            {modelTerms.length ? copy.noMatches : copy.emptyModels}
                           </div>
                         )
                         : null}

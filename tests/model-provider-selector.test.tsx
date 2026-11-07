@@ -259,8 +259,9 @@ describe('provider selection interaction', () => {
     await click(modelTrigger)
     expect(document.querySelector('.cxmp-next-send-label')).toBeNull()
     expect(document.querySelector('.cxmp-menu-heading')).toBeNull()
-    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Use on Send after response')
-    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Current: first')
+    expect(document.querySelector('.cxmp-announcement')).toBeNull()
+    expect(document.querySelector(modelTrigger)?.getAttribute('aria-label')).toContain('Use on Send after response')
+    expect(document.querySelector(modelTrigger)?.getAttribute('title')).toContain('Current: first / Current')
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
     await update({ selectionLocked: true })
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true)
@@ -585,7 +586,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('.cxmp-selector > [role="status"]:not(.cxmp-announcement)')).toBeNull()
   })
 
-  it('keeps switching and success feedback out of the model list while announcing it accessibly', async () => {
+  it('keeps switching and success feedback in the common accessible notification viewport', async () => {
     const { selectReasoningEffort, update } = await setup()
     let finish!: () => void
     selectReasoningEffort.mockImplementationOnce(() =>
@@ -600,12 +601,15 @@ describe('provider selection interaction', () => {
       slider.dispatchEvent(new dom!.window.Event('input', { bubbles: true }))
       slider.dispatchEvent(new dom!.window.KeyboardEvent('keyup', { key: 'ArrowLeft', bubbles: true }))
     })
-    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Switching model service')
+    expect(document.querySelector('[data-cordisx-notifications] [role="status"]')?.textContent)
+      .toContain('Switching model service')
+    expect(document.querySelector('.cxmp-announcement')).toBeNull()
     expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Switching model service')
     expect(document.querySelector('.cxmp-menu')?.querySelector('.cxmp-menu-heading')).toBeNull()
     await update({ reasoningEffort: 'low' })
     await act(async () => finish())
-    expect(document.querySelector('.cxmp-announcement')?.textContent).toContain('Reasoning effort updated')
+    expect(document.querySelector('[data-cordisx-notifications] [role="status"]')?.textContent)
+      .toContain('Reasoning effort updated')
     expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Reasoning effort updated')
     expect(document.querySelector('.cxmp-menu')?.querySelector('.cxmp-menu-heading')).toBeNull()
   })
@@ -686,10 +690,13 @@ describe('provider selection interaction', () => {
     const current = registry.snapshot()
     vi.spyOn(registry, 'snapshot').mockReturnValue({ ...current, providers: [], entries: [], loading: true })
     await update({ busy: true })
-    expect(document.querySelector('.cxmp-menu')?.textContent).toContain('Loading')
+    expect(document.querySelector('.cxmp-model-menu-body')?.getAttribute('aria-busy')).toBe('true')
+    expect(document.querySelector('.cxmp-menu')?.textContent).not.toContain('Loading')
     vi.mocked(registry.snapshot).mockReturnValue({ ...current, loading: false, error: 'offline' })
     await update({ busy: false })
-    expect(document.querySelector('.cxmp-retry')?.textContent).toContain('Could not load')
+    expect(document.querySelector('.cxmp-retry')?.textContent).toBe('Refresh')
+    expect(document.querySelector('[data-cordisx-notifications] [role="alert"]')?.textContent)
+      .toContain('Could not load')
   })
 
   it('keeps background provider refreshes silent while the menu is open', async () => {
@@ -833,7 +840,9 @@ describe('provider selection interaction', () => {
     })
     await update({ available: false })
     await click(providerTrigger)
-    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Model services unavailable')
+    expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Model services unavailable')
+    expect(document.querySelector('[data-cordisx-notifications] [role="status"]')?.textContent)
+      .toContain('Model services unavailable')
     expect([...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
       .every(button => button.disabled)).toBe(true)
     await click('[aria-label="Log in"]')
