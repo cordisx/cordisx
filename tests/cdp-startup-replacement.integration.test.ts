@@ -21,12 +21,15 @@ async function fixture(options: {
   deniedRestore?: boolean
   heldSeed?: boolean
   replacements?: number
+  initialWorkspaceVisible?: boolean
+  launcherOwned?: boolean
   lifecycle?: WatchInjectionOptions['pluginLifecycle']
 } = {}) {
   const calls: string[] = []
   const scopes = new Map<string, { socket: WebSocket; context: Context; scripts: Map<string, string> }>()
   let port = 0
   let generation = 0
+  let initialWorkspaceVisible = options.initialWorkspaceVisible ?? true
   let replacementVisible = true
   let replacementBootAllowed = true
   let interrupted = false
@@ -48,7 +51,7 @@ async function fixture(options: {
     const current = workspace()
     response.end(JSON.stringify([
       target('helper', 'detached-window.html'),
-      ...(generation === 0 || replacementVisible
+      ...((generation === 0 ? initialWorkspaceVisible : replacementVisible)
         ? [{ ...current, url: seedActivated ? current.url : 'data:text/html;charset=utf-8,loading' }]
         : []),
     ]))
@@ -181,13 +184,15 @@ async function fixture(options: {
     }
     : undefined
   const abort = new AbortController()
+  let hostExited = false
   const ready = vi.fn()
   const statuses: string[] = []
   const settings = {
     port,
     source: SOURCE,
     signal: abort.signal,
-    launcherOwnedNativeTarget: true,
+    launcherOwnedNativeTarget: options.launcherOwned ?? true,
+    ownedHostExited: () => hostExited,
     hasLoopbackGraph: true,
     pluginArtifactOrigin: 'http://127.0.0.1:47123',
     pluginManagement: management,
@@ -216,6 +221,9 @@ async function fixture(options: {
     statuses,
     interrupted: () => interrupted,
     scopes,
+    showInitialWorkspace: () => initialWorkspaceVisible = true,
+    markHostExited: () => hostExited = true,
+    abort: () => abort.abort(),
     showReplacement: (value: boolean) => replacementVisible = value,
     allowBoot: (value: boolean) => replacementBootAllowed = value,
     start: () => watching = watchAndInject(settings).then(() => ({}), error => ({ error })),
@@ -227,6 +235,84 @@ async function fixture(options: {
     },
   }
 }
+
+describe('first owned workspace during production installation', () => {
+  it('waits through a helper-only target list and admits only the native workspace', async () => {
+    const app = await fixture({ initialWorkspaceVisible: false, replacements: 0 })
+    try {
+      app.start()
+      await vi.waitFor(() => expect(app.statuses).toContain('initial-native-workspace-wait'))
+      expect(app.calls).toEqual([])
+      expect(app.ready).not.toHaveBeenCalled()
+      app.showInitialWorkspace()
+      await vi.waitFor(() => expect(app.ready).toHaveBeenCalledOnce(), { timeout: 3_000 })
+      expect(app.calls).toContain('connect:workspace-0')
+      expect(app.calls).not.toContain('connect:helper')
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('fails at the original deadline when the workspace never appears', async () => {
+    const app = await fixture({ initialWorkspaceVisible: false })
+    const now = Date.now.bind(Date)
+    const clock = vi.spyOn(Date, 'now').mockImplementation(now)
+    try {
+      const watching = app.start()
+      await vi.waitFor(() => expect(app.statuses).toContain('initial-native-workspace-wait'))
+      clock.mockImplementation(() => now() + 600_001)
+      expect(String((await watching).error)).toContain(
+        'Owned native workspace did not appear before the renderer installation deadline',
+      )
+      expect(app.calls).toEqual([])
+      expect(app.ready).not.toHaveBeenCalled()
+    } finally {
+      clock.mockRestore()
+      await app.stop()
+    }
+  })
+
+  it('fails when the owned Host exits while only a helper is visible', async () => {
+    const app = await fixture({ initialWorkspaceVisible: false })
+    try {
+      const watching = app.start()
+      await vi.waitFor(() => expect(app.statuses).toContain('initial-native-workspace-wait'))
+      app.markHostExited()
+      expect(String((await watching).error)).toContain('Owned Host exited before its native workspace was available')
+      expect(app.calls).toEqual([])
+      expect(app.ready).not.toHaveBeenCalled()
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('aborts during the wait without connecting to the helper', async () => {
+    const app = await fixture({ initialWorkspaceVisible: false })
+    try {
+      const watching = app.start()
+      await vi.waitFor(() => expect(app.statuses).toContain('initial-native-workspace-wait'))
+      app.abort()
+      expect(await watching).toEqual({})
+      expect(app.calls).toEqual([])
+      expect(app.ready).not.toHaveBeenCalled()
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('still rejects a production graph for a Host the watcher does not own', async () => {
+    const app = await fixture({ initialWorkspaceVisible: false, launcherOwned: false })
+    try {
+      expect(String((await app.start()).error)).toContain(
+        'production loopback graph compatibility requires a launcher-owned native target',
+      )
+      expect(app.statuses).not.toContain('initial-native-workspace-wait')
+      expect(app.calls).toEqual([])
+    } finally {
+      await app.stop()
+    }
+  })
+})
 
 describe('owned workspace replacement during production installation', () => {
   it.each([false, true])(

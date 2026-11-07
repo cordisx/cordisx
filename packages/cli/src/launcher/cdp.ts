@@ -402,6 +402,20 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             throw new Error('Owned native workspace replacement exceeded the renderer installation deadline')
           }
           watcherStage = 'target-list'
+          const browserGraphTransport = options.hasLoopbackGraph === true
+            || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
+          const waitingForFirstWorkspace = browserGraphTransport && options.launcherOwnedNativeTarget === true
+            && !ownedWorkspaceInstalled && !awaitingStartupReplacement
+          if (waitingForFirstWorkspace) {
+            if (ownedHostExited()) {
+              attemptedReloadTarget = 'production'
+              throw new Error('Owned Host exited before its native workspace was available')
+            }
+            if (startupInstallationDeadline !== undefined && Date.now() >= startupInstallationDeadline) {
+              attemptedReloadTarget = 'production'
+              throw new Error('Owned native workspace did not appear before the renderer installation deadline')
+            }
+          }
           if (startupNavigation === undefined && options.startupNavigation !== undefined) {
             startupStage('startup-handoff-wait')
             startupNavigation = await support.abortable(options.startupNavigation, options.signal)
@@ -439,8 +453,6 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             candidates.push(target)
             candidateIds.add(target.id)
           }
-          const browserGraphTransport = options.hasLoopbackGraph === true
-            || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
           let targets = options.viteDevelopment === true || browserGraphTransport
             ? candidates.filter(nativeAppTarget)
             : candidates
@@ -452,7 +464,12 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               ownedWorkspaceInstalled || !nativeAppTarget(target) || nativeWorkspaceTarget(target)
             ).sort((left, right) => Number(nativeWorkspaceTarget(right)) - Number(nativeWorkspaceTarget(left)))
           }
-          if (browserGraphTransport && candidates.length > 0 && targets.length === 0 && !awaitingStartupReplacement) {
+          if (waitingForFirstWorkspace && targets.length === 0) {
+            startupInstallationDeadline ??= Date.now() + support.CDP_INJECTION_TIMEOUT_MS
+            startupStage('initial-native-workspace-wait')
+          } else if (
+            browserGraphTransport && candidates.length > 0 && targets.length === 0 && !awaitingStartupReplacement
+          ) {
             attemptedReloadTarget = 'production'
             throw new Error('production loopback graph requires a native app:// renderer target')
           }
