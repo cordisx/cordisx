@@ -83,7 +83,6 @@ export interface ProviderSelectionTransport {
   ): Promise<'accepted' | 'busy' | 'unavailable'>
   selectReasoningEffort(reasoningEffort: string): Promise<'accepted' | 'busy' | 'unavailable'>
   selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'>
-  selectProviderIntent?(providerId: string): Promise<'accepted' | 'busy' | 'unavailable'>
   cancelProviderIntent?(): Promise<'accepted' | 'busy' | 'unavailable'>
   confirmSubmission?(confirmed: boolean): void
 }
@@ -351,21 +350,25 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     if (registry.hasLiveSource() && preference?.model === undefined) return
     if (preference === undefined || native.threadId !== undefined || pendingProviderId !== undefined) return
     const key = `${preference.generation}:${preference.revision}:${preference.providerId}`
-    if (attemptedDraftPreference.current === key) return
     const provider = preference.providerId === 'openai'
       ? {
         providerId: 'openai',
         models: nativeModelsForProvider(native, 'openai')?.filter(model => !model.disabled) ?? [],
       }
       : catalog.providers.find(candidate => candidate.providerId === preference.providerId)
-    if (provider === undefined) return
-    const model = preference.model === undefined
+    const model = provider === undefined
+      ? undefined
+      : preference.model === undefined
       ? selectionModelForProvider(effectiveModel, provider, locale)
       : provider.models.find(model => model.id === preference.model && (!('disabled' in model) || !model.disabled))
-    if (model === undefined) return
+    if (model === undefined) {
+      if (attemptedDraftPreference.current === key) attemptedDraftPreference.current = undefined
+      return
+    }
+    if (attemptedDraftPreference.current === key) return
     attemptedDraftPreference.current = key
     void transport.select(
-      { providerId: provider.providerId, model: model.id },
+      { providerId: preference.providerId, model: model.id },
       { source: 'preference', expectedRevision: preference.revision },
     )
   }, [
@@ -387,20 +390,17 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     void apply(provider, model)
   }
 
-  const changeProviderIntent = async (providerId?: string) => {
+  const cancelProviderIntent = async () => {
     if (!canInteract() || switching) return
-    const run = providerId === undefined
-      ? transport.cancelProviderIntent?.bind(transport)
-      : transport.selectProviderIntent?.bind(transport, providerId)
-    if (!run) return
+    if (!transport.cancelProviderIntent) return
     const generation = ++operation.current
     setSwitching(true)
     setError(undefined)
     try {
-      const result = await run()
+      const result = await transport.cancelProviderIntent()
       if (generation !== operation.current) return
       if (result !== 'accepted') setError(result === 'busy' ? copy.busy : copy.failed)
-      else setOpen(providerId === undefined ? 'provider' : 'model')
+      else setOpen('provider')
     } catch {
       if (generation === operation.current) setError(copy.failed)
     } finally {
@@ -438,7 +438,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
       usable: officialProvider.models.length > 0,
       favorite: false,
     },
-    ...(!selected && nativeProvider.providerId !== 'openai'
+    ...(!selected && nativeProvider.providerId !== 'openai' && !registry.hasStartupProvider(nativeProvider.providerId)
       ? [{
         key: `native:${nativeProvider.providerId}`,
         kind: 'native' as const,
@@ -448,13 +448,12 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
         favorite: false,
       }]
       : []),
-    ...catalog.providers.map(provider => ({
+    ...catalog.providers.filter(provider => provider.models.length > 0).map(provider => ({
       key: `catalog:${provider.providerId}`,
       kind: 'catalog' as const,
       provider,
       label: providerMenuLabel(provider),
-      usable: provider.models.length > 0,
-      intentAvailable: provider.startup !== undefined,
+      usable: true,
       favorite: provider.providerFavorite === true,
     })),
   ]
@@ -629,20 +628,8 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                     data-menu-initial={row.provider.providerId === displayedProviderId || undefined}
                     disabled={switching || native.selectionLocked
                       || (native.providerSwitchAvailable === false && row.provider.providerId !== native.modelProvider)
-                      || ('intentAvailable' in row && row.intentAvailable
-                        ? row.kind === 'catalog' && row.provider.startup
-                            && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))
-                          ? !transport.selectProviderIntent
-                          : !native.available || !row.usable
-                        : !native.available || !row.usable)}
+                      || !native.available || !row.usable}
                     onClick={() => {
-                      if (
-                        row.kind === 'catalog' && row.provider.startup
-                        && (!row.usable || !startupExecutionAvailable(catalog.startup, row.provider.startup))
-                      ) {
-                        void changeProviderIntent(row.provider.providerId)
-                        return
-                      }
                       if (row.kind === 'native') {
                         if (native.model) choose(row.provider, { id: native.model, label: selectedModelLabel })
                         return
@@ -709,7 +696,7 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
                       type="button"
                       className="cxmp-menu-heading"
                       disabled={switching}
-                      onClick={() => void changeProviderIntent()}
+                      onClick={() => void cancelProviderIntent()}
                     >
                       {managerCopy(locale, 'catalog.startup.cancelIntent')}
                     </button>

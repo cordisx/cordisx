@@ -88,8 +88,8 @@ export function createNativeSubmissionController(
   const now = options.now ?? Date.now
   const validSelection = async (selection: NativeProviderSelection): Promise<boolean> => {
     try {
-      const startup = options.startup?.availability(selection.providerId, selection.model)
-      return startup?.available === false ? false : await options.validateSelection?.(selection) ?? true
+      const available = () => options.startup?.availability(selection.providerId, selection.model)?.available !== false
+      return available() && (await options.validateSelection?.(selection) ?? true) && available()
     } catch {
       return false
     }

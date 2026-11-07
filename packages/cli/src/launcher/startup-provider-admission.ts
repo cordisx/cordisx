@@ -19,7 +19,12 @@ export function startupProviderAdmission(
     ...(observer === undefined ? {} : { snapshot: async () => safeStartupSnapshot(await observer.read()) }),
     availability(providerId, modelId) {
       const target = authority.providerReference(providerId)
-      return target === undefined ? undefined : authority.availability(target, modelId)
+      if (target === undefined) {
+        return authority.hasProvider(providerId) ? { available: false, reason: 'unknown-target' } : undefined
+      }
+      const admission = authority.nativeCatalogAdmission(target)
+      if (!admission.available) return admission
+      return admission.modelIds.has(modelId) ? { available: true } : { available: false, reason: 'model-unavailable' }
     },
     async wait(providerId, modelId, signal) {
       const target = authority.providerReference(providerId)

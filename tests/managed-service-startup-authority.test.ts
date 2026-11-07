@@ -4,6 +4,14 @@ import type { ManagedServiceProjectionV1 } from '@cordisx/protocol/managed-servi
 import { describe, expect, it } from 'vitest'
 import { ManagedServiceStartupAuthority } from '../packages/cli/src/launcher/managed-service-startup-authority.js'
 import type { StartupPluginAdmission } from '../packages/cli/src/launcher/managed-service-startup-admission.js'
+import { startupProviderAdmission } from '../packages/cli/src/launcher/startup-provider-admission.js'
+import {
+  draftAction,
+  draftScope,
+  harness,
+  pendingDraft,
+  requestId,
+} from './fixtures/native-submission-controller-harness.js'
 import { declaration } from './managed-service-runtime-fixture.js'
 
 const owner = { pluginId: 'plugin', pluginGeneration: 'one', serviceId: 'gateway', serviceGeneration: 'service-one' }
@@ -173,19 +181,82 @@ describe('startup authority', () => {
         digest: `sha256:${createHash('sha256').update(JSON.stringify(['catalog-one', ['model']])).digest('hex')}`,
       },
     })
-    authority.publication(owner, 'provider', { state: 'known', generation: 'catalog-one', modelIds: ['model'] })
+    authority.publication(
+      owner,
+      'provider',
+      { state: 'known', generation: 'catalog-one', modelIds: ['model'], gatewayModelIds: ['scoped/model'] },
+    )
     authority.settled(owner)
     expect(authority.availability(ref)).toMatchObject({ available: false, reason: 'milestone-pending' })
     expect(await reporter.report(report())).toEqual({ status: 'accepted' })
     expect(authority.availability(ref)).toEqual({ available: true })
     expect(authority.availability(ref, 'missing')).toMatchObject({ reason: 'model-unavailable' })
+    const native = startupProviderAdmission(authority)
+    expect(native.availability('provider', 'scoped/model')).toEqual({ available: true })
+    expect(native.availability('provider', 'model')).toMatchObject({ reason: 'model-unavailable' })
     await reporter.report({ ...report(2), state: 'failed' })
     expect(authority.availability(ref)).toMatchObject({ reason: 'failed' })
     await reporter.report(report(3))
     expect(authority.availability(ref)).toEqual({ available: true })
     authority.publication(owner, 'provider', undefined)
     expect(authority.availability(ref)).toMatchObject({ reason: 'provider-unpublished' })
+    expect(native.availability('provider', 'scoped/model')).toMatchObject({ reason: 'provider-unpublished' })
     authority.dispose()
+  })
+
+  it('rechecks the exact startup publication at Send and dispatch without falling through', async () => {
+    const { authority } = setup()
+    const reporter = authority.bindService(owner)
+    const pending = { ...pendingDraft, providerId: 'provider', model: 'old/model' }
+    const { controller, clearPending } = harness({ startup: startupProviderAdmission(authority), pending })
+    try {
+      await expect(controller.prepareSubmission(draftScope, draftAction)).resolves.toMatchObject({
+        kind: 'reject',
+        startupReason: 'not-prepared',
+      })
+      authority.adopt(owner)
+      authority.updateService(owner, service({ state: 'missing' }), true)
+      authority.settled(owner)
+      await reporter.report(report())
+      const catalog = { state: 'known' as const, generation: 'catalog', modelIds: ['alias'] }
+      await reporter.reportCatalog({
+        contract: 'cordisx.startup-catalog-report/v1',
+        target: ref,
+        generation: report().generation,
+        sequence: 1,
+        catalog: {
+          ...catalog,
+          digest: `sha256:${createHash('sha256').update(JSON.stringify(['catalog', ['alias']])).digest('hex')}`,
+        },
+      })
+      authority.publication(owner, 'provider', { ...catalog, gatewayModelIds: ['old/model'] })
+      await expect(controller.prepareSubmission(draftScope, draftAction)).resolves.toMatchObject({
+        kind: 'reject',
+        startupReason: 'authentication-required',
+      })
+      authority.updateService(owner, service({ state: 'configured', sessionHandle: 'msa_fixture' }), true)
+      const prepared = await controller.prepareSubmission(draftScope, draftAction)
+      if (prepared.kind !== 'allow-original') throw new Error('Expected the authenticated exact route to prepare')
+      authority.publication(owner, 'provider', { ...catalog, gatewayModelIds: ['replacement/model'] })
+      await expect(controller.consumeMarkedRequest({
+        method: 'thread/start',
+        requestId,
+        operationToken: prepared.operationToken,
+      })).resolves.toMatchObject({ kind: 'reject' })
+      await expect(controller.prepareSubmission(draftScope, draftAction)).resolves.toMatchObject({
+        kind: 'reject',
+        startupReason: 'model-unavailable',
+      })
+      authority.selectOwners([])
+      await expect(controller.prepareSubmission(draftScope, draftAction)).resolves.toMatchObject({
+        kind: 'reject',
+        startupReason: 'unknown-target',
+      })
+      expect(clearPending).not.toHaveBeenCalled()
+    } finally {
+      await controller.dispose()
+      authority.dispose()
+    }
   })
 
   it.each([false, true])(

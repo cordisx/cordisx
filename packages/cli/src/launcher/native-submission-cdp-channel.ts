@@ -148,6 +148,7 @@ export function createNativeSubmissionCdpAuthority(options: {
   readonly submissionAvailable?: boolean
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   catalogSubscribe?(listener: () => void): () => void
+  isStartupProvider?(providerId: string): boolean
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
   readonly defaultModelId?: string
@@ -200,8 +201,11 @@ export function createNativeSubmissionCdpAuthority(options: {
     } catch {
       catalog = []
     }
+    const explicitStartupModel = defaultProviderId !== undefined && options.defaultModelId !== undefined
+      && options.isStartupProvider?.(defaultProviderId) === true
     const providerId = candidates.find(candidate =>
       candidate === 'openai'
+      || explicitStartupModel && candidate === defaultProviderId
       || catalog.some(provider => provider.providerId === candidate && provider.models.length > 0)
     )
     return providerId === undefined
@@ -210,7 +214,8 @@ export function createNativeSubmissionCdpAuthority(options: {
         providerId,
         generation: nextDraftPreferenceGeneration++,
         ...(providerId === defaultProviderId && options.defaultModelId
-            && catalog.some(p => p.providerId === providerId && p.models.some(m => m.id === options.defaultModelId))
+            && (explicitStartupModel
+              || catalog.some(p => p.providerId === providerId && p.models.some(m => m.id === options.defaultModelId)))
           ? { model: options.defaultModelId }
           : {}),
       })
@@ -726,7 +731,7 @@ export function createNativeSubmissionCdpAuthority(options: {
               && (source === 'preference' || state.pending === undefined
                 || selected.providerId !== state.effective.providerId || selected.model !== state.effective.model)
             ) {
-              if (source === 'preference') {
+              if (source === 'preference' && options.isStartupProvider?.(selected.providerId) !== true) {
                 delete state.draftPreference
                 state.revision++
               }
@@ -817,8 +822,17 @@ export function createNativeSubmissionCdpAuthority(options: {
               await respond(requestId, { status: 'accepted', ...projection(state) })
             }
           } else if (envelope.operation === 'submissionPrepare') {
+            const action = actionOf(input?.action)
+            const preference = state?.draftPreference
+            if (
+              preference?.model !== undefined && options.isStartupProvider?.(preference.providerId) === true
+              && (state?.effective?.providerId !== preference.providerId || state.effective.model !== preference.model)
+            ) {
+              await respond(requestId, { status: 'reject', kind: 'reject', reason: 'provider-preparation-failed' })
+              return
+            }
             const beforePending = state?.pending
-            const result = await controller!.prepareSubmission(scope, actionOf(input?.action))
+            const result = await controller!.prepareSubmission(scope, action)
             let rejectedProjection
             if (
               result.kind === 'reject' && state?.pending && state.pending === beforePending

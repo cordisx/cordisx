@@ -652,6 +652,38 @@ describe('native submission document authority', () => {
     }
   })
 
+  it('preserves an explicit startup draft and rejects Send while its provider is absent', async () => {
+    const h = await harness({
+      defaultProviderId: 'startup-provider',
+      defaultModelId: 'exact/model',
+      isStartupProvider: id => id === 'startup-provider',
+      catalog: () => [],
+    })
+    try {
+      const read = {
+        scope: h.draft,
+        effective: { providerId: 'openai', model: 'native-model' },
+      }
+      const initial = await h.channel.selectionRead(read)
+      expect(initial.draftPreference).toMatchObject({ providerId: 'startup-provider', model: 'exact/model' })
+      await expect(h.channel.selectionSelect({
+        scope: h.draft,
+        providerId: 'startup-provider',
+        model: 'exact/model',
+        source: 'preference',
+        expectedRevision: initial.revision,
+      })).rejects.toThrow()
+      expect(await h.channel.selectionRead(read)).toMatchObject({ draftPreference: initial.draftPreference })
+      await expect(h.channel.submissionPrepare({
+        scope: h.draft,
+        action: { operationId: 'operation-1', operationGeneration: 1, intent: 'ordinary-send' },
+      })).resolves.toMatchObject({ status: 'reject', reason: 'provider-preparation-failed' })
+      expect(h.controller.prepareSubmission).not.toHaveBeenCalled()
+    } finally {
+      await h.installed.dispose()
+    }
+  })
+
   it('retires a draft preference when its Provider disappears before application', async () => {
     let providers = [{
       providerId: 'provider-b',

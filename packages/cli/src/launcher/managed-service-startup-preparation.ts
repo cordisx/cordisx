@@ -213,6 +213,7 @@ export class ManagedServiceStartupPreparation {
             state: 'known',
             generation: publication.catalog.generation,
             modelIds: publication.catalog.routes.map(route => route.alias),
+            gatewayModelIds: publication.catalog.routes.map(route => route.gatewayModelId),
           },
         )
       }

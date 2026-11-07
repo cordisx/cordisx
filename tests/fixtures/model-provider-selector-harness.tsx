@@ -40,7 +40,6 @@ export async function setup(model = 'shared', busy = false, options?: {
   readonly nativeModels?: ProviderSelectionSnapshot['nativeModels']
   readonly branded?: boolean
   readonly liveCatalog?: boolean
-  readonly providerIntentResult?: 'accepted' | 'busy' | 'unavailable'
   readonly firstProviderId?: string
   readonly firstProviderTitle?: string
   readonly secondProviderId?: string
@@ -127,14 +126,6 @@ export async function setup(model = 'shared', busy = false, options?: {
     return 'accepted' as const
   })
   const selectReasoningEffort = vi.fn(async () => 'accepted' as const)
-  const selectProviderIntent = vi.fn(async (providerId: string) => {
-    const result = options?.providerIntentResult ?? 'accepted'
-    if (result === 'accepted') {
-      snapshot = { ...snapshot, pendingProviderIntent: { providerId, generation: 1 } }
-      notify()
-    }
-    return result
-  })
   const cancelProviderIntent = vi.fn(async () => {
     snapshot = { ...snapshot, pendingProviderIntent: undefined }
     notify()
@@ -161,7 +152,6 @@ export async function setup(model = 'shared', busy = false, options?: {
           select,
           selectReasoningEffort,
           selectFastMode,
-          selectProviderIntent,
           cancelProviderIntent,
           confirmSubmission,
         }}
@@ -173,7 +163,6 @@ export async function setup(model = 'shared', busy = false, options?: {
     select,
     selectReasoningEffort,
     selectFastMode,
-    selectProviderIntent,
     cancelProviderIntent,
     snapshot,
     confirmSubmission,

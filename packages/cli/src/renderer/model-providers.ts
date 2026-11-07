@@ -12,7 +12,7 @@ import { isModelBrandChoice, isProviderBrandChoice } from '../model-selector-bra
 import type { GenerationVisibilityCoordinator, PluginGenerationEffectIdentity } from './generation-visibility.js'
 import { ModelCatalogClient } from './model-catalog-client.js'
 import type { StartupObserverV1, StartupProjectionV1 } from '@cordisx/protocol/startup/v1'
-import { type ModelStartupState, ModelStartupStore } from './model-startup-store.js'
+import { type ModelStartupState, ModelStartupStore, startupExecutionAvailable } from './model-startup-store.js'
 import { applyCatalogManagementPreferences } from './model-provider-preferences.js'
 import { type ModelReasoningCapabilities, parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
@@ -175,6 +175,10 @@ export class ModelProviderRegistry {
   private disconnectSource?: () => void
   private sourceReconcile?: ReturnType<typeof setInterval>
 
+  hasStartupProvider(providerId: string): boolean {
+    return this.startupProviderIds.has(providerId)
+  }
+
   hasLiveSource(): boolean {
     return this.disconnectSource !== undefined
   }
@@ -196,7 +200,11 @@ export class ModelProviderRegistry {
     const refresh = () => {
       void this.refresh()
     }
-    this.disconnectSource = subscribe(refresh)
+    this.disconnectSource = subscribe(() => {
+      // A publication can change routes while retaining the same display aliases.
+      this.projections = this.projections.filter(provider => !this.hasStartupProvider(provider.providerId))
+      refresh()
+    })
     // Full snapshots also repair missed invalidations and read/subscribe races.
     this.sourceReconcile = setInterval(refresh, 30_000)
     this.sourceReconcile.unref?.()
@@ -455,10 +463,10 @@ export class ModelProviderRegistry {
     for (const entry of declarations) this.startupProviderIds.add(entry.identity.providerId!)
     const projections = this.projections.filter(provider =>
       !this.startupProviderIds.has(provider.providerId)
-      || declarations.some(entry =>
-        entry.identity.providerId === provider.providerId
-        && entry.identity.pluginId === provider.pluginId
-      )
+      || declarations.filter(entry => entry.identity.providerId === provider.providerId).length === 1
+        && declarations.some(entry =>
+          entry.identity.providerId === provider.providerId && entry.identity.pluginId === provider.pluginId
+        )
     )
     for (const entry of declarations) {
       if (!projections.some(provider => provider.providerId === entry.identity.providerId)) {
@@ -503,7 +511,9 @@ export class ModelProviderRegistry {
             models: Object.freeze(
               provider.models.filter(model =>
                 progress === undefined
-                || progress.catalog.state === 'known' && progress.catalog.modelIds.includes(model.id)
+                || startupExecutionAvailable(startup, progress)
+                  && progress.catalog.state === 'known'
+                  && progress.catalog.modelIds.some(id => model.id === id || model.aliases?.includes(id))
               ).map(model => {
                 const metadata = presentation?.models?.find(item => item.id === model.id)
                 return metadata ? Object.freeze({ ...model, ...metadata }) : model

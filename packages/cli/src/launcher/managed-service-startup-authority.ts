@@ -33,6 +33,7 @@ export interface StartupServiceOwner {
 interface Entry extends Omit<StartupCapabilityEvidence, 'milestones'> {
   bindingGeneration?: string
   catalogSequence: number
+  publishedModelIds?: ReadonlySet<string> | undefined
   attempt?: object
   readonly admission: StartupPluginAdmission
   milestones: Map<string, { sequence: number; state: 'pending' | 'satisfied' | 'failed' }>
@@ -46,6 +47,7 @@ export class ManagedServiceStartupAuthority {
   private readonly entries = new Map<string, Entry>()
   private readonly admissions = new Map<string, StartupPluginAdmission>()
   private readonly selected = new Map<string, string>()
+  private readonly selectedProviderIds = new Set<string>()
   private readonly changes = new StartupSession(0)
   private readonly scopes = new Map<ReturnType<typeof createStartupObserverSource>, string | undefined>()
   private disposed = false
@@ -95,13 +97,28 @@ export class ManagedServiceStartupAuthority {
         )
       }
     }
+    this.rememberSelectedProviders()
     this.changed()
   }
 
   selectOwners(owners: readonly { readonly pluginId: string; readonly pluginGeneration: string }[]): void {
     this.selected.clear()
     for (const owner of owners) this.selected.set(owner.pluginId, owner.pluginGeneration)
+    this.rememberSelectedProviders()
     this.changed()
+  }
+
+  private rememberSelectedProviders(): void {
+    for (const [id, generation] of this.selected) {
+      for (const capability of this.admissions.get(ownerKey(id, generation))?.startup.capabilities ?? []) {
+        if (capability.kind === 'provider') this.selectedProviderIds.add(capability.providerId)
+      }
+    }
+  }
+
+  /** A retired startup provider cannot fall through to a stale native table or a remote owner. */
+  hasProvider(providerId: string): boolean {
+    return this.selectedProviderIds.has(providerId)
   }
 
   declaration(ref: StartupCapabilityRefV1, pluginGeneration = this.selected.get(ref.pluginId)) {
@@ -224,18 +241,23 @@ export class ManagedServiceStartupAuthority {
     this.patchOwner(owner, { revoked: true, published: false })
   }
 
-  publication(owner: StartupServiceOwner, providerId: string, catalog: StartupCatalogV1 | undefined): void {
+  publication(
+    owner: StartupServiceOwner,
+    providerId: string,
+    catalog:
+      | (Extract<StartupCatalogV1, { state: 'known' }> & { readonly gatewayModelIds: readonly string[] })
+      | undefined,
+  ): void {
     for (const entry of this.ownerEntries(owner)) {
       if (
         entry.revoked || entry.bindingGeneration !== owner.serviceGeneration || entry.declaration.kind !== 'provider'
         || entry.declaration.providerId !== providerId
       ) continue
-      if (catalog === undefined) Object.assign(entry, { published: false })
-      else if (
-        entry.catalog.state === 'known' && catalog.state === 'known'
+      const matches = catalog !== undefined && entry.catalog.state === 'known'
         && entry.catalog.generation === catalog.generation && entry.catalog.modelIds.length === catalog.modelIds.length
         && entry.catalog.modelIds.every(id => catalog.modelIds.includes(id))
-      ) Object.assign(entry, { published: true })
+      entry.publishedModelIds = matches ? new Set(catalog.gatewayModelIds) : undefined
+      Object.assign(entry, { published: matches })
     }
     this.changed()
   }
@@ -340,6 +362,22 @@ export class ManagedServiceStartupAuthority {
     })
   }
 
+  subscribeProviderAvailability(listener: () => void): () => void {
+    const signature = () =>
+      JSON.stringify(
+        this.projections(this.selected)
+          .filter(entry => entry.identity.providerId !== null)
+          .map(entry => [entry.identity, entry.generation, entry.actions.execute.available]),
+      )
+    let previous = signature()
+    return this.subscribe(() => {
+      const next = signature()
+      if (next === previous) return
+      previous = next
+      listener()
+    })
+  }
+
   providerReference(providerId: string): StartupCapabilityRefV1 | undefined {
     return this.projections(this.selected).find(entry => entry.identity.providerId === providerId)?.identity
   }
@@ -401,6 +439,20 @@ export class ManagedServiceStartupAuthority {
       return unavailable('model-unavailable')
     }
     return { available: true }
+  }
+
+  /** Native selection uses gateway model IDs; discovery and command waits use aliases. */
+  nativeCatalogAdmission(ref: StartupCapabilityRefV1):
+    | { readonly available: true; readonly modelIds: ReadonlySet<string> }
+    | Extract<StartupActionAvailabilityV1, { available: false }>
+  {
+    const available = this.availability(ref)
+    if (!available.available) return available
+    const generation = this.selected.get(ref.pluginId)
+    const entry = generation === undefined ? undefined : this.entries.get(entryKey(ref, generation))
+    return entry?.publishedModelIds
+      ? { available: true, modelIds: entry.publishedModelIds }
+      : { available: false, reason: 'provider-unpublished' }
   }
 
   async waitForDependency(
