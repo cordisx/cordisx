@@ -66,11 +66,12 @@ export function createBrowserManagedServiceConsole(input: {
         void dispose()
       }
       let pending = false
+      let lastBounds: string | undefined
       let scheduled: number | undefined
       let timer: ReturnType<typeof setInterval> | undefined
       let resize: ResizeObserver | undefined
       let mutation: MutationObserver | undefined
-      const update = async () => {
+      const update = async (force = false) => {
         if (retired || pending) return
         if (!live()) return dispose()
         const rect = target.getBoundingClientRect()
@@ -84,15 +85,14 @@ export function createBrowserManagedServiceConsole(input: {
           && ([[x, y], [x + width - 1, y], [x, y + height - 1], [x + width - 1, y + height - 1]] as const).every(
             ([left, top]) => target.contains(document.elementFromPoint(left, top)),
           )
+        const bounds = visible ? { x, y, width, height } : null
+        const nextBounds = JSON.stringify(bounds)
+        if (!force && lastBounds === nextBounds) return
         pending = true
         try {
-          const result = await send({
-            action: 'update',
-            viewId,
-            serviceGeneration,
-            bounds: visible ? { x, y, width, height } : null,
-          })
+          const result = await send({ action: 'update', viewId, serviceGeneration, bounds })
           if ((result as { status?: unknown } | null)?.status !== 'active') await dispose()
+          else lastBounds = nextBounds
         } catch {
           await dispose()
         } finally {
@@ -112,6 +112,9 @@ export function createBrowserManagedServiceConsole(input: {
           status?: string
           reason?: string
         }
+        if (result.status === 'mounted' && retired) {
+          await send({ action: 'dispose', viewId, serviceGeneration }).catch(() => undefined)
+        }
         if (result.status !== 'mounted' || retired || !live()) {
           await dispose()
           const reason = result.reason === 'sign-in-required' || result.reason === 'unsupported'
@@ -129,7 +132,9 @@ export function createBrowserManagedServiceConsole(input: {
         window.addEventListener('resize', schedule)
         window.addEventListener('scroll', schedule, true)
         document.addEventListener('visibilitychange', schedule)
-        timer = setInterval(schedule, 2000)
+        timer = setInterval(() => {
+          void update(true)
+        }, 2000)
         schedule()
         return { status: 'mounted', closed, dispose }
       } catch {
