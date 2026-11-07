@@ -27,6 +27,7 @@ export const NATIVE_HELPERS = {
   ],
   CordisXHostOpen: ['native/host-open.swift'],
   CordisXLauncher: ['native/app-launcher.swift'],
+  CordisXProcessIdentity: ['native/process-identity.c'],
   CordisXStartupGate: ['native/startup-gate.swift'],
 }
 export const NATIVE_RESOURCES = [
@@ -131,14 +132,28 @@ export function buildNativeHelperArtifact(sourceRoot, outputRoot, sourceCommit) 
       const slices = []
       for (const architecture of NATIVE_HELPER_ARCHITECTURES) {
         const slice = path.join(temporaryRoot, `${name}.${architecture}`)
-        execFileSync('/usr/bin/swiftc', [
-          '-O',
-          '-target',
-          `${architectureTargets[architecture]}-apple-macosx${NATIVE_HELPER_DEPLOYMENT_TARGET}`,
-          ...sources.map(relative => nativeSource(sourceRoot, relative)),
-          '-o',
-          slice,
-        ], { stdio: 'inherit' })
+        if (sources.length === 1 && sources[0].endsWith('.c')) {
+          execFileSync('/usr/bin/xcrun', [
+            'clang',
+            '-O2',
+            '-Wall',
+            '-Wextra',
+            '-Werror',
+            '-arch',
+            architectureTargets[architecture],
+            `-mmacosx-version-min=${NATIVE_HELPER_DEPLOYMENT_TARGET}`,
+            nativeSource(sourceRoot, sources[0]),
+            '-o',
+            slice,
+          ], { stdio: 'inherit' })
+        } else {execFileSync('/usr/bin/swiftc', [
+            '-O',
+            '-target',
+            `${architectureTargets[architecture]}-apple-macosx${NATIVE_HELPER_DEPLOYMENT_TARGET}`,
+            ...sources.map(relative => nativeSource(sourceRoot, relative)),
+            '-o',
+            slice,
+          ], { stdio: 'inherit' })}
         slices.push(slice)
       }
       const output = path.join(outputRoot, name)

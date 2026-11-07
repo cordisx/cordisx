@@ -4,8 +4,14 @@ import { execFileSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import {
+  cleanupPrelaunch,
+  releaseHostProfileLease,
+  stopPrelaunchedHost,
+} from '../packages/cli/src/cli/injected-host-cleanup.js'
 import { PROCESS_TABLE_MAX_BUFFER_BYTES } from '../packages/cli/src/launcher/process-identity.js'
 import {
+  acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
   codexExecutableCandidates,
   codexLaunchArgs,
@@ -308,60 +314,103 @@ writeFileSync(${JSON.stringify(environmentPath)}, JSON.stringify({
     }
   })
 
-  it.skipIf(process.platform === 'win32')('cleans the full launcher-owned Host process group', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-launch-group-test-'))
-    const executable = path.join(directory, 'fake-host')
-    const descendantPidPath = path.join(directory, 'descendant.pid')
-    const profile = { userDataDir: path.join(directory, 'profile'), cleanupOwned: true }
-    let launched: ReturnType<typeof launchCodex> | undefined
-    let descendantPid: number | undefined
-    try {
-      await writeFile(
-        executable,
-        `#!/usr/bin/env node
-const { spawn } = require('node:child_process')
+  it.skipIf(process.platform === 'win32')(
+    'retains the lease until a verified shutdown',
+    async () => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-launch-group-test-'))
+      const program = path.join(directory, 'fake-host.cjs')
+      const descendantPidPath = path.join(directory, 'descendant.pid')
+      const profile = { userDataDir: path.join(directory, 'profile'), cleanupOwned: true }
+      let launched: ReturnType<typeof launchCodex> | undefined
+      let descendantPid: number | undefined
+      try {
+        await writeFile(
+          program,
+          `const { spawn } = require('node:child_process')
 const { writeFileSync } = require('node:fs')
 if (process.argv.includes('--descendant')) setInterval(() => {}, 1000)
 else {
-const child = spawn(process.argv[1], ['--descendant', '--database=${profile.userDataDir}/Crashpad'], { stdio: 'ignore', detached: true })
+const child = spawn(process.execPath, [process.argv[1], '--descendant'], { stdio: 'ignore', detached: true })
 writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))
 setInterval(() => {}, 1000)
 }
 `,
-      )
-      await chmod(executable, 0o755)
-      launched = launchCodex(executable, 43123, [], profile)
-      for (let attempt = 0; attempt < 50; attempt += 1) {
-        descendantPid = Number(await readFile(descendantPidPath, 'utf8').catch(() => '0'))
-        if (Number.isInteger(descendantPid) && descendantPid > 0) break
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
-      expect(descendantPid).toBeGreaterThan(0)
-      await terminateIsolatedCodex(launched, profile)
-      for (let attempt = 0; attempt < 50 && descendantPid !== undefined; attempt += 1) {
-        try {
-          process.kill(descendantPid, 0)
+        )
+        launched = launchCodex(process.execPath, 43123, [program], profile)
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const candidate = Number(await readFile(descendantPidPath, 'utf8').catch(() => '0'))
+          if (Number.isInteger(candidate) && candidate > 1) {
+            descendantPid = candidate
+            break
+          }
           await new Promise(resolve => setTimeout(resolve, 20))
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ESRCH') break
-          throw error
         }
-      }
-      expect(() => process.kill(descendantPid!, 0)).toThrow(/ESRCH/)
-    } finally {
-      if (launched !== undefined && launched.exitCode === null && launched.signalCode === null) {
-        await terminateIsolatedCodex(launched, profile).catch(() => undefined)
-      }
-      if (descendantPid !== undefined) {
+        expect(descendantPid).toBeGreaterThan(0)
+        await mkdir(profile.userDataDir)
+        const lease = await acquireCodexProfileLaunchLease(profile.userDataDir)
+        const owner = path.join(`${profile.userDataDir}.cordisx-launch-lock`, 'owner.json')
+        const before = await readFile(owner, 'utf8')
+        // Let the ownership tracker see the detached descendant while its parent is still alive.
+        await new Promise(resolve => setTimeout(resolve, 350))
+        const host = launched
+        const hostExit = new Promise<void>(resolve => host.once('exit', () => resolve()))
+        host.kill('SIGTERM')
+        await hostExit
+        const ps = vi.mocked(execFileSync)
+        const original = ps.getMockImplementation()!
+        let reads = 0
+        ps.mockImplementation((...args) => {
+          if (args[0] === 'ps' && ++reads === 3) {
+            throw Object.assign(new Error('final process identity unavailable'), { code: 'EPERM' })
+          }
+          if (args[0].endsWith('/CordisXProcessIdentity')) {
+            return JSON.stringify({ version: 1, status: 'unavailable', reason: 'identity-unavailable' })
+          }
+          return original(...args)
+        })
         try {
-          process.kill(descendantPid, 'SIGKILL')
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+          const failed = await stopPrelaunchedHost(host, profile)
+          expect(failed).toMatchObject({
+            status: 'rejected',
+            reason: new Error(
+              process.platform === 'darwin'
+                ? 'Darwin process identity snapshot is unavailable (identity-unavailable)'
+                : 'final process identity unavailable',
+            ),
+          })
+          await releaseHostProfileLease(lease.release, failed)
+          expect(await readFile(owner, 'utf8')).toBe(before)
+          expect(() => process.kill(descendantPid!, 0)).not.toThrow()
+        } finally {
+          ps.mockImplementation(original)
         }
+        await cleanupPrelaunch(host, profile, lease.release)
+        await expect(readFile(owner, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+        for (let attempt = 0; attempt < 50 && descendantPid !== undefined; attempt += 1) {
+          try {
+            process.kill(descendantPid, 0)
+            await new Promise(resolve => setTimeout(resolve, 20))
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ESRCH') break
+            throw error
+          }
+        }
+        expect(() => process.kill(descendantPid!, 0)).toThrow(/ESRCH/)
+      } finally {
+        if (launched !== undefined && launched.exitCode === null && launched.signalCode === null) {
+          await terminateIsolatedCodex(launched, profile).catch(() => undefined)
+        }
+        if (descendantPid !== undefined) {
+          try {
+            process.kill(descendantPid, 'SIGKILL')
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+          }
+        }
+        await rm(directory, { recursive: true, force: true })
       }
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
+    },
+  )
 
   it.skipIf(process.platform === 'win32')(
     'stops an exact hidden Host when Launch Services uses another process group',

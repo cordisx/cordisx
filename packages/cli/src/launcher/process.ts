@@ -10,8 +10,10 @@ import {
   liveProcessStartedAt,
   PROCESS_TABLE_MAX_BUFFER_BYTES,
   type ProcessIdentity,
+  type ProcessIdentitySnapshot,
   processTable,
   type RecordedProcessStatus,
+  unobservedProcessStatus,
 } from './process-identity.js'
 import { waitForMainInspectorUrl } from './main-inspector.js'
 
@@ -53,6 +55,7 @@ class ProcessOwnershipTracker {
   private readonly rootStartedAt: string | undefined
   private rootState: RecordedProcessStatus
   private readonly timer: NodeJS.Timeout
+  private usedDarwinSnapshot = false
 
   constructor(private readonly rootPid: number) {
     try {
@@ -84,10 +87,24 @@ class ProcessOwnershipTracker {
     }
   }
 
+  usesDarwinSnapshot(): boolean {
+    return this.usedDarwinSnapshot
+  }
+
   stop(): readonly ProcessIdentity[] {
     clearInterval(this.timer)
-    this.capture()
-    return processTable().filter(item => this.identities.get(item.pid) === item.startedAt)
+    const snapshot = processTable()
+    this.captureSnapshot(snapshot)
+    if (snapshot.source === 'darwin-same-uid') {
+      if (this.rootStartedAt === undefined) throw new Error('Could not verify launched Host process identity')
+      const observed = new Set(snapshot.processes.map(item => item.pid))
+      for (const pid of this.identities.keys()) {
+        if (!observed.has(pid) && unobservedProcessStatus(snapshot.source, pid) === 'unknown') {
+          throw new Error(`Could not verify whether launched Host process ${pid} stopped`)
+        }
+      }
+    }
+    return snapshot.processes.filter(item => this.identities.get(item.pid) === item.startedAt)
   }
 
   captureNow(): void {
@@ -95,18 +112,22 @@ class ProcessOwnershipTracker {
   }
 
   private capture(): void {
-    let table: readonly ProcessIdentity[]
     try {
-      table = processTable()
+      this.captureSnapshot(processTable())
     } catch {
       this.rootState = 'unknown'
-      return
     }
-    const live = new Map(table.map(item => [item.pid, item]))
+  }
+
+  private captureSnapshot({ source, processes }: ProcessIdentitySnapshot): void {
+    if (source === 'darwin-same-uid') this.usedDarwinSnapshot = true
+    const live = new Map(processes.map(item => [item.pid, item]))
     const root = live.get(this.rootPid)
     this.rootState = this.rootStartedAt === undefined
       ? 'unknown'
-      : root?.startedAt === this.rootStartedAt
+      : root === undefined
+      ? unobservedProcessStatus(source, this.rootPid)
+      : root.startedAt === this.rootStartedAt
       ? 'alive'
       : 'dead'
     const owned = new Set<number>()
@@ -119,13 +140,13 @@ class ProcessOwnershipTracker {
     let changed = true
     while (changed) {
       changed = false
-      for (const item of table) {
+      for (const item of processes) {
         if (owned.has(item.pid) || !owned.has(item.parentPid)) continue
         owned.add(item.pid)
         changed = true
       }
     }
-    for (const item of table) {
+    for (const item of processes) {
       if (owned.has(item.pid) && !this.identities.has(item.pid)) this.identities.set(item.pid, item.startedAt)
     }
   }
@@ -576,11 +597,14 @@ export async function terminateIsolatedCodex(child: ChildProcess, profile?: Isol
     throw new Error(`failed to stop launched host process${child.pid === undefined ? '' : ` ${child.pid}`}`)
   }
   const ownedProcesses = ownership?.stop() ?? []
-  launchedProcessOwnership.delete(child)
-  pendingHiddenOwnership.delete(child)
-  if (profile?.cleanupOwned === true || (ownership !== undefined && ownership.pid !== child.pid)) {
+  if (
+    profile?.cleanupOwned === true || ownership?.usesDarwinSnapshot() === true
+    || (ownership !== undefined && ownership.pid !== child.pid)
+  ) {
     await terminateOwnedProcesses(ownedProcesses, child.pid)
   }
+  launchedProcessOwnership.delete(child)
+  pendingHiddenOwnership.delete(child)
 }
 
 /** Stop the verified Host group, or its exact PID when Launch Services chose another group. */
@@ -614,8 +638,16 @@ function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals, ownersh
 /** Stop only identities observed as descendants of the exact launched process. */
 async function terminateOwnedProcesses(owned: readonly ProcessIdentity[], rootPid: number): Promise<void> {
   const remaining = (): readonly ProcessIdentity[] => {
-    const live = new Map(processTable().map(item => [item.pid, item.startedAt]))
-    return owned.filter(item => item.pid !== rootPid && live.get(item.pid) === item.startedAt)
+    const { source, processes } = processTable()
+    const live = new Map(processes.map(item => [item.pid, item.startedAt]))
+    return owned.filter(item => {
+      if (item.pid === rootPid) return false
+      const current = live.get(item.pid)
+      if (current === undefined && unobservedProcessStatus(source, item.pid) === 'unknown') {
+        throw new Error(`Could not verify whether launched Host child process ${item.pid} stopped`)
+      }
+      return current === item.startedAt
+    })
   }
   const stop = (signal: NodeJS.Signals): void => {
     for (const { pid } of remaining()) {
