@@ -67,7 +67,9 @@ export function redactedHomeConfig(config: HomeConfig): unknown {
       Object.entries(config.apps).map(([appId, app]) => [appId, {
         ...app,
         profiles: Object.fromEntries(
-          Object.entries(app.profiles).map(([profileId, profile]) => [profileId, {
+          Object.entries(app.profiles).map((
+            [profileId, { managedServiceStartupConfig: _startupConfig, ...profile }],
+          ) => [profileId, {
             ...profile,
             ...(profile.managedProviders === undefined
               ? {}

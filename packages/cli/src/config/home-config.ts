@@ -127,6 +127,8 @@ export interface HomeConfigProfile {
   readonly managedProviders?: readonly ManagedProviderRecord[]
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
+  /** Host-only launch configuration for installed manifest-v15 managed backends, keyed by plugin id. */
+  readonly managedServiceStartupConfig?: Readonly<Record<string, JsonValue>>
 }
 
 export interface HomeConfigApp {
@@ -445,6 +447,22 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   }
 }
 
+function parseManagedServiceStartupConfig(
+  value: unknown,
+  label: string,
+): NonNullable<HomeConfigProfile['managedServiceStartupConfig']> {
+  const entries = Object.entries(record(value, label))
+  const result: Record<string, JsonValue> = Object.create(null)
+  for (const [pluginId, config] of entries) {
+    if (!PLUGIN_ID.test(pluginId)) throw new Error(`${label} has an invalid plugin id`)
+    if (Object.keys(record(config, label)).length === 0) {
+      throw new Error(`${label} requires a nonempty configuration object per plugin`)
+    }
+    result[pluginId] = jsonValue(config, label)
+  }
+  return result
+}
+
 function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const profile = record(value, label)
   rejectUnknownKeys(profile, [
@@ -454,6 +472,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'managedProviders',
     'iconTheme',
     'management',
+    'managedServiceStartupConfig',
   ], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
@@ -474,6 +493,12 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     ...(managedProviders.length === 0 ? {} : { managedProviders }),
     ...(iconTheme === undefined ? {} : { iconTheme }),
     ...(management === undefined ? {} : { management }),
+    ...(profile.managedServiceStartupConfig === undefined ? {} : {
+      managedServiceStartupConfig: parseManagedServiceStartupConfig(
+        profile.managedServiceStartupConfig,
+        `${label}.managedServiceStartupConfig`,
+      ),
+    }),
   }
 }
 

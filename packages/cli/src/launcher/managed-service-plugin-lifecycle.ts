@@ -65,6 +65,7 @@ export interface ManagedServicePluginLifecycleOptions {
   readonly profileId: string
   readonly runtimeGeneration: string
   readonly homeDir?: string
+  readonly validateInitialActivation?: (record: CordisXPluginActivationRecordV1) => Promise<void>
   readonly readStartupAdmissions?: (
     record: CordisXPluginActivationRecordV1,
   ) => Promise<readonly StartupPluginAdmission[]>
@@ -134,6 +135,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   async initialize(activation: CordisXPluginActivationRecordV1): Promise<ManagedServiceStartupSession> {
     if (this.initialized || this.disposed) throw new Error('managed service lifecycle already initialized or disposed')
     this.initialized = true
+    await this.options.validateInitialActivation?.(activation)
     const admissions = await this.resolveAdmissions(activation)
     this.startup.admit(admissions)
     this.startup.selectOwners(startupRecordOwners(activation))

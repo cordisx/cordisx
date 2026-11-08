@@ -99,6 +99,56 @@ reports. A callback that ignores cancellation cannot keep the Host's waiter
 alive indefinitely; the owning component still performs service cleanup. No
 other service, App instance, profile, or process is a cleanup target.
 
+### Configure an installed managed backend
+
+Stop the selected CordisX profile before editing its Host configuration file
+(`$CORDISX_HOME/config.json`, defaulting to `~/.cordisx/config.json`). Add
+`managedServiceStartupConfig` to the existing app profile. For example, this
+fragment sets Aiden's account root for the `preview` profile:
+
+```json
+{
+  "apps": {
+    "codex": {
+      "profiles": {
+        "preview": {
+          "managedServiceStartupConfig": {
+            "aiden": {
+              "account": {
+                "root": "/absolute/path/to/authorized/aiden/auth",
+                "layout": "nested",
+                "storage": "file"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Each key names an installed package with a manifest-v15 managed backend. One
+nonempty object applies to every managed backend module in that package, using
+each exact module's Node `Config` validator. An unknown package or a package
+without a compatible backend rejects startup. An invalid configuration blocks
+the affected managed service instead of falling back to its default. Remove a
+package's entry when uninstalling it to allow the next launch. A disabled
+package stays disabled.
+
+The explicit object replaces the selected package configuration for Node
+startup. Omitting the entry preserves the package's ordinary configuration.
+Both desktop and service-mode launchers read this field once per launch. Stop
+and restart the selected process to apply edits. The field is Host-only and
+its values are omitted from printable configuration and renderer metadata.
+Enter only nonsecret settings. Reserved fields are excluded by the existing
+Node configuration boundary.
+
+For Aiden, the account root selects where the plugin accesses the existing
+login. The Host still owns the gateway process, service runtime directory and
+loopback endpoint for the selected CordisX home. An independent launch uses a
+separate CordisX home to keep that runtime separate.
+
 ## Native adapter preparation
 
 Native resource discovery starts in a launcher-owned Worker and can overlap
