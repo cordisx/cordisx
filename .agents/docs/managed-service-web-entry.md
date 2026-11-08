@@ -45,6 +45,21 @@ The Host supplies discovery only. Plugins retain ownership of their page body,
 iframe, open action and lifecycle-driven target clearing. Reading an entry does
 not navigate or start a service.
 
+## Authenticated browser console
+
+A service that implements the [Protocol browser ticket contract](https://github.com/cordisx/cordisx-protocol/blob/v0.1.0-beta.12/.agents/docs/managed-service/browser-console-v1.md)
+can open an authenticated console in its active Manager page. The browser path
+is available on the verified arm64 signed macOS App build 25679, with an ordinary
+CordisX-owned independent Chromium profile. Other App builds, system profiles,
+attached Apps, and launches with custom Host arguments can continue to use the
+manual web entry or a supported native mount.
+
+The Host reserves one browser console service per App launch. Its private
+browser hostname is scoped to that service, including on reopen. Another
+service receives `unsupported` and can use its ordinary manual web entry.
+Closing the page, replacing its renderer or changing the service generation
+retires the active route and stops forwarding its old session.
+
 ## Verification boundaries
 
 The focused web-entry suites cover endpoint proof, source admission, canonical

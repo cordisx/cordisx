@@ -18,6 +18,7 @@ const TICKET = /^[A-Za-z0-9_-]{32}$/u
 
 export interface ManagedBrowserConsoleRoute {
   readonly origin: `http://${string}` | `https://${string}`
+  admit(ticket: string): boolean
   dispose(): void
 }
 
@@ -149,7 +150,9 @@ export function createManagedServiceBrowserConsoleBroker(input: {
         check()
         const result = value as ManagedServiceBrowserConsoleResultV1
         if (result.status === 'sign-in-required') return unavailable('sign-in-required')
-        if (result.status !== 'issued' || !TICKET.test(result.ticket)) return unavailable('failed')
+        if (result.status !== 'issued' || !TICKET.test(result.ticket) || !route.admit(result.ticket)) {
+          return unavailable('failed')
+        }
         url.searchParams.set('ticket', result.ticket)
         handedOff = true
         return { status: 'available', route, url: url.href } as const

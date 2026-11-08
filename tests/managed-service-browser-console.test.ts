@@ -70,7 +70,7 @@ function fixture(fetch: typeof globalThis.fetch = async () => Response.json({ st
     timeoutMs: 100,
     read: vi.fn(async () => ({ status: 'available', origin: webOrigin } as const)),
   }
-  const route = { origin: browserOrigin, dispose: vi.fn() } as const
+  const route = { origin: browserOrigin, admit: vi.fn(() => true), dispose: vi.fn() } as const
   const boundary = { open: vi.fn<ManagedBrowserConsoleBoundary['open']>(() => route) }
   const broker = createManagedServiceBrowserConsoleBroker({
     record,
@@ -106,6 +106,7 @@ describe('private managed browser console broker', () => {
       binding: expect.stringMatching(/^[a-f0-9]{64}$/u),
       origin: webOrigin,
     })
+    expect(f.route.admit).toHaveBeenCalledWith(ticket)
     expect(f.route.dispose).not.toHaveBeenCalled()
   })
 

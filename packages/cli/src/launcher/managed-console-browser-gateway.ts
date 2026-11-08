@@ -15,6 +15,7 @@ interface GatewayRoute extends RouteInput {
   readonly dispose: () => void
   cookie?: CookieBinding
   cleanNavigation?: string
+  redemption?: { readonly digest: string; readonly expiresAt: number }
 }
 
 const REQUEST_HEADERS = [
@@ -79,15 +80,18 @@ function forwardedCookie(header: string | undefined, binding: CookieBinding | un
 function redirect(
   response: IncomingMessage,
   upstream: URL,
+  ticket: string | undefined,
 ): string | undefined {
   if (![301, 302, 303, 307, 308].includes(response.statusCode ?? 0)) return undefined
   if (!response.headers.location) throw new Error('Managed console redirect has no destination')
   const target = new URL(response.headers.location, upstream)
+  const location = target.pathname + target.search + target.hash
   if (
     target.origin !== upstream.origin || target.username || target.password
     || target.searchParams.has('ticket') || target.pathname.startsWith('//')
+    || (ticket !== undefined && (location.includes(ticket) || location.includes('%') || target.hash !== ''))
   ) throw new Error('Managed console redirect left its verified origin')
-  return target.pathname + target.search + target.hash
+  return location
 }
 
 function reply(res: ServerResponse, status: number) {
@@ -109,13 +113,24 @@ async function forward(
   if (requestOrigin !== undefined && requestOrigin !== origin) return reply(outgoing, 403)
   if (incoming.method !== 'GET' && incoming.method !== 'HEAD' && requestOrigin !== origin) return reply(outgoing, 403)
   const redeeming = target.pathname === route.redeemPath
-  if (target.searchParams.has('ticket') && !redeeming) return reply(outgoing, 400)
+  const presentedTicket = target.searchParams.get('ticket')
+  if (
+    (presentedTicket !== null && !redeeming)
+    || (redeeming && (target.searchParams.size !== 1 || !/^[A-Za-z0-9_-]{32}$/u.test(presentedTicket ?? '')))
+  ) return reply(outgoing, 400)
   if (
     redeeming && (
       incoming.method !== 'GET' || incoming.headers['sec-fetch-dest'] !== 'iframe'
       || incoming.headers['sec-fetch-mode'] !== 'navigate'
     )
   ) return reply(outgoing, 403)
+  if (redeeming) {
+    const issued = route.redemption
+    if (!presentedTicket || !issued || issued.expiresAt <= Date.now() || issued.digest !== digest(presentedTicket)) {
+      return reply(outgoing, 410)
+    }
+    delete route.redemption
+  }
   const cleanNavigation = route.cleanNavigation === target.pathname + target.search && incoming.method === 'GET'
     && incoming.headers['sec-fetch-dest'] === 'iframe' && incoming.headers['sec-fetch-mode'] === 'navigate'
   if (cleanNavigation) delete route.cleanNavigation
@@ -144,26 +159,27 @@ async function forward(
     const outgoingHeaders = headerProjection(remote.headers, RESPONSE_HEADERS)
     outgoingHeaders['cache-control'] = 'no-store'
     outgoingHeaders['referrer-policy'] = 'no-referrer'
-    const location = redirect(remote, route.upstreamURL)
-    if (location) {
-      outgoingHeaders.location = location
-      if (redeeming && remote.statusCode === 303) route.cleanNavigation = location.split('#', 1)[0]!
+    const location = redirect(remote, route.upstreamURL, presentedTicket ?? undefined)
+    if (redeeming && (remote.statusCode !== 303 || location === undefined)) {
+      throw new Error('Managed console redemption did not return a clean 303')
     }
+    if (location) outgoingHeaders.location = location
     if (remote.headers['set-cookie']) {
       const values = remote.headers['set-cookie']
       const credential = values.length === 1 ? browserCookie(values[0]!) : undefined
-      const exactRedeem = redeeming
-        && target.searchParams.size === 1 && /^[A-Za-z0-9_-]{32}$/u.test(target.searchParams.get('ticket') ?? '')
-        && remote.statusCode === 303 && location !== undefined
-      if (credential?.clearing && credential.name === route.cookie?.name) {
-        delete route.cookie
-        outgoingHeaders['set-cookie'] = values
-      } else if (credential && !credential.clearing && exactRedeem && route.cookie === undefined) {
+      if (redeeming) {
+        if (!credential || credential.clearing || route.cookie) {
+          throw new Error('Managed console redemption returned invalid cookie material')
+        }
         route.cookie = { name: credential.name, digest: digest(credential.pair) }
+        outgoingHeaders['set-cookie'] = values
+      } else if (credential?.clearing && credential.name === route.cookie?.name) {
+        delete route.cookie
         outgoingHeaders['set-cookie'] = values
       }
     }
     signal.throwIfAborted()
+    if (redeeming && location) route.cleanNavigation = location.split('#', 1)[0]!
     outgoing.writeHead(remote.statusCode ?? 502, outgoingHeaders)
     await pipeline(remote, outgoing, { signal })
   } catch {
@@ -241,6 +257,8 @@ export async function openManagedConsoleBrowserGateway(): Promise<ManagedConsole
         const dispose = () => {
           if (active === route) active = undefined
           delete route.cookie
+          delete route.redemption
+          delete route.cleanNavigation
           input.signal.removeEventListener('abort', dispose)
           retired.abort()
         }
@@ -253,7 +271,17 @@ export async function openManagedConsoleBrowserGateway(): Promise<ManagedConsole
         service = input.service
         active = route
         input.signal.addEventListener('abort', dispose, { once: true })
-        return { origin, dispose }
+        let issued = false
+        return {
+          origin,
+          admit(ticket) {
+            if (issued || active !== route || route.signal.aborted || !/^[A-Za-z0-9_-]{32}$/u.test(ticket)) return false
+            issued = true
+            route.redemption = { digest: digest(ticket), expiresAt: Date.now() + 30_000 }
+            return true
+          },
+          dispose,
+        }
       },
     },
     close,

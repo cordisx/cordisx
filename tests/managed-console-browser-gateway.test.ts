@@ -9,14 +9,23 @@ const cookieAttributes = '; Path=/; Secure; HttpOnly; SameSite=None; Partitioned
 const iframe = { 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' }
 const sameOrigin = { 'sec-fetch-site': 'same-origin' }
 
-async function fixture(redirect?: string) {
+async function fixture(
+  redirect?: string,
+  redemptionStatus = 303,
+  issuedCookie: string | null = cookie + cookieAttributes,
+) {
   const seen = vi.fn<(request: IncomingMessage) => void>()
   const service = createServer((req, res) => {
     seen(req)
     if (req.url?.startsWith(redeemPath + '?')) {
-      return res.writeHead(303, {
+      return res.writeHead(redemptionStatus, {
         Location: redirect ?? '/providers',
-        'Set-Cookie': cookie + cookieAttributes,
+        ...(issuedCookie === null ? {} : { 'Set-Cookie': issuedCookie }),
+      }).end()
+    }
+    if (req.url === '/logout') {
+      return res.writeHead(204, {
+        'Set-Cookie': '__Host-fixture=; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=0',
       }).end()
     }
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
@@ -37,7 +46,7 @@ async function fixture(redirect?: string) {
     verify,
   }
   const route = gateway.boundary.open(routeInput)
-  if (!route) throw new Error('Missing browser fixture route')
+  if (!route?.admit(browserTicket)) throw new Error('Missing browser fixture route')
   const authority = new URL(route.origin)
   const send = async (path: string, headers: Record<string, string> = {}, method = 'GET') =>
     await new Promise<{ status: number | undefined; headers: IncomingMessage['headers']; body: string }>(
@@ -69,6 +78,8 @@ describe('managed console browser gateway', () => {
   it('relays an exact iframe redemption and its clean 303 but only forwards the bound session', async () => {
     const f = await fixture()
     try {
+      expect(await f.send(redeemPath + '?ticket=' + 'z'.repeat(32), iframe)).toMatchObject({ status: 410 })
+      expect(f.seen).not.toHaveBeenCalled()
       const issued = await f.send(redeemPath + '?ticket=' + browserTicket, {
         ...iframe,
         referer: 'https://other.invalid/',
@@ -81,6 +92,7 @@ describe('managed console browser gateway', () => {
           'set-cookie': [cookie + cookieAttributes],
         },
       })
+      expect(await f.send(redeemPath + '?ticket=' + browserTicket, iframe)).toMatchObject({ status: 410 })
       const clean = await f.send('/providers', { ...iframe, cookie: cookie + '; parent=not-for-this-service' })
       expect(clean).toMatchObject({ status: 200, body: 'ok' })
       expect(f.seen.mock.calls[0]![0].headers).not.toHaveProperty('referer')
@@ -102,6 +114,12 @@ describe('managed console browser gateway', () => {
       })
       expect(f.seen.mock.calls[2]![0].headers).not.toHaveProperty('authorization')
       expect(f.seen.mock.calls[2]![0].headers).not.toHaveProperty('x-forwarded-host')
+      f.route.dispose()
+      expect(await f.send('/providers', { ...sameOrigin, cookie })).toMatchObject({ status: 410 })
+      const next = new AbortController()
+      expect(f.gateway.boundary.open({ ...f.routeInput, generation: 'two', signal: next.signal })).toBeDefined()
+      expect(await f.send('/providers', { ...sameOrigin, cookie })).toMatchObject({ status: 200 })
+      expect(f.seen.mock.lastCall?.[0].headers).not.toHaveProperty('cookie')
     } finally {
       await f.close()
     }
@@ -137,6 +155,80 @@ describe('managed console browser gateway', () => {
       expect(f.gateway.boundary.open({ ...f.routeInput, generation: 'two', signal: current.signal })).toBeDefined()
       expect(await f.send('/providers', { ...sameOrigin, cookie })).toMatchObject({ status: 200 })
       expect(f.seen.mock.lastCall?.[0].headers).not.toHaveProperty('cookie')
+    } finally {
+      await f.close()
+    }
+  })
+
+  it.each([
+    [302, '/providers'],
+    [303, '/providers?wrong-name=' + browserTicket],
+    [303, '/providers#' + browserTicket],
+    [303, '/providers?value=' + '%61'.repeat(32)],
+  ])(
+    'rejects an unsafe redemption response (%s, %s) without forwarding a Location or cookie',
+    async (status, location) => {
+      const f = await fixture(location, status)
+      try {
+        const response = await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+        expect(response.status).toBe(502)
+        expect(response.headers).not.toHaveProperty('location')
+        expect(response.headers).not.toHaveProperty('set-cookie')
+      } finally {
+        await f.close()
+      }
+    },
+  )
+
+  it('honors Max-Age=0, clears the forwarded cookie, and permits a fresh lease only for the same service', async () => {
+    const f = await fixture()
+    try {
+      await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+      await f.send('/providers', { ...iframe, cookie })
+      const logout = await f.send('/logout', { ...sameOrigin, origin: f.route.origin, cookie }, 'POST')
+      expect(logout).toMatchObject({
+        status: 204,
+        headers: {
+          'set-cookie': [expect.stringContaining('Max-Age=0')],
+        },
+      })
+      expect(f.seen.mock.lastCall?.[0].headers.cookie).toBe(cookie)
+      await f.send('/providers', { ...sameOrigin, cookie })
+      expect(f.seen.mock.lastCall?.[0].headers).not.toHaveProperty('cookie')
+      f.route.dispose()
+      const next = new AbortController()
+      expect(f.gateway.boundary.open({ ...f.routeInput, service: 'other-service', signal: next.signal }))
+        .toBeUndefined()
+      const reopened = f.gateway.boundary.open({ ...f.routeInput, generation: 'two', signal: next.signal })
+      expect(reopened?.admit(browserTicket)).toBe(true)
+      expect(await f.send(redeemPath + '?ticket=' + browserTicket, iframe)).toMatchObject({ status: 303 })
+    } finally {
+      await f.close()
+    }
+  })
+
+  it('accepts a clean browser error redirect without setting a session cookie', async () => {
+    const errorPath = '/login?error=console-ticket-unavailable'
+    const f = await fixture(errorPath, 303, null)
+    try {
+      const response = await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+      expect(response).toMatchObject({ status: 303, headers: { location: errorPath } })
+      expect(response.headers).not.toHaveProperty('set-cookie')
+      expect(await f.send(errorPath, iframe)).toMatchObject({ status: 200 })
+      expect(f.seen.mock.lastCall?.[0].headers).not.toHaveProperty('cookie')
+    } finally {
+      await f.close()
+    }
+  })
+
+  it('fails closed when the redemption returns a cookie without partition isolation', async () => {
+    const f = await fixture('/providers', 303, cookie + '; Path=/; Secure; HttpOnly; SameSite=None')
+    try {
+      const response = await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+      expect(response.status).toBe(502)
+      expect(response.headers).not.toHaveProperty('location')
+      expect(response.headers).not.toHaveProperty('set-cookie')
+      expect(await f.send('/providers', iframe)).toMatchObject({ status: 403 })
     } finally {
       await f.close()
     }
