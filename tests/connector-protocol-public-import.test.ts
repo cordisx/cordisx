@@ -18,7 +18,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.12'
 const protocolResolvedSource = `https://registry.npmjs.org/@cordisx/protocol/-/protocol-${protocolVersion}.tgz`
 const protocolIntegrity =
-  'sha512-dv+8q38kJHJ88G5DYF1ReSexIjZR7VcnPwLimFAJaiVMAq0NV/G0jRfX/023SxMGAxYPVaLV3pn5B2Ao1+jh3w=='
+  'sha512-56WmT2Pv2wzJRAp24JHI9VCsBVfZj89MU5SDyLARYfyLYYgJwy2jSTCzlF9f1PMaYQ/8df+flccid8tAB3mJzQ=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
