@@ -1,3 +1,4 @@
+import { MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA } from '../packages/cli/src/launcher/managed-service-browser-console-broker.js'
 import type { spawn as nodeSpawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
@@ -95,5 +96,48 @@ describe('managed service runtime security boundaries', () => {
     expect(fetchCount).toBe(0)
     expect(spawnCount).toBe(0)
     await binding.dispose()
+  })
+
+  it('reserves the browser ticket response even when a consumer has a generic operation grant', async () => {
+    const { root, home } = await fixture()
+    const operationId = 'console.browser-ticket'
+    let ticketCalls = 0
+    const host = runtime(home, {
+      fetch: async (url, init) => {
+        if (String(url).endsWith('/private/issue')) ticketCalls++
+        return await fetch(url, init)
+      },
+    })
+    const plugin = 'browser-ticket-plugin'
+    const service = 'browser-ticket-service'
+    const binding = host.bind({
+      owner: owner(plugin, 'browser-one'),
+      source: 'https://plugins.example.test/browser-ticket',
+      declaration: declaration(service, plugin, [{ pluginId: plugin, operations: [operationId] }]),
+      artifactDirectory: root,
+    }, new AbortController().signal)
+    try {
+      const definitionWithTicket = definition(service, { hostSecret: true })
+      definitionWithTicket.operations = [...definitionWithTicket.operations, {
+        operationId,
+        method: 'POST',
+        path: '/private/issue',
+        requestSchema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-browser-console-request.v1.schema.json',
+        responseSchema: MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA,
+        timeoutMs: 2_000,
+      }]
+      const registration = await binding.registry.register(definitionWithTicket, {
+        revision: `sha256:${'b'.repeat(64)}`,
+      })
+      expect((await registration.ensureReady()).status).toBe('ready')
+      const acquired = await binding.client.acquire(registration.binding.identity)
+      if (acquired.status !== 'ready') throw new Error('Browser ticket fixture could not acquire generic lease')
+      expect(acquired.lease.operations).toContain(operationId)
+      await expect(binding.client.invoke(acquired.lease, operationId)).resolves.toMatchObject({ status: 'unavailable' })
+      expect(ticketCalls).toBe(0)
+    } finally {
+      await binding.dispose()
+    }
   })
 })

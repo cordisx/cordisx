@@ -171,7 +171,7 @@ export interface WatchInjectionOptions {
     runtimeGeneration: string
   }>
   readonly managedServiceUI?: {
-    readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+    readonly handleBindingValue: (value: string, documentSignal?: AbortSignal) => Promise<Record<string, unknown>>
     readonly transport?: StartupCdpTransport
   }
 }

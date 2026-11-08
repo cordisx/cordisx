@@ -1,3 +1,4 @@
+import type { ManagedBrowserConsoleBoundary } from './managed-service-browser-console-broker.js'
 import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import type { ManagedServiceNodeActivation } from './managed-service-node-host.js'
 import { createManagedServiceUIBridgeHandler, type ManagedServiceUIBridgeHandler } from './managed-service-ui-rpc.js'
@@ -8,6 +9,7 @@ export function managedServiceLiveHandler(
   readSources: () => ManagedServiceNodeActivation['sources'],
   readNativeProviders: () => Promise<readonly unknown[]>,
   nativeManagedConsole?: () => NativeManagedConsoleAdapter | undefined,
+  browserConsoleBoundary?: () => ManagedBrowserConsoleBoundary | undefined,
 ): ManagedServiceUIBridgeHandler {
   let execution: ManagedServiceUIBridgeHandler | undefined
   let disposed = false
@@ -15,7 +17,7 @@ export function managedServiceLiveHandler(
     token: observation.token,
     profileId: observation.profileId,
     generation: observation.generation,
-    async handle(owner, request) {
+    async handle(owner, request, documentSignal) {
       if (disposed) throw new Error('managed service owner disposed')
       if (String(request.operation).startsWith('startup')) return await observation.handle(owner, request)
       const services = readSources()
@@ -28,9 +30,10 @@ export function managedServiceLiveHandler(
           services,
           readNativeProviders,
           ...(nativeManagedConsole === undefined ? {} : { nativeManagedConsole }),
+          ...(browserConsoleBoundary === undefined ? {} : { browserConsoleBoundary }),
         })
       }
-      return await execution.handle(owner, request)
+      return await execution.handle(owner, request, documentSignal)
     },
     async disposeOwner(owner) {
       disposed = true

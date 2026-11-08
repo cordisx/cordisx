@@ -1,3 +1,8 @@
+import type { ManagedBrowserConsoleBoundary } from './managed-service-browser-console-broker.js'
+import {
+  type ManagedBrowserConsoleRequest,
+  ManagedServiceBrowserConsoleRPC,
+} from './managed-service-browser-console-rpc.js'
 import { type ManagedConsoleViewRequest, ManagedServiceConsoleRPC } from './managed-service-console-rpc.js'
 import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { ManagedServiceWebEntryRPC, type ManagedServiceWebEntryRPCRequest } from './managed-service-web-entry-rpc.js'
@@ -49,6 +54,13 @@ export type ManagedServiceUIBindingRequest =
     readonly serviceId: string
     readonly binding: ManagedServiceBindingV1
     readonly request: ManagedConsoleViewRequest
+  }
+  | {
+    readonly requestId: string
+    readonly operation: 'consoleBrowser'
+    readonly serviceId: string
+    readonly binding: ManagedServiceBindingV1
+    readonly request: ManagedBrowserConsoleRequest
   }
   | { readonly requestId: string; readonly operation: 'nativeProviders'; readonly serviceId: string }
   | { readonly requestId: string; readonly operation: 'get'; readonly serviceId: string }
@@ -154,7 +166,11 @@ export interface ManagedServiceUIBridgeHandler {
   readonly profileId: string
   readonly generation: string
   readonly hostStartup?: ReturnType<typeof createStartupHostUIBridgeHandler>
-  handle(owner: ManagedServiceUIOwner, request: ManagedServiceUIBindingRequest): Promise<unknown>
+  handle(
+    owner: ManagedServiceUIOwner,
+    request: ManagedServiceUIBindingRequest,
+    documentSignal?: AbortSignal,
+  ): Promise<unknown>
   replaceServices?(owner: ManagedServiceUIOwner, services: readonly ManagedServiceUISourceBinding[]): Promise<void>
   disposeOwner(owner: ManagedServiceUIOwner): Promise<void>
   dispose(): Promise<void>
@@ -197,6 +213,7 @@ export function createManagedServiceUIBridgeHandler(input: {
   readonly startupObservers?: readonly StartupUIObserverBinding[]
   readonly readNativeProviders?: () => Promise<readonly unknown[]>
   readonly nativeManagedConsole?: () => NativeManagedConsoleAdapter | undefined
+  readonly browserConsoleBoundary?: () => ManagedBrowserConsoleBoundary | undefined
 }): MutableManagedServiceUIBridgeHandler {
   const hostStartup = input.hostStartup === undefined
     ? undefined
@@ -208,6 +225,7 @@ export function createManagedServiceUIBridgeHandler(input: {
   const startup = createStartupUIRPC(input.startupObservers ?? [])
   const webEntries = new ManagedServiceWebEntryRPC(input.services)
   const consoleViews = new ManagedServiceConsoleRPC(input.nativeManagedConsole ?? (() => undefined))
+  const browserViews = new ManagedServiceBrowserConsoleRPC(input.browserConsoleBoundary ?? (() => undefined))
   const services = new Map<string, ManagedServiceSourceV1>()
   const declaredServices = new Set(
     (input.declaredServices ?? input.services).map(service => serviceKey(service, service.serviceId)),
@@ -266,7 +284,7 @@ export function createManagedServiceUIBridgeHandler(input: {
     profileId: input.profileId,
     generation: input.generation,
     ...(hostStartup ? { hostStartup } : {}),
-    async handle(owner, request) {
+    async handle(owner, request, documentSignal) {
       if (request.operation === 'readWebEntry' || request.operation === 'cancelWebEntry') {
         return clone(await webEntries.handle(owner, request))
       }
@@ -299,7 +317,14 @@ export function createManagedServiceUIBridgeHandler(input: {
       if (request.operation === 'consoleView') {
         return clone(await consoleViews.handle(ownerKey(owner), reader, request.request))
       }
+      if (request.operation === 'consoleBrowser') {
+        return clone(
+          await browserViews.handle(ownerKey(owner), reader, request.binding, request.request, documentSignal),
+        )
+      }
       if (request.operation === 'get') {
+        const nativeMount = !!reader?.authenticatedConsole && !!input.nativeManagedConsole?.()
+        const browserEntry = !!reader?.browserConsole && !!input.browserConsoleBoundary?.()
         return clone({
           status: 'available',
           service: {
@@ -308,10 +333,12 @@ export function createManagedServiceUIBridgeHandler(input: {
             contract: 'cordisx.managed-service/v1',
             schemaVersion: 1,
             binding: resolved.source.binding,
-            ...(!reader?.authenticatedConsole || !input.nativeManagedConsole?.() ? {} : {
+            ...(!reader || (!nativeMount && !browserEntry) ? {} : {
               authenticatedConsole: {
                 contract: 'cordisx.managed-service-console/v1',
                 serviceGeneration: reader.serviceGeneration,
+                ...(nativeMount ? {} : { nativeMount: false }),
+                ...(browserEntry ? { browserEntry: true } : {}),
               },
             }),
             ...(webEntries.descriptor(owner, request.serviceId) === undefined ? {} : {
@@ -435,6 +462,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       const revision = (ownerRevisions.get(key) ?? 0) + 1
       ownerRevisions.set(key, revision)
       webEntries.replace(owner, [])
+      browserViews.disposeOwner(key)
       await consoleViews.disposeOwner(key)
       for (const service of services.keys()) if (service.startsWith(`${key}\u0000`)) services.delete(service)
       const owned = [...subscriptions.entries()].filter(([, state]) => state.ownerKey === key).map(([id]) => id)
@@ -454,6 +482,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       startup.disposeOwner(owner)
       const key = ownerKey(owner)
       revokedOwners.add(key)
+      browserViews.disposeOwner(key)
       await consoleViews.disposeOwner(key)
       ownerRevisions.set(key, (ownerRevisions.get(key) ?? 0) + 1)
       for (const service of declaredServices) if (service.startsWith(`${key}\u0000`)) declaredServices.delete(service)
@@ -467,6 +496,7 @@ export function createManagedServiceUIBridgeHandler(input: {
       if (disposed) return
       disposed = true
       webEntries.dispose()
+      browserViews.dispose()
       await consoleViews.dispose()
       startup.dispose()
       hostStartup?.dispose()
@@ -475,9 +505,9 @@ export function createManagedServiceUIBridgeHandler(input: {
     },
   }
   const handleCurrent = handler.handle
-  handler.handle = async (owner, request) => {
+  handler.handle = async (owner, request, documentSignal) => {
     const revision = ownerRevisions.get(ownerKey(owner)) ?? 0
-    const result = await handleCurrent(owner, request)
+    const result = await handleCurrent(owner, request, documentSignal)
     if (
       request.operation !== 'readWebEntry' && request.operation !== 'cancelWebEntry'
       && (request.operation === 'get' || 'binding' in request)

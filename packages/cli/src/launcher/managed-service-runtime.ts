@@ -257,6 +257,7 @@ export class ManagedServiceRuntime {
     declaration: unknown,
     signal: AbortSignal,
     consoleDeclaration?: unknown,
+    browserConsoleDeclaration?: unknown,
   ) {
     const key = managedIdentityKey(identity)
     const record = this.records.get(key)
@@ -267,6 +268,7 @@ export class ManagedServiceRuntime {
       record,
       declaration,
       consoleDeclaration,
+      browserConsoleDeclaration,
       signal,
       fetch: this.fetch,
       current: () => this.records.get(key) === record && this.registrations.get(record.registrationHandle) === record,

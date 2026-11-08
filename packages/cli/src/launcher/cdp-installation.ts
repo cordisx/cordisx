@@ -49,7 +49,7 @@ export async function install(
   signal?: AbortSignal,
   hostMutationGate?: support.CdpLifecycleRequestGate,
   managedServiceUI?: {
-    readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+    readonly handleBindingValue: (value: string, documentSignal?: AbortSignal) => Promise<Record<string, unknown>>
     readonly transport?: StartupCdpTransport
   },
   nativeSubmission?: NativeSubmissionInstallation,
@@ -773,13 +773,34 @@ export async function install(
       })
     }
     if (managedServiceUI !== undefined) {
-      removeManagedServiceUIBindingListener = session.onEvent('Runtime.bindingCalled', params => {
+      const contexts = new Map<number, AbortController>()
+      const clearContexts = () => {
+        for (const context of contexts.values()) context.abort()
+        contexts.clear()
+      }
+      const removeDestroyed = session.onEvent('Runtime.executionContextDestroyed', params => {
+        if (typeof params.executionContextId !== 'number') return
+        contexts.get(params.executionContextId)?.abort()
+        contexts.delete(params.executionContextId)
+      })
+      const removeCleared = session.onEvent('Runtime.executionContextsCleared', clearContexts)
+      const removeClosed = session.onClose(clearContexts)
+      const removeRequest = session.onEvent('Runtime.bindingCalled', params => {
         if (params.name !== support.MANAGED_SERVICE_UI_BINDING || typeof params.payload !== 'string') return
         const payload = params.payload
         const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
         if (managedServiceUIController?.signal.aborted === true) return
-        void managedServiceUI.handleBindingValue(payload).then(
-          async response => await support.sendManagedServiceUIBindingResponse(session, response, executionContextId),
+        let context = executionContextId === undefined ? undefined : contexts.get(executionContextId)
+        if (executionContextId !== undefined && !context) {
+          context = new AbortController()
+          contexts.set(executionContextId, context)
+        }
+        void managedServiceUI.handleBindingValue(payload, context?.signal).then(
+          async response => {
+            if (!context?.signal.aborted) {
+              await support.sendManagedServiceUIBindingResponse(session, response, executionContextId)
+            }
+          },
           async () =>
             await support.sendManagedServiceUIBindingResponse(session, {
               requestId: 'invalid',
@@ -788,6 +809,13 @@ export async function install(
             }, executionContextId),
         ).catch(() => undefined)
       })
+      removeManagedServiceUIBindingListener = () => {
+        removeRequest()
+        removeDestroyed()
+        removeCleared()
+        removeClosed()
+        clearContexts()
+      }
     }
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
     const documentSource = newDocumentSource ?? source

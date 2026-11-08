@@ -11,6 +11,10 @@ import {
   createManagedServiceConsoleBroker,
   type ManagedServiceConsoleBroker,
 } from './managed-service-console-broker.js'
+import {
+  createManagedServiceBrowserConsoleBroker,
+  type ManagedServiceBrowserConsoleBroker,
+} from './managed-service-browser-console-broker.js'
 import { readWebEntryJSON } from './managed-service-web-entry-http.js'
 
 const SCHEMAS = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/'
@@ -28,6 +32,7 @@ export interface ManagedServiceWebEntryReader {
   readonly serviceGeneration: string
   readonly timeoutMs: number
   readonly authenticatedConsole?: ManagedServiceConsoleBroker
+  readonly browserConsole?: ManagedServiceBrowserConsoleBroker
   read(serviceGeneration: string, signal: AbortSignal): Promise<ManagedServiceWebEntryValue>
 }
 
@@ -98,6 +103,7 @@ export function createManagedServiceWebEntryReader(input: {
   readonly record: ManagedServiceRecord
   readonly declaration: unknown
   readonly consoleDeclaration?: unknown
+  readonly browserConsoleDeclaration?: unknown
   readonly signal: AbortSignal
   readonly current: () => boolean
   readonly endpointOwned: (origin: string) => boolean
@@ -227,19 +233,27 @@ export function createManagedServiceWebEntryReader(input: {
       }
     },
   }
-  if (input.consoleDeclaration === undefined) return Object.freeze(entry)
-  const authenticatedConsole = createManagedServiceConsoleBroker({
-    ...input,
-    declaration: input.consoleDeclaration,
-    ownerSignal: input.signal,
-    entry,
-  })
   return Object.freeze({
     get serviceGeneration() {
       return entry.serviceGeneration
     },
     timeoutMs: entry.timeoutMs,
     read: entry.read,
-    authenticatedConsole,
+    ...(input.consoleDeclaration === undefined ? {} : {
+      authenticatedConsole: createManagedServiceConsoleBroker({
+        ...input,
+        declaration: input.consoleDeclaration,
+        ownerSignal: input.signal,
+        entry,
+      }),
+    }),
+    ...(input.browserConsoleDeclaration === undefined ? {} : {
+      browserConsole: createManagedServiceBrowserConsoleBroker({
+        ...input,
+        declaration: input.browserConsoleDeclaration,
+        ownerSignal: input.signal,
+        entry,
+      }),
+    }),
   })
 }

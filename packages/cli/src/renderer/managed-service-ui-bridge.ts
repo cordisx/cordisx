@@ -415,7 +415,7 @@ export class BrowserManagedServiceUIBridge {
           || request.operation === 'toggleAccount'
           || request.operation === 'startOAuth' || request.operation === 'cancelOAuth'
           || request.operation === 'readWebEntry' || request.operation === 'cancelWebEntry'
-          || request.operation === 'consoleView'
+          || request.operation === 'consoleView' || request.operation === 'consoleBrowser'
         ) payload.request = request.request
         if (request.operation === 'pollOAuth') payload.sessionId = request.sessionId
         if (request.operation === 'cancelWebEntry') payload.targetRequestId = request.targetRequestId
