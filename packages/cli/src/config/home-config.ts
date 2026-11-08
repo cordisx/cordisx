@@ -18,9 +18,11 @@ import {
   parseHomeConfigMarketplaceSources,
 } from './home-config-marketplace.js'
 import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-provider-schema.js'
+import { type JsonValue, jsonValue, parseManagedServiceStartupConfig, PLUGIN_ID, record } from './home-config-values.js'
 import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
 import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from './home-config-model-service.js'
 
+export type { JsonValue } from './home-config-values.js'
 export type { HomeConfigModelServiceProvider, HomeConfigProviderProtocol } from './home-config-model-service.js'
 
 export { redactedHomeConfig } from './home-config-profile-private.js'
@@ -127,6 +129,8 @@ export interface HomeConfigProfile {
   readonly managedProviders?: readonly ManagedProviderRecord[]
   readonly iconTheme?: HomeConfigIconThemePreference
   readonly management?: HomeConfigProfileManagement
+  /** Host-only launch configuration for installed manifest-v15 managed backends, keyed by plugin id. */
+  readonly managedServiceStartupConfig?: Readonly<Record<string, JsonValue>>
 }
 
 export interface HomeConfigApp {
@@ -155,10 +159,6 @@ export interface HomeConfig {
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
-export type JsonValue = null | boolean | number | string | readonly JsonValue[] | {
-  readonly [key: string]: JsonValue
-}
-
 export interface HomeConfigPathOptions {
   readonly configPath?: string
   readonly env?: NodeJS.ProcessEnv
@@ -175,17 +175,9 @@ export interface HomeConfigWriteOptions extends HomeConfigPathOptions {
 }
 
 const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
-const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
-function record(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`)
-  }
-  return value as Record<string, unknown>
-}
-
 function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   const allowedKeys = new Set(allowed)
   const unknown = Object.keys(value).find((key) => !allowedKeys.has(key))
@@ -205,30 +197,6 @@ function portableId(value: unknown, label: string): string {
     throw new Error(`${label} must match ${APP_OR_PROFILE_ID.source}`)
   }
   return id
-}
-
-function jsonValue(value: unknown, label: string, seen = new Set<object>()): JsonValue {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`${label} must contain only finite JSON numbers`)
-    return value
-  }
-  if (typeof value !== 'object') throw new Error(`${label} must be JSON-compatible`)
-  if (seen.has(value)) throw new Error(`${label} must not contain circular references`)
-  seen.add(value)
-  try {
-    if (Array.isArray(value)) {
-      return value.map((entry, index) => jsonValue(entry, `${label}[${index}]`, seen))
-    }
-    const source = value as Record<string, unknown>
-    const result: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>
-    for (const [key, entry] of Object.entries(source)) {
-      result[key] = jsonValue(entry, `${label}.${key}`, seen)
-    }
-    return result
-  } finally {
-    seen.delete(value)
-  }
 }
 
 function parsePlugin(value: unknown, index: number): HomeConfigPlugin {
@@ -454,6 +422,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'managedProviders',
     'iconTheme',
     'management',
+    'managedServiceStartupConfig',
   ], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
@@ -474,6 +443,12 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     ...(managedProviders.length === 0 ? {} : { managedProviders }),
     ...(iconTheme === undefined ? {} : { iconTheme }),
     ...(management === undefined ? {} : { management }),
+    ...(profile.managedServiceStartupConfig === undefined ? {} : {
+      managedServiceStartupConfig: parseManagedServiceStartupConfig(
+        profile.managedServiceStartupConfig,
+        `${label}.managedServiceStartupConfig`,
+      ),
+    }),
   }
 }
 

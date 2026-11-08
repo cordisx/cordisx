@@ -255,6 +255,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       generation: lifecycleGeneration,
       environment: runtime.env ?? process.env,
       store: lifecycleStore,
+      startupConfig: selection.profile.managedServiceStartupConfig,
       nativeManagedConsole: supervisorRuntime.managedConsole,
       dryRun: invocation.options.dryRun,
     })

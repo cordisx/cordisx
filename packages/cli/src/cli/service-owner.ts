@@ -40,20 +40,11 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
   })
   try {
     await withDiagnostics(journal, async () => {
-      const supervisor = await createSupervisorRuntime(environment)
       const configPath = path.join(homeDir, 'config.json')
+      const supervisor = await createSupervisorRuntime(environment)
       const generation = randomUUID()
       const store = new PluginActivationStore(homeDir, profileId, generation)
-      const services = createProductionManagedServiceLifecycle({
-        runtime: createServicePluginRuntime(generation),
-        homeDir,
-        profileId,
-        generation,
-        environment,
-        store,
-        dryRun: false,
-        requireOwnedProcess: true,
-      })
+      let services: ReturnType<typeof createProductionManagedServiceLifecycle> | undefined
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
@@ -61,7 +52,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let failure: unknown
       const stopServices = () => {
-        void services.dispose().catch(() => undefined)
+        void services?.dispose().catch(() => undefined)
       }
       lifetime.signal.addEventListener('abort', stopServices, { once: true })
       try {
@@ -72,6 +63,17 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             policy => policy.key.profileId === profileId,
           )
         const config = await loadHomeConfig(configPath)
+        services = createProductionManagedServiceLifecycle({
+          runtime: createServicePluginRuntime(generation),
+          homeDir,
+          profileId,
+          generation,
+          environment,
+          store,
+          startupConfig: config.apps[appId]?.profiles[profileId]?.managedServiceStartupConfig,
+          dryRun: false,
+          requireOwnedProcess: true,
+        })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)
         const coordinator = new PluginLifecycleCoordinator({
@@ -132,7 +134,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => management?.close(),
-            () => services.dispose(),
+            () => services?.dispose(),
             () => managed?.close(),
             () => certified?.dispose(),
             () => releaseRuntimeOwner?.(),

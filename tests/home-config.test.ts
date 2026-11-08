@@ -72,6 +72,31 @@ describe('CordisX home configuration', () => {
     }
   })
 
+  it('parses profile-specific managed service startup data and omits it from printable configuration', () => {
+    const config = createDefaultHomeConfig()
+    const original = config.apps.codex!
+    const startupConfig = { aiden: { account: { root: '/private/account-root' } } }
+    const withStartupConfig = (value: unknown) => ({
+      ...config,
+      apps: {
+        codex: {
+          ...original,
+          profiles: {
+            ...original.profiles,
+            preview: { displayName: 'Preview', dataMode: 'shared', managedServiceStartupConfig: value },
+          },
+        },
+      },
+    })
+    const parsed = parseHomeConfig(withStartupConfig(startupConfig))
+    expect(parsed.apps.codex!.profiles.preview!.managedServiceStartupConfig).toEqual(startupConfig)
+    expect(parsed.apps.codex!.profiles.default!.managedServiceStartupConfig).toBeUndefined()
+    expect(JSON.stringify(redactedHomeConfig(parsed))).not.toMatch(/managedServiceStartupConfig|private\/account-root/u)
+    for (const invalid of [null, { 'invalid id': { root: '/private' } }, { aiden: [] }, { aiden: {} }]) {
+      expect(() => parseHomeConfig(withStartupConfig(invalid))).toThrow('managedServiceStartupConfig')
+    }
+  })
+
   it('redacts managed Provider credentials from printable configuration', () => {
     const config = createDefaultHomeConfig()
     const record = {
