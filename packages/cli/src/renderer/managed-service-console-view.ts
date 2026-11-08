@@ -1,3 +1,4 @@
+import { createManagedConsoleBrowserEntry } from './managed-service-console-browser-entry.js'
 import { activeManagedConsoleSeat } from './managed-console-seats.js'
 import type {
   ManagedServiceConsoleMountResultV1,
@@ -9,6 +10,8 @@ import type { ManagedServiceUIBindingRequest } from '../launcher/managed-service
 export interface ManagedConsoleDescriptor {
   readonly contract: 'cordisx.managed-service-console/v1'
   readonly serviceGeneration: string
+  readonly nativeMount?: boolean
+  readonly browserEntry?: true
 }
 
 export function createBrowserManagedServiceConsole(input: {
@@ -24,10 +27,16 @@ export function createBrowserManagedServiceConsole(input: {
     contract: descriptor.contract,
     binding,
     serviceGeneration,
+    ...(descriptor.browserEntry === true
+      ? {
+        readBrowserEntry: createManagedConsoleBrowserEntry({ ...input, serviceGeneration }),
+      }
+      : {}),
     async mount(
       target: HTMLElement,
       options?: { readonly signal?: AbortSignal },
     ): Promise<ManagedServiceConsoleMountResultV1> {
+      if (descriptor.nativeMount === false) return { status: 'unavailable', reason: 'unsupported' }
       const live = () => activeManagedConsoleSeat(target, input.owner)
       if (!live() || target.childElementCount) return { status: 'unavailable', reason: 'owner-unavailable' }
       if (options?.signal?.aborted) return { status: 'unavailable', reason: 'cancelled' }

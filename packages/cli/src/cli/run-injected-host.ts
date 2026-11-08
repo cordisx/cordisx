@@ -1,3 +1,4 @@
+import type { ManagedConsoleBrowserLaunch } from '../launcher/managed-console-browser-launch.js'
 import { bindDiagnostic, diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ConfigBridgeHandler } from '../launcher/config-rpc.js'
@@ -105,6 +106,7 @@ export async function runInjectedHost(input: {
     runtimeGeneration: string
   }>
   readonly managedServiceUI?: WatchInjectionOptions['managedServiceUI']
+  readonly browserConsole?: ManagedConsoleBrowserLaunch
   readonly executable?: string
   readonly prelaunchedHost?: Readonly<{
     child: ChildProcess
@@ -202,6 +204,7 @@ export async function runInjectedHost(input: {
         }
       })
       rendererIsReady = true
+      input.browserConsole?.markReady()
       markReady()
       input.stdout('[cordisx] CDP renderer ready')
     },
@@ -224,6 +227,9 @@ export async function runInjectedHost(input: {
       await input.beforeHostLaunch?.()
       controller.signal.throwIfAborted()
       const hidden = input.hiddenUntilReady === true
+      const hostArgs = input.browserConsole && input.profile && input.hasLoopbackGraph && !hidden
+        ? await input.browserConsole.prepare(input.executable, input.hostArgs, controller.signal)
+        : input.hostArgs
       const mainInspector = input.mainInspector === true && await supportsOwnedMainInspector(input.executable)
       diagnostic({ event: 'main-inspector-preflight', required: input.mainInspector === true, verified: mainInspector })
       if (hidden && !mainInspector) throw new Error('Hidden Host launch requires an owned main inspector')
@@ -232,7 +238,7 @@ export async function runInjectedHost(input: {
         ? await launchCodexHidden(
           input.executable,
           input.debugPort,
-          input.hostArgs,
+          hostArgs,
           input.profile,
           input.launcher.onlineDevtools,
           input.environment,
@@ -242,7 +248,7 @@ export async function runInjectedHost(input: {
       launched = hiddenLaunch?.child ?? launchCodex(
         input.executable,
         input.debugPort,
-        input.hostArgs,
+        hostArgs,
         input.profile,
         input.launcher.onlineDevtools,
         input.environment,
@@ -281,7 +287,7 @@ export async function runInjectedHost(input: {
     controller.abort()
     input.signal?.removeEventListener('abort', abort)
     const launchedHost = launched
-    const cleanup = await settleInjectedHostCleanup({
+    let cleanup = await settleInjectedHostCleanup({
       recoverAfterHostTermination: error =>
         !input.launcher.attach && launchedHost !== undefined
           && (launchedHost.exitCode !== null || launchedHost.signalCode !== null)
@@ -305,6 +311,9 @@ export async function runInjectedHost(input: {
         }),
     })
     const hostTermination = launchedHost === undefined ? undefined : cleanup.at(-1)
+    if (input.browserConsole !== undefined) {
+      cleanup = [...cleanup, ...await Promise.allSettled([input.browserConsole.close()])]
+    }
     const leaseCleanup = hostTermination?.status === 'rejected' || retainProfileLease
       ? []
       : await Promise.allSettled([profileLease?.release() ?? Promise.resolve()])

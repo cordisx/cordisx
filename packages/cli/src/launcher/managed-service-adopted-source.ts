@@ -67,7 +67,13 @@ export function adoptedManagedServiceSource(
       }),
   }
   const source = createManagedServiceSource(sourceOptions)
-  const webEntryDeclaration = (state.module as ManagedServiceWebEntryNodeModuleV1 | undefined)?.managedServiceWebEntry
+  const module = state.module as
+    | (ManagedServiceWebEntryNodeModuleV1 & {
+      readonly managedServiceConsole?: unknown
+      readonly managedServiceBrowserConsole?: unknown
+    })
+    | undefined
+  const webEntryDeclaration = module?.managedServiceWebEntry
   const webEntry = webEntryDeclaration === undefined
     ? undefined
     : runtime.bindWebEntry(
@@ -75,7 +81,8 @@ export function adoptedManagedServiceSource(
       state.binding.owner,
       webEntryDeclaration,
       state.binding.signal,
-      (state.module as ManagedServiceNodeModuleV1 & { managedServiceConsole?: unknown }).managedServiceConsole,
+      module?.managedServiceConsole,
+      module?.managedServiceBrowserConsole,
     )
   const loginTimeoutMs = runtime.getLoginTimeoutMs(identity)
   return Object.freeze({

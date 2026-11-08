@@ -1,3 +1,4 @@
+import { ManagedConsoleBrowserLaunch } from './managed-console-browser-launch.js'
 import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { managedServiceLiveHandler } from './managed-service-live-handler.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
@@ -116,6 +117,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private disposed = false
   readonly startup: ManagedServiceStartupAuthority
   readonly startupObserver: StartupObserverV1
+  readonly browserConsoleLaunch = new ManagedConsoleBrowserLaunch()
   private initialized = false
   private readonly lifecycle = new AbortController()
   private readonly startupTombstones: ManagedServiceStartupTombstones
@@ -224,7 +226,8 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private hostStartupInput: { readonly token: string; readonly observer: StartupObserverV1 } | undefined
 
   readonly managedServiceUI = {
-    handleBindingValue: async (value: string): Promise<Record<string, unknown>> => await this.handleBindingValue(value),
+    handleBindingValue: async (value: string, documentSignal?: AbortSignal): Promise<Record<string, unknown>> =>
+      await this.handleBindingValue(value, documentSignal),
   }
 
   nativeActivation(): ManagedServiceNativeActivation {
@@ -524,6 +527,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
           () => activation?.sources.filter(source => ownerKey(source) === key) ?? [],
           readNativeProviders,
           this.options.nativeManagedConsole,
+          this.browserConsoleLaunch.boundary,
         )
         routes.set(key, { key, token, owner, handler, ...(declaration === undefined ? {} : { startup: true }) })
       }
@@ -550,7 +554,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     throw new Error('managed service UI token generation failed')
   }
 
-  private async handleBindingValue(value: string): Promise<Record<string, unknown>> {
+  private async handleBindingValue(value: string, documentSignal?: AbortSignal): Promise<Record<string, unknown>> {
     let requestId = 'invalid'
     let envelope: Record<string, unknown> | undefined
     try {
@@ -565,7 +569,10 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
       const route = this.routesByToken.get(envelope.token)
       if (route === undefined) throw new Error('managed service UI request is not authorized')
       const request = parseManagedServiceUIBindingRequest(envelope, route.handler, route.owner)
-      return { requestId, ok: true, value: await route.handler.handle(route.owner, request) }
+      if (request.operation === 'consoleBrowser' && (!documentSignal || documentSignal.aborted)) {
+        return { requestId, ok: true, value: { status: 'unavailable', reason: 'owner-unavailable' } }
+      }
+      return { requestId, ok: true, value: await route.handler.handle(route.owner, request, documentSignal) }
     } catch (error) {
       const terminated = envelope === undefined ? undefined : this.startupTombstones.result(envelope)
       if (terminated !== undefined) return { requestId, ok: true, value: terminated }

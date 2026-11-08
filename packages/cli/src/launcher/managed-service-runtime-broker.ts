@@ -1,3 +1,4 @@
+import { MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA } from './managed-service-browser-console-broker.js'
 import { MANAGED_CONSOLE_RESULT_SCHEMA } from './managed-service-console-broker.js'
 import type {
   ManagedServiceAcquireResultV1,
@@ -116,6 +117,7 @@ export class ManagedServiceRuntimeBroker {
     const operation = record.definition.operations.find(item => item.operationId === operationId)
     if (
       operation === undefined || operation.responseSchema === MANAGED_CONSOLE_RESULT_SCHEMA
+      || operation.responseSchema === MANAGED_BROWSER_CONSOLE_RESULT_SCHEMA
       || record.origin === undefined
     ) {
       return managedFailure('unavailable', 'unsupported', false)

@@ -939,6 +939,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         }),
         publisherGrant,
         executable: plan.executable,
+        ...(hasManagedBackends ? { browserConsole: managedServiceLifecycleRuntime.browserConsoleLaunch } : {}),
         ...(prelaunchedHost === undefined ? {} : { prelaunchedHost }),
         beforeHostLaunch: modelServiceLaunchHook(currentHomeConfig, codexHomeOfPlan(plan), invocation.options, stdout),
         debugPort: resolvedDebugPort,

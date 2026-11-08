@@ -224,7 +224,7 @@ function operationEnvelope(value: unknown, operation: unknown): void {
   const common = ['version', 'token', 'requestId', 'operation', 'scope', 'serviceId']
   const allowed = operation === 'get' || operation === 'nativeProviders'
     ? common
-    : operation === 'readWebEntry' || operation === 'consoleView'
+    : operation === 'readWebEntry' || operation === 'consoleView' || operation === 'consoleBrowser'
     ? [...common, 'binding', 'request']
     : operation === 'cancelWebEntry'
     ? [...common, 'binding', 'request', 'targetRequestId']
@@ -294,6 +294,20 @@ export function parseManagedServiceUIBindingRequest(
   const currentBinding = binding(envelope.binding, handler, owner)
   if (currentBinding.identity.serviceId !== common.serviceId) {
     throw new Error('managed service UI binding service is stale or spoofed')
+  }
+  if (envelope.operation === 'consoleBrowser') {
+    const raw = exact(envelope.request, ['viewId', 'serviceGeneration', 'action'], 'managed browser console')
+    if (raw.action !== 'issue' && raw.action !== 'retire') throw new Error('Managed browser console action is invalid')
+    return {
+      ...common,
+      operation: 'consoleBrowser',
+      binding: currentBinding,
+      request: {
+        action: raw.action,
+        viewId: requestId(raw.viewId),
+        serviceGeneration: requestId(raw.serviceGeneration),
+      },
+    }
   }
   if (envelope.operation === 'consoleView') {
     const raw = exact(envelope.request, ['viewId', 'serviceGeneration', 'action', 'bounds'], 'managed console view')
