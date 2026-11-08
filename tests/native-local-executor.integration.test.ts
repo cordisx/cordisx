@@ -50,6 +50,7 @@ it.skipIf(process.platform !== 'darwin').each(['codex', 'codex-cli/bin/codex'])(
       expect(environment.CODEX_TPP_LOCAL_EXECUTOR_CLI_PATH).toBe(f.cli)
       expect(environment.CORDISX_NATIVE_REAL_CODEX_PATH).toBe(f.cli)
       expect(environment.CODEX_CLI_PATH).not.toBe(f.cli)
+      expect(environment.CORDISX_NATIVE_CLI_ENTRY_PATH).toBe(environment.CODEX_CLI_PATH)
       const chat = spawn(environment.CODEX_CLI_PATH!, ['app-server'], { env: environment })
       children.push(chat)
       chat.stdin!.on('error', () => {})

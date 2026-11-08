@@ -312,6 +312,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_CONTROL_SOCKET: control.socketPath,
     CORDISX_NATIVE_CONTROL_NONCE: control.nonce,
     CORDISX_NATIVE_REAL_CODEX_PATH: cli,
+    CORDISX_NATIVE_CLI_ENTRY_PATH: nativeEntry.executable,
     CORDISX_NATIVE_NODE_PATH: node,
     CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
   }

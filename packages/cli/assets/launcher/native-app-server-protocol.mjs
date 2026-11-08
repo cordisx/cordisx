@@ -6,6 +6,7 @@ import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
 import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
+import { withStableComputerUseCli } from './native-computer-use-config.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
 import { nativeProviderFailure } from './native-provider-errors.mjs'
@@ -15,6 +16,7 @@ import { createNativeProviderContinuation, dispatchNativeSelectionMutation } fro
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
 const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
+const nativeCliEntry = process.env.CORDISX_NATIVE_CLI_ENTRY_PATH
 const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
 // Native history and plugin catalogs can exceed the small private control-message budget.
@@ -27,6 +29,7 @@ for (
     'CORDISX_NATIVE_CONTROL_SOCKET',
     'CORDISX_NATIVE_CONTROL_NONCE',
     'CORDISX_NATIVE_REAL_CODEX_PATH',
+    'CORDISX_NATIVE_CLI_ENTRY_PATH',
     'CORDISX_NATIVE_NODE_PATH',
     'CORDISX_NATIVE_AGENT_MODELS_BINDING',
   ]
@@ -548,7 +551,8 @@ async function forward(line) {
         }
       } catch {}
     }
-    await write(nativeTransport.stdin, line)
+    const forwarded = withStableComputerUseCli(message, nativeCliEntry, executable)
+    await write(nativeTransport.stdin, forwarded === message ? line : forwarded)
     return
   }
   let admitted = false

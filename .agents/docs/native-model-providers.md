@@ -612,6 +612,15 @@ The launch shim replaces itself with that runtime and never changes the Host's
 Node or global `PATH`. A missing bundled runtime makes this composition unavailable;
 it does not fall back to a system Node or disable native peer authorization.
 
+Desktop's native Computer Use registration can persist the App Server launch
+path in the default `mcp_servers.node_repl` definition. When the generated
+replacement points to this launch's temporary CordisX entry, the authenticated
+intermediary substitutes the selected Desktop bundle's own CLI before forwarding
+the SDK request. The native SDK still applies the request and returns its
+response. Other edits, explicit config files and revisions, and other CLI
+paths pass through unchanged. The temporary entry remains private to the
+running App Server.
+
 Native submission admission reads the installed App's initial and primary
 JavaScript resources plus an optional shared resource without modifying or
 launching it. Desktop version/build
