@@ -6,6 +6,59 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { harness } from './fixtures/native-intermediary-harness.js'
 
+it('keeps the current temporary App Server entry out of a durable Computer Use registration', async () => {
+  const shim = '/private/tmp/cx-native-cli-current/codex'
+  const otherShim = '/private/tmp/cx-native-cli-other/codex'
+  const h = await harness(undefined, undefined, undefined, { CORDISX_NATIVE_CLI_ENTRY_PATH: shim })
+  const registration = {
+    keyPath: 'mcp_servers.node_repl',
+    mergeStrategy: 'replace',
+    value: { command: '/app/node_repl', args: ['--stdio'], env: { CODEX_CLI_PATH: shim, EXISTING: 'preserved' } },
+  }
+  const otherEdit = { ...registration, keyPath: 'mcp_servers.user_tool' }
+  const params = { filePath: null, expectedVersion: null, reloadUserConfig: true, edits: [registration, otherEdit] }
+  try {
+    h.send({ id: 'default-registration', method: 'config/batchWrite', params })
+    expect(JSON.parse(await h.read())).toMatchObject({
+      id: 'default-registration',
+      result: {
+        method: 'config/batchWrite',
+        received: {
+          ...params,
+          edits: [{
+            ...registration,
+            value: {
+              ...registration.value,
+              env: { ...registration.value.env, CODEX_CLI_PATH: process.execPath },
+            },
+          }, otherEdit],
+        },
+        leakedControlEnvironment: [],
+      },
+    })
+
+    for (
+      const [method, value] of [
+        ['config/batchWrite', { ...params, filePath: '/custom/config.toml' }],
+        ['config/batchWrite', { ...params, expectedVersion: 'explicit-revision' }],
+        ['config/batchWrite', { ...params, edits: [registration, registration] }],
+        ['config/batchWrite', { ...params, edits: [otherEdit] }],
+        ['config/batchWrite', { ...params, edits: [{ ...registration, mergeStrategy: 'upsert' }] }],
+        ['config/batchWrite', {
+          ...params,
+          edits: [{ ...registration, value: { ...registration.value, env: { CODEX_CLI_PATH: otherShim } } }],
+        }],
+        ['config/value/write', params],
+      ] as const
+    ) {
+      h.send({ id: 'pass-through', method, params: value })
+      expect(JSON.parse(await h.read()).result.received).toEqual(value)
+    }
+  } finally {
+    await h.close()
+  }
+})
+
 describe('Computer Use auxiliary app-server', () => {
   it('keeps fragmented native output separate from local rejections and returns native auth responses', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cx-cua-frame-'))
