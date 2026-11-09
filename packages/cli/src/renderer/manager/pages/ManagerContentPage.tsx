@@ -7,7 +7,12 @@ import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 
 export function ManagerContentPage(
-  { model, router, locale }: { readonly model: ManagerModel; readonly router: ManagerRouter; readonly locale: string },
+  { model, router, locale, headerActionsSeat }: {
+    readonly model: ManagerModel
+    readonly router: ManagerRouter
+    readonly locale: string
+    readonly headerActionsSeat?: HTMLElement | null
+  },
 ) {
   const seat = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -21,6 +26,9 @@ export function ManagerContentPage(
   const activeTab = presentation?.tabs.find(tab => tab.active)
   useEffect(() => {
     if (route.kind !== 'manager-content' || seat.current === null) return
+    // A Host-owned header is still mounting. Do not initialize and immediately
+    // abort the plugin page before its action seat is available.
+    if (headerActionsSeat === null) return
     if (model.mountManagerContent === undefined) {
       setState('error')
       return
@@ -31,6 +39,7 @@ export function ManagerContentPage(
     void model.mountManagerContent(route.id, route.reference, seat.current, {
       navigate: async reference => router.navigate({ kind: 'manager-content', id: route.id, reference }),
       back: async () => router.back(),
+      ...(headerActionsSeat == null ? {} : { headerActions: headerActionsSeat }),
     }).then(value => {
       if (disposed) value.abort()
       else {
@@ -45,7 +54,7 @@ export function ManagerContentPage(
       mount?.abort()
       void model.closeManagerContent?.()
     }
-  }, [model, route, router])
+  }, [model, route, router, headerActionsSeat])
   const activateTab = (index: number) => {
     if (presentation === undefined || contributionId === undefined) return
     const tab = presentation.tabs[index]

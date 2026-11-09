@@ -11,6 +11,11 @@
   flex: 1 1 0;
 }
 
+.cxmp-management .cordisx-brand-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .cxms-export-toolbar {
   display: grid;
   min-height: 32px;

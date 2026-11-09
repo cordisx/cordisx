@@ -260,7 +260,7 @@ describe('provider selection interaction', () => {
     expect(document.querySelector('.cxmp-next-send-label')).toBeNull()
     expect(document.querySelector('.cxmp-menu-heading')).toBeNull()
     expect(document.querySelector('.cxmp-announcement')).toBeNull()
-    expect(document.querySelector(modelTrigger)?.getAttribute('aria-label')).toContain('Use on Send after response')
+    expect(document.querySelector(modelTrigger)?.getAttribute('aria-label')).toContain('Use on next Send')
     expect(document.querySelector(modelTrigger)?.getAttribute('title')).toContain('Current: first / Current')
     expect(document.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(false)
     await update({ selectionLocked: true })

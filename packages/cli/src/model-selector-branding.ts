@@ -27,6 +27,7 @@ export const PROVIDER_BRAND_KEYS = [
 
 export const MODEL_BRAND_KEYS = [
   'claude',
+  'doubao',
   'deepseek',
   'gemini',
   'kimi',
@@ -175,6 +176,7 @@ const MODEL_RULES: readonly [ModelBrandKey, RegExp][] = [
   ['claude', /^(?:anthropic[/:])?claude(?:[-_.]|$)/u],
   ['gemini', /^(?:google[/:])?gemini(?:[-_.]|$)/u],
   ['deepseek', /^(?:deepseek[/:])?deepseek(?:[-_.]|$)/u],
+  ['doubao', /^(?:bytedance[/:]|doubao[/:])?(?:doubao|seed)(?:[-_.]|$)/u],
   ['kimi', /^(?:moonshotai[/:]|moonshot[/:])?kimi(?:[-_.]|$)/u],
   ['minimax', /^(?:minimax[/:])?minimax(?:[-_.]|$)/u],
   ['mistral', /^(?:mistralai[/:]|mistral[/:])?(?:mistral|codestral|ministral|pixtral)(?:[-_.]|$)/u],
@@ -187,6 +189,10 @@ export function inferModelBrand(id: string, displayName?: string): ModelBrandKey
   const exact = id.trim().toLowerCase()
   if (!exact || exact.length > 512 || /[\0\r\n\\]/u.test(exact)) return undefined
   for (const [brand, rule] of MODEL_RULES) if (rule.test(exact)) return brand
+  // Scoped gateway identities can retain a recognizable model slug as their final segment.
+  // Match that slug itself; an opaque route still must not inherit a brand from its label.
+  const slug = exact.split(/[/:]/u).at(-1)!
+  if (slug !== exact) { for (const [brand, rule] of MODEL_RULES) if (rule.test(slug)) return brand }
   if (/[/:]/u.test(exact) || /(?:deployment|endpoint|route|slot|proxy)/u.test(exact)) return undefined
   const label = normalizedName(displayName)?.replace(/ /gu, '-')
   if (label !== undefined) { for (const [brand, rule] of MODEL_RULES) if (rule.test(label)) return brand }

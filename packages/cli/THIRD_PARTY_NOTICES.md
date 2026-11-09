@@ -35,8 +35,9 @@ MIT terms and upstream credits are at `third_party/reicon-MIT.txt` and
 The OpenAI model/provider glyph is derived from the MIT-licensed OpenAI Apps SDK
 UI. Its license is included at `third_party/openai-apps-sdk-ui-MIT.txt`.
 
-The bundled MiniMax glyph is sourced from the MIT-licensed LobeHub Icons
-collection. Its license is included at `third_party/lobe-icons-MIT.txt`.
+The bundled MiniMax and Doubao glyphs are sourced from the MIT-licensed
+LobeHub Icons collection. The Doubao asset uses `@lobehub/icons-static-svg`
+1.100.0 (`doubao-color.svg`). Its license is included at `third_party/lobe-icons-MIT.txt`.
 
 The model disclosure brain glyph is the upstream `brain.svg` asset from Lucide
 `0.468.0`, sourced from

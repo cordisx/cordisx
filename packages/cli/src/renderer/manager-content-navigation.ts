@@ -126,6 +126,7 @@ export function sameStructuredValue(left: unknown, right: unknown): boolean {
 }
 
 export interface ManagerContentPresentation {
+  readonly contentInset?: 'standard' | 'none'
   readonly title: string
   readonly description: string
   readonly icon?: BrandIconV1

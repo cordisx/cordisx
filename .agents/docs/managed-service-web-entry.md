@@ -60,6 +60,14 @@ service receives `unsupported` and can use its ordinary manual web entry.
 Closing the page, replacing its renderer or changing the service generation
 retires the active route and stops forwarding its old session.
 
+The gateway also relays authorization cookies issued by the verified service
+after console authentication. These cookies must be HttpOnly, Secure,
+SameSite=None, partitioned, host-only and scoped to `/`, with an explicit
+expiry. Only exact service-issued values are forwarded alongside the bound
+console session. The route retains digests, caps supporting cookies at 16 and
+the forwarded header at 8 KiB, and clears the bindings on logout or disposal.
+Ordinary browser cookies and credentials from other origins are not relayed.
+
 ## Verification boundaries
 
 The focused web-entry suites cover endpoint proof, source admission, canonical

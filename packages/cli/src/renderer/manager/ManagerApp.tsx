@@ -287,6 +287,7 @@ function Content(
     pluginManagementSnapshot,
     pluginManagementError,
     onModelServicesSecondaryPageChange,
+    headerActionsSeat,
   }: {
     readonly model: ManagerModel
     readonly marketplace: MarketplaceModel
@@ -296,6 +297,7 @@ function Content(
     readonly pluginManagement: ManagerPluginManagementBinding | undefined
     readonly pluginManagementSnapshot: import('../../management/contracts.js').PluginManagementSnapshot | undefined
     readonly pluginManagementError: string | undefined
+    readonly headerActionsSeat: HTMLElement | null
     readonly onModelServicesSecondaryPageChange: (page: ModelServicesSecondaryPage | undefined) => void
   },
 ) {
@@ -374,7 +376,14 @@ function Content(
         </div>
       )
     }
-    return <ManagerContentPage model={model} router={route} locale={snapshot.localization.locale} />
+    return (
+      <ManagerContentPage
+        model={model}
+        router={route}
+        locale={snapshot.localization.locale}
+        headerActionsSeat={headerActionsSeat}
+      />
+    )
   }
   if (current.page === 'plugins' || current.page === 'plugin-bundles') {
     return <PluginsPage model={model} snapshot={snapshot} router={route} />
@@ -505,6 +514,7 @@ export function ManagerApp(
   const [workspaceVisited, setWorkspaceVisited] = useState(false)
   const [surface, setSurface] = useState<'pane' | 'modal'>('modal')
   const [seatUnavailable, setSeatUnavailable] = useState(false)
+  const [headerActionsSeat, setHeaderActionsSeat] = useState<HTMLElement | null>(null)
   const [modelServicesSecondaryPage, setModelServicesSecondaryPage] = useState<ModelServicesSecondaryPage>()
   const restoreTriggerFocus = useRef(true)
   const showSeatUnavailable = () => {
@@ -737,9 +747,10 @@ export function ManagerApp(
             />
           )}
       </div>
-      {!workspaceMode && surface === 'modal'
-        ? (
-          <div className="cxr-titlebar-actions">
+      <div className="cxr-titlebar-actions">
+        <div className="cxr-titlebar-actions" ref={setHeaderActionsSeat} data-manager-page-header-actions="true" />
+        {!workspaceMode && surface === 'modal'
+          ? (
             <Button
               className="cxr-titlebar-action"
               shape="square"
@@ -748,9 +759,9 @@ export function ManagerApp(
               icon={<HostIcon token="close" />}
               onClick={() => closeManager()}
             />
-          </div>
-        )
-        : null}
+          )
+          : null}
+      </div>
     </header>
   )
   return (
@@ -830,9 +841,13 @@ export function ManagerApp(
                 {surface === 'modal' ? header : null}
                 <div
                   className="cxr-content"
-                  data-content-layout={(modelServicesSecondaryPage !== undefined
-                      || router.route.kind === 'model-connection-create'
-                      || router.route.kind === 'marketplace-source-edit')
+                  data-content-layout={router.route.kind === 'manager-content'
+                      && model.managerContentPresentation?.(router.route.id, router.route.reference)?.contentInset
+                        === 'none'
+                    ? 'embedded'
+                    : (modelServicesSecondaryPage !== undefined
+                        || router.route.kind === 'model-connection-create'
+                        || router.route.kind === 'marketplace-source-edit')
                     ? 'form'
                     : 'document'}
                 >
@@ -846,6 +861,7 @@ export function ManagerApp(
                       pluginManagement={pluginManagement}
                       pluginManagementSnapshot={management.snapshot}
                       pluginManagementError={management.error}
+                      headerActionsSeat={headerActionsSeat}
                       onModelServicesSecondaryPageChange={setModelServicesSecondaryPage}
                     />
                   </MarketplaceInstallerProvider>

@@ -242,6 +242,7 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
     return Object.freeze({
       title,
       description,
+      contentInset: page.metadata.contentInset ?? 'standard',
       ...(page.metadata.icon === undefined ? {} : { icon: page.metadata.icon }),
       ...(declaration.declaration.parentRoute === undefined ? {} : { parent: declaration.declaration.parentRoute }),
       ...(recordSummary === undefined ? {} : { recordSummary }),

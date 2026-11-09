@@ -342,7 +342,10 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(titleSeat.getBoundingClientRect().right).toBe(1254)
       expect(nativeResizer.style.visibility).toBe('hidden')
 
-      expect(titlebarMain.querySelector('.cxr-titlebar-actions')).toBeNull()
+      const pageHeaderActions = titlebarMain.querySelector('[data-manager-page-header-actions="true"]')
+      expect(pageHeaderActions).not.toBeNull()
+      expect(pageHeaderActions?.childElementCount).toBe(0)
+      expect(titlebarMain.querySelector('.cxr-titlebar-actions button')).toBeNull()
       expect(titlebarMain.querySelector('[aria-label="Close CordisX Manager"]')).toBeNull()
       expect(document.querySelector('[data-cordisx-manager-pane]')).not.toBeNull()
       await act(async () => trigger().click())

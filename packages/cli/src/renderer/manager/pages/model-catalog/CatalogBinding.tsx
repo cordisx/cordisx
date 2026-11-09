@@ -253,7 +253,7 @@ export function CatalogBinding(
           </>
         )}
       <span className="cxms-provider-identity">
-        <strong>{view.title}</strong>
+        <strong>{provider?.title ?? view.title}</strong>
         <code>{view.scopeLabel ?? view.providerId}</code>
       </span>
       <span className="cxms-model-count">
@@ -506,8 +506,11 @@ export function CatalogBinding(
                 kind="model"
               />
               <div className="cxms-model-identity">
-                <strong>{row.label}</strong>
-                {row.id !== row.label ? <code>{row.id}</code> : null}
+                <strong>
+                  {provider?.models.find(model =>
+                    model.id === row.id
+                  )?.label ?? row.label}
+                </strong>
                 <small>
                   {row.provenance.map(source =>
                     t(
@@ -528,9 +531,7 @@ export function CatalogBinding(
               </div>
               <div className="cxmc-row-actions">
                 {onShare && view.sourceKind !== 'plugin' && view.transferAvailable && row.present
-                    && !row.provenance.some(value =>
-                      value === 'script' || value === 'script-supplement'
-                    )
+                    && !row.provenance.some(value => value === 'script' || value === 'script-supplement')
                   ? (
                     <MoreMenu
                       label={`${locale.startsWith('zh') ? '更多' : 'More'}: ${row.label}`}

@@ -1,4 +1,6 @@
 import { registerManagedConsoleSeat } from './managed-console-seats.js'
+import { pageChromeButton } from './navigation-pages.js'
+import { mountPageHeaderActions } from './page-header-actions.js'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -121,6 +123,7 @@ export class NavigationRegistry extends NavigationRegistryRouting {
     contributionId: string,
     container: HTMLElement,
     managerNavigation?: CordisXPageNavigation,
+    headerActions?: HTMLElement,
   ): Promise<ManagedManagerPageMount> {
     let result: ManagedManagerPageMount | undefined
     return this.enqueue(async () => {
@@ -172,7 +175,9 @@ export class NavigationRegistry extends NavigationRegistryRouting {
       content.dataset.cordisxRoute = record.qualifiedId
       content.dataset.cxmSettingsPlacement = 'page'
       content.dataset.cordisxNoDrag = 'true'
-      content.style.cssText = 'min-width:0;min-height:100%;box-sizing:border-box'
+      content.style.cssText = page.metadata.contentInset === 'none'
+        ? 'min-width:0;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;flex:1'
+        : 'min-width:0;min-height:100%;box-sizing:border-box'
       content.style.setProperty('-webkit-app-region', 'no-drag')
       container.append(content)
       const abortController = new AbortController()
@@ -191,6 +196,52 @@ export class NavigationRegistry extends NavigationRegistryRouting {
         return dispose
       }
       const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      if (headerActions !== undefined && page.metadata.chrome !== 'body-only') {
+        const headerSites = new Set<string>()
+        effects.push(() => {
+          for (const site of headerSites) this.i18n.clearDiagnosticSite(page.owner, site)
+        })
+        effects.push(mountPageHeaderActions({
+          chrome: headerActions,
+          actions: page.metadata.headerActions ?? [],
+          button: (label, icon) => pageChromeButton(content.ownerDocument, label, icon),
+          resolve: (text, suffix) => {
+            const site = `manager:${page.qualifiedId}:actions.${suffix}`
+            headerSites.add(site)
+            return this.i18n.resolveFor(page.owner, text, site).text
+          },
+          localize: refresh => {
+            localization.effect(() => {
+              refresh()
+              return () => {}
+            })
+          },
+          visible: action => evaluateWhen(action.when, this.contexts.getSnapshot()),
+          available: action => this.commands?.hasFor(page.owner, action.command) ?? false,
+          subscribe: refresh => {
+            const context = this.contexts.subscribe(refresh)
+            const commands = this.commands?.subscribeInternal(refresh)
+            return () => {
+              context()
+              commands?.()
+            }
+          },
+          execute: async (action, actionId) => {
+            const decision = this.access?.authorizeOutletPageCommand(
+              page.owner,
+              'manager.content',
+              record.qualifiedId,
+              page.qualifiedId,
+              actionId,
+              qualifyOwnedId(page.owner, action.command.id),
+            )
+            if (decision !== undefined && !decision.authorized) {
+              throw new Error(decision.reason ?? 'Page command denied')
+            }
+            await this.commands?.executeFor(page.owner, action.command, `page:${page.qualifiedId}:header:${actionId}`)
+          },
+        }))
+      }
       const collectionRoot = content.ownerDocument.createElement('div')
       collectionRoot.dataset.cordisxManagerCollectionRoot = 'true'
       const pageBody = content.ownerDocument.createElement('div')

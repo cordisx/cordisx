@@ -10,6 +10,7 @@ import cerebras from '../../../assets/model-brands/cerebras.png'
 import claude from '../../../assets/model-brands/claude.svg'
 import dashscope from '../../../assets/model-brands/dashscope.svg'
 import deepseek from '../../../assets/model-brands/deepseek.svg'
+import doubao from '../../../assets/model-brands/doubao.svg'
 import fireworks from '../../../assets/model-brands/fireworks.svg'
 import gemini from '../../../assets/model-brands/gemini.png'
 import googleVertex from '../../../assets/model-brands/google-vertex.svg'
@@ -43,6 +44,7 @@ const assets: Readonly<Partial<Record<BrandChoice, BrandAsset>>> = Object.freeze
   claude,
   dashscope,
   deepseek,
+  doubao,
   fireworks,
   gemini,
   'google-vertex': googleVertex,

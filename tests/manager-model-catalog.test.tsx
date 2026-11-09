@@ -5,6 +5,48 @@ import { catalogFixture, catalogView } from './helpers/catalog-management-fixtur
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 describe('binding catalog Manager', () => {
+  it('uses model-family marks inside a mixed-provider scoped catalog', async () => {
+    const definitions = [
+      ['gpt-6.1-sol', 'GPT-6.1 Sol', 'openai'],
+      ['seed-2.1-pro', 'Seed-2.1-Pro', 'doubao'],
+      ['deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', 'deepseek'],
+      ['auto', '自动', null],
+    ] as const
+    const view = catalogView({
+      sourceKind: 'plugin',
+      rows: definitions.map(([slug, label]) => ({
+        id: `cxw/workspace/doubao/account/${slug}`,
+        label,
+        provenance: ['native'],
+        notListed: false,
+        present: true,
+        compatibility: 'supported',
+        selectable: true,
+        blocked: false,
+        pinned: false,
+      })),
+    })
+    const host = catalogFixture([view])
+    const fixture = reactManagerFixture()
+    const { CatalogBinding } = await import(
+      '../packages/cli/src/renderer/manager/pages/model-catalog/CatalogBinding.js'
+    )
+    try {
+      await host.client.refresh()
+      await fixture.render(
+        <CatalogBinding view={view} client={host.client} locale="zh-CN" query="" filters={new Set()} connected />,
+      )
+      for (const [slug, label, brand] of definitions) {
+        const row = fixture.element(`[data-model-id="cxw/workspace/doubao/account/${slug}"]`)
+        expect(row.querySelector('.cxms-model-identity strong')?.textContent).toBe(label)
+        expect(row.querySelector('[data-selector-brand]')?.getAttribute('data-selector-brand') ?? null).toBe(brand)
+      }
+    } finally {
+      host.client.dispose()
+      await fixture.dispose()
+    }
+  })
+
   it('does not reuse a manual draft as supplemental declarations when switching editors', async () => {
     const fixture = reactManagerFixture()
     const host = catalogFixture([
