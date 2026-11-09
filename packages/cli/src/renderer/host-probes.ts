@@ -1,4 +1,8 @@
 import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
+import {
+  type ManagerCollapsedSidebarSeat,
+  resolveManagerCollapsedSidebarSeat,
+} from './adapter/manager-collapsed-sidebar.js'
 
 function visible(element: Element): element is HTMLElement {
   const ElementClass = element.ownerDocument.defaultView?.HTMLElement
@@ -395,7 +399,7 @@ export interface ManagerRailOnlySeat {
   readonly provenance: 'codex-26.924-rail-only'
 }
 
-export type ManagerPaneSeat = ManagerTwoPaneSeat | ManagerRailOnlySeat
+export type ManagerPaneSeat = ManagerTwoPaneSeat | ManagerRailOnlySeat | ManagerCollapsedSidebarSeat
 
 /** 26.924 pages with a rail and main viewport but no native navigation pane. */
 export function resolveManagerRailOnlySeat(document: Document): ManagerRailOnlySeat | undefined {
@@ -474,5 +478,12 @@ export function resolveManagerRailOnlySeat(document: Document): ManagerRailOnlyS
 }
 
 export function resolveManagerPaneSeat(document: Document): ManagerPaneSeat | undefined {
-  return resolveManagerTwoPaneSeat(document) ?? resolveManagerRailOnlySeat(document)
+  return resolveManagerTwoPaneSeat(document)
+    ?? resolveManagerCollapsedSidebarSeat(
+      document,
+      resolveManagerRailSeat(document)?.homeButton.closest<HTMLElement>('nav[data-app-navigation-rail="true"]')
+        ?? undefined,
+      resolveManagerCardSeat(document),
+    )
+    ?? resolveManagerRailOnlySeat(document)
 }

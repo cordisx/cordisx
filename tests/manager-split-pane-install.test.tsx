@@ -81,6 +81,35 @@ describe('Manager installation beside native right tabs', () => {
       setRect(main, rect(290, 44, 560, 800))
       setRect(frame, rect(290, 44, 560, 800))
       setRect(panel, rect(850, 44, 869, 800))
+      const aside = element('aside[data-app-shell-left-panel-appearance]')
+      const rail = element('nav[data-app-navigation-rail]')
+      const navigation = element('nav[role="navigation"][aria-label="Home"]')
+      const sidebar = document.createElement('div')
+      sidebar.id = 'app-shell-sidebar'
+      const list = document.createElement('div')
+      sidebar.append(rail, list)
+      list.append(navigation)
+      aside.prepend(sidebar)
+      const sidebarTrigger = document.createElement('button')
+      sidebarTrigger.setAttribute('data-app-shell-sidebar-trigger', 'true')
+      sidebarTrigger.setAttribute('aria-controls', 'app-shell-sidebar')
+      sidebarTrigger.setAttribute('aria-expanded', 'true')
+      sidebarTrigger.style.pointerEvents = 'auto'
+      element('[data-app-shell-header-slot="start"]').append(sidebarTrigger)
+      setRect(sidebarTrigger, rect(156, 8, 28, 28))
+      const changeSidebar = (expanded: boolean) => {
+        sidebarTrigger.setAttribute('aria-expanded', String(expanded))
+        list.toggleAttribute('data-sidebar-collapsed', !expanded)
+        const left = expanded ? 290 : 52
+        const content = expanded ? 560 : 798
+        setRect(aside, rect(0, 44, left, 800))
+        setRect(navigation, rect(expanded ? 52 : 36, 44, 238, 800))
+        setRect(main, rect(left, 44, content, 800))
+        setRect(frame, rect(left, 44, content, 800))
+        setRect(element('[data-app-shell-header-slot="start"]'), rect(0, 0, expanded ? 290 : 190, 44))
+        setRect(element('[data-app-shell-main-titlebar]'), rect(left, 0, content, 44))
+        setRect(titleSlot, rect(left, 0, content - 6, 44))
+      }
       for (const node of document.querySelectorAll('nav, button')) {
         node.getClientRects = () => ({ length: 1 }) as DOMRectList
       }
@@ -89,7 +118,7 @@ describe('Manager installation beside native right tabs', () => {
         configurable: true,
         value: (node: Element) => {
           const style = nativeStyle(node)
-          if (node.matches('[data-app-shell-tab-controller="right"] [role="tab"]')) {
+          if (node === sidebarTrigger || node.matches('[data-app-shell-tab-controller="right"] [role="tab"]')) {
             Object.defineProperty(style, 'webkitAppRegion', { value: 'no-drag', configurable: true })
           }
           return style
@@ -125,6 +154,11 @@ describe('Manager installation beside native right tabs', () => {
         const trigger = element('[data-cordisx-manager-trigger]')
         await act(async () => trigger.click())
         const manager = element('[data-cordisx-react-manager]')
+        const embedded = document.createElement('iframe')
+        embedded.src = 'about:blank'
+        manager.append(embedded)
+        const embeddedDocument = embedded.contentDocument!
+        embeddedDocument.body.innerHTML = '<input value="plugin draft" />'
         expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
         expect(manager.parentElement).toBe(main)
         expect(frame.inert).toBe(true)
@@ -154,9 +188,23 @@ describe('Manager installation beside native right tabs', () => {
         })
         await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
         expect(document.querySelector('[data-cordisx-react-manager]')).toBe(manager)
+        expect(embedded.contentDocument).toBe(embeddedDocument)
+        expect(embeddedDocument.querySelector('input')?.value).toBe('plugin draft')
         expect(frame.inert).toBe(true)
         expect(browser.getAttribute('src')).toBe(sourceBefore)
         expect(draft.value).toBe('unsent draft')
+        for (const expanded of [false, true]) {
+          await act(async () => {
+            changeSidebar(expanded)
+            await new Promise(resolve => setTimeout(resolve, 40))
+          })
+          await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
+          expect(manager.parentElement).toBe(main)
+          expect(embedded.contentDocument).toBe(embeddedDocument)
+          expect(element('[data-cordisx-manager-sidebar-root]').hidden).toBe(!expanded)
+          expect(browser.getAttribute('src')).toBe(sourceBefore)
+          expect(draft.value).toBe('unsent draft')
+        }
         await act(async () => {
           if (touchingSeam) {
             route = { ...route, key: 'different-thread', nativeLocation: { pathname: '/other', search: '', hash: '' } }

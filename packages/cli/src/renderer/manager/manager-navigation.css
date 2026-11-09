@@ -150,6 +150,9 @@ nav[data-app-navigation-rail="true"]
   cursor: col-resize;
   outline: none;
 }
+.cxr-native-navigation-seat[hidden], .cxr-manager-sidebar-resizer[hidden] {
+  display: none;
+}
 .cxr-manager-sidebar-resizer::after {
   position: absolute;
   inset-block: 0;
