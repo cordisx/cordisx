@@ -42,7 +42,8 @@ describe('Manager installation beside native right tabs', () => {
       workspace.dataset.appShellHeaderPlacement = 'titlebar'
       header.replaceWith(workspace)
       workspace.append(header)
-      header.dataset.appShellHeaderLayout = 'full-bleed'
+      const touchingSeam = presentationMode === 'workspace'
+      header.dataset.appShellHeaderLayout = touchingSeam ? 'default' : 'full-bleed'
       const titleSlot = element('[data-app-shell-titlebar-slot="main"]')
       const obstacle = document.createElement('div')
       obstacle.dataset.appShellHeaderObstacle = 'true'
@@ -71,9 +72,11 @@ describe('Manager installation beside native right tabs', () => {
       setRect(element('aside[data-app-shell-left-panel-appearance]'), rect(0, 44, 290, 800))
       setRect(element('[data-app-shell-main-titlebar]'), rect(290, 0, 560, 44))
       setRect(element('[data-app-shell-titlebar-slot="main"]'), rect(290, 0, 554, 44))
-      setRect(end, rect(854, 0, 865, 44))
-      setRect(element('[data-app-shell-tab-controller="right"]'), rect(858, 6, 240, 32))
-      setRect(tab, rect(858, 6, 210, 32))
+      const endLeft = touchingSeam ? 850 : 854
+      const tabLeft = endLeft + 4
+      setRect(end, rect(endLeft, 0, 1719 - endLeft, 44))
+      setRect(element('[data-app-shell-tab-controller="right"]'), rect(tabLeft, 6, 240, 32))
+      setRect(tab, rect(tabLeft, 6, 210, 32))
       setRect(element('[data-native-manager-resizer]'), rect(282, 44, 16, 800))
       setRect(main, rect(290, 44, 560, 800))
       setRect(frame, rect(290, 44, 560, 800))
@@ -92,11 +95,12 @@ describe('Manager installation beside native right tabs', () => {
           return style
         },
       })
-      const route = {
+      let route = {
         available: true as const,
         key: 'thread',
         nativeLocation: { pathname: '/thread', search: '', hash: '' },
       }
+      const routeListeners = new Set<() => void>()
       const panelBefore = panel.outerHTML
       const sourceBefore = browser.getAttribute('src')
       expect(resolveManagerRailSeat(document)).toBeDefined()
@@ -111,7 +115,10 @@ describe('Manager installation beside native right tabs', () => {
             presentationMode,
             nativeRouteHistory: {
               snapshot: () => route,
-              subscribe: () => () => {},
+              subscribe: listener => {
+                routeListeners.add(listener)
+                return () => routeListeners.delete(listener)
+              },
             },
           })
         })
@@ -132,14 +139,17 @@ describe('Manager installation beside native right tabs', () => {
         const controller = element('[data-app-shell-tab-controller="right"]')
         const replacement = controller.cloneNode(true) as HTMLElement
         controller.replaceWith(replacement)
-        setRect(replacement, rect(858, 6, 0, 32))
+        setRect(replacement, rect(tabLeft, 6, 0, 32))
         const replacementTab = replacement.querySelector<HTMLElement>('[role="tab"]')!
-        setRect(replacementTab, rect(858, 6, 210, 32))
+        setRect(replacementTab, rect(tabLeft, 6, 210, 32))
         replacementTab.style.setProperty('-webkit-app-region', 'no-drag')
+        if (touchingSeam) setRect(frame, rect(290, 44, 0, 800))
         await act(async () => {
-          // The controller is temporarily unmeasurable during the native split animation.
-          await new Promise(resolve => setTimeout(resolve, 80))
-          setRect(replacement, rect(858, 6, 240, 32))
+          // Default workspaces can lose the measurable pane for longer than the
+          // first 150ms retry window. Retain its actual root through recapture.
+          await new Promise(resolve => setTimeout(resolve, touchingSeam ? 220 : 80))
+          setRect(frame, rect(290, 44, 560, 800))
+          setRect(replacement, rect(tabLeft, 6, 240, 32))
           await new Promise(resolve => setTimeout(resolve, 40))
         })
         await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
@@ -147,7 +157,13 @@ describe('Manager installation beside native right tabs', () => {
         expect(frame.inert).toBe(true)
         expect(browser.getAttribute('src')).toBe(sourceBefore)
         expect(draft.value).toBe('unsent draft')
-        await act(async () => trigger.click())
+        await act(async () => {
+          if (touchingSeam) {
+            route = { ...route, key: 'different-thread', nativeLocation: { pathname: '/other', search: '', hash: '' } }
+            for (const listener of routeListeners) listener()
+          } else trigger.click()
+        })
+        await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull())
         expect(document.querySelector('[data-cordisx-manager-pane="true"]')).toBeNull()
         expect(frame.inert).toBeFalsy()
         expect(frame.style.visibility).toBe('')

@@ -26,6 +26,9 @@ export function ManagerContentPage(
   const activeTab = presentation?.tabs.find(tab => tab.active)
   useEffect(() => {
     if (route.kind !== 'manager-content' || seat.current === null) return
+    // A Host-owned header is still mounting. Do not initialize and immediately
+    // abort the plugin page before its action seat is available.
+    if (headerActionsSeat === null) return
     if (model.mountManagerContent === undefined) {
       setState('error')
       return

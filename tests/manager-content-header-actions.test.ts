@@ -5,9 +5,51 @@ import { NavigationRegistry, OutletRegistry, PageRegistry } from '../packages/cl
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { reactManagerFixture } from './helpers/react-manager.js'
+import { managerModel, managerRouter } from './helpers/react-manager.js'
+import { ManagerContentPage } from '../packages/cli/src/renderer/manager/pages/ManagerContentPage.js'
+import type { ManagedManagerPageMount } from '../packages/cli/src/renderer/navigation-pages.js'
+import type { ManagerModel } from '../packages/cli/src/renderer/manager.js'
 import { fakeI18n, FakeOutlet } from './suites/navigation.fixtures.js'
 
 describe('embedded Manager page header actions', () => {
+  it('waits for the actual header seat before initializing the plugin page', async () => {
+    const fixture = reactManagerFixture()
+    const controller = new AbortController()
+    const abort = vi.fn(() => controller.abort())
+    const close = vi.fn(async () => {})
+    const mount = vi.fn<NonNullable<ManagerModel['mountManagerContent']>>(async () =>
+      ({
+        owner: 'demo',
+        contributionId: 'demo:console',
+        routeId: 'demo:console',
+        pageId: 'demo:console',
+        signal: controller.signal,
+        abort,
+        dispose: async () => {},
+      }) as ManagedManagerPageMount
+    )
+    const model = managerModel(undefined, { mountManagerContent: mount, closeManagerContent: close })
+    const router = managerRouter({ kind: 'manager-content', id: 'demo:console', reference: { id: 'console' } })
+    const header = fixture.document.createElement('header')
+    fixture.document.body.append(header)
+    try {
+      await fixture.render(
+        React.createElement(ManagerContentPage, { model, router, locale: 'en', headerActionsSeat: null }),
+      )
+      expect(mount).not.toHaveBeenCalled()
+      expect(close).not.toHaveBeenCalled()
+      await fixture.render(
+        React.createElement(ManagerContentPage, { model, router, locale: 'en', headerActionsSeat: header }),
+      )
+      expect(mount).toHaveBeenCalledOnce()
+      expect(mount.mock.calls[0]?.[3]).toMatchObject({ headerActions: header })
+      expect(abort).not.toHaveBeenCalled()
+    } finally {
+      await fixture.dispose()
+      expect(abort).toHaveBeenCalledOnce()
+      expect(close).toHaveBeenCalledOnce()
+    }
+  })
   it('uses the standard header with owner authorization, subscription and mount cleanup', async () => {
     const fixture = reactManagerFixture()
     const document = fixture.document
@@ -124,4 +166,4 @@ describe('embedded Manager page header actions', () => {
     }
   })
 })
-import { act } from 'react'
+import React, { act } from 'react'

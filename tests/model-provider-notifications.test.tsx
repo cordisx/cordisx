@@ -101,8 +101,12 @@ describe('model menus use the notification boundary', () => {
     expect(center().visible().map(entry => entry.options.kind)).toEqual(['model.provider.reasoning.updated'])
   })
 
-  it('keeps a queued selection on the trigger while its operation feedback uses notifications', async () => {
-    const { select, update } = await setup('shared', true)
+  it.each([
+    { draft: true, busy: false, locale: 'zh-CN', message: '下次发送时使用' },
+    { draft: true, busy: false, locale: 'en', message: 'Use on next Send' },
+    { draft: false, busy: true, locale: 'en', message: 'Use on next Send' },
+  ])('keeps truthful next-Send feedback for draft=$draft and busy=$busy ($locale)', async options => {
+    const { select, update } = await setup('shared', options.busy, options)
     select.mockImplementationOnce(async target => {
       await update({ nextSend: { providerId: target.providerId, model: target.model, reasoningEffort: 'low' } })
       return 'accepted'
@@ -111,8 +115,9 @@ describe('model menus use the notification boundary', () => {
     await click('[data-provider-id="second"]')
     await click(modelTrigger)
     assertSelectionOnly()
-    expect(document.querySelector(modelTrigger)?.getAttribute('aria-label')).toContain('Use on Send after response')
-    expect(viewport().querySelector('[role="status"]')?.textContent).toContain('Use on Send after response')
+    expect(document.querySelector(modelTrigger)?.getAttribute('aria-label')).toContain(options.message)
+    expect(viewport().querySelector('[role="status"]')?.textContent).toContain(options.message)
+    expect(viewport().textContent).not.toMatch(/回复结束后|after response/u)
   })
 
   it('does not replay a catalog failure on polls or reopening and clears it on recovery', async () => {

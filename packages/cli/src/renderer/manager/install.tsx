@@ -30,6 +30,7 @@ import type { HostManagerNavigationController } from './navigation-controller.js
 import type { PluginManagementBinding } from '../management-binding.js'
 import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 import { WorkspaceRailProjection } from './workspace-rail-projection.js'
+import { ManagerPaneRecapture } from './manager-pane-recapture.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
 
@@ -306,13 +307,7 @@ export function installReactCordisXManager(
     saveWidth(pane.width)
   })
   let paneLossHandler: (() => void) | undefined
-  let paneRecapture: {
-    readonly route: string | undefined
-    readonly rail: HTMLElement
-    readonly main: HTMLElement
-    readonly deadline: number
-  } | undefined
-  let paneRecaptureTimer: ReturnType<typeof setTimeout> | undefined
+  const paneRecapture = new ManagerPaneRecapture(options.nativeRouteHistory, () => schedule())
   let paneSeatMissingSince: number | undefined
   let paneSeatRetryTimer: ReturnType<typeof setTimeout> | undefined
   const railProjection = new WorkspaceRailProjection(document, options.nativeRouteHistory, {
@@ -396,14 +391,12 @@ export function installReactCordisXManager(
     return true
   }
   const deactivatePane = () => {
-    paneRecapture = undefined
-    clearTimeout(paneRecaptureTimer)
-    paneRecaptureTimer = undefined
+    paneRecapture.cancel()
     const current = pane
-    if (current === undefined) return
     paneSeatMissingSince = undefined
     clearTimeout(paneSeatRetryTimer)
     paneSeatRetryTimer = undefined
+    if (current === undefined) return
     stopResize()
     pane = undefined
     if (current.titlebarLease !== undefined) releaseManagerTitlebarLease(current.titlebarLease)
@@ -709,27 +702,23 @@ export function installReactCordisXManager(
     )
   )
 
+  let disposed = false
   let scheduled = false
   const reconcile = () => {
     scheduled = false
-    if (paneRecapture !== undefined) {
-      const pending = paneRecapture
-      const seat = resolveManagerPaneSeat(document)
-      const sameRoute = options.nativeRouteHistory !== undefined
-        && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === pending.route
-      const samePage = seat !== undefined && seat.rail === pending.rail && seat.main.anchor === pending.main
-      if (sameRoute && samePage && activatePane()) {
-        paneRecapture = undefined
-        clearTimeout(paneRecaptureTimer)
-        paneRecaptureTimer = undefined
-      } else if (!sameRoute || Date.now() >= pending.deadline) {
-        deactivatePane()
-        paneLossHandler?.()
-      } else {
-        clearTimeout(paneRecaptureTimer)
-        paneRecaptureTimer = setTimeout(schedule, 25)
-        return
-      }
+    if (disposed) return
+    const recaptured = paneRecapture.resume(resolveManagerPaneSeat(document), activatePane)
+    if (recaptured === 'waiting') return
+    if (recaptured === 'lost') {
+      deactivatePane()
+      paneLossHandler?.()
+    }
+    if (
+      pane !== undefined && options.nativeRouteHistory !== undefined
+      && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) !== pane.nativeRouteIdentity
+    ) {
+      deactivatePane()
+      paneLossHandler?.()
     }
     if (pane !== undefined) {
       const seat = resolveManagerPaneSeat(document)
@@ -767,23 +756,18 @@ export function installReactCordisXManager(
         // Opening or closing a native right tab changes titlebar identities
         // without leaving the current page. Restore and recapture the native
         // layout while retaining the mounted Manager tree and its draft state.
-        const sameRoute = options.nativeRouteHistory !== undefined
-          && nativeRouteIdentity(options.nativeRouteHistory.snapshot()) === pane.nativeRouteIdentity
-        const samePage = seat !== undefined && seat.rail === pane.rail
-          && seat.main.anchor === pane.mainAnchor
         const pending = {
           route: pane.nativeRouteIdentity,
           rail: pane.rail,
           main: pane.mainAnchor,
-          deadline: Date.now() + 1000,
         }
+        const retain = paneRecapture.canRetain(pending, seat)
         deactivatePane()
-        if (!sameRoute || !samePage) paneLossHandler?.()
+        if (!retain) paneLossHandler?.()
         else if (!activatePane()) {
           // Native split animations temporarily invalidate titlebar geometry.
           // Recapture the same page after it settles, without unmounting React.
-          paneRecapture = pending
-          paneRecaptureTimer = setTimeout(schedule, 25)
+          paneRecapture.start(pending)
         }
       } else if (titlebar !== undefined) {
         placeTitlebarSeat(titlebar)
@@ -810,7 +794,7 @@ export function installReactCordisXManager(
     currentTarget = target
   }
   const schedule = () => {
-    if (scheduled) return
+    if (disposed || scheduled) return
     scheduled = true
     queueMicrotask(reconcile)
   }
@@ -831,13 +815,24 @@ export function installReactCordisXManager(
       'data-app-shell-main-titlebar',
       'data-app-shell-titlebar-slot',
       'data-app-shell-header-slot',
+      'data-app-shell-header-layout',
+      'data-app-shell-workspace-layout',
+      'data-app-shell-tab-controller',
+      'data-app-shell-tab-panel-controller',
+      'data-app-shell-header-obstacle',
+      'data-tab-id',
+      'aria-selected',
       'role',
     ],
   })
   view?.addEventListener('resize', schedule)
+  const unsubscribeNativeRoute = options.nativeRouteHistory?.subscribe(schedule)
   reconcile()
 
   return () => {
+    disposed = true
+    paneRecapture.dispose()
+    unsubscribeNativeRoute?.()
     view?.removeEventListener('resize', schedule)
     observer?.disconnect()
     view?.removeEventListener('resize', onViewportResize)
