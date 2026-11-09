@@ -58,6 +58,7 @@ export function managedSourceFixture(
     captureAccountAt = 0,
     accountUnavailable = false
   let signerReads = 0, signerAt = 0, signerHold: Promise<void> | undefined
+  let signerEntered: (() => void) | undefined
   const seen: { path: string; body?: Record<string, unknown>; authorization?: string | null }[] = []
   const signResult = (payload: unknown) => ({
     payload,
@@ -107,7 +108,10 @@ export function managedSourceFixture(
       if (!value) throw new Error()
       if (service === MANAGED_SOURCE_KEYCHAIN_SERVICE) {
         signerReads++
-        if (signerReads === signerAt) await signerHold
+        if (signerReads === signerAt) {
+          signerEntered?.()
+          await signerHold
+        }
       }
       if (service.startsWith('cordisx/http/')) {
         bearerReads++
@@ -216,6 +220,9 @@ export function managedSourceFixture(
     holdSignerAt: (at: number, p: Promise<void>) => {
       signerAt = at
       signerHold = p
+      return new Promise<void>(resolve => {
+        signerEntered = resolve
+      })
     },
     signerReads: () => signerReads,
     holdAccountAt: (at: number, p: Promise<void>) => {

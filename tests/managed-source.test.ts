@@ -525,10 +525,11 @@ it('late initial native A after timeout cannot retire a healthy B work lease', a
 it('expired signer-loading cleanup cannot delete a replacement healthy work lease', async () => {
   vi.useFakeTimers()
   const f = fixture(), held = deferred(), request = { ...binding, audience: 'work-income' }
-  f.holdSignerAt(1, held.promise)
+  const signerEntered = f.holdSignerAt(1, held.promise)
   const old = f.invoke('plugin-http-submit-work', request)
-  await vi.advanceTimersByTimeAsync(0)
-  await vi.waitFor(() => expect(f.signerReads()).toBe(1), { interval: 1, timeout: 500 })
+  // Custody includes real fsync work; wait for its signer boundary before advancing the fake deadline.
+  await signerEntered
+  expect(f.signerReads()).toBe(1)
   await vi.advanceTimersByTimeAsync(15001)
   expect((await old).status).toBe('unavailable')
   expect((await f.invoke('plugin-http-submit-work', request)).status).toBe('accepted')
