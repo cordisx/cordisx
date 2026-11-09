@@ -124,7 +124,7 @@ export function installReactCordisXManager(
     titlebarNative: readonly HTMLElement[]
     titlebarPosition: string
     provenance: string
-    titlebarProvenance: 'native' | 'split' | 'rail-only' | 'settings'
+    titlebarProvenance: 'native' | 'split' | 'rail-only' | 'settings' | 'collapsed'
     titlebarLease: ManagerTitlebarLease | undefined
     titlebarSafeLeft: number
     titlebarSafeRight: number
@@ -174,6 +174,10 @@ export function installReactCordisXManager(
   const setSidebarWidth = (width: number) => {
     const current = pane
     if (current === undefined) return
+    const collapsed = current.provenance === 'codex-26.1103-collapsed-sidebar'
+    navigationSeat.hidden = collapsed
+    resizeHandle.hidden = collapsed
+    if (collapsed) return
     const next = Math.round(Math.min(current.maximumWidth, Math.max(current.minimumWidth, width)))
     current.width = next
     resizeHandle.setAttribute('aria-valuenow', String(next))
@@ -227,7 +231,7 @@ export function installReactCordisXManager(
   }
   const onViewportResize = () => {
     const current = pane
-    if (current === undefined) return
+    if (current === undefined || current.provenance === 'codex-26.1103-collapsed-sidebar') return
     const mainRect = current.mainAnchor.getBoundingClientRect()
     const availableWidth = current.provenance === 'codex-26.924-rail-only'
       ? mainRect.width
@@ -391,13 +395,21 @@ export function installReactCordisXManager(
     current.nativeTitle = next
     return true
   }
-  const deactivatePane = () => {
+  const detachContentSeat = () => {
+    rootSeat.dataset.managerSurface = 'modal'
+    ;(document.body ?? document.documentElement).append(rootSeat)
+  }
+  const deactivatePane = (retainContent = false, retainRail = false) => {
     paneRecapture.cancel()
     const current = pane
     paneSeatMissingSince = undefined
     clearTimeout(paneSeatRetryTimer)
     paneSeatRetryTimer = undefined
-    if (current === undefined) return
+    if (current === undefined) {
+      if (!retainRail && presentationMode === 'workspace') railProjection.leave()
+      if (!retainContent && rootSeat.dataset.managerSurface === 'pane') detachContentSeat()
+      return
+    }
     stopResize()
     pane = undefined
     if (current.titlebarLease !== undefined) releaseManagerTitlebarLease(current.titlebarLease)
@@ -425,8 +437,9 @@ export function installReactCordisXManager(
     navigationSeat.style.overflow = current.navigationOverflow
     rootSeat.style.left = current.rootLeft
     rootSeat.style.width = current.rootWidth
-    if (presentationMode === 'workspace') railProjection.leave()
-    else {
+    if (presentationMode === 'workspace') {
+      if (!retainRail) railProjection.leave()
+    } else {
       const rail = resolveManagerRailSeat(document)?.homeButton.closest('nav[data-app-navigation-rail="true"]')
       const selected = rail?.querySelectorAll('button[data-sidebar-destination][aria-current="page"]')
       const marked = rail?.querySelectorAll('button[data-sidebar-destination][data-selected]')
@@ -444,10 +457,15 @@ export function installReactCordisXManager(
     resizeHandle.remove()
     titlebarSeat.remove()
     delete titlebarSeat.dataset.cordisxManagerTitleDivider
-    rootSeat.dataset.managerSurface = 'modal'
-    ;(document.body ?? document.documentElement).append(rootSeat)
+    // An iframe loses its browsing context on an ordinary DOM move, even if
+    // the React root stays mounted. Same-page recapture must leave it connected
+    // to the original native main seat while only chrome leases are renewed.
+    if (!retainContent) detachContentSeat()
   }
   const resolveTitlebar = (seat: NonNullable<ReturnType<typeof resolveManagerPaneSeat>>) => {
+    if (seat.provenance === 'codex-26.1103-collapsed-sidebar') {
+      return { ...seat.titlebar, provenance: 'collapsed' as const, lease: undefined }
+    }
     if (seat.provenance === 'codex-26.924-rail-only') {
       const railOnly = resolveManagerRailOnlyTitlebarSeat(document)
       return railOnly === undefined ? undefined : {
@@ -514,7 +532,8 @@ export function installReactCordisXManager(
       placeTitlebarSeat(titlebar)
       return true
     }
-    deactivatePane()
+    const sameContent = rootSeat.dataset.managerSurface === 'pane' && rootSeat.parentElement === seat.main.anchor
+    deactivatePane(sameContent, sameContent && railProjection.active())
     const selected = presentationMode === 'workspace' ? [] : [
       ...seat.rail.querySelectorAll<HTMLButtonElement>('button[aria-current],button[data-selected]'),
     ]
@@ -524,7 +543,7 @@ export function installReactCordisXManager(
         current: button.getAttribute('aria-current'),
         dataSelected: button.getAttribute('data-selected'),
       }))
-    if (presentationMode === 'workspace' && !railProjection.enter()) {
+    if (presentationMode === 'workspace' && !railProjection.active() && !railProjection.enter()) {
       if (current === undefined && titlebar.lease !== undefined) releaseManagerTitlebarLease(titlebar.lease)
       return false
     }
@@ -562,7 +581,7 @@ export function installReactCordisXManager(
       }
       return ''
     })()
-    const initialWidth = seat.provenance === 'codex-26.924-rail-only'
+    const initialWidth = seat.provenance !== 'codex-26.924-native-two-pane'
       ? seat.sidebar.width
       : seat.geometry.sidebarRight - seat.geometry.sidebarLeft
     const minimumWidth = seat.provenance === 'codex-26.924-native-two-pane' && sidebarLayout !== undefined
@@ -667,7 +686,7 @@ export function installReactCordisXManager(
       navigationSeat.style.borderTopLeftRadius = nativeSidebarRadius
       navigationSeat.style.overflow = 'hidden'
     }
-    seat.main.anchor.append(rootSeat)
+    if (rootSeat.parentElement !== seat.main.anchor) seat.main.anchor.append(rootSeat)
     ;(seat.provenance === 'codex-26.924-native-two-pane' ? sidebarLayout! : seat.sidebar.container)
       .append(navigationSeat)
     placeTitlebarSeat(titlebar)
@@ -762,9 +781,11 @@ export function installReactCordisXManager(
           rail: pane.rail,
           main: pane.mainAnchor,
         }
-        const nativeSplit = pane.titlebarProvenance === 'split' || hasManagerSplitLayout(pane.mainAnchor)
-        const retain = nativeSplit && paneRecapture.canRetain(pending, seat)
-        deactivatePane()
+        const layoutTransition = pane.titlebarProvenance === 'split' || hasManagerSplitLayout(pane.mainAnchor)
+          || pane.provenance === 'codex-26.1103-collapsed-sidebar'
+          || seat?.provenance === 'codex-26.1103-collapsed-sidebar'
+        const retain = layoutTransition && paneRecapture.canRetain(pending, seat)
+        deactivatePane(retain, retain)
         if (!retain) paneLossHandler?.()
         else if (!activatePane()) {
           // Native split animations temporarily invalidate titlebar geometry.
@@ -821,9 +842,12 @@ export function installReactCordisXManager(
       'data-app-shell-workspace-layout',
       'data-app-shell-tab-controller',
       'data-app-shell-tab-panel-controller',
+      'data-app-shell-sidebar-trigger',
+      'data-sidebar-collapsed',
       'data-app-shell-header-obstacle',
       'data-tab-id',
       'aria-selected',
+      'aria-expanded',
       'role',
     ],
   })

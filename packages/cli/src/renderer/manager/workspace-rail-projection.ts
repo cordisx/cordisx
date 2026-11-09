@@ -106,6 +106,11 @@ export class WorkspaceRailProjection {
     return true
   }
 
+  /** Same-page chrome recapture must not release the workspace's native selection. */
+  active(): boolean {
+    return this.captured !== undefined && !this.dirty && !this.disposed
+  }
+
   leave(): boolean {
     this.cancelIconVisual()
     const captured = this.captured
