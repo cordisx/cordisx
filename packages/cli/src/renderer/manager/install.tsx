@@ -31,6 +31,7 @@ import type { PluginManagementBinding } from '../management-binding.js'
 import { nativeRouteIdentity, type NativeRouteSource } from './native-route-transition.js'
 import { WorkspaceRailProjection } from './workspace-rail-projection.js'
 import { ManagerPaneRecapture } from './manager-pane-recapture.js'
+import { hasManagerSplitLayout } from '../adapter/manager-split-titlebar.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
 
@@ -761,7 +762,8 @@ export function installReactCordisXManager(
           rail: pane.rail,
           main: pane.mainAnchor,
         }
-        const retain = paneRecapture.canRetain(pending, seat)
+        const nativeSplit = pane.titlebarProvenance === 'split' || hasManagerSplitLayout(pane.mainAnchor)
+        const retain = nativeSplit && paneRecapture.canRetain(pending, seat)
         deactivatePane()
         if (!retain) paneLossHandler?.()
         else if (!activatePane()) {

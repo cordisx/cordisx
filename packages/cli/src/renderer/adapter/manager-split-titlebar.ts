@@ -18,6 +18,11 @@ function near(a: number, b: number): boolean {
   return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 2
 }
 
+/** Structural split marker remains readable while native animation has no measurable seat. */
+export function hasManagerSplitLayout(anchor: HTMLElement): boolean {
+  return anchor.getAttribute('data-app-shell-workspace-layout') === 'split'
+}
+
 /** A horizontally scrolled 26.930 tab strip clips headers outside its own viewport. */
 export function clippedTabSpan(element: HTMLElement, header: HTMLElement): { left: number; right: number } {
   const rect = element.getBoundingClientRect()

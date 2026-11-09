@@ -70,7 +70,7 @@ describe('Manager native catalog coverage', () => {
       expect(fixture.element('[data-selector-brand="deepseek"]')).toBeDefined()
       await fixture.type('[aria-label="Search services or models"]', 'ＭＯＤＥＬ－ＯＮＥ')
       expect(fixture.document.querySelectorAll('.cxms-model-identity')).toHaveLength(1)
-      expect(fixture.element('.cxms-model-identity').textContent).toContain('model-one')
+      expect(fixture.element('.cxms-model-identity').textContent?.trim()).toBe('Model one')
       expect(fixture.document.querySelector('[aria-label="Pin model: model-one"]')).toBeNull()
       await fixture.render(<ModelServicesPage registry={registry} locale="zh-CN" />)
       expect(fixture.element('[data-empty-state="unavailable"][role="status"] p').textContent).toBe(
