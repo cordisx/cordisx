@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, request } from 'node:http'
+import { createServer, type IncomingMessage, request, type ServerResponse } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import { openManagedConsoleBrowserGateway } from '../packages/cli/src/launcher/managed-console-browser-gateway.js'
 
@@ -13,6 +13,7 @@ async function fixture(
   redirect?: string,
   redemptionStatus = 303,
   issuedCookie: string | null = cookie + cookieAttributes,
+  handle?: (req: IncomingMessage, res: ServerResponse) => boolean,
 ) {
   const seen = vi.fn<(request: IncomingMessage) => void>()
   const service = createServer((req, res) => {
@@ -28,6 +29,7 @@ async function fixture(
         'Set-Cookie': '__Host-fixture=; Path=/; Secure; HttpOnly; SameSite=None; Partitioned; Max-Age=0',
       }).end()
     }
+    if (handle?.(req, res)) return
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
   })
   await new Promise<void>(resolve => service.listen(0, '127.0.0.1', resolve))
@@ -75,6 +77,45 @@ async function fixture(
 }
 
 describe('managed console browser gateway', () => {
+  it('preserves service-issued partitioned authorization state between start and poll', async () => {
+    const pending = 'fakemodel_device_pending_embedded=' + 'c'.repeat(210) + '.' + 'd'.repeat(43)
+    const attributes = '; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=None; Partitioned'
+    const f = await fixture(undefined, 303, cookie + cookieAttributes, (req, res) => {
+      if (req.url === '/auth/device/start') {
+        res.writeHead(200, {
+          'Set-Cookie': [
+            'fakemodel_device_pending=ordinary; Path=/; HttpOnly; SameSite=Lax; Max-Age=600',
+            pending + attributes,
+          ],
+        }).end('{"expires_in":600}')
+        return true
+      }
+      if (req.url === '/auth/device/poll') {
+        res.writeHead(req.headers.cookie?.split('; ').includes(pending) ? 202 : 410).end()
+        return true
+      }
+      return false
+    })
+    try {
+      await f.send(redeemPath + '?ticket=' + browserTicket, iframe)
+      const start = await f.send('/auth/device/start', { ...sameOrigin, origin: f.route.origin, cookie }, 'POST')
+      expect(start.status).toBe(200)
+      const poll = await f.send('/auth/device/poll', { ...sameOrigin, cookie: cookie + '; ' + pending })
+      expect({ pendingCookieDelivered: start.headers['set-cookie']?.includes(pending + attributes), poll: poll.status })
+        .toEqual({ pendingCookieDelivered: true, poll: 202 })
+      expect(start.headers['set-cookie']).toEqual([pending + attributes])
+      expect(f.seen.mock.lastCall?.[0].headers.cookie).toBe(cookie + '; ' + pending)
+      f.route.dispose()
+      const next = new AbortController()
+      expect(f.gateway.boundary.open({ ...f.routeInput, generation: 'two', signal: next.signal })).toBeDefined()
+      expect(await f.send('/auth/device/poll', { ...sameOrigin, cookie: cookie + '; ' + pending }))
+        .toMatchObject({ status: 410 })
+      expect(f.seen.mock.lastCall?.[0].headers).not.toHaveProperty('cookie')
+    } finally {
+      await f.close()
+    }
+  })
+
   it('relays an exact iframe redemption and its clean 303 but only forwards the bound session', async () => {
     const f = await fixture()
     try {

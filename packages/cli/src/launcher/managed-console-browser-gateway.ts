@@ -1,19 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, request, type ServerResponse } from 'node:http'
 import { pipeline } from 'node:stream/promises'
+import { ManagedConsoleBrowserCookies } from './managed-console-browser-cookies.js'
 import type { ManagedBrowserConsoleBoundary } from './managed-service-browser-console-broker.js'
 
 type RouteInput = Parameters<ManagedBrowserConsoleBoundary['open']>[0]
 
-interface CookieBinding {
-  readonly name: string
-  readonly digest: string
-}
-
 interface GatewayRoute extends RouteInput {
   readonly upstreamURL: URL
   readonly dispose: () => void
-  cookie?: CookieBinding
+  readonly cookies: ManagedConsoleBrowserCookies
   cleanNavigation?: string
   redemption?: { readonly digest: string; readonly expiresAt: number }
 }
@@ -51,30 +47,6 @@ function headerProjection(headers: IncomingMessage['headers'], names: readonly s
     const value = headers[name]
     return typeof value === 'string' ? [[name, value]] : []
   }))
-}
-
-function browserCookie(
-  value: string,
-): { readonly name: string; readonly pair: string; readonly clearing: boolean } | undefined {
-  const [pair, ...fields] = value.split(';').map(field => field.trim())
-  const match = /^(__Host-[A-Za-z0-9_-]{1,80})=([A-Za-z0-9_-]{0,128})$/u.exec(pair!)
-  if (!match) return undefined
-  const attributes = new Set(fields.map(field => field.toLowerCase()))
-  if (
-    fields.length !== attributes.size || !['path=/', 'secure', 'httponly', 'partitioned', 'samesite=none']
-      .every(field => attributes.has(field))
-    || fields.some(field => /^domain(?:=|$)/iu.test(field))
-  ) return undefined
-  const clearing = match[2] === '' && attributes.has('max-age=0')
-  if (!clearing && match[2]!.length < 24) return undefined
-  return { name: match[1]!, pair: pair!, clearing }
-}
-
-function forwardedCookie(header: string | undefined, binding: CookieBinding | undefined): string | undefined {
-  if (!header || !binding) return undefined
-  return header.split(';').map(value => value.trim()).find(pair =>
-    pair.startsWith(binding.name + '=') && digest(pair) === binding.digest
-  )
 }
 
 function redirect(
@@ -149,7 +121,7 @@ async function forward(
     signal.throwIfAborted()
     const headers = headerProjection(incoming.headers, REQUEST_HEADERS)
     if (requestOrigin === origin) headers.origin = route.upstream
-    const cookie = forwardedCookie(incoming.headers.cookie, route.cookie)
+    const cookie = route.cookies.forwarded(incoming.headers.cookie)
     if (cookie) headers.cookie = cookie
     remote = await new Promise<IncomingMessage>((resolve, reject) => {
       const upstream = request(target, { method: incoming.method, headers, signal, agent: false }, resolve)
@@ -165,18 +137,8 @@ async function forward(
     }
     if (location) outgoingHeaders.location = location
     if (remote.headers['set-cookie']) {
-      const values = remote.headers['set-cookie']
-      const credential = values.length === 1 ? browserCookie(values[0]!) : undefined
-      if (redeeming) {
-        if (!credential || credential.clearing || route.cookie) {
-          throw new Error('Managed console redemption returned invalid cookie material')
-        }
-        route.cookie = { name: credential.name, digest: digest(credential.pair) }
-        outgoingHeaders['set-cookie'] = values
-      } else if (credential?.clearing && credential.name === route.cookie?.name) {
-        delete route.cookie
-        outgoingHeaders['set-cookie'] = values
-      }
+      const values = route.cookies.accept(remote.headers['set-cookie'], redeeming, cookie !== undefined)
+      if (values.length) outgoingHeaders['set-cookie'] = values
     }
     signal.throwIfAborted()
     if (redeeming && location) route.cleanNavigation = location.split('#', 1)[0]!
@@ -256,7 +218,7 @@ export async function openManagedConsoleBrowserGateway(): Promise<ManagedConsole
         const retired = new AbortController()
         const dispose = () => {
           if (active === route) active = undefined
-          delete route.cookie
+          route.cookies.clear()
           delete route.redemption
           delete route.cleanNavigation
           input.signal.removeEventListener('abort', dispose)
@@ -266,6 +228,7 @@ export async function openManagedConsoleBrowserGateway(): Promise<ManagedConsole
           ...input,
           signal: AbortSignal.any([input.signal, retired.signal]),
           upstreamURL,
+          cookies: new ManagedConsoleBrowserCookies(),
           dispose,
         }
         service = input.service
