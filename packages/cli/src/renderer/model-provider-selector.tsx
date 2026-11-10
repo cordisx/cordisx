@@ -142,7 +142,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const reasoningInFlight = useRef<Promise<void> | undefined>(undefined)
   const fastActionInFlight = useRef<number | undefined>(undefined)
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
-  const creationReadOnly = native.pendingCreation !== undefined || native.creationDisplay !== undefined
+  const boundCreation = native.available && native.threadId !== undefined
+    && native.modelProvider !== undefined && native.model !== undefined
+  const creationReadOnly = native.pendingCreation !== undefined
+    || native.creationDisplay !== undefined && !boundCreation
   const canInteract = () => !suspended && !creationReadOnly && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
     if (canInteract()) return
