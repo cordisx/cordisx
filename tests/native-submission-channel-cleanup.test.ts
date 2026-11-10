@@ -1,6 +1,10 @@
 import vm from 'node:vm'
 import { expect, it, vi } from 'vitest'
-import type { CdpSession } from '../packages/cli/src/launcher/cdp-session.js'
+import {
+  CdpConnectionClosedError,
+  type CdpSession,
+  CdpTargetClosedError,
+} from '../packages/cli/src/launcher/cdp-session.js'
 import { nativeSubmissionChannelCleanup } from '../packages/cli/src/launcher/native-submission-channel-cleanup.js'
 
 it('retries only failed removal and never disposes a newer channel owner', async () => {
@@ -36,3 +40,42 @@ it('retries only failed removal and never disposes a newer channel owner', async
   expect(send.mock.calls.length).toBe(count + 1)
   expect(dispose).toHaveBeenCalledOnce()
 })
+
+it.each(['before-cleanup', 'Runtime.evaluate', 'Runtime.removeBinding', 'Page.removeScriptToEvaluateOnNewDocument'])(
+  'releases document cleanup after explicit target retirement at %s',
+  async retirement => {
+    let retired = retirement === 'before-cleanup'
+    const send = vi.fn(async (method: string) => {
+      if (method === retirement) {
+        retired = true
+        throw new CdpTargetClosedError()
+      }
+      return {}
+    })
+    const session = { send, isTargetClosed: () => retired } as unknown as CdpSession
+    const cleanup = nativeSubmissionChannelCleanup('old', () => 'old-script', session)
+    await expect(cleanup(session)).resolves.toBeUndefined()
+    const methods = ['Runtime.evaluate', 'Runtime.removeBinding', 'Page.removeScriptToEvaluateOnNewDocument']
+    expect(send.mock.calls.map(([method]) => method)).toEqual(
+      retirement === 'before-cleanup' ? [] : methods.slice(0, methods.indexOf(retirement) + 1),
+    )
+    const replacementSend = vi.fn(async () => ({}))
+    await cleanup({ send: replacementSend, isTargetClosed: () => false } as unknown as CdpSession)
+    expect(replacementSend).not.toHaveBeenCalled()
+  },
+)
+
+it.each([false, true])(
+  'retains cleanup failures without retirement proof or of a different kind (%s)',
+  async retired => {
+    const error = retired ? new Error('cleanup permission denied') : new CdpConnectionClosedError('socket closed')
+    const send = vi.fn(async () => {
+      // A failure can race with retirement, but only the typed closed transport is removed by retirement.
+      closedTarget = retired
+      throw error
+    })
+    let closedTarget = false
+    const session = { send, isTargetClosed: () => closedTarget } as unknown as CdpSession
+    await expect(nativeSubmissionChannelCleanup('old', () => 'old-script')(session)).rejects.toBe(error)
+  },
+)

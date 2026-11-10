@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { waitForInitialDocument } from './cdp-document-ready.js'
 import * as support from './cdp-installation-support.js'
-import { cdpInstallationAborted } from './cdp-session.js'
+import { CdpConnectionClosedError, cdpInstallationAborted } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import {
   installNativeResourceInterception,
@@ -106,6 +106,7 @@ async function bootstrapInstalledDocument(
       })
       state.nativeInterception = nativeInterception
       if (nativeInterception.status !== 'active') {
+        if (nativeInterception.failure instanceof CdpConnectionClosedError) throw nativeInterception.failure
         throw new Error(`Native submission interception unavailable: ${JSON.stringify(nativeInterception.evidence)}`)
       }
       await waitForRendererBootstrap(options, deadline, network)

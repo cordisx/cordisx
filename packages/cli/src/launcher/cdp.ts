@@ -4,6 +4,7 @@ import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contra
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
 import { CdpInstallationTargetRetiredError } from './cdp-installation-cleanup.js'
+import { observeCdpTargetRetirement } from './cdp-target-retirement.js'
 import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
@@ -574,6 +575,9 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.managedServiceUI,
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
               activateStartupDocument,
+              options.launcherOwnedNativeTarget === true && nativeWorkspaceTarget(target) && !ownedWorkspaceInstalled
+                ? session => observeCdpTargetRetirement(options.port, target, session)
+                : undefined,
             )
             installed.set(target.id, record)
             if (nativeWorkspaceTarget(target)) {

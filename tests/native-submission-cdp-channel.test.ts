@@ -500,7 +500,7 @@ describe('native submission document authority', () => {
     }
   })
 
-  it('remembers only explicit new-draft provider choices, including OpenAI', async () => {
+  it('remembers explicit choices in new and existing conversations, including OpenAI', async () => {
     const h = await harness({ defaultProviderId: 'provider-b' })
     try {
       const first = await h.channel.selectionRead({
@@ -543,7 +543,7 @@ describe('native submission document authority', () => {
       await expect(h.channel.selectionRead({
         scope: third,
         effective: { providerId: 'provider-b', model: 'model-b' },
-      })).resolves.toMatchObject({ draftPreference: { providerId: 'openai', generation: 3 } })
+      })).resolves.toMatchObject({ draftPreference: { providerId: 'provider-b', model: 'model-b', generation: 3 } })
     } finally {
       await h.installed.dispose()
     }

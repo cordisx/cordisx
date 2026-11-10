@@ -435,18 +435,22 @@ Same-provider changes retain the thread; cross-provider continuation uses a new
 native thread with the selected provider. The accepted native operation and its
 destination selection establish the effective provider. New drafts use the
 private configuration defaults.
-Within one App/profile launch, the Provider explicitly selected in a new draft
-becomes the default Provider for later new drafts. Before that first explicit
-draft selection, `apps.<app>.profiles.<profile>.defaultModelProvider` is used
-when it resolves to `openai`, a ready managed Provider, or an available
-config-backed Provider. The precedence is therefore last explicit new-draft
-Provider, configured profile default, then the native Codex default. This
-launch-scoped memory stores only the Provider ID, never credentials or a model;
-each draft reuses the normal exact-ID, unique-alias, provider-default, then
-first-model selection strategy to choose a legal model for that Provider.
-Existing-thread switches, restoration, catalog projection, and automatic
-initialization do not update the preference. Restarting the App clears the
-launch-scoped memory and reads the profile configuration again.
+Within one App/profile launch, the last explicit Provider and model selection
+in a new draft or existing conversation becomes the preference for later new
+drafts. A new draft applies that exact pair only when its provider catalog (or
+the native OpenAI catalog) still offers the model. If a remembered model is no
+longer available, the draft waits for an explicit model choice instead of
+silently choosing another model. A newer explicit choice always wins over a
+pending automatic preference; ordinary Send is fenced until a displayed exact
+preference is applied.
+
+Before the first explicit selection, `apps.<app>.profiles.<profile>.defaultModelProvider`
+is used when it resolves to `openai`, a ready managed Provider, or an available
+config-backed Provider. If the remembered Provider disappears, the configured
+profile default or the native Codex default remains the fallback. Restoration,
+catalog projection, automatic initialization, and internal staged Send do not
+update the preference. The launch-scoped memory contains no credentials and is
+cleared when the App restarts.
 Config-backed providers pass only the selected `model_provider` and `model` to
 Codex, which continues to own their configured endpoint and authentication.
 Custom choices are checked against their provider's catalog, including changes

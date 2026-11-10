@@ -9,8 +9,9 @@ import { watchAndInject, type WatchInjectionOptions } from '../packages/cli/src/
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
 import type { CdpSession, CdpTarget } from '../packages/cli/src/launcher/cdp-session.js'
 import type { PluginManagementService } from '../packages/cli/src/management/service.js'
+import { createNativeSubmissionCdpAuthority } from '../packages/cli/src/launcher/native-submission-cdp-channel.js'
 
-type Interruption = 'retired' | 'socket' | 'crashed' | 'activation'
+type Interruption = 'retired' | 'silent-retired' | 'unannounced-retired' | 'socket' | 'crashed' | 'activation'
 const SOURCE = 'globalThis.__cordisxCompositionBoot = Promise.resolve(globalThis.__cordisxRuntime = { ready: true })'
 const RESOURCE = 'globalThis.nativeReady = "ANCHOR"'
 
@@ -24,6 +25,7 @@ async function fixture(options: {
   initialWorkspaceVisible?: boolean
   launcherOwned?: boolean
   lifecycle?: WatchInjectionOptions['pluginLifecycle']
+  browserUnavailable?: boolean
 } = {}) {
   const calls: string[] = []
   const scopes = new Map<string, { socket: WebSocket; context: Context; scripts: Map<string, string> }>()
@@ -41,6 +43,10 @@ async function fixture(options: {
     webSocketDebuggerUrl: `ws://127.0.0.1:${port}/${id}`,
   })
   const workspace = () => target(`workspace-${generation}`)
+  const liveWorkspaces = () =>
+    options.interruption === 'socket' && interrupted
+      ? [target('workspace-0'), workspace()]
+      : [workspace()]
   let seedActivated = !options.heldSeed
   const server = createServer((request, response) => {
     response.setHeader('content-type', 'application/json')
@@ -48,11 +54,13 @@ async function fixture(options: {
       response.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}/browser` }))
       return
     }
-    const current = workspace()
     response.end(JSON.stringify([
       target('helper', 'detached-window.html'),
       ...((generation === 0 ? initialWorkspaceVisible : replacementVisible)
-        ? [{ ...current, url: seedActivated ? current.url : 'data:text/html;charset=utf-8,loading' }]
+        ? liveWorkspaces().map(current => ({
+          ...current,
+          url: seedActivated ? current.url : 'data:text/html;charset=utf-8,loading',
+        }))
         : []),
     ]))
   })
@@ -61,6 +69,9 @@ async function fixture(options: {
     createContext({
       document: { readyState: 'complete' },
       location: { href: 'app://-/index.html' },
+      crypto,
+      setTimeout,
+      clearTimeout,
     })
   const shouldInterrupt = (id: string) => {
     const number = Number(id.split('-').at(-1))
@@ -77,6 +88,12 @@ async function fixture(options: {
     }
     generation++
     seedActivated = true
+    if (interruption === 'silent-retired' || interruption === 'crashed') {
+      scopes.get('browser')?.socket.send(JSON.stringify({
+        method: interruption === 'crashed' ? 'Target.targetCrashed' : 'Target.targetDestroyed',
+        params: { targetId: id },
+      }))
+    }
     if (interruption === 'socket' || interruption === 'crashed') scope.socket.terminate()
     else scope.socket.close()
   }
@@ -108,6 +125,17 @@ async function fixture(options: {
       let result: unknown = {}
       let error: unknown
       try {
+        if (item.method === 'Target.setDiscoverTargets' && options.browserUnavailable) {
+          throw new Error('fixture browser observer unavailable')
+        }
+        if (item.method === 'Target.getTargets') {
+          result = {
+            targetInfos: [...liveWorkspaces().map(current => ({ targetId: current.id, type: 'page' })), {
+              targetId: 'helper',
+              type: 'page',
+            }],
+          }
+        }
         if (item.method === 'Browser.setPermission' && params.setting === 'prompt' && options.deniedRestore) {
           throw new Error('fixture permission restore denied')
         }
@@ -157,16 +185,21 @@ async function fixture(options: {
     service: { subscribe: () => unsubscribe } as unknown as PluginManagementService,
   }
   const nativeDispose = vi.fn()
+  const nativeAuthority = createNativeSubmissionCdpAuthority({
+    catalog: async () => [],
+    isThreadIdle: async () => true,
+    submissionAvailable: false,
+  })
   const nativeSubmission = options.transforms
     ? {
       authority: {
         install: async (session: CdpSession, current: CdpTarget) => {
-          const remove = session.onEvent('Runtime.bindingCalled', () => {})
+          const channel = await nativeAuthority.install(session, current)
           return {
             dispose: async () => {
               calls.push(`native-dispose:${current.id}`)
               nativeDispose(current.id)
-              remove()
+              await channel.dispose()
             },
           }
         },
@@ -356,6 +389,42 @@ describe('owned workspace replacement during production installation', () => {
       expect(app.calls).not.toContain('connect:helper')
       app.showReplacement(true)
       await vi.waitFor(() => expect(app.ready).toHaveBeenCalledOnce(), { timeout: 3_000 })
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it.each(['silent-retired', 'unannounced-retired'] as const)(
+    'confirms %s through independent browser evidence before releasing the native document',
+    async interruption => {
+      const app = await fixture({ transforms: true, interruption })
+      try {
+        let failure: unknown
+        app.start().then(result => failure = result.error)
+        await vi.waitFor(() => {
+          if (failure !== undefined) throw failure
+          expect(app.ready).toHaveBeenCalledOnce()
+        }, { timeout: 3_000 })
+        expect(app.calls).toContain('connect:workspace-1')
+        expect(app.calls).not.toContain('connect:helper')
+        expect(app.calls.indexOf('native-dispose:workspace-0')).toBeLessThan(app.calls.indexOf('connect:workspace-1'))
+        expect(app.calls.indexOf('browser:Browser.setPermission:prompt')).toBeLessThan(
+          app.calls.indexOf('connect:workspace-1'),
+        )
+        expect(app.scopes.get('workspace-1')?.context.nativeReady).toBe('PATCHED')
+      } finally {
+        await app.stop()
+      }
+    },
+  )
+
+  it('keeps a silent close terminal when browser identity evidence is unavailable', async () => {
+    const app = await fixture({ transforms: true, interruption: 'unannounced-retired', browserUnavailable: true })
+    try {
+      const result = await app.start()
+      expect(result.error).toBeInstanceOf(AggregateError)
+      expect(app.ready).not.toHaveBeenCalled()
+      expect(app.calls).not.toContain('connect:workspace-1')
     } finally {
       await app.stop()
     }
