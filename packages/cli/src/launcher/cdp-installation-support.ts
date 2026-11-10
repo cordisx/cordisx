@@ -764,8 +764,10 @@ export async function uninstall(
   installed: InstalledScript,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
   ownedHostExited: () => boolean = () => false,
-  targetRetired = false,
+  targetMissing = false,
 ): Promise<void> {
+  // A target-list omission does not retire a renderer that still has a live connection.
+  const targetRetired = targetMissing && installed.session.isClosed()
   const reconnected = installed.session.isClosed() && !targetRetired && !ownedHostExited()
     && (installed.nativeInterception !== undefined || installed.nativeChannel !== undefined)
   const session = reconnected
