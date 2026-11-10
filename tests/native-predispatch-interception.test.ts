@@ -404,6 +404,36 @@ describe('native pre-dispatch resource interception', () => {
     await vi.waitFor(() => expect(session.calls.some(call => call.method === 'Fetch.disable')).toBe(true))
   })
 
+  it('retries failed interception cleanup through a replacement connection', async () => {
+    const session = new FakeSession()
+    const url = 'app://-/assets/reconnect.js'
+    session.bodies.set('initial', 'one ANCHOR')
+    const installed = await installNativeResourceInterception({
+      session,
+      target: { id: 'native', url: 'app://-/index.html' },
+      transforms: [transform(url, 'one ANCHOR')],
+      reloadDocument: async () => pause(session, 'initial', url),
+      timeoutMs: 100,
+    })
+    session.send = async () => {
+      throw new Error('CDP connection is closed')
+    }
+    Object.assign(session, { isClosed: () => true })
+    await expect(installed.dispose()).rejects.toThrow('cleanup was incomplete')
+
+    const replacement = new FakeSession()
+    await expect(installed.dispose(replacement)).resolves.toBeUndefined()
+    expect(replacement.fenced).toEqual([`fence:${url}`])
+    expect(replacement.calls.map(call => call.method)).toEqual([
+      'Runtime.evaluate',
+      'Fetch.disable',
+      'Network.setCacheDisabled',
+    ])
+    const count = replacement.calls.length
+    await installed.dispose(replacement)
+    expect(replacement.calls).toHaveLength(count)
+  })
+
   it('surfaces a renderer fence exception during explicit disposal', async () => {
     const session = new FakeSession()
     const url = 'app://-/assets/fence-failure.js'

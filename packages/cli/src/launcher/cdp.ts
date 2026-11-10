@@ -475,9 +475,15 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           }
           const live = new Set(targets.map(target => target.id))
           for (const [id, record] of installed) {
+            await record.session.isResponsive()
             if (live.has(id)) continue
             watcherStage = 'target-retired-cleanup'
-            await support.uninstall(record, viteLoopbackPermissions, ownedHostExited)
+            await support.uninstall(
+              record,
+              viteLoopbackPermissions,
+              ownedHostExited,
+              !listedTargets.some(target => target.id === id),
+            )
             installed.delete(id)
           }
           for (const target of targets) {

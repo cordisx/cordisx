@@ -52,6 +52,7 @@ export class CdpSession {
   private nextId = 1
   private closed = false
   private targetClosed = false
+  private responseTimedOut = false
   private readonly closeListeners = new Set<() => void>()
   private readonly pending = new Map<number, {
     readonly resolve: (value: Record<string, unknown>) => void
@@ -61,6 +62,7 @@ export class CdpSession {
 
   private constructor(
     private readonly socket: WebSocket,
+    private readonly url: string,
     private readonly endpoint: { resourceRef: string; debugPort: number | undefined },
   ) {
     this.emitDiagnostic({ event: 'cdp-connected', requestRef: this.connectionRef, ...endpoint })
@@ -82,6 +84,7 @@ export class CdpSession {
       if (message.id === undefined) return
       const callback = this.pending.get(message.id)
       if (callback === undefined) return
+      this.responseTimedOut = false
       this.pending.delete(message.id)
       if (message.error !== undefined) callback.reject(new Error(`CDP ${message.error.code}: ${message.error.message}`))
       else callback.resolve(message.result ?? {})
@@ -130,7 +133,23 @@ export class CdpSession {
         socket.terminate()
       })
     })
-    return new CdpSession(socket, endpoint)
+    return new CdpSession(socket, url, endpoint)
+  }
+
+  /** Reopen only the previously owned target for cleanup; never replay pending commands. */
+  async reconnectForCleanup(targetId: string): Promise<CdpSession> {
+    if (!this.isClosed()) throw new Error('CDP cleanup reconnection requires a closed session')
+    if (this.pending.size > 0) throw new Error('CDP closing requests have not settled')
+    const session = await CdpSession.connect(this.url)
+    try {
+      const result = await session.send('Target.getTargetInfo')
+      const info = result.targetInfo as { targetId?: unknown } | undefined
+      if (info?.targetId !== targetId) throw new Error('CDP cleanup target identity changed')
+      return session
+    } catch (error) {
+      session.close()
+      throw error
+    }
   }
 
   send(
@@ -146,6 +165,7 @@ export class CdpSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
+        this.responseTimedOut = true
         this.emitDiagnostic({
           event: 'cdp-request-deadline',
           requestRef: this.connectionRef,
@@ -202,6 +222,45 @@ export class CdpSession {
 
   isTargetClosed(): boolean {
     return this.targetClosed
+  }
+
+  /** A slow operation alone cannot retire a socket; confirm it with two independent read-only probes. */
+  async isResponsive(): Promise<boolean> {
+    if (this.isClosed()) return false
+    if (!this.responseTimedOut) return true
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await this.send('Runtime.evaluate', { expression: 'true', returnByValue: true }, 2_500)
+        return true
+      } catch {
+        if (this.isClosed()) return false
+        // Any matched response, including a protocol rejection, proves the transport still answers.
+        if (!this.responseTimedOut) return true
+      }
+    }
+    this.emitDiagnostic({ event: 'cdp-connection-unresponsive', requestRef: this.connectionRef, ...this.endpoint })
+    await new Promise<void>(resolve => {
+      this.onClose(resolve)
+      this.socket.terminate()
+    })
+    return false
+  }
+}
+
+/** Chromium may already have removed a future script owned by a disconnected session. */
+export async function removeCdpFutureScript(
+  session: CdpSession,
+  identifier: string,
+  originalSession = session,
+): Promise<void> {
+  try {
+    await session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+  } catch (error) {
+    if (
+      session !== originalSession && originalSession.isClosed()
+      && error instanceof Error && error.message === 'CDP -32000: Script not found'
+    ) return
+    throw error
   }
 }
 

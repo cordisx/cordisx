@@ -111,7 +111,7 @@ export async function install(
   let certifiedPermissionChannel: support.CdpCertifiedPermissionChannel | undefined
   const documentInstallation = createDocumentInstallationState()
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
-  let nativeChannel: { dispose(): Promise<void> } | undefined
+  let nativeChannel: { dispose(session?: support.CdpSession): Promise<void> } | undefined
   let managementBinding: ManagementCdpBinding | undefined
   try {
     if (certifiedPermission !== undefined) {

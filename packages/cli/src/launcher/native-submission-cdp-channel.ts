@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { nativeSubmissionChannelCleanup } from './native-submission-channel-cleanup.js'
 import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
 import { modelProviderDisplayExpression } from '../renderer/adapter/model-provider-display.js'
 import type {
@@ -138,7 +139,7 @@ export interface NativeSubmissionCdpAuthority {
   bindController(controller: NativeSubmissionController): void
   taskCreationAvailable(): Promise<boolean>
   providerDisplays(): Promise<readonly ModelProviderDisplay[]>
-  install(session: CdpSession, target: CdpTarget): Promise<{ dispose(): Promise<void> }>
+  install(session: CdpSession, target: CdpTarget): Promise<{ dispose(session?: CdpSession): Promise<void> }>
 }
 
 /** Each binding belongs to one native renderer generation, never a shared global request queue. */
@@ -935,27 +936,23 @@ export function createNativeSubmissionCdpAuthority(options: {
       let identifier: string | undefined
       let unsubscribeCatalog: (() => void) | undefined
       let unsubscribeManagement: (() => void) | undefined
-      const dispose = async (): Promise<void> => {
-        if (owner.disposed) return
-        owner.disposed = true
-        environmentGenerator.close()
-        unsubscribeCatalog?.()
-        unsubscribeManagement?.()
-        documents.delete(target.id)
-        remove()
-        for (const [id, state] of states) {
-          if (state.scope.targetId === target.id && state.scope.rendererGeneration === generation) {
-            await controller!.releaseScope(state.scope).catch(() => undefined)
-            states.delete(id)
+      const cleanupRenderer = nativeSubmissionChannelCleanup(generation, () => identifier, session)
+      const dispose = async (cleanupSession = session): Promise<void> => {
+        if (!owner.disposed) {
+          owner.disposed = true
+          environmentGenerator.close()
+          unsubscribeCatalog?.()
+          unsubscribeManagement?.()
+          documents.delete(target.id)
+          remove()
+          for (const [id, state] of states) {
+            if (state.scope.targetId === target.id && state.scope.rendererGeneration === generation) {
+              await controller!.releaseScope(state.scope).catch(() => undefined)
+              states.delete(id)
+            }
           }
         }
-        await Promise.allSettled([
-          session.send('Runtime.evaluate', { expression: 'globalThis.__cordisxNativeSubmissionChannelDispose?.()' }),
-          session.send('Runtime.removeBinding', { name: BINDING }),
-          ...(identifier === undefined
-            ? []
-            : [session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })]),
-        ])
+        await cleanupRenderer(cleanupSession)
       }
       try {
         const added = await session.send('Page.addScriptToEvaluateOnNewDocument', { source })
