@@ -98,3 +98,54 @@ it('keeps two new side drafts isolated and refuses a threadless Send without a u
     dom.window.close()
   }
 })
+
+it('captures Fast before asynchronous Send admission for both handoff and native request', async () => {
+  const dom = new JSDOM('<main></main>')
+  const composer = dom.window.document.querySelector('main')!
+  let tier: 'priority' | 'default' = 'priority'
+  let finish!: (value: { allow: true; operationToken: string }) => void
+  const admitted = vi.fn()
+  const detach = registerNativeComposerSubmission({
+    snapshot: () => ({
+      scope: { targetId: 't', rendererGeneration: 'r', navigationGeneration: 0, composerId: 'c' },
+      idle: true,
+    }),
+    composer: () => composer,
+    submit: () =>
+      new Promise(resolve => {
+        finish = resolve
+      }),
+    serviceTier: () => tier,
+    creationAdmitted: admitted,
+  })
+  try {
+    const result = (globalThis as any).__cordisxNativeSubmitHook(descriptor())
+    tier = 'default'
+    finish({ allow: true, operationToken: 'exact-operation-token' })
+    await expect(result).resolves.toMatchObject({ serviceTier: 'priority' })
+    expect(admitted).toHaveBeenCalledWith(expect.objectContaining({ serviceTier: 'priority' }), expect.anything())
+  } finally {
+    detach()
+    dom.window.close()
+  }
+})
+
+it('leaves an unknown Fast value to native handling instead of inventing a default', async () => {
+  const dom = new JSDOM('<main></main>')
+  const detach = registerNativeComposerSubmission({
+    snapshot: () => ({
+      scope: { targetId: 't', rendererGeneration: 'r', navigationGeneration: 0, composerId: 'c' },
+      idle: true,
+    }),
+    composer: () => dom.window.document.querySelector('main'),
+    submit: async () => ({ allow: true as const }),
+    serviceTier: () => undefined,
+  })
+  try {
+    await expect((globalThis as any).__cordisxNativeSubmitHook(descriptor())).resolves.toEqual({ allow: true })
+    expect((globalThis as any).__cordisxNativeServiceTierOverride).toBeUndefined()
+  } finally {
+    detach()
+    dom.window.close()
+  }
+})

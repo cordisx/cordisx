@@ -29,13 +29,28 @@ function executionEdits(plan: TaskSource): void {
   if (!hasKeys(options, ['scope', 'sourceThreadId', 'target', 'model', 'prompt', 'parentTurnId', 'rootTurnId'])) {
     throw new Error('Native task creation input unavailable')
   }
+  const modelNode = properties(options).get('model')!
+  if (!['Identifier', 'MemberExpression', 'Literal'].includes(modelNode.type)) {
+    throw new Error('Native task model binding unavailable')
+  }
+  const thinkingNode = properties(options).get('thinking')
+  const tierNode = properties(options).get('serviceTier')
+  if (
+    [thinkingNode, tierNode].some(node => node && !['Identifier', 'MemberExpression', 'Literal'].includes(node.type))
+  ) {
+    throw new Error('Native task configuration binding unavailable')
+  }
   const targetNode = properties(options).get('target')!
   if (targetNode.type !== 'Identifier') throw new Error('Native task target binding unavailable')
   const target = plan.text(targetNode)
   // Wrap this one native call, preserving original permission, registration and settlement helpers.
   plan.replace(
     call,
-    `await (async()=>{const ${taskHandle}=await globalThis.${taskMarker}?.claim({callId:__cxTaskCallId,sourceThreadId:__cxTaskSourceThread,arguments:__cxTaskArguments,hostId:${target}.type==='remoteProject'?${target}.hostId:'local'});if(typeof __cxTaskCallId==='string'&&__cxTaskCallId.startsWith('cordisx-task-')&&${taskHandle}===void 0)throw Error('Native task routing unavailable');return ${
+    `await (async()=>{const ${taskHandle}=await globalThis.${taskMarker}?.claim({callId:__cxTaskCallId,sourceThreadId:__cxTaskSourceThread,arguments:__cxTaskArguments,model:${
+      plan.text(modelNode)
+    },${thinkingNode ? `thinking:${plan.text(thinkingNode)},` : ''}${
+      tierNode ? `serviceTier:${plan.text(tierNode)},` : ''
+    }hostId:${target}.type==='remoteProject'?${target}.hostId:'local'});if(typeof __cxTaskCallId==='string'&&__cxTaskCallId.startsWith('cordisx-task-')&&${taskHandle}===void 0)throw Error('Native task routing unavailable');return ${
       plan.text(call.callee)
     }({${taskHandle},${plan.text(options).slice(1, -1)}})})()`,
   )
@@ -96,7 +111,7 @@ function initialEdits(plan: TaskSource): void {
   }
   const localFn = plan.declaration(local.callee.name)
   const localInput = plan.parameter(localFn, ['config', 'model', 'thinking', 'target', 'sourceThreadId'])
-  plan.addHandle(localFn, localInput, plan.binding(localInput, 'model'))
+  plan.addHandle(localFn, localInput, plan.binding(localInput, 'model'), plan.binding(localInput, 'thinking'))
   const localRequest = plan.require(
     localFn.body,
     node =>
@@ -125,7 +140,12 @@ function initialEdits(plan: TaskSource): void {
     'startingState',
     'sourceThreadId',
   ])
-  plan.addHandle(worktreeFn, worktreeInput, plan.binding(worktreeInput, 'model'))
+  plan.addHandle(
+    worktreeFn,
+    worktreeInput,
+    plan.binding(worktreeInput, 'model'),
+    plan.binding(worktreeInput, 'thinking'),
+  )
   const queued = plan.require(
     worktreeFn.body,
     node =>

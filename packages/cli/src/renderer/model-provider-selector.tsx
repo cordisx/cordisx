@@ -67,6 +67,7 @@ export interface ProviderSelectionSnapshot {
   readonly submissionError?: NativeSubmissionRejection
   readonly pendingCreation?: import('./adapter/native-composer-creation.js').NativeComposerCreationSelection | undefined
   readonly creationDisplay?: import('./native-composer-creation-handoff.js').NativeComposerCreationDisplay | undefined
+  readonly cachedDisplay?: import('./native-session-display-cache.js').NativeSessionDisplay | undefined
   readonly draftPreference?: Readonly<{
     readonly model?: string
     readonly providerId: string
@@ -141,7 +142,10 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const reasoningInFlight = useRef<Promise<void> | undefined>(undefined)
   const fastActionInFlight = useRef<number | undefined>(undefined)
   const attemptedDraftPreference = useRef<string | undefined>(undefined)
-  const creationReadOnly = native.pendingCreation !== undefined || native.creationDisplay !== undefined
+  const boundCreation = native.available && native.threadId !== undefined
+    && native.modelProvider !== undefined && native.model !== undefined
+  const creationReadOnly = native.pendingCreation !== undefined
+    || native.creationDisplay !== undefined && !boundCreation
   const canInteract = () => !suspended && !creationReadOnly && nativeModelProviderInteractionAllowed(anchor.current)
   const blockInteraction = (event: SyntheticEvent) => {
     if (canInteract()) return
@@ -181,7 +185,18 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     })
     : []
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
-  const fastMode = supportsFastMode && native.serviceTier === 'priority'
+  const matchingCreation = native.creationDisplay && (!native.available || !native.modelProvider || !native.model
+      || native.modelProvider === native.creationDisplay.providerId && native.model === native.creationDisplay.model)
+    ? native.creationDisplay
+    : undefined
+  const fastMode = matchingCreation !== undefined
+    ? (native.available && native.serviceTier !== undefined ? native.serviceTier : matchingCreation.serviceTier)
+      === 'priority'
+    : native.available
+    ? supportsFastMode && (native.serviceTier === 'priority'
+      || native.serviceTier === undefined && native.cachedDisplay?.providerId === native.modelProvider
+        && native.cachedDisplay?.model === native.model && native.cachedDisplay?.serviceTier === 'priority')
+    : native.cachedDisplay?.serviceTier === 'priority'
   const canQueueFast = reasoningInFlight.current !== undefined
   const fastDisabled = !native.available || !supportsFastMode || fastActionPending
     || ((native.busy || switching) && !canQueueFast)

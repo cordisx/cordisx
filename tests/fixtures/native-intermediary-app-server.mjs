@@ -5,6 +5,22 @@ const restoredEndpoints = new Map()
 reader.on('line', async line => {
   const message = JSON.parse(line)
   const threadId = message.params?.threadId
+  if (threadId === 'source-fork-pending' && message.method === 'thread/fork') return
+  if (threadId === 'source-fork' && message.method === 'thread/fork') {
+    process.stdout.write(
+      JSON.stringify({
+        id: message.id,
+        result: {
+          thread: { id: 'fork-child' },
+          modelProvider: message.params.modelProvider,
+          model: message.params.model,
+          reasoningEffort: message.params.config.model_reasoning_effort,
+          serviceTier: message.params.serviceTier,
+        },
+      }) + '\n',
+    )
+    return
+  }
   if (threadId === 'ephemeral-side' && message.method === 'thread/read') {
     process.stdout.write(
       JSON.stringify({

@@ -4,6 +4,8 @@ import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
+import type { NativeSourceConfiguration } from './native-source-configuration.js'
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 
 const object = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined
@@ -31,6 +33,7 @@ export class NativeAgentTasks {
       invoke(
         input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
       ): Promise<unknown>
+      sourceConfiguration?(threadId: string): Promise<NativeSourceConfiguration | undefined>
       routing: NativeAgentTaskRouting
     },
   ) {}
@@ -163,6 +166,33 @@ export class NativeAgentTasks {
   async claim(input: unknown) {
     const request = object(input), intent = request && this.intents.get(request.callId)
     if (
+      request && !intent && valid(request.callId) && !request.callId.startsWith('cordisx-task-')
+      && valid(request.sourceThreadId) && request.hostId === 'local'
+    ) {
+      const source = await this.authority.sourceConfiguration?.(request.sourceThreadId)
+      if (!source) return undefined
+      const model = request.model === undefined || request.model === null ? source.model : request.model
+      const effort = request.thinking == null ? source.reasoningEffort : request.thinking
+      const tier = request.serviceTier === undefined ? source.serviceTier : request.serviceTier
+      if (!isModelReasoningEffort(effort) || (tier !== null && tier !== 'priority')) return undefined
+      if (
+        !valid(model)
+        || source.providerId !== 'openai'
+          && !(await this.authority.catalog()).some(provider =>
+            provider.providerId === source.providerId && provider.models.some(item => item.id === model)
+          )
+      ) return undefined
+      return await this.authority.routing.prepare({
+        callId: request.callId,
+        sourceThreadId: request.sourceThreadId,
+        providerId: source.providerId,
+        model,
+        reasoningEffort: effort,
+        serviceTier: tier,
+        transient: true,
+      })
+    }
+    if (
       !intent || intent.claimed || request.sourceThreadId !== intent.sourceThreadId || request.hostId !== 'local'
       || JSON.stringify(request.arguments) !== intent.fingerprint
     ) return undefined
@@ -182,11 +212,13 @@ export class NativeAgentTasks {
     ) {
       throw new Error('Native task selection unavailable')
     }
+    const source = await this.authority.sourceConfiguration?.(intent.sourceThreadId)
     return await this.authority.routing.prepare({
       callId: intent.callId,
       sourceThreadId: intent.sourceThreadId,
       providerId: String(intent.arguments.providerId),
       model: String(intent.arguments.model),
+      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort, serviceTier: source.serviceTier }),
     })
   }
 }

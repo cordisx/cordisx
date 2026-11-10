@@ -38,6 +38,16 @@ export class PendingModelReasoning {
     return this.selection?.effort ?? fallback
   }
 
+  target(
+    navigation: number,
+    pending: PendingNativeProviderSelection,
+    fallback: string | undefined,
+    models: readonly NativeReasoningModel[],
+    catalog: CatalogReasoningLookup,
+  ): TargetReasoning {
+    return resolveTargetReasoning(pending, this.resolve(navigation, pending, fallback), models, catalog)
+  }
+
   private key(navigation: number, pending: PendingNativeProviderSelection): string {
     return JSON.stringify([navigation, pending.generation, pending.providerId, pending.model])
   }

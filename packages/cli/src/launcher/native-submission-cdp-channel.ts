@@ -1,3 +1,4 @@
+import { readNativeSourceConfiguration, reconcileNativeThreadSelection } from './native-source-configuration.js'
 import { randomUUID } from 'node:crypto'
 import { nativeSubmissionChannelCleanup } from './native-submission-channel-cleanup.js'
 import { type ModelProviderDisplay, modelProviderDisplays } from '../model-provider-display.js'
@@ -137,6 +138,7 @@ export interface NativeSubmissionCdpAuthority {
     release(threadId: string): void
   }
   bindController(controller: NativeSubmissionController): void
+  sourceConfiguration(threadId: string): ReturnType<typeof readNativeSourceConfiguration>
   taskCreationAvailable(): Promise<boolean>
   providerDisplays(): Promise<readonly ModelProviderDisplay[]>
   install(session: CdpSession, target: CdpTarget): Promise<{ dispose(session?: CdpSession): Promise<void> }>
@@ -401,6 +403,13 @@ export function createNativeSubmissionCdpAuthority(options: {
     },
     selection,
     runtime,
+    sourceConfiguration: threadId =>
+      readNativeSourceConfiguration(
+        threadId,
+        () => states.values(),
+        id => documents.get(id),
+        id => threadSelections.get(id),
+      ),
     async taskCreationAvailable() {
       for (const owner of documents.values()) {
         if (owner.disposed) continue
@@ -660,6 +669,8 @@ export function createNativeSubmissionCdpAuthority(options: {
                 ...(preference === undefined || before?.draftUserSelected ? {} : { draftPreference: preference }),
               }
               states.set(key(scope), state)
+            } else if (scope.threadId) {
+              reconcileNativeThreadSelection(state, threadSelections.get(scope.threadId))
             }
             await respond(requestId, projection(state))
           } else if (

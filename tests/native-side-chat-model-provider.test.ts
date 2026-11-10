@@ -43,7 +43,7 @@ it('keeps main and side native controls, selections and Send scopes independent'
     expect(first?.getSnapshot()).toMatchObject({ modelProvider: 'provider-a', model: 'model-a' })
     expect(second?.getSnapshot()).toMatchObject({ modelProvider: 'provider-b', model: 'model-b' })
     const hook = (globalThis as any).__cordisxNativeSubmitHook
-    await expect(hook({
+    const action = {
       target: 'local',
       thread: 'side-thread',
       response: false,
@@ -53,7 +53,21 @@ it('keeps main and side native controls, selections and Send scopes independent'
       explicitAction: undefined,
       edit: null,
       promptOverride: false,
-    })).resolves.toEqual({ allow: true, serviceTier: 'default' })
+    }
+    await expect(hook(action)).resolves.toEqual({ allow: true })
+    expect(second?.getSnapshot().serviceTier).toBeUndefined()
+    message(h.dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'side-thread', settings: { serviceTier: 'priority' } },
+      },
+    })
+    await settle()
+    await settle()
+    await expect(hook(action)).resolves.toEqual({ allow: true, serviceTier: 'priority' })
+    expect(first?.getSnapshot().serviceTier).toBeUndefined()
     expect(h.channel.submissionPrepare).toHaveBeenLastCalledWith(expect.objectContaining({
       scope: expect.objectContaining({ composerId: 'side', threadId: 'side-thread' }),
     }))

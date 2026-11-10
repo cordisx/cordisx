@@ -5,7 +5,7 @@ import { ModelProviderRegistry } from '../packages/cli/src/renderer/model-provid
 import { CodexDesktopNativeModelProviderTransport } from '../packages/cli/src/renderer/native-model-provider-transport.js'
 import { attachNativeCreatedRoute, attachNativeCreation } from './fixtures/native-composer-creation.js'
 import { composer } from './fixtures/native-model-provider-composer.js'
-import { harness, install, settle } from './fixtures/native-model-provider-transport-harness.js'
+import { harness, install, message, settle } from './fixtures/native-model-provider-transport-harness.js'
 
 // Previous refresh fixtures reused one transport across different Composer roots.
 // Production installation disposes that transport and creates a new owner.
@@ -164,6 +164,24 @@ it('hands an admitted selection through fresh pending and settled Composers with
       modelProvider: 'provider-b',
       model: 'model-b',
       reasoningEffort: 'low',
+      creationDisplay: { providerId: 'provider-b', model: 'model-b', reasoningEffort: 'low', serviceTier: null },
+    })
+    expect(transports[2]!.getSnapshot().serviceTier).toBeUndefined()
+    expect(h.dom.window.document.querySelector<HTMLButtonElement>('.cxmp-model-trigger')?.disabled).toBe(false)
+    expect(h.dom.window.document.querySelector<HTMLButtonElement>('.cxmp-provider-trigger')?.disabled).toBe(false)
+    expect(h.dom.window.document.querySelector('.cxmp-selector')?.getAttribute('data-cordisx-model-send-eligible'))
+      .toBe('true')
+    await act(async () => {
+      message(h.dom.window, {
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: {
+          method: 'thread/settings/updated',
+          params: { threadId: 'created', settings: { serviceTier: null } },
+        },
+      })
+      await settle()
+      await settle()
     })
     expect(transports[2]!.getSnapshot().pendingCreation).toBeUndefined()
     expect(transports[2]!.getSnapshot().creationDisplay).toBeUndefined()

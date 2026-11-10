@@ -19,6 +19,11 @@ export interface SelectionPatch {
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
+/** An unknown Fast value must remain a native decision. */
+export function nativeSubmissionServiceTier(state: SelectionSnapshot): 'priority' | 'default' | undefined {
+  return state.serviceTier === undefined ? undefined : state.serviceTier === 'priority' ? 'priority' : 'default'
+}
+
 /** Model ownership evidence lives only within its exact thread/catalog scope. */
 export class NativeModelAssignments {
   private readonly entries = new Map<string, { readonly providerId: string; readonly model: string }>()
@@ -97,6 +102,26 @@ export function nativeThreadBusy(thread: Record<string, unknown>): boolean | und
   return status === 'active' ? true : undefined
 }
 
+/** Poll one scoped native turn without letting late reads affect a successor. */
+export async function refreshNativeTurnStatus(owner: {
+  current(): boolean
+  read(): Promise<unknown>
+  update(busy: boolean): Promise<void>
+  retry(): void
+}): Promise<void> {
+  if (!owner.current()) return
+  try {
+    const response = record(await owner.read())
+    if (!owner.current()) return
+    const busy = nativeThreadBusy(record(response?.thread) ?? {})
+    if (busy !== undefined) await owner.update(busy)
+  } catch {
+    // A failed read cannot prove the turn completed.
+  } finally {
+    if (owner.current()) owner.retry()
+  }
+}
+
 export function nextSendSelectionFields(
   projection: import('./native-provider-selection-client.js').NativeProviderSelectionProjection,
   submissionActive: boolean,
@@ -150,3 +175,14 @@ export const errorMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim() !== ''
     ? error.message
     : 'Native model provider selection failed'
+
+/** Preserve external-store identity when only object allocation or key order changed. */
+export function sameSnapshot(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+  if (Array.isArray(left) !== Array.isArray(right)) return false
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>
+  const keys = Object.keys(a).filter(key => a[key] !== undefined)
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length
+    && keys.every(key => sameSnapshot(a[key], b[key]))
+}

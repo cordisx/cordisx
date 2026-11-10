@@ -56,8 +56,10 @@ export async function waitForRequest(
 export async function harness(
   handler?: (request: Record<string, unknown>, view: Window) => boolean | void,
   catalogReasoning?: Parameters<typeof CodexDesktopNativeModelProviderTransport.connect>[3],
+  storage?: Storage,
 ) {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'app://-/index.html' })
+  if (storage) Object.defineProperty(dom.window, 'localStorage', { configurable: true, value: storage })
   const control = composer(dom.window.document)
   const requests: Record<string, unknown>[] = []
   install('window', dom.window)

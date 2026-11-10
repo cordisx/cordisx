@@ -7,7 +7,10 @@ type Route = {
   token: string
   providerId: string
   model: string
-  resumeToken: string
+  reasoningEffort?: import('../model-reasoning-capabilities.js').ModelReasoningEffort
+  serviceTier?: 'priority' | null
+  transient?: boolean
+  resumeToken?: string
   configOverrides: Readonly<Record<string, unknown>>
   phase: 'start' | 'turn' | 'complete' | 'uncertain'
   threadId?: string
@@ -40,27 +43,50 @@ export class NativeAgentTaskRouting {
       true,
   ) {}
 
-  async prepare(input: { callId: string; sourceThreadId: string; providerId: string; model: string }) {
-    if (this.closed || !Object.values(input).every(valid) || this.routes.size >= 128) {
+  async prepare(
+    input: {
+      callId: string
+      sourceThreadId: string
+      providerId: string
+      model: string
+      reasoningEffort?: import('../model-reasoning-capabilities.js').ModelReasoningEffort
+      serviceTier?: 'priority' | null
+      transient?: boolean
+    },
+  ) {
+    if (
+      this.closed || ![input.callId, input.sourceThreadId, input.providerId, input.model].every(valid)
+      || this.routes.size >= 128
+    ) {
       throw new Error('Native task routing unavailable')
     }
-    const prepared = await this.controller.prepareThreadResume({
-      threadId: input.sourceThreadId,
-      providerId: input.providerId,
-      model: input.model,
-    })
-    if (prepared.kind !== 'resume') throw new Error('Native task credentials unavailable')
-    if (this.closed) {
-      await this.controller.completeThreadResume({
+    const prepared = input.providerId === 'openai'
+      ? { kind: 'native' as const, configOverrides: {} }
+      : await this.controller.prepareThreadResume({
         threadId: input.sourceThreadId,
-        resumeToken: prepared.resumeToken,
-        succeeded: false,
+        providerId: input.providerId,
+        model: input.model,
       })
+    if (prepared.kind !== 'resume' && prepared.kind !== 'native') {
+      throw new Error('Native task credentials unavailable')
+    }
+    if (this.closed) {
+      if (prepared.kind === 'resume') {
+        await this.controller.completeThreadResume({
+          threadId: input.sourceThreadId,
+          resumeToken: prepared.resumeToken,
+          succeeded: false,
+        })
+      }
       throw new Error('Native task routing retired')
     }
     const token = randomUUID()
     this.routes.set(token, { ...input, token, ...prepared, phase: 'start' })
-    return { token, model: input.model }
+    return {
+      token,
+      model: input.model,
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+    }
   }
 
   async consume(request: NativeMarkedRequest): Promise<unknown | undefined> {
@@ -87,6 +113,8 @@ export class NativeAgentTaskRouting {
       model: route.model,
       providerId: route.providerId,
       configOverrides: route.configOverrides,
+      ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }),
+      ...(route.serviceTier === undefined ? {} : { serviceTier: route.serviceTier }),
     }
   }
 
@@ -123,7 +151,7 @@ export class NativeAgentTaskRouting {
       }
       route.threadId = input.boundThreadId
       // Native credentials are bound to the returned id, not the calling task.
-      const committed = await this.controller.completeThreadResume({
+      const committed = route.resumeToken === undefined || await this.controller.completeThreadResume({
         threadId: route.sourceThreadId,
         createdThreadId: route.threadId,
         resumeToken: route.resumeToken,
@@ -136,14 +164,17 @@ export class NativeAgentTaskRouting {
       route.phase = 'turn'
       delete route.requestId
       delete route.authorized
-    } else if (route.phase === 'turn') route.phase = 'complete'
-    else route.phase = 'uncertain'
+    } else if (route.phase === 'turn') {
+      route.phase = 'complete'
+      if (route.transient) this.routes.delete(route.token)
+    } else route.phase = 'uncertain'
     return true
   }
 
   async close() {
     this.closed = true
     for (const route of this.routes.values()) {
+      if (route.resumeToken === undefined) continue
       await this.controller.completeThreadResume({
         threadId: route.sourceThreadId,
         resumeToken: route.resumeToken,

@@ -65,6 +65,11 @@ export interface NativeSubmissionControlServer {
     params: Readonly<Record<string, unknown>>,
     configuredProviderOverrides?: Readonly<Record<string, unknown>>,
   ): Promise<unknown>
+  bindSourceConfigurationReader(
+    read: (
+      threadId: string,
+    ) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>,
+  ): void
   bindConfiguredProvider(prepare: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>): void
   bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
@@ -85,6 +90,9 @@ export async function startNativeSubmissionControlServer(
   const nonce = randomBytes(32).toString('hex')
   let peer: Socket | undefined
   let authenticated = false
+  let sourceConfiguration:
+    | ((threadId: string) => Promise<import('./native-source-configuration.js').NativeSourceConfiguration | undefined>)
+    | undefined
   let prepareConfigured: ((providerId?: string) => Promise<Readonly<Record<string, unknown>>>) | undefined
   let unmarkedGuard: ((input: { threadId?: string; providerId?: string }) => Promise<boolean>) | undefined
   let controller: NativeSubmissionController | undefined
@@ -221,12 +229,20 @@ export async function startNativeSubmissionControlServer(
     let fragmentBytes = 0
     let active = 0
     const activeIds = new Set<string>()
+    const forkLeases = new Map<string, { threadId: string; timer: ReturnType<typeof setTimeout> }>()
     const authTimer = setTimeout(() => socket.destroy(), TIMEOUT)
     socket.setEncoding('utf8')
     socket.on('error', () => socket.destroy())
     socket.on('close', () => {
       diagnostic({ event: 'native-control-peer-closed', requestRef: peerRef, verified: authenticated, aborted: closed })
       clearTimeout(authTimer)
+      for (const [resumeToken, lease] of forkLeases) {
+        clearTimeout(lease.timer)
+        void controller?.completeThreadResume({ threadId: lease.threadId, resumeToken, succeeded: false }).catch(() =>
+          undefined
+        )
+      }
+      forkLeases.clear()
       if (peer === socket) {
         peer = undefined
         authenticated = false
@@ -338,6 +354,84 @@ export async function startNativeSubmissionControlServer(
           await write(socket, { id: value.id, ok: true, value: allowed })
         } catch {
           await write(socket, { id: value.id, ok: true, value: false })
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
+        return
+      }
+      if (value.type === 'fork-prepare' || value.type === 'fork-complete') {
+        if (!authenticated || !controller || active >= 32 || !valid(value.threadId)) {
+          throw new Error('Control unavailable')
+        }
+        active++
+        activeIds.add(value.id)
+        try {
+          if (value.type === 'fork-prepare') {
+            if (forkLeases.size >= 64 || !valid(value.providerId, 128) || !valid(value.model)) {
+              throw new Error('Invalid native thread')
+            }
+            const prepared = await controller.prepareThreadResume({
+              threadId: value.threadId,
+              providerId: value.providerId,
+              model: value.model,
+            })
+            if (prepared.kind === 'resume') {
+              if (peer !== socket || !authenticated) {
+                await controller.completeThreadResume({
+                  threadId: value.threadId,
+                  resumeToken: prepared.resumeToken,
+                  succeeded: false,
+                })
+                return
+              }
+              const resumeToken = prepared.resumeToken, threadId = value.threadId
+              const timer = setTimeout(() => {
+                forkLeases.delete(resumeToken)
+                void controller?.completeThreadResume({ threadId, resumeToken, succeeded: false }).catch(() =>
+                  undefined
+                )
+              }, 65_000)
+              forkLeases.set(resumeToken, { threadId, timer })
+            }
+            await write(socket, { id: value.id, ok: true, value: prepared })
+          } else {
+            if (
+              !valid(value.resumeToken, 256) || forkLeases.get(value.resumeToken)?.threadId !== value.threadId
+              || typeof value.succeeded !== 'boolean'
+              || value.succeeded && (!valid(value.createdThreadId) || value.createdThreadId === value.threadId)
+            ) {
+              throw new Error('Invalid native thread resume completion')
+            }
+            clearTimeout(forkLeases.get(value.resumeToken)!.timer)
+            forkLeases.delete(value.resumeToken)
+            const result = await controller.completeThreadResume({
+              threadId: value.threadId,
+              resumeToken: value.resumeToken,
+              succeeded: value.succeeded,
+              ...(value.succeeded && typeof value.createdThreadId === 'string'
+                ? { createdThreadId: value.createdThreadId }
+                : {}),
+            })
+            await write(socket, { id: value.id, ok: true, value: result })
+          }
+        } catch {
+          await write(socket, { id: value.id, ok: false }).catch(() => undefined)
+        } finally {
+          active--
+          activeIds.delete(value.id)
+        }
+        return
+      }
+      if (value.type === 'source-configuration') {
+        if (!authenticated || active >= 32 || !valid(value.threadId)) throw new Error('Control unavailable')
+        active++
+        activeIds.add(value.id)
+        try {
+          const tuple = await sourceConfiguration?.(value.threadId)
+          await write(socket, { id: value.id, ok: true, value: tuple ?? null })
+        } catch {
+          await write(socket, { id: value.id, ok: true, value: null })
         } finally {
           active--
           activeIds.delete(value.id)
@@ -575,6 +669,10 @@ export async function startNativeSubmissionControlServer(
     },
     bindUnmarkedProviderGuard(value: (input: { threadId?: string; providerId?: string }) => Promise<boolean>) {
       unmarkedGuard = value
+    },
+    bindSourceConfigurationReader(value: NonNullable<typeof sourceConfiguration>) {
+      if (sourceConfiguration) throw new Error('Source configuration reader already bound')
+      sourceConfiguration = value
     },
     bindConfiguredProvider(value: (providerId?: string) => Promise<Readonly<Record<string, unknown>>>) {
       if (prepareConfigured) throw new Error('Configured provider already bound')

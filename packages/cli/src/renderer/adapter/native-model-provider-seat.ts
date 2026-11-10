@@ -26,6 +26,7 @@ export interface NativeModelSelectionControl {
   readonly reasoningEffort: string
   readonly reasoningEfforts: readonly string[]
   readonly serviceTier: 'priority' | null
+  readonly serviceTierKnown: boolean
   selectModel(model: string, reasoningEffort?: string): Promise<void>
 }
 
@@ -212,6 +213,8 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
         reasoningEffort,
         reasoningEfforts: reasoningEfforts(props, model),
         serviceTier: props.selectedServiceTier === 'priority' ? 'priority' : null,
+        serviceTierKnown: Object.hasOwn(props, 'selectedServiceTier')
+          && (props.selectedServiceTier === null || props.selectedServiceTier === 'priority'),
         selectModel: async (nextModel, nextReasoningEffort) => {
           if (await selectModel(nextModel, nextReasoningEffort) === false) {
             throw new Error('Native model update was rejected')

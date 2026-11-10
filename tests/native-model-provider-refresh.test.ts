@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { composer } from './fixtures/native-model-provider-composer.js'
 import { harness, message, nativeRequest, settle } from './fixtures/native-model-provider-transport-harness.js'
 import { NativeMcpRequestClient } from '../packages/cli/src/renderer/native-mcp-request-client.js'
+import { harness as channelHarness } from './fixtures/native-submission-channel-harness.js'
 
 // Request completion must not depend on a native dispatch acknowledgement.
 describe('native model request completion', () => {
@@ -281,6 +282,248 @@ it('does not retain a previous thread choice when the next thread binding read f
     expect(h.transport.getSnapshot()).toMatchObject({ available: false, threadId: 'unrelated' })
     expect(h.transport.getSnapshot().modelProvider).toBeUndefined()
     expect(h.transport.getSnapshot().pendingProviderId).toBeUndefined()
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('keeps the same published snapshot when focus reconciliation finds no change', async () => {
+  const h = await harness()
+  try {
+    const before = h.transport.getSnapshot()
+    const changed = vi.fn()
+    const unsubscribe = h.transport.subscribe(changed)
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toBe(before)
+    expect(changed).not.toHaveBeenCalled()
+    unsubscribe()
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not let a delayed focus read replace a later user selection', async () => {
+  let hold = false
+  let pending: Record<string, unknown> | undefined
+  const h = await harness(request => {
+    if (hold && request.method === 'config/read') {
+      pending = request
+      return true
+    }
+  })
+  try {
+    hold = true
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    expect(pending).toBeDefined()
+    expect(await h.transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('accepted')
+    message(h.dom.window, {
+      type: 'mcp-response',
+      hostId: 'local',
+      message: { id: pending!.id, result: { config: { model_provider: 'provider-a', model: 'model-a' } } },
+    })
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-b', model: 'model-b' })
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('projects cached labels immediately while withholding a real binding', async () => {
+  const data = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => data.set(key, value),
+  } as Storage
+  data.set(
+    'cordisx.session-display.v1:' + JSON.stringify(['local', 'thread-1']),
+    JSON.stringify({
+      providerId: 'saved-provider',
+      model: 'saved-model',
+      reasoningEffort: 'high',
+      serviceTier: 'priority',
+      updatedAt: 1,
+    }),
+  )
+  let pending: Record<string, unknown> | undefined
+  const h = await harness(
+    request => {
+      if (request.method === 'thread/read') {
+        pending = request
+        return true
+      }
+    },
+    undefined,
+    storage,
+  )
+  try {
+    expect(pending).toBeDefined()
+    expect(h.transport.getSnapshot()).toMatchObject({
+      available: false,
+      threadId: 'thread-1',
+      cachedDisplay: { providerId: 'saved-provider', model: 'saved-model', serviceTier: 'priority' },
+    })
+    expect(h.transport.getSnapshot().modelProvider).toBeUndefined()
+    expect(await h.transport.select({ providerId: 'saved-provider', model: 'saved-model' })).toBe('unavailable')
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not infer an existing thread Fast setting from global configuration', async () => {
+  const h = await harness((request, view) => {
+    if (request.method !== 'config/read') return
+    queueMicrotask(() =>
+      message(view, {
+        type: 'mcp-response',
+        hostId: 'local',
+        message: { id: request.id, result: { config: { model_provider: 'provider-a', service_tier: 'priority' } } },
+      })
+    )
+    return true
+  })
+  try {
+    expect(h.transport.getSnapshot().serviceTier).toBeUndefined()
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not promote global provider, model or effort into an unknown existing session', async () => {
+  const { nativeComposerBaselineRouting, refreshedNativeComposerSelection } = await import(
+    '../packages/cli/src/renderer/native-composer-refresh.js'
+  )
+  const baseline = {
+    thread: undefined,
+    config: { model_provider: 'global-provider', model: 'global-model', model_reasoning_effort: 'high' },
+  }
+  const control = {
+    model: '',
+    reasoningEffort: '',
+    reasoningEfforts: [],
+    serviceTier: null,
+    serviceTierKnown: false,
+    models: [],
+    selectModel: async () => {},
+  }
+  const routing = nativeComposerBaselineRouting(baseline, control, undefined, 'thread')
+  expect(routing.provider).toBeUndefined()
+  expect(routing.model).toBeUndefined()
+  const snapshot = refreshedNativeComposerSelection(
+    'thread',
+    baseline,
+    control,
+    { available: false, revision: 1 },
+    false,
+  )
+  expect(snapshot.reasoningEffort).toBeUndefined()
+  expect(snapshot.serviceTier).toBeUndefined()
+})
+
+it('reconciles an existing Composer with a committed selection changed in another scope', async () => {
+  const h = await harness()
+  try {
+    h.channel.selectionRead.mockImplementation(async () => ({
+      available: true,
+      revision: 20,
+      effective: { providerId: 'provider-b', model: 'model-b' },
+    }))
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, modelProvider: 'provider-b', model: 'model-b' })
+    expect(h.selectModel.mock.calls.at(-1)?.[0]).toBe('model-b')
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('updates the native Composer after another bound scope commits its model', async () => {
+  const h = await harness()
+  const channel = await channelHarness({
+    catalog: () => [{
+      providerId: 'provider-a',
+      pluginId: 'host',
+      label: 'A',
+      models: [{ id: 'model-a', label: 'A', aliases: [] }, { id: 'model-b', label: 'B', aliases: [] }],
+    }],
+  })
+  const main = { ...channel.draft, composerId: 'main', threadId: 'thread-1' }
+  const side = { ...channel.draft, composerId: 'side', threadId: 'thread-1' }
+  try {
+    channel.setLive(main)
+    await channel.channel.selectionRead({ scope: main, effective: { providerId: 'provider-a', model: 'model-a' } })
+    channel.setLive(side)
+    const other = await channel.channel.selectionRead({
+      scope: side,
+      effective: { providerId: 'provider-a', model: 'model-a' },
+    })
+    await channel.channel.selectionSelect({
+      scope: side,
+      providerId: 'provider-a',
+      model: 'model-b',
+      expectedRevision: other.revision,
+    })
+    channel.setLive(main)
+    h.channel.selectionRead.mockImplementation(async () => await channel.channel.selectionRead({ scope: main }))
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, modelProvider: 'provider-a', model: 'model-b' })
+    expect(h.selectModel.mock.calls.at(-1)?.[0]).toBe('model-b')
+  } finally {
+    await channel.installed.dispose()
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('retains a settings event that arrives while a background binding read is pending', async () => {
+  const h = await harness()
+  let release!: (value: { available: true; revision: number; effective: { providerId: string; model: string } }) => void
+  try {
+    ;(h.trigger as any).__reactFiber$test.return.memoizedProps.selectedServiceTier = null
+    message(h.dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'thread-1', settings: { serviceTier: null } },
+      },
+    })
+    await settle()
+    await settle()
+    h.channel.selectionRead.mockClear()
+    h.channel.selectionRead.mockImplementationOnce(() =>
+      new Promise(resolve => {
+        release = resolve
+      })
+    )
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    expect(release).toBeTypeOf('function')
+    message(h.dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'thread-1', settings: { serviceTier: 'priority' } },
+      },
+    })
+    expect(h.transport.getSnapshot().serviceTier).toBe('priority')
+    release({ available: true, revision: 2, effective: { providerId: 'provider-a', model: 'model-a' } })
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot().serviceTier).toBe('priority')
+    expect(h.channel.selectionRead.mock.calls.length).toBeGreaterThanOrEqual(2)
   } finally {
     h.transport.dispose()
     h.dom.window.close()

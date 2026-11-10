@@ -61,6 +61,18 @@ describe('structural native task creation', () => {
       }),
     )
   })
+  it('carries inherited effort while preserving an explicit native effort', async () => {
+    const { value, handle, start } = world()
+    ;(handle as any).reasoningEffort = 'high'
+    await value.create({ __cordisxTask: handle, target: { type: 'projectless' }, model: 'native' })
+    expect(start.mock.calls.at(-1)?.[0]).toMatchObject({
+      collaborationMode: { settings: { model: 'provider-model', thinking: 'high' } },
+    })
+    await value.create({ __cordisxTask: handle, target: { type: 'projectless' }, model: 'native', thinking: 'low' })
+    expect(start.mock.calls.at(-1)?.[0]).toMatchObject({
+      collaborationMode: { settings: { model: 'provider-model', thinking: 'low' } },
+    })
+  })
   it('joins actual dispatcher metadata to original arguments despite target shadowing', async () => {
     const { value, handle } = world()
     runInNewContext(applyAgentTaskStructure(taskExecutionSource, 'execution').replace(/import[^;]+;/, ''), value)

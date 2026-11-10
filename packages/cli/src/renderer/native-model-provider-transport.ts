@@ -35,23 +35,30 @@ import { stageEffortNextSend, stageModelNextSend, validateNextSendSelection } fr
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { NativeModelSelectionSynchronizer } from './native-model-selection-synchronizer.js'
 import { applyNativeFastMode } from './native-model-fast-mode.js'
+import { NativeSessionDisplayCache, nativeSessionDisplayPrefix } from './native-session-display-cache.js'
+import { NativeSettingsReconciliation } from './native-settings-reconciliation.js'
 import {
   nativeComposerBaselineRouting,
   nativeComposerControlPatch,
   nativeComposerCreationSelection,
   nativeComposerSelectionPresentation,
+  nativeSourceComposerConfiguration,
   pendingNativeComposerSelection,
   readNativeComposerBaseline,
   refreshedNativeComposerSelection,
+  settledBackgroundComposerSelection,
 } from './native-composer-refresh.js'
 import {
   type EffectiveSelection,
   errorMessage,
   NativeModelAssignments,
+  nativeSubmissionServiceTier,
   nativeThreadBusy as threadBusy,
   nextSendSelectionFields,
   patchNativeSelection,
   record,
+  refreshNativeTurnStatus,
+  sameSnapshot,
   type SelectionPatch,
   type SelectionSnapshot,
   string,
@@ -67,6 +74,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private readonly requestObserver: NativeComposerRequestObserver
   private readonly effectiveByThread = new Map<string, EffectiveSelection>()
   private readonly nativeModelAssignments = new NativeModelAssignments()
+  private readonly displayCache: NativeSessionDisplayCache
   private nativeModelCatalogIdentity: string | undefined
   private readonly nativeModelSource = new NativeModelSource()
   private readonly requestClient: NativeMcpRequestClient
@@ -79,6 +87,23 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private selecting = false
   private turnBusy = false
   private refreshGeneration = 0
+  private suppressedRefresh: number | undefined
+  private readonly settingsReconciliation = new NativeSettingsReconciliation({
+    invalidate: () => {
+      if (this.suppressedRefresh === this.refreshGeneration) this.selectionClient.invalidateReadback()
+      this.refreshGeneration++
+    },
+    publish: patch => this.publishPatch(patch),
+    ready: () =>
+      !this.disposed && !this.selecting && !this.selectionClient.selectionActive()
+      && !this.selectionClient.submissionActive(),
+    reconcile: () => {
+      if (currentThreadId(this.document, this.composer) === this.visibleThreadId) void this.refreshComposer(0, true)
+    },
+    matchesStorage: event =>
+      event.key === null
+      || event.key === nativeSessionDisplayPrefix + JSON.stringify([this.hostId, this.visibleThreadId]),
+  })
   private pendingComposerRefresh: { generation: number; control: string } | undefined
   private navigationGeneration = 0
   private selectionGeneration = 0
@@ -111,6 +136,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     navigateContinuation?: (threadId: string) => void | Promise<void>,
     private readonly creationHandoff?: NativeComposerCreationHandoff,
   ) {
+    let storage: Storage | undefined
+    try {
+      storage = document.defaultView?.localStorage
+    } catch { /* optional storage */ }
+    this.displayCache = new NativeSessionDisplayCache(storage)
     this.requestClient = new NativeMcpRequestClient(bridge, hostId)
     this.visibleThreadId = currentThreadId(document, this.composer)
     this.selectionClient = new NativeProviderSelectionClient(
@@ -134,8 +164,9 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       async (selection, submittedEffort) => {
         const navigation = this.navigationGeneration
         const threadId = this.visibleThreadId
+        const backgroundRefresh = this.suppressedRefresh === this.refreshGeneration ? this.refreshGeneration : undefined
         if (!threadId) throw new Error('Native existing thread unavailable')
-        this.refreshGeneration++
+        if (this.suppressedRefresh !== this.refreshGeneration) this.refreshGeneration++
         this.clearControlDiscoveryRetry()
         const trigger = this.visibleTrigger
         const control = trigger?.isConnected ? locateNativeModelSelectionControl(trigger) : undefined
@@ -150,7 +181,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
             const liveTrigger = this.visibleTrigger
             return liveTrigger?.isConnected ? locateNativeModelSelectionControl(liveTrigger) : undefined
           },
-          assertCurrent: () => this.assertCurrent(navigation, threadId),
+          assertCurrent: () => {
+            this.assertCurrent(navigation, threadId)
+            if (backgroundRefresh !== undefined && !this.isRefreshCurrent(backgroundRefresh, threadId)) {
+              throw new Error('Native configuration changed during refresh')
+            }
+          },
         })
         this.confirmNativeModelAssignment(selection.providerId, selection.model)
         const selectedControl = this.modelControl()
@@ -192,9 +228,19 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       snapshot: this.submissionAuthority.snapshot,
       composer: () => this.composer ?? this.visibleTrigger?.closest<HTMLElement>('[data-codex-composer-root]'),
       submit: this.selectionClient.submitHook,
-      serviceTier: () => this.state.serviceTier === 'priority' ? 'priority' : 'default',
+      serviceTier: () => nativeSubmissionServiceTier(this.state),
+      sourceConfiguration: () =>
+        nativeSourceComposerConfiguration(
+          this.state,
+          this.modelControl(),
+          this.visibleThreadId,
+          this.selecting || this.selectionClient.configurationActive(),
+        ),
       creationAdmitted: (result, descriptor) => {
-        if (!result.allow || !result.operationToken || result.continuation || this.disposed) return
+        if (
+          !result.allow || !result.operationToken || result.serviceTier === undefined || result.continuation
+          || this.disposed
+        ) return
         const scope = this.currentSubmissionScope()
         if (
           scope.threadId !== undefined
@@ -209,6 +255,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
             result.operationToken,
             selection,
             result.reasoningEffort ?? this.state.reasoningEffort,
+            result.serviceTier,
           )
         }
       },
@@ -229,11 +276,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       scheduleTurnStatusRefresh: threadId => this.scheduleTurnStatusRefresh(threadId),
       publishPatch: patch => this.publishPatch(patch),
       refreshSelection: () => this.selectionClient.refresh(),
+      settingsUpdated: patch => this.settingsReconciliation.update(patch),
       receiveOwnRequest: message => this.requestClient.receive(message),
       modelControl: () => this.modelControl(),
       confirmEffective: (threadId, selection) => this.effectiveByThread.set(threadId, selection),
       confirmModel: (provider, model) => this.confirmNativeModelAssignment(provider, model),
     })
+    document.defaultView?.addEventListener('focus', this.settingsReconciliation.focus)
+    document.defaultView?.addEventListener('storage', this.settingsReconciliation.storage)
     const Observer = document.defaultView?.MutationObserver
     if (Observer !== undefined) {
       this.observer = new Observer(records => {
@@ -330,6 +380,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       return 'unavailable'
     }
     if (this.selectionClient.submissionActive()) return 'busy'
+    this.refreshGeneration++
     return this.selectionClient.selectProviderIntent(providerId)
   }
 
@@ -347,6 +398,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   > {
     if (this.disposed || !this.state.available || this.modelControl() === undefined) return 'unavailable'
     if (this.selectionClient.submissionActive() || this.selectionClient.selectionActive()) return 'busy'
+    this.refreshGeneration++
     if (this.state.providerSwitchAvailable === false && target.providerId !== this.state.modelProvider) {
       return 'unavailable'
     }
@@ -445,6 +497,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   async selectReasoningEffort(reasoningEffort: string): Promise<'accepted' | 'busy' | 'unavailable'> {
     if (this.disposed || !this.nativeManagedModelRoutingAvailable || !this.state.available) return 'unavailable'
     if (this.selectionClient.submissionActive()) return 'busy'
+    this.refreshGeneration++
     const draft = this.selectionClient.snapshot().nextSend
     if (this.turnBusy || draft !== undefined) {
       return stageEffortNextSend(
@@ -518,20 +571,28 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   async selectFastMode(enabled: boolean): Promise<'accepted' | 'busy' | 'unavailable'> {
     if (this.disposed || !this.nativeManagedModelRoutingAvailable || !this.state.available) return 'unavailable'
     if (this.state.busy || this.selectionClient.submissionActive()) return 'busy'
+    this.refreshGeneration++
     const navigation = this.navigationGeneration
     const threadId = this.state.threadId
     const generation = ++this.selectionGeneration
+    const settingsEpoch = this.settingsReconciliation.epoch()
     this.selecting = true
     try {
-      return await applyNativeFastMode(
+      const result = await applyNativeFastMode(
         enabled,
         this.modelControl(),
         this.state.model,
         threadId,
         (method, params) => this.requestClient.request(method, params),
         () => this.assertCurrent(navigation, threadId),
-        patch => this.publishPatch(patch),
+        patch => {
+          if (!Object.hasOwn(patch, 'serviceTier') || this.settingsReconciliation.epoch() === settingsEpoch) {
+            this.publishPatch(patch)
+          }
+        },
       )
+      if (result === 'accepted') this.settingsReconciliation.clearTierIfUnchanged(settingsEpoch)
+      return result
     } finally {
       if (generation === this.selectionGeneration) {
         this.selecting = false
@@ -550,6 +611,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.refreshGeneration += 1
     this.clearControlDiscoveryRetry()
     this.clearTurnStatusRetry()
+    this.document.defaultView?.removeEventListener('focus', this.settingsReconciliation.focus)
+    this.document.defaultView?.removeEventListener('storage', this.settingsReconciliation.storage)
     this.observer?.disconnect()
     this.requestObserver.dispose()
     this.requestClient.dispose()
@@ -586,6 +649,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const trigger = locateNativeModelProviderSeat(this.document, this.composer)?.trigger
     if (threadId !== this.visibleThreadId) {
       this.invalidateNativeModelAssignments()
+      this.settingsReconciliation.reset()
       this.state = Object.freeze({ available: false, busy: threadId !== undefined })
       this.selectionClient.invalidateScope()
       this.submissionError = undefined
@@ -618,7 +682,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.syncControl()
   }
 
-  private async refreshComposer(controlDiscoveryAttempt = 0): Promise<void> {
+  private async refreshComposer(controlDiscoveryAttempt = 0, reconcile = false): Promise<void> {
     this.clearControlDiscoveryRetry()
     const generation = ++this.refreshGeneration
     const threadId = currentThreadId(this.document, this.composer)
@@ -629,12 +693,15 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (trigger && !nativeModelProviderInteractionAllowed(trigger)) this.suspendedAvailability = this.state.available
     this.visibleThreadId = threadId
     this.visibleTrigger = trigger
-    this.turnBusy = threadId !== undefined
-    this.replaceState({
-      ...(this.state.threadId === threadId ? this.state : threadId === undefined ? {} : { threadId }),
-      available: false,
-      busy: threadId !== undefined,
-    })
+    const background = reconcile && this.state.available && this.state.threadId === threadId
+    if (!background) {
+      this.turnBusy = threadId !== undefined
+      this.replaceState({
+        ...(this.state.threadId === threadId ? this.state : threadId === undefined ? {} : { threadId }),
+        available: false,
+        busy: threadId !== undefined,
+      })
+    }
     if (
       this.state.pendingCreation !== undefined || threadId === undefined && nativeComposerCreationPending(this.composer)
     ) {
@@ -679,6 +746,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         baseline,
         control,
         effective,
+        threadId,
       )
       this.providerNames.clear()
       for (const [id, name] of providerNames) this.providerNames.set(id, name)
@@ -694,18 +762,41 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.nativeModelAssignments.updateScope(threadId, catalogIdentity, control.models.map(option => option.id))
       this.confirmNativeModelAssignment(provider, model, nativeModelsScope, control.models)
       // Read the Host binding before exposing a native config default as the selected provider.
+      let reconciled: SelectionSnapshot | undefined
+      if (background) this.suppressedRefresh = generation
       await this.selectionClient.refresh({
         scope: this.currentSubmissionScope(),
         idle: !busy,
-        ...(model === undefined ? {} : { effective: { providerId: provider, model } }),
+        ...(model === undefined || provider === undefined ? {} : { effective: { providerId: provider, model } }),
       }, () => {
         if (!this.isRefreshCurrent(generation, threadId)) return
         const projection = this.selectionClient.snapshot()
-        this.replaceState(refreshedNativeComposerSelection(threadId, baseline, control, projection, busy, confirmed))
+        reconciled = refreshedNativeComposerSelection(threadId, baseline, control, projection, busy, confirmed)
+        if (!background) this.replaceState(this.settingsReconciliation.protect(reconciled, control))
       })
+      if (background && this.suppressedRefresh === generation) {
+        this.suppressedRefresh = undefined
+        if (reconciled && this.isRefreshCurrent(generation, threadId)) {
+          const currentControl = this.modelControl() ?? control
+          this.replaceState(this.settingsReconciliation.protect(
+            settledBackgroundComposerSelection(
+              threadId,
+              baseline,
+              currentControl,
+              this.selectionClient.snapshot(),
+              busy,
+              confirmed,
+            ),
+            currentControl,
+          ))
+        }
+      }
     } catch {
-      if (this.isRefreshCurrent(generation, threadId)) this.replaceState({ available: false, busy: false })
+      if (!background && this.isRefreshCurrent(generation, threadId)) {
+        this.replaceState({ ...(threadId === undefined ? {} : { threadId }), available: false, busy: false })
+      }
     } finally {
+      if (this.suppressedRefresh === generation) this.suppressedRefresh = undefined
       if (this.pendingComposerRefresh?.generation === generation) this.pendingComposerRefresh = undefined
     }
   }
@@ -733,12 +824,13 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     pending: PendingNativeProviderSelection,
     control: NonNullable<ReturnType<CodexDesktopNativeModelProviderTransport['modelControl']>>,
   ): TargetReasoning {
-    const effort = this.pendingReasoning.resolve(
+    return this.pendingReasoning.target(
       this.navigationGeneration,
       pending,
       this.state.reasoningEffort ?? control.reasoningEffort,
+      control.models,
+      this.catalogReasoning,
     )
-    return this.targetReasoning(pending, control, effort)
   }
 
   private clearControlDiscoveryRetry(): void {
@@ -763,35 +855,17 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     }, TURN_STATUS_RETRY_MS)
   }
 
-  private async refreshTurnStatus(
-    navigationGeneration: number,
-    turnGeneration: number,
-    threadId: string,
-  ): Promise<void> {
-    if (
-      !this.turnBusy || turnGeneration !== this.turnGeneration
-      || !this.isCurrent(navigationGeneration, threadId)
-    ) return
-    try {
-      const response = record(await this.requestClient.request('thread/read', { threadId, includeTurns: false }))
-      if (
-        !this.turnBusy || turnGeneration !== this.turnGeneration
-        || !this.isCurrent(navigationGeneration, threadId)
-      ) return
-      const busy = threadBusy(record(response?.thread) ?? {})
-      if (busy !== undefined) {
+  private async refreshTurnStatus(navigation: number, turn: number, threadId: string): Promise<void> {
+    await refreshNativeTurnStatus({
+      current: () => this.turnBusy && turn === this.turnGeneration && this.isCurrent(navigation, threadId),
+      read: () => this.requestClient.request('thread/read', { threadId, includeTurns: false }),
+      update: async busy => {
         this.turnBusy = busy
         this.publishPatch()
         if (!busy) await this.selectionClient.refresh()
-      }
-    } catch {
-      // A failed read cannot prove the turn completed; keep the selector disabled and retry.
-    } finally {
-      if (
-        this.turnBusy && turnGeneration === this.turnGeneration
-        && this.isCurrent(navigationGeneration, threadId)
-      ) this.scheduleTurnStatusRefresh(threadId)
-    }
+      },
+      retry: () => this.scheduleTurnStatusRefresh(threadId),
+    })
   }
 
   private syncControl(): void {
@@ -821,6 +895,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.catalogReasoning,
     )
     if (patch === undefined) return
+    if (this.suppressedRefresh !== this.refreshGeneration) this.refreshGeneration++
     this.confirmNativeModelAssignment(
       this.state.modelProvider,
       patch.model ?? undefined,
@@ -859,7 +934,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   }
 
   private replaceState(next: SelectionSnapshot): void {
-    if (this.disposed) return
+    if (this.disposed || this.suppressedRefresh === this.refreshGeneration) return
     const base = { ...next }
     Reflect.deleteProperty(base, 'nativeModelsProviderId')
     const seat = locateNativeModelProviderMountSeat(this.document, this.composer)
@@ -881,11 +956,15 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     const composer = this.composer ?? seat?.trigger.closest<HTMLElement>('[data-codex-composer-root]') ?? undefined
     const actualBinding = next.threadId !== undefined && next.available
       && next.modelProvider !== undefined && next.model !== undefined
+      && isModelReasoningEffort(next.reasoningEffort) && next.serviceTier !== undefined
+      && control?.model === next.model && control.reasoningEffort === next.reasoningEffort
     if (actualBinding) this.creationHandoff?.acknowledge(composer, next.threadId!)
     const creationDisplay = actualBinding ? undefined : this.creationHandoff?.read(composer, next.threadId)
     if (this.suspendedAvailability !== undefined) this.suspendedAvailability = next.available
-    this.state = Object.freeze({
+    const cachedDisplay = this.displayCache.readSelection(this.hostId, next)
+    const updated = {
       ...base,
+      cachedDisplay,
       ...presentation,
       creationDisplay,
       available: presentation.pendingCreation === undefined && this.suspendedAvailability === undefined
@@ -900,7 +979,14 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         this.selectionClient.selectionActive(),
         { effort: pendingReasoning?.effort, confirmation, error: this.submissionError },
       ),
-    })
+    }
+    this.displayCache.writeSelection(
+      this.hostId,
+      next,
+      this.selecting || this.selectionClient.selectionActive() || this.selectionClient.submissionActive(),
+    )
+    if (sameSnapshot(this.state, updated)) return
+    this.state = Object.freeze(updated)
     for (const listener of this.listeners) listener()
   }
 
@@ -909,5 +995,6 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (Object.hasOwn(next, 'submissionError')) this.submissionError = next.submissionError ?? undefined
     const patch = patchNativeSelection(this.state, next, this.selecting || this.turnBusy, this.suspendedAvailability)
     this.replaceState(patch)
+    this.settingsReconciliation.flush()
   }
 }

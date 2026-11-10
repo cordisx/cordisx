@@ -73,12 +73,16 @@ export class TaskSource {
   addProperty(object: SyntaxNode, text: string): void {
     this.insert(object.start + 1, text + ',')
   }
-  addHandle(fn: SyntaxNode, pattern: SyntaxNode, model?: string): void {
+  addHandle(fn: SyntaxNode, pattern: SyntaxNode, model?: string, effort?: string): void {
     this.addProperty(pattern, `${taskHandle}:${taskHandle}`)
     this.insert(
       fn.body.start + 1,
       `if(${taskHandle}!==void 0&&!globalThis.${taskMarker}?.owns(${taskHandle}))throw Error('Invalid native task handle');${
         model === undefined ? '' : `if(${taskHandle}!==void 0)${model}=${taskHandle}.model;`
+      }${
+        effort === undefined
+          ? ''
+          : `if(${taskHandle}!==void 0&&${effort}==null&&${taskHandle}.reasoningEffort!==void 0)${effort}=${taskHandle}.reasoningEffort;`
       }`,
     )
   }

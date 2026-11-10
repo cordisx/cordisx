@@ -13,6 +13,7 @@ import { isModelReasoningEffort, type ModelReasoningEffort } from '../model-reas
 export interface NativeComposerCreationDisplay extends NativeComposerCreationSelection {
   readonly providerId: string
   readonly threadId?: string
+  readonly serviceTier: 'priority' | null
 }
 
 interface Admission {
@@ -20,6 +21,7 @@ interface Admission {
   readonly navigationGeneration: number
   readonly selection: NativeProviderSelection
   readonly effort: ModelReasoningEffort
+  readonly serviceTier: 'priority' | null
   readonly expiresAt: number
   clientThreadId?: string
   threadId?: string
@@ -37,7 +39,13 @@ export class NativeComposerCreationHandoff {
 
   constructor(private readonly owner: NativeProviderSelectionOwner, private readonly now: () => number = Date.now) {}
 
-  admit(scope: NativeSubmissionScope, token: string, selection: NativeProviderSelection, effort: unknown): void {
+  admit(
+    scope: NativeSubmissionScope,
+    token: string,
+    selection: NativeProviderSelection,
+    effort: unknown,
+    serviceTier: 'priority' | 'default' = 'default',
+  ): void {
     if (
       this.disposed || scope.threadId !== undefined || !scope.composerId || !identifier(token)
       || scope.targetId !== this.owner.targetId || scope.rendererGeneration !== this.owner.rendererGeneration
@@ -51,7 +59,7 @@ export class NativeComposerCreationHandoff {
       if (
         existing.composerId !== scope.composerId || existing.navigationGeneration !== scope.navigationGeneration
         || existing.selection.providerId !== selection.providerId || existing.selection.model !== selection.model
-        || existing.effort !== effort
+        || existing.effort !== effort || existing.serviceTier !== (serviceTier === 'priority' ? 'priority' : null)
       ) this.retire(token)
       return
     }
@@ -61,6 +69,7 @@ export class NativeComposerCreationHandoff {
       navigationGeneration: scope.navigationGeneration,
       selection: { ...selection },
       effort,
+      serviceTier: serviceTier === 'priority' ? 'priority' : null,
       expiresAt: this.now() + 600_000,
     })
   }
@@ -122,6 +131,7 @@ export class NativeComposerCreationHandoff {
       providerId: admission.selection.providerId,
       model: admission.selection.model,
       reasoningEffort: admission.effort,
+      serviceTier: admission.serviceTier,
       ...(threadId === undefined ? {} : { threadId }),
     }
   }
