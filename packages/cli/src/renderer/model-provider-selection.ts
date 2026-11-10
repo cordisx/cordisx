@@ -45,11 +45,20 @@ export function modelProviderSelectionDisplay(
 ) {
   // Cached values are projected only into this display function.
   if (!native.available && native.cachedDisplay && native.threadId !== undefined) {
-    const { reasoningEffort: _previousEffort, ...base } = native
+    const sameTuple = native.modelProvider === native.cachedDisplay.providerId
+      && native.model === native.cachedDisplay.model
+    const {
+      reasoningEffort: _previousEffort,
+      modelLabel: _previousModelLabel,
+      providerLabel: _previousProviderLabel,
+      ...base
+    } = native
     native = {
       ...base,
       modelProvider: native.cachedDisplay.providerId,
       model: native.cachedDisplay.model,
+      modelLabel: sameTuple ? native.modelLabel ?? native.cachedDisplay.model : native.cachedDisplay.model,
+      ...(sameTuple && native.providerLabel !== undefined ? { providerLabel: native.providerLabel } : {}),
       ...(native.cachedDisplay.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: native.cachedDisplay.reasoningEffort }),
@@ -63,7 +72,11 @@ export function modelProviderSelectionDisplay(
   }
   const cachedDisplay = !native.available ? native.cachedDisplay : undefined
   const preference = native.threadId === undefined ? native.draftPreference : undefined
-  const creationDisplay = native.creationDisplay?.threadId === native.threadId ? native.creationDisplay : undefined
+  const handoff = native.creationDisplay?.threadId === native.threadId ? native.creationDisplay : undefined
+  const creationDisplay = handoff && (!native.available || !native.modelProvider || !native.model
+      || native.modelProvider === handoff.providerId && native.model === handoff.model)
+    ? handoff
+    : undefined
   const providerIntent = native.pendingProviderIntent?.providerId
   const selected = providers.find(provider => provider.providerId === native.modelProvider)
   const selectedModel = selected?.models.find(model => model.id === native.model)
@@ -134,7 +147,7 @@ export function modelProviderSelectionDisplay(
     ?.find(model => model.id === displayedModelId)
   const catalogBacked = displayedProviderId !== 'openai' && displayedProvider !== undefined
   const selectedReasoningEffort = creationModel !== undefined
-    ? creation?.reasoningEffort
+    ? native.available && native.reasoningEffort !== undefined ? native.reasoningEffort : creation?.reasoningEffort
     : pendingProviderId === undefined
     ? native.reasoningEffort
     : pendingEffort

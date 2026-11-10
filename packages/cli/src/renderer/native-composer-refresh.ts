@@ -122,6 +122,21 @@ export function refreshedNativeComposerSelection(
   }
 }
 
+/** Finish background readback using the current control, retaining an already known Fast value when absent. */
+export function settledBackgroundComposerSelection(
+  threadId: string | undefined,
+  baseline: NonNullable<Awaited<ReturnType<typeof readNativeComposerBaseline>>>,
+  control: NativeModelSelectionControl,
+  projection: NativeProviderSelectionProjection,
+  busy: boolean,
+  confirmed: SelectionSnapshot | undefined,
+): SelectionSnapshot {
+  const settled = refreshedNativeComposerSelection(threadId, baseline, control, projection, busy)
+  return settled.serviceTier === undefined && confirmed?.serviceTier !== undefined
+    ? { ...settled, serviceTier: confirmed.serviceTier }
+    : settled
+}
+
 /** Reconcile native control presentation while preserving a confirmed thread model. */
 export function nativeComposerControlPatch(
   state: SelectionSnapshot,

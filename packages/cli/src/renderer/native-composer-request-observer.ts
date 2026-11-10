@@ -18,7 +18,7 @@ interface NativeRequestOwner {
   scheduleTurnStatusRefresh(threadId: string): void
   publishPatch(patch?: SelectionPatch): void
   refreshSelection(): Promise<void>
-  refreshConfiguration(): void
+  settingsUpdated(patch?: SelectionPatch): void
   receiveOwnRequest(message: Record<string, unknown> | undefined): boolean
   modelControl(): NativeModelSelectionControl | undefined
   confirmEffective(threadId: string, selection: EffectiveSelection): void
@@ -130,10 +130,11 @@ export class NativeComposerRequestObserver {
       if (settings && Object.hasOwn(settings, 'serviceTier')) {
         const tier = settings.serviceTier
         if (tier === null || tier === 'priority' || tier === 'fast') {
-          this.owner.publishPatch({ serviceTier: tier === null ? null : 'priority' })
+          this.owner.settingsUpdated({ serviceTier: tier === null ? null : 'priority' })
+          return
         }
       }
-      this.owner.refreshConfiguration()
+      this.owner.settingsUpdated()
       return
     } else return
     this.owner.publishPatch()

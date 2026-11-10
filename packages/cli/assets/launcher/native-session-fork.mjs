@@ -29,8 +29,17 @@ export async function inheritNativeFork(message, { nativeCall, controlCall }) {
   const effort = Object.hasOwn(inputConfig, 'model_reasoning_effort')
     ? inputConfig.model_reasoning_effort
     : source.reasoningEffort
-  const tier = Object.hasOwn(params, 'serviceTier') ? params.serviceTier : source.serviceTier
-  if (!efforts.has(effort) || (tier !== null && tier !== 'priority')) return { handled: false }
+  const hasTopTier = Object.hasOwn(params, 'serviceTier')
+  const hasConfigTier = Object.hasOwn(inputConfig, 'service_tier')
+  const knownTier = value => value === null || value === 'priority'
+  // Native schema accepts arbitrary strings and does not specify conflict precedence.
+  // Preserve unknown or conflicting explicit settings through the native path.
+  if (
+    hasTopTier && !knownTier(params.serviceTier) || hasConfigTier && !knownTier(inputConfig.service_tier)
+    || hasTopTier && hasConfigTier && params.serviceTier !== inputConfig.service_tier
+  ) return { handled: false }
+  const tier = hasTopTier ? params.serviceTier : hasConfigTier ? inputConfig.service_tier : source.serviceTier
+  if (!efforts.has(effort)) return { handled: false }
   let lease
   try {
     if (providerId !== 'openai') {

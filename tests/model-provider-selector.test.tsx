@@ -849,3 +849,54 @@ describe('provider selection interaction', () => {
     expect(login).toHaveBeenCalledOnce()
   })
 })
+
+it('shows cached tuple labels with a cold catalog without borrowing stale labels or authority', async () => {
+  const { update } = await setup()
+  await update({
+    available: false,
+    modelProvider: 'old-provider',
+    model: 'old-model',
+    modelLabel: 'Old model',
+    providerLabel: 'Old provider',
+    reasoningEffort: 'low',
+    serviceTier: null,
+    cachedDisplay: {
+      providerId: 'cached-provider',
+      model: 'cached-model[Responses]',
+      reasoningEffort: 'high',
+      serviceTier: 'priority',
+      updatedAt: 1,
+    },
+  })
+  expect(document.querySelector(providerTrigger)?.getAttribute('aria-label')).toContain('cached-provider')
+  expect(document.querySelector(`${modelTrigger} .cxmp-model-label`)?.textContent).toBe('cached-model')
+  expect(document.querySelector('.cxmp-effort-label')?.textContent).toBe('High')
+  expect(document.querySelector<HTMLButtonElement>('.cxmp-fast-trigger')?.disabled).toBe(true)
+  expect(document.querySelector('.cxmp-selector')?.getAttribute('data-cordisx-model-send-eligible')).toBe('false')
+})
+
+it('uses settled partial fields before matching creation display hints', async () => {
+  const { update } = await setup()
+  await update({
+    available: true,
+    threadId: 'created',
+    modelProvider: 'first',
+    model: 'shared',
+    reasoningEffort: 'high',
+    serviceTier: null,
+    creationDisplay: {
+      clientThreadId: 'client',
+      threadId: 'created',
+      providerId: 'first',
+      model: 'shared',
+      reasoningEffort: 'low',
+      serviceTier: 'priority',
+    },
+  })
+  expect(document.querySelector('.cxmp-effort-label')?.textContent).toBe('High')
+  expect(document.querySelector('.cxmp-fast-trigger')).toBeNull()
+  expect(document.querySelector('.cxmp-selector')?.getAttribute('data-cordisx-model-send-eligible')).toBe('false')
+  await update({ model: 'different', modelLabel: 'Settled model' })
+  expect(document.querySelector(`${modelTrigger} .cxmp-model-label`)?.textContent).toBe('Settled model')
+  expect(document.querySelector('.cxmp-fast-trigger')).toBeNull()
+})

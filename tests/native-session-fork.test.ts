@@ -99,3 +99,23 @@ it('rechecks the source and keeps native rejection details while retiring the le
   expect(await inheritNativeFork(request, rejected)).toEqual({ handled: true, error: nativeError })
   expect(rejected.calls.at(-1)?.value).toMatchObject({ succeeded: false })
 })
+
+it('honors explicit config service tier without inventing precedence for unknown or conflicting values', async () => {
+  const f = fixture()
+  const configOnly = { ...request, params: { ...request.params, config: { service_tier: null } } }
+  expect(await inheritNativeFork(configOnly, f)).toMatchObject({ handled: true, result: { serviceTier: null } })
+  expect(f.nativeCall).toHaveBeenCalledWith(
+    'thread/fork',
+    expect.objectContaining({ serviceTier: null, config: expect.objectContaining({ service_tier: null }) }),
+  )
+  for (
+    const params of [
+      { ...request.params, serviceTier: 'priority', config: { service_tier: null } },
+      { ...request.params, config: { service_tier: 'unrecognized-tier' } },
+    ]
+  ) {
+    const other = fixture()
+    expect(await inheritNativeFork({ ...request, params }, other)).toEqual({ handled: false })
+    expect(other.nativeCall).not.toHaveBeenCalled()
+  }
+})

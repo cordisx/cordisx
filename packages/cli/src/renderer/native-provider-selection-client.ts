@@ -238,6 +238,9 @@ export class NativeProviderSelectionClient {
     const scope = this.authority().scope
     return [...this.selectionOperations].some(operation => sameScope(operation.scope, scope))
   }
+  configurationActive = (): boolean =>
+    this.selectionActive() || this.submissionActive() || this.synchronizationActive()
+    || this.projection.pending !== undefined || this.projection.pendingProviderIntent !== undefined
   confirmation = (): NativeProviderSubmitConfirmation | undefined => this.waiter?.confirmation
   subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
@@ -415,6 +418,11 @@ export class NativeProviderSelectionClient {
     this.waiter = undefined
     this.emit()
     waiter.resolve(confirmed)
+  }
+
+  /** Retire a read already in flight without discarding the live selection. */
+  invalidateReadback(): void {
+    this.projectionGeneration++
   }
 
   invalidateScope(): void {

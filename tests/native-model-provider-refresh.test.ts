@@ -485,3 +485,47 @@ it('updates the native Composer after another bound scope commits its model', as
     h.dom.window.close()
   }
 })
+
+it('retains a settings event that arrives while a background binding read is pending', async () => {
+  const h = await harness()
+  let release!: (value: { available: true; revision: number; effective: { providerId: string; model: string } }) => void
+  try {
+    ;(h.trigger as any).__reactFiber$test.return.memoizedProps.selectedServiceTier = null
+    message(h.dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'thread-1', settings: { serviceTier: null } },
+      },
+    })
+    await settle()
+    await settle()
+    h.channel.selectionRead.mockClear()
+    h.channel.selectionRead.mockImplementationOnce(() =>
+      new Promise(resolve => {
+        release = resolve
+      })
+    )
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    expect(release).toBeTypeOf('function')
+    message(h.dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'thread-1', settings: { serviceTier: 'priority' } },
+      },
+    })
+    expect(h.transport.getSnapshot().serviceTier).toBe('priority')
+    release({ available: true, revision: 2, effective: { providerId: 'provider-a', model: 'model-a' } })
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot().serviceTier).toBe('priority')
+    expect(h.channel.selectionRead.mock.calls.length).toBeGreaterThanOrEqual(2)
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})

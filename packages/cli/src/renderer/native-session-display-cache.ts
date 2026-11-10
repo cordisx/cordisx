@@ -1,3 +1,5 @@
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+
 /** Persisted labels are presentation hints only; never use them for routing or authorization. */
 export interface NativeSessionDisplay {
   readonly providerId: string
@@ -27,7 +29,7 @@ export class NativeSessionDisplayCache {
       const item = value as Record<string, unknown>
       if (
         !valid(item.providerId) || !valid(item.model)
-        || (item.reasoningEffort !== undefined && !valid(item.reasoningEffort))
+        || (item.reasoningEffort !== undefined && !isModelReasoningEffort(item.reasoningEffort))
         || (item.serviceTier !== null && item.serviceTier !== 'priority')
         || typeof item.updatedAt !== 'number' || !Number.isFinite(item.updatedAt)
       ) return undefined
@@ -44,7 +46,10 @@ export class NativeSessionDisplayCache {
   }
 
   readSelection(hostId: string, state: import('./native-model-provider-state.js').SelectionSnapshot) {
-    if (!state.threadId || state.available && state.reasoningEffort !== undefined && state.serviceTier !== undefined) {
+    if (
+      !state.threadId
+      || state.available && isModelReasoningEffort(state.reasoningEffort) && state.serviceTier !== undefined
+    ) {
       return undefined
     }
     return this.read(hostId, state.threadId)
@@ -58,7 +63,7 @@ export class NativeSessionDisplayCache {
   ): void {
     if (
       locked || !state.available || !state.threadId || !state.modelProvider || !state.model
-      || state.reasoningEffort === undefined || state.serviceTier === undefined
+      || !isModelReasoningEffort(state.reasoningEffort) || state.serviceTier === undefined
     ) return
     this.write(hostId, state.threadId, {
       providerId: state.modelProvider,
@@ -71,7 +76,7 @@ export class NativeSessionDisplayCache {
   write(hostId: string, threadId: string, display: Omit<NativeSessionDisplay, 'updatedAt'>): void {
     if (
       !valid(hostId) || !valid(threadId) || !valid(display.providerId) || !valid(display.model)
-      || (display.reasoningEffort !== undefined && !valid(display.reasoningEffort))
+      || (display.reasoningEffort !== undefined && !isModelReasoningEffort(display.reasoningEffort))
     ) return
     const old = this.read(hostId, threadId)
     if (

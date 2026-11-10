@@ -19,6 +19,11 @@ export interface SelectionPatch {
   readonly draftPreference?: ProviderSelectionSnapshot['draftPreference'] | null
 }
 
+/** An unknown Fast value must remain a native decision. */
+export function nativeSubmissionServiceTier(state: SelectionSnapshot): 'priority' | 'default' | undefined {
+  return state.serviceTier === undefined ? undefined : state.serviceTier === 'priority' ? 'priority' : 'default'
+}
+
 /** Model ownership evidence lives only within its exact thread/catalog scope. */
 export class NativeModelAssignments {
   private readonly entries = new Map<string, { readonly providerId: string; readonly model: string }>()
@@ -95,6 +100,26 @@ export function nativeThreadBusy(thread: Record<string, unknown>): boolean | und
     : undefined
   if (status === 'idle' || status === 'notLoaded' || status === 'systemError') return false
   return status === 'active' ? true : undefined
+}
+
+/** Poll one scoped native turn without letting late reads affect a successor. */
+export async function refreshNativeTurnStatus(owner: {
+  current(): boolean
+  read(): Promise<unknown>
+  update(busy: boolean): Promise<void>
+  retry(): void
+}): Promise<void> {
+  if (!owner.current()) return
+  try {
+    const response = record(await owner.read())
+    if (!owner.current()) return
+    const busy = nativeThreadBusy(record(response?.thread) ?? {})
+    if (busy !== undefined) await owner.update(busy)
+  } catch {
+    // A failed read cannot prove the turn completed.
+  } finally {
+    if (owner.current()) owner.retry()
+  }
 }
 
 export function nextSendSelectionFields(

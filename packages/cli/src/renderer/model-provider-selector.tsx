@@ -182,8 +182,13 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     })
     : []
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
-  const fastMode = native.creationDisplay !== undefined
-    ? native.creationDisplay.serviceTier === 'priority'
+  const matchingCreation = native.creationDisplay && (!native.available || !native.modelProvider || !native.model
+      || native.modelProvider === native.creationDisplay.providerId && native.model === native.creationDisplay.model)
+    ? native.creationDisplay
+    : undefined
+  const fastMode = matchingCreation !== undefined
+    ? (native.available && native.serviceTier !== undefined ? native.serviceTier : matchingCreation.serviceTier)
+      === 'priority'
     : native.available
     ? supportsFastMode && (native.serviceTier === 'priority'
       || native.serviceTier === undefined && native.cachedDisplay?.providerId === native.modelProvider
