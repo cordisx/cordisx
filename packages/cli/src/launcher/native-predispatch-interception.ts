@@ -19,6 +19,7 @@ export const CODEX_BUILD_8109_NATIVE_RESOURCE_PINS = Object.freeze({
 })
 
 export interface NativeResourceInterceptionSession {
+  isClosed?(): boolean
   send(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>
   onEvent(method: string, listener: (params: Record<string, unknown>) => void): () => void
   isTargetClosed?(): boolean
@@ -61,7 +62,7 @@ export interface NativeResourceInterception {
   readonly managedRuntimeFlag: false
   readonly evidence: readonly NativeResourceEvidence[]
   readonly status: NativeResourceInterceptionStatus
-  dispose(): Promise<void>
+  dispose(session?: NativeResourceInterceptionSession): Promise<void>
 }
 
 export interface NativeResourceInterceptionOptions {
@@ -192,15 +193,18 @@ class Handle implements NativeResourceInterception {
     readonly target: Readonly<{ id: string; url: string }>,
     readonly evidence: readonly NativeResourceEvidence[],
     private readonly state: State,
-    private readonly cleanup: (finalStatus: 'unavailable' | 'disposed') => Promise<void>,
+    private readonly cleanup: (
+      finalStatus: 'unavailable' | 'disposed',
+      session?: NativeResourceInterceptionSession,
+    ) => Promise<void>,
   ) {}
 
   get status(): NativeResourceInterceptionStatus {
     return this.state.status
   }
 
-  async dispose(): Promise<void> {
-    await this.cleanup('disposed')
+  async dispose(session?: NativeResourceInterceptionSession): Promise<void> {
+    await this.cleanup('disposed', session)
   }
 }
 
@@ -300,12 +304,12 @@ export async function installNativeResourceInterception(
   const continueOriginal = async (requestId: string): Promise<void> => {
     await settleRequest(requestId, 'Fetch.continueRequest', {})
   }
-  const fence = async (): Promise<void> => {
+  const fence = async (session: NativeResourceInterceptionSession): Promise<void> => {
     const failures: unknown[] = []
     for (const expression of state.fences) {
       await settle(
         documentOperation(async () => {
-          const response = await options.session.send('Runtime.evaluate', {
+          const response = await session.send('Runtime.evaluate', {
             expression,
             returnByValue: true,
             awaitPromise: true,
@@ -313,13 +317,17 @@ export async function installNativeResourceInterception(
           if (response.exceptionDetails !== undefined) {
             throw new Error('native resource interception fence threw in the renderer')
           }
+          state.fences.delete(expression)
         }),
         failures,
       )
     }
     if (failures.length > 0) throw new AggregateError(failures, 'native resource interception fence was incomplete')
   }
-  const cleanup = async (finalStatus: 'unavailable' | 'disposed'): Promise<void> => {
+  const cleanup = async (finalStatus: 'unavailable' | 'disposed', session = options.session): Promise<void> => {
+    if (session !== options.session && options.session.isClosed?.() !== true) {
+      throw new Error('Native interception cleanup replacement requires a closed original connection')
+    }
     if (finalStatus === 'disposed') cleanupFinalStatus = 'disposed'
     if (cleanupPromise !== undefined) {
       await cleanupPromise
@@ -330,7 +338,7 @@ export async function installNativeResourceInterception(
       state.disposed = true
       if (state.status === 'active') publish('unavailable')
       const failures: unknown[] = []
-      await settle(fence(), failures)
+      await settle(fence(session), failures)
       state.removeListener?.()
       state.removeListener = undefined
       state.removeLifecycleListener?.()
@@ -338,34 +346,42 @@ export async function installNativeResourceInterception(
       state.removeAbortListener?.()
       state.removeAbortListener = undefined
       await Promise.allSettled([...state.operations])
-      for (const requestId of state.requests.keys()) {
-        await settle(documentOperation(async () => await continueOriginal(requestId)), failures)
-      }
+      // Fetch request IDs belong to the disconnected session and cannot be replayed on another connection.
+      if (session !== options.session) state.requests.clear()
+      else {for (const requestId of state.requests.keys()) {
+          await settle(documentOperation(async () => await continueOriginal(requestId)), failures)
+        }}
       if (state.fetchEnabled) {
         await settle(
-          documentOperation(async () => await options.session.send('Fetch.disable', {}, timeoutMs)),
+          documentOperation(async () => await session.send('Fetch.disable', {}, timeoutMs)).then(() => {
+            state.fetchEnabled = false
+          }),
           failures,
         )
       }
-      state.fetchEnabled = false
       if (state.cacheDisabled) {
         await settle(
           documentOperation(async () =>
-            await options.session.send('Network.setCacheDisabled', { cacheDisabled: false }, timeoutMs)
-          ),
+            await session.send('Network.setCacheDisabled', { cacheDisabled: false }, timeoutMs)
+          )
+            .then(() => {
+              state.cacheDisabled = false
+            }),
           failures,
         )
-        state.cacheDisabled = false
       }
-      state.requests.clear()
       state.acknowledgements.clear()
-      state.fences.clear()
       publish(cleanupFinalStatus)
       if (failures.length > 0) {
         throw new AggregateError(failures, 'native resource interception cleanup was incomplete')
       }
     })()
-    await cleanupPromise
+    try {
+      await cleanupPromise
+    } catch (error) {
+      cleanupPromise = undefined
+      throw error
+    }
   }
   const handle = new Handle(options.target, [...evidence.values()], state, cleanup)
   const unavailable = (item: NativeResourceEvidence, reason: string, error: unknown = new Error(reason)): void => {

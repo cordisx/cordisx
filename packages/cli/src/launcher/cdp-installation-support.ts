@@ -13,6 +13,7 @@ import {
   CdpSession,
   type CdpTarget,
   evaluateRuntimeOperation,
+  removeCdpFutureScript,
 } from './cdp-session.js'
 import { AGENT_HISTORY_BINDING, AGENT_HISTORY_RECEIVER } from './agent-history-rpc.js'
 import { CHANNEL_ACTIONS_BINDING, CHANNEL_ACTIONS_RECEIVER } from './channel-actions-rpc.js'
@@ -269,8 +270,8 @@ async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> 
 }
 
 export interface InstalledScript {
-  readonly nativeChannel?: { dispose(): Promise<void> }
-  readonly nativeInterception?: { dispose(): Promise<void> }
+  readonly nativeChannel?: { dispose(session?: CdpSession): Promise<void> }
+  readonly nativeInterception?: { dispose(session?: CdpSession): Promise<void> }
   readonly viteDevelopment?: boolean
   readonly loopbackModules?: boolean
   readonly viteLoopbackPermission?: {
@@ -763,55 +764,61 @@ export async function uninstall(
   installed: InstalledScript,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
   ownedHostExited: () => boolean = () => false,
+  targetRetired = false,
 ): Promise<void> {
-  await installed.startupTransport?.disconnecting(installed.session)
-  installed.marketplaceController.abort()
-  const nativeCleanup = await Promise.allSettled([
-    installed.nativeChannel?.dispose(),
-    installed.nativeInterception?.dispose(),
-  ])
-  installed.providerController?.abort()
-  installed.historyController?.abort()
-  installed.configController?.abort()
-  installed.ownerDocumentController?.abort()
-  installed.serviceConfigController?.abort()
-  installed.credentialController?.abort()
-  installed.actionsController?.abort()
-  installed.permissionController?.abort()
-  installed.iconThemePreferenceController?.abort()
-  installed.lifecycleController?.abort()
-  installed.managementController?.abort()
-  installed.publisherGrantController?.abort()
-  installed.managedServiceUIController?.abort()
-  installed.removeBindingListener()
-  installed.removeProviderBindingListener?.()
-  installed.removeHistoryBindingListener?.()
-  installed.removeConfigBindingListener?.()
-  installed.removeOwnerDocumentBindingListener?.()
-  installed.removeServiceConfigBindingListener?.()
-  installed.removeCredentialBindingListener?.()
-  installed.removeActionsBindingListener?.()
-  installed.removePermissionBindingListener?.()
-  installed.removeIconThemePreferenceBindingListener?.()
-  installed.unregisterIconThemePreferenceBroadcast?.()
-  installed.removeLifecycleBindingListener?.()
-  installed.removeManagementBindingListener?.()
-  installed.unsubscribeManagement?.()
-  installed.unregisterLifecycleSession()
-  installed.removePublisherGrantBindingListener?.()
-  installed.removeManagedServiceUIBindingListener?.()
-  await installed.certifiedPermissionChannel?.dispose()
+  const reconnected = installed.session.isClosed() && !targetRetired && !ownedHostExited()
+    && (installed.nativeInterception !== undefined || installed.nativeChannel !== undefined)
+  const session = reconnected
+    ? await installed.session.reconnectForCleanup(installed.target.id)
+    : installed.session
   try {
+    await installed.startupTransport?.disconnecting(session)
+    installed.marketplaceController.abort()
+    const nativeCleanup = await Promise.allSettled([
+      installed.nativeChannel?.dispose(session),
+      installed.nativeInterception?.dispose(session),
+    ])
+    installed.providerController?.abort()
+    installed.historyController?.abort()
+    installed.configController?.abort()
+    installed.ownerDocumentController?.abort()
+    installed.serviceConfigController?.abort()
+    installed.credentialController?.abort()
+    installed.actionsController?.abort()
+    installed.permissionController?.abort()
+    installed.iconThemePreferenceController?.abort()
+    installed.lifecycleController?.abort()
+    installed.managementController?.abort()
+    installed.publisherGrantController?.abort()
+    installed.managedServiceUIController?.abort()
+    installed.removeBindingListener()
+    installed.removeProviderBindingListener?.()
+    installed.removeHistoryBindingListener?.()
+    installed.removeConfigBindingListener?.()
+    installed.removeOwnerDocumentBindingListener?.()
+    installed.removeServiceConfigBindingListener?.()
+    installed.removeCredentialBindingListener?.()
+    installed.removeActionsBindingListener?.()
+    installed.removePermissionBindingListener?.()
+    installed.removeIconThemePreferenceBindingListener?.()
+    installed.unregisterIconThemePreferenceBroadcast?.()
+    installed.removeLifecycleBindingListener?.()
+    installed.removeManagementBindingListener?.()
+    installed.unsubscribeManagement?.()
+    installed.unregisterLifecycleSession()
+    installed.removePublisherGrantBindingListener?.()
+    installed.removeManagedServiceUIBindingListener?.()
+    await installed.certifiedPermissionChannel?.dispose()
     const strictProductionCleanup = installed.loopbackModules === true && installed.viteDevelopment !== true
     const cleanupFailure = (stage: string, cause: unknown): Error =>
-      new Error(`${stage} (session ${installed.session.isClosed() ? 'closed' : 'open'})`, { cause })
+      new Error(`${stage} (session ${session.isClosed() ? 'closed' : 'open'})`, { cause })
     const cleanupFailures: Error[] = nativeCleanup.flatMap((result, index) =>
-      result.status === 'rejected'
+      result.status === 'rejected' && !targetRetired
         ? [cleanupFailure(index === 0 ? 'native-channel' : 'native-interception', result.reason)]
         : []
     )
     if (ownedHostExited()) {
-      await viteLoopbackPermissions?.release(installed.session, installed.viteLoopbackPermission)
+      await viteLoopbackPermissions?.release(session, installed.viteLoopbackPermission)
       return
     }
     const attemptCleanup = async (stage: string, operation: Promise<unknown>): Promise<boolean> => {
@@ -826,7 +833,7 @@ export async function uninstall(
     if (installed.viteDevelopment) {
       await attemptCleanup(
         'vite-dispose',
-        installed.session.send('Runtime.evaluate', {
+        session.send('Runtime.evaluate', {
           expression: VITE_DISPOSE_EXPRESSION,
           awaitPromise: true,
           allowUnsafeEvalBlockedByCSP: true,
@@ -834,53 +841,53 @@ export async function uninstall(
       )
     }
     const rendererCleanup = await Promise.allSettled([
-      installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
-      evaluateRuntimeOperation(installed.session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
-      installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
+      removeCdpFutureScript(session, installed.identifier, installed.session),
+      evaluateRuntimeOperation(session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
+      session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
       ...(installed.lifecycleBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_ARTIFACT_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: MARKETPLACE_ARTIFACT_BINDING })]
         : []),
       ...(installed.providerBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: PROVIDER_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: PROVIDER_BINDING })]
         : []),
       ...(installed.historyBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: AGENT_HISTORY_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: AGENT_HISTORY_BINDING })]
         : []),
       ...(installed.configBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: CONFIG_BINDING })]
         : []),
       ...(installed.ownerDocumentBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: OWNER_DOCUMENT_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: OWNER_DOCUMENT_BINDING })]
         : []),
       ...(installed.serviceConfigBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: SERVICE_CONFIG_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: SERVICE_CONFIG_BINDING })]
         : []),
       ...(installed.credentialBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: CHANNEL_CREDENTIAL_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: CHANNEL_CREDENTIAL_BINDING })]
         : []),
       ...(installed.actionsBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: CHANNEL_ACTIONS_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: CHANNEL_ACTIONS_BINDING })]
         : []),
       ...(installed.permissionBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: PERMISSION_BINDING })]
         : []),
       ...(installed.iconThemePreferenceBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: ICON_THEME_PREFERENCE_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: ICON_THEME_PREFERENCE_BINDING })]
         : []),
       ...(installed.lifecycleBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: PLUGIN_LIFECYCLE_BINDING })]
         : []),
       ...(installed.managementBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: MANAGEMENT_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: MANAGEMENT_BINDING })]
         : []),
       ...(installed.publisherGrantBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
         : []),
       ...(installed.managedServiceUIBindingInstalled
-        ? [installed.session.send('Runtime.removeBinding', { name: MANAGED_SERVICE_UI_BINDING })]
+        ? [session.send('Runtime.removeBinding', { name: MANAGED_SERVICE_UI_BINDING })]
         : []),
     ])
-    const rendererGone = installed.session.isClosed()
+    const rendererGone = targetRetired || (session.isClosed() && !reconnected)
     if (strictProductionCleanup && !rendererGone) {
       cleanupFailures.push(
         ...rendererCleanup.flatMap((result, index) =>
@@ -896,20 +903,20 @@ export async function uninstall(
     const scriptRemoved = rendererGone || rendererCleanup[0]?.status === 'fulfilled'
     if (installed.loopbackModules) {
       const cspRestored = rendererGone
-        || await attemptCleanup('csp-restore', installed.session.send('Page.setBypassCSP', { enabled: false }))
+        || await attemptCleanup('csp-restore', session.send('Page.setBypassCSP', { enabled: false }))
       if (viteLoopbackPermissions === undefined) {
         await attemptCleanup(
           'loopback-permission-restore',
-          restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission),
+          restoreViteLoopbackPermission(session, installed.viteLoopbackPermission),
         )
       } else {
         await attemptCleanup(
           'loopback-permission-restore',
-          viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission),
+          viteLoopbackPermissions.release(session, installed.viteLoopbackPermission),
         )
       }
       if (!rendererGone && !installed.viteDevelopment && scriptRemoved && cspRestored) {
-        await attemptCleanup('clean-reload', installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
+        await attemptCleanup('clean-reload', session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
       }
     }
     if (cleanupFailures.length > 0 && !ownedHostExited()) {
@@ -919,6 +926,6 @@ export async function uninstall(
       )
     }
   } finally {
-    installed.session.close()
+    session.close()
   }
 }

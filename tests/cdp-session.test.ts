@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
-import { CdpSession, CdpTargetClosedError } from '../packages/cli/src/launcher/cdp-session.js'
+import { CdpSession, CdpTargetClosedError, removeCdpFutureScript } from '../packages/cli/src/launcher/cdp-session.js'
 
 async function fixtureServer(): Promise<{
   readonly server: WebSocketServer
@@ -116,6 +116,87 @@ describe('CdpSession transport authority', () => {
           expect(session.isTargetClosed()).toBe(false)
         }
         expect(closed).toHaveBeenCalledOnce()
+      } finally {
+        session.close()
+        server.close()
+        await once(server, 'close')
+      }
+    },
+  )
+  it.each(['owned-target', 'other-target'])('opens cleanup only for the original target (%s)', async targetId => {
+    const { server, url } = await fixtureServer()
+    const requests: string[] = []
+    let connections = 0
+    server.on('connection', socket => {
+      const first = ++connections === 1
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string }
+        requests.push(request.method)
+        if (first) socket.close()
+        else {socket.send(JSON.stringify({
+            id: request.id,
+            result: request.method === 'Target.getTargetInfo' ? { targetInfo: { targetId } } : { cleaned: true },
+          }))}
+      })
+    })
+    const session = await CdpSession.connect(url)
+    let cleanup: CdpSession | undefined
+    try {
+      await expect(session.send('Runtime.interrupted')).rejects.toThrow('CDP connection closed')
+      if (targetId === 'owned-target') {
+        cleanup = await session.reconnectForCleanup('owned-target')
+        await expect(cleanup.send('Runtime.cleanup')).resolves.toEqual({ cleaned: true })
+        await expect(session.send('Runtime.oldChannel')).rejects.toThrow('CDP connection is closed')
+        expect(requests).toEqual(['Runtime.interrupted', 'Target.getTargetInfo', 'Runtime.cleanup'])
+      } else {
+        await expect(session.reconnectForCleanup('owned-target')).rejects.toThrow('target identity changed')
+        expect(requests).toEqual(['Runtime.interrupted', 'Target.getTargetInfo'])
+      }
+    } finally {
+      cleanup?.close()
+      session.close()
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('accepts only already-removed scripts from a disconnected original session', async () => {
+    const original = { isClosed: () => true } as CdpSession
+    const send = vi.fn().mockRejectedValue(new Error('CDP -32000: Script not found'))
+    const replacement = { send, isClosed: () => false } as unknown as CdpSession
+    await expect(removeCdpFutureScript(replacement, 'old-script', original)).resolves.toBeUndefined()
+    await expect(removeCdpFutureScript(replacement, 'old-script')).rejects.toThrow('Script not found')
+    send.mockRejectedValue(new Error('CDP connection is closed'))
+    await expect(removeCdpFutureScript(replacement, 'old-script', original)).rejects.toThrow('connection is closed')
+  })
+
+  it.each(['result', 'protocol-error'])(
+    'keeps a slow operation on its connection when a probe gets a %s',
+    async reply => {
+      const { server, url } = await fixtureServer()
+      const methods: string[] = []
+      server.on('connection', socket =>
+        socket.on('message', data => {
+          const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+          methods.push(request.method)
+          if (request.params.expression !== 'true') return
+          socket.send(JSON.stringify(
+            reply === 'result'
+              ? { id: request.id, result: { result: { value: true } } }
+              : { id: request.id, error: { code: -32000, message: 'Execution context changed' } },
+          ))
+        }))
+      const session = await CdpSession.connect(url)
+      const closed = vi.fn()
+      session.onClose(closed)
+      try {
+        expect(await session.isResponsive()).toBe(true)
+        expect(methods).toEqual([])
+        await expect(session.send('Runtime.evaluate', { expression: 'slow' }, 25)).rejects.toThrow('timed out')
+        expect(await session.isResponsive()).toBe(true)
+        expect(session.isClosed()).toBe(false)
+        expect(closed).not.toHaveBeenCalled()
+        expect(methods).toEqual(['Runtime.evaluate', 'Runtime.evaluate'])
       } finally {
         session.close()
         server.close()

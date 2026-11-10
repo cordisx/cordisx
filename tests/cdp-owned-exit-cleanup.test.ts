@@ -15,7 +15,9 @@ describe('confirmed owned Host exit cleanup', () => {
         const request = JSON.parse(String(data))
         socket.send(JSON.stringify({
           id: request.id,
-          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+          result: request.method === 'Target.getTargetInfo'
+            ? { targetInfo: { targetId: 'owned' } }
+            : request.method === 'Page.addScriptToEvaluateOnNewDocument'
             ? { identifier: 'exit-bootstrap' }
             : { result: { value: { ok: true } } },
         }))
@@ -43,9 +45,15 @@ describe('confirmed owned Host exit cleanup', () => {
       installed.session.close()
       const cleanup = uninstall(record, undefined, () => exited)
       if (exited) await expect(cleanup).resolves.toBeUndefined()
-      else await expect(cleanup).rejects.toThrow('native-interception (session closed)')
+      else await expect(cleanup).rejects.toThrow('native-interception (session open)')
       expect(interception.dispose).toHaveBeenCalledOnce()
-      expect(removeListener).toHaveBeenCalledOnce()
+      if (!exited) {
+        interception.dispose.mockImplementation(async () => {})
+        await expect(uninstall(record)).resolves.toBeUndefined()
+        expect(interception.dispose).toHaveBeenCalledTimes(2)
+      }
+
+      expect(removeListener).toHaveBeenCalledTimes(exited ? 1 : 2)
     } finally {
       installed.session.close()
       for (const socket of server.clients) socket.terminate()
