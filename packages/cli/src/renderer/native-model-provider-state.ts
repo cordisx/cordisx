@@ -150,3 +150,14 @@ export const errorMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim() !== ''
     ? error.message
     : 'Native model provider selection failed'
+
+/** Preserve external-store identity when only object allocation or key order changed. */
+export function sameSnapshot(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+  if (Array.isArray(left) !== Array.isArray(right)) return false
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>
+  const keys = Object.keys(a).filter(key => a[key] !== undefined)
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length
+    && keys.every(key => sameSnapshot(a[key], b[key]))
+}

@@ -808,6 +808,16 @@ describe('native model provider transport', () => {
     })
     expect(transport.getSnapshot().serviceTier).toBe('priority')
     expect((globalThis as any).__cordisxNativeServiceTierOverride).toBe('priority')
+    message(dom.window, {
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: {
+        method: 'thread/settings/updated',
+        params: { threadId: 'thread-1', settings: { reasoningEffort: 'high' } },
+      },
+    })
+    await settle()
+    expect(transport.getSnapshot().serviceTier).toBe('priority')
     props.selectedServiceTier = null
     dom.window.document.body.append(dom.window.document.createElement('aside'))
     await settle()

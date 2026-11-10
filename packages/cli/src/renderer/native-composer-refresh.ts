@@ -11,6 +11,7 @@ import type { NativeProviderSelectionProjection } from './native-provider-select
 import type { NativeModelSource } from './adapter/native-model-list.js'
 import type { CatalogReasoningLookup } from './native-model-reasoning.js'
 import { resolveTargetReasoning } from './native-model-reasoning.js'
+import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { locateNativeComposerCreationSelection } from './adapter/native-composer-creation.js'
 import { locateNativeModelProviderMountSeat } from './adapter/native-model-provider-seat.js'
 
@@ -86,7 +87,13 @@ export function refreshedNativeComposerSelection(
   confirmed?: SelectionSnapshot,
 ): SelectionSnapshot {
   const { config, thread } = baseline
-  const serviceTier = string(thread?.serviceTier) ?? string(config.service_tier)
+  const serviceTier = threadId === undefined
+    ? string(config.service_tier) ?? null
+    : control.serviceTierKnown
+    ? control.serviceTier
+    : thread && Object.hasOwn(thread, 'serviceTier')
+    ? thread.serviceTier
+    : confirmed?.serviceTier
   const effort = confirmed?.modelProvider === projection.effective?.providerId
       && confirmed?.model === projection.effective?.model
     ? confirmed?.reasoningEffort ?? control.reasoningEffort
@@ -105,7 +112,9 @@ export function refreshedNativeComposerSelection(
       : { reasoningEffort: effort || string(config.model_reasoning_effort)! }),
     reasoningEfforts: control.reasoningEfforts,
     nativeModelsScope: string(config.model_catalog_json) === undefined ? 'active-provider' : 'global',
-    serviceTier: serviceTier === 'priority' || serviceTier === 'fast' ? 'priority' : null,
+    ...(serviceTier === undefined ? {} : {
+      serviceTier: serviceTier === 'priority' || serviceTier === 'fast' ? 'priority' as const : null,
+    }),
     ...(threadId === undefined && projection.draftPreference !== undefined
       ? { draftPreference: { ...projection.draftPreference, revision: projection.revision } }
       : {}),
@@ -160,5 +169,25 @@ export function nativeComposerBaselineRouting(
     catalogIdentity,
     nativeModelsScope: catalogIdentity === undefined ? 'active-provider' as const : 'global' as const,
     providerNames,
+  }
+}
+
+/** Only live, bound native controls can supply a creation source tuple. */
+export function nativeSourceComposerConfiguration(
+  state: SelectionSnapshot,
+  control: NativeModelSelectionControl | undefined,
+  visibleThreadId: string | undefined,
+  operationActive: boolean,
+) {
+  if (
+    !state.available || !visibleThreadId || state.threadId !== visibleThreadId || operationActive
+    || !state.modelProvider || !state.model || !control || control.model !== state.model || !control.serviceTierKnown
+    || state.serviceTier !== control.serviceTier || !isModelReasoningEffort(control.reasoningEffort)
+  ) return undefined
+  return {
+    providerId: state.modelProvider,
+    model: control.model,
+    reasoningEffort: control.reasoningEffort,
+    serviceTier: control.serviceTier,
   }
 }

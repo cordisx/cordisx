@@ -738,6 +738,7 @@ export async function prepareNativeSubmissionBootstrap(
           ),
           catalog,
           routing: taskRouting,
+          sourceConfiguration: threadId => cdp.sourceConfiguration(threadId),
           available: () => cdp.taskCreationAvailable(),
           invoke: input => control.invokeTask(input),
         })

@@ -710,6 +710,17 @@ reports resource hashes; it does not prove a native submission or account read.
 
 ## Verification Boundaries
 
+Session display snapshots are scoped by Host and thread and are presentation
+hints, not selection or submission authority. A live, bound local Composer can
+supply a source tuple for ordinary native task creation when its provider, model,
+effort and Fast value are all known and consistent with the Host binding. The
+managed-provider route carries that tuple through the admitted start and first
+turn; explicit native choices take precedence. Missing or ambiguous source
+settings, official-provider tasks, remote targets, and ordinary native forks do
+not have a verified inheritance seam. Independent agent sessions without a source
+thread do not inherit from the visible Composer. Structural fixtures are not
+proof of a native App flow.
+
 Registry, selector, managed-service RPC, configuration and native transport tests
 cover their individual contracts. Production package staging and a real isolated
 `app://` composer flow are additionally required before claiming native usability.

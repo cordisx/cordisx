@@ -286,3 +286,111 @@ it('does not retain a previous thread choice when the next thread binding read f
     h.dom.window.close()
   }
 })
+
+it('keeps the same published snapshot when focus reconciliation finds no change', async () => {
+  const h = await harness()
+  try {
+    const before = h.transport.getSnapshot()
+    const changed = vi.fn()
+    const unsubscribe = h.transport.subscribe(changed)
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toBe(before)
+    expect(changed).not.toHaveBeenCalled()
+    unsubscribe()
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not let a delayed focus read replace a later user selection', async () => {
+  let hold = false
+  let pending: Record<string, unknown> | undefined
+  const h = await harness(request => {
+    if (hold && request.method === 'config/read') {
+      pending = request
+      return true
+    }
+  })
+  try {
+    hold = true
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    expect(pending).toBeDefined()
+    expect(await h.transport.select({ providerId: 'provider-b', model: 'model-b' })).toBe('accepted')
+    message(h.dom.window, {
+      type: 'mcp-response',
+      hostId: 'local',
+      message: { id: pending!.id, result: { config: { model_provider: 'provider-a', model: 'model-a' } } },
+    })
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ modelProvider: 'provider-b', model: 'model-b' })
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('projects cached labels immediately while withholding a real binding', async () => {
+  const data = new Map<string, string>()
+  const storage = {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => data.set(key, value),
+  } as Storage
+  data.set(
+    'cordisx.session-display.v1:' + JSON.stringify(['local', 'thread-1']),
+    JSON.stringify({
+      providerId: 'saved-provider',
+      model: 'saved-model',
+      reasoningEffort: 'high',
+      serviceTier: 'priority',
+      updatedAt: 1,
+    }),
+  )
+  let pending: Record<string, unknown> | undefined
+  const h = await harness(
+    request => {
+      if (request.method === 'thread/read') {
+        pending = request
+        return true
+      }
+    },
+    undefined,
+    storage,
+  )
+  try {
+    expect(pending).toBeDefined()
+    expect(h.transport.getSnapshot()).toMatchObject({
+      available: false,
+      threadId: 'thread-1',
+      cachedDisplay: { providerId: 'saved-provider', model: 'saved-model', serviceTier: 'priority' },
+    })
+    expect(h.transport.getSnapshot().modelProvider).toBeUndefined()
+    expect(await h.transport.select({ providerId: 'saved-provider', model: 'saved-model' })).toBe('unavailable')
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not infer an existing thread Fast setting from global configuration', async () => {
+  const h = await harness((request, view) => {
+    if (request.method !== 'config/read') return
+    queueMicrotask(() =>
+      message(view, {
+        type: 'mcp-response',
+        hostId: 'local',
+        message: { id: request.id, result: { config: { model_provider: 'provider-a', service_tier: 'priority' } } },
+      })
+    )
+    return true
+  })
+  try {
+    expect(h.transport.getSnapshot().serviceTier).toBeUndefined()
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})

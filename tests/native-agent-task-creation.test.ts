@@ -266,3 +266,51 @@ it('returns declared startup failure before native task intent or provisioning w
   expect(f.controller.prepareThreadResume).not.toHaveBeenCalled()
   expect(await readdir(f.authority.directory)).toEqual([])
 })
+
+it('inherits a live source tuple for ordinary task creation and keeps explicit model/effort/tier overrides', async () => {
+  const f = await fixture()
+  const sourceConfiguration = vi.fn(async (threadId: string) =>
+    threadId === 'source'
+      ? { providerId: 'configured', model: 'model', reasoningEffort: 'low' as const, serviceTier: 'priority' as const }
+      : undefined
+  )
+  const tasks = new NativeAgentTasks({ ...f.authority, sourceConfiguration })
+  const handle = await tasks.claim({
+    callId: 'native-call',
+    sourceThreadId: 'source',
+    hostId: 'local',
+    model: 'model',
+    thinking: 'high',
+    serviceTier: null,
+  }) as { token: string; model: string; reasoningEffort: string }
+  expect(handle).toMatchObject({ model: 'model', reasoningEffort: 'high' })
+  const start = { operationToken: handle.token, method: 'thread/start' as const, requestId: 1 }
+  expect(await f.routing.consume(start)).toMatchObject({
+    providerId: 'configured',
+    model: 'model',
+    reasoningEffort: 'high',
+    serviceTier: null,
+  })
+  expect(await f.routing.authorize(handle.token, 1)).toBe(true)
+  await f.routing.complete({
+    operationToken: handle.token,
+    requestId: 1,
+    succeeded: true,
+    boundThreadId: 'child',
+    providerId: 'configured',
+    model: 'model',
+  })
+  const turn = { operationToken: handle.token, method: 'turn/start' as const, requestId: 2, threadId: 'child' }
+  expect(await f.routing.consume(turn)).toMatchObject({
+    providerId: 'configured',
+    model: 'model',
+    reasoningEffort: 'high',
+    serviceTier: null,
+  })
+  expect(await f.routing.authorize(handle.token, 2)).toBe(true)
+  await f.routing.complete({ operationToken: handle.token, requestId: 2, succeeded: true })
+  expect(await f.routing.consume(turn)).toBeUndefined()
+  expect(await tasks.claim({ callId: 'other', sourceThreadId: 'missing', hostId: 'local' })).toBeUndefined()
+  expect(await tasks.claim({ callId: 'remote', sourceThreadId: 'source', hostId: 'remote' })).toBeUndefined()
+  await f.routing.close()
+})

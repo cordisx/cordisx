@@ -43,6 +43,19 @@ export function modelProviderSelectionDisplay(
   providers: readonly HostModelProvider[],
   copy: Readonly<{ choose: string; official: string; unknown: string }>,
 ) {
+  // Cached values are projected only into this display function.
+  if (!native.available && native.cachedDisplay && native.threadId !== undefined) {
+    const { reasoningEffort: _previousEffort, ...base } = native
+    native = {
+      ...base,
+      modelProvider: native.cachedDisplay.providerId,
+      model: native.cachedDisplay.model,
+      ...(native.cachedDisplay.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: native.cachedDisplay.reasoningEffort }),
+    }
+  }
+  const cachedDisplay = !native.available ? native.cachedDisplay : undefined
   const preference = native.threadId === undefined ? native.draftPreference : undefined
   const creationDisplay = native.creationDisplay?.threadId === native.threadId ? native.creationDisplay : undefined
   const providerIntent = native.pendingProviderIntent?.providerId
@@ -82,7 +95,7 @@ export function modelProviderSelectionDisplay(
     ? copy.official
     : displayedProvider?.title ?? providerIntent ?? creationDisplay?.providerId ?? pendingProviderId
       ?? preference?.providerId
-      ?? providerLabel
+      ?? cachedDisplay?.providerId ?? providerLabel
   const creation = creationDisplay ?? (native.threadId === undefined ? native.pendingCreation : undefined)
   const creationModel = creation === undefined
     ? undefined
@@ -132,7 +145,8 @@ export function modelProviderSelectionDisplay(
     : !reasoning.catalogBacked || displayedNativeModel?.id === native.model && native.model !== undefined
     ? native.reasoningEfforts ?? []
     : []
-  const reasoningEffort = creationModel !== undefined || reasoningEfforts.includes(selectedReasoningEffort ?? '')
+  const reasoningEffort = cachedDisplay !== undefined || creationModel !== undefined
+      || reasoningEfforts.includes(selectedReasoningEffort ?? '')
     ? selectedReasoningEffort
     : reasoning.effort
   return {

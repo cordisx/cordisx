@@ -67,6 +67,7 @@ export interface ProviderSelectionSnapshot {
   readonly submissionError?: NativeSubmissionRejection
   readonly pendingCreation?: import('./adapter/native-composer-creation.js').NativeComposerCreationSelection | undefined
   readonly creationDisplay?: import('./native-composer-creation-handoff.js').NativeComposerCreationDisplay | undefined
+  readonly cachedDisplay?: import('./native-session-display-cache.js').NativeSessionDisplay | undefined
   readonly draftPreference?: Readonly<{
     readonly model?: string
     readonly providerId: string
@@ -181,7 +182,11 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
     })
     : []
   const supportsFastMode = displayedNativeModel?.supportsFastMode === true
-  const fastMode = supportsFastMode && native.serviceTier === 'priority'
+  const fastMode = native.creationDisplay !== undefined
+    ? native.creationDisplay.serviceTier === 'priority'
+    : native.available
+    ? supportsFastMode && native.serviceTier === 'priority'
+    : native.cachedDisplay?.serviceTier === 'priority'
   const canQueueFast = reasoningInFlight.current !== undefined
   const fastDisabled = !native.available || !supportsFastMode || fastActionPending
     || ((native.busy || switching) && !canQueueFast)

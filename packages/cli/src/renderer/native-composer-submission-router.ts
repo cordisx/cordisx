@@ -5,6 +5,9 @@ import { createNativeContinuationCompletion, type NativeContinuationOwner } from
 interface ComposerSubmission extends NativeContinuationOwner {
   submit: NativeProviderSelectionClient['submitHook']
   serviceTier(): 'priority' | 'default'
+  sourceConfiguration?():
+    | Readonly<{ providerId: string; model: string; reasoningEffort: string; serviceTier: 'priority' | null }>
+    | undefined
   creationAdmitted?(
     result: Awaited<ReturnType<NativeProviderSelectionClient['submitHook']>>,
     descriptor: NativeSubmissionOrchestratorDescriptor,
@@ -25,8 +28,18 @@ export function nativeComposerContinuation(
 
 type Hook = NativeProviderSelectionClient['submitHook']
 interface SubmissionAuthority {
-  snapshot(): { scope: NativeSubmissionScope; idle: boolean } | undefined
-  resolve(scope: NativeSubmissionScope): { scope: NativeSubmissionScope; idle: boolean } | undefined
+  snapshot():
+    | ReturnType<ComposerSubmission['snapshot']> & {
+      sourceConfiguration?: ReturnType<NonNullable<ComposerSubmission['sourceConfiguration']>>
+    }
+    | undefined
+  resolve(
+    scope: NativeSubmissionScope,
+  ):
+    | ReturnType<ComposerSubmission['snapshot']> & {
+      sourceConfiguration?: ReturnType<NonNullable<ComposerSubmission['sourceConfiguration']>>
+    }
+    | undefined
 }
 type NativePage = typeof globalThis & {
   __cordisxNativeSubmitHook?: Hook
@@ -69,21 +82,29 @@ function forDescriptor(descriptor: NativeSubmissionOrchestratorDescriptor): Comp
 const submit: Hook = async descriptor => {
   const owner = forDescriptor(descriptor)
   if (!owner) return { allow: false }
+  const serviceTier = owner.serviceTier()
   const result = await owner.submit({
     ...descriptor,
     continuationAvailable: descriptor.continuationAvailable === true && continuations.available(owner),
   })
-  if (result.allow) {
-    continuations.admitted(owner, result)
-    owner.creationAdmitted?.(result, descriptor)
-  }
-  return result.allow && owner.snapshot().scope.composerId !== undefined
-    ? { ...result, serviceTier: owner.serviceTier() }
+  const admitted = result.allow && owner.snapshot().scope.composerId !== undefined
+    ? { ...result, serviceTier }
     : result
+  if (admitted.allow) {
+    continuations.admitted(owner, admitted)
+    owner.creationAdmitted?.(admitted, descriptor)
+  }
+  return admitted
+}
+
+function sourceSnapshot(owner: ComposerSubmission | undefined) {
+  if (!owner) return undefined
+  const sourceConfiguration = owner.sourceConfiguration?.()
+  return { ...owner.snapshot(), ...(sourceConfiguration === undefined ? {} : { sourceConfiguration }) }
 }
 
 const authority: SubmissionAuthority = {
-  snapshot: () => focusedOwner()?.snapshot(),
+  snapshot: () => sourceSnapshot(focusedOwner()),
   resolve(scope) {
     const candidates = liveOwners().filter(owner => {
       const live = owner.snapshot().scope
@@ -91,7 +112,7 @@ const authority: SubmissionAuthority = {
       return live.targetId === scope.targetId && live.rendererGeneration === scope.rendererGeneration
         && live.composerId === scope.composerId
     })
-    return candidates.length === 1 ? candidates[0]!.snapshot() : undefined
+    return candidates.length === 1 ? sourceSnapshot(candidates[0]) : undefined
   },
 }
 

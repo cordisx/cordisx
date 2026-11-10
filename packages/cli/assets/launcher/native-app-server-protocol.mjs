@@ -575,6 +575,9 @@ async function forward(line) {
     turnDiagnostics.selected(message.id, dispatch)
     const nextConfig = { ...config }
     delete nextConfig[marker]
+    if (dispatch.agentTask && (dispatch.serviceTier === 'priority' || dispatch.serviceTier === null)) {
+      params.serviceTier = dispatch.serviceTier
+    }
     if (message.method === 'thread/start') {
       params.modelProvider = dispatch.providerId
       params.model = dispatch.model

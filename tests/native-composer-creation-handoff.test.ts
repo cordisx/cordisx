@@ -34,7 +34,7 @@ describe('native creation display handoff', () => {
     const h = fixture()
     try {
       const pending = h.store.read(h.root, undefined)
-      expect(pending).toEqual({ clientThreadId, ...selected, reasoningEffort: 'low' })
+      expect(pending).toEqual({ clientThreadId, ...selected, reasoningEffort: 'low', serviceTier: null })
       expect(JSON.stringify(pending)).not.toContain(token)
       h.root.remove()
       attachNativeCreatedRoute(h.side, clientThreadId, 'created')
@@ -42,6 +42,7 @@ describe('native creation display handoff', () => {
         clientThreadId,
         ...selected,
         reasoningEffort: 'low',
+        serviceTier: null,
         threadId: 'created',
       })
       h.store.acknowledge(h.side, 'created')
@@ -103,10 +104,16 @@ describe('native creation display handoff', () => {
   it('keeps concurrent composers and document generations independent', () => {
     const h = fixture()
     try {
-      h.store.admit({ ...scope, composerId: 'side' }, 'exact-operation-token-b', {
-        providerId: 'traex',
-        model: 'model-c',
-      }, 'high')
+      h.store.admit(
+        { ...scope, composerId: 'side' },
+        'exact-operation-token-b',
+        {
+          providerId: 'traex',
+          model: 'model-c',
+        },
+        'high',
+        'priority',
+      )
       attachNativeCreation(h.side, {
         clientThreadId: 'client-new-thread:own-b',
         operationToken: 'exact-operation-token-b',
@@ -114,7 +121,7 @@ describe('native creation display handoff', () => {
         effort: 'high',
       })
       expect(h.store.read(h.root, undefined)?.providerId).toBe('aiden')
-      expect(h.store.read(h.side, undefined)?.providerId).toBe('traex')
+      expect(h.store.read(h.side, undefined)).toMatchObject({ providerId: 'traex', serviceTier: 'priority' })
       const otherDocument = new NativeComposerCreationHandoff({ ...renderer, rendererGeneration: 'other' })
       otherDocument.admit(scope, token, selected, 'low')
       expect(otherDocument.read(h.root, undefined)).toBeUndefined()
