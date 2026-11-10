@@ -160,6 +160,29 @@ describe('CdpSession transport authority', () => {
     }
   })
 
+  it('accepts retirement only for its exact closed target and preserves crash evidence', async () => {
+    const { server, url } = await fixtureServer()
+    server.on('connection', socket => socket.on('message', () => socket.close()))
+    const session = await CdpSession.connect(url + '/owned')
+    try {
+      session.confirmTargetRetirement('owned')
+      expect(session.isTargetClosed()).toBe(false)
+      await expect(session.send('Runtime.interrupted')).rejects.toThrow('CDP connection closed')
+      expect(() => session.confirmTargetRetirement('replacement')).toThrow('target identity changed')
+      session.confirmTargetRetirement('owned')
+      expect(session.isTargetClosed()).toBe(true)
+      await expect(session.send('Runtime.retired')).rejects.toBeInstanceOf(CdpTargetClosedError)
+      session.confirmTargetCrash('owned')
+      session.confirmTargetRetirement('owned')
+      expect(session.isTargetCrashed()).toBe(true)
+      expect(session.isTargetClosed()).toBe(false)
+    } finally {
+      session.close()
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
   it('accepts only already-removed scripts from a disconnected original session', async () => {
     const original = { isClosed: () => true } as CdpSession
     const send = vi.fn().mockRejectedValue(new Error('CDP -32000: Script not found'))

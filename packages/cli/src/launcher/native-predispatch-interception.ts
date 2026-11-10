@@ -62,6 +62,8 @@ export interface NativeResourceInterception {
   readonly managedRuntimeFlag: false
   readonly evidence: readonly NativeResourceEvidence[]
   readonly status: NativeResourceInterceptionStatus
+  /** Preserve the original transport failure for exact-target retirement verification. */
+  readonly failure?: unknown
   dispose(session?: NativeResourceInterceptionSession): Promise<void>
 }
 
@@ -197,10 +199,15 @@ class Handle implements NativeResourceInterception {
       finalStatus: 'unavailable' | 'disposed',
       session?: NativeResourceInterceptionSession,
     ) => Promise<void>,
+    private readonly firstFailure: () => unknown,
   ) {}
 
   get status(): NativeResourceInterceptionStatus {
     return this.state.status
+  }
+
+  get failure(): unknown {
+    return this.firstFailure()
   }
 
   async dispose(session?: NativeResourceInterceptionSession): Promise<void> {
@@ -383,7 +390,7 @@ export async function installNativeResourceInterception(
       throw error
     }
   }
-  const handle = new Handle(options.target, [...evidence.values()], state, cleanup)
+  const handle = new Handle(options.target, [...evidence.values()], state, cleanup, () => firstFailure)
   const unavailable = (item: NativeResourceEvidence, reason: string, error: unknown = new Error(reason)): void => {
     firstFailure ??= error
     item.state = 'unavailable'
