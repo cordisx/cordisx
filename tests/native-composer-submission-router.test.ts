@@ -129,3 +129,23 @@ it('captures Fast before asynchronous Send admission for both handoff and native
     dom.window.close()
   }
 })
+
+it('leaves an unknown Fast value to native handling instead of inventing a default', async () => {
+  const dom = new JSDOM('<main></main>')
+  const detach = registerNativeComposerSubmission({
+    snapshot: () => ({
+      scope: { targetId: 't', rendererGeneration: 'r', navigationGeneration: 0, composerId: 'c' },
+      idle: true,
+    }),
+    composer: () => dom.window.document.querySelector('main'),
+    submit: async () => ({ allow: true as const }),
+    serviceTier: () => undefined,
+  })
+  try {
+    await expect((globalThis as any).__cordisxNativeSubmitHook(descriptor())).resolves.toEqual({ allow: true })
+    expect((globalThis as any).__cordisxNativeServiceTierOverride).toBeUndefined()
+  } finally {
+    detach()
+    dom.window.close()
+  }
+})

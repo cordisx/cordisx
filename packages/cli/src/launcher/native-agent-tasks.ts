@@ -170,16 +170,17 @@ export class NativeAgentTasks {
       && valid(request.sourceThreadId) && request.hostId === 'local'
     ) {
       const source = await this.authority.sourceConfiguration?.(request.sourceThreadId)
-      if (!source || source.providerId === 'openai') return undefined
+      if (!source) return undefined
       const model = request.model === undefined || request.model === null ? source.model : request.model
       const effort = request.thinking == null ? source.reasoningEffort : request.thinking
       const tier = request.serviceTier === undefined ? source.serviceTier : request.serviceTier
       if (!isModelReasoningEffort(effort) || (tier !== null && tier !== 'priority')) return undefined
       if (
         !valid(model)
-        || !(await this.authority.catalog()).some(provider =>
-          provider.providerId === source.providerId && provider.models.some(item => item.id === model)
-        )
+        || source.providerId !== 'openai'
+          && !(await this.authority.catalog()).some(provider =>
+            provider.providerId === source.providerId && provider.models.some(item => item.id === model)
+          )
       ) return undefined
       return await this.authority.routing.prepare({
         callId: request.callId,

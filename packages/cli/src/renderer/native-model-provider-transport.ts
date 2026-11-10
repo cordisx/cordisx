@@ -202,7 +202,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       snapshot: this.submissionAuthority.snapshot,
       composer: () => this.composer ?? this.visibleTrigger?.closest<HTMLElement>('[data-codex-composer-root]'),
       submit: this.selectionClient.submitHook,
-      serviceTier: () => this.state.serviceTier === 'priority' ? 'priority' : 'default',
+      serviceTier: () =>
+        this.state.serviceTier === undefined
+          ? undefined
+          : this.state.serviceTier === 'priority'
+          ? 'priority'
+          : 'default',
       sourceConfiguration: () =>
         nativeSourceComposerConfiguration(
           this.state,
@@ -213,7 +218,10 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
             || this.selectionClient.snapshot().pendingProviderIntent !== undefined,
         ),
       creationAdmitted: (result, descriptor) => {
-        if (!result.allow || !result.operationToken || result.continuation || this.disposed) return
+        if (
+          !result.allow || !result.operationToken || result.serviceTier === undefined || result.continuation
+          || this.disposed
+        ) return
         const scope = this.currentSubmissionScope()
         if (
           scope.threadId !== undefined
@@ -228,7 +236,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
             result.operationToken,
             selection,
             result.reasoningEffort ?? this.state.reasoningEffort,
-            result.serviceTier ?? 'default',
+            result.serviceTier,
           )
         }
       },
@@ -723,6 +731,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         baseline,
         control,
         effective,
+        threadId,
       )
       this.providerNames.clear()
       for (const [id, name] of providerNames) this.providerNames.set(id, name)
@@ -743,7 +752,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       await this.selectionClient.refresh({
         scope: this.currentSubmissionScope(),
         idle: !busy,
-        ...(model === undefined ? {} : { effective: { providerId: provider, model } }),
+        ...(model === undefined || provider === undefined ? {} : { effective: { providerId: provider, model } }),
       }, () => {
         if (!this.isRefreshCurrent(generation, threadId)) return
         const projection = this.selectionClient.snapshot()
@@ -889,6 +898,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       this.catalogReasoning,
     )
     if (patch === undefined) return
+    if (this.suppressedRefresh !== this.refreshGeneration) this.refreshGeneration++
     this.confirmNativeModelAssignment(
       this.state.modelProvider,
       patch.model ?? undefined,
@@ -952,9 +962,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (actualBinding) this.creationHandoff?.acknowledge(composer, next.threadId!)
     const creationDisplay = actualBinding ? undefined : this.creationHandoff?.read(composer, next.threadId)
     if (this.suspendedAvailability !== undefined) this.suspendedAvailability = next.available
-    const cachedDisplay = next.threadId === undefined || next.available
-      ? undefined
-      : this.displayCache.read(this.hostId, next.threadId)
+    const cachedDisplay = this.displayCache.readSelection(this.hostId, next)
     const updated = Object.freeze({
       ...base,
       cachedDisplay,
@@ -973,17 +981,11 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         { effort: pendingReasoning?.effort, confirmation, error: this.submissionError },
       ),
     })
-    if (
-      next.threadId && next.available && !this.selecting && !this.selectionClient.selectionActive()
-      && next.modelProvider && next.model && next.serviceTier !== undefined
-    ) {
-      this.displayCache.write(this.hostId, next.threadId, {
-        providerId: next.modelProvider,
-        model: next.model,
-        ...(next.reasoningEffort === undefined ? {} : { reasoningEffort: next.reasoningEffort }),
-        serviceTier: next.serviceTier,
-      })
-    }
+    this.displayCache.writeSelection(
+      this.hostId,
+      next,
+      this.selecting || this.selectionClient.selectionActive() || this.selectionClient.submissionActive(),
+    )
     if (sameSnapshot(this.state, updated)) return
     this.state = updated
     for (const listener of this.listeners) listener()

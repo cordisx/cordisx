@@ -185,7 +185,9 @@ export function ModelProviderSelector({ registry, transport, locale, suspended =
   const fastMode = native.creationDisplay !== undefined
     ? native.creationDisplay.serviceTier === 'priority'
     : native.available
-    ? supportsFastMode && native.serviceTier === 'priority'
+    ? supportsFastMode && (native.serviceTier === 'priority'
+      || native.serviceTier === undefined && native.cachedDisplay?.providerId === native.modelProvider
+        && native.cachedDisplay?.model === native.model && native.cachedDisplay?.serviceTier === 'priority')
     : native.cachedDisplay?.serviceTier === 'priority'
   const canQueueFast = reasoningInFlight.current !== undefined
   const fastDisabled = !native.available || !supportsFastMode || fastActionPending

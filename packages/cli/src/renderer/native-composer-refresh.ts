@@ -92,6 +92,7 @@ export function refreshedNativeComposerSelection(
     : control.serviceTierKnown
     ? control.serviceTier
     : thread && Object.hasOwn(thread, 'serviceTier')
+        && (thread.serviceTier === null || thread.serviceTier === 'priority' || thread.serviceTier === 'fast')
     ? thread.serviceTier
     : confirmed?.serviceTier
   const effort = confirmed?.modelProvider === projection.effective?.providerId
@@ -107,9 +108,9 @@ export function refreshedNativeComposerSelection(
       modelProvider: projection.effective.providerId,
       model: projection.effective.model,
     }),
-    ...(effort === '' && string(config.model_reasoning_effort) === undefined
-      ? {}
-      : { reasoningEffort: effort || string(config.model_reasoning_effort)! }),
+    ...(effort ? { reasoningEffort: effort } : threadId === undefined && string(config.model_reasoning_effort)
+      ? { reasoningEffort: string(config.model_reasoning_effort)! }
+      : {}),
     reasoningEfforts: control.reasoningEfforts,
     nativeModelsScope: string(config.model_catalog_json) === undefined ? 'active-provider' : 'global',
     ...(serviceTier === undefined ? {} : {
@@ -155,6 +156,7 @@ export function nativeComposerBaselineRouting(
   baseline: NonNullable<Awaited<ReturnType<typeof readNativeComposerBaseline>>>,
   control: NativeModelSelectionControl,
   effective: EffectiveSelection | undefined,
+  threadId: string | undefined,
 ) {
   const { config, thread } = baseline
   const providerNames = new Map<string, string>()
@@ -164,8 +166,9 @@ export function nativeComposerBaselineRouting(
   }
   const catalogIdentity = string(config.model_catalog_json)
   return {
-    provider: effective?.providerId ?? string(thread?.modelProvider) ?? string(config.model_provider) ?? 'openai',
-    model: effective?.model ?? (control.model || string(config.model)),
+    provider: effective?.providerId ?? string(thread?.modelProvider)
+      ?? (threadId === undefined ? string(config.model_provider) ?? 'openai' : undefined),
+    model: effective?.model ?? (control.model || (threadId === undefined ? string(config.model) : undefined)),
     catalogIdentity,
     nativeModelsScope: catalogIdentity === undefined ? 'active-provider' as const : 'global' as const,
     providerNames,

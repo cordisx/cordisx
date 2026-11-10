@@ -19,6 +19,15 @@ describe('native session display cache', () => {
     cache.write('local', 'chat', value)
     expect(writes).toBe(1)
     expect(cache.read('local', 'chat')).toEqual({ ...value, updatedAt: 1 })
+    cache.writeSelection('local', {
+      available: true,
+      busy: false,
+      threadId: 'chat',
+      modelProvider: 'provider',
+      model: 'other',
+      serviceTier: null,
+    }, false)
+    expect(cache.read('local', 'chat')).toEqual({ ...value, updatedAt: 1 })
     expect(cache.read('remote', 'chat')).toBeUndefined()
     expect(cache.read('local', 'other')).toBeUndefined()
     cache.write('local', 'chat', { ...value, serviceTier: null })

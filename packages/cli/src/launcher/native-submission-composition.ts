@@ -716,10 +716,12 @@ export async function prepareNativeSubmissionBootstrap(
         })
         lifetime.signal.throwIfAborted()
         control.bindController(controller)
+        control.bindSourceConfigurationReader(threadId => cdp.sourceConfiguration(threadId))
         taskRouting = new NativeAgentTaskRouting(
           controller,
           async selection =>
-            (await catalog()).some(provider =>
+            selection.providerId === 'openai'
+            || (await catalog()).some(provider =>
               provider.providerId === selection.providerId
               && provider.models.some(model => model.id === selection.model)
             ),

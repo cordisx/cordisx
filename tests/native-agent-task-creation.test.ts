@@ -314,3 +314,23 @@ it('inherits a live source tuple for ordinary task creation and keeps explicit m
   expect(await tasks.claim({ callId: 'remote', sourceThreadId: 'source', hostId: 'remote' })).toBeUndefined()
   await f.routing.close()
 })
+
+it('inherits the official provider for a bound native source without acquiring a managed credential', async () => {
+  const f = await fixture()
+  const tasks = new NativeAgentTasks({
+    ...f.authority,
+    sourceConfiguration: async () => ({
+      providerId: 'openai',
+      model: 'native-model',
+      reasoningEffort: 'high' as const,
+      serviceTier: null,
+    }),
+  })
+  const handle = await tasks.claim({ callId: 'official-call', sourceThreadId: 'source', hostId: 'local' }) as {
+    token: string
+  }
+  expect(await f.routing.consume({ operationToken: handle.token, method: 'thread/start', requestId: 1 }))
+    .toMatchObject({ providerId: 'openai', model: 'native-model', reasoningEffort: 'high', serviceTier: null })
+  expect(f.controller.prepareThreadResume).not.toHaveBeenCalled()
+  await f.routing.close()
+})

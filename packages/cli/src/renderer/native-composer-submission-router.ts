@@ -4,7 +4,7 @@ import { createNativeContinuationCompletion, type NativeContinuationOwner } from
 
 interface ComposerSubmission extends NativeContinuationOwner {
   submit: NativeProviderSelectionClient['submitHook']
-  serviceTier(): 'priority' | 'default'
+  serviceTier(): 'priority' | 'default' | undefined
   sourceConfiguration?():
     | Readonly<{ providerId: string; model: string; reasoningEffort: string; serviceTier: 'priority' | null }>
     | undefined
@@ -88,7 +88,7 @@ const submit: Hook = async descriptor => {
     continuationAvailable: descriptor.continuationAvailable === true && continuations.available(owner),
   })
   const admitted = result.allow && owner.snapshot().scope.composerId !== undefined
-    ? { ...result, serviceTier }
+    ? { ...result, ...(serviceTier === undefined ? {} : { serviceTier }) }
     : result
   if (admitted.allow) {
     continuations.admitted(owner, admitted)

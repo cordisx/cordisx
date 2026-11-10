@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { composer } from './fixtures/native-model-provider-composer.js'
 import { harness, message, nativeRequest, settle } from './fixtures/native-model-provider-transport-harness.js'
 import { NativeMcpRequestClient } from '../packages/cli/src/renderer/native-mcp-request-client.js'
+import { harness as channelHarness } from './fixtures/native-submission-channel-harness.js'
 
 // Request completion must not depend on a native dispatch acknowledgement.
 describe('native model request completion', () => {
@@ -390,6 +391,96 @@ it('does not infer an existing thread Fast setting from global configuration', a
   try {
     expect(h.transport.getSnapshot().serviceTier).toBeUndefined()
   } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('does not promote global provider, model or effort into an unknown existing session', async () => {
+  const { nativeComposerBaselineRouting, refreshedNativeComposerSelection } = await import(
+    '../packages/cli/src/renderer/native-composer-refresh.js'
+  )
+  const baseline = {
+    thread: undefined,
+    config: { model_provider: 'global-provider', model: 'global-model', model_reasoning_effort: 'high' },
+  }
+  const control = {
+    model: '',
+    reasoningEffort: '',
+    reasoningEfforts: [],
+    serviceTier: null,
+    serviceTierKnown: false,
+    models: [],
+    selectModel: async () => {},
+  }
+  const routing = nativeComposerBaselineRouting(baseline, control, undefined, 'thread')
+  expect(routing.provider).toBeUndefined()
+  expect(routing.model).toBeUndefined()
+  const snapshot = refreshedNativeComposerSelection(
+    'thread',
+    baseline,
+    control,
+    { available: false, revision: 1 },
+    false,
+  )
+  expect(snapshot.reasoningEffort).toBeUndefined()
+  expect(snapshot.serviceTier).toBeUndefined()
+})
+
+it('reconciles an existing Composer with a committed selection changed in another scope', async () => {
+  const h = await harness()
+  try {
+    h.channel.selectionRead.mockImplementation(async () => ({
+      available: true,
+      revision: 20,
+      effective: { providerId: 'provider-b', model: 'model-b' },
+    }))
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, modelProvider: 'provider-b', model: 'model-b' })
+    expect(h.selectModel.mock.calls.at(-1)?.[0]).toBe('model-b')
+  } finally {
+    h.transport.dispose()
+    h.dom.window.close()
+  }
+})
+
+it('updates the native Composer after another bound scope commits its model', async () => {
+  const h = await harness()
+  const channel = await channelHarness({
+    catalog: () => [{
+      providerId: 'provider-a',
+      pluginId: 'host',
+      label: 'A',
+      models: [{ id: 'model-a', label: 'A', aliases: [] }, { id: 'model-b', label: 'B', aliases: [] }],
+    }],
+  })
+  const main = { ...channel.draft, composerId: 'main', threadId: 'thread-1' }
+  const side = { ...channel.draft, composerId: 'side', threadId: 'thread-1' }
+  try {
+    channel.setLive(main)
+    await channel.channel.selectionRead({ scope: main, effective: { providerId: 'provider-a', model: 'model-a' } })
+    channel.setLive(side)
+    const other = await channel.channel.selectionRead({
+      scope: side,
+      effective: { providerId: 'provider-a', model: 'model-a' },
+    })
+    await channel.channel.selectionSelect({
+      scope: side,
+      providerId: 'provider-a',
+      model: 'model-b',
+      expectedRevision: other.revision,
+    })
+    channel.setLive(main)
+    h.channel.selectionRead.mockImplementation(async () => await channel.channel.selectionRead({ scope: main }))
+    h.dom.window.dispatchEvent(new h.dom.window.Event('focus'))
+    await settle()
+    await settle()
+    expect(h.transport.getSnapshot()).toMatchObject({ available: true, modelProvider: 'provider-a', model: 'model-b' })
+    expect(h.selectModel.mock.calls.at(-1)?.[0]).toBe('model-b')
+  } finally {
+    await channel.installed.dispose()
     h.transport.dispose()
     h.dom.window.close()
   }

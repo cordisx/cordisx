@@ -55,6 +55,12 @@ export function modelProviderSelectionDisplay(
         : { reasoningEffort: native.cachedDisplay.reasoningEffort }),
     }
   }
+  const useCachedEffort = native.available && native.reasoningEffort === undefined
+    && native.cachedDisplay?.reasoningEffort !== undefined && native.cachedDisplay.providerId === native.modelProvider
+    && native.cachedDisplay.model === native.model
+  if (useCachedEffort) {
+    native = { ...native, reasoningEffort: native.cachedDisplay!.reasoningEffort! }
+  }
   const cachedDisplay = !native.available ? native.cachedDisplay : undefined
   const preference = native.threadId === undefined ? native.draftPreference : undefined
   const creationDisplay = native.creationDisplay?.threadId === native.threadId ? native.creationDisplay : undefined
@@ -145,7 +151,7 @@ export function modelProviderSelectionDisplay(
     : !reasoning.catalogBacked || displayedNativeModel?.id === native.model && native.model !== undefined
     ? native.reasoningEfforts ?? []
     : []
-  const reasoningEffort = cachedDisplay !== undefined || creationModel !== undefined
+  const reasoningEffort = cachedDisplay !== undefined || useCachedEffort || creationModel !== undefined
       || reasoningEfforts.includes(selectedReasoningEffort ?? '')
     ? selectedReasoningEffort
     : reasoning.effort

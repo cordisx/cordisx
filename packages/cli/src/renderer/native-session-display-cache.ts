@@ -43,6 +43,31 @@ export class NativeSessionDisplayCache {
     }
   }
 
+  readSelection(hostId: string, state: import('./native-model-provider-state.js').SelectionSnapshot) {
+    if (!state.threadId || state.available && state.reasoningEffort !== undefined && state.serviceTier !== undefined) {
+      return undefined
+    }
+    return this.read(hostId, state.threadId)
+  }
+
+  /** Store only a fully observed tuple from an unlocked, bound selection. */
+  writeSelection(
+    hostId: string,
+    state: import('./native-model-provider-state.js').SelectionSnapshot,
+    locked: boolean,
+  ): void {
+    if (
+      locked || !state.available || !state.threadId || !state.modelProvider || !state.model
+      || state.reasoningEffort === undefined || state.serviceTier === undefined
+    ) return
+    this.write(hostId, state.threadId, {
+      providerId: state.modelProvider,
+      model: state.model,
+      reasoningEffort: state.reasoningEffort,
+      serviceTier: state.serviceTier,
+    })
+  }
+
   write(hostId: string, threadId: string, display: Omit<NativeSessionDisplay, 'updatedAt'>): void {
     if (
       !valid(hostId) || !valid(threadId) || !valid(display.providerId) || !valid(display.model)

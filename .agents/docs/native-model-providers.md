@@ -713,11 +713,11 @@ reports resource hashes; it does not prove a native submission or account read.
 Session display snapshots are scoped by Host and thread and are presentation
 hints, not selection or submission authority. A live, bound local Composer can
 supply a source tuple for ordinary native task creation when its provider, model,
-effort and Fast value are all known and consistent with the Host binding. The
-managed-provider route carries that tuple through the admitted start and first
-turn; explicit native choices take precedence. Missing or ambiguous source
-settings, official-provider tasks, remote targets, and ordinary native forks do
-not have a verified inheritance seam. Independent agent sessions without a source
+effort and Fast value are all known and consistent with the Host binding. The admitted native task route carries that tuple through start and first turn;
+explicit native choices take precedence. An ordinary fork with a matching live
+source tuple carries it into the native fork and binds any managed credential to
+the returned child. Missing or ambiguous source settings, remote targets and
+unloaded source conversations do not have a verified inheritance seam. Independent agent sessions without a source
 thread do not inherit from the visible Composer. Structural fixtures are not
 proof of a native App flow.
 

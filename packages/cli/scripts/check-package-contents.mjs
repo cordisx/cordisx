@@ -301,6 +301,7 @@ try {
       'dist/assets/launcher/native-provider-credential-helper.mjs',
       'dist/assets/launcher/native-app-server-intermediary.mjs',
       'dist/assets/launcher/native-app-server-protocol.mjs',
+      'dist/assets/launcher/native-session-fork.mjs',
       'dist/assets/launcher/native-configured-overrides.mjs',
       'dist/assets/launcher/native-thread-switch.mjs',
       'dist/assets/launcher/native-app-server-input.mjs',

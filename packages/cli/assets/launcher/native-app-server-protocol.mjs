@@ -12,6 +12,7 @@ import { createNativeProviderTransport } from './native-provider-transport.mjs'
 import { nativeProviderFailure } from './native-provider-errors.mjs'
 import { switchNativeThread } from './native-thread-switch.mjs'
 import { createNativeProviderContinuation, dispatchNativeSelectionMutation } from './native-provider-continuation.mjs'
+import { inheritNativeFork } from './native-session-fork.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -422,6 +423,14 @@ async function forward(line) {
     return
   }
   if (!managed) {
+    const fork = await inheritNativeFork(message, { nativeCall, controlCall })
+    if (fork.handled) {
+      await write(
+        process.stdout,
+        fork.error ? { id: message.id, error: fork.error } : { id: message.id, result: fork.result },
+      )
+      return
+    }
     if (['thread/start', 'turn/start', 'turn/steer', 'turn/addUserMessage'].includes(message?.method)) {
       const allowed = await controlCall('unmarked-provider', {
         ...(typeof params?.threadId === 'string' ? { threadId: params.threadId } : {}),
