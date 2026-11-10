@@ -1,4 +1,5 @@
 import type { StartupCdpTransport } from './startup-cdp-transport.js'
+import type { CdpTargetRetirementObserver } from './cdp-target-retirement.js'
 import { installRuntimeBindings } from './cdp-runtime-bindings.js'
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
@@ -54,6 +55,7 @@ export async function install(
   },
   nativeSubmission?: NativeSubmissionInstallation,
   activateDocument?: (identifier: string) => Promise<void>,
+  observeRetirement?: (session: support.CdpSession) => Promise<CdpTargetRetirementObserver>,
 ): Promise<support.InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
@@ -113,7 +115,9 @@ export async function install(
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
   let nativeChannel: { dispose(session?: support.CdpSession): Promise<void> } | undefined
   let managementBinding: ManagementCdpBinding | undefined
+  let retirement: CdpTargetRetirementObserver | undefined
   try {
+    retirement = await observeRetirement?.(session)
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new support.CdpCertifiedPermissionChannel(session, {
         ...certifiedPermission,
@@ -917,6 +921,7 @@ export async function install(
       ...(nativeChannel === undefined ? {} : { nativeChannel }),
       ...(viteLoopbackPermission === undefined ? {} : { permission: viteLoopbackPermission }),
       ...(viteLoopbackPermissions === undefined ? {} : { permissions: viteLoopbackPermissions }),
+      ...(retirement === undefined ? {} : { confirmRetirement: () => retirement!.confirm() }),
       disposeHost: async () => {
         marketplaceController.abort()
         providerController?.abort()
@@ -954,5 +959,7 @@ export async function install(
         await certifiedPermissionChannel?.dispose()
       },
     })
+  } finally {
+    retirement?.close()
   }
 }

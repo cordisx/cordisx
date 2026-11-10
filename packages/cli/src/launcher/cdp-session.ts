@@ -8,7 +8,7 @@ export class CdpInstallationAbortedError extends Error {}
 
 export class CdpConnectionClosedError extends Error {}
 
-/** Only the inspected target's explicit retirement notification establishes this state. */
+/** An explicit notification or independent browser target evidence establishes retirement. */
 export class CdpTargetClosedError extends CdpConnectionClosedError {
   constructor() {
     super('CDP target closed')
@@ -52,6 +52,7 @@ export class CdpSession {
   private nextId = 1
   private closed = false
   private targetClosed = false
+  private targetCrashed = false
   private responseTimedOut = false
   private readonly closeListeners = new Set<() => void>()
   private readonly pending = new Map<number, {
@@ -69,6 +70,7 @@ export class CdpSession {
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as CdpResponse
       if (message.method !== undefined) {
+        if (message.method === 'Inspector.targetCrashed') this.targetCrashed = true
         if (message.method === 'Inspector.detached' && message.params?.reason === 'target_closed') {
           this.targetClosed = true
           this.emitDiagnostic({
@@ -221,7 +223,31 @@ export class CdpSession {
   }
 
   isTargetClosed(): boolean {
-    return this.targetClosed
+    return this.targetClosed && !this.targetCrashed
+  }
+
+  isTargetCrashed(): boolean {
+    return this.targetCrashed
+  }
+
+  /** Used only after independent browser evidence identifies this exact disconnected target. */
+  confirmTargetRetirement(targetId: string): void {
+    if (new URL(this.url).pathname.split('/').at(-1) !== targetId) {
+      throw new Error('CDP retirement target identity changed')
+    }
+    if (!this.isClosed() || this.targetCrashed || this.targetClosed) return
+    this.targetClosed = true
+    this.emitDiagnostic({
+      event: 'cdp-target-closed',
+      phase: 'browser-confirmation',
+      requestRef: this.connectionRef,
+      ...this.endpoint,
+    })
+  }
+
+  confirmTargetCrash(targetId: string): void {
+    if (new URL(this.url).pathname.split('/').at(-1) !== targetId) throw new Error('CDP crash target identity changed')
+    this.targetCrashed = true
   }
 
   /** A slow operation alone cannot retire a socket; confirm it with two independent read-only probes. */

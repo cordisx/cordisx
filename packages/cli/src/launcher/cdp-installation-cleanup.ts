@@ -33,11 +33,13 @@ interface FailedInstallation {
   readonly permission?: { readonly name: string; readonly origin: string }
   readonly permissions?: ViteLoopbackPermissionCoordinator
   readonly timeoutMs: number
+  readonly confirmRetirement?: () => Promise<void>
 }
 
 /** Renderer retirement removes document authority, but cannot remove browser-scoped permission grants. */
 export async function failInstallation(input: FailedInstallation): Promise<never> {
   const { session, document, error } = input
+  if (error instanceof CdpConnectionClosedError) await input.confirmRetirement?.()
   const strict = input.loopbackModules && !input.viteDevelopment
   const failures: unknown[] = []
   const attempt = async (operation: Promise<unknown>, hostResource = false): Promise<boolean> => {
