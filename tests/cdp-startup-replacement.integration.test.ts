@@ -9,6 +9,7 @@ import { watchAndInject, type WatchInjectionOptions } from '../packages/cli/src/
 import { CdpPluginLifecycleRuntime } from '../packages/cli/src/launcher/cdp-plugin-lifecycle-runtime.js'
 import type { CdpSession, CdpTarget } from '../packages/cli/src/launcher/cdp-session.js'
 import type { PluginManagementService } from '../packages/cli/src/management/service.js'
+import { createNativeSubmissionCdpAuthority } from '../packages/cli/src/launcher/native-submission-cdp-channel.js'
 
 type Interruption = 'retired' | 'socket' | 'crashed' | 'activation'
 const SOURCE = 'globalThis.__cordisxCompositionBoot = Promise.resolve(globalThis.__cordisxRuntime = { ready: true })'
@@ -61,6 +62,9 @@ async function fixture(options: {
     createContext({
       document: { readyState: 'complete' },
       location: { href: 'app://-/index.html' },
+      crypto,
+      setTimeout,
+      clearTimeout,
     })
   const shouldInterrupt = (id: string) => {
     const number = Number(id.split('-').at(-1))
@@ -157,16 +161,21 @@ async function fixture(options: {
     service: { subscribe: () => unsubscribe } as unknown as PluginManagementService,
   }
   const nativeDispose = vi.fn()
+  const nativeAuthority = createNativeSubmissionCdpAuthority({
+    catalog: async () => [],
+    isThreadIdle: async () => true,
+    submissionAvailable: false,
+  })
   const nativeSubmission = options.transforms
     ? {
       authority: {
         install: async (session: CdpSession, current: CdpTarget) => {
-          const remove = session.onEvent('Runtime.bindingCalled', () => {})
+          const channel = await nativeAuthority.install(session, current)
           return {
             dispose: async () => {
               calls.push(`native-dispose:${current.id}`)
               nativeDispose(current.id)
-              remove()
+              await channel.dispose()
             },
           }
         },
