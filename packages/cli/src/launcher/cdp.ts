@@ -4,6 +4,7 @@ import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contra
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
 import { CdpInstallationTargetRetiredError } from './cdp-installation-cleanup.js'
+import { createCdpInstallationDeadline } from './cdp-installation-deadline.js'
 import { observeCdpTargetRetirement } from './cdp-target-retirement.js'
 import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
@@ -542,6 +543,9 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
                 startupNavigationPending = false
               }
               : undefined
+            const installationDeadline = awaitingStartupReplacement
+              ? createCdpInstallationDeadline(options.signal, startupInstallationDeadline!)
+              : undefined
             const record = await install(
               target,
               selectedSource,
@@ -565,12 +569,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.viteDevelopment,
               options.viteDevelopment === true || browserGraphTransport,
               viteLoopbackPermissions,
-              awaitingStartupReplacement
-                ? AbortSignal.any([
-                  options.signal,
-                  AbortSignal.timeout(Math.max(1, startupInstallationDeadline! - Date.now())),
-                ])
-                : options.signal,
+              installationDeadline?.signal ?? options.signal,
               hostMutationGate,
               options.managedServiceUI,
               target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
@@ -578,7 +577,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.launcherOwnedNativeTarget === true && nativeWorkspaceTarget(target) && !ownedWorkspaceInstalled
                 ? session => observeCdpTargetRetirement(options.port, target, session)
                 : undefined,
-            )
+            ).finally(() => installationDeadline?.release())
             installed.set(target.id, record)
             if (nativeWorkspaceTarget(target)) {
               ownedWorkspaceInstalled = true
