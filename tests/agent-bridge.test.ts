@@ -67,14 +67,16 @@ function fakeCodex(): AgentBridgeCodexAuthority & { calls: Array<{ method: strin
           thread: {
             id: 't1',
             status: { type: (params as { threadId: string }).threadId === 'loaded' ? 'idle' : 'notLoaded' },
-            turns: [{
-              items: [
-                { type: 'userMessage', content: [{ type: 'text', text: 'please fix' }] },
-                { type: 'commandExecution', command: 'npm test' },
-                { type: 'agentMessage', text: 'fixed' },
-              ],
-            }],
           },
+        }
+      }
+      if (method === 'thread/items/list') {
+        return {
+          data: [
+            { type: 'userMessage', content: [{ type: 'text', text: 'please fix' }] },
+            { type: 'commandExecution', command: 'npm test' },
+            { type: 'agentMessage', text: 'fixed' },
+          ].reverse().slice(0, params.limit as number).map(item => ({ turnId: 'turn', item })),
         }
       }
       if (method === 'thread/start') {
@@ -209,8 +211,12 @@ function searchableCodex(threads: Readonly<Record<string, readonly string[]>>) {
       }
       if (method === 'thread/read') {
         const id = String((params as { threadId: string }).threadId)
+        return { thread: { id, name: `thread ${id}` } }
+      }
+      if (method === 'thread/items/list') {
+        const id = String(params.threadId)
         reads.push(id)
-        return { thread: { id, name: `thread ${id}`, turns: turns(id) } }
+        return { data: turns(id)[0]!.items.toReversed().map(item => ({ turnId: 'turn', item })) }
       }
       if (method === 'thread/start') return { thread: { id: 'new-thread' } }
       if (method === 'turn/start') return { turn: { id: 'turn-1' } }

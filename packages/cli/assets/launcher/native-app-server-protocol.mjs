@@ -13,6 +13,7 @@ import { nativeProviderFailure } from './native-provider-errors.mjs'
 import { switchNativeThread } from './native-thread-switch.mjs'
 import { createNativeProviderContinuation, dispatchNativeSelectionMutation } from './native-provider-continuation.mjs'
 import { inheritNativeFork } from './native-session-fork.mjs'
+import { readNativeLines } from './native-json-lines.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -20,8 +21,6 @@ const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
 const nativeCliEntry = process.env.CORDISX_NATIVE_CLI_ENTRY_PATH
 const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
 const marker = 'cordisx.operation_token'
-// Native history and plugin catalogs can exceed the small private control-message budget.
-const maxNativeLineBytes = 64 * 1024 * 1024
 const maxControlLineBytes = 8 * 1024 * 1024
 if (!socketPath || !nonce || !executable?.startsWith('/')) throw new Error('Native intermediary is not configured')
 for (
@@ -57,7 +56,12 @@ if (agentModelsBinding && nativeArgs.includes('app-server')) {
   )
 }
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
-const nativeTransport = createNativeProviderTransport(child, { executable, args: nativeArgs, env: process.env })
+const nativeTransport = createNativeProviderTransport(child, {
+  executable,
+  args: nativeArgs,
+  env: process.env,
+  diagnostic: details => nativeLifecycle(details.phase, details),
+})
 const control = net.connect(socketPath)
 const controlCalls = new Map()
 const privateCalls = new Map()
@@ -278,27 +282,8 @@ function missingManagedProvider(message) {
 }
 
 // Only framed messages are buffered. Many small lines in one chunk do not count as one large request.
-function readLines(stream, receive, maxLineBytes = maxNativeLineBytes) {
-  let buffer = ''
-  stream.setEncoding('utf8')
-  stream.on('data', chunk => {
-    buffer += chunk
-    for (;;) {
-      const newline = buffer.indexOf('\n')
-      if (newline < 0) break
-      const line = buffer.slice(0, newline)
-      buffer = buffer.slice(newline + 1)
-      if (Buffer.byteLength(line) > maxLineBytes) {
-        stop('frame-limit-exceeded')
-        return
-      }
-      if (line.length > 0) receive(line)
-    }
-    if (Buffer.byteLength(buffer) > maxLineBytes) stop('frame-limit-exceeded')
-  })
-  stream.once('end', () => {
-    if (buffer.trim() !== '') stop('incomplete-frame')
-  })
+function readLines(stream, receive, maxLineBytes) {
+  readNativeLines(stream, receive, stop, maxLineBytes)
 }
 
 let authenticate
@@ -898,6 +883,8 @@ const continuation = createNativeProviderContinuation({
 const BRIDGE_NATIVE_METHODS = new Set([
   'thread/list',
   'thread/read',
+  'thread/turns/list',
+  'thread/items/list',
   'thread/start',
   'thread/resume',
   'thread/name/set',
