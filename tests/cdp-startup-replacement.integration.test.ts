@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { type Context, createContext, runInContext } from 'node:vm'
-import { setImmediate as nextTurn } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import WebSocket, { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { watchAndInject, type WatchInjectionOptions } from '../packages/cli/src/launcher/cdp.js'
@@ -13,7 +13,7 @@ import { createNativeSubmissionCdpAuthority } from '../packages/cli/src/launcher
 
 type Interruption = 'retired' | 'silent-retired' | 'unannounced-retired' | 'socket' | 'crashed' | 'activation'
 const SOURCE = 'globalThis.__cordisxCompositionBoot = Promise.resolve(globalThis.__cordisxRuntime = { ready: true })'
-const RESOURCE = 'globalThis.nativeReady = "ANCHOR"'
+const RESOURCE = 'globalThis.nativeReady = "ANCHOR";globalThis.__cordisxNativeContinuationLocalSendReady = true'
 
 /** Real loopback CDP and the executable production bootstrap; no synthetic ready response. */
 async function fixture(options: {
@@ -211,7 +211,7 @@ async function fixture(options: {
           source: source.replace('ANCHOR', 'PATCHED'),
           anchorMatches: 1,
           acknowledgementExpression: 'globalThis.nativeReady === "PATCHED"',
-          fenceExpression: 'delete globalThis.nativeReady',
+          fenceExpression: 'delete globalThis.nativeReady;delete globalThis.__cordisxNativeContinuationLocalSendReady',
         }),
       }],
     }
@@ -348,6 +348,35 @@ describe('first owned workspace during production installation', () => {
 })
 
 describe('owned workspace replacement during production installation', () => {
+  it('keeps continuation active after successful replacement when the startup deadline expires', async () => {
+    const app = await fixture({ transforms: true })
+    const deadline = new AbortController()
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const timeouts: number[] = []
+    const replacementTimeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      if (milliseconds === 2_000) return timeout(milliseconds)
+      timeouts.push(milliseconds)
+      return deadline.signal
+    })
+    try {
+      app.start()
+      await vi.waitFor(() => expect(app.ready).toHaveBeenCalledOnce(), { timeout: 3_000 })
+      expect(timeouts).toHaveLength(1)
+      const replacement = app.scopes.get('workspace-1')!.context
+      expect(replacement.__cordisxNativeContinuationLocalSendReady).toBe(true)
+      deadline.abort()
+      // Let the actual CDP fence round trip settle if the deadline still owns the installed document.
+      await delay(100)
+      expect(replacement.__cordisxNativeContinuationLocalSendReady).toBe(true)
+      expect(app.calls).not.toContain('workspace-1:Fetch.disable')
+    } finally {
+      replacementTimeout.mockRestore()
+      await app.stop()
+    }
+    expect(app.scopes.get('workspace-1')?.context.__cordisxNativeContinuationLocalSendReady).toBeUndefined()
+    expect(app.calls).toContain('workspace-1:Fetch.disable')
+  })
+
   it.each([false, true])(
     'releases an interrupted native transform installation before admitting its replacement (held seed %s)',
     async heldSeed => {
