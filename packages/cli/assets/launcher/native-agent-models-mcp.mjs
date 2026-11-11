@@ -70,7 +70,7 @@ const tools = [{
 }, {
   name: 'read_session',
   description:
-    'Read one page of a conversation transcript by its sessionId (from list_sessions), newest messages kept, plus the link and `transcriptTotal`. Read-only and cheap for one page, but a page may be large (~60k characters). Page older text with `cursor` from `nextCursor`; `truncated: true` means something was left out, and `clippedCharacters` says how much of the oldest returned message was cut.',
+    'Read one page of a conversation transcript by its sessionId (from list_sessions), newest messages kept, plus the link and `transcriptTotal` (null when native paging has not counted the whole transcript). Read-only and cheap for one page, but a page may be large (~60k characters). Page older text with `cursor` from `nextCursor`; `truncated: true` means something was left out, and `clippedCharacters` says how much of the oldest returned message was cut.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

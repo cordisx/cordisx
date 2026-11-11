@@ -13,10 +13,12 @@ import {
   handoffPrompt,
   readCandidate,
   scanReport,
+  SEARCH_MAX_CHARACTERS,
   SEARCH_MAX_ELAPSED_MS,
   SEARCH_MAX_THREADS,
   SEARCH_RECENT_THREADS,
   searchEntries,
+  SUMMARY_MAX_CHARS,
 } from './agent-bridge-context.js'
 import type { HomeConfigProvider } from '../config/home-config.js'
 import {
@@ -47,6 +49,16 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
 import { createIntegrationStatus } from './integration-status.js'
+import {
+  codexRecentEntries,
+  codexThreadMetadata,
+  codexTranscriptPage,
+  codexTurn,
+  summaryHistoryCharacters,
+  transcriptLimit,
+} from './agent-bridge-codex-history.js'
+
+export { threadEntries, threadTranscript } from './agent-bridge-codex-history.js'
 
 export { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
 
@@ -128,43 +140,6 @@ function threadSummary(value: unknown) {
   }
 }
 
-/** Every readable entry of a thread, oldest first: messages, plans, and commands. */
-export function threadEntries(value: unknown): readonly TranscriptEntry[] {
-  const thread = object(value) ?? {}
-  const entries: TranscriptEntry[] = []
-  for (const turn of Array.isArray(thread.turns) ? thread.turns : []) {
-    for (const item of Array.isArray(object(turn)?.items) ? object(turn)!.items as unknown[] : []) {
-      const entry = object(item)
-      if (entry === undefined) continue
-      if (entry.type === 'userMessage') {
-        const parts = Array.isArray(entry.content) ? entry.content : []
-        const said = parts.map(part => object(part)?.text).filter((part): part is string => typeof part === 'string')
-        if (said.length > 0) entries.push({ role: 'user', text: said.join('\n') })
-      } else if (entry.type === 'agentMessage' && typeof entry.text === 'string') {
-        entries.push({ role: 'assistant', text: entry.text })
-      } else if (entry.type === 'plan' && typeof entry.text === 'string') {
-        entries.push({ role: 'plan', text: entry.text })
-      } else if (entry.type === 'commandExecution' && typeof entry.command === 'string') {
-        entries.push({
-          role: 'command',
-          text: entry.command + (typeof entry.aggregatedOutput === 'string' ? '\n' + entry.aggregatedOutput : ''),
-        })
-      } else if (['mcpToolCall', 'dynamicToolCall', 'fileChange'].includes(String(entry.type))) {
-        entries.push({ role: 'tool', text: JSON.stringify(entry) })
-      }
-    }
-  }
-  return entries
-}
-
-/** The newest page of a thread's transcript; `limit` bounds entries and the page says what it left out. */
-export const threadTranscript = (value: unknown, limit?: number): readonly TranscriptEntry[] =>
-  pageTranscript(threadEntries(value), limit === undefined ? {} : { limit }).entries
-
-/** `limit` as the tools declare it: a positive integer of message entries, or undefined when absent. */
-const transcriptLimit = (value: unknown): number | undefined =>
-  Number.isInteger(value) ? Math.min(Math.max(value as number, 1), 200) : undefined
-
 export interface CodexBridgeOptions {
   /** Where a validated app + provider + model + cwd combination is remembered. */
   readonly validation?: BridgeValidationCache
@@ -223,15 +198,22 @@ async function searchCodexThreads(
       break
     }
     attempts += 1
-    let read: Record<string, unknown> | undefined
+    let read: Awaited<ReturnType<typeof codexRecentEntries>>
     try {
-      read = object(await codex.nativeRequest('thread/read', { threadId: session.sessionId, includeTurns: true }))
+      read = await codexRecentEntries(codex, session.sessionId, {
+        deadline: startedAt + SEARCH_MAX_ELAPSED_MS,
+        maxCharacters: SEARCH_MAX_CHARACTERS - scan.characters,
+      })
     } catch {
       scan.capped = true
       scan.reason = 'read-unavailable'
       continue
     }
-    const entries = threadEntries(read?.thread)
+    const entries = read.entries
+    if (read.capped) {
+      scan.capped = true
+      if (read.reason !== undefined) scan.reason ??= read.reason
+    }
     if (!readCandidate(scan, transcriptSize(entries))) {
       unread += 1
       break
@@ -249,15 +231,20 @@ export async function codexConversationSummary(
   callerThreadId: string,
 ): Promise<string | undefined> {
   try {
-    const read = object(await codex.nativeRequest('thread/read', { threadId: callerThreadId, includeTurns: true }))
-    const thread = object(read?.thread)
+    const thread = await codexThreadMetadata(codex, callerThreadId)
+    const read = await codexRecentEntries(codex, callerThreadId, {
+      deadline: Date.now() + SEARCH_MAX_ELAPSED_MS,
+      maxCharacters: summaryHistoryCharacters,
+    })
     const title = text(thread?.name, 1024)
-    const summary = conversationSummary(threadEntries(thread), {
+    const summary = conversationSummary(read.entries, {
       app: 'Codex',
       sessionId: callerThreadId,
       ...(title === undefined ? {} : { title }),
     })
-    return summary.length === 0 ? undefined : summary
+    if (summary.length === 0) return undefined
+    const note = read.capped ? 'Recent history only; older pages were not scanned. ' : ''
+    return note + summary.slice(0, SUMMARY_MAX_CHARS - note.length)
   } catch {
     return undefined
   }
@@ -295,11 +282,7 @@ export function createCodexBridgeHandler(
     dryRun: async (args, operationId) => await dryRun(args, operationId),
     refresh: async record => {
       if (record.sessionId === undefined || record.turnId === undefined) return undefined
-      const read = object(await codex.nativeRequest('thread/read', { threadId: record.sessionId, includeTurns: true }))
-      const thread = object(read?.thread)
-      const turn = (Array.isArray(thread?.turns) ? thread.turns : []).map(object).find(item =>
-        item?.id === record.turnId
-      )
+      const turn = await codexTurn(codex, record.sessionId, record.turnId)
       if (turn?.status === 'completed') return { status: 'succeeded' }
       if (turn?.status === 'failed' || turn?.status === 'interrupted') {
         return {
@@ -497,14 +480,14 @@ export function createCodexBridgeHandler(
       // `read_session`: a page of the newest messages, with a cursor for the rest.
       const threadId = text(args.sessionId)
       if (threadId === undefined) throw new BridgeOperationError('sessionId-required')
-      const read = object(await codex.nativeRequest('thread/read', { threadId, includeTurns: true }))
+      const thread = await codexThreadMetadata(codex, threadId)
       const limit = transcriptLimit(args.limit)
-      const page = pageTranscript(threadEntries(read?.thread), {
+      const page = await codexTranscriptPage(codex, threadId, {
         ...(limit === undefined ? {} : { limit }),
         ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
       })
       return {
-        ...threadSummary(read?.thread),
+        ...threadSummary(thread),
         transcript: page.entries,
         transcriptTotal: page.total,
         truncated: page.truncated,

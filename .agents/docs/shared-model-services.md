@@ -240,17 +240,24 @@ Failures carry `status`, `reason`, `retryable`, `howToContinue`, and a short
 as `cursor` to continue reading older text. Character clipping preserves the
 remaining head of the clipped message on the following page. Cursors are
 opaque and valid for the current transcript; changing the transcript can make
-one invalid.
+one invalid. Codex uses native item pagination, so `transcriptTotal` is `null`
+when the whole transcript has not been counted. A query does not read the
+whole history just to count it. Empty text pages can still have a `nextCursor`
+when native items contain only images or other non-text material.
 
 `limit` bounds message entries, so a short request never spends its budget on
 character clipping; the 60k-character cap still applies underneath it.
 
 - **`app: "codex"`** runs on the Codex desktop's own app-server through the
   intermediary's `native-request` control message, which allows only
-  `thread/list`, `thread/read`, `thread/start`, `thread/resume`,
-  `thread/name/set`, `turn/start`, and `turn/interrupt`. Authenticated replies
-  to outstanding native requests may contain up to 64 MiB of history; commands
-  and diagnostics retain their 256 KiB frame limit. Threads it starts show
+  `thread/list`, `thread/read`, `thread/turns/list`, `thread/items/list`,
+  `thread/start`, `thread/resume`, `thread/name/set`, `turn/start`, and
+  `turn/interrupt`. History reads use metadata-only `thread/read` followed by
+  bounded native pages. Search and caller summaries scan recent pages and
+  report when that scan stops early. Completion checks read turn metadata
+  without loading items. Model data and authenticated replies to outstanding
+  native requests have no fixed CordisX byte cap; commands and diagnostics
+  retain their 256 KiB frame limit. Threads it starts show
   in the Codex sidebar; `start_session` can pick a declared provider and model,
   and names the thread when `title` is given (`thread/start` has no name field,
   so the name is set immediately after it).

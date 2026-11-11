@@ -44,8 +44,8 @@ async function fixture(handler: Parameters<typeof createServer>[0]) {
 }
 
 describe('encrypted Responses replay', () => {
-  for (const bytes of [17 * 1024 * 1024, 64 * 1024 * 1024, 64 * 1024 * 1024 + 1]) {
-    it(`bounds image-bearing request bodies at 64 MiB (${bytes} bytes)`, async () => {
+  for (const bytes of [17 * 1024 * 1024, 64 * 1024 * 1024 + 1]) {
+    it(`forwards image-bearing bodies unchanged without a default size cap (${bytes} bytes)`, async () => {
       const imageRequest = {
         model: 'test-model',
         input: [{
@@ -70,15 +70,9 @@ describe('encrypted Responses replay', () => {
       })
       const result = await fetch(url, { method: 'POST', body: payload })
       expect(Buffer.byteLength(payload)).toBe(bytes)
-      if (bytes <= 64 * 1024 * 1024) {
-        expect(result.status).toBe(200)
-        expect(await result.text()).toBe('forwarded')
-        expect(received).toEqual([{ bytes, digest: createHash('sha256').update(payload).digest('hex') }])
-      } else {
-        expect(result.status).toBe(502)
-        expect(await result.json()).toEqual({ error: { message: 'Provider transport unavailable' } })
-        expect(received).toHaveLength(0)
-      }
+      expect(result.status).toBe(200)
+      expect(await result.text()).toBe('forwarded')
+      expect(received).toEqual([{ bytes, digest: createHash('sha256').update(payload).digest('hex') }])
     })
   }
 

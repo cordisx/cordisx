@@ -127,7 +127,11 @@ approval replies follow the thread's connection, while global account and
 configuration requests stay on the original connection. A failed connection
 does not select another provider or replay an uncertain turn. The intermediary
 owns these processes and terminates them on disposal. Native permission and
-Send authorization checks remain in force.
+Send authorization checks remain in force. Model data frames have no fixed
+CordisX byte cap and are accumulated as fragments until their frame boundary;
+a large valid history reply does not terminate the provider connection. Worker
+exits and input errors record safe lifecycle metadata including the provider,
+exit code or signal, without recording request content or credentials.
 
 ### Native resource compatibility
 
@@ -791,8 +795,10 @@ SSE recovery is permitted only before any output item, text delta, tool event
 or unknown event is forwarded. An exhausted retry, unrelated error, cancelled
 request or partially delivered stream cannot trigger another replay. Unknown
 SSE frames and oversized preludes pass through without recovery. The loopback
-transport uses unguessable, fixed-upstream routes, bounded request sizes and
-concurrency; redirects are rejected rather than forwarding credentials to a
+transport uses unguessable, fixed-upstream routes and bounded concurrency.
+HTTP model request bodies have no fixed CordisX byte cap. The replay path
+still buffers and parses the complete body when it examines encrypted history;
+this does not remove upstream byte or model-context limits. Redirects are rejected rather than forwarding credentials to a
 new destination. Routes and requests are retired with the launch.
 
 Transport and native-request composition checks do not establish real-provider

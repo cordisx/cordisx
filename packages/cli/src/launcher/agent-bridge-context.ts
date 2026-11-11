@@ -48,7 +48,7 @@ export interface ContentScan {
   characters: number
   /** Whether the scan stopped while candidates were left unread. */
   capped: boolean
-  reason?: 'candidate-limit' | 'size-limit' | 'read-unavailable' | 'time-limit'
+  reason?: 'candidate-limit' | 'history-page-limit' | 'size-limit' | 'read-unavailable' | 'time-limit'
 }
 
 export const beginScan = (): ContentScan => ({ scanned: 0, characters: 0, capped: false })

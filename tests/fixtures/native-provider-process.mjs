@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { createHash } from 'node:crypto'
 
 const selected = process.argv.find(argument => argument.startsWith('model_provider='))
 const current = selected ? JSON.parse(selected.slice('model_provider='.length)) : 'openai'
@@ -61,12 +62,28 @@ createInterface({ input: process.stdin }).on('line', line => {
           modelProvider,
           model: 'test-model',
           status: { type: threads.has(params.threadId) ? 'idle' : 'notLoaded' },
+          ...(params.fixtureBytes === undefined ? {} : {
+            turns: [{ items: [{ type: 'agentMessage', text: 'x'.repeat(params.fixtureBytes) }] }],
+          }),
         },
       },
     })
   } else if (message.method === 'thread/unsubscribe') {
     threads.delete(params.threadId)
     emit({ id: message.id, result: { status: 'unsubscribed' } })
+  } else if (message.method === 'thread/turns/list') {
+    emit({
+      id: message.id,
+      result: { data: [{ id: 'fixture-turn', status: 'inProgress', items: [] }], nextCursor: null },
+    })
+  } else if (message.method === 'thread/items/list') {
+    emit({
+      id: message.id,
+      result: {
+        data: [{ turnId: 'fixture-turn', item: { type: 'agentMessage', text: 'fixture-history' } }],
+        nextCursor: null,
+      },
+    })
   } else if (message.method === 'turn/start') {
     const expected = threads.get(params.threadId)
     emit(
@@ -78,7 +95,17 @@ createInterface({ input: process.stdin }).on('line', line => {
             data: { type: 'modelProviderMismatch', modelProvider: expected, currentModelProvider: current },
           },
         }
-        : { id: message.id, result: { turn: { id: `turn-${++sequence}`, status: 'inProgress' }, current } },
+        : {
+          id: message.id,
+          result: {
+            turn: { id: `turn-${++sequence}`, status: 'inProgress' },
+            current,
+            ...(params.input?.[0]?.text === undefined ? {} : {
+              textLength: params.input[0].text.length,
+              textDigest: createHash('sha256').update(params.input[0].text).digest('hex'),
+            }),
+          },
+        },
     )
   } else if (message.method === 'fixture/approval') {
     approvals.set(1, message.id)

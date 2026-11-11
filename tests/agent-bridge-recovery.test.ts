@@ -54,12 +54,16 @@ function backend() {
           thread: {
             id: 'new',
             status: { type: 'idle' },
-            turns: [{
-              id: 'turn',
-              status: state,
-              items: [{ type: 'userMessage', content: [{ type: 'text', text: 'body-only needle' }] }],
-            }],
           },
+        }
+      }
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: state, items: [] }] }
+      if (method === 'thread/items/list') {
+        return {
+          data: [{
+            turnId: 'turn',
+            item: { type: 'userMessage', content: [{ type: 'text', text: 'body-only needle' }] },
+          }],
         }
       }
       return {}
@@ -140,7 +144,7 @@ describe('bridge operation recovery', () => {
     const f = backend()
     const native = f.authority.nativeRequest
     f.authority.nativeRequest = async (method, params) => {
-      if (method === 'thread/read') throw new Error('transport disconnected')
+      if (method === 'thread/items/list') throw new Error('transport disconnected')
       return native(method, params)
     }
     expect(await createCodexBridgeHandler(f.authority)('list_sessions', { searchTerm: 'needle' })).toMatchObject({
@@ -158,10 +162,10 @@ describe('bridge operation recovery', () => {
         expect(params.modelProviders).toEqual([])
         return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
       }
-      if (method === 'thread/read') {
+      if (method === 'thread/items/list') {
         attempts += 1
         if (attempts === 1) throw new Error('large history timeout')
-        return { thread: { turns: [{ items: [{ type: 'agentMessage', text: 'needle' }] }] } }
+        return { data: [{ turnId: 'turn', item: { type: 'agentMessage', text: 'needle' } }] }
       }
       return {}
     }
@@ -184,7 +188,7 @@ describe('bridge operation recovery', () => {
         if (method === 'thread/list') {
           return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
         }
-        if (method === 'thread/read') {
+        if (method === 'thread/items/list') {
           reads += 1
           elapsed += 30_000
           throw new Error('timed out')
@@ -212,11 +216,11 @@ describe('bridge operation recovery', () => {
         if (method === 'thread/list') {
           return { data: Array.from({ length: 12 }, (_, index) => ({ id: `t${index}`, name: '' })) }
         }
-        if (method === 'thread/read') {
+        if (method === 'thread/items/list') {
           reads += 1
           elapsed += reads === 1 ? 44_999 : 30_000
           if (reads === 2) throw new Error('timed out')
-          return { thread: { turns: [] } }
+          return { data: [] }
         }
         return {}
       }

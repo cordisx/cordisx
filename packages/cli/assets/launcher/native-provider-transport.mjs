@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { PassThrough, Writable } from 'node:stream'
+import { readNativeLines } from './native-json-lines.mjs'
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
 const provider = value => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/u.test(value) ? value : undefined
 const key = id => JSON.stringify([typeof id, id])
-const MAX_FRAME = 64 * 1024 * 1024
 const MAX_WORKERS = 128
 
 /** Multiplex native connections after the Host has admitted the original request.
@@ -13,12 +13,17 @@ const MAX_WORKERS = 128
  * The inert process default satisfies native provider identity checks and cannot
  * silently send a request when a per-thread override has been lost.
  */
-export function createNativeProviderTransport(primary, { executable, args, env, initialize } = {}) {
+export function createNativeProviderTransport(primary, { executable, args, env, initialize, diagnostic } = {}) {
   const stdout = new PassThrough()
   const workers = new Map()
   const owners = new Map()
   const serverRequests = new Map()
   const primaryWrite = primary.stdin.write.bind(primary.stdin)
+  const observe = details => {
+    try {
+      diagnostic?.(details)
+    } catch { /* Diagnostics never control provider transport. */ }
+  }
   let initializeParams = initialize
   let disposed = false
   const emit = (message, original) => {
@@ -54,7 +59,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
           if (owner?.connection === connection) owner.turn = message.result.turn
         }
       }
-      if (Array.isArray(message.result?.data)) {
+      if (pending?.method === 'thread/list' && Array.isArray(message.result?.data)) {
         for (const thread of message.result.data) {
           const owner = owners.get(thread.id)
           if (owner?.connection !== primary && owner?.status) {
@@ -93,25 +98,14 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
     emit(message, original)
   }
   const attach = (stream, connection) => {
-    let buffer = ''
-    stream.setEncoding('utf8')
-    stream.on('data', chunk => {
-      buffer += chunk
-      let boundary
-      while ((boundary = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, boundary)
-        buffer = buffer.slice(boundary + 1)
-        if (Buffer.byteLength(line) > MAX_FRAME) {
-          connection.child?.kill('SIGTERM')
-          return
-        }
-        try {
-          receive(connection, JSON.parse(line), line)
-        } catch {
-          if (connection === primary && !disposed) stdout.write(line + '\n')
-        }
+    readNativeLines(stream, line => {
+      try {
+        receive(connection, JSON.parse(line), line)
+      } catch {
+        if (connection === primary && !disposed) stdout.write(line + '\n')
       }
-      if (Buffer.byteLength(buffer) > MAX_FRAME) connection.child?.kill('SIGTERM')
+    }, reason => {
+      observe({ phase: reason, childPid: connection.child?.pid })
     })
   }
   primary.pending = new Map()
@@ -158,7 +152,8 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
       })
       workers.set(id, worker)
       attach(child.stdout, worker)
-      const failed = () => {
+      const failed = details => {
+        observe({ childPid: child.pid, provider: id, ...details })
         if (worker.closed) return
         worker.closed = true
         if (workers.get(id) === worker) workers.delete(id)
@@ -197,9 +192,11 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
           serverRequests.delete(requestId)
         }
       }
-      child.once('error', failed)
-      child.once('exit', failed)
-      child.stdin.on('error', failed)
+      const errorCode = error =>
+        ['ENOENT', 'EACCES', 'EPERM', 'EPIPE', 'ECONNRESET'].includes(error?.code) ? error.code : 'unknown'
+      child.once('error', error => failed({ phase: 'provider-spawn-failed', errorCode: errorCode(error) }))
+      child.once('exit', (exitCode, signal) => failed({ phase: 'provider-exited', exitCode, signal }))
+      child.stdin.on('error', error => failed({ phase: 'provider-input-error', errorCode: errorCode(error) }))
       void send(worker.write, { id: worker.initializeId, method: 'initialize', params: initializeParams })
         .catch(worker.rejectReady)
     }
@@ -241,28 +238,25 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
     const write = connection === primary ? primaryWrite : connection.write
     await new Promise((resolve, reject) => write(original + '\n', error => error ? reject(error) : resolve()))
   }
-  let buffer = ''
+  let fragments = []
   const stdin = new Writable({
     write(chunk, _encoding, callback) {
-      buffer += chunk.toString('utf8')
+      const input = chunk.toString('utf8')
       const frames = []
-      let boundary
-      while ((boundary = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, boundary)
-        buffer = buffer.slice(boundary + 1)
-        if (Buffer.byteLength(line) > MAX_FRAME) {
-          callback(new Error('Native frame exceeds limit'))
-          return
-        }
+      let start = 0
+      for (;;) {
+        const boundary = input.indexOf('\n', start)
+        const fragment = input.slice(start, boundary < 0 ? undefined : boundary)
+        if (fragment.length > 0) fragments.push(fragment)
+        if (boundary < 0) break
+        const line = fragments.length === 1 ? fragments[0] : fragments.join('')
+        fragments = []
+        start = boundary + 1
         try {
           frames.push({ message: JSON.parse(line), original: line })
         } catch {
           primaryWrite(line + '\n')
         }
-      }
-      if (Buffer.byteLength(buffer) > MAX_FRAME) {
-        callback(new Error('Native frame exceeds limit'))
-        return
       }
       void (async () => {
         for (const { message: frame, original } of frames) {
@@ -296,6 +290,7 @@ export function createNativeProviderTransport(primary, { executable, args, env, 
     workers.clear()
     owners.clear()
     serverRequests.clear()
+    fragments = []
     stdin.destroy()
     stdout.end()
   }

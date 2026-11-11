@@ -5,12 +5,20 @@ import { createInterface } from 'node:readline'
 import { expect, it } from 'vitest'
 import { createNativeProviderTransport } from '../packages/cli/assets/launcher/native-provider-transport.mjs'
 import { nativeProviderFailure } from '../packages/cli/assets/launcher/native-provider-errors.mjs'
+import { harness } from './fixtures/native-intermediary-harness.js'
+import { createHash } from 'node:crypto'
 
 it('keeps native provider identity per connection, preserves history ids and namespaces approval replies', async () => {
   const args = [path.resolve('tests/fixtures/native-provider-process.mjs'), 'app-server']
   const primary = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
   const closed = once(primary, 'close')
-  const transport = createNativeProviderTransport(primary, { executable: process.execPath, args, env: process.env })
+  const diagnostics: unknown[] = []
+  const transport = createNativeProviderTransport(primary, {
+    executable: process.execPath,
+    args,
+    env: process.env,
+    diagnostic: (event: unknown) => diagnostics.push(event),
+  })
   const lines = createInterface({ input: transport.stdout })
   const replies: any[] = []
   const waiting: ((value: any) => void)[] = []
@@ -151,6 +159,12 @@ it('keeps native provider identity per connection, preserves history ids and nam
       params: { requestId: activeApproval.id, threadId: 'saved-provider-a' },
     })
     expect(transport.workers().map((worker: { providerId: string }) => worker.providerId)).toEqual(['provider.b'])
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      phase: 'provider-exited',
+      provider: 'provider-a',
+      exitCode: 7,
+      signal: null,
+    }))
     send({ id: 'primary-after-exit', method: 'config/read', params: {} })
     expect((await read()).result.current).toBe('openai')
     transport.close()
@@ -170,6 +184,55 @@ it('keeps native provider identity per connection, preserves history ids and nam
     primary.kill('SIGTERM')
     lines.close()
     await closed
+  }
+})
+
+it('passes model input and history above 64 MiB through the real intermediary without retiring a sibling turn', async () => {
+  const h = await harness(undefined, 'native-provider-process.mjs')
+  try {
+    h.send({ id: 'initialize', method: 'initialize', params: { clientInfo: { name: 'fixture', version: '1' } } })
+    await h.read()
+    const start = () =>
+      h.server.nativeRequest('thread/start', {
+        modelProvider: 'provider-b',
+        config: { 'model_providers.provider-b': { wire_api: 'responses' } },
+      }) as Promise<{ thread: { id: string } }>
+    const first = await start()
+    const sibling = await start()
+    const active = await h.server.nativeRequest('turn/start', { threadId: sibling.thread.id, input: [] })
+    expect(active).toMatchObject({ current: 'provider-b', turn: { status: 'inProgress' } })
+    expect(
+      await h.server.nativeRequest('thread/turns/list', {
+        threadId: first.thread.id,
+        limit: 1,
+        itemsView: 'notLoaded',
+      }),
+    ).toEqual({ data: [{ id: 'fixture-turn', status: 'inProgress', items: [] }], nextCursor: null })
+    expect(await h.server.nativeRequest('thread/items/list', { threadId: first.thread.id, limit: 1 }))
+      .toEqual({
+        data: [{ turnId: 'fixture-turn', item: { type: 'agentMessage', text: 'fixture-history' } }],
+        nextCursor: null,
+      })
+    const bytes = 65 * 1024 * 1024
+    const read = await h.server.nativeRequest('thread/read', {
+      threadId: first.thread.id,
+      includeTurns: true,
+      fixtureBytes: bytes,
+    }) as { thread: { turns: Array<{ items: Array<{ text: string }> }> } }
+    const text = read.thread.turns[0]!.items[0]!.text
+    expect(text.length).toBe(bytes)
+    h.send({ id: 'large-input', method: 'turn/start', params: { threadId: first.thread.id, input: [{ text }] } })
+    expect(JSON.parse(await h.read()).result).toMatchObject({
+      current: 'provider-b',
+      textLength: bytes,
+      textDigest: createHash('sha256').update(text).digest('hex'),
+    })
+    const next = await h.server.nativeRequest('turn/start', { threadId: sibling.thread.id, input: [] })
+    expect(next).toMatchObject({ current: 'provider-b', turn: { status: 'inProgress' } })
+    expect(h.child.exitCode).toBeNull()
+    expect(h.startupEvents().some(event => event.phase === 'provider-exited')).toBe(false)
+  } finally {
+    await h.close()
   }
 })
 

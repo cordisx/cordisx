@@ -136,6 +136,7 @@ export async function harness(
               'errorCode',
               'state',
               'reason',
+              'provider',
             ].includes(key)
           ),
         ).toBe(true)

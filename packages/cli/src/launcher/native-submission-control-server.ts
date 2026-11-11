@@ -12,8 +12,6 @@ import { NativeThreadSwitchError } from './native-thread-switch-error.js'
 
 // Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
-// Match the intermediary native-history envelope; command budgets stay small.
-const MAX_RESPONSE_LINE = 64 * 1024 * 1024
 const TIMEOUT = 30_000
 const valid = (value: unknown, max = 512): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max && !/[\0\r\n]/u.test(value)
@@ -40,6 +38,8 @@ function rejectionReason(error: unknown): string {
 export type NativeBridgeMethod =
   | 'thread/list'
   | 'thread/read'
+  | 'thread/turns/list'
+  | 'thread/items/list'
   | 'thread/start'
   | 'thread/resume'
   | 'thread/name/set'
@@ -557,13 +557,12 @@ export async function startNativeSubmissionControlServer(
         const newline = chunk.indexOf('\n', start)
         const fragment = chunk.slice(start, newline < 0 ? undefined : newline)
         fragmentBytes += Buffer.byteLength(fragment)
-        const frameLimit = authenticated ? MAX_RESPONSE_LINE : MAX_LINE
-        if (fragmentBytes > frameLimit) {
+        if (!authenticated && fragmentBytes > MAX_LINE) {
           diagnostic({
             event: 'native-control-frame-rejected',
-            phase: authenticated ? 'response-frame-limit' : 'request-frame-limit',
+            phase: 'request-frame-limit',
             bytes: fragmentBytes,
-            count: frameLimit,
+            count: MAX_LINE,
             verified: authenticated,
           })
           socket.destroy()
@@ -579,8 +578,8 @@ export async function startNativeSubmissionControlServer(
         try {
           const value = record(JSON.parse(line))
           if (!value) throw new Error('Invalid control envelope')
-          // The larger frame budget is only for an authenticated response to
-          // an outstanding request. Commands and diagnostics retain 256 KiB.
+          // Only an authenticated reply to an outstanding request may be large.
+          // Commands and diagnostics retain 256 KiB; model data has no byte cap.
           if (
             lineBytes > MAX_LINE
             && (!authenticated || typeof value.ok !== 'boolean' || !valid(value.id, 256)

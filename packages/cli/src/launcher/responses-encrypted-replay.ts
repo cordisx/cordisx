@@ -8,7 +8,6 @@ export interface ResponsesReplayRouteOptions {
   readonly nativeStreamIdlePolicy?: boolean
 }
 
-const MAX_BODY = 64 * 1024 * 1024
 const MAX_PRELUDE = 1024 * 1024
 const MAX_ROUTES = 128
 const HOP_HEADERS = new Set([
@@ -74,10 +73,7 @@ function harmlessEvent(value: unknown): boolean {
 
 async function collect(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = []
-  let bytes = 0
   for await (const chunk of request) {
-    bytes += chunk.length
-    if (bytes > MAX_BODY) throw new Error('request too large')
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)
