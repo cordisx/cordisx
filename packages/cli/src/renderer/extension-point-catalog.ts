@@ -754,7 +754,7 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'manager.settings.navigation-group.resources': '资源',
   'manager.settings.navigation-group.development': '开发',
   'manager.settings.navigation-group.collaboration': '协作',
-  'manager.settings.navigation-group.external-accounts': '外部账号',
+  'manager.settings.navigation-group.external-accounts': '外部连接',
   'manager.settings.navigation-group.other': '其他',
   'manager.content.title': '管理器内容',
   'manager.content.description': '在宿主拥有的标准管理器页面标题下挂载受控的可信本地插件正文。',

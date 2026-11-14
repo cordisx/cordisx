@@ -19,6 +19,7 @@
 }
 .cxr-manager-collection-views {
   display: flex;
+  flex-wrap: wrap;
   width: fit-content;
   max-width: 100%;
   gap: 3px;
@@ -27,12 +28,14 @@
   background: var(--cx-hover, rgba(255, 255, 255, 0.07));
 }
 .cxr-manager-collection-views button {
+  flex: 0 0 auto;
   border: 0;
   border-radius: 7px;
   padding: 5px 10px;
   background: transparent;
   color: var(--cx-muted, #9ca5b5);
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 .cxr-manager-collection-views button[aria-selected="true"] {

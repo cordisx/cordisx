@@ -1,9 +1,10 @@
 # Extensible Manager settings navigation
 
-Status: approved architecture and delivery contract. Protocol ownership is
-formal at `cordisx-protocol#31` (`f350899`) plus the configuration-IA closure
+Status: current Host reference. The original architecture is owned by
+`cordisx-protocol#31` (`f350899`) plus the configuration-IA closure
 in `cordisx-protocol#34` (`20053fb`). Host implementation must consume only
-formal Protocol and Host merge commits.
+formal Protocol and Host merge commits. Versioned visual grouping follows
+[Manager Settings navigation groups v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/manager-settings-navigation/groups-v2.md).
 
 ## Product outcome and compatibility boundary
 
@@ -34,6 +35,44 @@ have real standalone content.
 The names `before-settings` and `after-settings` remain closed Protocol group
 identities for the two sides of a stable virtual insertion seam. They do not
 imply a visible Host Settings row and are not renamed locally.
+
+## Visual categories and external connections
+
+Visual categories are separate from the two insertion seams. The current
+surface-v11 registration may select `resources`, `development`,
+`collaboration`, `external-accounts`, or `other`. Host renders only non-empty
+categories in catalog order and owns their localized labels.
+
+The shared **External connections / 外部连接** category uses the compatible
+public id `external-accounts`. It groups connections to externally managed
+accounts and services, including Channel connections. Any plugin may register
+its own eligible Manager destination here; this is not a Channel-specific
+category or an authorization grant. Keep the id when migrating an existing
+consumer. No `external-connections` id or arbitrary plugin-created category is
+accepted by this contract.
+
+Use the exact surface-v11 identity and public `navigationGroup` reference:
+
+```ts
+ctx.slots.register({
+  $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
+  schemaVersion: 11,
+  name: 'manager.settings.navigation-items',
+  id: 'connections',
+  group: 'after-settings',
+  order: 180,
+}, {
+  route: { id: 'connections' },
+  navigationGroup: { id: 'external-accounts' },
+})
+```
+
+Import `CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11` from `cordisx/contracts` and
+register a same-owner route and standard page as below. Surface-v9 retains
+only its original four categories; it cannot declare `external-accounts`.
+An unversioned registration cannot carry `navigationGroup` and falls back to
+`other`. Unknown explicit ids fail closed. These compatibility rules are
+defined by Protocol; the visible category name is Host presentation.
 
 ## Structured B contribution
 
@@ -77,9 +116,10 @@ ctx.pages.register({
 })
 ```
 
-The contribution envelope is the single source for local `id`, required
+The legacy contribution envelope above is the single source for local `id`, required
 `group`, numeric `order`, `when`, and `disabled`. Its item contains exactly one
-same-owner local route reference with optional scalar params. Route v2 owns the
+same-owner local route reference with optional scalar params. A versioned v11
+item additionally accepts the visual category reference above. Route v2 owns the
 navigation title/description; page v3 owns the standard header
 title/description, required Host icon, breadcrumbs, and structured header
 actions. Missing metadata is pending or invalid, never inferred from ids, DOM,
@@ -125,20 +165,20 @@ target or grant plugins Manager DOM authority.
 
 ## Deterministic navigation projection
 
-The single fixed projection is:
+The current visual projection is:
 
-1. Host core `host:plugins`, `host:extensions`, `host:routes`, and
-   `host:marketplace`;
-2. eligible `before-settings` contributions;
-3. the virtual settings seam, with no rendered Host row;
-4. eligible `after-settings` contributions; and
-5. bottom-anchored `host:about`.
+1. **Resources**, including Host Plugins and Plugin Store;
+2. **Development**, including Host Extension points and Routes;
+3. non-empty **Collaboration**;
+4. non-empty **External connections**;
+5. non-empty **Other**, including legacy and unassigned contributions; and
+6. bottom-anchored `host:about`, outside the visual categories.
 
 Host records have fixed positions rather than plugin numeric orders. Within
-each external group the sole order is:
+each visual category the contribution order is:
 
 ```text
-numeric order -> owner by Unicode code unit -> qualified id by Unicode code unit
+insertion seam -> numeric order -> owner by Unicode code unit -> qualified id by Unicode code unit
 ```
 
 Registration time, localized title, DOM position, current activation, and the

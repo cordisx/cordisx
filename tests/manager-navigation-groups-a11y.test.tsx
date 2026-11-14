@@ -144,7 +144,7 @@ describe('Manager grouped navigation', () => {
         '资源',
         '开发',
         '协作',
-        '外部账号',
+        '外部连接',
         '其他',
       ])
       expect(groups.at(0)?.querySelector('[data-tab="plugins"]')).not.toBeNull()
@@ -174,7 +174,7 @@ describe('Manager grouped navigation', () => {
           'Resources',
           'Development',
           'Collaboration',
-          'External accounts',
+          'External connections',
           'Other',
         ])
       expect(buttons.every(button => button.tabIndex === 0)).toBe(true)
@@ -227,7 +227,7 @@ describe('Manager grouped navigation', () => {
     }
   })
 
-  it('marks an external account deep link as the current page', async () => {
+  it('marks an external connection deep link as the current page', async () => {
     const { dom, root } = await mountNavigation('en', true, {
       kind: 'manager-content',
       id: 'accounts:connections',
