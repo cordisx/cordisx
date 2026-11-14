@@ -6,6 +6,7 @@ import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState
 import type { CordisXIconToken } from '../../../contracts.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
+import { IconButton } from '../../host-ui/IconButton.js'
 import {
   type HostManagerCollectionPageOptions,
   HostManagerCollectionPageRegistry,
@@ -32,13 +33,13 @@ function LeadingVisual({ item }: { readonly item: ManagerCollectionItem }) {
   const visual = item.leadingVisual
   if (visual.kind === 'semantic-icon') {
     return (
-      <span className="cxr-manager-collection-visual" data-kind="semantic-icon">
+      <span className="cxr-card-icon cxr-manager-collection-visual" data-kind="semantic-icon">
         <HostSurfaceIcon token={visual.icon} />
       </span>
     )
   }
   return (
-    <span className="cxr-manager-collection-visual" data-kind="semantic-fallback">
+    <span className="cxr-card-icon cxr-manager-collection-visual" data-kind="semantic-fallback">
       <HostSurfaceIcon token="host:chat" />
     </span>
   )
@@ -184,7 +185,7 @@ function Row(
     : registry.localized(item.disabled.reason, `item:${item.id}:disabled`)
   return (
     <article
-      className="cxr-manager-collection-row"
+      className="cxr-card cxr-manager-collection-row"
       role="listitem"
       data-manager-collection-item={item.id}
       data-disabled={item.disabled.value || undefined}
@@ -199,9 +200,9 @@ function Row(
         onClick={() => void registry.open(item.id)}
       >
         <LeadingVisual item={item} />
-        <span className="cxr-manager-collection-copy">
-          <strong>{title}</strong>
-          <span>{summary}</span>
+        <span className="cxr-card-body">
+          <strong className="cxr-card-title">{title}</strong>
+          <span className="cxr-card-description">{summary}</span>
         </span>
       </button>
       {direct.length === 0 && overflow.length === 0
@@ -359,11 +360,10 @@ function Dialog(
 }
 
 function ViewSelector(
-  { registry, views, active, panelId }: {
+  { registry, views, active }: {
     readonly registry: HostManagerCollectionPageRegistry
     readonly views: NonNullable<ReturnType<HostManagerCollectionPageRegistry['snapshot']>['registration']>['views']
     readonly active: string
-    readonly panelId: string
   },
 ) {
   const refs = useRef(new Map<string, HTMLButtonElement>())
@@ -387,22 +387,22 @@ function ViewSelector(
     }
   }
   return (
-    <div className="cxr-manager-collection-views" role="tablist" aria-label={registry.options.hostCopy('views')}>
+    <div className="cxr-manager-collection-views" role="radiogroup" aria-label={registry.options.hostCopy('views')}>
       {views.map((view, index) => (
         <button
           key={view.id}
-          id={`${panelId}-${view.id}`}
           ref={node => {
             if (node === null) refs.current.delete(view.id)
             else refs.current.set(view.id, node)
           }}
           type="button"
-          role="tab"
-          aria-selected={view.id === active}
-          aria-controls={panelId}
+          role="radio"
+          aria-checked={view.id === active}
           tabIndex={view.id === active ? 0 : -1}
-          onKeyDown={event => onKeyDown(event, index)}
-          onClick={() => activate(view.id)}
+          onKeyDown={event =>
+            onKeyDown(event, index)}
+          onClick={() =>
+            activate(view.id)}
         >
           {registry.localized(view.label, `view:${view.id}:label`)}
         </button>
@@ -413,7 +413,10 @@ function ViewSelector(
 
 function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCollectionPageRegistry }) {
   const snapshot = useSyncExternalStore(listener => registry.subscribe(listener), () => registry.snapshot())
-  const panelId = useId()
+  const filtersId = useId()
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filterTrigger = useRef<HTMLElement>(null)
+  const filterPanel = useRef<HTMLDivElement>(null)
   const section = useRef<HTMLElement>(null)
   const lastTrigger = useRef<HTMLElement | null>(null)
   const pendingFocusRestore = useRef(false)
@@ -463,21 +466,60 @@ function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCol
       aria-label={registry.localized(registration.label, 'label')}
       aria-busy={snapshot.state === 'loading' || snapshot.busy !== undefined}
     >
-      {!multipleViews
-        ? null
-        : <ViewSelector registry={registry} views={registration.views} active={snapshot.view!} panelId={panelId} />}
       <SearchToolbar
         value={snapshot.search}
         aria-label={registry.localized(registration.search.label, 'search:label')}
         placeholder={registry.localized(registration.search.placeholder, 'search:placeholder')}
         clearLabel={registry.options.hostCopy('clear-search')}
         onChange={value => registry.setSearch(value)}
+        actions={!multipleViews ? undefined : (
+          <IconButton
+            ref={filterTrigger}
+            icon="models-read"
+            label={registry.options.hostCopy('filters')}
+            {...(snapshot.view === registration.defaultView || currentView === undefined
+              ? {}
+              : { description: registry.localized(currentView.label, `view:${currentView.id}:label`) })}
+            aria-expanded={filtersOpen}
+            aria-controls={filtersId}
+            aria-pressed={snapshot.view !== registration.defaultView}
+            onClick={() => setFiltersOpen(open => !open)}
+            onKeyDown={event => {
+              if (event.key === 'Escape' && filtersOpen) {
+                event.preventDefault()
+                event.stopPropagation()
+                setFiltersOpen(false)
+                return
+              }
+              if (event.key !== 'ArrowDown') return
+              event.preventDefault()
+              flushSync(() => setFiltersOpen(true))
+              filterPanel.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus()
+            }}
+          />
+        )}
       />
+      {!multipleViews ? null : (
+        <div
+          ref={filterPanel}
+          id={filtersId}
+          className="cxr-manager-collection-filters"
+          hidden={!filtersOpen}
+          onKeyDown={event => {
+            if (event.key !== 'Escape') return
+            event.preventDefault()
+            event.stopPropagation()
+            setFiltersOpen(false)
+            filterTrigger.current?.focus({ preventScroll: true })
+          }}
+        >
+          <ViewSelector registry={registry} views={registration.views} active={snapshot.view!} />
+        </div>
+      )}
       <div
         className="cxr-manager-collection-panel"
-        id={panelId}
-        role={multipleViews ? 'tabpanel' : undefined}
-        aria-labelledby={multipleViews ? `${panelId}-${snapshot.view}` : undefined}
+        role="region"
+        aria-label={registry.localized(currentView?.label ?? registration.label, 'results:label')}
       >
         {snapshot.state === 'loading'
           ? <div className="cxr-manager-collection-state" role="status">{registry.options.hostCopy('loading')}</div>
@@ -502,7 +544,7 @@ function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCol
           )
           : (
             <div
-              className="cxr-manager-collection-list"
+              className="cxr-list cxr-manager-collection-list"
               role="list"
               aria-label={registry.localized(registration.label, 'list:label')}
             >

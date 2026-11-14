@@ -446,6 +446,16 @@ or Space. It never carries a trailing chevron, arrow button, or any other
 second navigation affordance: navigation is already expressed by the card's
 accessible name and focus/hover treatment. Installed plugins, extension
 points, routes/pages, and Marketplace browse records use this pattern.
+
+Plugin-contributed `managerCollection` pages use the same Host card grid and
+icon/title/description primitives. Multiple collection views are single-choice
+filters: a shared icon action to the right of search expands their controls
+below the toolbar. The disclosure starts collapsed, preserves the active view
+when closed, and indicates a non-default selection on its trigger. Arrow Down
+opens it and focuses the selected option; arrow keys and Home/End choose a view;
+Escape closes it and restores trigger focus. Hidden filters are outside the tab
+order, and the results region retains the current view's accessible label.
+
 TDesign settings forms, permission controls, provider rows, and Marketplace
 source reorder controls remain semantic grouped rows because they are controls,
 not whole-card detail destinations. Marketplace reaches those source controls

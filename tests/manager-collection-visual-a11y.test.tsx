@@ -18,7 +18,7 @@ const globals = {
 
 afterEach(() => Object.assign(globalThis, globals))
 
-function mountCollection() {
+function mountCollection(multipleViews = false) {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'https://example.test/',
   })
@@ -32,6 +32,7 @@ function mountCollection() {
     IS_REACT_ACT_ENVIRONMENT: false,
   })
   const container = dom.window.document.getElementById('root')!
+  const navigate = vi.fn(async () => {})
   const mounted = mountManagerCollectionHost(container, {
     document: dom.window.document,
     owner: 'chatroom',
@@ -39,7 +40,7 @@ function mountCollection() {
     pageId: 'chatroom:rooms',
     resolveText: value => value.fallback ?? value.key,
     clearTextSite() {},
-    navigate: async () => {},
+    navigate,
     deepLink: () => 'https://example.test/rooms/room-1',
     executeCommand: async () => {
       throw new Error('actions are not submitted by this visual test')
@@ -55,12 +56,22 @@ function mountCollection() {
     id: 'rooms',
     label: text('rooms', 'Rooms'),
     description: text('rooms.description', 'Manage Rooms'),
-    views: [{
-      id: 'active',
-      label: text('active', 'Active'),
-      emptyTitle: text('empty', 'No Rooms'),
-      emptyDescription: text('empty.description', 'Create a Room'),
-    }],
+    views: [
+      {
+        id: 'active',
+        label: text('active', 'Active'),
+        emptyTitle: text('empty', 'No Rooms'),
+        emptyDescription: text('empty.description', 'Create a Room'),
+      },
+      ...(multipleViews
+        ? [{
+          id: 'archived',
+          label: text('archived', 'Archived'),
+          emptyTitle: text('archived.empty', 'No archived Rooms'),
+          emptyDescription: text('archived.empty.description', 'No archived Rooms yet'),
+        }]
+        : []),
+    ],
     defaultView: 'active',
     search: {
       fields: ['title', 'summary'],
@@ -118,7 +129,7 @@ function mountCollection() {
     subscribe: () => () => {},
     dispose: () => {},
   })
-  return { container, dom, mounted }
+  return { container, dom, mounted, navigate }
 }
 
 describe('Host Manager collection visual accessibility', () => {
@@ -162,7 +173,64 @@ describe('Host Manager collection visual accessibility', () => {
     }
   })
 
-  it('uses overlay actions, no-hover fallback, compact dividers, and aligned content edges', () => {
+  it('keeps filtering separate from navigation and preserves the selection when collapsed', async () => {
+    const { container, dom, mounted, navigate } = mountCollection(true)
+    try {
+      await vi.waitFor(() => expect(container.querySelector('[data-manager-collection-item="room-1"]')).not.toBeNull())
+      const trigger = container.querySelector<HTMLButtonElement>('.cxh-search-toolbar button[aria-controls]')!
+      const filters = dom.window.document.getElementById(trigger.getAttribute('aria-controls')!)!
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(filters.hidden).toBe(true)
+
+      trigger.focus()
+      trigger.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+      )
+      await vi.waitFor(() => {
+        expect(filters.hidden).toBe(false)
+        expect(dom.window.document.activeElement?.textContent).toBe('Active')
+      })
+      dom.window.document.activeElement!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+      )
+      await vi.waitFor(() => {
+        expect(mounted.registry.snapshot().view).toBe('archived')
+        expect(dom.window.document.activeElement?.textContent).toBe('Archived')
+        expect(trigger.getAttribute('aria-pressed')).toBe('true')
+      })
+      filters.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      await vi.waitFor(() => {
+        expect(filters.hidden).toBe(true)
+        expect(dom.window.document.activeElement).toBe(trigger)
+      })
+      expect(mounted.registry.snapshot().view).toBe('archived')
+      expect(container.querySelector('[role="region"]')?.getAttribute('aria-label')).toBe('Archived')
+      expect(navigate).not.toHaveBeenCalled()
+
+      trigger.click()
+      await vi.waitFor(() => expect(filters.hidden).toBe(false))
+      expect(filters.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Archived')
+      filters.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+      )
+      await vi.waitFor(() => {
+        const snapshot = mounted.registry.snapshot()
+        expect(snapshot.view).toBe('active')
+        expect(snapshot.source?.view).toBe('active')
+        expect(snapshot.state).toBe('ready')
+        expect(container.querySelector('.cxr-list .cxr-card .cxr-card-title')?.textContent).toBe('Planning')
+      })
+      expect(trigger.getAttribute('aria-pressed')).toBe('false')
+      container.querySelector<HTMLButtonElement>('.cxr-manager-collection-open')!.click()
+      await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ id: 'room-detail' }))
+    } finally {
+      mounted.dispose()
+      await new Promise(resolve => setImmediate(resolve))
+      dom.window.close()
+    }
+  })
+
+  it('uses shared cards with overlay actions, no-hover fallback, and aligned content edges', () => {
     expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-actions')).toMatchObject({
       position: 'absolute',
       top: '50%',
@@ -178,17 +246,24 @@ describe('Host Manager collection visual accessibility', () => {
     ).toMatchObject({ opacity: '1', 'pointer-events': 'auto' })
     expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-actions', '(hover: none), (pointer: coarse)'))
       .toMatchObject({ opacity: '1', 'pointer-events': 'auto' })
-    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-list')).toMatchObject({
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-list')).toMatchObject({
       display: 'grid',
+      'grid-template-columns': 'repeat(auto-fill,minmax(min(260px,100%),1fr))',
+      gap: '7px',
+    })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-card')).toMatchObject({
+      border: '1px solid var(--cx-border,#353a42)',
+      'border-radius': '11px',
+    })
+    expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-list')).toMatchObject({
       width: '100%',
       'min-width': '0',
-      gap: '0',
+      'align-content': 'start',
       margin: '0',
-      border: '1px solid var(--cx-border,#353a42)',
     })
     expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-row')).toMatchObject({
-      border: '0',
-      'border-bottom': '1px solid var(--cx-border,#353a42)',
+      padding: '0',
+      'align-self': 'stretch',
     })
     expect(cssDeclarations(REACT_MANAGER_STYLES, '.cxr-manager-collection-panel')).toMatchObject({
       width: '100%',

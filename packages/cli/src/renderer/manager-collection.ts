@@ -101,6 +101,7 @@ export type ManagerCollectionHostCopyKey =
   | 'empty'
   | 'error-description'
   | 'error-title'
+  | 'filters'
   | 'loading'
   | 'more-actions'
   | 'retry'

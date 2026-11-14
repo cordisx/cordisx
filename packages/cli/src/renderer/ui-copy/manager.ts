@@ -24,6 +24,7 @@ export const MANAGER_NAVIGATION_COPY = {
   'manager.back': { en: 'Back', 'zh-CN': '返回' },
   'manager.content.loading': { en: 'Loading page…', 'zh-CN': '正在加载页面…' },
   'manager.content.failed': { en: 'This page could not be loaded.', 'zh-CN': '无法加载此页面。' },
+  'manager.collection.filters': { en: 'Filters', 'zh-CN': '筛选' },
 } satisfies ProductCopyCatalog<'manager'>
 
 export const EXTENSION_TAB_COPY = {
