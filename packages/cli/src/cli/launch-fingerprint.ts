@@ -7,7 +7,14 @@ function configurationIntent(source: string): string {
     const config = JSON.parse(source)
     for (
       const app of Object.values(config.apps ?? {}) as {
-        profiles?: Record<string, { management?: Record<string, unknown> }>
+        profiles?: Record<string, {
+          management?: {
+            revision?: number
+            migrations?: unknown
+            sources?: { url: string; enabled: boolean }[]
+            hiddenCatalogEntries?: unknown[]
+          }
+        }>
       }[]
     ) {
       for (const profile of Object.values(app.profiles ?? {})) {
@@ -15,6 +22,20 @@ function configurationIntent(source: string): string {
           // Runtime migration bookkeeping does not change the launched configuration.
           delete profile.management.revision
           delete profile.management.migrations
+          // First renderer startup persists inherited Marketplace selections.
+          // Their materialization is equivalent to the absent default, while
+          // explicit source overrides and hidden entries still change intent.
+          const management = profile.management
+          const defaults = config.marketplaceSources as { url: string; enabled: boolean }[] | undefined
+          if (
+            Array.isArray(defaults)
+            && management.hiddenCatalogEntries?.length === 0
+            && management.sources?.length === defaults.length
+            && management.sources.every((source, index) =>
+              source.url === defaults[index]?.url && source.enabled === defaults[index]?.enabled
+            )
+            && Object.keys(management).every(key => key === 'sources' || key === 'hiddenCatalogEntries')
+          ) delete profile.management
         }
       }
     }
