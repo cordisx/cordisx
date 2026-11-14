@@ -1,6 +1,7 @@
 import type { StartupCdpTransport } from './startup-cdp-transport.js'
 import type { CdpTargetRetirementObserver } from './cdp-target-retirement.js'
 import { installRuntimeBindings } from './cdp-runtime-bindings.js'
+import { waitForInitialDocument } from './cdp-document-ready.js'
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isWalletSpendRequest } from './wallet-spend-authority.js'
@@ -126,6 +127,13 @@ export async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    // An ordinary cold launch can expose its target before the initial document
+    // becomes responsive. Drain that read-only readiness probe under the existing
+    // injection budget before issuing bindings with their shorter RPC deadlines.
+    // A held startup seed must keep its bindings until activateDocument releases it.
+    if (loopbackModules && activateDocument === undefined) {
+      await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
+    }
     if (nativeSubmission !== undefined) nativeChannel = await nativeSubmission.authority.install(session, target)
     if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
