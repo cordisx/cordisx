@@ -20,6 +20,22 @@ does not make a Provider Fleet, model, workspace, or notification policy a
 Channel configuration field. The Host consumes Protocol PR #46's formal merge
 `7f5e9a8ecd8cf6fc5f1d9fd0317a46f72a90283b`.
 
+## Account identity display
+
+The launcher reuses the official Feishu/Lark SDK's existing authenticated
+bot-info request to retain only the bot's public name and avatar source.
+Artwork is fetched without credential headers from the platform CDN, bounded,
+decoded and normalized to a 128px RGBA PNG in a generation-owned memory cache.
+Avatar failure does not fail or reconnect the Channel connection. The source
+URL and original bot-info response never enter the renderer projection.
+
+The renderer exposes the optional name/artwork through the explicit
+[Channel Manager v3 identity contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v3-identity.md).
+Frozen `snapshot()` remains unchanged. The read-only identity refresh uses the
+existing token-bound Channel bridge, fences stale and aborted responses, and
+never initiates login or transport restart. Service disposal aborts and releases
+its image work; page disposal retires the consumer's request and refresh timer.
+
 ## Normative v1 boundary
 
 This section supersedes the older task-routing, binding, selector, and

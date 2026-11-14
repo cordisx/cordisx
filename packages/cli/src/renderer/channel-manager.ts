@@ -9,6 +9,8 @@ import type {
   ChannelManagerTargetResultV1,
   ChannelManagerV2,
 } from '@cordisx/protocol/channel-manager/v2'
+import type { ChannelManagerSnapshotV4, ChannelManagerV3 } from '@cordisx/protocol/channel-manager/v3'
+import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
 import type {
   HostServiceConfigDescriptor,
   HostServiceConfigMutation,
@@ -16,6 +18,7 @@ import type {
 } from '../launcher/service-config.js'
 import type { ChannelManagerActionResult, ChannelManagerRuntimeProjection } from '../launcher/channel-manager-api.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
+import { cloneRasterImageSnapshot } from './raster-image.js'
 
 export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' | 'unavailable' | 'planned'
 
@@ -40,6 +43,8 @@ export interface ChannelManagerRouteProjection {
 }
 
 export interface ChannelManagerAccountProjection extends ChannelManagerConnectionProjection {
+  readonly accountName?: string
+  readonly accountAvatar?: RasterImageSnapshotV1
   readonly implementationStatus: ChannelProductStatus
   readonly connectionState: 'disabled' | 'starting' | 'ready' | 'retrying' | 'unavailable' | 'stopped'
   readonly generation: number
@@ -136,12 +141,15 @@ interface ChannelManagerState {
   runtimeProjection?: ChannelManagerRuntimeProjection
   cachedProjection: ChannelManagerProjectionV1 | undefined
   publicController?: PublicChannelManagerController
+  refreshSequence: number
+  disposed: boolean
+  readonly isCurrent: () => boolean
 }
 
 /** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
 export interface ChannelManagerActionsApi {
   run(
-    action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
+    action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind' | 'snapshot',
     input: Record<string, unknown>,
   ): Promise<ChannelManagerActionResult>
 }
@@ -210,6 +218,14 @@ function boundedInteger(value: unknown, label: string): number {
     throw new TypeError(`${label} is invalid`)
   }
   return value as number
+}
+
+function accountDisplayName(value: unknown, label: string): string {
+  if (
+    typeof value !== 'string' || Array.from(value).length < 1 || Array.from(value).length > 256
+    || /[\u0000-\u001F\u007F]/u.test(value)
+  ) throw new TypeError(`${label} is invalid`)
+  return value
 }
 
 function array(value: unknown, label: string, maximum = 256): readonly unknown[] {
@@ -316,6 +332,8 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
       exactKeys(item, [
         'ref',
         'displayName',
+        'accountName',
+        'accountAvatar',
         'adapterKind',
         'enabled',
         'transportMode',
@@ -343,6 +361,12 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
       }
       return {
         ...base,
+        ...(item.accountName === undefined
+          ? {}
+          : { accountName: accountDisplayName(item.accountName, `${label}.accountName`) }),
+        ...(item.accountAvatar === undefined
+          ? {}
+          : { accountAvatar: cloneRasterImageSnapshot(item.accountAvatar as RasterImageSnapshotV1) }),
         implementationStatus: oneOf(item.implementationStatus, [
           'implemented',
           'verified',
@@ -460,8 +484,11 @@ function withRuntimeProjection(
     ...base,
     accounts: base.accounts.map(account => {
       const update = updates.get(accountKey(account))
-      return update === undefined ? account : {
-        ...account,
+      const { accountName: _name, accountAvatar: _avatar, ...prior } = account
+      return update === undefined ? prior : {
+        ...prior,
+        ...(update.accountName === undefined ? {} : { accountName: update.accountName }),
+        ...(update.accountAvatar === undefined ? {} : { accountAvatar: update.accountAvatar }),
         adapterKind: update.adapterKind,
         implementationStatus: update.implementationStatus,
         connectionState: update.connectionState,
@@ -495,10 +522,12 @@ export interface ChannelManagerServiceInput {
     readonly mutation: HostServiceConfigMutation
   }) => Promise<HostServiceConfigMutationResult>
   readonly actions?: ChannelManagerActionsApi
+  /** Host generation lifetime; an old renderer may never adopt new account artwork. */
+  readonly isCurrent?: () => boolean
 }
 
 /** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
-export class CordisXChannelManagerService extends Service implements ChannelManagerV2 {
+export class CordisXChannelManagerService extends Service implements ChannelManagerV2, ChannelManagerV3 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
@@ -515,6 +544,9 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       localConnections: [],
       listeners: new Set<() => void>(),
       cachedProjection: undefined,
+      refreshSequence: 0,
+      disposed: false,
+      isCurrent: wrapped.isCurrent ?? (() => true),
     })
     stateFor(this).publicController = new PublicChannelManagerController({
       profileId: wrapped.profileId ?? 'default',
@@ -523,10 +555,42 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       actionsAvailable: () => stateFor(this).actions !== undefined,
       runAction: async (action, value) => await this.runAction(action, value),
     })
+    ctx.effect(() => () => {
+      const state = stateFor(this)
+      state.disposed = true
+      state.refreshSequence += 1
+      delete state.runtimeProjection
+      state.listeners.clear()
+    }, 'cordisx: Channel account identity lifetime')
   }
 
   snapshot(): ChannelManagerSnapshotV3 {
     return stateFor(this).publicController!.snapshot()
+  }
+
+  snapshotWithIdentity(): ChannelManagerSnapshotV4 {
+    return stateFor(this).publicController!.snapshotWithIdentity()
+  }
+
+  async refreshIdentity(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
+    const state = stateFor(this)
+    if (state.actions === undefined || state.disposed || !state.isCurrent()) return
+    const sequence = ++state.refreshSequence
+    const result = await state.actions.run('snapshot', {})
+    if (
+      signal.aborted || state.disposed || !state.isCurrent() || state.refreshSequence !== sequence
+      || result.projection === undefined
+    ) return
+    const before = JSON.stringify(projectionFor(this).accounts)
+    // Normalize the entire readback before it can replace any last-good account data.
+    withRuntimeProjection(state.projection, result.projection)
+    state.runtimeProjection = result.projection
+    const after = JSON.stringify(projectionFor(this).accounts)
+    if (before === after) return
+    state.cachedProjection = undefined
+    state.publicController!.invalidate()
+    this.notifyListeners()
   }
 
   issue(request: ChannelManagerTargetRequestV1): Promise<ChannelManagerTargetResultV1> {
@@ -605,7 +669,15 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   ): Promise<ChannelManagerActionResult> {
     const state = stateFor(this)
     if (state.actions === undefined) throw new Error('channel-action-unavailable')
-    const result = await state.actions.run(action, input)
+    state.refreshSequence += 1
+    let result: ChannelManagerActionResult
+    try {
+      result = await state.actions.run(action, input)
+    } finally {
+      // Reject reads that began during a failed or completed connection operation too.
+      state.refreshSequence += 1
+    }
+    if (state.disposed || !state.isCurrent()) return result
     if (result.projection !== undefined) state.runtimeProjection = result.projection
     state.cachedProjection = undefined
     if (result.status === 'applied') state.publicController!.invalidate()

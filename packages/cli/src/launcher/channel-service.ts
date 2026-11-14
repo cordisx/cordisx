@@ -19,6 +19,7 @@ import {
   createChannelManagerApi,
 } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
+import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -27,6 +28,7 @@ interface ActiveRuntime {
   readonly runtime: ChannelRuntime
   readonly host: LauncherChannelServiceHost
   readonly service: ActiveLauncherChannelService
+  readonly identities: ChannelAccountIdentityStore
   dispose(): Promise<void>
 }
 
@@ -38,6 +40,7 @@ export interface LocalChannelService {
     finalize(): Promise<void>
   }>
   snapshot(): ChannelRuntimeSnapshot | undefined
+  identity(ref: ChannelRuntimeSnapshot['accounts'][number]['ref']): ChannelAccountIdentity | undefined
   auditSnapshot(): ReturnType<ChannelRuntime['auditSnapshot']>
   /** Launcher-private runtime controls; never bind this object into renderer code. */
   readonly manager: ChannelManagerApi
@@ -52,6 +55,7 @@ export function projectLocalChannelManager(input: {
   readonly writable: boolean
   readonly runtime?: ChannelRuntimeSnapshot
   readonly audit?: ReturnType<ChannelRuntime['auditSnapshot']>
+  readonly identity?: (ref: ChannelRuntimeSnapshot['accounts'][number]['ref']) => ChannelAccountIdentity | undefined
 }): ChannelManagerProjectionV1 {
   const configuration = parseChannelServiceConfig(input.configuration)
   const runtimeAccounts = new Map((input.runtime?.accounts ?? []).map(account => [
@@ -85,6 +89,7 @@ export function projectLocalChannelManager(input: {
     ]))
     return {
       ...connection,
+      ...input.identity?.(connection.ref),
       implementationStatus: runtime?.implementationStatus
         ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
       connectionState: runtime?.connectionState ?? (connection.enabled ? 'starting' as const : 'disabled' as const),
@@ -155,6 +160,7 @@ export function createLocalChannelService(input: {
       storePath: path.join(input.dataDir, `${generation}.json`),
     })
     const host = new LauncherChannelServiceHost(runtime)
+    const identities = new ChannelAccountIdentityStore()
     try {
       const serviceSource = path.join(artifactDirectory, 'service.mjs')
       const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
@@ -177,6 +183,7 @@ export function createLocalChannelService(input: {
         const definition of feishuDefinitionsForConfig(configuration, {
           source: input.source,
           configurationRevision: sequence,
+          identities,
           ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
         })
       ) {
@@ -189,11 +196,14 @@ export function createLocalChannelService(input: {
         runtime,
         host,
         service,
+        identities,
         dispose: async () => {
+          await identities.dispose()
           await host.dispose()
         },
       }
     } catch (error) {
+      await identities.dispose()
       await host.dispose().catch(() => undefined)
       throw error
     }
@@ -218,6 +228,7 @@ export function createLocalChannelService(input: {
 
   const manager = createChannelManagerApi({
     active: () => active === undefined ? undefined : { generation: active.generation, runtime: active.runtime },
+    identity: ref => active?.identities.snapshot(ref),
     connection: async (action, ref, expectedGeneration) => {
       const configuration = activeConfiguration
       if (configuration === undefined) return 'unavailable'
@@ -268,6 +279,7 @@ export function createLocalChannelService(input: {
       }
     },
     snapshot: () => active?.runtime.snapshot(),
+    identity: ref => active?.identities.snapshot(ref),
     auditSnapshot: () => active?.runtime.auditSnapshot() ?? [],
     manager,
     async dispose() {

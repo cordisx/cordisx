@@ -123,6 +123,7 @@
     "rehype-sanitize": "^6.0.0",
     "reicon": "1.2.1",
     "remark-gfm": "4.0.1",
+    "sharp": "0.34.5",
     "shiki": "4.4.3",
     "sigstore": "4.0.0",
     "smol-toml": "1.8.0",

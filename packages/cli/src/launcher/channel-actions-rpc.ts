@@ -24,6 +24,10 @@ export function createChannelActionsBridgeHandler(
       const action = request.action
       const generation = typeof request.generation === 'string' ? request.generation : undefined
       if (typeof action !== 'string') throw new Error('invalid channel action')
+      if (action === 'snapshot') {
+        const projection = input.api.snapshot()
+        return projection === undefined ? { status: 'unavailable' } : { status: 'applied', projection }
+      }
       if (['enable', 'disable', 'reconnect'].includes(action)) {
         const ref = record(request.ref)
         const inputValue = {

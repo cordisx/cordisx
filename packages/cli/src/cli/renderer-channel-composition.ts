@@ -47,6 +47,7 @@ export async function createRendererChannelComposition(input: {
       writable: true,
       ...(service.snapshot() === undefined ? {} : { runtime: service.snapshot()! }),
       audit: service.auditSnapshot(),
+      identity: ref => service!.identity(ref),
     })
   }
   if (plugin === undefined) return { loadManagerProjection }

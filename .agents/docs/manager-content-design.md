@@ -456,6 +456,13 @@ opens it and focuses the selected option; arrow keys and Home/End choose a view;
 Escape closes it and restores trigger focus. Hidden filters are outside the tab
 order, and the results region retains the current view's accessible label.
 
+Identity-bearing cards use the shared `AccountIdentityVisual`: a platform icon
+when account artwork is absent, or a circular account image with that platform
+icon in the lower-right corner. The Host owns both geometry and failed-image
+fallback. These decorative images add no nested control or accessible name.
+The explicit collection-v2 snapshot carries only validated bounded PNGs;
+collection-v1 rows retain their frozen visual contract.
+
 TDesign settings forms, permission controls, provider rows, and Marketplace
 source reorder controls remain semantic grouped rows because they are controls,
 not whole-card detail destinations. Marketplace reaches those source controls

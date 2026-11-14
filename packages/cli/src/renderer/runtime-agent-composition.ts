@@ -506,6 +506,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
           {
             profileId: runtimeScope.metadata()!.profileId,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
+            isCurrent: () => !runtimeScope.disposed,
             ...(runtimeScope.metadata()!.channelManager === undefined
               ? {}
               : { projection: runtimeScope.metadata()!.channelManager }),

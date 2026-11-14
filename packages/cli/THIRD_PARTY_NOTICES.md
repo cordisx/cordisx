@@ -19,9 +19,14 @@ licenses remain with their respective copyright holders:
 | `luna-dom-viewer`          | `1.8.4`                   | MIT              |
 | `luna-object-viewer`       | `0.3.2`                   | MIT              |
 | `reicon`                   | `1.2.1`                   | MIT              |
+| `sharp`                    | `0.34.5`                  | Apache-2.0       |
 | `tdesign-react`            | `1.18.2`                  | MIT              |
 | `tar`                      | `7.5.22`                  | BlueOak-1.0.0    |
 | `ws`                       | `^8.18.3`                 | MIT              |
+
+`sharp` uses its platform-specific libvips optional dependency under
+LGPL-3.0-or-later; that separately installed package retains its upstream
+license. It is used only in the launcher to normalize account artwork.
 
 CordisX bundles only the selected Reicon glyph modules referenced by its
 Host-private semantic icon catalog. Reicon credits Solar Icons, designed by

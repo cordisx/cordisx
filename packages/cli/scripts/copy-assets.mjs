@@ -17,6 +17,7 @@ const preservedRendererStyles = [
   'renderer/host-ui/empty-state.css',
   'renderer/host-ui/empty-state-illustration-theme.css',
   'renderer/host-ui/action-group.css',
+  'renderer/host-ui/account-identity.css',
   'renderer/model-providers.css',
   'renderer/manager/manager-navigation.css',
   'renderer/manager/manager-content.css',

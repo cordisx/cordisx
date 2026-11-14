@@ -1,4 +1,3 @@
-import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   ManagerCollectionAction,
   ManagerCollectionActionResultV1,
@@ -13,6 +12,13 @@ import type {
   ManagerCollectionSourceV1,
   ManagerCollectionTextInputAction,
 } from '@cordisx/protocol/manager-collection/v1'
+import type {
+  ManagerCollectionItemV2,
+  ManagerCollectionRegistryV2,
+  ManagerCollectionSnapshotV2,
+  ManagerCollectionSourceV2,
+} from '@cordisx/protocol/manager-collection/v2'
+import { assertManagerCollectionVisual } from './manager-collection-visual.js'
 import type { NavigationCollectionCommandAction } from '@cordisx/protocol/navigation-collection-actions/v1'
 import type { CordisXCommandReference, CordisXLocalizedText } from '../contracts.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
@@ -36,6 +42,13 @@ const SNAPSHOT_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-collection-snapshot.v1.schema.json'
 const RESULT_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-collection-action-result.v1.schema.json'
+const SNAPSHOT_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-collection-snapshot.v2.schema.json'
+
+type CollectionSnapshot = ManagerCollectionSnapshotV1 | ManagerCollectionSnapshotV2
+type CollectionItem = ManagerCollectionItem | ManagerCollectionItemV2
+type CollectionSource = ManagerCollectionSourceV1 | ManagerCollectionSourceV2
+
 const OPAQUE_ID = /^[A-Za-z0-9._~-]{1,512}$/u
 const PARAMETER_ID = /^[a-z][a-zA-Z0-9]*$/u
 const CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/u
@@ -68,7 +81,7 @@ export interface HostManagerCollectionSnapshot {
   readonly version: number
   readonly state: ManagerCollectionLoadState
   readonly registration?: ManagerCollectionRegistrationV1
-  readonly source?: ManagerCollectionSnapshotV1
+  readonly source?: CollectionSnapshot
   readonly view?: string
   readonly search: string
   readonly busy?: Readonly<{ readonly itemId: string; readonly actionId: string }>
@@ -395,9 +408,10 @@ function assertRegistration(input: ManagerCollectionRegistrationV1): ManagerColl
 }
 
 function assertSnapshot(
-  input: ManagerCollectionSnapshotV1,
+  input: CollectionSnapshot,
   query: ManagerCollectionQueryV1,
-): ManagerCollectionSnapshotV1 {
+  version: 1 | 2,
+): CollectionSnapshot {
   assertPlainObject(input, 'manager collection snapshot')
   assertKeys(input, [
     '$schema',
@@ -411,8 +425,8 @@ function assertSnapshot(
     'items',
   ], 'manager collection snapshot')
   if (
-    input.$schema !== SNAPSHOT_SCHEMA || input.contract !== 'cordisx.manager-collection-snapshot/v1'
-    || input.schemaVersion !== 1
+    input.$schema !== (version === 1 ? SNAPSHOT_SCHEMA : SNAPSHOT_SCHEMA_V2)
+    || input.contract !== `cordisx.manager-collection-snapshot/v${version}` || input.schemaVersion !== version
   ) throw new Error('manager collection snapshot has an unsupported schema tuple')
   if (
     input.collectionId !== query.collectionId || input.queryRevision !== query.queryRevision
@@ -440,30 +454,7 @@ function assertSnapshot(
     ids.add(item.id)
     assertDisplayText(item.title, `manager collection item ${index} title`)
     assertDisplayText(item.summary, `manager collection item ${index} summary`)
-    assertPlainObject(item.leadingVisual, `manager collection item ${index} leadingVisual`)
-    if (item.leadingVisual.kind === 'semantic-icon') {
-      assertKeys(item.leadingVisual, ['kind', 'icon'], `manager collection item ${index} leadingVisual`)
-      assertIcon(item.leadingVisual.icon, `manager collection item ${index} leadingVisual icon`, true)
-    } else if (item.leadingVisual.kind === 'avatar') {
-      assertKeys(item.leadingVisual, ['kind', 'avatar'], `manager collection item ${index} leadingVisual`)
-      cloneAgentAvatarRef(item.leadingVisual.avatar)
-    } else if (item.leadingVisual.kind === 'avatar-stack') {
-      assertKeys(item.leadingVisual, ['kind', 'entries'], `manager collection item ${index} leadingVisual`)
-      if (
-        !Array.isArray(item.leadingVisual.entries) || item.leadingVisual.entries.length < 1
-        || item.leadingVisual.entries.length > 16
-      ) throw new Error(`manager collection item ${index} avatar stack is invalid`)
-      const entryIds = new Set<string>()
-      for (const [entryIndex, entry] of item.leadingVisual.entries.entries()) {
-        assertPlainObject(entry, `manager collection item ${index} avatar ${entryIndex}`)
-        assertKeys(entry, ['id', 'avatar'], `manager collection item ${index} avatar ${entryIndex}`)
-        if (!OPAQUE_ID.test(entry.id) || entryIds.has(entry.id)) {
-          throw new Error(`manager collection item ${index} avatar ${entryIndex} id is invalid`)
-        }
-        entryIds.add(entry.id)
-        cloneAgentAvatarRef(entry.avatar)
-      }
-    } else throw new Error(`manager collection item ${index} leadingVisual kind is invalid`)
+    assertManagerCollectionVisual(item.leadingVisual, `manager collection item ${index}`, version)
     assertRoute(item.route, `manager collection item ${index} route`)
     if (!Number.isSafeInteger(item.order) || item.order < -1_000_000_000 || item.order > 1_000_000_000) {
       throw new Error(`manager collection item ${index} order is invalid`)
@@ -533,13 +524,14 @@ function validActionResult(
   return immutableSnapshot(input as unknown as ManagerCollectionActionResultV1)
 }
 
-export class HostManagerCollectionPageRegistry implements ManagerCollectionRegistryV1 {
+export class HostManagerCollectionPageRegistry implements ManagerCollectionRegistryV1, ManagerCollectionRegistryV2 {
   private registration: ManagerCollectionRegistrationV1 | undefined
-  private source: ManagerCollectionSourceV1 | undefined
+  private source: CollectionSource | undefined
   private sourceDispose: (() => void) | undefined
   private unsubscribeSource: (() => void) | undefined
   private queryAbort: AbortController | undefined
-  private accepted: ManagerCollectionSnapshotV1 | undefined
+  private accepted: CollectionSnapshot | undefined
+  private snapshotVersion: 1 | 2 = 1
   private view: string | undefined
   private search = ''
   private state: ManagerCollectionLoadState = 'unregistered'
@@ -564,6 +556,21 @@ export class HostManagerCollectionPageRegistry implements ManagerCollectionRegis
     registration: ManagerCollectionRegistrationV1,
     source: ManagerCollectionSourceV1,
   ): ManagerCollectionRegistrationHandleV1 {
+    return this.registerSource(registration, source, 1)
+  }
+
+  registerV2(
+    registration: ManagerCollectionRegistrationV1,
+    source: ManagerCollectionSourceV2,
+  ): ManagerCollectionRegistrationHandleV1 {
+    return this.registerSource(registration, source, 2)
+  }
+
+  private registerSource(
+    registration: ManagerCollectionRegistrationV1,
+    source: CollectionSource,
+    version: 1 | 2,
+  ): ManagerCollectionRegistrationHandleV1 {
     if (this.disposed) throw new Error('manager collection page registry is disposed')
     if (this.registration !== undefined) {
       throw new Error('manager collection page registry already has an active registration')
@@ -575,6 +582,7 @@ export class HostManagerCollectionPageRegistry implements ManagerCollectionRegis
     this.registration = assertRegistration(registration)
     const activeRegistration = this.registration
     this.source = source
+    this.snapshotVersion = version
     this.view = this.registration.defaultView
     this.search = ''
     this.state = 'loading'
@@ -723,7 +731,7 @@ export class HostManagerCollectionPageRegistry implements ManagerCollectionRegis
     this.listeners.clear()
   }
 
-  private item(itemId: string): ManagerCollectionItem | undefined {
+  private item(itemId: string): CollectionItem | undefined {
     return this.accepted?.items.find(item => item.id === itemId)
   }
 
@@ -852,28 +860,32 @@ export class HostManagerCollectionPageRegistry implements ManagerCollectionRegis
         abort.signal.aborted || this.disposed || this.registration !== registration || this.source !== source
         || this.queryAbort !== abort
       ) return false
-      const snapshot = assertSnapshot(candidate, query)
+      const snapshot = assertSnapshot(candidate, query, this.snapshotVersion)
       if (this.accepted !== undefined && snapshot.revision < this.accepted.revision) {
         throw new Error('manager collection snapshot revision moved backwards')
       }
       if (minimumRevision !== undefined && snapshot.revision < minimumRevision) {
         throw new Error('manager collection action result revision is not yet authoritative')
       }
-      const defensive = normalized === '' ? snapshot.items : snapshot.items.filter(item => {
-        const title = normalizeManagerCollectionSearch(this.localized(item.title, `item:${item.id}:title`))
-        const summary = normalizeManagerCollectionSearch(this.localized(item.summary, `item:${item.id}:summary`))
-        return managerCollectionCodePointIncludes(title, normalized)
-          || managerCollectionCodePointIncludes(summary, normalized)
-      })
-      this.clearLocalizationSites()
-      this.accepted = Object.freeze({
-        ...snapshot,
-        items: Object.freeze(
+      const arrange = <Item extends CollectionItem>(items: readonly Item[]): readonly Item[] => {
+        const defensive = normalized === '' ? items : items.filter(item => {
+          const title = normalizeManagerCollectionSearch(this.localized(item.title, `item:${item.id}:title`))
+          const summary = normalizeManagerCollectionSearch(this.localized(item.summary, `item:${item.id}:summary`))
+          return managerCollectionCodePointIncludes(title, normalized)
+            || managerCollectionCodePointIncludes(summary, normalized)
+        })
+        return Object.freeze(
           [...defensive].sort((left, right) =>
             left.order - right.order || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
           ),
-        ),
-      })
+        )
+      }
+      // Preserve the discriminated version while filtering; v1 cannot acquire v2 visuals.
+      const prepared = snapshot.schemaVersion === 1
+        ? { ...snapshot, items: arrange(snapshot.items) }
+        : { ...snapshot, items: arrange(snapshot.items) }
+      this.clearLocalizationSites()
+      this.accepted = Object.freeze(prepared)
       this.state = 'ready'
       this.publish()
       return true

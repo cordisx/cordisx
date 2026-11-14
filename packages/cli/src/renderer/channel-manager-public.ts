@@ -8,6 +8,7 @@ import type {
   ChannelManagerTargetResultV1,
 } from '@cordisx/protocol/channel-manager/v2'
 import type { ChannelAdapterKind } from '@cordisx/protocol/channel-runtime/v1'
+import type { ChannelManagerSnapshotV4 } from '@cordisx/protocol/channel-manager/v3'
 import type { ChannelManagerActionResult } from '../launcher/channel-manager-api.js'
 import type {
   ChannelManagerBindingProjection,
@@ -129,6 +130,23 @@ export class PublicChannelManagerController {
   private projectionFingerprint: string | undefined
 
   constructor(private readonly input: PublicChannelManagerInput) {}
+
+  snapshotWithIdentity(): ChannelManagerSnapshotV4 {
+    const snapshot = this.snapshot()
+    const connections = this.input.projection()
+    const accounts = snapshot.accounts.map(account => {
+      const target = this.connectionTargets.get(account.connectionToken)
+      const identity = target === undefined
+        ? undefined
+        : connections.accounts.find(candidate => connectionKey(candidate.ref) === connectionKey(target.ref))
+      return {
+        ...account,
+        ...(identity?.accountName === undefined ? {} : { accountName: identity.accountName }),
+        ...(identity?.accountAvatar === undefined ? {} : { accountAvatar: identity.accountAvatar }),
+      }
+    })
+    return immutable({ ...snapshot, contract: 'cordisx.channel-runtime-snapshot/v4', schemaVersion: 4, accounts })
+  }
 
   snapshot(): ChannelManagerSnapshotV3 {
     const projection = this.input.projection()

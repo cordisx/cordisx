@@ -1,5 +1,7 @@
 import { SearchToolbar } from '../../host-ui/SearchToolbar.js'
-import type { ManagerCollectionAction, ManagerCollectionItem } from '@cordisx/protocol/manager-collection/v1'
+import type { ManagerCollectionAction } from '@cordisx/protocol/manager-collection/v1'
+import type { ManagerCollectionItemV2 as ManagerCollectionItem } from '@cordisx/protocol/manager-collection/v2'
+import { AccountIdentityVisual } from '../../host-ui/AccountIdentityVisual.js'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -31,6 +33,13 @@ function ActionIcon({ action }: { readonly action: ManagerCollectionAction }) {
 
 function LeadingVisual({ item }: { readonly item: ManagerCollectionItem }) {
   const visual = item.leadingVisual
+  if (visual.kind === 'identity') {
+    return (
+      <span className="cxr-card-icon cxr-manager-collection-visual" data-kind="identity">
+        <AccountIdentityVisual icon={visual.icon} {...(visual.avatar === undefined ? {} : { avatar: visual.avatar })} />
+      </span>
+    )
+  }
   if (visual.kind === 'semantic-icon') {
     return (
       <span className="cxr-card-icon cxr-manager-collection-visual" data-kind="semantic-icon">

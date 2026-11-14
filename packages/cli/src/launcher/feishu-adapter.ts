@@ -15,6 +15,8 @@ import type {
   ChannelTenantRef,
 } from '@cordisx/channel-runtime'
 import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig } from '@cordisx/channel-runtime'
+import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
+import { feishuProfileHttp } from './feishu-profile-http.js'
 import {
   LauncherSecretResolutionError,
   type LauncherSecretResolverOptions,
@@ -29,6 +31,7 @@ export interface FeishuChannelFactoryOptions {
   readonly domain: typeof Domain.Feishu | typeof Domain.Lark
   readonly source: string
   readonly requireMention: boolean
+  readonly onProfile: (profile: FeishuBotProfile) => void
 }
 
 export interface FeishuAdapterOptions {
@@ -37,6 +40,7 @@ export interface FeishuAdapterOptions {
   readonly source: string
   readonly resolveSecret?: (reference: string | undefined) => Promise<string>
   readonly createChannel?: (options: FeishuChannelFactoryOptions) => FeishuSdkChannel
+  readonly identities?: ChannelAccountIdentityStore
 }
 
 class FeishuAdapterError extends Error {
@@ -106,6 +110,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       loggerLevel: LoggerLevel.warn,
       transport: 'websocket',
       policy: { dmMode: 'open', requireMention: options.requireMention },
+      httpInstance: feishuProfileHttp(options.onProfile),
     }))
   return {
     descriptor: {
@@ -125,6 +130,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         domain: input.connection.adapterKind === 'lark' ? Domain.Lark : Domain.Feishu,
         source: input.source,
         requireMention: false,
+        onProfile: profile => input.identities?.receive(input.connection.ref, profile),
       })
       // Never retain raw event bodies; the normalized text-only envelope is all
       // that crosses into the durable Channel core.
@@ -171,6 +177,7 @@ export function feishuDefinitionsForConfig(
     readonly source: string
     readonly configurationRevision: number
     readonly secretResolver?: LauncherSecretResolverOptions
+    readonly identities?: ChannelAccountIdentityStore
   },
 ): readonly ChannelAdapterDefinition[] {
   return configuration.connections
@@ -182,6 +189,7 @@ export function feishuDefinitionsForConfig(
         connection,
         source: input.source,
         configurationRevision: input.configurationRevision,
+        ...(input.identities === undefined ? {} : { identities: input.identities }),
         ...(input.secretResolver === undefined ? {} : {
           resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),
         }),

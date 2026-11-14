@@ -69,6 +69,14 @@ export type {
   ManagerCollectionView,
 } from '@cordisx/protocol/manager-collection/v1'
 export type {
+  ManagerCollectionIdentityVisualV2,
+  ManagerCollectionItemV2,
+  ManagerCollectionLeadingVisualV2,
+  ManagerCollectionRegistryV2,
+  ManagerCollectionSnapshotV2,
+  ManagerCollectionSourceV2,
+} from '@cordisx/protocol/manager-collection/v2'
+export type {
   ManagerContentNavigationDeclarationV2,
   ManagerContentNavigationLocalizedTextV2,
   ManagerContentNavigationRouteReferenceV2,

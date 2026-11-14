@@ -31,6 +31,7 @@ import type {
 } from '@cordisx/protocol/agent-page-admission/v2'
 
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
+import type { ManagerCollectionRegistryV2 } from '@cordisx/protocol/manager-collection/v2'
 
 import type {
   ManagerSettingsNavigationGroupIdV2,
@@ -764,7 +765,7 @@ export interface CordisXPageMountContext<
   /** Host-owned semantic controls available to contributed page bodies. */
   readonly controls: CordisXPageControls
   /** Present only for the active authorized manager.content page mount. */
-  readonly managerCollection?: ManagerCollectionRegistryV1
+  readonly managerCollection?: ManagerCollectionRegistryV1 & Partial<Pick<ManagerCollectionRegistryV2, 'registerV2'>>
   readonly tabId?: string
 }
 
