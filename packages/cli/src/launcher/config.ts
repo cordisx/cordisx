@@ -1,3 +1,6 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 } from '../channel-exact-request-permissions.js'
+import { normalizePluginManifestV16 } from './latest-runtime-manifest.js'
+import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V15, normalizePluginManifestV15 } from './latest-runtime-manifest.js'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
@@ -37,6 +40,7 @@ import type {
   CordisXPluginManifestV9,
 } from '../permission-contracts.js'
 import { bundledPluginEntry } from './bundled-plugin.js'
+import { configuredPluginManifest } from './configured-plugin-manifest.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -59,6 +63,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV16
     | PluginRuntimeManifestV14
     | PluginRuntimeManifestV15
   readonly package?: {
@@ -70,7 +75,10 @@ export interface CordisXConfigPlugin {
     readonly canonicalSource?: string
   }
   readonly readme?: string
+  readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   readonly readmes?: Readonly<Record<string, string>>
+  /** Digest-validated package metadata that must invalidate this direct-entry assembly. */
+  readonly manifestFiles?: readonly string[]
   /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
   readonly moduleFactorySource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
@@ -347,10 +355,11 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
   const absolutePath = path.resolve(configPath)
   const config = parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
   const plugins = await Promise.all(config.plugins.map(async plugin => {
-    if (plugin.id !== 'cli-proxy-api') return plugin
+    if (plugin.id !== 'cli-proxy-api') return configuredPluginManifest(plugin)
     const packageRoot = path.resolve(path.dirname(plugin.entry), '..', '..')
     const resolved = await new JsonPackageManifestV2Resolver({
       runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V16]: value => normalizePluginManifestV16(value, plugin.id),
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V15]: value => {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json",
+  "schemaVersion": 16,
+  "id": "channel",
+  "name": "Channels",
+  "capabilities": [
+    {
+      "name": "channel.accounts.read",
+      "required": true,
+      "scope": {}
+    },
+    {
+      "name": "channel.accounts.connect",
+      "required": false,
+      "scope": {
+        "runtime": "exact-request"
+      }
+    },
+    {
+      "name": "channel.events.receive",
+      "required": false,
+      "scope": {
+        "channelTenants": [
+          {
+            "adapterId": "simulator",
+            "accountId": "local",
+            "tenantId": "test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "channel.events.subscribe",
+      "required": false,
+      "scope": {
+        "channelTenants": [
+          {
+            "adapterId": "simulator",
+            "accountId": "local",
+            "tenantId": "test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "channel.messages.send",
+      "required": false,
+      "scope": {
+        "channelConversations": [
+          {
+            "adapterId": "simulator",
+            "accountId": "local",
+            "tenantId": "test",
+            "conversationId": "direct-alice",
+            "kind": "direct"
+          }
+        ]
+      }
+    },
+    {
+      "name": "channel.bindings.read",
+      "required": false,
+      "scope": {}
+    },
+    {
+      "name": "channel.bindings.write",
+      "required": false,
+      "scope": {
+        "runtime": "exact-request"
+      }
+    },
+    {
+      "name": "channel.attachments.read",
+      "required": false,
+      "scope": {
+        "channelConversations": [
+          {
+            "adapterId": "simulator",
+            "accountId": "local",
+            "tenantId": "test",
+            "conversationId": "direct-alice",
+            "kind": "direct"
+          }
+        ]
+      }
+    }
+  ],
+  "services": [
+    {
+      "id": "runtime",
+      "kind": "channel-adapter",
+      "entry": "./dist/service.mjs",
+      "configuration": {
+        "kind": "host",
+        "schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json",
+        "configApplies": "restart"
+      }
+    }
+  ]
+}

@@ -10,3 +10,14 @@ export function nativeProviderFailure(message) {
   ) return undefined
   return data.modelProvider
 }
+
+/** Compatibility for native versions that expose a missing provider as plain configuration text. */
+export function missingManagedProvider(message) {
+  const structured = nativeProviderFailure(message)
+  if (structured !== undefined) return structured
+  if (message?.error?.code !== -32600 || typeof message.error.message !== 'string') return undefined
+  const match = /^failed to load configuration: Model provider `([^`\0\r\n]{1,128})` not found$/u.exec(
+    message.error.message,
+  )
+  return match?.[1]
+}

@@ -1,3 +1,6 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V16 } from '../../channel-exact-request-permissions.js'
+export const PLUGIN_PACKAGE_SCHEMA_V16 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v16.schema.json'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11 } from '../../usage-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12,
@@ -79,6 +82,7 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V16,
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -257,11 +261,13 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       ? 14
       : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15
       ? 15
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V16 && manifest.schemaVersion === 16
+      ? 16
       : undefined
     if (packageVersion === undefined) {
       throw new PackageLifecycleError(
         'invalid-package-manifest',
-        'package manifest must use plugin-package.v2 through plugin-package.v15',
+        'package manifest must use plugin-package.v2 through plugin-package.v16',
       )
     }
     const pluginId = string(manifest.id, 'package manifest id')
@@ -310,23 +316,26 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       || (packageVersion < 6 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6)
       || (packageVersion < 7 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)
       || (packageVersion !== 8 && packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12
-        && packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
+        && packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15 && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
       || (packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
-        && packageVersion !== 14 && packageVersion !== 15
+        && packageVersion !== 14 && packageVersion !== 15 && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9)
       || (packageVersion !== 10 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
-        && packageVersion !== 14 && packageVersion !== 15
+        && packageVersion !== 14 && packageVersion !== 15 && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10)
       || (packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13 && packageVersion !== 14
-        && packageVersion !== 15
+        && packageVersion !== 15 && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11)
       || (packageVersion !== 12 && packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
+        && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12)
-      || (packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15
+      || (packageVersion !== 13 && packageVersion !== 14 && packageVersion !== 15 && packageVersion !== 16
         && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13)
-      || (packageVersion !== 14 && packageVersion !== 15 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14)
-      || (packageVersion !== 15 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15)
+      || (packageVersion !== 14 && packageVersion !== 15 && packageVersion !== 16
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14)
+      || (packageVersion !== 15 && packageVersion !== 16 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15)
+      || (packageVersion !== 16 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V16)
       || (packageVersion >= 11 && (
         runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6
         || runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7

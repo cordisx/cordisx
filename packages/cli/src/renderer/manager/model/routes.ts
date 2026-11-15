@@ -31,6 +31,7 @@ export type ManagerRoute =
   | { readonly kind: 'model-connection-create' }
   | { readonly kind: 'about-acknowledgements' }
   | { readonly kind: 'notification-rules' }
+  | { readonly kind: 'chat-execution' }
   | { readonly kind: 'manager-content'; readonly id: string; readonly reference: CordisXRouteReference }
 
 export interface ManagerRouter {

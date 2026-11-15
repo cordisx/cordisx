@@ -1,13 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import {
   type ActiveLauncherChannelService,
   CHANNEL_SERVICE_CONFIG_INITIAL,
   CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
   ChannelRuntime,
   type ChannelRuntimeSnapshot,
+  channelServiceInputV1,
+  type ChannelTenantRef,
+  type ChannelUserInput,
   createChannelHostServiceConfigContract,
   LauncherChannelServiceHost,
   parseChannelServiceConfig,
@@ -20,21 +22,28 @@ import {
 } from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
+import { ChannelLiveDirectory } from './channel-live-directory.js'
+import type { ChannelCommandAddressing } from './channel-command-users.js'
+import type { ChannelConversationAccess } from './channel-conversation-tools.js'
+import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
 interface ActiveRuntime {
-  readonly generation: string
+  generation: string
   readonly runtime: ChannelRuntime
   readonly host: LauncherChannelServiceHost
-  readonly service: ActiveLauncherChannelService
+  service: ActiveLauncherChannelService
   readonly identities: ChannelAccountIdentityStore
+  readonly directory: ChannelLiveDirectory
   dispose(): Promise<void>
 }
 
 export interface LocalChannelService {
+  managementOwner(): HostServiceCapabilityOwner | undefined
+  generation(): string | undefined
   start(configuration: unknown): Promise<string>
-  restart(configuration: unknown): Promise<{
+  restart(configuration: unknown, expectedGeneration?: string): Promise<{
     readonly generation: string
     rollback(): Promise<void>
     finalize(): Promise<void>
@@ -44,6 +53,23 @@ export interface LocalChannelService {
   auditSnapshot(): ReturnType<ChannelRuntime['auditSnapshot']>
   /** Launcher-private runtime controls; never bind this object into renderer code. */
   readonly manager: ChannelManagerApi
+  conversationAccess(): ChannelConversationAccess | undefined
+  observeInputs(
+    listener: (
+      recordId: string,
+      input: ChannelUserInput,
+      mentionedBot: boolean,
+      persisted: boolean,
+      addressing?: ChannelCommandAddressing,
+    ) => Promise<void>,
+  ): () => void
+  setConversationManager(value: {
+    bindings(): readonly import('./channel-manager-api.js').ChannelManagerBindingProjection[]
+    binding(action: 'archive' | 'restore' | 'unbind', id: string): Promise<boolean>
+  }): void
+  observeCardActions(
+    listener: (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>,
+  ): () => void
   dispose(): Promise<void>
 }
 
@@ -74,6 +100,9 @@ export function projectLocalChannelManager(input: {
     ]))
     return {
       ref: connection.ref,
+      ...('displayName' in connection && connection.displayName !== undefined
+        ? { displayName: connection.displayName }
+        : {}),
       adapterKind: connection.adapterKind,
       enabled: connection.enabled,
       transportMode: connection.transport.mode,
@@ -147,8 +176,56 @@ export function createLocalChannelService(input: {
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   let active: ActiveRuntime | undefined
+  let managementOwner: HostServiceCapabilityOwner | undefined
   let activeConfiguration: ReturnType<typeof parseChannelServiceConfig> | undefined
   let sequence = 0
+  let disposed = false
+  let mutationTail: Promise<unknown> = Promise.resolve()
+  let pendingConfiguration: string | undefined
+  let conversationManager: Parameters<LocalChannelService['setConversationManager']>[0] | undefined
+  const listeners = new Set<
+    (
+      recordId: string,
+      input: ChannelUserInput,
+      mentionedBot: boolean,
+      persisted: boolean,
+      addressing?: ChannelCommandAddressing,
+    ) => Promise<void>
+  >()
+  const cardListeners = new Set<
+    (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>
+  >()
+  const key = (ref: ChannelTenantRef) => JSON.stringify([ref.adapterId, ref.accountId, ref.tenantId])
+  const caller = (generation: string) => ({ source: input.source, pluginId: 'channel', generation })
+  const definitions = (configuration: ReturnType<typeof parseChannelServiceConfig>, current: ActiveRuntime) =>
+    feishuDefinitionsForConfig(configuration, {
+      source: input.source,
+      configurationRevision: sequence,
+      identities: current.identities,
+      channelConnected: (ref, channel) => current.directory.connected(ref, channel),
+      onCardAction: async (ref, event) => {
+        for (const listener of cardListeners) await listener(ref, event)
+      },
+      onNormalizedInput: async (recordId, message, mentionedBot, persisted, addressing) => {
+        if (persisted) current.directory.observe(message, addressing)
+        await Promise.all(
+          [...listeners].map(listener => listener(recordId, message, mentionedBot, persisted, addressing)),
+        )
+      },
+      readConnection: ref => activeConfiguration?.connections.find(connection => key(connection.ref) === key(ref)),
+      ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
+    })
+  const serial = <T>(operation: () => Promise<T>): Promise<T> => {
+    const task = mutationTail.then(operation)
+    mutationTail = task.catch(() => undefined)
+    return task
+  }
+
+  const simulatorConfiguration = (configuration: ReturnType<typeof parseChannelServiceConfig>) =>
+    channelServiceInputV1({
+      ...configuration,
+      connections: configuration.connections.filter(connection => connection.adapterKind === 'simulator'),
+    })
 
   const createActive = async (value: unknown): Promise<ActiveRuntime> => {
     const configuration = parseChannelServiceConfig(value)
@@ -157,10 +234,13 @@ export function createLocalChannelService(input: {
     await mkdir(input.dataDir, { recursive: true })
     const runtime = await ChannelRuntime.open({
       permissions: localPermissions(),
-      storePath: path.join(input.dataDir, `${generation}.json`),
+      // One profile-owned transport ledger survives service replacement and launcher restart.
+      storePath: path.join(input.dataDir, 'transport.json'),
     })
     const host = new LauncherChannelServiceHost(runtime)
     const identities = new ChannelAccountIdentityStore()
+    const directory = new ChannelLiveDirectory()
+    sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
     try {
       const serviceSource = path.join(artifactDirectory, 'service.mjs')
       const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
@@ -173,39 +253,131 @@ export function createLocalChannelService(input: {
         configurationRevision: sequence,
         artifactDirectory,
         runtimeEntry: './service.mjs',
-      }, configuration)
+      }, simulatorConfiguration(configuration))
       // The official adapter is deliberately launcher-owned: it gets an
       // opaque secret reference only, resolves it privately, and publishes
       // only the redacted runtime snapshot. A bad/missing credential leaves
       // that account unavailable without preventing the rest of CordisX from
       // starting.
-      for (
-        const definition of feishuDefinitionsForConfig(configuration, {
-          source: input.source,
-          configurationRevision: sequence,
-          identities,
-          ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
-        })
-      ) {
-        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() =>
-          undefined
-        )
-      }
-      return {
+      const current: ActiveRuntime = {
         generation,
         runtime,
         host,
         service,
         identities,
+        directory,
         dispose: async () => {
+          directory.clear()
           await identities.dispose()
           await host.dispose()
         },
       }
+      for (const definition of definitions(configuration, current)) {
+        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() =>
+          undefined
+        )
+      }
+      let cursor = 'channel-input:0:empty'
+      for (;;) {
+        if (!configuration.connections.length) break
+        const readback = await runtime.inputsSince(
+          caller(generation),
+          configuration.connections.map(connection => ({ account: connection.ref })),
+          cursor,
+          100,
+        )
+        for (const record of readback.messages) directory.observe(record.input)
+        if (readback.cursor === cursor || !readback.messages.length) break
+        cursor = readback.cursor
+      }
+      return current
     } catch (error) {
       await identities.dispose()
       await host.dispose().catch(() => undefined)
       throw error
+    }
+  }
+
+  const fingerprint = (connection: ReturnType<typeof parseChannelServiceConfig>['connections'][number] | undefined) =>
+    connection === undefined
+      ? ''
+      : JSON.stringify([
+        connection.ref,
+        connection.adapterKind,
+        connection.enabled,
+        connection.transport,
+        connection.secretRef,
+      ])
+  const applyConfiguration = async (configuration: ReturnType<typeof parseChannelServiceConfig>, forceKey?: string) => {
+    const current = active
+    const priorConfiguration = activeConfiguration
+    if (!current || !priorConfiguration || disposed) throw new Error('CHANNEL_UNAVAILABLE')
+    if (pendingConfiguration !== undefined) throw new Error('CHANNEL_CONFIGURATION_PENDING')
+    const transaction = randomBytes(24).toString('hex')
+    pendingConfiguration = transaction
+    const prior = new Map(priorConfiguration.connections.map(connection => [key(connection.ref), connection]))
+    const next = new Map(configuration.connections.map(connection => [key(connection.ref), connection]))
+    const changed = [...new Set([...prior.keys(), ...next.keys()])].filter(id =>
+      id === forceKey || fingerprint(prior.get(id)) !== fingerprint(next.get(id))
+    )
+    const officialChanged = changed.filter(id => (next.get(id) ?? prior.get(id))?.adapterKind !== 'simulator')
+    const simulatorChanged = changed.some(id => (next.get(id) ?? prior.get(id))?.adapterKind === 'simulator')
+    const install = async (value: ReturnType<typeof parseChannelServiceConfig>) => {
+      sequence += 1
+      for (const id of officialChanged) {
+        const existing = prior.get(id) ?? next.get(id)
+        if (existing) await current.runtime.deactivate(existing.ref)
+        const definition = definitions(value, current).find(definition => key(definition.descriptor.ref) === id)
+        if (definition) await current.runtime.activate(definition, caller(current.generation))
+      }
+      if (simulatorChanged) {
+        await current.service.dispose()
+        const serviceSource = path.join(artifactDirectory, 'service.mjs')
+        const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
+        current.service = await current.host.activate({
+          packageIdentity: { pluginId: 'channel', version: 'development', integrity },
+          pluginIdentity: caller(current.generation),
+          serviceId: 'runtime',
+          serviceKind: 'channel-adapter',
+          configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
+          configurationRevision: sequence,
+          artifactDirectory,
+          runtimeEntry: './service.mjs',
+        }, simulatorConfiguration(value))
+      }
+      activeConfiguration = value
+      current.generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
+    }
+    try {
+      await install(configuration)
+    } catch (error) {
+      try {
+        await install(priorConfiguration)
+      } catch {
+        throw new Error('CHANNEL_ROLLBACK_FAILED')
+      } finally {
+        pendingConfiguration = undefined
+      }
+      throw error
+    }
+    let settled = false
+    return {
+      generation: current.generation,
+      rollback: () =>
+        serial(async () => {
+          if (settled || pendingConfiguration !== transaction) return
+          try {
+            await install(priorConfiguration)
+          } finally {
+            settled = true
+            pendingConfiguration = undefined
+          }
+        }),
+      finalize: () =>
+        serial(async () => {
+          if (pendingConfiguration === transaction) pendingConfiguration = undefined
+          settled = true
+        }),
     }
   }
 
@@ -215,20 +387,21 @@ export function createLocalChannelService(input: {
   ): Promise<ChannelManagerActionStatus> => {
     const prior = active
     if (prior === undefined || prior.generation !== expectedGeneration) return 'unavailable'
-    const next = await createActive(configuration)
-    if (active !== prior) {
-      await next.dispose().catch(() => undefined)
-      return 'unavailable'
-    }
-    active = next
-    activeConfiguration = configuration
-    await prior.dispose()
+    const result = await serial(async () => {
+      if (active?.generation !== expectedGeneration) return undefined
+      return applyConfiguration(configuration)
+    })
+    if (!result) return 'unavailable'
+    await result.finalize()
     return 'applied'
   }
 
   const manager = createChannelManagerApi({
-    active: () => active === undefined ? undefined : { generation: active.generation, runtime: active.runtime },
+    active: () =>
+      active === undefined || disposed ? undefined : { generation: active.generation, runtime: active.runtime },
     identity: ref => active?.identities.snapshot(ref),
+    bindings: () => conversationManager?.bindings() ?? [],
+    binding: (action, id) => conversationManager?.binding(action, id) ?? Promise.resolve(false),
     connection: async (action, ref, expectedGeneration) => {
       const configuration = activeConfiguration
       if (configuration === undefined) return 'unavailable'
@@ -244,45 +417,116 @@ export function createLocalChannelService(input: {
           candidate === index ? { ...connection, enabled: action === 'enable' } : connection
         )),
       }
+      if (action === 'reconnect') {
+        const result = await serial(async () => {
+          if (active?.generation !== expectedGeneration) return undefined
+          return applyConfiguration(configuration, key(ref))
+        })
+        if (!result) return 'unavailable'
+        await result.finalize()
+        return 'applied'
+      }
       return await replaceActive(parseChannelServiceConfig(next), expectedGeneration)
     },
   })
 
   return {
     async start(configuration) {
-      const nextConfiguration = parseChannelServiceConfig(configuration)
-      const next = await createActive(nextConfiguration)
-      const prior = active
-      active = next
-      activeConfiguration = nextConfiguration
-      await prior?.dispose()
-      return next.generation
-    },
-    async restart(configuration) {
-      const nextConfiguration = parseChannelServiceConfig(configuration)
-      const next = await createActive(nextConfiguration)
-      const prior = active
-      const priorConfiguration = activeConfiguration
-      active = next
-      activeConfiguration = nextConfiguration
-      return {
-        generation: next.generation,
-        rollback: async () => {
-          if (active !== next) return
-          active = prior
-          activeConfiguration = priorConfiguration
+      return serial(async () => {
+        if (disposed) throw new Error('CHANNEL_UNAVAILABLE')
+        if (active !== undefined) throw new Error('CHANNEL_ALREADY_STARTED')
+        const nextConfiguration = parseChannelServiceConfig(configuration)
+        const next = await createActive(nextConfiguration)
+        if (disposed) {
           await next.dispose()
-        },
-        finalize: async () => {
-          await prior?.dispose()
-        },
-      }
+          throw new Error('CHANNEL_UNAVAILABLE')
+        }
+        active = next
+        activeConfiguration = nextConfiguration
+        managementOwner = Object.freeze({
+          source: next.service.identity.source,
+          pluginId: next.service.identity.pluginId,
+          serviceId: next.service.serviceId,
+          serviceKind: 'channel-adapter',
+          serviceGeneration: next.service.identity.generation,
+          capabilities: Object.freeze([
+            'channel.accounts.read',
+            'channel.accounts.connect',
+            'channel.bindings.read',
+            'channel.bindings.write',
+          ].map(name => Object.freeze({ name, scope: Object.freeze({}) }))) as HostServiceCapabilityOwner[
+            'capabilities'
+          ],
+        })
+        return next.generation
+      })
     },
+    async restart(configuration, expectedGeneration) {
+      return serial(() => {
+        if (expectedGeneration !== undefined && active?.generation !== expectedGeneration) {
+          throw new Error('service configuration generation is stale')
+        }
+        return applyConfiguration(parseChannelServiceConfig(configuration))
+      })
+    },
+    generation: () => disposed ? undefined : active?.generation,
+    managementOwner: () => disposed ? undefined : managementOwner,
     snapshot: () => active?.runtime.snapshot(),
     identity: ref => active?.identities.snapshot(ref),
     auditSnapshot: () => active?.runtime.auditSnapshot() ?? [],
     manager,
+    conversationAccess: () => {
+      const current = active, configuration = activeConfiguration
+      if (!current || disposed) return undefined
+      return {
+        generation: current.generation,
+        runtime: current.runtime,
+        accounts: () =>
+          (configuration?.connections ?? []).map(connection => ({
+            ref: connection.ref,
+            name: 'displayName' in connection && typeof connection.displayName === 'string'
+              ? connection.displayName
+              : connection.ref.accountId,
+            state: current.runtime.snapshot().accounts.find(account => key(account.ref) === key(connection.ref))
+              ?.connectionState ?? 'disabled',
+          })),
+        conversations: ref => current.directory.conversations(ref),
+        users: event => current.directory.users(event),
+        name: event => current.directory.name(event),
+        replyCapabilities: event => current.directory.replyCapabilities(event),
+        sendCard: async (event, card) => {
+          const channel = current.directory.channel(event)
+          if (!channel) throw new Error('CHANNEL_CARD_UNAVAILABLE')
+          return (await channel.send(event.conversationId, { card })).messageId
+        },
+        updateCard: async (event, messageId, card) => {
+          const channel = current.directory.channel(event)
+          if (!channel?.updateCard) throw new Error('CHANNEL_CARD_UNAVAILABLE')
+          await channel.updateCard(messageId, card)
+        },
+        drain: async ref => {
+          await current.runtime.drainOutbound(ref, 100)
+        },
+      }
+    },
+    observeInputs: listener => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    observeCardActions: listener => {
+      cardListeners.add(listener)
+      return () => cardListeners.delete(listener)
+    },
+    setConversationManager: value => {
+      conversationManager = value
+    },
     async dispose() {
+      cardListeners.clear()
+      disposed = true
+      listeners.clear()
+      await mutationTail
       const prior = active
       active = undefined
       activeConfiguration = undefined

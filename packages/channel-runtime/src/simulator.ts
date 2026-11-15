@@ -4,6 +4,7 @@ import {
   type ChannelServiceConfigurationDeclaration,
   type ChannelServiceConfigV1,
   parseChannelServiceConfig,
+  parseChannelServiceConfigV1,
 } from './config.js'
 import type {
   ChannelAdapterDefinition,
@@ -49,7 +50,7 @@ export const STATIC_NOTIFIER_NO_CONFIG_DECLARATION: ChannelServiceConfigurationD
 })
 
 /** Complete local-only configuration fixture; it needs no account or secret. */
-export const SIMULATOR_CHANNEL_SERVICE_CONFIG: ChannelServiceConfigV1 = parseChannelServiceConfig({
+export const SIMULATOR_CHANNEL_SERVICE_CONFIG: ChannelServiceConfigV1 = parseChannelServiceConfigV1({
   contract: 'cordisx.channel-service-config/v1',
   schemaVersion: 1,
   connections: [{

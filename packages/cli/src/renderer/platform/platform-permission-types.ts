@@ -1,4 +1,7 @@
 import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
+import type { CordisXPluginManifestV16 } from '../../channel-exact-request-permissions.js'
+import { isChannelExactRequestDeclaration } from '../../channel-exact-request-permissions.js'
+import type { PluginManifestChannelExactCapabilityNameV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../../runtime-exact-request-permissions.js'
 import type { AgentTaskScopeSource } from '../agent-task-permission-scope.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
@@ -34,13 +37,14 @@ import { isHostDomPermissionCapability } from '../../permission-model-v4.js'
 
 import { object } from './platform-manifest.js'
 import { RequestedScope } from './platform-permission-store.js'
+import type { RegisteredServiceCapabilityOwner } from '../../service-capability-ownership.js'
 
 export interface AuditRecord {
   lastUsedAt?: string
   lastDeniedAt?: string
   lastRequested?: RequestedScope
   denialCount: number
-  authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
+  authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development' | 'service-owner'
   authorizationReason?: string
   certification?: CordisXCertifiedPermissionProjectionV1
 }
@@ -58,7 +62,7 @@ export interface PlatformPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
-  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development' | 'service-owner'
   readonly authorizationReason?: string
   readonly certification?: CordisXCertifiedPermissionProjectionV1
 }
@@ -91,6 +95,7 @@ export interface Registration {
   /** Verified Host composition input, valid only for this registration. */
   readonly development: boolean
   readonly identity: CordisXPluginIdentity
+  readonly serviceCapabilities: ReadonlyMap<CordisXPermissionCapabilityV2, RegisteredServiceCapabilityOwner>
   readonly manifest:
     | CordisXPluginManifestV1
     | CordisXPluginManifestV4
@@ -103,10 +108,12 @@ export interface Registration {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | CordisXPluginManifestV16
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
   readonly runtimeExactCapabilities: ReadonlySet<CordisXPlatformCapability>
+  readonly channelExactCapabilities: ReadonlySet<PluginManifestChannelExactCapabilityNameV16>
   readonly generation: PluginGenerationEffectIdentity
   readonly candidateView?: PluginGenerationView
   readonly artifact?: RegistrationArtifactBinding
@@ -147,19 +154,21 @@ export function manifestDeclarationsV2(
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
-    | CordisXPluginManifestV13,
+    | CordisXPluginManifestV13
+    | CordisXPluginManifestV16,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
   if (
     manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
     || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
     || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
-      || manifest.schemaVersion === 13)
+      || manifest.schemaVersion === 13 || manifest.schemaVersion === 16)
   ) {
     return manifest.capabilities.filter(item => (
       !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
       && item.name !== 'usage.read' && item.name !== 'ui.extension-points.interact'
       && item.name !== 'ui.extension-points.render' && !('runtime' in item.scope)
+      && !isChannelExactRequestDeclaration(item)
     )) as readonly CordisXCapabilityDeclarationV2[]
   }
   return Object.freeze(manifest.capabilities.map(declaration =>
@@ -183,12 +192,13 @@ export function manifestHostDomDeclarationsV4(
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
-    | CordisXPluginManifestV13,
+    | CordisXPluginManifestV13
+    | CordisXPluginManifestV16,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
       || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
       || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
-        || manifest.schemaVersion === 13)
+        || manifest.schemaVersion === 13 || manifest.schemaVersion === 16)
     ? manifest.capabilities.filter(item =>
       isHostDomPermissionCapability(item.name)
     ) as readonly CordisXCapabilityDeclarationV4[]
@@ -213,12 +223,13 @@ function permissionPlanDeclarations(
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
-    | CordisXPluginManifestV13,
+    | CordisXPluginManifestV13
+    | CordisXPluginManifestV16,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
       || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
       || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
-        || manifest.schemaVersion === 13)
+        || manifest.schemaVersion === 13 || manifest.schemaVersion === 16)
     ? manifest.capabilities.filter(item =>
       !isAgentRuntimePermission(item.name)
       && item.name !== 'usage.read' && item.name !== 'ui.extension-points.interact'
@@ -250,7 +261,44 @@ export function pathInside(value: string, root: string): boolean {
   return left === right || left.startsWith(right === '/' ? '/' : `${right}/`)
 }
 
-export function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedScope): boolean {
+export function scopeAllows(
+  scope: CordisXCapabilityScope | CordisXPermissionScopeV2,
+  requested: RequestedScope,
+): boolean {
+  const channelScope = scope as CordisXPermissionScopeV2
+  const account = requested.channelAccount ?? requested.channelTenant ?? requested.channelConversation
+    ?? requested.channelUser
+  const tenant = requested.channelTenant ?? requested.channelConversation ?? requested.channelUser
+  const accountMatch = (
+    left: { adapterId: string; accountId: string },
+    right: { adapterId: string; accountId: string },
+  ) => left.adapterId === right.adapterId && left.accountId === right.accountId
+  if (
+    channelScope.channelAccounts !== undefined
+    && (!account || !channelScope.channelAccounts.some(ref => accountMatch(ref, account)))
+  ) return false
+  if (
+    channelScope.channelTenants !== undefined
+    && (!tenant
+      || !channelScope.channelTenants.some(ref => accountMatch(ref, tenant) && ref.tenantId === tenant.tenantId))
+  ) return false
+  if (
+    channelScope.channelConversations !== undefined
+    && (!requested.channelConversation
+      || !channelScope.channelConversations.some(ref =>
+        accountMatch(ref, requested.channelConversation!) && ref.tenantId === requested.channelConversation!.tenantId
+        && ref.conversationId === requested.channelConversation!.conversationId
+        && ref.kind === requested.channelConversation!.kind
+      ))
+  ) return false
+  if (
+    channelScope.channelUsers !== undefined
+    && (!requested.channelUser
+      || !channelScope.channelUsers.some(ref =>
+        accountMatch(ref, requested.channelUser!) && ref.tenantId === requested.channelUser!.tenantId
+        && ref.userId === requested.channelUser!.userId
+      ))
+  ) return false
   if (
     requested.providerId !== undefined && scope.providers !== undefined
     && !scope.providers.includes(requested.providerId)
@@ -283,6 +331,14 @@ export function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedS
 
 export function requestedSnapshot(requested: RequestedScope): RequestedScope {
   return Object.freeze({
+    ...(requested.channelAccount === undefined
+      ? {}
+      : { channelAccount: Object.freeze({ ...requested.channelAccount }) }),
+    ...(requested.channelTenant === undefined ? {} : { channelTenant: Object.freeze({ ...requested.channelTenant }) }),
+    ...(requested.channelConversation === undefined
+      ? {}
+      : { channelConversation: Object.freeze({ ...requested.channelConversation }) }),
+    ...(requested.channelUser === undefined ? {} : { channelUser: Object.freeze({ ...requested.channelUser }) }),
     ...(requested.providerId === undefined ? {} : { providerId: requested.providerId }),
     ...(requested.providerIds === undefined ? {} : { providerIds: Object.freeze([...requested.providerIds]) }),
     ...(requested.cwd === undefined ? {} : { cwd: requested.cwd }),

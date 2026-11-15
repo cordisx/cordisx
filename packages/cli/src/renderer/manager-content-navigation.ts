@@ -1,5 +1,10 @@
+import type {
+  ManagerContentRecordSummaryV6,
+  ManagerContentSummaryMetricV1,
+  ManagerContentSummaryStatusV1,
+} from '@cordisx/protocol/manager-content-navigation/v6'
+import { assertManagerRecordSummary } from './manager-record-summary.js'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
-import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
 import type { AgentPageComposerCommandAdapter } from '@cordisx/protocol/agent-page-admission/v2'
 import type { BrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
@@ -9,6 +14,7 @@ import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V6,
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
@@ -25,6 +31,7 @@ import type {
   CordisXManagerContentNavigationDeclarationV3,
   CordisXManagerContentNavigationDeclarationV4,
   CordisXManagerContentNavigationDeclarationV5,
+  CordisXManagerContentNavigationDeclarationV6,
   CordisXManagerContentRecordTitleV1,
   CordisXMessageDefinition,
   CordisXOutletName,
@@ -38,7 +45,6 @@ import type {
   CordisXRouteReference,
   CordisXRoutes,
   ManagerContentNavigationTabV2,
-  ManagerContentRecordSummaryProjectionV2,
 } from '../contracts.js'
 import type { ManagerContentConfigBindingHandle } from './manager-content-config.js'
 import { mountManagerContentConfigForm } from './manager-content-config-form.js'
@@ -93,6 +99,7 @@ export interface ManagerContentDeclarationRecord {
     | CordisXManagerContentNavigationDeclarationV3
     | CordisXManagerContentNavigationDeclarationV4
     | CordisXManagerContentNavigationDeclarationV5
+    | CordisXManagerContentNavigationDeclarationV6
   readonly config?: ManagerContentConfigBindingHandle
 }
 
@@ -132,11 +139,13 @@ export interface ManagerContentPresentation {
   readonly icon?: BrandIconV1
   readonly parent?: CordisXRouteReference
   readonly recordSummary?: Readonly<{
-    readonly leadingVisual: Readonly<{ readonly kind: 'agent-avatar'; readonly avatar: AgentAvatarRef }>
+    readonly leadingVisual: ManagerContentRecordSummaryV6['leadingVisual']
+    readonly statuses?: readonly (Omit<ManagerContentSummaryStatusV1, 'label'> & { readonly label: string })[]
+    readonly metrics?: readonly (Omit<ManagerContentSummaryMetricV1, 'label'> & { readonly label: string })[]
     readonly title: string
     readonly description?: string
     /** Exact immutable protocol projection retained before Host localization. */
-    readonly source: ManagerContentRecordSummaryProjectionV2
+    readonly source: ManagerContentRecordSummaryV6
   }>
   /**
    * A Host semantic icon is projected from the exact same-owner page route.
@@ -197,7 +206,8 @@ export class ManagerContentNavigationRegistry {
       | CordisXManagerContentNavigationDeclarationV2
       | CordisXManagerContentNavigationDeclarationV3
       | CordisXManagerContentNavigationDeclarationV4
-      | CordisXManagerContentNavigationDeclarationV5,
+      | CordisXManagerContentNavigationDeclarationV5
+      | CordisXManagerContentNavigationDeclarationV6,
   ): () => void {
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
     const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
@@ -235,6 +245,8 @@ export class ManagerContentNavigationRegistry {
         ? 4
         : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5 && declaration.schemaVersion === 5
         ? 5
+        : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V6 && declaration.schemaVersion === 6
+        ? 6
         : undefined
     if (version === undefined) {
       throw new Error('manager content navigation declaration has an unsupported schema tuple')
@@ -279,7 +291,8 @@ export class ManagerContentNavigationRegistry {
         declaration as
           | CordisXManagerContentNavigationDeclarationV3
           | CordisXManagerContentNavigationDeclarationV4
-          | CordisXManagerContentNavigationDeclarationV5,
+          | CordisXManagerContentNavigationDeclarationV5
+          | CordisXManagerContentNavigationDeclarationV6,
         candidateView,
       )
     }
@@ -290,12 +303,17 @@ export class ManagerContentNavigationRegistry {
     let config: ManagerContentConfigBindingHandle | undefined
     if (
       version >= 4
-      && (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5)
+      && (declaration as
+          | CordisXManagerContentNavigationDeclarationV4
+          | CordisXManagerContentNavigationDeclarationV5
+          | CordisXManagerContentNavigationDeclarationV6)
           .body !== undefined
     ) {
-      const body =
-        (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5)
-          .body!
+      const body = (declaration as
+        | CordisXManagerContentNavigationDeclarationV4
+        | CordisXManagerContentNavigationDeclarationV5
+        | CordisXManagerContentNavigationDeclarationV6)
+        .body!
       this.assertConfigBody(body)
       if (this.configFactory === undefined) throw new Error('manager content config authority is unavailable')
       const moduleGeneration = generation.moduleGeneration
@@ -379,6 +397,7 @@ export class ManagerContentNavigationRegistry {
         | CordisXManagerContentNavigationDeclarationV3
         | CordisXManagerContentNavigationDeclarationV4
         | CordisXManagerContentNavigationDeclarationV5
+        | CordisXManagerContentNavigationDeclarationV6
       )[]
       readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
     }>,
@@ -444,7 +463,8 @@ export class ManagerContentNavigationRegistry {
         ? (record.declaration as
           | CordisXManagerContentNavigationDeclarationV3
           | CordisXManagerContentNavigationDeclarationV4
-          | CordisXManagerContentNavigationDeclarationV5).subject
+          | CordisXManagerContentNavigationDeclarationV5
+          | CordisXManagerContentNavigationDeclarationV6).subject
         : undefined
       return subject?.kind === 'agent-definition'
         && subject.identity.agentId === identity.agentId
@@ -455,7 +475,8 @@ export class ManagerContentNavigationRegistry {
     const subject = (match.declaration as
       | CordisXManagerContentNavigationDeclarationV3
       | CordisXManagerContentNavigationDeclarationV4
-      | CordisXManagerContentNavigationDeclarationV5).subject!
+      | CordisXManagerContentNavigationDeclarationV5
+      | CordisXManagerContentNavigationDeclarationV6).subject!
     return Object.freeze({
       owner: match.owner,
       generation: match.generation,
@@ -489,7 +510,8 @@ export class ManagerContentNavigationRegistry {
     declaration:
       | CordisXManagerContentNavigationDeclarationV3
       | CordisXManagerContentNavigationDeclarationV4
-      | CordisXManagerContentNavigationDeclarationV5,
+      | CordisXManagerContentNavigationDeclarationV5
+      | CordisXManagerContentNavigationDeclarationV6,
     view?: PluginGenerationView,
   ): void {
     if (declaration.subject !== undefined) {
@@ -511,7 +533,8 @@ export class ManagerContentNavigationRegistry {
           ? (record.declaration as
             | CordisXManagerContentNavigationDeclarationV3
             | CordisXManagerContentNavigationDeclarationV4
-            | CordisXManagerContentNavigationDeclarationV5).subject
+            | CordisXManagerContentNavigationDeclarationV5
+            | CordisXManagerContentNavigationDeclarationV6).subject
           : undefined
         return subject?.kind === 'agent-definition'
           && subject.identity.agentId === declaration.subject!.identity.agentId
@@ -524,32 +547,7 @@ export class ManagerContentNavigationRegistry {
       }
     }
     if (declaration.recordSummary !== undefined) {
-      assertKeys(declaration.recordSummary, ['leadingVisual', 'title', 'description'], 'manager content record summary')
-      assertKeys(
-        declaration.recordSummary.leadingVisual,
-        ['kind', 'avatar'],
-        'manager content record summary leading visual',
-      )
-      if (declaration.recordSummary.leadingVisual.kind !== 'agent-avatar') {
-        throw new Error('manager content record summary leading visual kind is invalid')
-      }
-      cloneAgentAvatarRef(declaration.recordSummary.leadingVisual.avatar)
-      assertLocalizedText(declaration.recordSummary.title, 'manager content record summary title')
-      if (
-        typeof declaration.recordSummary.title.fallback !== 'string'
-        || declaration.recordSummary.title.fallback.trim() === ''
-      ) {
-        throw new Error('manager content record summary title fallback is invalid')
-      }
-      if (declaration.recordSummary.description !== undefined) {
-        assertLocalizedText(declaration.recordSummary.description, 'manager content record summary description')
-        if (
-          typeof declaration.recordSummary.description.fallback !== 'string'
-          || declaration.recordSummary.description.fallback.trim() === ''
-        ) {
-          throw new Error('manager content record summary description fallback is invalid')
-        }
-      }
+      assertManagerRecordSummary(declaration.recordSummary, declaration.schemaVersion)
     }
   }
 

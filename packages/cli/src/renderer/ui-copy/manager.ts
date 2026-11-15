@@ -78,6 +78,11 @@ export const STATUS_COPY = {
 } satisfies ProductCopyCatalog<'status'>
 
 export const PERMISSION_COPY = {
+  'permission.service-owner': { en: 'Own service', 'zh-CN': '插件自有能力' },
+  'permission.service-owner-reason': {
+    en: 'This plugin invokes its own active service. No user approval is required.',
+    'zh-CN': '插件内部调用自己提供的服务，无需用户审批。',
+  },
   'permission.certified-automatic-authorization': {
     en: 'Certified automatic authorization',
     'zh-CN': '认证自动授权',

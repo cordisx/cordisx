@@ -15,6 +15,7 @@ import {
 function visualManifest(registration: Registration): boolean {
   return registration.manifest.schemaVersion === 10 || registration.manifest.schemaVersion === 11
     || registration.manifest.schemaVersion === 12 || registration.manifest.schemaVersion === 13
+    || registration.manifest.schemaVersion === 16
 }
 
 function supportedInteractionEvent(point: string, event: string): boolean {

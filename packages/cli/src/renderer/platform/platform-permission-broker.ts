@@ -17,12 +17,13 @@ import { PlatformPermissionSnapshot, Registration } from './platform-permission-
 export class PermissionBroker extends PlatformUsagePermissionBroker {
   runtimeExactExplanations(): readonly {
     readonly identity: Registration['identity']
-    readonly capability: CordisXPlatformCapability
+    readonly capability: CordisXPermissionCapabilityV2
+    readonly authorizationOrigin?: 'service-owner'
   }[] {
     return [...this.registrations.values()]
       .filter(registration => this.visibility?.visible(registration.generation) ?? true)
       .flatMap(registration =>
-        [...registration.runtimeExactCapabilities].map(capability => ({
+        [...registration.runtimeExactCapabilities, ...registration.channelExactCapabilities].map(capability => ({
           identity: registration.identity,
           capability,
         }))
@@ -174,8 +175,26 @@ export class PermissionBroker extends PlatformUsagePermissionBroker {
       ...hostDom,
       ...this.visualPermissionSnapshots(),
       ...this.usagePermissionSnapshots(),
+      ...[...this.registrations.values()]
+        .filter(registration => this.visibility?.visible(registration.generation) ?? true)
+        .flatMap(registration =>
+          [...registration.serviceCapabilities].map(([capability, owner]) => ({
+            identity: registration.identity,
+            capability,
+            required: false,
+            reason: this.catalog.get(capability).presentation.description,
+            scope: owner.scope,
+            fingerprint:
+              `service-owner:${owner.serviceId}:${owner.serviceGeneration}:${owner.moduleGeneration}:${capability}`,
+            policy: 'allow' as const,
+            denialCount: 0,
+            authorizationOrigin: 'service-owner' as const,
+            authorizationReason: 'The active provider invokes its own service; no user permission is required.',
+          }))
+        ),
     ]
     return Object.freeze(snapshots.map(snapshot => {
+      if (snapshot.authorizationOrigin === 'service-owner') return snapshot
       const registration = this.registration(snapshot.identity)
       const declared = registration !== undefined && this.developmentPermission(registration, snapshot.capability)
       const points = snapshot.capability === 'ui.extension-points.render' ? snapshot.scope.extensionPoints : undefined

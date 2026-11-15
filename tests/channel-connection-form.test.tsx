@@ -1,0 +1,120 @@
+import { act, createElement } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { ChannelConnectionForm } from '../packages/cli/src/renderer/channel-connection-form.js'
+import { reactManagerFixture } from './helpers/react-manager.js'
+
+describe('unified Host Channel connection form', () => {
+  it('saves settings without a new key and resets every editable field with one footer', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    const snapshot = {
+      displayName: 'Original',
+      selectors: ['direct', 'group'],
+      revision: 2,
+      serviceRevision: 7,
+      writable: true,
+      credentialWritable: true,
+    }
+    const apply = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED' })), onResult = vi.fn()
+    const props = {
+      account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' },
+      initial: snapshot,
+      credentialsAvailable: true,
+      locale: 'en',
+      signal: lifetime.signal,
+      subscribe: () => () => {},
+      read: async () => ({ ...snapshot, displayName: 'Updated' }),
+      apply,
+      onResult,
+    }
+    try {
+      await f.render(createElement(ChannelConnectionForm, props))
+      expect(f.document.querySelectorAll('form')).toHaveLength(1)
+      expect(f.document.querySelectorAll('.cxf-form-grid')).toHaveLength(1)
+      expect(f.document.querySelectorAll('[type="submit"]')).toHaveLength(1)
+      expect((f.element('#channel-credential-appId input') as HTMLInputElement).disabled).toBe(true)
+      expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('')
+      await f.type('#channel-connection-displayName input', 'Updated')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).toHaveBeenCalledWith(
+        expect.objectContaining({ displayName: 'Updated', secret: '', groupMode: 'all' }),
+        snapshot,
+      )
+      expect(onResult).toHaveBeenLastCalledWith({ status: 'applied', code: 'APPLIED' })
+      await f.type('#channel-connection-displayName input', 'Draft')
+      await f.type('#channel-credential-secret input', 'test-secret')
+      await f.click('.cxf-form-action-buttons button[type="button"]')
+      expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('Updated')
+      expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('')
+      expect(apply).toHaveBeenCalledOnce()
+    } finally {
+      lifetime.abort()
+      await f.dispose()
+    }
+  })
+
+  it('retains edits and a new secret through refresh/conflict, then clears only on abort or reset', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    let snapshot = {
+        displayName: 'Original',
+        selectors: ['direct'],
+        revision: 2,
+        serviceRevision: 7,
+        writable: true,
+        credentialWritable: true,
+      },
+      refresh: (() => void) | undefined
+    const apply = vi.fn(async () => ({ status: 'conflict' as const, code: 'REVISION_CONFLICT' }))
+    const props = {
+      account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' },
+      initial: snapshot,
+      credentialsAvailable: true,
+      locale: 'en',
+      signal: lifetime.signal,
+      subscribe: (listener: () => void) => {
+        refresh = listener
+        return () => {
+          refresh = undefined
+        }
+      },
+      read: async () => snapshot,
+      apply,
+      onResult: vi.fn(),
+    }
+    try {
+      await f.render(createElement(ChannelConnectionForm, props))
+      await f.type('#channel-connection-displayName input', 'My edit')
+      await f.type('#channel-credential-secret input', 'test-secret')
+      snapshot = { ...snapshot, displayName: 'Other window', revision: 3, serviceRevision: 8 }
+      await act(async () => {
+        refresh!()
+        await Promise.resolve()
+      })
+      expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('My edit')
+      expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('test-secret')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).toHaveBeenLastCalledWith(
+        expect.objectContaining({ secret: 'test-secret', displayName: 'My edit' }),
+        snapshot,
+      )
+      expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('test-secret')
+      await f.click('.cxf-form-action-buttons button[type="button"]')
+      expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('Other window')
+      expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('')
+      await act(async () => {
+        lifetime.abort()
+      })
+    } finally {
+      lifetime.abort()
+      await f.dispose()
+      expect(refresh).toBeUndefined()
+    }
+  })
+})

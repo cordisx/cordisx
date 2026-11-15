@@ -1,4 +1,5 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
+import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
@@ -528,6 +529,7 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   await runtimeScope.visualFiber?.dispose()
   runtimeScope.visualFiber = undefined
   await runtimeScope.channelManagerFiber?.dispose()
+  runtimeScope.channelCredentialBridge()?.dispose()
   runtimeScope.channelManagerFiber = undefined
   await runtimeScope.playgroundRoomSimulationBridgeFiber?.dispose()
   runtimeScope.playgroundRoomSimulationBridgeFiber = undefined
@@ -887,6 +889,16 @@ export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): Ma
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
   modelProviders: runtimeScope.modelProviders()!,
+  ...(runtimeScope.channelActionsBridge() === undefined ? {} : {
+    chatExecution: new ChannelExecutionWorkflow({
+      document,
+      profileId: runtimeScope.metadata()!.profileId ?? 'default',
+      hostGeneration: runtimeScope.generation()!,
+      lifetime: new AbortController().signal,
+      live: () => !runtimeScope.disposed,
+      run: (action, args) => runtimeScope.channelActionsBridge()!.run(action, args),
+    }),
+  }),
   iconThemePreferenceWritable: runtimeScope.iconThemePreferenceBridge()! !== undefined,
   ...(marketplaceArtifactBridgeAvailable()
     ? {

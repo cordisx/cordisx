@@ -68,6 +68,22 @@ export interface ChannelManagerActionResult {
   readonly status: ChannelManagerActionStatus
   readonly generation?: string
   readonly projection?: ChannelManagerRuntimeProjection
+  readonly conversationPolicy?: {
+    readonly revision: number
+    readonly policy: import('./channel-conversation-policy.js').ChannelConversationPolicy
+  }
+  readonly code?: string
+  readonly execution?: {
+    readonly status: string
+    readonly revision?: number
+    readonly settings?: unknown
+    readonly code?: string
+  }
+  readonly bindingLabels?: readonly {
+    readonly bindingId: string
+    readonly sessionName: string
+    readonly conversationName: string
+  }[]
 }
 
 export interface ChannelManagerActionInput {
@@ -107,6 +123,8 @@ export interface ActiveChannelManagerRuntime {
 export interface ChannelManagerRuntimeAccess {
   active(): ActiveChannelManagerRuntime | undefined
   identity?(ref: ChannelTenantRef): ChannelAccountIdentity | undefined
+  bindings?(): readonly ChannelManagerBindingProjection[]
+  binding?(action: 'archive' | 'restore' | 'unbind', id: string): Promise<boolean>
   connection(
     action: 'enable' | 'disable' | 'reconnect',
     ref: ChannelTenantRef,
@@ -124,6 +142,7 @@ function sameAccount(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
 function projectSnapshot(
   snapshot: ChannelRuntimeSnapshot,
   identity?: ChannelManagerRuntimeAccess['identity'],
+  bindings: readonly ChannelManagerBindingProjection[] = [],
 ): ChannelManagerRuntimeProjection {
   return Object.freeze({
     contract: 'cordisx.channel-manager-runtime/v1',
@@ -145,7 +164,7 @@ function projectSnapshot(
         outbound: { ...account.outbound },
       })
     ),
-    bindings: Object.freeze([]) as readonly ChannelManagerBindingProjection[],
+    bindings: Object.freeze(bindings.map(binding => Object.freeze({ ...binding }))),
   })
 }
 
@@ -227,7 +246,10 @@ function result(access: ChannelManagerRuntimeAccess, status: ChannelManagerActio
     status,
     ...(active === undefined
       ? {}
-      : { generation: active.generation, projection: projectSnapshot(active.runtime.snapshot(), access.identity) }),
+      : {
+        generation: active.generation,
+        projection: projectSnapshot(active.runtime.snapshot(), access.identity, access.bindings?.()),
+      }),
   })
 }
 
@@ -251,18 +273,20 @@ export function createChannelManagerApi(access: ChannelManagerRuntimeAccess): Ch
   ): Promise<ChannelManagerActionResult> => {
     const active = expectedActive(access, input)
     if (active === undefined) return result(access, 'unavailable')
-    const status = action === 'archive'
+    const status = access.binding === undefined
       ? 'unavailable'
-      : action === 'restore'
-      ? 'unavailable'
-      : 'unavailable'
+      : await access.binding(action, input.bindingId)
+      ? 'applied'
+      : 'not-found'
     return result(access, status)
   }
 
   return Object.freeze({
     snapshot: () => {
       const active = access.active()
-      return active === undefined ? undefined : projectSnapshot(active.runtime.snapshot(), access.identity)
+      return active === undefined
+        ? undefined
+        : projectSnapshot(active.runtime.snapshot(), access.identity, access.bindings?.())
     },
     logs: (query?: ChannelManagerLogQuery) => logPage(access.active(), query),
     exportLogs: (query?: Omit<ChannelManagerLogQuery, 'offset' | 'limit'>) => {

@@ -1,3 +1,6 @@
+export type * from '@cordisx/protocol/channel-manager/v7'
+export type * from '@cordisx/protocol/channel-manager/v8'
+export type * from '@cordisx/protocol/manager-content-navigation/v6'
 export type * from './dialog-contracts.js'
 export type * from './current-user-contracts.js'
 export * from './usage-contracts.js'
@@ -19,6 +22,10 @@ export {
   type CordisXPluginManifestV13,
 } from './runtime-exact-request-permissions.js'
 export * from './extension-point-visual-contracts.js'
+export {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V16,
+  type CordisXPluginManifestV16,
+} from './channel-exact-request-permissions.js'
 export * from './control-contracts.js'
 export * from './platform-contracts.js'
 export * from './permission-contracts.js'
@@ -31,6 +38,9 @@ export * from './plugin-bundle-contracts.js'
 export * from './visual-contracts.js'
 export type * from '@cordisx/protocol/channel-runtime/v1'
 export type * from '@cordisx/protocol/channel-manager/v2'
+export type * from '@cordisx/protocol/channel-manager/v4'
+export type * from '@cordisx/protocol/channel-manager/v5'
+export type * from '@cordisx/protocol/channel-conversation-policy/v1'
 export type {
   TransientCanvasPluginContextV1,
   TransientCanvasPresenterV1,
@@ -256,6 +266,7 @@ export {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V6,
   CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V3,
@@ -305,15 +316,18 @@ export type {
   CordisXManagerContentNavigationCatalogProjectionV2,
   CordisXManagerContentNavigationCatalogProjectionV3,
   CordisXManagerContentNavigationCatalogProjectionV4,
+  CordisXManagerContentNavigationCatalogProjectionV5,
   CordisXManagerContentNavigationDeclarationV1,
   CordisXManagerContentNavigationDeclarationV2,
   CordisXManagerContentNavigationDeclarationV3,
   CordisXManagerContentNavigationDeclarationV4,
   CordisXManagerContentNavigationDeclarationV5,
+  CordisXManagerContentNavigationDeclarationV6,
   CordisXManagerContentNavigationProjectionV1,
   CordisXManagerContentProjectionV2,
   CordisXManagerContentProjectionV3,
   CordisXManagerContentProjectionV4,
+  CordisXManagerContentProjectionV5,
   CordisXManagerContentRecordTitleV1,
   CordisXManagerOpenResult,
   CordisXManagerService,

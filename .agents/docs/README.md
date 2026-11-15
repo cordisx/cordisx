@@ -187,3 +187,5 @@ or protocol sources. Availability depends on the installed CordisX version.
 
 - [Standalone services](standalone-services.md) — run plugin backends and the model API without an App or Agent.
 - [Local model and Agent API](local-model-api.md) — experimental loopback API candidate.
+
+- [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.

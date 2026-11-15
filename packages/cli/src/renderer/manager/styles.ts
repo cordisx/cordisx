@@ -1,5 +1,6 @@
 import managerNavigationCss from './manager-navigation.css?inline'
 import managerContentCss from './manager-content.css?inline'
+import managerRecordSummaryCss from './manager-record-summary.css?inline'
 import managerCatalogCss from './manager-catalog.css?inline'
 import managerDetailsCss from './manager-details.css?inline'
 import managerMarketplaceCss from './manager-marketplace.css?inline'
@@ -32,6 +33,7 @@ export const REACT_MANAGER_STYLES = [
   actionGroupCss,
   managerNavigationCss,
   managerContentCss,
+  managerRecordSummaryCss,
   managerCatalogCss,
   managerDetailsCss,
   managerMarketplaceCss,

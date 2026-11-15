@@ -55,8 +55,29 @@ import {
   scopeAllows,
 } from './platform-permission-types.js'
 import { materializeValidatedRuntimeExactScope } from './platform-runtime-exact-scope.js'
+import { materializeChannelExactScope } from './channel-exact-scope.js'
 
 export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV2Broker {
+  /** Channel is a v2 permission family, not a legacy platform capability cast. */
+  async authorizeChannel(
+    identity: CordisXPluginIdentity,
+    capability: Extract<CordisXPermissionCapabilityV2, `channel.${string}`>,
+    requested: RequestedScope,
+    view?: PluginGenerationView,
+  ): Promise<boolean> {
+    const registration = this.registration(identity, view)
+    const concrete = (capability === 'channel.accounts.connect' || capability === 'channel.bindings.write')
+        && registration?.channelExactCapabilities.has(capability)
+      ? materializeChannelExactScope(capability, requested)
+      : undefined
+    const declaration = concrete === undefined
+      ? registration?.declarationsV2.get(capability)
+      : { name: capability, required: false, scope: concrete }
+    if (!registration || !declaration || registration.manifest.schemaVersion === 1) return false
+    // Shared v2 logic uses the legacy-shaped return only for existing platform callers.
+    const result = await this.authorizeDeclarationV2(registration, declaration, requested)
+    return result.ok && this.isRegistered(registration)
+  }
   policy(
     identity: CordisXPluginIdentity,
     capability: CordisXPlatformCapability,
@@ -512,7 +533,18 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       this.denied(identityKey, capability, requested)
       return failure('permission-undeclared', `Plugin ${identity.id} does not declare ${capability}`)
     }
-    if (!scopeAllows(declaration.scope as CordisXCapabilityScope, requested)) {
+    const result = await this.authorizeDeclarationV2(registration, declaration, requested)
+    return result.ok ? { ok: true, value: { declaration: legacyDeclaration } } : result
+  }
+
+  /** The common v2 evaluator uses real capability names; Channel never masquerades as Platform. */
+  protected async authorizeDeclarationV2(
+    registration: Registration,
+    declaration: CordisXCapabilityDeclarationV2,
+    requested: RequestedScope,
+  ): Promise<CordisXPlatformResult<true>> {
+    const identity = registration.identity, identityKey = platformIdentityKey(identity), capability = declaration.name
+    if (!scopeAllows(declaration.scope, requested)) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is outside the declared scope`)
       this.denied(identityKey, capability, requested)
       return failure('permission-scope-denied', `Requested parameters are outside the declared ${capability} scope`)
@@ -567,6 +599,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
         return failure('permission-denied', `${capability} was not authorized for this call`)
       }
       try {
+        if (!this.isRegistered(registration)) throw new Error('Retired permission registration')
         this.assertDecisionV2(plan, decision)
         await this.commitDecisionV2(plan, decision)
       } catch {
@@ -607,7 +640,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     this.audit.set(auditKey, audit)
     this.consoleObserver?.permission(identity, capability, 'allow', `${capability} allowed`)
     this.changed()
-    return { ok: true, value: { declaration: legacyDeclaration } }
+    return { ok: true, value: true }
   }
 
   requiredDenied(

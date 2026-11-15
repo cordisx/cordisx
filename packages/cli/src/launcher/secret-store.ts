@@ -79,8 +79,7 @@ export class LauncherSecretStore {
   private readonly captures = new Map<string, SecretIdentity>()
   private readonly backend: LauncherKeychainBackend | undefined
 
-  // TODO: bind captures to service generation/owner and add compare-and-swap
-  // semantics when this private API is connected to a renderer workflow.
+  // Public Manager workflows bind these private handles in ChannelCredentialDraftBroker.
 
   constructor(options: LauncherSecretStoreOptions = {}) {
     this.backend = (options.platform ?? process.platform) === 'darwin'
@@ -136,6 +135,11 @@ export class LauncherSecretStore {
   referenceFor(captureId: string): string | undefined {
     const target = this.lookupCapture(captureId)
     return target === undefined ? undefined : channelKeychainReference(target)
+  }
+
+  /** Retire in-memory authority after commit or cleanup; the persisted item is managed separately. */
+  forget(captureId: string): void {
+    this.captures.delete(captureId)
   }
 
   private lookupCapture(value: string): SecretIdentity | undefined {

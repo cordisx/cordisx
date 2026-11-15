@@ -102,7 +102,7 @@ export function normalizePluginManifestV13(value: unknown, expectedId: string): 
 }
 
 export function runtimeExactCapabilities(
-  manifest: CordisXPluginManifestV13,
+  manifest: { readonly capabilities: readonly unknown[] },
 ): ReadonlySet<PluginManifestRuntimeExactCapabilityNameV13> {
   return new Set(manifest.capabilities.filter(isRuntimeExactRequestDeclaration).map(item => item.name))
 }

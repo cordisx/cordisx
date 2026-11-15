@@ -1,4 +1,5 @@
 import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
+import { channelExactCapabilities, type CordisXPluginManifestV16 } from '../../channel-exact-request-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../../runtime-exact-request-permissions.js'
 import { runtimeExactCapabilities } from '../../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
@@ -21,6 +22,7 @@ import type {
   CordisXPermissionAuthorizationPlanV2,
   CordisXPermissionAuthorizationPlanV3,
   CordisXPermissionAuthorizationPlanV4,
+  CordisXPermissionCapabilityV2,
   CordisXPermissionCapabilityV4,
   CordisXPermissionPolicyRecordV2,
   CordisXPermissionPolicyRecordV3,
@@ -33,6 +35,8 @@ import type {
   CordisXPluginManifestV9,
 } from '../../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../../capability-risk-catalog.js'
+import type { RuntimeServiceCapabilityOwner } from '../../service-capability-ownership.js'
+import { ServiceCapabilityOwnership } from './service-capability-ownership.js'
 import { PermissionOnceGrantLedger } from '../../permission-model-v2.js'
 import { normalizeCertifiedPermissionProjectionV1 } from '../../permission-model-v4.js'
 import {
@@ -65,9 +69,11 @@ import {
   Registration,
   RegistrationArtifactBinding,
   requestedSnapshot,
+  scopeAllows,
 } from './platform-permission-types.js'
 
 export abstract class PlatformPermissionBrokerBase {
+  private readonly serviceOwnership: ServiceCapabilityOwnership
   protected readonly registrations = new Map<string, Registration>()
 
   /** Launcher-fed, renderer-ephemeral exact projections; never a feed/root/store authority. */
@@ -173,7 +179,9 @@ export abstract class PlatformPermissionBrokerBase {
     protected readonly visibility?: GenerationVisibilityCoordinator,
     protected readonly consoleObserver?: PluginConsolePermissionObserver,
     protected readonly promptV2?: PermissionAuthorizationPromptV2,
+    serviceOwners: readonly RuntimeServiceCapabilityOwner[] = [],
   ) {
+    this.serviceOwnership = new ServiceCapabilityOwnership(serviceOwners, generation)
     for (const record of store.read()) {
       if (record.key.profileId === profileId) this.policyRecords.set(persistedPermissionRecordKey(record), record)
     }
@@ -202,7 +210,8 @@ export abstract class PlatformPermissionBrokerBase {
       | CordisXPluginManifestV10
       | CordisXPluginManifestV11
       | CordisXPluginManifestV12
-      | CordisXPluginManifestV13,
+      | CordisXPluginManifestV13
+      | CordisXPluginManifestV16,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
@@ -213,7 +222,7 @@ export abstract class PlatformPermissionBrokerBase {
       manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
         || manifest.schemaVersion === 7 || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
         || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
-          || manifest.schemaVersion === 13)
+          || manifest.schemaVersion === 13 || manifest.schemaVersion === 16)
         ? manifest.capabilities.flatMap(item => (
           (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
             && !('runtime' in item.scope)
@@ -269,15 +278,23 @@ export abstract class PlatformPermissionBrokerBase {
         integrity: artifact.integrity,
         ...(certification === undefined ? {} : { certification }),
       })
+    const registrationToken = Object.freeze({})
     const registration: Registration = {
-      token: Object.freeze({}),
+      token: registrationToken,
       development: development && generation.moduleGeneration !== undefined,
       identity: Object.freeze({ ...identity }),
+      serviceCapabilities: this.serviceOwnership.bind(
+        identity,
+        generation,
+        'services' in manifest ? manifest : {},
+        registrationToken,
+      ),
       manifest,
       declarations,
       declarationsV2,
       declarationsV4,
-      runtimeExactCapabilities: manifest.schemaVersion === 13
+      channelExactCapabilities: manifest.schemaVersion === 16 ? channelExactCapabilities(manifest) : new Set(),
+      runtimeExactCapabilities: manifest.schemaVersion === 13 || manifest.schemaVersion === 16
         ? runtimeExactCapabilities(manifest)
         : new Set(),
       generation,
@@ -330,6 +347,47 @@ export abstract class PlatformPermissionBrokerBase {
   protected developmentPermission(registration: Registration, capability: string): boolean {
     return registration.development && this.isRegistered(registration)
       && registration.manifest.capabilities.some(item => item.name === capability)
+  }
+
+  /** A separate internal service path, not an implicit grant for delegated APIs. */
+  serviceOwner(
+    identity: CordisXPluginIdentity,
+    moduleGeneration: string,
+    capability: CordisXPermissionCapabilityV2,
+    view?: PluginGenerationView,
+  ) {
+    const registration = this.registration(identity, view)
+    if (
+      !registration || !this.isRegistered(registration)
+      || registration.generation.moduleGeneration !== moduleGeneration
+    ) return undefined
+    return registration.serviceCapabilities.get(capability)
+  }
+
+  authorizeServiceOwner(
+    identity: CordisXPluginIdentity,
+    owner: NonNullable<ReturnType<PlatformPermissionBrokerBase['serviceOwner']>>,
+    capability: CordisXPermissionCapabilityV2,
+    requested: RequestedScope,
+    view?: PluginGenerationView,
+  ): boolean {
+    const current = this.serviceOwner(identity, owner.moduleGeneration, capability, view)
+    if (
+      !current || current.registrationToken !== owner.registrationToken
+      || current.runtimeGeneration !== owner.runtimeGeneration || current.moduleGeneration !== owner.moduleGeneration
+      || current.source !== owner.source || current.pluginId !== owner.pluginId
+      || current.serviceId !== owner.serviceId || current.serviceKind !== owner.serviceKind
+      || current.serviceGeneration !== owner.serviceGeneration || !scopeAllows(current.scope, requested)
+    ) return false
+    // There is no user permission to grant for invoking the provider's own service.
+    const auditKey = this.auditKey(platformIdentityKey(identity), capability)
+    const audit = this.audit.get(auditKey) ?? { denialCount: 0 }
+    audit.lastUsedAt = isoNow(this.now)
+    audit.lastRequested = requestedSnapshot(requested)
+    audit.authorizationOrigin = 'service-owner'
+    audit.authorizationReason = 'The active provider is invoking its own registered service.'
+    this.audit.set(auditKey, audit)
+    return true
   }
 
   protected developmentPoint(registration: Registration, pointId: string): boolean {
@@ -406,7 +464,7 @@ export abstract class PlatformPermissionBrokerBase {
     })
   }
 
-  protected denied(identityKey: string, capability: CordisXPlatformCapability, requested: RequestedScope): void {
+  protected denied(identityKey: string, capability: CordisXPermissionCapabilityV2, requested: RequestedScope): void {
     const key = this.auditKey(identityKey, capability)
     const audit = this.audit.get(key) ?? { denialCount: 0 }
     audit.lastDeniedAt = isoNow(this.now)
@@ -416,7 +474,7 @@ export abstract class PlatformPermissionBrokerBase {
     this.changed()
   }
 
-  protected auditKey(identityKey: string, capability: CordisXPlatformCapability): string {
+  protected auditKey(identityKey: string, capability: CordisXPermissionCapabilityV2): string {
     return `${identityKey}\u0000${capability}`
   }
 

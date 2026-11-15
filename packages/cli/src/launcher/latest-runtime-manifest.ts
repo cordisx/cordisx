@@ -1,4 +1,9 @@
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
+import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V16,
+  partitionChannelExactManifest,
+} from '../channel-exact-request-permissions.js'
 import { validateStartupDeclaration } from '../startup-declaration-validation.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
@@ -204,9 +209,13 @@ export function normalizeLatestRuntimeManifest(
   | CordisXPluginManifestV13
   | PluginRuntimeManifestV14
   | PluginRuntimeManifestV15
+  | PluginRuntimeManifestV16
   | undefined
 {
   const candidate = value as { readonly $schema?: unknown; readonly schemaVersion?: unknown }
+  if (candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 || candidate.schemaVersion === 16) {
+    return normalizePluginManifestV16(value, expectedId)
+  }
   if (candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || candidate.schemaVersion === 15) {
     return normalizePluginManifestV15(value, expectedId)
   }
@@ -217,6 +226,29 @@ export function normalizeLatestRuntimeManifest(
     : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && candidate.schemaVersion === 14
     ? normalizePluginManifestV14(value, expectedId)
     : undefined
+}
+
+export function normalizePluginManifestV16(value: unknown, expectedId: string): PluginRuntimeManifestV16 {
+  const { base, exact, startup } = partitionChannelExactManifest(value)
+  const ordinary = normalizePluginManifestV14({
+    ...base,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+    schemaVersion: 14,
+  }, expectedId)
+  if (
+    startup !== undefined && startup.capabilities.some(capability => {
+      const service = ordinary.services.find(item => item.id === capability.serviceId)
+      return !service
+        || ((capability.kind === 'provider' || capability.milestones.length > 0) && service.kind !== 'managed-backend')
+    })
+  ) throw new Error('startup capability service is unsupported')
+  return Object.freeze({
+    ...ordinary,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V16,
+    schemaVersion: 16,
+    capabilities: Object.freeze([...ordinary.capabilities, ...exact]),
+    ...(startup === undefined ? {} : { startup }),
+  })
 }
 
 export function runtimeManifestHasServices<T extends { readonly schemaVersion: number }>(

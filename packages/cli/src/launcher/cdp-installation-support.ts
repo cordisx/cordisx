@@ -713,10 +713,12 @@ export async function sendServiceConfigBindingResponse(
 export async function sendChannelCredentialBindingResponse(
   session: CdpSession,
   payload: Record<string, unknown>,
+  contextId?: number,
 ): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${CHANNEL_CREDENTIAL_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
+    ...(contextId === undefined ? {} : { contextId }),
   })
 }
 

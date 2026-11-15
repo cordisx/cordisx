@@ -1,4 +1,5 @@
 import type { ChannelManagerActionResult, ChannelManagerApi } from './channel-manager-api.js'
+import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 
 export const CHANNEL_ACTIONS_BINDING = '__cordisxChannelActionsRequestV1'
 export const CHANNEL_ACTIONS_RECEIVER = '__cordisxChannelActionsReceiveV1'
@@ -14,7 +15,18 @@ function record(value: unknown): Record<string, unknown> {
 }
 /** Token-bound narrow proxy for the formal launcher action API. */
 export function createChannelActionsBridgeHandler(
-  input: { readonly token: string; readonly api: ChannelManagerApi },
+  input: {
+    readonly token: string
+    readonly api: ChannelManagerApi
+    readonly consumer?: Pick<
+      ChannelConversationConsumer,
+      'policy' | 'policySet' | 'executionOperation' | 'bindingLabels'
+    >
+    readonly execution?: (
+      operation: string,
+      args: Record<string, unknown>,
+    ) => Promise<{ status: string; code?: string }>
+  },
 ): ChannelActionsBridgeHandler {
   return {
     token: input.token,
@@ -24,6 +36,59 @@ export function createChannelActionsBridgeHandler(
       const action = request.action
       const generation = typeof request.generation === 'string' ? request.generation : undefined
       if (typeof action !== 'string') throw new Error('invalid channel action')
+      if (
+        [
+          'execution-defaults',
+          'execution-defaults-set',
+          'execution-settings',
+          'execution-settings-set',
+          'binding-labels',
+        ].includes(action)
+      ) {
+        if (
+          action === 'binding-labels' && !input.consumer
+          || action !== 'binding-labels' && !input.consumer && !input.execution
+        ) return { status: 'unavailable', code: 'EXECUTION_SETTINGS_UNAVAILABLE' }
+        try {
+          if (action === 'binding-labels') {
+            return { status: 'applied', bindingLabels: await input.consumer!.bindingLabels() }
+          }
+          const { version: _version, token: _token, requestId: _id, action: _action, ...args } = request
+          const value =
+            await (input.execution ? input.execution(action, args) : input.consumer!.executionOperation(action, args))
+          return value.status === 'ok'
+            ? { status: 'applied', execution: value }
+            : { status: 'unavailable', code: value.code ?? 'EXECUTION_SETTINGS_UNAVAILABLE' }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'EXECUTION_SETTINGS_UNAVAILABLE',
+          }
+        }
+      }
+      if (action === 'policy') {
+        return input.consumer === undefined
+          ? { status: 'unavailable' }
+          : { status: 'applied', conversationPolicy: input.consumer.policy() }
+      }
+      if (action === 'policy-set') {
+        if (!input.consumer || !Number.isSafeInteger(request.expectedRevision)) return { status: 'unavailable' }
+        try {
+          return {
+            status: 'applied',
+            conversationPolicy: await input.consumer.policySet(request.policy, Number(request.expectedRevision)),
+          }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'POLICY_CONFIGURATION_FAILED',
+          }
+        }
+      }
       if (action === 'snapshot') {
         const projection = input.api.snapshot()
         return projection === undefined ? { status: 'unavailable' } : { status: 'applied', projection }

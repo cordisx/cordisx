@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV16 } from './channel-exact-request-permissions.js'
 import type { CordisXPluginManifestV11 } from './usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from './runtime-exact-request-permissions.js'
 import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
@@ -242,6 +243,7 @@ export interface CordisXPluginModule {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | CordisXPluginManifestV16
     | PluginRuntimeManifestV14
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
@@ -278,6 +280,7 @@ export interface CordisXBrowserPlugin {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | CordisXPluginManifestV16
     | PluginRuntimeManifestV14
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
@@ -289,6 +292,7 @@ export interface CordisXBrowserPlugin {
   }
   /** Adjacent README.md captured by the launcher for this browser generation. */
   readonly readme?: string
+  readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   /** Locale-keyed adjacent READMEs; `default` is README.md. */
   readonly readmes?: Readonly<Record<string, string>>
 }

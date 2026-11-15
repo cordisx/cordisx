@@ -433,6 +433,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         config: runtimeScope.configuration()!.descriptor(controller.item.id, locale).value,
         configuration: runtimeScope.configuration()!.descriptor(controller.item.id, locale),
         ...(readme === undefined ? {} : { readme }),
+        ...(controller.item.documents === undefined ? {} : { documents: controller.item.documents }),
         ...(controller.item.package === undefined ? {} : {
           package: {
             version: controller.item.package.version,
@@ -823,11 +824,8 @@ export const createRuntimeSetPermissionPolicy = (
         policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
         controller.generationView,
       )
-    } else if (
-      controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
-      || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
-      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
-    ) {
+    } else if (controller.manifest.schemaVersion !== 1) {
+      // Every modern manifest uses v2 declarations, including Channel-only capabilities.
       await runtimeScope.broker()!.setPolicyV2(
         controller.identity,
         capability,

@@ -249,6 +249,10 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
 }
 
 export interface RequestedScope {
+  readonly channelAccount?: import('../../permission-contracts.js').CordisXChannelAccountRef
+  readonly channelTenant?: import('../../permission-contracts.js').CordisXChannelTenantRef
+  readonly channelConversation?: import('../../permission-contracts.js').CordisXChannelConversationRef
+  readonly channelUser?: import('../../permission-contracts.js').CordisXChannelUserRef
   readonly providerId?: string
   readonly providerIds?: readonly string[]
   readonly cwd?: string

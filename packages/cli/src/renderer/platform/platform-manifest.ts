@@ -1,6 +1,11 @@
 import type { StartupDeclarationV1 } from '@cordisx/protocol/startup/v1'
 import { validateStartupDeclaration } from '../../startup-declaration-validation.js'
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V16,
+  type CordisXPluginManifestV16,
+  normalizeChannelExactManifestV16,
+} from '../../channel-exact-request-permissions.js'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
   type CordisXPluginManifestV11,
   normalizeUsageManifestV11,
@@ -137,6 +142,7 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV11
   | CordisXPluginManifestV12
   | CordisXPluginManifestV13
+  | CordisXPluginManifestV16
   | (CordisXPluginManifestV13 & { readonly startup: StartupDeclarationV1 })
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
@@ -149,6 +155,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 || manifest.schemaVersion === 16) {
+    return normalizeChannelExactManifestV16(manifest, expectedId)
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.schemaVersion === 15) {
     if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 || manifest.schemaVersion !== 15) {
       throw new Error('manifest v15 identity is invalid')

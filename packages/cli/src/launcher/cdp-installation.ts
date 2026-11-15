@@ -460,8 +460,15 @@ export async function install(
       })
     }
     if (credential !== undefined) {
-      removeCredentialBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+      const retireDestroyedContext = session.onEvent('Runtime.executionContextDestroyed', params => {
+        if (typeof params.executionContextId === 'number') {
+          void credential.retireDocument?.(`${target.id}:${params.executionContextId}`).catch(() => {})
+        }
+      })
+      const removeCredentialRequest = session.onEvent('Runtime.bindingCalled', (params) => {
         if (params.name !== support.CHANNEL_CREDENTIAL_BINDING || typeof params.payload !== 'string') return
+        const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
+        const documentId = `${target.id}:${executionContextId ?? 'unknown'}`
         void (async () => {
           const payload = params.payload as string
           let requestId = 'invalid'
@@ -472,17 +479,25 @@ export async function install(
             const raw = JSON.parse(payload) as { requestId?: unknown }
             requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
             if (credentialController?.signal.aborted === true) throw new Error('channel credential bridge is closed')
-            const value = await lifecycleRequests.exclusive(async () => await credential.handle(raw))
-            await support.sendChannelCredentialBindingResponse(session, { requestId, ok: true, value })
+            const value = await lifecycleRequests.exclusive(async () => await credential.handle(raw, documentId))
+            await support.sendChannelCredentialBindingResponse(
+              session,
+              { requestId, ok: true, value },
+              executionContextId,
+            )
           } catch {
             await support.sendChannelCredentialBindingResponse(session, {
               requestId,
               ok: false,
               code: 'channel-credential-unavailable',
-            }).catch(() => undefined)
+            }, executionContextId).catch(() => undefined)
           }
         })()
       })
+      removeCredentialBindingListener = () => {
+        removeCredentialRequest()
+        retireDestroyedContext()
+      }
     }
     if (actions !== undefined) {
       removeActionsBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {

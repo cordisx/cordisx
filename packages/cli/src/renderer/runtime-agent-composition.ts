@@ -505,6 +505,8 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
           CordisXChannelManagerService,
           {
             profileId: runtimeScope.metadata()!.profileId,
+            document,
+            broker: runtimeScope.broker()!,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
             isCurrent: () => !runtimeScope.disposed,
             ...(runtimeScope.metadata()!.channelManager === undefined
@@ -517,8 +519,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
               },
             }),
             ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
-              createCredentialedConnection: async (input) =>
-                await runtimeScope.channelCredentialBridge()!.create(input),
+              credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
             }),
             ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
               actions: { run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input) },

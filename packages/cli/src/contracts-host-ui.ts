@@ -1,3 +1,7 @@
+import type {
+  ManagerContentNavigationDeclarationV6,
+  ManagerContentProjectionV5,
+} from '@cordisx/protocol/manager-content-navigation/v6'
 import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 import type { ExtensionPointVisualPresentationV1 } from '@cordisx/protocol/extension-point-visual/v1'
 import type { BrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
@@ -562,6 +566,9 @@ export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4 =
 export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-navigation.v5.schema.json' as const
 
+export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-navigation.v6.schema.json' as const
+
 export const CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-projection.v1.schema.json' as const
 
@@ -595,6 +602,9 @@ export type CordisXManagerContentNavigationDeclarationV3 = ManagerContentNavigat
 export type CordisXManagerContentNavigationDeclarationV4 = ManagerContentNavigationDeclarationV4
 
 export type CordisXManagerContentNavigationDeclarationV5 = ManagerContentNavigationDeclarationV5
+
+export type CordisXManagerContentNavigationDeclarationV6 = ManagerContentNavigationDeclarationV6
+export type CordisXManagerContentProjectionV5 = ManagerContentProjectionV5
 
 export type CordisXManagerContentProjectionV2 = ManagerContentProjectionV2
 
@@ -644,7 +654,22 @@ export interface CordisXManagerContentNavigationCatalogProjectionV4 {
   readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
 }
 
+export interface CordisXManagerContentNavigationCatalogProjectionV5 {
+  readonly declarations: readonly (
+    | CordisXManagerContentNavigationDeclarationV1
+    | CordisXManagerContentNavigationDeclarationV2
+    | CordisXManagerContentNavigationDeclarationV3
+    | CordisXManagerContentNavigationDeclarationV4
+    | CordisXManagerContentNavigationDeclarationV5
+    | CordisXManagerContentNavigationDeclarationV6
+  )[]
+  readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
+}
+
 export interface CordisXManagerContentNavigation {
+  readonly supportedSchemaVersions?: readonly (1 | 2 | 3 | 4 | 5 | 6)[]
+  register(declaration: CordisXManagerContentNavigationDeclarationV6): Disposable<void | Promise<void>>
+  replaceProjection(projection: CordisXManagerContentNavigationCatalogProjectionV5): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV1): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV2): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV3): Disposable<void | Promise<void>>

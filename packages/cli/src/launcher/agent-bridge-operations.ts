@@ -156,6 +156,7 @@ export function operationState(record: BridgeOperationRecord): Record<string, un
     operationId: record.operationId,
     operation: record.operation,
     app: record.app,
+    ...(record.turnId === undefined ? {} : { turnId: record.turnId }),
     ...(record.sessionId === undefined ? {} : { sessionId: record.sessionId }),
     ...(record.link === undefined ? {} : { link: record.link }),
     startedAt: record.startedAt,

@@ -40,6 +40,8 @@ import { startNativeSubmissionControlServer } from './native-submission-control-
 import { startNativeAgentModelsServer } from './native-agent-models.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
+import { ChannelNativeSessions } from './channel-native-sessions.js'
+import { configuredChannelCliContext } from './channel-cli-context.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -48,6 +50,7 @@ import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
 import { startModelApiServer } from './model-api-server.js'
+import { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import { nativeProviderConfig } from './native-provider-config.js'
 import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
@@ -85,6 +88,8 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly chatExecution?: ChatExecutionPreferences
+  readonly channelSession?: import('./channel-native-sessions.js').ChannelNativeSessions
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly installation: NativeSubmissionInstallation
@@ -107,6 +112,9 @@ export class NativeSubmissionCompatibilityError extends Error {
   }
 }
 export interface NativeSubmissionCatalogOptions {
+  readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
+  readonly channelSectionName?: () => string | undefined
   readonly remoteTerminalProvider?: ExistingTerminalProviderSource
   readonly onStage?: (stage: NativeSubmissionCompletionStage) => void
   readonly defaultProviderId?: string
@@ -267,6 +275,7 @@ export async function prepareNativeSubmissionBootstrap(
   let completion: Promise<NativeSubmissionComposition> | undefined
   let closePromise: Promise<void> | undefined
   let agentBridge: AgentBridge | undefined
+  let chatExecution: ChatExecutionPreferences | undefined
   let modelApi: Awaited<ReturnType<typeof startModelApiServer>> | undefined
   const apiAgentCredentials = new Map<string, { dispose(): void }>()
   const close = (): Promise<void> =>
@@ -279,6 +288,7 @@ export async function prepareNativeSubmissionBootstrap(
       apiAgentCredentials.forEach(lease => lease.dispose())
       apiAgentCredentials.clear()
       await agentBridge?.close()
+      await chatExecution?.close()
       await agentModels.close()
       await taskRouting?.close()
       dynamic?.dispose()
@@ -747,6 +757,21 @@ export async function prepareNativeSubmissionBootstrap(
         cdp.bindController(controller)
         terminalProviderDisplays = () => cdp.providerDisplays()
         if (completeOptions.managedCatalog !== undefined) {
+          const managedHome = completeOptions.managedCatalog
+          chatExecution = await ChatExecutionPreferences.open({
+            file: path.join(
+              managedHome.homeDir,
+              'apps',
+              'codex',
+              'profiles',
+              managedHome.profileId,
+              'chat-execution.json',
+            ),
+            configPath: path.join(managedHome.homeDir, 'config.json'),
+            appId: 'codex',
+            profileId: managedHome.profileId,
+          })
+          control.bindChatExecution(chatExecution)
           // The agent bridge lets Claude Code sessions read and start threads in this
           // app-server, and lets this app's agents reach Claude. Failing to start it
           // only leaves the cross-app tools unavailable.
@@ -891,6 +916,7 @@ export async function prepareNativeSubmissionBootstrap(
         }
         lifetime.signal.throwIfAborted()
         agentModels.bind({
+          ...(completeOptions.channel === undefined ? {} : { channel: completeOptions.channel }),
           ...(startup === undefined ? {} : { startup }),
           catalog,
           controller,
@@ -917,7 +943,30 @@ export async function prepareNativeSubmissionBootstrap(
         lifetime.signal.throwIfAborted()
         reportStage('native-submission-controller-bound')
         return {
+          ...(chatExecution === undefined ? {} : { chatExecution }),
           terminalProvider: request => terminalProviders!.request(request),
+          channelSession: new ChannelNativeSessions({
+            bridge: () => agentBridge,
+            nativeRequest: (method, params) => control.nativeRequest(method, params),
+            ...(chatExecution === undefined ? {} : { execution: chatExecution }),
+            ...(completeOptions.channelName === undefined ? {} : { name: completeOptions.channelName }),
+            ...(completeOptions.channelSectionName === undefined
+              ? {}
+              : { sectionName: completeOptions.channelSectionName }),
+            subscribeApprovals: listener => control.subscribeNativeApprovals(listener),
+            respondApproval: value => control.respondNativeApproval(value),
+            cwd: completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
+            ...(completeOptions.managedCatalog === undefined ? {} : {
+              cli: configuredChannelCliContext(
+                completeOptions.managedCatalog.homeDir,
+                completeOptions.managedCatalog.profileId,
+              ),
+            }),
+            ...(completeOptions.defaultProviderId === undefined
+              ? {}
+              : { providerId: completeOptions.defaultProviderId }),
+            ...(completeOptions.defaultModelId === undefined ? {} : { model: completeOptions.defaultModelId }),
+          }),
           async modelExport(request) {
             if (closePromise !== undefined || !management || !managed || !completeOptions.managedCatalog) {
               throw new Error('Model export catalog unavailable')

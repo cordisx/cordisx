@@ -64,5 +64,58 @@ describe('Channel credential Host bridge', () => {
     expect(JSON.stringify(result)).not.toMatch(/keychain:|test-only-secret/)
     expect(JSON.stringify(received)).toContain('keychain:cordisx/channel/work/')
     expect([...values.values()]).toEqual(['test-only-secret'])
+    await handler.dispose?.()
+  })
+
+  it('cleans a failed legacy target and retains deletion authority until cleanup succeeds', async () => {
+    let saved = false, failRemoval = true
+    const store = new LauncherSecretStore({
+      platform: 'darwin',
+      backend: {
+        read: async () => '',
+        status: async () => saved ? 'set' : 'unset',
+        upsert: async () => {
+          saved = true
+        },
+        remove: async () => {
+          if (failRemoval) throw new Error('fixture failure')
+          saved = false
+        },
+      },
+    })
+    const handler = createChannelCredentialBridgeHandler({
+      token: 'c'.repeat(64),
+      profileId: 'work',
+      store,
+      service: {
+        mutate: async () => {
+          throw new Error('target must be rejected first')
+        },
+      } as never,
+    })
+    const mutation = {
+      contract: 'cordisx.service-config-mutation/v1',
+      schemaVersion: 1,
+      identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
+      scope: { profileId: 'work', generation: 'test' },
+      expectedRevision: 0,
+      configuration: { connections: [] },
+    }
+    await expect(
+      handler.handle({
+        version: 1,
+        token: handler.token,
+        requestId: 'capture-1',
+        account: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'test' },
+        secret: 'fixture-only',
+        mutation,
+      }, 'document'),
+    )
+      .rejects.toThrow('CREDENTIAL_CLEANUP_UNAVAILABLE')
+    expect(saved).toBe(true)
+    failRemoval = false
+    await handler.retireDocument?.('document')
+    expect(saved).toBe(false)
+    await handler.dispose?.()
   })
 })

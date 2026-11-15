@@ -1,13 +1,12 @@
 import type { HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
+import type { ChannelCredentialDraftResult } from '../launcher/channel-credential-drafts.js'
 
 const BINDING = '__cordisxChannelCredentialRequestV1'
 const RECEIVER = '__cordisxChannelCredentialReceiveV1'
 type Binding = (payload: string) => void
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cordisxChannelCredentialRequestV1: Binding | undefined
-  // eslint-disable-next-line no-var
   var __cordisxChannelCredentialReceiveV1: ((payload: string) => void) | undefined
 }
 
@@ -16,7 +15,7 @@ export class BrowserChannelCredentialBridge {
   private readonly pending = new Map<
     string,
     {
-      resolve: (value: HostServiceConfigMutationResult) => void
+      resolve: (value: unknown) => void
       reject: (error: Error) => void
       timer: ReturnType<typeof setTimeout>
     }
@@ -44,10 +43,37 @@ export class BrowserChannelCredentialBridge {
         this.pending.delete(requestId)
         reject(new Error('channel-credential-timeout'))
       }, 5_000)
-      this.pending.set(requestId, { resolve, reject, timer })
+      this.pending.set(requestId, {
+        resolve: value => resolve(value as HostServiceConfigMutationResult),
+        reject,
+        timer,
+      })
       binding(JSON.stringify({ version: 1, token: this.token, requestId, ...input }))
     })
   }
+  async request(input: Record<string, unknown>): Promise<ChannelCredentialDraftResult & { projection?: unknown }> {
+    const binding = globalThis[BINDING]
+    if (typeof binding !== 'function') throw new Error('channel-credential-unavailable')
+    const requestId = crypto.randomUUID()
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(requestId)
+        reject(new Error('channel-credential-timeout'))
+      }, 30_000)
+      this.pending.set(requestId, { resolve: value => resolve(value as ChannelCredentialDraftResult), reject, timer })
+      binding(JSON.stringify({ ...input, version: 2, token: this.token, requestId }))
+    })
+  }
+
+  dispose(): void {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error('channel-credential-disposed'))
+    }
+    this.pending.clear()
+    if (globalThis[RECEIVER] === this.receive) globalThis[RECEIVER] = undefined
+  }
+
   private readonly receive = (payload: string): void => {
     let response: { requestId?: unknown; ok?: unknown; value?: unknown; code?: unknown }
     try {

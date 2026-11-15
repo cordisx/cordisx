@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { createInterface } from 'node:readline'
+import { channelAgentInstructions, channelAgentOperation, channelAgentTools } from './channel-agent-tools.mjs'
 
 const bindingPath = process.argv[2]
 const tools = [{
@@ -174,7 +175,7 @@ const tools = [{
       },
     },
   },
-}]
+}, ...channelAgentTools]
 const sessionTools = new Set([
   'list_sessions',
   'read_session',
@@ -249,13 +250,15 @@ reader.on('line', line => {
           protocolVersion: request.params?.protocolVersion ?? '2024-11-05',
           capabilities: { tools: {} },
           serverInfo: { name: 'cordisx-models', version: '1.0.0' },
+          instructions: channelAgentInstructions,
         }
       } else if (request.method === 'tools/list') result = { tools }
       else if (request.method === 'ping') result = {}
       else if (request.method === 'resources/list') result = { resources: [] }
       else if (request.method === 'resources/templates/list') result = { resourceTemplates: [] }
       else if (request.method === 'tools/call') {
-        const operation = sessionTools.has(request.params?.name)
+        const channelOperation = channelAgentOperation(request.params?.name)
+        const operation = channelOperation ?? (sessionTools.has(request.params?.name)
           ? `session:${request.params.name}`
           : request.params?.name === 'integration_status'
           ? 'integration_status'
@@ -265,7 +268,7 @@ reader.on('line', line => {
           ? 'select'
           : request.params?.name === 'create_thread_with_provider'
           ? 'create'
-          : undefined
+          : undefined)
         if (operation === undefined) throw new Error('Unknown native model tool')
         const value = await invoke(operation, request.params.arguments ?? {}, {
           ...request.params._meta,

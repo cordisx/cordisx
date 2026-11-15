@@ -7,7 +7,6 @@ const source = fileURLToPath(new URL('../assets', import.meta.url))
 const destination = fileURLToPath(new URL('../dist/assets', import.meta.url))
 const channelRuntimeSource = fileURLToPath(new URL('../../channel-runtime/dist', import.meta.url))
 const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime', import.meta.url))
-const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
 const cordisxSkillsSource = fileURLToPath(new URL('../../../skills', import.meta.url))
 const cordisxSkillsDestination = fileURLToPath(new URL('../dist/skills', import.meta.url))
 const bundledSkillNames = ['cordisx', 'cordisx-docs', 'cordisx-qa', 'cordisx-plugin-development', 'cordisx-feedback']
@@ -21,6 +20,7 @@ const preservedRendererStyles = [
   'renderer/model-providers.css',
   'renderer/manager/manager-navigation.css',
   'renderer/manager/manager-content.css',
+  'renderer/manager/manager-record-summary.css',
   'renderer/manager/manager-catalog.css',
   'renderer/manager/manager-details.css',
   'renderer/manager/manager-marketplace.css',
@@ -47,7 +47,7 @@ for (const relative of preservedRendererStyles) {
   await copyFile(styleSource, styleDestination)
 }
 // Channel runtime is private workspace infrastructure. Package the compiled
-// launcher-only runtime beside the CLI and rewrite its single Node entry import
+// launcher-only runtime beside the CLI and rewrite its compiled consumers
 // so an installed `cordisx` tarball never relies on a workspace symlink.
 await mkdir(channelRuntimeDestination, { recursive: true })
 await cp(channelRuntimeSource, channelRuntimeDestination, { recursive: true, force: true })
@@ -62,12 +62,6 @@ for (const skillName of bundledSkillNames) {
     { recursive: true, force: false, errorOnExist: true },
   )
 }
-const channelService = await readFile(channelServiceDestination, 'utf8')
-await writeFile(
-  channelServiceDestination,
-  channelService.replace("from '@cordisx/channel-runtime'", "from '../../channel-runtime/index.js'"),
-  'utf8',
-)
 
 // npm bin linking can chmod an old output; fresh tsc output must pack identically.
 await chmod(fileURLToPath(new URL('../dist/src/cli.js', import.meta.url)), 0o755)
@@ -85,22 +79,28 @@ await copyFile(new URL('../src/renderer/dialogs/styles.css', import.meta.url), d
 const adapterDestination = fileURLToPath(new URL('../dist/codex-adapter', import.meta.url))
 await rm(adapterDestination, { recursive: true, force: true })
 await cp(new URL('../../codex-adapter/dist', import.meta.url), adapterDestination, { recursive: true })
-async function bindBuiltinAdapter(directory) {
+async function bindBuiltinModules(directory) {
   const { readdir } = await import('node:fs/promises')
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name)
-    if (entry.isDirectory()) await bindBuiltinAdapter(file)
+    if (entry.isDirectory()) await bindBuiltinModules(file)
     else if (/\.(?:js|ts)$/u.test(entry.name)) {
       const source = await readFile(file, 'utf8')
       const target = path.relative(path.dirname(file), adapterDestination).split(path.sep).join('/')
+      const channelTarget = path.relative(path.dirname(file), channelRuntimeDestination).split(path.sep).join('/')
       await writeFile(
         file,
         source.replace(
-          /(['"])@cordisx\/codex-adapter(?:\/([^'"]+))?\1/gu,
-          (_all, quote) => `${quote}${target.startsWith('.') ? target : `./${target}`}/adapter.mjs${quote}`,
-        ),
+          /(['"])@cordisx\/channel-runtime\1/gu,
+          (_all, quote) =>
+            `${quote}${channelTarget.startsWith('.') ? channelTarget : `./${channelTarget}`}/index.js${quote}`,
+        )
+          .replace(
+            /(['"])@cordisx\/codex-adapter(?:\/([^'"]+))?\1/gu,
+            (_all, quote) => `${quote}${target.startsWith('.') ? target : `./${target}`}/adapter.mjs${quote}`,
+          ),
       )
     }
   }
 }
-await bindBuiltinAdapter(fileURLToPath(new URL('../dist/src', import.meta.url)))
+await bindBuiltinModules(fileURLToPath(new URL('../dist/src', import.meta.url)))

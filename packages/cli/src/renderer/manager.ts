@@ -91,6 +91,7 @@ export interface ManagerPluginSnapshot {
   readonly config: unknown
   readonly configuration: ManagerPluginConfigSnapshot
   readonly readme?: string
+  readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   readonly status: ManagerPluginStatus
   readonly error?: string
   readonly blockedReason?: string
@@ -121,7 +122,7 @@ export interface ManagerPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
-  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development' | 'service-owner'
   readonly authorizationReason?: string
   readonly certification?: CordisXCertifiedPermissionProjectionV1
   readonly availability: ManagerCapabilityAvailabilitySnapshot
@@ -160,7 +161,8 @@ export interface ManagerSnapshot {
   /** Read-only declarations whose concrete scope is verified from each real request. */
   readonly runtimeExactPermissions?: readonly {
     readonly identity: CordisXPluginIdentity
-    readonly capability: CordisXPlatformCapability
+    readonly capability: CordisXPermissionCapabilityV4
+    readonly authorizationOrigin?: 'service-owner'
   }[]
   /** Host-owned providers; permission policy remains independently editable. */
   readonly capabilityProviders?: readonly ManagerCapabilityProviderSnapshot[]
@@ -218,6 +220,8 @@ export interface ManagerSettingsNavigationItemSnapshot {
 }
 
 export interface ManagerModel {
+  /** Host-private shared execution preferences, independent of installed Channel transports. */
+  chatExecution?: import('./channel-execution-workflow.js').ChannelExecutionWorkflow
   readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1

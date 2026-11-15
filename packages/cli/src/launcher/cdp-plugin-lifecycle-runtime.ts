@@ -550,6 +550,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           }),
           identitySource: mutation.package.identitySource,
           ...(mutation.package.readme === undefined ? {} : { readme: mutation.package.readme }),
+          ...(mutation.package.readmes === undefined ? {} : { readmes: mutation.package.readmes }),
+          ...(mutation.package.documents === undefined ? {} : { documents: mutation.package.documents }),
         },
       }),
       ...(this.ownerDocumentAuthority === undefined ? {} : {

@@ -1,3 +1,10 @@
+import { readPluginDocuments } from './plugin-documents.js'
+import {
+  parsePluginDocumentPayload,
+  pluginDocumentPayload,
+  readStoredPluginDocumentText,
+} from './plugin-package-documents.js'
+import { artifactDigest, readStoredBrowserArtifact } from './plugin-package-artifact.js'
 import { normalizeModernPluginManifest } from './modern-plugin-manifest.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
@@ -53,8 +60,6 @@ import type { PluginManifestManagedBackendServiceV14 } from '@cordisx/protocol/p
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
-import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-server.js'
-import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 import { normalizeLatestRuntimeManifest, runtimeManifestHasServices } from './latest-runtime-manifest.js'
 import {
   readOptionalFile,
@@ -372,50 +377,6 @@ async function buildServiceArtifact(
   return Object.freeze({ declaration, moduleSource: output.text })
 }
 
-function artifactDigest(
-  manifestText: string,
-  moduleSource: string,
-  artifactSource: string,
-  serviceModules: readonly StagedPluginServiceModule[] = [],
-  managedServiceResources: readonly ManagedServicePackageResource[] = [],
-  entityTemplatesText?: string,
-  browserArtifact?: BuiltPluginGenerationArtifact,
-): `sha256:${string}` {
-  const digest = createHash('sha256')
-    .update(manifestText)
-    .update('\0')
-    .update(moduleSource)
-    .update('\0')
-    .update(artifactSource)
-  for (
-    const service of [...serviceModules].sort((left, right) => left.declaration.id.localeCompare(right.declaration.id))
-  ) {
-    digest.update('\0service\0')
-      .update(JSON.stringify(service.declaration))
-      .update('\0')
-      .update(service.moduleSource)
-  }
-  for (const resource of [...managedServiceResources].sort((left, right) => left.path.localeCompare(right.path))) {
-    digest.update('\0managed-service-resource\0')
-      .update(resource.path)
-      .update('\0')
-      .update(resource.mode)
-      .update('\0')
-      .update(resource.digest)
-      .update('\0')
-      .update(resource.contents)
-  }
-  if (entityTemplatesText !== undefined) digest.update('\0entity-templates\0').update(entityTemplatesText)
-  if (browserArtifact !== undefined) {
-    digest.update('\0browser-artifact\0').update(`${JSON.stringify(browserArtifact.manifest, null, 2)}\n`)
-    for (const [file, contents] of [...browserArtifact.files].sort(([left], [right]) => left.localeCompare(right))) {
-      digest.update('\0browser-file\0').update(file).update('\0').update(contents)
-    }
-  }
-  const value = digest.digest('hex')
-  return `sha256:${value}`
-}
-
 function packageDirectory(homeDir: string, digest: string): string {
   const match = DIGEST.exec(digest)
   if (match?.[1] === undefined) throw new Error('plugin package digest is invalid')
@@ -465,6 +426,7 @@ async function publishPackage(
   managedServiceResources: readonly ManagedServicePackageResource[] = [],
   entityTemplatesText?: string,
   browserArtifact?: BuiltPluginGenerationArtifact,
+  documentsText?: string,
 ): Promise<void> {
   const parent = path.join(homeDir, 'packages', 'sha256')
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -483,6 +445,7 @@ async function publishPackage(
       storedManagedResources,
       storedEntityTemplates,
       storedBrowserArtifact,
+      storedDocumentsText,
     ] = await Promise.all([
       readFile(path.join(destination, 'manifest.json'), 'utf8'),
       readFile(path.join(destination, 'module.js'), 'utf8'),
@@ -490,6 +453,7 @@ async function publishPackage(
       readStoredManagedServicePackageResources(destination, storedServices),
       readOptionalFile(path.join(destination, 'entity-templates.json')),
       readStoredBrowserArtifact(path.join(destination, 'browser')),
+      readStoredPluginDocumentText(destination),
     ])
     if (
       artifactDigest(
@@ -500,6 +464,7 @@ async function publishPackage(
         storedManagedResources,
         storedEntityTemplates,
         storedBrowserArtifact,
+        storedDocumentsText,
       ) !== digest
     ) {
       throw new Error('existing plugin package failed integrity readback')
@@ -547,6 +512,9 @@ async function publishPackage(
         ),
       ]),
       writeFileSynced(path.join(temporary, 'artifact.js'), artifactSource),
+      ...(documentsText === undefined
+        ? []
+        : [writeFileSynced(path.join(temporary, 'plugin-documents.json'), documentsText)]),
       ...(runtimeManifestText === undefined
         ? []
         : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
@@ -583,6 +551,7 @@ async function publishPackage(
         chmod(path.join(destination, 'manifest.json'), 0o444),
         chmod(path.join(destination, 'module.js'), 0o444),
         chmod(path.join(destination, 'artifact.js'), 0o444),
+        ...(documentsText === undefined ? [] : [chmod(path.join(destination, 'plugin-documents.json'), 0o444)]),
         ...(browserArtifact === undefined ? [] : [
           chmod(path.join(destination, 'browser', 'artifact.json'), 0o444),
           ...[...browserArtifact.files.keys()]
@@ -620,72 +589,6 @@ async function publishPackage(
   } finally {
     if (!published) await rm(temporary, { recursive: true, force: true })
   }
-}
-
-async function readStoredBrowserArtifact(directory: string): Promise<BuiltPluginGenerationArtifact | undefined> {
-  const metadata = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined
-    throw error
-  })
-  if (metadata === undefined) return undefined
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error('stored browser artifact root must be a real directory')
-  }
-  const root = await realpath(directory)
-  const manifest = await readPluginGenerationArtifactV1(root)
-  if (manifest === undefined) return undefined
-  const actualFiles = new Set<string>()
-  const actualDirectories = new Set<string>()
-  const visit = async (relativeDirectory: string): Promise<void> => {
-    const entries = await readdir(path.join(root, relativeDirectory), { withFileTypes: true })
-    for (const entry of entries) {
-      const relative = path.posix.join(relativeDirectory.replaceAll(path.sep, '/'), entry.name)
-      if (entry.isSymbolicLink()) throw new Error('stored browser artifact contains a symbolic link')
-      if (entry.isDirectory()) {
-        actualDirectories.add(relative)
-        await visit(relative)
-      } else if (entry.isFile()) actualFiles.add(`./${relative}`)
-      else throw new Error('stored browser artifact contains a non-regular entry')
-    }
-  }
-  await visit('')
-  const expectedFiles = new Set(['./artifact.json', ...manifest.files.map(file => file.path)])
-  const expectedDirectories = new Set<string>()
-  for (const file of manifest.files) {
-    let parent = path.posix.dirname(file.path.slice(2))
-    while (parent !== '.') {
-      expectedDirectories.add(parent)
-      parent = path.posix.dirname(parent)
-    }
-  }
-  if (
-    actualFiles.size !== expectedFiles.size || [...actualFiles].some(file => !expectedFiles.has(file))
-    || actualDirectories.size !== expectedDirectories.size
-    || [...actualDirectories].some(item => !expectedDirectories.has(item))
-  ) {
-    throw new Error('stored browser artifact contains undeclared files or directories')
-  }
-  const files = new Map<`./${string}`, Uint8Array>()
-  for (const descriptor of manifest.files) {
-    const file = path.resolve(root, descriptor.path.slice(2))
-    if (!within(root, file)) throw new Error('stored browser artifact path escapes its immutable directory')
-    const metadata = await lstat(file)
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error('stored browser artifact contains a non-regular file')
-    }
-    const contents = await readFile(file)
-    if (
-      contents.byteLength !== descriptor.byteLength
-      || `sha256:${createHash('sha256').update(contents).digest('hex')}` !== descriptor.digest
-    ) {
-      throw new Error(`stored browser artifact file failed integrity readback: ${descriptor.path}`)
-    }
-    files.set(descriptor.path, contents)
-  }
-  await assertPluginGenerationArtifactFileReferences(manifest, files)
-  const moduleBytes = files.get(manifest.entry)
-  if (moduleBytes === undefined) throw new Error('stored browser artifact entry is missing')
-  return Object.freeze({ manifest, files, moduleSource: Buffer.from(moduleBytes).toString('utf8'), inputModules: [] })
 }
 
 /**
@@ -737,6 +640,9 @@ export async function stageResolvedPluginPackage(
     await readEntityTemplatePayload(root, declaration)
   )))
   const entityTemplatesText = entityTemplates.length === 0 ? undefined : `${JSON.stringify(entityTemplates)}\n`
+  const documentsText = pluginDocumentPayload(
+    (await readPluginDocuments(entry, resolved.packageManifest.pluginId, root)).documents,
+  )
   const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const storedRuntimeDigest = `sha256:${createHash('sha256').update(runtimeManifestText).digest('hex')}` as const
   const stored: StoredSeparatedPackageV3 | StoredSeparatedPackageV4 = options.artifactIntegrity === undefined
@@ -766,6 +672,7 @@ export async function stageResolvedPluginPackage(
     managedServiceResources,
     entityTemplatesText,
     built.browserArtifact,
+    documentsText,
   )
   await publishPackage(
     homeDir,
@@ -779,6 +686,7 @@ export async function stageResolvedPluginPackage(
     managedServiceResources,
     entityTemplatesText,
     built.browserArtifact,
+    documentsText,
   )
   return await loadStagedPluginPackage(homeDir, digest)
 }
@@ -807,6 +715,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
+  const documentsText = pluginDocumentPayload((await readPluginDocuments(entry, manifest.id, root)).documents)
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`
   const digest = artifactDigest(
     manifestText,
@@ -816,6 +725,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     [],
     undefined,
     built.browserArtifact,
+    documentsText,
   )
   await publishPackage(
     homeDir,
@@ -829,20 +739,9 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     [],
     undefined,
     built.browserArtifact,
+    documentsText,
   )
-  const hex = digest.slice('sha256:'.length)
-  return {
-    manifest,
-    digest,
-    moduleSource: built.moduleSource,
-    artifactSource: built.artifactSource,
-    browserArtifact: built.browserArtifact,
-    serviceModules: [],
-    managedServiceResources: [],
-    entityTemplates: [],
-    ...(readme === undefined ? {} : { readme }),
-    identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
-  }
+  return await loadStagedPluginPackage(homeDir, digest)
 }
 
 /** Read and integrity-check one immutable package without exposing its store path. */
@@ -860,6 +759,7 @@ export async function loadStagedPluginPackage(
     managedServiceResources,
     entityTemplatesText,
     browserArtifact,
+    documentsText,
   ] = await Promise.all([
     readFile(path.join(directory, 'manifest.json'), 'utf8'),
     readFile(path.join(directory, 'module.js'), 'utf8'),
@@ -871,6 +771,7 @@ export async function loadStagedPluginPackage(
     readStoredManagedServicePackageResources(directory, serviceModules),
     readOptionalFile(path.join(directory, 'entity-templates.json')),
     readStoredBrowserArtifact(path.join(directory, 'browser')),
+    readStoredPluginDocumentText(directory),
   ])
   if (
     artifactDigest(
@@ -881,6 +782,7 @@ export async function loadStagedPluginPackage(
       managedServiceResources,
       entityTemplatesText,
       browserArtifact,
+      documentsText,
     )
       !== digest
   ) {
@@ -962,6 +864,7 @@ export async function loadStagedPluginPackage(
     serviceModules,
     managedServiceResources,
     entityTemplates: immutableEntityTemplates(entityTemplates),
+    documents: parsePluginDocumentPayload(documentsText, manifest.id),
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
   }

@@ -1,3 +1,4 @@
+import type { ManagerContentRecordSummaryV6 } from '@cordisx/protocol/manager-content-navigation/v6'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -25,6 +26,7 @@ import type {
   CordisXManagerContentNavigationDeclarationV3,
   CordisXManagerContentNavigationDeclarationV4,
   CordisXManagerContentNavigationDeclarationV5,
+  CordisXManagerContentNavigationDeclarationV6,
   CordisXManagerContentRecordTitleV1,
   CordisXMessageDefinition,
   CordisXOutletName,
@@ -38,7 +40,6 @@ import type {
   CordisXRouteReference,
   CordisXRoutes,
   ManagerContentNavigationTabV2,
-  ManagerContentRecordSummaryProjectionV2,
 } from '../contracts.js'
 import type { ManagerContentConfigBindingHandle } from './manager-content-config.js'
 import { mountManagerContentConfigForm } from './manager-content-config-form.js'
@@ -178,12 +179,14 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
         && (candidate.declaration as
             | CordisXManagerContentNavigationDeclarationV3
             | CordisXManagerContentNavigationDeclarationV4
-            | CordisXManagerContentNavigationDeclarationV5).recordSummary !== undefined
+            | CordisXManagerContentNavigationDeclarationV5
+            | CordisXManagerContentNavigationDeclarationV6).recordSummary !== undefined
         ? [
           (candidate.declaration as
             | CordisXManagerContentNavigationDeclarationV3
             | CordisXManagerContentNavigationDeclarationV4
-            | CordisXManagerContentNavigationDeclarationV5).recordSummary!,
+            | CordisXManagerContentNavigationDeclarationV5
+            | CordisXManagerContentNavigationDeclarationV6).recordSummary!,
         ]
         : []
     ))
@@ -192,7 +195,7 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
     }
     const summarySource = summarySources[0] === undefined
       ? undefined
-      : immutableSnapshot(summarySources[0]) as ManagerContentRecordSummaryProjectionV2
+      : immutableSnapshot(summarySources[0]) as ManagerContentRecordSummaryV6
     const recordSummary = summarySource === undefined ? undefined : Object.freeze({
       leadingVisual: summarySource.leadingVisual,
       title: text(summarySource.title, `manager-content:${owner}:${declaration.declaration.id}:summary:title`),
@@ -202,6 +205,22 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
           `manager-content:${owner}:${declaration.declaration.id}:summary:description`,
         ),
       }),
+      ...(summarySource.statuses === undefined
+        ? {}
+        : {
+          statuses: summarySource.statuses.map(item => ({
+            ...item,
+            label: text(item.label, `manager-content:${owner}:status:${item.id}`),
+          })),
+        }),
+      ...(summarySource.metrics === undefined
+        ? {}
+        : {
+          metrics: summarySource.metrics.map(item => ({
+            ...item,
+            label: text(item.label, `manager-content:${owner}:metric:${item.id}`),
+          })),
+        }),
       source: summarySource,
     })
     const tabs = (declaration.declaration.tabs ?? []).flatMap(tab => {

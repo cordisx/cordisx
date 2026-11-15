@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
 import {
   accountKey,
+  canonical,
+  channelInboxRecordId,
   ChannelIntegrityError,
   digest,
   nonEmptyText,
@@ -309,9 +312,39 @@ export class ChannelRuntime {
     )
   }
 
+  /** Launcher lifecycle control for one account; queues and every other connection remain intact. */
+  async deactivate(ref: ChannelTenantRef): Promise<void> {
+    this.#assertRuntimeActive()
+    const key = accountKey(sanitizedTenant(ref))
+    const current = this.#connections.get(key)
+    if (current !== undefined) {
+      await current.connection.stop('replaced')
+      this.#connections.delete(key)
+    }
+    await this.#store.transaction(state => {
+      const adapter = state.adapters[key]
+      if (adapter !== undefined) state.adapters[key] = { ...adapter, connectionState: 'disabled' }
+    })
+  }
+
+  async drainOutbound(ref: ChannelTenantRef, limit = 100): Promise<number> {
+    const generation = this.#store.snapshot().adapters[accountKey(ref)]?.generation
+    if (generation === undefined) throw new ChannelGenerationFencedError()
+    return this.#drainOutboundAt(ref, generation, limit)
+  }
+
   async notify(
     notification: ChannelNotification,
     caller: ChannelPluginIdentity,
+  ): Promise<ChannelDeliveryHandle> {
+    return this.notifyOnce(notification, caller, `delivery:${randomUUID()}`)
+  }
+
+  /** Launcher-only operation identity. Public plugin send retains its existing API. */
+  async notifyOnce(
+    notification: ChannelNotification,
+    caller: ChannelPluginIdentity,
+    deliveryId: string,
   ): Promise<ChannelDeliveryHandle> {
     this.#assertRuntimeActive()
     const target = sanitizedThread(notification.target)
@@ -324,7 +357,9 @@ export class ChannelRuntime {
     const key = accountKey(target)
     const adapter = this.#store.snapshot().adapters[key]
     if (adapter === undefined) throw new ChannelGenerationFencedError()
-    const deliveryId = `delivery:${randomUUID()}`
+    if (!/^delivery:[A-Za-z0-9-]{1,128}$/u.test(deliveryId)) {
+      throw new ChannelIntegrityError('Invalid delivery identity')
+    }
     await this.#requirePermission({
       caller,
       capability: 'channel.messages.send',
@@ -335,6 +370,14 @@ export class ChannelRuntime {
     const now = this.#now()
     await this.#store.transaction(state => {
       if (state.adapters[key]?.generation !== adapter.generation) throw new ChannelGenerationFencedError()
+      const prior = state.outbox[deliveryId]
+      if (prior) {
+        if (
+          canonical(prior.caller) !== canonical(caller) || canonical(prior.target) !== canonical(target)
+          || prior.kind !== notification.kind || prior.text !== notification.text
+        ) throw new ChannelIntegrityError('Operation conflict')
+        return
+      }
       state.outbox[deliveryId] = {
         deliveryId,
         accountKey: key,
@@ -384,6 +427,22 @@ export class ChannelRuntime {
     return visible
   }
 
+  deliverySnapshot(id: string, caller: ChannelPluginIdentity) {
+    return deliverySnapshot(this.#store.snapshot(), id, caller)
+  }
+  latestInputCursor(): string {
+    return latestInputCursor(this.#store.snapshot())
+  }
+  async inputsSince(
+    caller: ChannelPluginIdentity,
+    filters: readonly ChannelSubscriptionFilter[],
+    cursor: string,
+    limit = 50,
+  ) {
+    this.#assertRuntimeActive()
+    return inputsSince(this.#store.snapshot(), this.#permissions, caller, filters, cursor, limit)
+  }
+
   async subscribe(
     caller: ChannelPluginIdentity,
     filter: ChannelSubscriptionFilter,
@@ -408,7 +467,11 @@ export class ChannelRuntime {
     await this.#requirePermission({
       caller,
       capability: 'channel.events.subscribe',
-      source: account,
+      source: {
+        ...account,
+        ...(safeFilter.conversationId === undefined ? {} : { conversationId: safeFilter.conversationId }),
+        ...(safeFilter.userId === undefined ? {} : { actor: { ...account, userId: safeFilter.userId } }),
+      },
       generation: adapter.generation,
       operationId: subscriptionId,
     })
@@ -491,7 +554,7 @@ export class ChannelRuntime {
     validateInput(ref, envelope)
     const event = envelope.input.source.event
     const eventReplayKey = replayKey(event)
-    const recordId = `inbox:${digest(eventReplayKey)}`
+    const recordId = channelInboxRecordId(event)
     const operationId = `channel-event:${digest(eventReplayKey)}`
     const key = accountKey(ref)
     await this.#requirePermission({

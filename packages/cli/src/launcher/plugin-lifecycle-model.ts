@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import {
@@ -128,6 +129,7 @@ export interface PluginRuntimeMutation {
     readonly identitySource: string
     readonly readme?: string
     readonly readmes?: Readonly<Record<string, string>>
+    readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
     readonly manifest?:
       | CordisXPluginManifestV7
       | CordisXPluginManifestV8
@@ -136,6 +138,7 @@ export interface PluginRuntimeMutation {
       | CordisXPluginManifestV11
       | CordisXPluginManifestV12
       | CordisXPluginManifestV13
+      | PluginRuntimeManifestV16
       | PluginRuntimeManifestV14
       | PluginRuntimeManifestV15
     readonly development: CordisXLocalDevelopmentSnapshot

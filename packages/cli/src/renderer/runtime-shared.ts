@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV16 } from '../channel-exact-request-permissions.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
@@ -234,6 +235,7 @@ import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
 import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
+import type { RuntimeServiceCapabilityOwner } from '../service-capability-ownership.js'
 
 export const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
 
@@ -246,6 +248,7 @@ export function cloneRendererValue<Value>(value: Value): Value {
 }
 
 export interface CordisXRuntimeMetadata {
+  readonly serviceCapabilityOwners?: readonly RuntimeServiceCapabilityOwner[]
   readonly version: string
   readonly workspaceCwd: string
   readonly providers: readonly { readonly id: string; readonly displayName: string }[]
@@ -360,6 +363,7 @@ export interface PluginController {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | CordisXPluginManifestV16
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -485,6 +489,8 @@ export interface RendererPluginMutation {
     readonly artifactIntegrity?: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    readonly readmes?: Readonly<Record<string, string>>
+    readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   }
   readonly developmentPackage?: {
     readonly id: string
@@ -492,6 +498,8 @@ export interface RendererPluginMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    readonly readmes?: Readonly<Record<string, string>>
+    readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
     /** Launcher-authoritative manifest captured with this exact local build. */
     readonly manifest?: CordisXBrowserPlugin['manifest']
     readonly development: CordisXLocalDevelopmentSnapshot
@@ -696,7 +704,8 @@ export function manifestUsesHostDom(
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
-    | CordisXPluginManifestV13,
+    | CordisXPluginManifestV13
+    | CordisXPluginManifestV16,
 ): manifest is
   | CordisXPluginManifestV5
   | CordisXPluginManifestV6
@@ -706,12 +715,13 @@ export function manifestUsesHostDom(
   | CordisXPluginManifestV11
   | CordisXPluginManifestV12
   | CordisXPluginManifestV13
+  | CordisXPluginManifestV16
 {
   return (
     manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8
     || manifest.schemaVersion === 9
     || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
-      || manifest.schemaVersion === 13)
+      || manifest.schemaVersion === 13 || manifest.schemaVersion === 16)
   )
     && manifest.capabilities.some(capability => (
       capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
@@ -730,7 +740,8 @@ export function manifestUsesTransientCanvas(
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
-    | CordisXPluginManifestV13,
+    | CordisXPluginManifestV13
+    | CordisXPluginManifestV16,
 ): manifest is CordisXPluginManifestV7 {
   return manifest.schemaVersion === 7
     && manifest.execution.realm === 'isolated-worker'

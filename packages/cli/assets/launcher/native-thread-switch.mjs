@@ -8,6 +8,26 @@ const acknowledged = (result, threadId, providerId, model) =>
   result?.thread?.id === threadId
   && result.thread.status?.type === 'idle' && result.modelProvider === providerId && result.model === model
 
+export function acknowledgedSwitchResume(message, expected) {
+  return expected && message.error === undefined
+    && acknowledged(message.result, expected.threadId, expected.providerId, expected.model)
+}
+
+export function reconcileNativeSwitch(message, expected, state, hostAdmitted = false) {
+  if (
+    acknowledgedSwitchResume(message, expected) && state.uncertainSwitches.get(expected.threadId) === expected
+    && (expected.providerId === 'openai' || hostAdmitted) && !state.lifecycleUncertain
+    && ![...state.lifecycleCalls.values()].includes(expected.threadId)
+  ) state.uncertainSwitches.delete(expected.threadId)
+}
+
+export function preparedSwitchResumeSucceeded(message, prepared, reconciliation, uncertainSwitches) {
+  return message.error === undefined && message.result?.thread?.id === prepared.threadId
+    && (reconciliation === undefined
+      || (acknowledgedSwitchResume(message, reconciliation)
+        && uncertainSwitches.get(reconciliation.threadId) === reconciliation))
+}
+
 /** A rejected provider change restores only the exact previous native session, never a Send. */
 export async function switchNativeThread(message, { nativeCall, controlCall, current }) {
   const threadId = message.threadId

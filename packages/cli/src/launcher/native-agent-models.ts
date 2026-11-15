@@ -43,6 +43,8 @@ export interface NativeAgentModelsAuthority {
   /** The read-only integration report. Reads files and probes; never launches or writes. */
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
+  /** Channel operations use this launch's configured connection and conversation consumer. */
+  channel?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -52,6 +54,11 @@ const text = (value: unknown, max = 512): value is string =>
 /** Uses the UI's admitted catalog and credential leases; tool callers never supply a connection or secret. */
 export function createNativeAgentModelsHandler(authority: NativeAgentModelsAuthority) {
   return async (operation: unknown, input: unknown, metadata?: unknown): Promise<unknown> => {
+    if (typeof operation === 'string' && operation.startsWith('channel:')) {
+      return authority.channel === undefined
+        ? { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
+        : await authority.channel(operation.slice('channel:'.length), input, metadata)
+    }
     const session = sessionOperation(operation)
     if (session !== undefined) {
       const args = object(input) ?? {}
