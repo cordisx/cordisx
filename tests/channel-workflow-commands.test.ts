@@ -76,6 +76,42 @@ describe('progressive Channel command experience', () => {
     )
     expect(removed.rules[0]?.commands).toEqual(['approve'])
   })
+  it('creates the actual native section and moves only the newly created chat with the complete native request', async () => {
+    const thread: { id: string; name: string; section: { id: string } | null } = {
+      id: 'chat',
+      name: '飞书 · 群聊',
+      section: null,
+    }
+    const nativeRequest = vi.fn(async (method: string, params: Readonly<Record<string, unknown>>) => {
+      if (method === 'thread/read') return { thread: { ...thread } }
+      if (method === 'threadSection/list') return { data: [], nextCursor: null }
+      if (method === 'threadSection/create') return { section: { id: 'section', name: '外部连接' } }
+      if (method === 'thread/section/move') {
+        expect(params).toEqual({ threadId: 'chat', sectionId: 'section', beforeThreadId: null })
+        thread.section = { id: 'section' }
+        return {}
+      }
+      throw Error('unexpected method')
+    })
+    const organization = new ChannelChatOrganization({ nativeRequest })
+    await organization.created('chat', thread.name, '外部连接')
+    expect(thread.section).toEqual({ id: 'section' })
+    expect(nativeRequest.mock.calls.filter(([method]) => method === 'thread/section/move')).toHaveLength(1)
+  })
+  it('rechecks a user move after section lookup and before submitting a native move', async () => {
+    const thread = { id: 'chat', name: '飞书 · 群聊', section: null as { id: string } | null }
+    const nativeRequest = vi.fn(async (method: string) => {
+      if (method === 'thread/read') return { thread: { ...thread } }
+      if (method === 'threadSection/list') {
+        thread.section = { id: 'users-section' }
+        return { data: [{ id: 'external', name: '外部连接' }], nextCursor: null }
+      }
+      throw Error('a user move must not be overwritten')
+    })
+    await new ChannelChatOrganization({ nativeRequest }).created('chat', thread.name, '外部连接')
+    expect(thread.section).toEqual({ id: 'users-section' })
+    expect(nativeRequest.mock.calls.some(([method]) => method === 'thread/section/move')).toBe(false)
+  })
   it('shows platform and real counterpart names; respects user rename and user group moves', async () => {
     expect(channelChatTitle(event, '联调群')).toBe('飞书 · 联调群')
     expect(channelChatTitle({ ...event, kind: 'direct' }, '小明')).toBe('飞书 · 小明')

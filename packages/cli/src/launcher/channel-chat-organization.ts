@@ -50,7 +50,7 @@ export class ChannelChatOrganization {
         object(await this.input.nativeRequest('thread/read', { threadId, includeTurns: false })).thread,
       )
       if (current.section || current.name && current.name !== title) return
-      await this.input.nativeRequest('thread/section/move', { threadId, sectionId: section.id })
+      await this.input.nativeRequest('thread/section/move', { threadId, sectionId: section.id, beforeThreadId: null })
       const final = object(
         object(await this.input.nativeRequest('thread/read', { threadId, includeTurns: false })).thread,
       )
