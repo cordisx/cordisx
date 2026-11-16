@@ -232,7 +232,10 @@ export class ChannelNativeApprovals {
     } catch {
       if (pending.state === 'submitted') pending.state = 'unknown'
       await this.update(pending)
-      return '提交结果未知，请等待原生审批状态确认；不会自动重复提交。'
+      const state = this.pending.get(String(pending.native.reference))?.state
+      if (state === 'resolved') return '原生已确认处理此审批；未重复执行。'
+      if (state === 'cancelled') return '原生请求已取消；未重复执行。'
+      return '审批结果尚未确认，请等待原生状态；不会自动重复提交。'
     }
     await this.update(pending)
     const state = this.pending.get(String(pending.native.reference))?.state
