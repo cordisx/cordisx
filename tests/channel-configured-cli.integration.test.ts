@@ -11,6 +11,7 @@ import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-nati
 import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channel-conversation-consumer.js'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runConfiguredChannelCommand } from '../packages/cli/src/cli/channel-configured-command.js'
+import { configuredChannelManagementToolHandler } from '../packages/cli/src/cli/channel-consumer-composition.js'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import {
   type ChannelConversationAccess,
@@ -129,8 +130,9 @@ describe('configured Channel CLI production endpoint', () => {
     })
     consumer.setNativeExtras(() => native)
     const tools = new ChannelConversationTools(() => access, consumer)
+    const management = configuredChannelManagementToolHandler(tools)
     const channel = vi.fn((operation: string, value: unknown, metadata?: unknown) =>
-      tools.call(operation, value, metadata)
+      management.channel!(operation, value, metadata)
     )
     const identity = await processStartIdentity(process.pid)
     const server = await startPluginManagementRpcServer({
