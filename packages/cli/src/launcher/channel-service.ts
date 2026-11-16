@@ -23,6 +23,7 @@ import {
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 import { type ChannelAccountIdentity, ChannelAccountIdentityStore } from './channel-account-identity.js'
 import { ChannelLiveDirectory } from './channel-live-directory.js'
+import { ChannelConversationDisplayStore } from './channel-conversation-display-store.js'
 import type { ChannelCommandAddressing } from './channel-command-users.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
@@ -242,7 +243,11 @@ export function createLocalChannelService(input: {
     })
     const host = new LauncherChannelServiceHost(runtime)
     const identities = new ChannelAccountIdentityStore()
-    const directory = new ChannelLiveDirectory()
+    const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
+    display.retainAccounts(configuration.connections.map(connection => connection.ref))
+    const senders = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'sender-display.json'))
+    senders.retainAccounts(configuration.connections.map(connection => connection.ref))
+    const directory = new ChannelLiveDirectory(display, senders)
     sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
     try {
       const serviceSource = path.join(artifactDirectory, 'service.mjs')
@@ -271,6 +276,8 @@ export function createLocalChannelService(input: {
         directory,
         dispose: async () => {
           directory.clear()
+          await display.close()
+          await senders.close()
           await identities.dispose()
           await host.dispose()
         },
@@ -295,6 +302,9 @@ export function createLocalChannelService(input: {
       }
       return current
     } catch (error) {
+      directory.clear()
+      await display.close()
+      await senders.close()
       await identities.dispose()
       await host.dispose().catch(() => undefined)
       throw error
@@ -349,6 +359,7 @@ export function createLocalChannelService(input: {
         }, simulatorConfiguration(value))
       }
       activeConfiguration = value
+      current.directory.retainAccounts(value.connections.map(connection => connection.ref))
       current.generation = `channel-local-${Date.now()}-${sequence}-${randomBytes(4).toString('hex')}`
     }
     try {
@@ -457,6 +468,7 @@ export function createLocalChannelService(input: {
             'channel.accounts.connect',
             'channel.bindings.read',
             'channel.bindings.write',
+            'channel.events.subscribe',
           ].map(name => Object.freeze({ name, scope: Object.freeze({}) }))) as HostServiceCapabilityOwner[
             'capabilities'
           ],
@@ -494,8 +506,12 @@ export function createLocalChannelService(input: {
               ?.connectionState ?? 'disabled',
           })),
         conversations: ref => current.directory.conversations(ref),
+        displayConversations: ref => current.directory.displayConversations(ref),
+        conversationDisplay: ref => current.directory.conversationDisplay(ref),
         users: event => current.directory.users(event),
+        messageContext: (message, addressing) => current.directory.messageContext(message, addressing),
         name: event => current.directory.name(event),
+        conversationIdentity: event => current.directory.conversationIdentity(event),
         replyCapabilities: event => current.directory.replyCapabilities(event),
         sendCard: async (event, card) => {
           const channel = current.directory.channel(event)

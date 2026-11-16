@@ -40,8 +40,7 @@ import { startNativeSubmissionControlServer } from './native-submission-control-
 import { startNativeAgentModelsServer } from './native-agent-models.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
-import { ChannelNativeSessions } from './channel-native-sessions.js'
-import { configuredChannelCliContext } from './channel-cli-context.js'
+import { createChannelNativeSession } from './channel-native-composition.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -346,6 +345,7 @@ export async function prepareNativeSubmissionBootstrap(
           } catch { /* Diagnostics must not change native submission startup. */ }
         }
         reportStage('native-submission-completion-start')
+        let channelSession: import('./channel-native-sessions.js').ChannelNativeSessions | undefined
         let discovered: Pick<NativeSubmissionInstallation, 'transforms' | 'accountCapability' | 'adapterLifecycle'>
         try {
           discovered = await preparation.ready
@@ -779,6 +779,8 @@ export async function prepareNativeSubmissionBootstrap(
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
             codex: {
               catalog,
+              observedDispatch: (operationId, threadId, turnId) =>
+                channelSession?.observedDispatch(operationId, threadId, turnId),
               nativeRequest: async (method, params) => {
                 let providerId = typeof params.modelProvider === 'string' ? params.modelProvider : undefined
                 if (method === 'turn/start' && typeof params.threadId === 'string') {
@@ -915,11 +917,13 @@ export async function prepareNativeSubmissionBootstrap(
           })
         }
         lifetime.signal.throwIfAborted()
-        agentModels.bind({
+        const modelHandler = agentModels.bind({
           ...(completeOptions.channel === undefined ? {} : { channel: completeOptions.channel }),
           ...(startup === undefined ? {} : { startup }),
           catalog,
           controller,
+          channelModelSelection: (input, metadata) =>
+            completeOptions.channel?.('task-model-select', input, metadata) ?? Promise.resolve(undefined),
           sessions: async (app, operation, input) => {
             if (agentBridge === undefined) throw new Error('The CordisX agent bridge is unavailable')
             return await agentBridge.call(app, operation, input)
@@ -942,31 +946,19 @@ export async function prepareNativeSubmissionBootstrap(
         })
         lifetime.signal.throwIfAborted()
         reportStage('native-submission-controller-bound')
+        channelSession = createChannelNativeSession({
+          options: completeOptions,
+          codexHome,
+          selection: threadId => cdp.sourceConfiguration(threadId),
+          bridge: () => agentBridge,
+          control,
+          execution: chatExecution,
+          models: modelHandler,
+        })
         return {
           ...(chatExecution === undefined ? {} : { chatExecution }),
           terminalProvider: request => terminalProviders!.request(request),
-          channelSession: new ChannelNativeSessions({
-            bridge: () => agentBridge,
-            nativeRequest: (method, params) => control.nativeRequest(method, params),
-            ...(chatExecution === undefined ? {} : { execution: chatExecution }),
-            ...(completeOptions.channelName === undefined ? {} : { name: completeOptions.channelName }),
-            ...(completeOptions.channelSectionName === undefined
-              ? {}
-              : { sectionName: completeOptions.channelSectionName }),
-            subscribeApprovals: listener => control.subscribeNativeApprovals(listener),
-            respondApproval: value => control.respondNativeApproval(value),
-            cwd: completeOptions.managedCatalog?.homeDir ?? path.dirname(codexHome),
-            ...(completeOptions.managedCatalog === undefined ? {} : {
-              cli: configuredChannelCliContext(
-                completeOptions.managedCatalog.homeDir,
-                completeOptions.managedCatalog.profileId,
-              ),
-            }),
-            ...(completeOptions.defaultProviderId === undefined
-              ? {}
-              : { providerId: completeOptions.defaultProviderId }),
-            ...(completeOptions.defaultModelId === undefined ? {} : { model: completeOptions.defaultModelId }),
-          }),
+          channelSession,
           async modelExport(request) {
             if (closePromise !== undefined || !management || !managed || !completeOptions.managedCatalog) {
               throw new Error('Model export catalog unavailable')

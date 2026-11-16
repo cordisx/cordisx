@@ -16,8 +16,22 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
 shape as native `channel_*` tools. `connections`, `conversations`, `bind`,
 `unbind`, `bind-status`, `reply-mode`, `history`, `listen`, `send`, `send-many`, `receipt`,
-`policy` and `policy-set` use the existing management endpoint and verify the
+`policy`, `policy-set`, `model-list`, `task-settings`, `task-settings-set`,
+`task-config`, `task-config-set` and `task-requests` use the existing management endpoint and verify the
 launcher identity. An inactive runtime reports unavailable.
+
+Incoming native turns include a transient `--context` for that exact dispatch.
+Keep it in the configured CLI calls; it binds the real sender and active chat,
+without granting new account, destination or configuration rights. Display
+context includes the platform, conversation name/ID, sender name/ID and mention
+identities. Names use a durable display cache, refreshed in the background;
+lookup failures preserve IDs and do not prevent delivery. Names are never
+authorization identities.
+
+The exact running-runtime CLI's ordinary reads and policy-allowed source replies
+receive one-time native approval automatically. This does not approve arbitrary
+shell commands, binding/policy mutations or sends to another conversation.
+Commands that cannot be verified retain normal approval behavior.
 
 `conversations` returns `complete: true` when the platform group directory was
 fully read. A missing permission, transport failure or pagination limit returns
@@ -199,6 +213,45 @@ The credential form and target validation stay Host-owned in both paths.
 Conversation policy is saved through the profile-bound Host form, separately
 from delegated transport and binding writes.
 
+## Provider, model and effort
+
+The unified Channel settings entry adds a **Task models** tab on Manager v12.
+It configures creation defaults, per-conversation/per-user defaults and model
+permissions. Each binding also exposes its Host-owned current model form.
+Older Hosts omit the unsupported tab. Contract and downgrade semantics are in
+[task settings v1 / Manager v12](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/task-settings-v1.md).
+
+Read `model-list` for the admitted catalog and `task-settings` for a chat's
+actual/pending selection. `task-settings-set` accepts
+`{sessionId, settings:{providerId?,model?,effort?}, expectedRevision?}`;
+`task-config-set` accepts `{config:{defaults,scopes,permissions},expectedRevision}`.
+Both use the selected runtime; they do not add providers or accept credentials.
+Native tools expose corresponding `channel_*` operations. Source-scoped writes
+use the actual received user's rights, even when requested through an Agent.
+
+```text
+/models
+/model <model> --provider <provider> --effort high
+/task-settings --provider <provider> --model <model> --target <chat-id>
+/task-requests
+/task-approve <request-id>
+/task-deny <request-id>
+```
+
+A single binding is selected automatically; multiple bindings offer a choice
+of one or all unless the command specifies `--target` or `--all`. A change is
+validated against the actual catalog and queued until the chat is idle. Saving,
+submission and observed application are distinct states; unknown effects are
+not replayed after restart.
+
+Model grants constrain platform/account/conversation, users/user groups, changed
+fields, Provider, qualified model and effort. Deny wins and applicable allow
+scopes intersect. Reads do not require a mutation grant. An eligible sender can
+change directly; otherwise a fixed, expiring request requires explicit approval
+by a currently eligible user from the source conversation. Agent tool calls
+cannot provide that user's approval. Rights and configuration are rechecked
+before the native change.
+
 ## 发送诊断、执行设置与文档
 
 CLI 返回固定 code 和 submitted 状态，区分未运行、身份无法核验、过期端点、Socket 权限、连接不可用和结果未知。已观察到同一 send 在受限环境失败、正常授权后成功；未采集具体 syscall，不能将全程等待归于权限。先核对运行中精确 CLI/profile，再查询同一 operationId 的 receipt。缺失 receipt 明确为 null/not-found；final 或 stop 不是外发证据。详见插件随包发送排障文档。
@@ -206,6 +259,8 @@ CLI 返回固定 code 和 submitted 状态，区分未运行、身份无法核�
 `execution-defaults`/`execution-defaults-set` 维护 CordisX profile 的新建默认值；`execution-settings`/`execution-settings-set` 维护 host+chat 覆盖，CAS `expectedRevision`，下一 turn 应用。`never` 不扩大执行权限。Native effective 状态与保存、提交分开。
 
 飞书审批使用自定义交互卡片，按钮与 `/approve`、`/deny` 都提交同一原生请求。按钮回调先由 SDK 确认接收，再通过有界生命周期队列执行审批和更新，避免同步回调结束时保留旧卡片。卡片更新必须取得平台业务成功；HTTP 成功本身不代表更新成功。更新失败时发送独立状态回执，诊断只记录阶段、数字 HTTP 状态与平台错误码。原生确认保持有效，重复点击不会重新执行；卡片通知不依赖 `autoReply`。
+
+卡片直接展示简短操作摘要、申请人、状态与按钮；原因、命令和参数放在默认折叠的“操作详情”中，并做有界脱敏。完成、取消、过期或结果未知后移除决定按钮。模型变更卡片只批准固定的一次变更，消息审批使用 `/task-approve`、`/task-deny`。
 
 `docs --input '{"pluginId":"channel"}'` 列出已激活插件文档；加 `id` 读取一个随包 Markdown。Host 只读 package 内常规文件，拒绝越界及 symlink。通用插件 README 页面提供独立文档选择，文档不自动获得 prompt 权限。
 

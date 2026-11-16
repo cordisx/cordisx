@@ -47,6 +47,7 @@ import { createBridgeValidationCache, memoryValidationCache } from './agent-brid
 import { type ClaudeHostSessionsInput, createClaudeHostSessions } from './claude-host-sessions.js'
 import type { NativeModelProviderCatalogEntry } from './native-model-provider-catalog.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
+import { nativeExecutionStart, nativeExecutionTurn, parseChatExecutionSettings } from '../chat-execution-settings.js'
 import { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-paths.js'
 import { createIntegrationStatus } from './integration-status.js'
 import {
@@ -91,6 +92,7 @@ export { agentBridgeBindingPath, codexLaunchRecordPath } from './agent-bridge-pa
 export interface AgentBridgeCodexAuthority {
   nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
+  observedDispatch?(operationId: string, threadId: string, turnId?: string): void
 }
 
 export interface AgentBridgeBinding {
@@ -357,6 +359,7 @@ export function createCodexBridgeHandler(
           if (context === undefined) throw new BridgeOperationError('context-invalid')
           const handed = context === 'summary' ? handedSummary(args) : undefined
           const providerId = text(args.providerId, 128)
+          const execution = parseChatExecutionSettings(args.execution)
           let model = text(args.model)
           if (providerId !== undefined) {
             const provider = (await codex.catalog()).find(entry => entry.providerId === providerId)
@@ -376,6 +379,7 @@ export function createCodexBridgeHandler(
           turn.uncertain()
           const started = object(
             await codex.nativeRequest('thread/start', {
+              ...nativeExecutionStart(execution),
               cwd,
               ...(providerId === undefined ? {} : { modelProvider: providerId }),
               ...(model === undefined ? {} : { model }),
@@ -386,6 +390,7 @@ export function createCodexBridgeHandler(
           // The thread exists from here on: a repeat sends to it instead of starting another.
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
+          codex.observedDispatch?.(String(args.operationId), threadId)
           const requestedTitle = text(args.title, 120)
           let title: string | undefined
           if (requestedTitle !== undefined) {
@@ -393,7 +398,14 @@ export function createCodexBridgeHandler(
               .then(() => requestedTitle)
               .catch(() => undefined)
           }
-          const turnId = await startTurn(codex, threadId, handoffPrompt(prompt, handed), signal)
+          const turnId = await startTurn(
+            codex,
+            threadId,
+            handoffPrompt(prompt, handed),
+            signal,
+            nativeExecutionTurn(execution, { model: started?.model ?? model, cwd }, {}),
+          )
+          codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           const base = {
             sessionId: threadId,
             link,
@@ -437,6 +449,7 @@ export function createCodexBridgeHandler(
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
           const turnId = await startTurn(codex, threadId, prompt, signal)
+          codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           if (turnId === undefined) {
             return turn.failed({
               status: 'failed',
@@ -524,10 +537,12 @@ async function startTurn(
   threadId: string,
   prompt: string,
   signal?: AbortSignal,
+  settings: Readonly<Record<string, unknown>> = {},
 ): Promise<string | undefined> {
   signal?.throwIfAborted()
   const started = object(
     await codex.nativeRequest('turn/start', {
+      ...settings,
       threadId,
       input: [{ type: 'text', text: prompt, text_elements: [] }],
     }),

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
+import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
   accountKey,
   canonical,
@@ -432,6 +433,19 @@ export class ChannelRuntime {
   }
   latestInputCursor(): string {
     return latestInputCursor(this.#store.snapshot())
+  }
+  /** Launcher-owned management projection; not exposed by the brokered plugin facade. */
+  conversationReadback(ref: import('./types.js').ChannelConversationRef) {
+    this.#assertRuntimeActive()
+    return conversationReadback(this.#store.snapshot(), ref)
+  }
+  accountConversationReadback(ref: ChannelTenantRef) {
+    this.#assertRuntimeActive()
+    return conversationReadback(this.#store.snapshot(), sanitizedTenant(ref))
+  }
+  localConversationRefs(ref: ChannelTenantRef) {
+    this.#assertRuntimeActive()
+    return localConversationRefs(this.#store.snapshot(), ref)
   }
   async inputsSince(
     caller: ChannelPluginIdentity,

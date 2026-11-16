@@ -116,7 +116,6 @@ describe('Host UI catalog and production React composition', () => {
         'Select',
         'Checkbox',
         'Switch',
-        'RadioGroup',
         'InputNumber',
         'Slider',
         'DatePicker',
@@ -128,6 +127,8 @@ describe('Host UI catalog and production React composition', () => {
     ) {
       expectRenderedImport('host-ui/HostForm.tsx', 'tdesign-react', control)
     }
+    expectRenderedImport('host-ui/HostForm.tsx', './HostRadioChoices.js', 'HostRadioChoices')
+    expectRenderedImport('host-ui/HostRadioChoices.tsx', 'tdesign-react', 'RadioGroup')
     expectRenderedImport('manager/pages/PermissionDetailPage.tsx', 'tdesign-react', 'Select')
     expectRenderedImport(
       'manager/pages/MarketplaceSourcesPage.tsx',

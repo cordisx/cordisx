@@ -68,6 +68,7 @@ const UI_EXPORTS = [
   'FieldList',
   'FilterToolbar',
   'Heading',
+  'IdentityVisual',
   'HorizontalSplitPane',
   'HoverCard',
   'Icon',

@@ -169,6 +169,8 @@ const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.
   'host:history': 'navigation.history',
   'host:info': 'status.info',
   'host:layers': 'content.layers',
+  'host:log-in': 'action.enable',
+  'host:log-out': 'action.disable',
   'host:key': 'content.key',
   'host:marketplace': 'navigation.marketplace',
   'host:more': 'action.more',

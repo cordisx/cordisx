@@ -169,6 +169,23 @@ describe('Agent model-provider tools', () => {
     expect(await f.handler('select', target)).toMatchObject({ status: 'rejected', reason: 'selection-busy' })
     expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
   })
+  it('uses Channel field authority before acquiring credentials and rechecks the fixed intent after preparing a lease', async () => {
+    const f = fixture(), channelModelSelection = vi.fn(async () => ({ status: 'ok', application: 'approval-required' }))
+    const guarded = createNativeAgentModelsHandler({ ...f.authority, channelModelSelection })
+    expect(await guarded('select', target, { 'openai/threadId': 'chat' })).toMatchObject({
+      application: 'approval-required',
+    })
+    expect(f.authority.reserve).not.toHaveBeenCalled()
+    expect(await f.handler('select', target, undefined, async () => false)).toMatchObject({
+      status: 'rejected',
+      reason: 'selection-changed',
+    })
+    expect(f.authority.controller.prepareThreadResume).toHaveBeenCalledOnce()
+    expect(f.authority.switchThread).not.toHaveBeenCalled()
+    expect(f.authority.controller.completeThreadResume).toHaveBeenCalledWith(
+      expect.objectContaining({ succeeded: false }),
+    )
+  })
   it('distinguishes a known pre-mutation busy rejection from an uncertain native result', async () => {
     const f = fixture()
     f.authority.switchThread.mockRejectedValue(new NativeAgentModelSelectionRejected('not idle'))
@@ -219,6 +236,11 @@ describe('Agent model-provider tools', () => {
         'send_message',
         'check_operation',
         'integration_status',
+        'channel_model_list',
+        'channel_task_settings',
+        'channel_task_settings_set',
+        'channel_task_config',
+        'channel_task_requests',
         'channel_connections',
         'channel_conversations',
         'channel_bind',

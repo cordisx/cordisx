@@ -2,10 +2,17 @@ import type { SchemaFormOptionsV1 } from '@cordisx/protocol/schema-form/v1'
 import type { DialogChromeV1, DialogHandleV1, DialogMountV1, DialogResultV1, DialogsV1 } from './dialog-contracts.js'
 import type * as React from 'react'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import type { ManagerCollectionIdentityVisualV2 } from '@cordisx/protocol/manager-collection/v2'
 import type { CordisXConfigFormIcon } from './contracts.js'
 
 export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'color'> {
   readonly variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
+  /** Compact Host toolbar action. Supply an icon, accessible name and tooltip. */
+  readonly presentation?: 'icon'
+}
+/** Host-rendered normalized identity artwork and platform badge, using the public v2 display contract. */
+export interface IdentityVisualProps extends Omit<ManagerCollectionIdentityVisualV2, 'kind'> {
+  readonly size?: 32 | 40
 }
 
 export interface StackProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -69,6 +76,8 @@ export interface DisclosureProps
 
 export type IconName =
   | CordisXConfigFormIcon
+  /** Host surface tokens use the same registered icon renderer as structured Manager chrome. */
+  | `host:${string}`
   | 'search'
   | 'create'
   | 'success'
@@ -282,6 +291,7 @@ export const HoverCard = HostComponent<HoverCardProps>('HoverCard')
 export const PanZoomCanvas = HostComponent<PanZoomCanvasProps>('PanZoomCanvas')
 export const FilterToolbar = HostComponent<FilterToolbarProps>('FilterToolbar')
 export const SearchField = HostComponent<SearchFieldProps>('SearchField')
+export const IdentityVisual = HostComponent<IdentityVisualProps>('IdentityVisual')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownEditor = HostComponent<MarkdownEditorProps>('MarkdownEditor')

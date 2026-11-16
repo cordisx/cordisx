@@ -64,7 +64,7 @@
 .cxh-search-field input::placeholder {
   color: var(--cx-muted, #9ca5b5);
 }
-.cxh-search-field input::-webkit-search-cancel-button {
+.cxh-search-field[data-clearable="true"] input::-webkit-search-cancel-button {
   display: none;
 }
 .cxh-search-field[data-disabled="true"] {

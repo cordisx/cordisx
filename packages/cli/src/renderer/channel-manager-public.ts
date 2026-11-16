@@ -538,6 +538,19 @@ export class PublicChannelManagerController {
   }
 
   /** Bound internally to the current opaque token incarnation, never supplied by the plugin. */
+  bindingTargetsForConnection(connectionToken: string, conversationId: string) {
+    const snapshot = this.fullSnapshot()
+    return {
+      snapshotRevision: snapshot.revision,
+      bindings: snapshot.bindings.flatMap(binding => {
+        const target = this.bindingTargets.get(binding.bindingToken)
+        return binding.connectionToken === connectionToken && target?.binding.channel.conversationId === conversationId
+          ? [{ bindingId: target.binding.bindingId, binding }]
+          : []
+      }),
+    }
+  }
+
   bindingTarget(token: string) {
     this.fullSnapshot()
     const target = this.bindingTargets.get(token)

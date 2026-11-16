@@ -27,6 +27,81 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('correlates the first native approval before the first-turn acknowledgement and forwards scoped model/effort defaults', async () => {
+    const message = structuredClone(input)
+    message.source.event = {
+      ...message.source.event,
+      actor: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'test', userId: 'ou_alice' },
+    }
+    let sessions!: ChannelNativeSessions
+    const nativeRequest = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'thread/start') return { thread: { id: 'chat' }, model: 'model', modelProvider: 'provider' }
+      if (method === 'turn/start') {
+        expect(sessions.sourceFor('chat', 'turn')?.actor?.userId).toBe('ou_alice')
+        expect(params.effort).toBe('high')
+        return { turn: { id: 'turn' } }
+      }
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: 'completed' }] }
+      return {}
+    })
+    const handler = createCodexBridgeHandler({
+      nativeRequest,
+      catalog: async () => [{
+        providerId: 'provider',
+        pluginId: 'test',
+        models: [{ id: 'model', label: 'Model', aliases: [] }],
+      }],
+      observedDispatch: (id, thread, turn) => sessions.observedDispatch(id, thread, turn),
+    }, '/tmp')
+    sessions = new ChannelNativeSessions({
+      bridge: () => ({ call: (_app, operation, args, signal) => handler(operation, args, signal) }) as AgentBridge,
+      nativeRequest,
+      cwd: '/tmp',
+    })
+    expect(
+      await sessions.start('first', message, undefined, undefined, undefined, undefined, {
+        providerId: 'provider',
+        model: 'model',
+        effort: 'high',
+      }),
+    ).toMatchObject({ state: 'running' })
+    expect(nativeRequest.mock.calls.find(([method]) => method === 'thread/start')?.[1]).toMatchObject({
+      config: { model_reasoning_effort: 'high' },
+      modelProvider: 'provider',
+      model: 'model',
+    })
+    await sessions.completion('chat', 'turn')
+    expect(sessions.sourceFor('chat')).toBeUndefined()
+  })
+
+  it('never reads a saved model override as actual native state and applies effort without changing other execution settings', async () => {
+    let live = { providerId: 'two', model: 'new', reasoningEffort: 'low', serviceTier: null }
+    const execution = {
+      read: vi.fn(() => ({
+        revision: 2,
+        override: { approval: 'never', effort: 'high' },
+        effective: { modelProvider: 'one', model: 'old', reasoningEffort: 'high' },
+      })),
+      set: vi.fn(async () => ({})),
+    }
+    const nativeRequest = vi.fn(async () => ({
+      thread: { id: 'chat', status: { type: 'idle' }, modelProvider: 'two', model: 'new' },
+    }))
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      nativeRequest,
+      cwd: '/tmp',
+      execution: execution as never,
+      sourceConfiguration: async () => live as never,
+      models: async () => ({ status: 'selected' }),
+    })
+    expect(await sessions.taskSelection('chat')).toEqual({ providerId: 'two', model: 'new', effort: 'low' })
+    expect(await sessions.applyTaskSelection('chat', { providerId: 'two', model: 'new', effort: 'inherit' }))
+      .toMatchObject({ status: 'selected' })
+    expect(execution.set).toHaveBeenCalledWith('local', 'chat', { approval: 'never' }, 2)
+    live = undefined as never
+    expect(await sessions.taskSelection('chat')).toEqual({ providerId: 'two', model: 'new' })
+  })
   it('passes captured reply defaults and the exact incoming operation to the model without sending', async () => {
     const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
     const nativeRequest = vi.fn(async () => ({}))
@@ -60,7 +135,7 @@ describe('Channel native task delivery', () => {
     const prompt = (call.mock.calls[0] as unknown as [string, string, { prompt: string }])[2].prompt
     expect(prompt).toContain('Automatic final-response delivery is disabled')
     expect(prompt).toContain('commentary and final answers stay here')
-    expect(prompt).toContain("send --profile 'own-preview' --input")
+    expect(prompt).toMatch(/send --profile 'own-preview' --context '[a-f0-9]{48}' --input/u)
     expect(prompt).toContain("CORDISX_HOME='/tmp/Channel user'\\''s home'")
     expect(prompt).toContain(cli.entry)
     expect(prompt).toContain('"enabled":false')

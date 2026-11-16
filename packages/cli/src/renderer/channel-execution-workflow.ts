@@ -5,6 +5,7 @@ import type { ChannelManagerActionsApi } from './channel-manager.js'
 import { parseChatExecutionSettings } from '../chat-execution-settings.js'
 import { ChatExecutionForm } from './chat-execution-form.js'
 import { mountChannelHostForm } from './channel-form-mount.js'
+import type { ChannelSettingsDraft } from './channel-settings-draft.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -94,6 +95,7 @@ export class ChannelExecutionWorkflow {
       owner: string
       options: ChannelManagerFormOptionsV1
       sessionId?: string
+      draft?: ChannelSettingsDraft
       live: () => boolean
       authorize: () => Promise<boolean>
     },
@@ -108,6 +110,7 @@ export class ChannelExecutionWorkflow {
       render: signal =>
         createElement(ChatExecutionForm, {
           initial,
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
           locale: this.input.document.documentElement.lang || 'en',
           signal,
           read: () => this.read(input.sessionId, signal),

@@ -27,7 +27,13 @@ export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
   | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
   | { readonly kind: 'terminal-provider'; readonly request: TerminalProviderRequest }
-  | { readonly kind: 'channel'; readonly operation: string; readonly input: unknown }
+  | {
+    readonly kind: 'channel'
+    readonly operation: string
+    readonly input: unknown
+    readonly context?: string
+    readonly callerThreadId?: string
+  }
   | { readonly kind: 'refresh-catalog'; readonly sourceUrl?: string }
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
@@ -127,7 +133,12 @@ export function parsePluginManagementRpcRequest(
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
     operation.kind === 'channel' && (typeof operation.operation !== 'string'
-      || !/^[a-z][a-z-]{0,48}$/u.test(operation.operation))
+      || !/^[a-z][a-z-]{0,48}$/u.test(operation.operation)
+      || operation.context !== undefined
+        && (typeof operation.context !== 'string' || !/^[a-f0-9]{48}$/u.test(operation.context))
+      || operation.callerThreadId !== undefined
+        && (typeof operation.callerThreadId !== 'string'
+          || !/^[a-zA-Z0-9._:-]{1,512}$/u.test(operation.callerThreadId)))
   ) throw new Error('invalid Channel operation')
   return request as unknown as PluginManagementRpcRequest
 }
@@ -201,7 +212,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly service: PluginManagementService
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
-  readonly channel?: (operation: string, input: unknown) => Promise<unknown>
+  readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
@@ -233,7 +244,18 @@ export async function startPluginManagementRpcServer(input: {
             requestId,
             ok: true,
             value: request.operation.kind === 'channel'
-              ? await (input.channel?.(request.operation.operation, request.operation.input)
+              ? await (input.channel?.(
+                request.operation.operation,
+                request.operation.input,
+                request.operation.context || request.operation.callerThreadId
+                  ? {
+                    ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
+                    ...(request.operation.callerThreadId
+                      ? { 'openai/threadId': request.operation.callerThreadId }
+                      : {}),
+                  }
+                  : undefined,
+              )
                 ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }))
               : request.operation.kind === 'terminal-provider'
               ? await (input.terminalProvider?.(request.operation.request)

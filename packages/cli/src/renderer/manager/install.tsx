@@ -220,7 +220,7 @@ export function installReactCordisXManager(
         bottom: 'auto',
         left: `${desiredLeft - titleRect.left}px`,
         right: 'auto',
-        width: `${Math.max(0, Math.min(current.titlebarSafeRight, titleRect.right) - desiredLeft)}px`,
+        width: `${Math.max(0, current.titlebarSafeRight - desiredLeft)}px`,
         height: `${titleRect.height}px`,
       })
     }

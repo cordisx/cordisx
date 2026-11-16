@@ -195,13 +195,14 @@ export class ChatExecutionPreferences {
         ...selected,
         ...(fields.config ? { config: { ...object(fields.config), ...object(params.config) } } : {}),
       }
-    const capturedSettings = method === 'turn/start' && !current?.override
+    const capturedSettings = (method === 'turn/start' || method === 'thread/start') && !current?.override
       ? {
         ...settings,
         ...observedExecutionSettings({
           sandbox: prepared.sandboxPolicy,
           approvalPolicy: prepared.approvalPolicy,
-          reasoningEffort: object(object(prepared.collaborationMode).settings).reasoning_effort ?? prepared.effort,
+          reasoningEffort: object(object(prepared.collaborationMode).settings).reasoning_effort ?? prepared.effort
+            ?? object(prepared.config).model_reasoning_effort,
           workMode: object(prepared.collaborationMode).mode,
         }),
       }
@@ -247,9 +248,17 @@ export class ChatExecutionPreferences {
       } else {
         const effective = { ...record.effective }
         for (
-          const field of ['approvalPolicy', 'sandbox', 'cwd', 'model', 'reasoningEffort', 'activePermissionProfile']
+          const field of [
+            'approvalPolicy',
+            'sandbox',
+            'cwd',
+            'model',
+            'modelProvider',
+            'reasoningEffort',
+            'activePermissionProfile',
+          ]
         ) {
-          if (result[field] !== undefined) effective[field] = result[field]
+          if ((result[field] ?? thread[field]) !== undefined) effective[field] = result[field] ?? thread[field]
         }
         if (capture.method === 'turn/start' && typeof object(result.turn).id === 'string') {
           record.turnId = String(object(result.turn).id)
@@ -296,7 +305,7 @@ export class ChatExecutionPreferences {
       const record = this.records.records[key('local', threadId)]
       if (!record) return
       const effective = { ...record.effective }
-      for (const field of ['model', 'cwd', 'approvalPolicy', 'activePermissionProfile']) {
+      for (const field of ['model', 'modelProvider', 'cwd', 'approvalPolicy', 'activePermissionProfile']) {
         if (native[field] !== undefined) effective[field] = native[field]
       }
       if (native.sandboxPolicy !== undefined) effective.sandbox = native.sandboxPolicy

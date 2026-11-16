@@ -38,6 +38,36 @@ its image work; page disposal retires the consumer's request and refresh timer.
 
 ## Normative v1 boundary
 
+The [Manager v11 settings surface](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v11-settings.md)
+mounts the shared Host forms for new-chat defaults, messages, permissions and
+grouping. It uses the existing profile-defaults and Channel-policy stores,
+with no new configuration file or copied account state. Source/generation-owned
+drafts survive sibling tab navigation. Section saves merge into the latest
+complete policy under a revision fence; same-section conflicts require refresh.
+Undo affects only the current section. The registered own destination hides
+the duplicate Host shortcut only while its actual route, page, service owner
+and render permission remain available, and retirement restores the fallback.
+
+The explicit [Manager v10 conversation contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v10-conversations.md)
+adds read-only remote-conversation summaries and paged local transport activity.
+The launcher combines its existing transport store, consumer bindings and the
+connected account's directory. It returns normalized avatar bytes, safe labels
+and delivery states, without credentials, image URLs or a Codex transcript.
+The own-service facade uses actual caller tracing and account/service lifetime;
+delegated activity readers need exact-conversation event permission. Opening
+an issued binding uses Host navigation and does not resume its native turn.
+
+Conversation names and normalized PNG avatars are durable display hints in
+`$CORDISX_HOME/apps/<app>/profiles/<profile>/channel-runtime/conversation-display.json`,
+scoped by adapter, account, tenant and conversation. Manager list and detail
+reads return saved hints immediately and coalesce background revalidation.
+Failed reads retain the last known name and image; name updates do not wait
+for an avatar download. The atomic local file contains no messages, secrets,
+membership authority or issued Manager tokens. Its disposable display limits
+do not limit bindings. Removing a configured account retires its hints, and
+account replacement or disposal prevents late network replies from restoring
+old data. Ordinary CLI conversation/member lookup remains a fresh read.
+
 This section supersedes the older task-routing, binding, selector, and
 notification design notes below. They are historical planning material only:
 no Channel core configuration, persistence, or runtime path may depend on

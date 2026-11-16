@@ -184,7 +184,7 @@ export function ChannelConnectionForm(props: {
                     <Button
                       type="button"
                       variant="outline"
-                      icon={<HostIcon token="reset" />}
+                      icon={<HostIcon token="action.reset" />}
                       disabled={!dirty || busy}
                       onClick={() => {
                         adopt(baseline.current, false)
@@ -196,7 +196,7 @@ export function ChannelConnectionForm(props: {
                     <Button
                       type="submit"
                       theme="primary"
-                      icon={<HostIcon token="save" />}
+                      icon={<HostIcon token="action.save" />}
                       loading={busy}
                       disabled={!dirty || busy || !baseline.current.writable}
                     >

@@ -301,6 +301,17 @@ function matches(
     && (rule.commands === undefined || command !== undefined && rule.commands.includes(command))
 }
 
+/** Read-only discovery uses no mutation grant, while explicit command denials still apply. */
+export function channelCommandDenied(
+  policy: ChannelConversationPolicy,
+  event: ChannelEventRef,
+  command: string,
+): boolean {
+  return policy.rules.some(rule =>
+    rule.action === 'command' && rule.effect === 'deny' && matches(rule, policy, event, command)
+  )
+}
+
 /** Denials win. Allowlists at global and narrower scopes each apply, so their intersection is enforced. */
 export function channelPolicyAllows(
   policy: ChannelConversationPolicy,
@@ -322,7 +333,10 @@ export function channelPolicyAllows(
     buckets.set(key, [...buckets.get(key) ?? [], rule])
   }
   if (buckets.size === 0) {
-    return action !== 'command' || ['bind-status', 'messages-status', 'help', 'approvals'].includes(command ?? '')
+    return action !== 'command'
+      || ['bind-status', 'messages-status', 'help', 'approvals', 'models', 'task-requests', 'task-settings'].includes(
+        command ?? '',
+      )
   }
   return [...buckets.values()].every(bucket => bucket.some(rule => matches(rule, policy, event, command)))
 }

@@ -50,9 +50,39 @@ export const channelAgentInstructions =
   + 'Automatic final-response forwarding is off by default. Local commentary and final answers are not external messages. '
   + 'For incoming Channel replies, invoke the exact configured Channel CLI described in the task prompt; use explicit send/send-many and inspect its receipt. '
   + 'Only when automatic forwarding is explicitly enabled may channel_reply_mode choose the final route; select none before a manual reply to avoid duplicate delivery. '
+  + 'Use channel_model_list and channel_task_settings to inspect task model settings. For a user-requested change use channel_task_settings_set; keep any approval request ID and wait for an eligible human. An Agent cannot approve its own request. '
   + 'The bundled cordisx Skill includes the configured-runtime Channel CLI guide.'
 
+const taskSettings = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    providerId: { ...string, maxLength: 128 },
+    model: string,
+    effort: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
+  },
+}
 export const channelAgentTools = [
+  tool(
+    'model-list',
+    "Read this runtime's admitted providers, exact model IDs and supported reasoning efforts. No credentials.",
+  ),
+  tool(
+    'task-settings',
+    "Read the current or explicitly bound Channel task's observed model settings and pending preferences. Read-only.",
+    { sessionId: string },
+  ),
+  tool(
+    'task-settings-set',
+    "Request exact provider/model/effort changes for the current or bound task, only on the sender's request. The authenticated incoming user's field and model permissions apply. Authorized users queue directly; otherwise returns approval-required. Human approval must explicitly cover these exact values. Never approve for the user or retry unknown application.",
+    { sessionId: string, settings: taskSettings, expectedRevision: { type: 'integer', minimum: 0 } },
+    ['settings'],
+  ),
+  tool('task-config', 'Read scoped Channel creation defaults and model permissions. Read-only.'),
+  tool(
+    'task-requests',
+    'Read exact pending model-change requests associated with the incoming Channel conversation. Does not approve or execute.',
+  ),
   tool(
     'connections',
     'List configured Channel accounts and connection readiness. Read-only; never starts another SDK connection.',

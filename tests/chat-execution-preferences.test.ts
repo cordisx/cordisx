@@ -20,6 +20,23 @@ async function fixture() {
   return { service, root, file, configPath }
 }
 describe('user-owned chat execution preferences', () => {
+  it('captures explicit first-turn effort instead of the profile default and keeps nested provider observations', async () => {
+    const { service } = await fixture()
+    await service.setDefaults({ effort: 'low' }, 0)
+    const capture = await service.prepare('thread/start', {
+      cwd: '/tmp',
+      model: 'model',
+      config: { model_reasoning_effort: 'high' },
+    })
+    expect(capture.params.config).toMatchObject({ model_reasoning_effort: 'high' })
+    await service.complete(capture.captureId!, true, {
+      thread: { id: 'chat', modelProvider: 'provider', model: 'model', reasoningEffort: 'high' },
+    })
+    expect(service.read('local', 'chat')).toMatchObject({
+      capturedDefaults: { effort: 'high' },
+      effective: { modelProvider: 'provider', model: 'model', reasoningEffort: 'high' },
+    })
+  })
   it('captures new-chat defaults without modifying older chats; never and scope remain independent', async () => {
     const { service } = await fixture()
     await service.setDefaults({ execution: 'workspace-write', approval: 'never', workMode: 'plan', effort: 'low' }, 0)

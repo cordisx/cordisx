@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { ChannelManagerV5 } from '@cordisx/protocol/channel-manager/v5'
+import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import {
@@ -72,9 +73,11 @@ describe('actual direct Channel service ownership assembly', () => {
           generation: 'runtime-owner',
           serviceCapabilityOwners: channel.serviceCapabilityOwners!,
           channelManager: channel.manager!,
+          channelActionsBridgeToken: channel.actionsBridgeToken!,
         })
         // Read data emitted by the production assembly, without manufacturing ownership.
         const metadata = Function(`return (${bundle.metadataSource})`)()
+        expect(metadata.channelActionsBridgeToken).toBe(channel.actionsBridgeToken)
         const plugin = Function(`return (${bundle.pluginsSource})`)()[0]
         const manifest = normalizePluginManifest(plugin.manifest, plugin.id)
         expect(metadata.serviceCapabilityOwners[0]).toMatchObject({
@@ -128,8 +131,15 @@ describe('actual direct Channel service ownership assembly', () => {
           [CORDISX_PLUGIN_SOURCE]: plugin.source,
           [CORDISX_PLUGIN_GENERATION]: plugin.artifactGeneration,
         })
-        const manager = (caller.channelManager as ChannelManagerV5).forOwnService()!
+        const manager = (caller.channelManager as ChannelManagerV10).forOwnConversationService()!
         const snapshot = manager.snapshot(), account = snapshot.accounts[0]!
+        const signal = new AbortController().signal
+        await expect(manager.conversationPage({ connectionToken: account.connectionToken }, signal)).resolves
+          .toMatchObject({
+            contract: 'cordisx.channel-manager-conversation-page/v1',
+            conversations: [],
+            total: 0,
+          })
         const ref = SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!.ref
         expect(account.availableOperations).toContain('connection.disable')
         await expect(manager.execute({

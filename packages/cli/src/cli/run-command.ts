@@ -140,7 +140,11 @@ import {
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createChannelLaunchBridges, createRendererChannelComposition } from './renderer-channel-composition.js'
-import { configuredLaunchCleanup, createConfiguredChannelConsumer } from './channel-consumer-composition.js'
+import {
+  configuredChannelToolHandler,
+  configuredLaunchCleanup,
+  createConfiguredChannelConsumer,
+} from './channel-consumer-composition.js'
 import { chatExecutionOperation } from '../launcher/chat-execution-operation.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
@@ -373,12 +377,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         channelConsumer?.policy().policy.sidebarGroup === null
           ? undefined
           : channelConsumer?.policy().policy.sidebarGroup ?? '外部连接',
-      ...(channelTools === undefined
-        ? {}
-        : {
-          channel: (operation: string, input: unknown, metadata?: unknown) =>
-            channelTools.call(operation, input, metadata),
-        }),
+      ...configuredChannelToolHandler(channelTools),
       ...(runtime.internalRemoteTerminalProvider === undefined
         ? {}
         : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
@@ -739,9 +738,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        ...(channelTools === undefined
-          ? {}
-          : { channel: (operation: string, input: unknown) => channelTools.call(operation, input) }),
+        ...configuredChannelToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
@@ -892,9 +889,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        ...(channelTools === undefined
-          ? {}
-          : { channel: (operation: string, input: unknown) => channelTools.call(operation, input) }),
+        ...configuredChannelToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)

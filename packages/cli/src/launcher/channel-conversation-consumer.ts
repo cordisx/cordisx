@@ -1,3 +1,4 @@
+import { channelCardAction } from './channel-card-actions.js'
 import { createHash } from 'node:crypto'
 import type {
   ChannelEventRef,
@@ -12,6 +13,9 @@ import { ChannelSessionCommands } from './channel-session-commands.js'
 import { channelCommandHelp } from '../channel-command-registry.js'
 import { ChannelNativeApprovals } from './channel-native-approvals.js'
 import { chatExecutionOperation } from './chat-execution-operation.js'
+import { channelMessageContext } from './channel-message-context.js'
+import { ChannelAgentAccess } from './channel-agent-access.js'
+import { ChannelTaskSettings } from './channel-task-settings.js'
 import {
   channelCommandReplyTarget,
   channelReplyDefaults,
@@ -21,6 +25,7 @@ import {
 } from './channel-reply-routing.js'
 import {
   CHANNEL_COMMANDS,
+  channelCommandDenied,
   channelExact,
   channelPolicyAllows,
   channelRecord,
@@ -90,19 +95,31 @@ export class ChannelConversationConsumer {
   private extraNative: (() => ChannelNativeSessions | undefined) | undefined
   private readonly sessionCommands: ChannelSessionCommands
   private readonly approvals: ChannelNativeApprovals
+  readonly agentAccess = new ChannelAgentAccess(() => this.store.snapshot(), () => this.extraNative?.())
+  readonly taskSettings: ChannelTaskSettings
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput,
   ) {
+    this.taskSettings = new ChannelTaskSettings({
+      store: this.store,
+      native: () => this.extraNative?.(),
+      access: this.input.access,
+      agent: this.agentAccess,
+      notify: (event, text, id) => this.commandReply(id, event, text),
+    })
     this.sessionCommands = new ChannelSessionCommands({
       bindings: () => this.bindings(),
       native: () => this.extraNative?.(),
       allowed: (event, command) => channelPolicyAllows(this.store.snapshot().policy, 'command', event, command),
       unbind: id => this.bindingAction('unbind', id),
+      tasks: this.taskSettings,
+      denied: (event, command) => channelCommandDenied(this.store.snapshot().policy, event, command),
     })
     this.approvals = new ChannelNativeApprovals({
       bindings: () => this.bindings(),
+      routineAllowed: (command, threadId, turnId) => this.agentAccess.routine(command, threadId, turnId),
       allowed: (event, command) => channelPolicyAllows(this.store.snapshot().policy, 'command', event, command),
       sendCard: (event, card) =>
         this.input.access()?.sendCard?.(event, card) ?? Promise.reject(new Error('CHANNEL_CARD_UNAVAILABLE')),
@@ -123,6 +140,9 @@ export class ChannelConversationConsumer {
   bindings(): readonly ChannelChatBinding[] {
     return Object.values(this.store.snapshot().bindings)
   }
+  commandAllowed(event: ChannelEventRef, command: string): boolean {
+    return channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
+  }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
     this.extraNative = native
     this.approvals.attach(native())
@@ -131,41 +151,54 @@ export class ChannelConversationConsumer {
     ref: import('@cordisx/channel-runtime').ChannelTenantRef,
     action: import('@larksuiteoapi/node-sdk').CardActionEvent,
   ) {
-    const value = action.action.value as { channelApproval?: unknown; decision?: unknown } | undefined
-    if (
-      !value || typeof value.channelApproval !== 'string'
-      || !['accept', 'acceptForSession', 'decline'].includes(String(value.decision))
-    ) return
-    const channel = this.bindings().find(binding =>
-      binding.channel.adapterId === ref.adapterId && binding.channel.accountId === ref.accountId
-      && binding.channel.tenantId === ref.tenantId && binding.channel.conversationId === action.chatId
-    )?.channel
-    if (!channel) return
-    const event: ChannelEventRef = {
-      ...ref,
-      conversationId: action.chatId,
-      kind: channel.kind,
-      threadId: channel.threadId,
-      semantics: 'conversation',
-      eventId: action.messageId,
-      messageId: action.messageId,
-      actor: { ...ref, userId: action.operator.openId },
-    }
-    const result = await this.approvals.answer(event, value.channelApproval, String(value.decision), action.messageId)
-    await this.commandReply(
-      `card-action:${identity([value.channelApproval, action.operator.openId, value.decision])}`,
-      event,
-      result,
+    return channelCardAction(
+      {
+        bindings: () => this.bindings(),
+        tasks: this.taskSettings,
+        approvals: this.approvals,
+        reply: (id, event, text) => this.commandReply(id, event, text),
+      },
+      ref,
+      action,
     )
-    await this.approvals.synchronizeCard(event, value.channelApproval, action.messageId)
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
     return chatExecutionOperation(this.extraNative?.(), operation, args)
   }
-  async bindingLabels() {
+  managementReadback() {
+    const state = this.store.snapshot()
+    return {
+      revision: state.revision,
+      bindings: Object.values(state.bindings),
+      senders: Object.values(state.inputs).flatMap(record =>
+        record.addressing?.senderName
+          ? [{ event: record.input.source.event, name: record.addressing.senderName }]
+          : []
+      ),
+      deliveries: Object.values(state.jobs).flatMap(job =>
+        job.deliveryId && job.sessionId && state.inputs[job.recordId]
+          ? [{
+            deliveryId: job.deliveryId,
+            sessionId: job.sessionId,
+            event: state.inputs[job.recordId]!.input.source.event,
+          }]
+          : []
+      ),
+    }
+  }
+  async bindingNavigation(id: string) {
+    const binding = this.bindings().find(binding => binding.id === id)
+    const native = this.extraNative?.()
+    if (!binding || !native || this.lifetime.signal.aborted || !await native.exists(binding.sessionId)) return undefined
+    if (this.lifetime.signal.aborted || this.bindings().find(item => item.id === id)?.sessionId !== binding.sessionId) {
+      return undefined
+    }
+    return binding.sessionId
+  }
+  async bindingLabels(ids?: readonly string[]) {
     const native = this.extraNative?.()
     return Promise.all(
-      this.bindings().map(async binding => {
+      this.bindings().filter(binding => ids === undefined || ids.includes(binding.id)).map(async binding => {
         const event: ChannelEventRef = { ...binding.channel, eventId: 'display' }
         const conversationName = await this.input.access()?.name?.(event).catch(() => undefined)
         return {
@@ -423,6 +456,7 @@ export class ChannelConversationConsumer {
     this.pumping = (async () => {
       this.approvals.attach(this.extraNative?.())
       await this.approvals.expire()
+      void this.taskSettings.pump().catch(() => this.input.report?.('CHANNEL_TASK_SETTINGS_UNAVAILABLE'))
       await this.catchup()
       for (
         const record of Object.values(this.store.snapshot().inputs).filter(record => record.persisted && !record.routed)
@@ -541,7 +575,18 @@ export class ChannelConversationConsumer {
   private async command(record: ChannelConversationInput, command: string, argument: string): Promise<void> {
     const event = record.input.source.event
     if (
-      !['choose', 'permissions', 'work-mode'].includes(command)
+      ![
+        'choose',
+        'permissions',
+        'work-mode',
+        'models',
+        'model',
+        'provider',
+        'task-settings',
+        'task-requests',
+        'task-approve',
+        'task-deny',
+      ].includes(command)
       && !channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
     ) {
       await this.commandReply(
@@ -725,7 +770,7 @@ export class ChannelConversationConsumer {
           && ['dispatching', 'running', 'replying', 'reconciliation-required'].includes(other.state)
         )
       ) return
-      if (job.sessionId && this.sessionClaims.has(job.sessionId)) return
+      if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
       if (job.sessionId) this.sessionClaims.add(job.sessionId)
       try {
         await this.store.mutate(state => {
@@ -759,10 +804,20 @@ export class ChannelConversationConsumer {
             }],
           }
           : record.input
-        const result = await native.start(job.id, message, job.sessionId, this.lifetime.signal, {
-          ...defaults,
-          enabled: captured.jobs[job.id]!.finalDeliveryEnabled === true,
-        })
+        const context = await this.input.access()?.messageContext?.(message, record.addressing)
+          .catch(() => undefined) ?? channelMessageContext(message, record.addressing)
+        const result = await native.start(
+          job.id,
+          message,
+          job.sessionId,
+          this.lifetime.signal,
+          {
+            ...defaults,
+            enabled: captured.jobs[job.id]!.finalDeliveryEnabled === true,
+          },
+          context,
+          job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
+        )
         await this.store.mutate(state => {
           const current = state.jobs[job.id]!
           current.state = result.state === 'busy' ? 'queued' : result.state

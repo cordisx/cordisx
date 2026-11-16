@@ -1,53 +1,19 @@
 import * as React from 'react'
 import type { FilterToolbarProps, SearchFieldProps } from '../../ui.js'
-import { HostIcon } from './HostIcon.js'
+import { ActionGroup } from './ActionGroup.js'
+import { SearchField as HostSearchField } from './SearchField.js'
 
-export function SearchField({
-  className,
-  value,
-  onChange,
-  clearable = false,
-  clearLabel = 'Clear search',
-  ...props
-}: SearchFieldProps): React.ReactElement {
-  const input = React.useRef<HTMLInputElement>(null)
+const EmbeddedSearch = React.createContext(false)
+
+/** Public plugin controls use the same search shell as the Manager collection. */
+export function SearchField({ className, clearable = false, ...props }: SearchFieldProps): React.ReactElement {
   return (
-    <span
+    <HostSearchField
+      {...props}
+      clearable={clearable}
+      embedded={React.useContext(EmbeddedSearch)}
       className={['cxr-ui-filter-search', className].filter(Boolean).join(' ')}
-      data-clearable={clearable ? 'true' : undefined}
-      onClick={event => {
-        const target = event.target as Element
-        if (target.closest('button,input,a,[role="button"]') !== null) return
-        input.current?.focus()
-      }}
-    >
-      <HostIcon token="search" className="cxr-ui-filter-search__icon" size={16} />
-      <input
-        {...props}
-        ref={input}
-        type="search"
-        value={value}
-        onChange={event => onChange(event.currentTarget.value)}
-      />
-      {clearable && value.length > 0
-        ? (
-          <button
-            type="button"
-            className="cxr-ui-button cxr-ui-filter-search__clear"
-            data-variant="ghost"
-            aria-label={clearLabel.trim() || 'Clear search'}
-            title={clearLabel.trim() || 'Clear search'}
-            disabled={props.disabled || props.readOnly}
-            onClick={() => {
-              onChange('')
-              input.current?.focus()
-            }}
-          >
-            <HostIcon token="close" surfaceToken="host:close" size={16} />
-          </button>
-        )
-        : null}
-    </span>
+    />
   )
 }
 
@@ -62,13 +28,13 @@ export function FilterToolbar({
   return (
     <div
       {...props}
-      className={['cxr-ui-filter-toolbar', className].filter(Boolean).join(' ')}
+      className={['cxh-search-toolbar', 'cxr-ui-filter-toolbar', className].filter(Boolean).join(' ')}
       role="toolbar"
       aria-label={ariaLabel}
     >
-      <div className="cxr-ui-filter-toolbar__search">{search}</div>
+      <EmbeddedSearch.Provider value={true}>{search}</EmbeddedSearch.Provider>
       {filters.length === 0 ? null : <div className="cxr-ui-filter-toolbar__filters">{filters}</div>}
-      {actions === undefined ? null : <div className="cxr-ui-filter-toolbar__actions">{actions}</div>}
+      {actions == null ? null : <ActionGroup className="cxh-search-toolbar-actions">{actions}</ActionGroup>}
     </div>
   )
 }

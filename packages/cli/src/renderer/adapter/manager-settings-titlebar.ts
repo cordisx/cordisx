@@ -147,8 +147,7 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   ) return undefined
 
   const left = Math.ceil(Math.max(navRect.right, (toggle ?? second).rect.right + 16))
-  // Reserve the 26.924 end control width even though Settings currently gives
-  // that y=0 slot zero width. The Host never claims the macOS/window edge.
+  // Preserve the native window-edge reservation even when its controls are hidden.
   const right = Math.floor(Math.min(headerRect.right - 36, titleRect.right))
   if (right - left < 320) return undefined
   const y = headerRect.top + headerRect.height / 2

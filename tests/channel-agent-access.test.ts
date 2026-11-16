@@ -1,0 +1,102 @@
+import { describe, expect, it } from 'vitest'
+import { ChannelAgentAccess } from '../packages/cli/src/launcher/channel-agent-access.js'
+import { configuredChannelApprovalOperation } from '../packages/cli/src/launcher/channel-cli-approval.js'
+import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/channel-conversation-policy.js'
+
+const context = { node: '/fixed/node', entry: '/fixed/cli.js', home: "/tmp/user's home", profile: 'preview' }
+const source = {
+  adapterId: 'feishu',
+  accountId: 'account',
+  tenantId: 'tenant',
+  conversationId: 'oc_group',
+  kind: 'group' as const,
+  threadId: 'oc_group',
+  semantics: 'conversation' as const,
+  eventId: 'om_event',
+  actor: { adapterId: 'feishu', accountId: 'account', tenantId: 'tenant', userId: 'ou_alice' },
+}
+const argv = (op: string, input: unknown = {}, token?: string) => [
+  'env',
+  `CORDISX_HOME=${context.home}`,
+  context.node,
+  context.entry,
+  'channel',
+  op,
+  '--profile',
+  context.profile,
+  '--input',
+  JSON.stringify(input),
+  ...(token ? ['--context', token] : []),
+]
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+
+describe('configured Channel CLI routine approval', () => {
+  it('recognizes exact literal argv and nested shell quoting, but never expansions or a different runtime', () => {
+    const command = argv('connections')
+    expect(configuredChannelApprovalOperation(command, context)?.kind).toBe('read')
+    expect(configuredChannelApprovalOperation(['/bin/zsh', '-lc', command.map(quote).join(' ')], context)?.kind).toBe(
+      'read',
+    )
+    for (
+      const text of [
+        command.map(quote).join(' ') + '; echo injected',
+        '$(echo injected)',
+        command.map(quote).join(' ') + ' > /tmp/file',
+        'env CORDISX_HOME="$HOME" node cli channel connections',
+      ]
+    ) {
+      expect(configuredChannelApprovalOperation(['/bin/zsh', '-lc', text], context)).toBeUndefined()
+    }
+    expect(configuredChannelApprovalOperation(command.map(value => value === context.node ? 'node' : value), context))
+      .toBeUndefined()
+    expect(
+      configuredChannelApprovalOperation(command.map(value => value === context.profile ? 'default' : value), context),
+    ).toBeUndefined()
+    expect(configuredChannelApprovalOperation(argv('task-settings-set'), context)?.kind).toBe('write')
+    expect(configuredChannelApprovalOperation(argv('task-approve'), context)).toBeUndefined()
+  })
+
+  it('allows reads and policy-approved source replies, preserves explicit send denials and fences old context', () => {
+    let policy = parseChannelConversationPolicy({ enabled: true })
+    const native = {
+      sourceFor: (thread: string, turn?: string) =>
+        thread === 'chat' && (!turn || turn === 'turn') ? source : undefined,
+      contextFor: (token: string) =>
+        token === 'current'
+          ? { source, threadId: 'chat', turnId: 'turn' }
+          : token === 'old'
+          ? { source, threadId: 'chat', turnId: 'older' }
+          : undefined,
+      cliApprovalOperation: (command: unknown) => configuredChannelApprovalOperation(command, context),
+    }
+    const access = new ChannelAgentAccess(
+      () => ({ policy, bindings: {}, jobs: {}, inputs: {} }) as never,
+      () => native as never,
+    )
+    expect(access.routine(argv('history', { sessionId: 'chat' }), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('history', { sessionId: 'other' }), 'chat', 'turn')).toBe(false)
+    const send = {
+      account: { adapterId: 'feishu', accountId: 'account', tenantId: 'tenant' },
+      target: { id: 'oc_group', kind: 'group' },
+      text: 'hello',
+      operationId: 'one',
+    }
+    expect(access.routine(argv('send', send, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('send', send, 'old'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('send', { ...send, target: { id: 'oc_other', kind: 'group' } }), 'chat', 'turn')).toBe(
+      false,
+    )
+    expect(access.routine(argv('task-settings-set', {}), 'chat', 'turn')).toBe(false)
+    expect(
+      access.caller({
+        'cordisx/channelContext': 'current',
+        'x-codex-turn-metadata': { thread_id: 'other', turn_id: 'turn' },
+      }),
+    ).toBeUndefined()
+    policy = parseChannelConversationPolicy({
+      enabled: true,
+      rules: [{ id: 'deny', action: 'send', effect: 'deny', userIds: ['ou_alice'] }],
+    })
+    expect(access.routine(argv('send', send), 'chat', 'turn')).toBe(false)
+  })
+})

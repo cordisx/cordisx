@@ -368,14 +368,14 @@ describe('public Select and PanZoomCanvas', () => {
       )
       const toolbar = dom.window.document.querySelector<HTMLElement>('.cxr-ui-filter-toolbar')!
       expect(toolbar.getAttribute('role')).toBe('toolbar')
-      expect(toolbar.querySelector('.cxr-ui-filter-toolbar__search input[type="search"]')).not.toBeNull()
+      expect(toolbar.querySelector('.cxh-search-field[data-embedded="true"] input[type="search"]')).not.toBeNull()
       expect(toolbar.querySelector('[data-host-icon-key="search"]')).not.toBeNull()
       expect(toolbar.querySelector('.cxr-ui-filter-toolbar__filters > .cxr-ui-select')).not.toBeNull()
       expect(toolbar.querySelector('[data-host-icon="host:people"]')).not.toBeNull()
       expect(toolbar.querySelector('[data-host-icon-key="control.chevron-down"]')).not.toBeNull()
       const style = dom.window.document.querySelector('style[data-cordisx-shared-react]')?.textContent ?? ''
       expect(style).toContain('border-inline-start:1px solid var(--cx-border)')
-      expect(style).toContain('.cxr-ui-filter-search__icon{display:grid;inline-size:16px')
+      expect(style).toContain('.cxh-search-icon')
     } finally {
       await act(async () => root.unmount())
       runtime.dispose()

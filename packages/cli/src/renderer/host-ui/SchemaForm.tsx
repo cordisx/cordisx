@@ -9,6 +9,8 @@ import { HOST_FORM_REACT_STYLES, HostFieldRow } from './HostForm.js'
 import { hostFormValidationIssueText } from './HostFormValidation.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HOST_TDESIGN_REACT_STYLES } from './tdesign-styles.js'
+import type { SemanticIconKey } from '../../icon-theme-contracts.js'
+import type { HostFormChoiceIcons, HostFormChoiceLabels } from './HostRadioChoices.js'
 
 export function schemaFormSnapshot(
   schema: SchemaFormOptionsV1['schema'],
@@ -81,6 +83,12 @@ const HostSchemaFormSurfaceContext = createContext<string | undefined>(undefined
 
 export type HostSchemaFormOptions = SchemaFormOptionsV1 & {
   readonly renderArrayItemSupplement?: import('./ArrayEditor.js').ArrayEditorProps['renderItemSupplement']
+  /** Host-authored forms may assign semantic field icons without widening the public form schema. */
+  readonly fieldIcons?: Readonly<Record<string, SemanticIconKey>>
+  readonly choiceIcons?: Readonly<Record<string, HostFormChoiceIcons>>
+  readonly choiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
+  readonly fieldPaths?: readonly string[]
+  readonly baseline?: Readonly<Record<string, unknown>>
 }
 
 /** Host shell integration only; the public embedded SchemaForm contract remains unchanged. */
@@ -112,6 +120,11 @@ export function SchemaForm(
     locale = 'en-US',
     disabled = false,
     renderArrayItemSupplement,
+    fieldIcons,
+    choiceIcons,
+    choiceLabels,
+    fieldPaths,
+    baseline: providedBaseline,
     onChange,
     onValidationChange,
   }: HostSchemaFormOptions,
@@ -119,7 +132,7 @@ export function SchemaForm(
   const surfaceIdentity = useContext(HostSchemaFormSurfaceContext)
   const initial = useRef({ identity, value: structuredClone(value) })
   if (initial.current.identity !== identity) initial.current = { identity, value: structuredClone(value) }
-  const baseline = initial.current.value
+  const baseline = providedBaseline ?? initial.current.value
   const changeField = (path: readonly string[], next: unknown) => {
     if (disabled) return
     assertPath(path)
@@ -150,10 +163,20 @@ export function SchemaForm(
   const body = (
     <div className="cxf-form-body">
       <div className="cxf-form-grid">
-        {projected.map(field => (
+        {projected.filter(field => fieldPaths === undefined || fieldPaths.includes(field.path.join('.'))).map(field => (
           <HostFieldRow
             key={`${identity}/${JSON.stringify(field.path)}`}
             field={field}
+            {...(fieldIcons?.[field.path.join('.')] === undefined
+              ? {}
+              : { iconOverride: fieldIcons[field.path.join('.')] })}
+            {...(choiceIcons?.[field.path.join('.')] === undefined
+              ? {}
+              : { choiceIcons: choiceIcons[field.path.join('.')] })}
+            {...(choiceLabels?.[field.path.join('.')] === undefined
+              ? {}
+              : { choiceLabels: choiceLabels[field.path.join('.')] })}
+            {...(choiceLabels === undefined ? {} : { nestedChoiceLabels: choiceLabels })}
             value={field.value}
             locale={locale}
             changed={JSON.stringify(field.value) !== JSON.stringify(ownValue(baseline, field.path))}

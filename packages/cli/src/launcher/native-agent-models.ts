@@ -45,6 +45,7 @@ export interface NativeAgentModelsAuthority {
   taskCreationAvailable?(): Promise<boolean>
   /** Channel operations use this launch's configured connection and conversation consumer. */
   channel?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
+  channelModelSelection?(input: unknown, metadata?: unknown): Promise<unknown | undefined>
 }
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -53,7 +54,12 @@ const text = (value: unknown, max = 512): value is string =>
 
 /** Uses the UI's admitted catalog and credential leases; tool callers never supply a connection or secret. */
 export function createNativeAgentModelsHandler(authority: NativeAgentModelsAuthority) {
-  return async (operation: unknown, input: unknown, metadata?: unknown): Promise<unknown> => {
+  return async (
+    operation: unknown,
+    input: unknown,
+    metadata?: unknown,
+    beforeEffect?: () => Promise<boolean>,
+  ): Promise<unknown> => {
     if (typeof operation === 'string' && operation.startsWith('channel:')) {
       return authority.channel === undefined
         ? { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
@@ -110,6 +116,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,
+          ...(provider.defaultModelId ? { defaultModelId: provider.defaultModelId } : {}),
           models: provider.models.map(model => ({
             id: model.id,
             label: model.label,
@@ -128,6 +135,8 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       || Object.keys(selection).some(key => !['threadId', 'providerId', 'model'].includes(key))
     ) return { status: 'rejected', reason: 'invalid-selection' }
     const target: Selection = { threadId: selection.threadId, providerId: selection.providerId, model: selection.model }
+    const channel = await authority.channelModelSelection?.(input, metadata)
+    if (channel !== undefined) return channel
     const startup = authority.startup?.availability(target.providerId, target.model)
     if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     if (
@@ -142,6 +151,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
       const prepared = await authority.controller.prepareThreadResume(target)
       if (prepared.kind !== 'resume') return { status: 'rejected', reason: prepared.startupReason ?? prepared.reason }
       token = prepared.resumeToken
+      if (beforeEffect && !await beforeEffect()) return { status: 'rejected', reason: 'selection-changed' }
       attempted = true
       await authority.switchThread({ ...target, configOverrides: prepared.configOverrides })
       const committed = await authority.controller.completeThreadResume({
@@ -229,6 +239,8 @@ export async function startNativeAgentModelsServer() {
     bindingPath,
     bind(authority: NativeAgentModelsAuthority) {
       handler = createNativeAgentModelsHandler(authority)
+      const { channelModelSelection: _guard, ...trusted } = authority
+      return createNativeAgentModelsHandler(trusted)
     },
     async close() {
       if (closed) return

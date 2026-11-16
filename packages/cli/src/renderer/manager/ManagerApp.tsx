@@ -378,6 +378,7 @@ function Content(
     return (
       <ChatExecutionPage
         model={model}
+        router={route}
         locale={snapshot.localization.locale}
         {...(notificationCenter === undefined ? {} : { notifications: notificationCenter })}
       />

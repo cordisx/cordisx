@@ -20,7 +20,7 @@ const request = {
   method: 'item/commandExecution/requestApproval',
   params: { threadId: 'chat', turnId: 'turn', itemId: 'item', command: 'echo hello', reason: 'Test operation' },
 }
-function fixture() {
+function fixture(routineAllowed?: () => boolean) {
   let listener!: (event: Record<string, unknown>) => void
   const cards: object[] = [], updates: object[] = []
   let bindings = [{ id: 'binding', sessionId: 'chat', channel: event, state: 'active' }]
@@ -40,6 +40,7 @@ function fixture() {
   const report = vi.fn()
   const approvals = new ChannelNativeApprovals({
     bindings: () => bindings as never,
+    ...(routineAllowed ? { routineAllowed } : {}),
     allowed: () => allowed,
     sendCard: async (_event, card) => {
       cards.push(card)
@@ -68,6 +69,48 @@ function fixture() {
   }
 }
 describe('Channel custom approval lifecycle', () => {
+  it('accepts one accurate routine request without a card and suppresses duplicates before the acknowledgement', async () => {
+    const f = fixture(() => true)
+    let resolve!: (value: { status: string }) => void
+    f.native.answerApproval.mockImplementation(() =>
+      new Promise(done => {
+        resolve = done
+      })
+    )
+    f.emit(request)
+    f.emit(request)
+    await vi.waitFor(() => expect(f.native.answerApproval).toHaveBeenCalledTimes(1))
+    resolve({ status: 'submitted' })
+    await Promise.resolve()
+    f.emit(request)
+    expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
+    expect(f.cards).toHaveLength(0)
+    f.approvals.dispose()
+  })
+
+  it('keeps a lost automatic approval unknown without a second native effect or an actionable button', async () => {
+    const f = fixture(() => true)
+    f.native.answerApproval.mockRejectedValue(new Error('lost acknowledgement'))
+    f.emit(request)
+    await vi.waitFor(() => expect(f.cards).toHaveLength(1))
+    expect(JSON.stringify(f.cards[0])).toContain('提交结果未知')
+    expect(JSON.stringify(f.cards[0])).not.toContain('批准这一次')
+    f.emit(request)
+    expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
+    f.emit({ event: 'resolved', reference: 'request' })
+    await vi.waitFor(() => expect(JSON.stringify(f.updates.at(-1))).toContain('已处理'))
+    f.approvals.dispose()
+  })
+
+  it('does not turn a native confirmation preceding notification into a new pending request', async () => {
+    const f = fixture()
+    f.emit({ event: 'resolved', reference: 'request' })
+    f.emit(request)
+    await Promise.resolve()
+    expect(f.cards).toHaveLength(0)
+    expect(f.native.answerApproval).not.toHaveBeenCalled()
+    f.approvals.dispose()
+  })
   it('waits for the initial native binding; authenticates the actor and exact card, then preserves terminal confirmation', async () => {
     const f = fixture()
     f.bindings([])

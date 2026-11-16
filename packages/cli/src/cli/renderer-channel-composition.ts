@@ -3,6 +3,7 @@ import { HostServiceConfigNarrowApi } from '../launcher/service-config.js'
 import { createChannelHostServiceConfigContract } from '../launcher/channel-service.js'
 import { createChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import { createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
+import { ChannelConversationManagement } from '../launcher/channel-conversation-management.js'
 import { configuredChannelManager } from '../launcher/channel-connection-configuration.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
 import type { ChannelConversationConsumer } from '../launcher/channel-conversation-consumer.js'
@@ -152,6 +153,7 @@ export function createChannelLaunchBridges(input: {
   const actions = channel.actionsBridgeToken !== undefined
     ? createChannelActionsBridgeHandler({
       token: channel.actionsBridgeToken,
+      conversations: new ChannelConversationManagement(() => channel.service?.conversationAccess(), input.consumer),
       api: channel.service
         ? configuredChannelManager({
           service: channel.service,

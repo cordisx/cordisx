@@ -18,6 +18,26 @@ function fixture() {
   return { control, controlCall, events, writes }
 }
 describe('exact native approval and execution bridge', () => {
+  it('forwards creation effort and safe nested thread observations without credential fields', async () => {
+    const f = fixture()
+    await f.control.prepare('thread/start', { config: { model_reasoning_effort: 'high', api_key: 'fixture-secret' } })
+    expect(f.controlCall.mock.calls[0]?.[1]).toMatchObject({ params: { config: { model_reasoning_effort: 'high' } } })
+    expect(JSON.stringify(f.controlCall.mock.calls)).not.toContain('fixture-secret')
+    await f.control.complete('capture', true, {
+      thread: {
+        id: 'chat',
+        modelProvider: 'provider',
+        model: 'model',
+        reasoningEffort: 'high',
+        apiKey: 'fixture-secret',
+      },
+    })
+    expect(f.controlCall.mock.calls[1]?.[1]).toMatchObject({
+      result: { thread: { id: 'chat', modelProvider: 'provider', model: 'model', reasoningEffort: 'high' } },
+    })
+    expect(JSON.stringify(f.controlCall.mock.calls)).not.toContain('fixture-secret')
+    f.control.dispose()
+  })
   it('matches every native identity, suppresses desktop duplicates, and resolves only on native confirmation', async () => {
     const f = fixture()
     f.control.received({ id: 7, method: 'item/commandExecution/requestApproval', params })

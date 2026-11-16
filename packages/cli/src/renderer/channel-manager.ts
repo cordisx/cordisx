@@ -1,3 +1,11 @@
+import {
+  originalService,
+  projectionFor,
+  registerChannelManagerState,
+  registerChannelServiceFacade,
+  serviceOwnerFor,
+  stateFor,
+} from './channel-manager-state.js'
 import { type Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import type {
   ChannelManagerLogExportResultV2,
@@ -18,6 +26,12 @@ import type {
 } from '@cordisx/protocol/channel-manager/v7'
 import type { ChannelManagerV8 } from '@cordisx/protocol/channel-manager/v8'
 import type { ChannelManagerBindingPageV2, ChannelManagerV9 } from '@cordisx/protocol/channel-manager/v9'
+import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
+import type { ChannelManagerV12, ChannelSettingsFormSectionV2 } from '@cordisx/protocol/channel-manager/v12'
+import { ChannelSettingsWorkflow } from './channel-settings-workflow.js'
+import { ChannelTaskSettingsWorkflow } from './channel-task-settings-workflow.js'
+import { registerChannelSettingsDestination } from './channel-settings-destination.js'
+import { ChannelConversationWorkflow } from './channel-conversation-workflow.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import {
   channelConnectionFormSnapshot,
@@ -26,14 +40,13 @@ import {
 } from './channel-connection-form-mount.js'
 import { mutateChannelConnectionConfiguration } from './channel-connection-configuration.js'
 import { managedConsoleSeatFor } from './managed-console-seats.js'
-import type { RegisteredServiceCapabilityOwner } from '../service-capability-ownership.js'
 import { ChannelPolicyWorkflow } from './channel-policy-workflow.js'
 import type {
   HostServiceConfigDescriptor,
   HostServiceConfigMutation,
   HostServiceConfigMutationResult,
 } from '../launcher/service-config.js'
-import type { ChannelManagerActionResult, ChannelManagerRuntimeProjection } from '../launcher/channel-manager-api.js'
+import type { ChannelManagerActionResult } from '../launcher/channel-manager-api.js'
 import { ChannelCredentialWorkflow } from './channel-credential-workflow.js'
 import { captureChannelCredential } from './channel-credential-prompt.js'
 import type { ChannelCredentialDraftResult, ChannelCredentialRef } from '../launcher/channel-credential-drafts.js'
@@ -61,28 +74,6 @@ export type {
   ChannelProductStatus,
 } from './channel-manager-projection.js'
 
-const CORDIS_ORIGINAL = Symbol.for('cordis.original')
-interface ChannelManagerState {
-  projection: ChannelManagerProjectionV1
-  readonly credentialRequest?: ChannelManagerServiceInput['credentialRequest']
-  readonly broker?: PermissionBroker
-  credentials?: ChannelCredentialWorkflow
-  policy?: ChannelPolicyWorkflow
-  execution?: ChannelExecutionWorkflow
-  readonly lifetime: AbortController
-  readonly serviceConfig?: ChannelManagerServiceConfigApi
-  readonly createCredentialedConnection?: ChannelManagerServiceInput['createCredentialedConnection']
-  readonly actions?: ChannelManagerServiceInput['actions']
-  readonly localConnections: ChannelManagerConnectionProjection[]
-  readonly listeners: Set<() => void>
-  runtimeProjection?: ChannelManagerRuntimeProjection
-  cachedProjection: ChannelManagerProjectionV1 | undefined
-  publicController?: PublicChannelManagerController
-  refreshSequence: number
-  disposed: boolean
-  readonly isCurrent: () => boolean
-}
-
 /** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
 export interface ChannelManagerActionsApi {
   run(
@@ -100,57 +91,19 @@ export interface ChannelManagerActionsApi {
       | 'execution-defaults-set'
       | 'execution-settings'
       | 'execution-settings-set'
-      | 'binding-labels',
+      | 'model-list'
+      | 'task-config'
+      | 'task-config-set'
+      | 'task-settings'
+      | 'task-settings-set'
+      | 'binding-labels'
+      | 'conversation-page'
+      | 'conversation-detail'
+      | 'conversation-activity'
+      | 'conversation-bindings'
+      | 'binding-navigation',
     input: Record<string, unknown>,
   ): Promise<ChannelManagerActionResult>
-}
-
-const projections = new WeakMap<object, ChannelManagerState>()
-interface OwnedServiceFacade {
-  readonly owner: RegisteredServiceCapabilityOwner
-  readonly lifetime: AbortSignal
-}
-const ownedFacades = new WeakMap<object, OwnedServiceFacade>()
-
-function originalService(service: object): object {
-  const seen = new Set<object>()
-  let current = service
-  while (!seen.has(current)) {
-    seen.add(current)
-    const original = (current as { [CORDIS_ORIGINAL]?: object })[CORDIS_ORIGINAL]
-    if (original === undefined || original === current) return current
-    current = original
-  }
-  throw new Error('Invalid Cordis service trace')
-}
-
-function serviceOwnerFor(service: object): OwnedServiceFacade | undefined {
-  let current: object | null = originalService(service)
-  while (current !== null) {
-    const owner = ownedFacades.get(current)
-    if (owner !== undefined) return owner
-    current = Object.getPrototypeOf(current) as object | null
-  }
-  return undefined
-}
-
-function stateFor(service: object): ChannelManagerState {
-  let candidate: object | null = originalService(service)
-  while (candidate !== null) {
-    const state = projections.get(candidate)
-    if (state !== undefined) return state
-    candidate = Object.getPrototypeOf(candidate) as object | null
-  }
-  throw new Error('CordisX Channel Manager is detached from its Host projection')
-}
-
-function projectionFor(service: object): ChannelManagerProjectionV1 {
-  const state = stateFor(service)
-  const projection = state.localConnections.length === 0 ? state.projection : normalizeProjection({
-    ...state.projection,
-    connections: [...state.projection.connections, ...state.localConnections],
-  })
-  return withRuntimeProjection(projection, state.runtimeProjection)
 }
 
 export interface ChannelManagerServiceConfigApi {
@@ -159,6 +112,7 @@ export interface ChannelManagerServiceConfigApi {
 }
 
 export interface ChannelManagerServiceInput {
+  readonly navigateConversation?: (sessionId: string) => Promise<void> | void
   readonly profileId?: string
   readonly hostGeneration?: string
   readonly projection?: ChannelManagerProjectionV1
@@ -180,14 +134,14 @@ export interface ChannelManagerServiceInput {
 }
 
 /** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
-export class CordisXChannelManagerService extends Service implements ChannelManagerV9 {
+export class CordisXChannelManagerService extends Service implements ChannelManagerV12 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
     const wrapped = 'projection' in candidate || 'serviceConfig' in candidate || 'credentialRequest' in candidate
       ? candidate as ChannelManagerServiceInput
       : { projection: candidate as ChannelManagerProjectionV1 }
-    projections.set(this, {
+    registerChannelManagerState(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.credentialRequest === undefined ? {} : { credentialRequest: wrapped.credentialRequest }),
       ...(wrapped.broker === undefined ? {} : { broker: wrapped.broker }),
@@ -202,6 +156,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       refreshSequence: 0,
       lifetime: new AbortController(),
       disposed: false,
+      settings: new ChannelSettingsWorkflow(),
       isCurrent: wrapped.isCurrent ?? (() => true),
     })
     const state = stateFor(this)
@@ -224,6 +179,12 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       })
     }
     if (wrapped.document && wrapped.actions) {
+      state.tasks = new ChannelTaskSettingsWorkflow({
+        document: wrapped.document,
+        lifetime: state.lifetime.signal,
+        live: () => !state.disposed && state.isCurrent(),
+        run: (action, request) => wrapped.actions!.run(action, request),
+      })
       state.execution = new ChannelExecutionWorkflow({
         document: wrapped.document,
         profileId: wrapped.profileId ?? 'default',
@@ -251,11 +212,25 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       actionsAvailable: () => stateFor(this).actions !== undefined,
       runAction: async (action, value) => await this.runAction(action, value),
     })
+    if (wrapped.actions) {
+      state.conversations = new ChannelConversationWorkflow({
+        profileId: wrapped.profileId ?? 'default',
+        hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
+        controller: state.publicController,
+        actions: wrapped.actions,
+        caller: 'detached',
+        live: () => false,
+        authorize: async () => false,
+        ...(wrapped.navigateConversation === undefined ? {} : { navigate: wrapped.navigateConversation }),
+      })
+    }
     ctx.effect(() => () => {
       const state = stateFor(this)
       state.disposed = true
       state.lifetime.abort()
       state.credentials?.dispose()
+      state.conversations?.dispose()
+      state.settings.clear()
       state.refreshSequence += 1
       delete state.runtimeProjection
       state.listeners.clear()
@@ -287,7 +262,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     Object.defineProperty(facade, 'ctx', { value: this.ctx, configurable: true })
     const lifetime = new AbortController()
     this.ctx.effect(() => () => lifetime.abort(), 'channelManager owned service lifetime')
-    ownedFacades.set(facade, { owner, lifetime: lifetime.signal })
+    registerChannelServiceFacade(facade, owner, lifetime.signal)
     // Cordis tracing carries the actual caller into every inherited method. A
     // borrowed facade never becomes a bearer grant for a different plugin.
     return facade
@@ -335,6 +310,91 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     return this.forOwnService() as ChannelManagerV9 | undefined
   }
 
+  forOwnConversationService(): ChannelManagerV10 | undefined {
+    return this.forOwnService() as ChannelManagerV10 | undefined
+  }
+  forOwnSettingsService(): ChannelManagerV12 | undefined {
+    return this.forOwnService() as ChannelManagerV12 | undefined
+  }
+
+  async mountSettingsForm(
+    section: ChannelSettingsFormSectionV2,
+    target: HTMLElement,
+    options: ChannelManagerFormOptionsV1,
+  ) {
+    const owner = ownerFromContext(this.ctx), state = stateFor(this)
+    if (
+      !['new-chats', 'messages', 'permissions', 'organization', 'task-models'].includes(section)
+      || !managedConsoleSeatFor(target, owner) || options.signal.aborted
+      || !await this.authorizeChannel('channel.bindings.read')
+    ) return { status: 'unavailable' as const, code: 'HOST_FORM_UNAVAILABLE' }
+    const caller = this.operationOwner()
+    return state.settings.mount({
+      ctx: this.ctx,
+      caller,
+      pageOwner: owner,
+      section,
+      target,
+      options,
+      ...(state.policy === undefined ? {} : { policy: state.policy }),
+      ...(state.execution === undefined ? {} : { execution: state.execution }),
+      ...(state.tasks === undefined ? {} : { tasks: state.tasks }),
+      live: () => this.operationLive() && this.ownedReadAllowed(),
+      authorizeWrite: () => this.authorizeChannel('channel.bindings.write'),
+    })
+  }
+
+  registerChatCreationSettingsDestination(reference: { readonly id: string }): { dispose(): void } | undefined {
+    const state = stateFor(this),
+      owner = ownerFromContext(this.ctx),
+      source = sourceFromContext(this.ctx),
+      facade = serviceOwnerFor(this)
+    if (
+      !reference || typeof reference.id !== 'string' || Object.keys(reference).some(key => key !== 'id')
+      || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(reference.id) || !facade || !source || !this.operationLive()
+      || !this.ownedReadAllowed()
+    ) return undefined
+    const document = state.policy?.document
+    if (!document) return undefined
+    const routeService = this.ctx.routes as {
+      registry?: { managerContentRoute(owner: string, reference: { id: string }): { state: string } }
+    } | undefined
+    const remove = registerChannelSettingsDestination(document, {
+      owner,
+      source,
+      routeId: reference.id,
+      live: () =>
+        this.operationLive() && this.ownedReadAllowed()
+        && routeService?.registry?.managerContentRoute(owner, reference).state === 'available',
+    })
+    const dispose = this.ctx.effect(() => remove, 'channelManager own settings destination')
+    return { dispose }
+  }
+  conversationPage(request: Parameters<ChannelManagerV10['conversationPage']>[0], signal: AbortSignal) {
+    return this.conversationWorkflow().page(request, signal)
+  }
+  conversationDetail(token: string, signal: AbortSignal) {
+    return this.conversationWorkflow().detail(token, signal)
+  }
+  conversationActivity(request: Parameters<ChannelManagerV10['conversationActivity']>[0], signal: AbortSignal) {
+    return this.conversationWorkflow().activity(request, signal)
+  }
+  conversationBindings(request: Parameters<ChannelManagerV10['conversationBindings']>[0], signal: AbortSignal) {
+    return this.conversationWorkflow().bindings(request, signal)
+  }
+  openBindingConversation(token: string, signal: AbortSignal) {
+    return this.conversationWorkflow().openBinding(token, signal)
+  }
+  private conversationWorkflow() {
+    const workflow = stateFor(this).conversations
+    if (!workflow || !this.operationLive()) throw new Error('CHANNEL_CONVERSATIONS_UNAVAILABLE')
+    return workflow.forCaller({
+      caller: this.operationOwner(),
+      live: () => this.operationLive() && this.ownedReadAllowed(),
+      authorize: (capability, requested) => this.authorizeChannel(capability, requested),
+    })
+  }
+
   async conversationWorkflowPolicy(signal: AbortSignal) {
     if (!await this.authorizeChannel('channel.bindings.read')) throw new Error('PERMISSION_DENIED')
     const policy = stateFor(this).policy
@@ -377,6 +437,29 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   mountBindingExecutionForm(bindingToken: string, target: HTMLElement, options: ChannelManagerFormOptionsV1) {
     return this.mountExecutionForm(bindingToken, target, options)
+  }
+  async mountBindingModelForm(
+    bindingToken: string,
+    target: HTMLElement,
+    options: ChannelManagerFormOptionsV1,
+  ): Promise<ChannelManagerFormMountResultV1> {
+    const owner = ownerFromContext(this.ctx),
+      state = stateFor(this),
+      binding = state.publicController!.bindingTarget(bindingToken)
+    if (
+      !binding || !state.tasks || !managedConsoleSeatFor(target, owner) || options.signal.aborted
+      || !await this.authorizeChannel('channel.bindings.read')
+    ) return { status: 'unavailable', code: 'TARGET_UNAVAILABLE' }
+    return state.tasks.mount({
+      target,
+      owner,
+      options,
+      sessionId: binding.session.remoteSessionId,
+      live: () =>
+        this.operationLive() && this.ownedReadAllowed()
+        && state.publicController!.bindingTarget(bindingToken)?.bindingId === binding.bindingId,
+      authorize: () => this.authorizeChannel('channel.bindings.write'),
+    })
   }
 
   private async mountExecutionForm(
@@ -723,7 +806,8 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       | 'channel.accounts.read'
       | 'channel.accounts.connect'
       | 'channel.bindings.read'
-      | 'channel.bindings.write',
+      | 'channel.bindings.write'
+      | 'channel.events.subscribe',
     requested: RequestedScope = {},
   ): Promise<boolean> {
     const state = stateFor(this)
@@ -749,7 +833,8 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       | 'channel.accounts.read'
       | 'channel.accounts.connect'
       | 'channel.bindings.read'
-      | 'channel.bindings.write',
+      | 'channel.bindings.write'
+      | 'channel.events.subscribe',
     requested: RequestedScope = {},
   ): boolean {
     const facade = serviceOwnerFor(this), state = stateFor(this)

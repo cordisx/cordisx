@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  RadioGroup,
   Select,
   Slider,
   Switch,
@@ -26,13 +25,21 @@ import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps } from './ArrayEditor.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
+import { HostIcon } from './HostIcon.js'
+import {
+  HOST_RADIO_CHOICE_STYLES,
+  type HostFormChoiceIcons,
+  type HostFormChoiceLabels,
+  HostRadioChoices,
+} from './HostRadioChoices.js'
+import type { SemanticIconKey } from '../../icon-theme-contracts.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
 export { hostFormValidationIssueText } from './HostFormValidation.js'
 
 import { HOST_FORM_PAGE_STYLES } from './HostFormPages.styles.js'
 
-export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
+export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + HOST_RADIO_CHOICE_STYLES + String.raw`
   .cxf-react-form { --cxf-field-padding-block: 14px; --cxf-field-title-line-height: 24px; --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
@@ -172,6 +179,9 @@ function Control({
   controlId,
   locale,
   transientSecret,
+  choiceIcons,
+  choiceLabels,
+  nestedChoiceLabels,
   renderArrayItemSupplement,
 }: {
   readonly field: CordisXConfigFieldSnapshot
@@ -181,6 +191,9 @@ function Control({
   readonly controlId?: string
   readonly locale: string
   readonly transientSecret?: boolean
+  readonly choiceIcons?: HostFormChoiceIcons
+  readonly choiceLabels?: HostFormChoiceLabels
+  readonly nestedChoiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
   readonly renderArrayItemSupplement?: ArrayEditorProps['renderItemSupplement']
 }) {
   // TDesign values exclude null. Stable option keys preserve every JSON scalar,
@@ -203,7 +216,13 @@ function Control({
         onChange={onChange}
         locale={locale}
         validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)}
-        renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />}
+        renderFieldRow={props => (
+          <ArrayItemFieldRow
+            {...props}
+            locale={locale}
+            {...(nestedChoiceLabels === undefined ? {} : { choiceLabels: nestedChoiceLabels })}
+          />
+        )}
         {...(renderArrayItemSupplement === undefined ? {} : { renderItemSupplement: renderArrayItemSupplement })}
       />
     )
@@ -270,13 +289,12 @@ function Control({
   }
   if (resolved === 'radio') {
     return (
-      <RadioGroup
-        {...(field.presenter?.kind === 'choice.segmented' ? { className: 'cxf-segmented' } : {})}
-        variant={field.presenter?.kind === 'choice.segmented' ? 'primary-filled' : 'default-filled'}
-        value={choiceKey(value)}
-        options={choices}
-        disabled={field.disabled}
-        onChange={next => onChange(choiceValue(next))}
+      <HostRadioChoices
+        field={field}
+        value={value}
+        onChange={onChange}
+        {...(choiceIcons === undefined ? {} : { icons: choiceIcons })}
+        {...(choiceLabels === undefined ? {} : { labels: choiceLabels })}
       />
     )
   }
@@ -358,8 +376,12 @@ function Control({
 }
 
 function ArrayItemFieldRow(
-  { field, controlId, issueText, onChange, locale }: ArrayEditorFieldRowRenderProps & { readonly locale: string },
+  { field, controlId, issueText, onChange, locale, choiceLabels }: ArrayEditorFieldRowRenderProps & {
+    readonly locale: string
+    readonly choiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
+  },
 ) {
+  const path = field.path.filter((_, index) => index % 2 === 0).join('.')
   return (
     <HostFieldRow
       field={field}
@@ -370,6 +392,8 @@ function ArrayItemFieldRow(
       controlId={controlId}
       {...(issueText === undefined ? {} : { issueText })}
       fieldActions="static"
+      {...(choiceLabels?.[path] === undefined ? {} : { choiceLabels: choiceLabels[path] })}
+      {...(choiceLabels === undefined ? {} : { nestedChoiceLabels: choiceLabels })}
       onChange={onChange}
     />
   )
@@ -455,7 +479,7 @@ function ConfigControl({ model, pluginId, field, blocked, value, resolved, onCha
 }
 
 type FieldLabelProps =
-  & { readonly field: CordisXConfigFieldSnapshot; readonly labelId: string }
+  & { readonly field: CordisXConfigFieldSnapshot; readonly labelId: string; readonly iconOverride?: SemanticIconKey }
   & (
     | { readonly mode: 'static' }
     | {
@@ -473,18 +497,24 @@ function FieldLabel(props: FieldLabelProps) {
   if (props.mode === 'static') {
     return (
       <span className="cxf-field-label">
-        {field.icon === undefined ? null : (
-          <span className="cxf-field-icon" aria-hidden="true">
-            <HostSurfaceIcon token={field.icon} />
-          </span>
-        )}
+        {field.icon === undefined && props.iconOverride === undefined
+          ? null
+          : (
+            <span className="cxf-field-icon" aria-hidden="true">
+              {props.iconOverride === undefined
+                ? <HostSurfaceIcon token={field.icon!} />
+                : <HostIcon token={props.iconOverride} />}
+            </span>
+          )}
         <span id={props.labelId} className="cxf-field-label-text cxf-label">
           {field.label ?? humanizeFieldName(field.path.at(-1))}
         </span>
       </span>
     )
   }
-  const icon = <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
+  const icon = props.iconOverride === undefined
+    ? <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
+    : <HostIcon token={props.iconOverride} />
   const { changed, locale, onUseDefault, onRollback, onCopyPath } = props
   const options: DropdownOption[] = [
     {
@@ -527,7 +557,7 @@ function FieldLabel(props: FieldLabelProps) {
           aria-label={managerCopy(locale, 'form.field-actions')}
           aria-haspopup="menu"
           data-host-form-action="field-actions"
-          data-host-form-action-icon={field.icon ?? 'host:settings'}
+          data-host-form-action-icon={props.iconOverride ?? field.icon ?? 'host:settings'}
           icon={icon}
         />
       </Dropdown>
@@ -540,6 +570,10 @@ function FieldLabel(props: FieldLabelProps) {
 
 interface HostFieldRowBaseProps {
   readonly field: CordisXConfigFieldSnapshot
+  readonly iconOverride?: SemanticIconKey
+  readonly choiceIcons?: HostFormChoiceIcons
+  readonly choiceLabels?: HostFormChoiceLabels
+  readonly nestedChoiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
   readonly value: unknown
   readonly changed: boolean
   readonly locale: string
@@ -629,11 +663,19 @@ export function HostFieldRow(props: HostFieldRowProps) {
     >
       <div className="cxf-label-row" id={labelId}>
         {props.fieldActions === 'static'
-          ? <FieldLabel field={controlField} labelId={`${labelId}-text`} mode="static" />
+          ? (
+            <FieldLabel
+              field={controlField}
+              labelId={`${labelId}-text`}
+              mode="static"
+              {...(props.iconOverride === undefined ? {} : { iconOverride: props.iconOverride })}
+            />
+          )
           : (
             <FieldLabel
               field={controlField}
               labelId={`${labelId}-text`}
+              {...(props.iconOverride === undefined ? {} : { iconOverride: props.iconOverride })}
               mode="menu"
               changed={changed}
               locale={locale}
@@ -674,6 +716,9 @@ export function HostFieldRow(props: HostFieldRowProps) {
               onChange={onChange}
               controlId={resolvedControlId}
               locale={locale}
+              {...(props.choiceIcons === undefined ? {} : { choiceIcons: props.choiceIcons })}
+              {...(props.choiceLabels === undefined ? {} : { choiceLabels: props.choiceLabels })}
+              {...(props.nestedChoiceLabels === undefined ? {} : { nestedChoiceLabels: props.nestedChoiceLabels })}
               {...(transientSecret === undefined ? {} : { transientSecret })}
               {...(renderArrayItemSupplement === undefined ? {} : { renderArrayItemSupplement })}
             />

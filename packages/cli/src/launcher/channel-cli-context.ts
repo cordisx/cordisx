@@ -15,22 +15,25 @@ export function configuredChannelCliContext(home: string, profile: string): Chan
 const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
 /** Only executable/configuration paths and a profile identifier are exposed; no credential or RPC token. */
-export function channelCliSendInstructions(context: ChannelNativeCliContext | undefined): readonly string[] {
+export function channelCliSendInstructions(
+  context: ChannelNativeCliContext | undefined,
+  token?: string,
+): readonly string[] {
   if (!context) {
     return [
       'Use the configured Channel CLI to send messages. If its runtime scope is unavailable, report that locally; do not forward your final answer.',
     ]
   }
   const prefix = `env CORDISX_HOME=${quote(context.home)} ${quote(context.node)} ${quote(context.entry)} channel`
+  const scope = `--profile ${quote(context.profile)}${token ? ` --context ${quote(token)}` : ''}`
   return [
-    `Read the installed Channel manual with ${prefix} docs --profile ${
-      quote(context.profile)
-    } --input '{"pluginId":"channel","id":"usage"}'. Use help <operation> for exact arguments.`,
-    `Use this exact running Host CLI: ${prefix} send --profile ${quote(context.profile)} --input '<JSON>'.`,
+    `Read the installed Channel manual with ${prefix} docs ${scope} --input '{"pluginId":"channel","id":"usage"}'. Use help <operation> for exact arguments.`,
+    `Use this exact running Host CLI: ${prefix} send ${scope} --input '<JSON>'.`,
     'The send JSON is {account:{adapterId,accountId,tenantId},target:{id,kind,replyMode,replyTo?},text,operationId}.',
     'Use the incoming source account and conversation identifiers below for a reply; do not guess another account or destination.',
     'Choose target.replyMode per send: conversation posts in the main stream; reply quotes replyTo; thread replies in a topic. Reply/thread require the source messageId as replyTo.',
     'For multiple destinations use send-many with targets. Choose one stable operationId per explicit send and read receipt after uncertainty; never blindly resend.',
     'Pass JSON through proper shell quoting or spawn argument arrays. The CLI reuses this runtime connection and credentials; do not start another service or ask for keys.',
+    'Keep --context for all operations: it identifies this real incoming message. It does not grant additional account, destination or configuration permissions.',
   ]
 }

@@ -18,9 +18,10 @@ export function createChannelActionsBridgeHandler(
   input: {
     readonly token: string
     readonly api: ChannelManagerApi
+    readonly conversations?: import('./channel-conversation-management.js').ChannelConversationManagement
     readonly consumer?: Pick<
       ChannelConversationConsumer,
-      'policy' | 'policySet' | 'executionOperation' | 'bindingLabels'
+      'policy' | 'policySet' | 'executionOperation' | 'bindingLabels' | 'taskSettings'
     >
     readonly execution?: (
       operation: string,
@@ -36,6 +37,46 @@ export function createChannelActionsBridgeHandler(
       const action = request.action
       const generation = typeof request.generation === 'string' ? request.generation : undefined
       if (typeof action !== 'string') throw new Error('invalid channel action')
+      if (['model-list', 'task-config', 'task-config-set', 'task-settings', 'task-settings-set'].includes(action)) {
+        if (!input.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        const { version: _version, token: _token, requestId: _id, action: _action, generation: _generation, ...args } =
+          request
+        try {
+          const value = await input.consumer.taskSettings.call(action, args) as { status: string; code?: string }
+          return value.status === 'ok'
+            ? { status: 'applied', task: value }
+            : { status: 'unavailable', code: value.code ?? 'TASK_SETTINGS_UNAVAILABLE' }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'TASK_SETTINGS_UNAVAILABLE',
+          }
+        }
+      }
+      if (
+        [
+          'conversation-page',
+          'conversation-detail',
+          'conversation-activity',
+          'conversation-bindings',
+          'binding-navigation',
+        ].includes(action)
+      ) {
+        if (!input.conversations) return { status: 'unavailable', code: 'CHANNEL_CONVERSATIONS_UNAVAILABLE' }
+        const { version: _version, token: _token, requestId: _id, action: _action, ...args } = request
+        try {
+          return { status: 'applied', ...await input.conversations.read(action, args) }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'CHANNEL_CONVERSATIONS_UNAVAILABLE',
+          }
+        }
+      }
       if (
         [
           'execution-defaults',
