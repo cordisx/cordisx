@@ -1,6 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
 import { resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
-import { managerTitlebarPresentationRight } from './manager-titlebar-presentation.js'
 
 /**
  * Host-private seat for the native full-bleed Settings layout. 26.930 uses the
@@ -148,12 +147,8 @@ export function resolveManagerSettingsTitlebarSeat(document: Document): ManagerS
   ) return undefined
 
   const left = Math.ceil(Math.max(navRect.right, (toggle ?? second).rect.right + 16))
-  const right = Math.floor(managerTitlebarPresentationRight(
-    header,
-    header,
-    [title],
-    Math.min(headerRect.right - 36, titleRect.right),
-  ))
+  // Preserve the native window-edge reservation even when its controls are hidden.
+  const right = Math.floor(Math.min(headerRect.right - 36, titleRect.right))
   if (right - left < 320) return undefined
   const y = headerRect.top + headerRect.height / 2
   for (let x = left + 8; x < right; x += 16) {

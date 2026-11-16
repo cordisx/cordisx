@@ -380,7 +380,7 @@ export function resolveManagerTitlebarSeat(document: Document): {
     })
   if (pageActions.length > 1 || (!endToolbar && endButtons.length > 1)) return undefined
   const native = [...nativeTitle, ...pageActions, ...(endButtons.length > 0 ? [ends[0]!] : [])]
-  const right = managerTitlebarPresentationRight(bar, slot, native, safeRight)
+  const right = managerTitlebarPresentationRight(bar, slot, pageActions, safeRight, endRect.left)
   return {
     slot,
     native,

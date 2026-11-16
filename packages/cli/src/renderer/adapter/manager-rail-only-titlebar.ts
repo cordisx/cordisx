@@ -1,6 +1,5 @@
 import { isRetainedInactiveNativePage } from '../host-probes.js'
 import { resolveNativeViewportTitlebarOwner } from './native-viewport-titlebar.js'
-import { managerTitlebarPresentationRight } from './manager-titlebar-presentation.js'
 
 /** Host-private 26.924 probe for destinations with a rail and no native sidebar. */
 export interface ManagerRailOnlyTitlebarSeat {
@@ -111,12 +110,7 @@ export function resolveManagerRailOnlyTitlebarSeat(document: Document): ManagerR
   if (first === undefined || second === undefined || first.rect.right > second.rect.left + 2) return undefined
 
   const left = Math.ceil(Math.max(startRect.right, second.rect.right + 16))
-  const right = Math.floor(managerTitlebarPresentationRight(
-    header,
-    header,
-    [title],
-    Math.min(headerRect.right - 36, endRect.left),
-  ))
+  const right = Math.floor(Math.min(headerRect.right - 36, endRect.left))
   if (right - left < 320) return undefined
   // The native strip must remain click-through outside its two buttons. A new
   // interactive native control in this span invalidates the Host seat.
