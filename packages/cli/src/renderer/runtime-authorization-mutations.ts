@@ -382,28 +382,7 @@ export const createRuntimeAuthorizePluginV2 = (
     )
   })
 
-export const createRuntimeAuthorizePluginV4 = (
-  runtimeScope: RuntimeClosureScope,
-  id: string,
-  decision: CordisXPermissionAuthorizationDecisionV4,
-): Promise<void> =>
-  runtimeScope.authorizePluginWith()!(id, async (controller) => {
-    if (
-      controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6
-      && controller.manifest.schemaVersion !== 7 && controller.manifest.schemaVersion !== 8
-      && controller.manifest.schemaVersion !== 9
-      && (controller.manifest.schemaVersion !== 10 && controller.manifest.schemaVersion !== 11
-        && controller.manifest.schemaVersion !== 12 && controller.manifest.schemaVersion !== 13)
-    ) {
-      throw new Error(`plugin ${id} does not use permission v4`)
-    }
-    await runtimeScope.broker()!.authorizeActivationV4(
-      controller.identity,
-      decision,
-      'enable',
-      controller.generationView,
-    )
-  })
+export { createRuntimeAuthorizePluginV4 } from './runtime-activation-review.js'
 
 export const createRuntimeCandidateController = (
   runtimeScope: RuntimeClosureScope,
@@ -493,7 +472,16 @@ export const createRuntimeCandidateController = (
       : existing!.item.readme === undefined
       ? {}
       : { readme: existing!.item.readme }),
-    ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
+    ...(replacesTarget
+      ? replacementPackage!.readmes === undefined ? {} : { readmes: replacementPackage!.readmes }
+      : existing!.item.readmes === undefined
+      ? {}
+      : { readmes: existing!.item.readmes }),
+    ...(replacesTarget
+      ? replacementPackage!.documents === undefined ? {} : { documents: replacementPackage!.documents }
+      : existing!.item.documents === undefined
+      ? {}
+      : { documents: existing!.item.documents }),
   }
   const controller = createController(item, runtimeScope.pluginConsole()!)
   if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
@@ -507,7 +495,8 @@ export const createRuntimeCandidateController = (
       || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
       || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
       || (controller.manifest.schemaVersion === 10 || controller.manifest.schemaVersion === 11
-        || controller.manifest.schemaVersion === 12 || controller.manifest.schemaVersion === 13))
+        || controller.manifest.schemaVersion === 12 || controller.manifest.schemaVersion === 13
+        || controller.manifest.schemaVersion === 16))
     && controller.manifest.services.length > 0
   ) {
     throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
@@ -707,7 +696,8 @@ export const createRuntimeStagePluginMutation = (
               && (candidate.controller.manifest.schemaVersion !== 10
                 && candidate.controller.manifest.schemaVersion !== 11
                 && candidate.controller.manifest.schemaVersion !== 12
-                && candidate.controller.manifest.schemaVersion !== 13)
+                && candidate.controller.manifest.schemaVersion !== 13
+                && candidate.controller.manifest.schemaVersion !== 16)
             ) {
               throw new Error(
                 'permission v4 decision requires manifest-v5, manifest-v6, manifest-v7 through manifest-v12',

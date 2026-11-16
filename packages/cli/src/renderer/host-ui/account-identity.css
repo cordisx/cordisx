@@ -1,0 +1,46 @@
+.cxr-account-identity {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+}
+.cxr-account-identity-platform {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 8px;
+}
+.cxr-account-identity-platform > .cordisx-host-icon {
+  width: 100%;
+  height: 100%;
+}
+.cxr-account-identity img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cxr-account-identity-avatar {
+  border-radius: 50%;
+}
+.cxr-account-identity-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  box-sizing: border-box;
+  overflow: hidden;
+  place-items: center;
+  border: 2px solid var(--cx-surface-raised);
+  border-radius: 50%;
+  background: var(--cx-surface-raised);
+}
+.cxr-account-identity-badge > .cordisx-host-icon {
+  width: 13px;
+  height: 13px;
+}

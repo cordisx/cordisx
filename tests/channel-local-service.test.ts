@@ -39,7 +39,10 @@ describe('built-in local Channel service', () => {
     })
     expect(restarted.generation).toMatch(/^channel-local-/)
     await restarted.finalize()
-    expect(service.snapshot()?.accounts).toEqual([])
+    expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
+      adapterKind: 'simulator',
+      connectionState: 'stopped',
+    })])
     await service.dispose()
   })
 
@@ -56,7 +59,7 @@ describe('built-in local Channel service', () => {
 
     const disabled = await service.manager.connections.disable({ ref, generation: firstGeneration })
     expect(disabled.status).toBe('applied')
-    expect(disabled.projection?.accounts).toEqual([])
+    expect(disabled.projection?.accounts).toEqual([expect.objectContaining({ ref, connectionState: 'stopped' })])
 
     const enabled = await service.manager.connections.enable({ ref, generation: disabled.generation })
     expect(enabled.status).toBe('applied')
@@ -93,7 +96,10 @@ describe('built-in local Channel service', () => {
         enabled: false,
       }],
     })
-    expect(service.snapshot()?.accounts).toEqual([])
+    expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
+      adapterKind: 'simulator',
+      connectionState: 'stopped',
+    })])
     await restarted.rollback()
     expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
       adapterKind: 'simulator',

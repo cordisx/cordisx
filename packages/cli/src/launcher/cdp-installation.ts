@@ -1,6 +1,7 @@
 import type { StartupCdpTransport } from './startup-cdp-transport.js'
 import type { CdpTargetRetirementObserver } from './cdp-target-retirement.js'
 import { installRuntimeBindings } from './cdp-runtime-bindings.js'
+import { waitForInitialDocument } from './cdp-document-ready.js'
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isWalletSpendRequest } from './wallet-spend-authority.js'
@@ -126,6 +127,13 @@ export async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    // An ordinary cold launch can expose its target before the initial document
+    // becomes responsive. Drain that read-only readiness probe under the existing
+    // injection budget before issuing bindings with their shorter RPC deadlines.
+    // A held startup seed must keep its bindings until activateDocument releases it.
+    if (loopbackModules && activateDocument === undefined) {
+      await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
+    }
     if (nativeSubmission !== undefined) nativeChannel = await nativeSubmission.authority.install(session, target)
     if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
@@ -452,8 +460,15 @@ export async function install(
       })
     }
     if (credential !== undefined) {
-      removeCredentialBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {
+      const retireDestroyedContext = session.onEvent('Runtime.executionContextDestroyed', params => {
+        if (typeof params.executionContextId === 'number') {
+          void credential.retireDocument?.(`${target.id}:${params.executionContextId}`).catch(() => {})
+        }
+      })
+      const removeCredentialRequest = session.onEvent('Runtime.bindingCalled', (params) => {
         if (params.name !== support.CHANNEL_CREDENTIAL_BINDING || typeof params.payload !== 'string') return
+        const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
+        const documentId = `${target.id}:${executionContextId ?? 'unknown'}`
         void (async () => {
           const payload = params.payload as string
           let requestId = 'invalid'
@@ -464,17 +479,25 @@ export async function install(
             const raw = JSON.parse(payload) as { requestId?: unknown }
             requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
             if (credentialController?.signal.aborted === true) throw new Error('channel credential bridge is closed')
-            const value = await lifecycleRequests.exclusive(async () => await credential.handle(raw))
-            await support.sendChannelCredentialBindingResponse(session, { requestId, ok: true, value })
+            const value = await lifecycleRequests.exclusive(async () => await credential.handle(raw, documentId))
+            await support.sendChannelCredentialBindingResponse(
+              session,
+              { requestId, ok: true, value },
+              executionContextId,
+            )
           } catch {
             await support.sendChannelCredentialBindingResponse(session, {
               requestId,
               ok: false,
               code: 'channel-credential-unavailable',
-            }).catch(() => undefined)
+            }, executionContextId).catch(() => undefined)
           }
         })()
       })
+      removeCredentialBindingListener = () => {
+        removeCredentialRequest()
+        retireDestroyedContext()
+      }
     }
     if (actions !== undefined) {
       removeActionsBindingListener = session.onEvent('Runtime.bindingCalled', (params) => {

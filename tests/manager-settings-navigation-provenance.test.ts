@@ -23,6 +23,30 @@ function registry(): SurfaceRegistry {
 }
 
 describe('Manager Settings navigation provenance', () => {
+  it('lets independent plugins share the external connections category without sharing route identity', () => {
+    const surfaces = registry()
+    for (const owner of ['channel', 'future-connector']) {
+      surfaces.register(owner, {
+        $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
+        schemaVersion: 11,
+        name: 'manager.settings.navigation-items',
+        id: 'connections',
+        group: 'after-settings',
+      }, { route: { id: 'connections' }, navigationGroup: { id: 'external-accounts' } })
+    }
+    const items = surfaces.snapshot()
+    expect(items).toHaveLength(2)
+    expect(items.map(item => item.owner).sort()).toEqual(['channel', 'future-connector'])
+    expect(items.map(item => item.item)).toEqual([
+      { route: { id: 'connections' }, navigationGroup: { id: 'external-accounts' } },
+      { route: { id: 'connections' }, navigationGroup: { id: 'external-accounts' } },
+    ])
+    expect(items.map(item => item.managerSettingsNavigationSurfaceProvenance)).toEqual([
+      { kind: 'versioned', $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11, schemaVersion: 11 },
+      { kind: 'versioned', $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11, schemaVersion: 11 },
+    ])
+  })
+
   it('keeps legacy, exact v9, and exact v11 registrations distinguishable', () => {
     const surfaces = registry()
     surfaces.register('demo', {

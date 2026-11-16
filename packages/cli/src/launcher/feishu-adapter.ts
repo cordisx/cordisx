@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto'
 import {
+  type CardActionEvent,
   createLarkChannel,
   Domain,
   type LarkChannel,
+  type Logger,
   LoggerLevel,
   type NormalizedMessage,
 } from '@larksuiteoapi/node-sdk'
@@ -14,14 +17,22 @@ import type {
   ChannelSendResult,
   ChannelTenantRef,
 } from '@cordisx/channel-runtime'
-import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig } from '@cordisx/channel-runtime'
+import { channelInboxRecordId } from '@cordisx/channel-runtime'
+import type { ChannelServiceConfig, ChannelServiceConnectionConfigV2 } from '@cordisx/channel-runtime'
+import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
+import { feishuProfileHttp } from './feishu-profile-http.js'
+import { createFeishuDiagnostics } from './feishu-diagnostics.js'
+import { FeishuCardActionQueue } from './feishu-card-action-queue.js'
+import { type ChannelCommandAddressing, channelCommandAddressing } from './channel-command-users.js'
 import {
   LauncherSecretResolutionError,
   type LauncherSecretResolverOptions,
   resolveLauncherSecret,
 } from './secret-resolver.js'
 
-type FeishuSdkChannel = Pick<LarkChannel, 'connect' | 'disconnect' | 'on' | 'send'>
+export type FeishuSdkChannel =
+  & Pick<LarkChannel, 'connect' | 'disconnect' | 'on' | 'send'>
+  & Partial<Pick<LarkChannel, 'rawClient' | 'botIdentity' | 'getChatInfo' | 'updateCard'>>
 
 export interface FeishuChannelFactoryOptions {
   readonly appId: string
@@ -29,14 +40,28 @@ export interface FeishuChannelFactoryOptions {
   readonly domain: typeof Domain.Feishu | typeof Domain.Lark
   readonly source: string
   readonly requireMention: boolean
+  readonly onProfile: (profile: FeishuBotProfile) => void
+  readonly logger: Logger
 }
 
 export interface FeishuAdapterOptions {
-  readonly connection: ChannelServiceConnectionConfig
+  readonly connection: ChannelServiceConnectionConfigV2
   readonly configurationRevision: number
   readonly source: string
   readonly resolveSecret?: (reference: string | undefined) => Promise<string>
   readonly createChannel?: (options: FeishuChannelFactoryOptions) => FeishuSdkChannel
+  readonly identities?: ChannelAccountIdentityStore
+  readonly acceptMessage?: (message: NormalizedMessage) => boolean
+  readonly readConnection?: () => ChannelServiceConnectionConfigV2 | undefined
+  readonly channelConnected?: (ref: ChannelTenantRef, channel: FeishuSdkChannel | undefined) => void
+  readonly onNormalizedInput?: (
+    recordId: string,
+    input: ChannelInboundEnvelope['input'],
+    mentionedBot: boolean,
+    persisted: boolean,
+    addressing: ChannelCommandAddressing,
+  ) => Promise<void>
+  readonly onCardAction?: (ref: ChannelTenantRef, event: CardActionEvent) => Promise<void>
 }
 
 class FeishuAdapterError extends Error {
@@ -50,11 +75,17 @@ function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
   return left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 }
 
+// The official SDK preserves empty root_id/thread_id fields for ordinary messages.
+// Only a nonblank identifier establishes a reply chain, including receive selectors.
+const replyThreadId = (message: NormalizedMessage): string | undefined =>
+  message.rootId?.trim() || message.threadId?.trim() || undefined
+
 function inboundEnvelope(
   message: NormalizedMessage,
-  connection: ChannelServiceConnectionConfig,
+  connection: ChannelServiceConnectionConfigV2,
 ): ChannelInboundEnvelope {
-  const threadId = message.rootId ?? message.threadId ?? message.chatId
+  const replyId = replyThreadId(message)
+  const threadId = replyId ?? message.chatId
   return {
     input: {
       contract: 'cordisx.channel-user-input/v1',
@@ -70,7 +101,7 @@ function inboundEnvelope(
           conversationId: message.chatId,
           kind: message.chatType === 'p2p' ? 'direct' : 'group',
           threadId,
-          semantics: message.rootId === undefined && message.threadId === undefined ? 'conversation' : 'reply-chain',
+          semantics: replyId === undefined ? 'conversation' : message.threadId?.trim() ? 'topic' : 'reply-chain',
           eventId: message.messageId,
           messageId: message.messageId,
           actor: {
@@ -103,9 +134,11 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       appSecret: options.appSecret,
       domain: options.domain,
       source: options.source,
-      loggerLevel: LoggerLevel.warn,
+      loggerLevel: LoggerLevel.debug,
+      logger: options.logger,
       transport: 'websocket',
       policy: { dmMode: 'open', requireMention: options.requireMention },
+      httpInstance: feishuProfileHttp(options.onProfile),
     }))
   return {
     descriptor: {
@@ -119,22 +152,91 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       const secret = await (input.resolveSecret ?? (async reference => await resolveLauncherSecret(reference)))(
         input.connection.secretRef,
       )
+      const observation = createFeishuDiagnostics(input.connection.ref.accountId)
       const channel = create({
         appId: input.connection.ref.accountId,
         appSecret: secret,
         domain: input.connection.adapterKind === 'lark' ? Domain.Lark : Domain.Feishu,
         source: input.source,
         requireMention: false,
+        onProfile: profile => input.identities?.receive(input.connection.ref, profile),
+        logger: observation.logger,
       })
       // Never retain raw event bodies; the normalized text-only envelope is all
       // that crosses into the durable Channel core.
-      const unsubscribe = channel.on('message', async message => {
-        if (message.content.trim().length === 0) return
-        await host.receive(inboundEnvelope(message, input.connection))
-        await host.drainInbound(1)
-      })
-      await channel.connect()
       let stopped = false
+      const cardActions = new FeishuCardActionQueue(
+        async event => {
+          if (!stopped) await input.onCardAction?.(input.connection.ref, event)
+        },
+        (phase, error) => observation.failure(phase, error),
+      )
+      const unsubscribe = channel.on('message', async message => {
+        if (stopped) return
+        observation.message('normalized', message.messageId, {
+          reason: message.chatType,
+          outcome: message.mentionedBot ? 'mentioned' : 'unaddressed',
+        })
+        if (message.content.trim().length === 0 || input.acceptMessage?.(message) === false) {
+          observation.message('filtered', message.messageId, { reason: 'empty-or-accept-filter' })
+          return
+        }
+        const selectors = (input.readConnection?.() ?? input.connection).selectors
+        if (
+          selectors !== undefined && !selectors.includes(message.chatType === 'p2p' ? 'direct' : 'group')
+          && !(selectors.includes('mentions') && message.mentionedBot)
+          && !(selectors.includes('replies') && replyThreadId(message) !== undefined)
+        ) {
+          observation.message('filtered', message.messageId, { reason: 'selectors' })
+          return
+        }
+        const envelope = inboundEnvelope(message, input.connection)
+        const addressing = channelCommandAddressing(message)
+        const event = envelope.input.source.event
+        const recordId = channelInboxRecordId(event)
+        try {
+          // Stage addressing metadata before the transport commit can wake subscribers.
+          // Only a persisted core receipt (or catch-up read) makes it eligible for routing.
+          await input.onNormalizedInput?.(recordId, envelope.input, message.mentionedBot, false, addressing)
+          observation.message('staged', message.messageId)
+          if (stopped) return
+          const receipt = await host.receive(envelope)
+          observation.message('persisted', message.messageId, {
+            verified: receipt.recordId === recordId,
+            outcome: receipt.duplicate ? 'duplicate' : receipt.status,
+          })
+          await input.onNormalizedInput?.(receipt.recordId, envelope.input, message.mentionedBot, true, addressing)
+          await host.drainInbound(1)
+          observation.message('drained', message.messageId)
+        } catch (error) {
+          // SDK handler errors otherwise disappear into a generic safety-pipeline log.
+          // Never log text, raw bodies, URLs, credentials or the original exception.
+          observation.failure('inbound-failed', error)
+        }
+      })
+      const subscriptions = [
+        unsubscribe,
+        channel.on('cardAction', event => cardActions.enqueue(event)),
+        channel.on('reject', value => observation.reject(value.messageId, value.reason)),
+        channel.on('error', error => observation.failure('channel-error', error)),
+        channel.on('reconnecting', () => observation.event('reconnecting')),
+        channel.on('reconnected', () => observation.event('reconnected')),
+      ]
+      const disposeObservation = () => {
+        for (const dispose of subscriptions) dispose()
+        observation.dispose()
+      }
+      try {
+        await channel.connect()
+        observation.event('connected')
+      } catch {
+        stopped = true
+        await cardActions.dispose()
+        disposeObservation()
+        await channel.disconnect().catch(() => undefined)
+        throw new FeishuAdapterError('CONNECTION_UNAVAILABLE')
+      }
+      input.channelConnected?.(input.connection.ref, channel)
       const interval = setInterval(() => {
         void host.drainOutbound(20).catch(() => undefined)
       }, 1_000)
@@ -142,21 +244,44 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       return {
         send: async (delivery: ChannelOutboundDelivery): Promise<ChannelSendResult> => {
           if (!sameTenant(delivery.target, input.connection.ref)) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
-          const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
-            ...(delivery.target.semantics === 'reply-chain'
-              ? { replyTo: delivery.target.threadId, replyInThread: true }
-              : {}),
-          })
+          if (stopped) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+          let messageId: string
+          if (channel.rawClient) {
+            // The existing authenticated SDK supports server-side deduplication.
+            // Reclaiming a delivery uses the same UUID rather than creating a second message.
+            const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
+            const content = JSON.stringify({ text: delivery.text })
+            const response = delivery.target.semantics !== 'conversation'
+              ? await channel.rawClient.im.v1.message.reply({
+                path: { message_id: delivery.target.threadId },
+                data: { msg_type: 'text', content, uuid, reply_in_thread: delivery.target.semantics === 'topic' },
+              })
+              : await channel.rawClient.im.v1.message.create({
+                params: { receive_id_type: delivery.target.conversationId.startsWith('ou_') ? 'open_id' : 'chat_id' },
+                data: { receive_id: delivery.target.conversationId, msg_type: 'text', content, uuid },
+              })
+            if (response.code !== 0 || !response.data?.message_id) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
+            messageId = response.data.message_id
+          } else {
+            const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
+              ...(delivery.target.semantics !== 'conversation'
+                ? { replyTo: delivery.target.threadId, replyInThread: delivery.target.semantics === 'topic' }
+                : {}),
+            })
+            messageId = result.messageId
+          }
           return {
-            externalMessageId: result.messageId,
-            ...(result.messageId.length > 0 ? { recallHandle: result.messageId } : {}),
+            externalMessageId: messageId,
+            ...(messageId.length > 0 ? { recallHandle: messageId } : {}),
           }
         },
         stop: async () => {
           if (stopped) return
           stopped = true
           clearInterval(interval)
-          unsubscribe()
+          await cardActions.dispose()
+          disposeObservation()
+          input.channelConnected?.(input.connection.ref, undefined)
           await channel.disconnect()
         },
       }
@@ -166,11 +291,16 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
 
 /** Narrow adapter constructor used by the launcher; it intentionally never accepts a secret value. */
 export function feishuDefinitionsForConfig(
-  configuration: ChannelServiceConfigV1,
+  configuration: ChannelServiceConfig,
   input: {
     readonly source: string
     readonly configurationRevision: number
     readonly secretResolver?: LauncherSecretResolverOptions
+    readonly identities?: ChannelAccountIdentityStore
+    readonly channelConnected?: FeishuAdapterOptions['channelConnected']
+    readonly onNormalizedInput?: FeishuAdapterOptions['onNormalizedInput']
+    readonly onCardAction?: FeishuAdapterOptions['onCardAction']
+    readonly readConnection?: (ref: ChannelTenantRef) => ChannelServiceConnectionConfigV2 | undefined
   },
 ): readonly ChannelAdapterDefinition[] {
   return configuration.connections
@@ -182,6 +312,11 @@ export function feishuDefinitionsForConfig(
         connection,
         source: input.source,
         configurationRevision: input.configurationRevision,
+        ...(input.identities === undefined ? {} : { identities: input.identities }),
+        ...(input.channelConnected === undefined ? {} : { channelConnected: input.channelConnected }),
+        ...(input.onNormalizedInput === undefined ? {} : { onNormalizedInput: input.onNormalizedInput }),
+        ...(input.onCardAction === undefined ? {} : { onCardAction: input.onCardAction }),
+        ...(input.readConnection === undefined ? {} : { readConnection: () => input.readConnection!(connection.ref) }),
         ...(input.secretResolver === undefined ? {} : {
           resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),
         }),

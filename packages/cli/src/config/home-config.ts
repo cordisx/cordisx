@@ -21,6 +21,7 @@ import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-pr
 import { type JsonValue, jsonValue, parseManagedServiceStartupConfig, PLUGIN_ID, record } from './home-config-values.js'
 import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
 import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from './home-config-model-service.js'
+import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-execution-settings.js'
 
 export type { JsonValue } from './home-config-values.js'
 export type { HomeConfigModelServiceProvider, HomeConfigProviderProtocol } from './home-config-model-service.js'
@@ -117,6 +118,8 @@ export interface HomeConfigCliProxyProvider {
 export type HomeConfigProvider = HomeConfigCliProxyProvider | HomeConfigModelServiceProvider
 export interface HomeConfigProfile {
   readonly displayName: string
+  /** Captured by all new chats in this profile; changing it never rewrites an existing chat. */
+  readonly chatExecution?: ChatExecutionDefaults
   readonly dataMode: HomeDataMode
   /** Launch-scoped default for new native conversation drafts. */
   readonly defaultModelProvider?: string
@@ -423,6 +426,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'iconTheme',
     'management',
     'managedServiceStartupConfig',
+    'chatExecution',
   ], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
@@ -436,8 +440,10 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
   const management = profile.management === undefined
     ? undefined
     : parseHomeConfigProfileManagement(profile.management, `${label}.management`)
+  const chatExecution = parseChatExecutionDefaults(profile.chatExecution)
   return {
     displayName,
+    ...(chatExecution === undefined ? {} : { chatExecution }),
     dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
     ...modelOptions,
     ...(managedProviders.length === 0 ? {} : { managedProviders }),

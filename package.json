@@ -1,6 +1,6 @@
 {
   "name": "cordisx-monorepo",
-  "version": "0.1.0-beta.63",
+  "version": "0.1.0-beta.64",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -103,7 +103,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "0.1.0-beta.12",
+    "@cordisx/protocol": "0.1.0-beta.13",
     "@cordisx/schemastery-ui": "0.1.0-beta.7",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -142,13 +142,14 @@
     "tar": "7.5.22",
     "tdesign-react": "1.18.2",
     "ws": "^8.18.3",
-    "yaml": "2.8.1"
+    "yaml": "2.8.1",
+    "sharp": "0.34.5"
   },
   "optionalDependencies": {
     "fsevents": "~2.3.3"
   },
   "cordisxSources": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#1b6def3a53758e5d2fd93af922d2ed29b2706822",
+    "@cordisx/channel": "github:cordisx/plugin-channel#bf1babca93ae7b8cfc63a87b15585a62ae5f27a7",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
   },
   "devDependencies": {

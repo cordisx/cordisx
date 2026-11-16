@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { normalize, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import type { ChannelAdapterHost, ChannelInboundEnvelope, ChannelOutboundDelivery } from '@cordisx/channel-runtime'
+import { validateInput } from '../packages/channel-runtime/src/runtime-validation.js'
 import { createFeishuAdapterDefinition } from '../packages/cli/src/launcher/feishu-adapter.js'
 import { LauncherSecretResolutionError, resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
 
@@ -24,6 +26,142 @@ describe('launcher private secret resolution', () => {
 })
 
 describe('official Feishu direct-message adapter', () => {
+  it.each([true, false])('preserves main, quoted and topic sends with raw SDK=%s', async raw => {
+    const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_created' } }))
+    const reply = vi.fn(async () => ({ code: 0, data: { message_id: 'om_replied' } }))
+    const send = vi.fn(async () => ({ messageId: 'om_sent' }))
+    const definition = createFeishuAdapterDefinition({
+      connection,
+      configurationRevision: 1,
+      source: 'test',
+      resolveSecret: async () => 'fixture-only',
+      createChannel: () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          on: () => () => {},
+          send,
+          ...(raw ? { rawClient: { im: { v1: { message: { create, reply } } } } } : {}),
+        }) as never,
+    })
+    const active = await definition.start({
+      generation: 1,
+      ref: connection.ref,
+      receive: async () => ({ recordId: 'unused', duplicate: false, status: 'queued' }),
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    })
+    try {
+      for (const semantics of ['conversation', 'reply-chain', 'topic'] as const) {
+        await active.send({
+          deliveryId: 'delivery:' + semantics,
+          target: {
+            ...connection.ref,
+            conversationId: 'oc_group',
+            kind: 'group',
+            threadId: semantics === 'conversation' ? 'oc_group' : 'om_source',
+            semantics,
+          },
+          kind: 'reply',
+          text: 'requested',
+          createdAt: '2026-11-15T00:00:00Z',
+        })
+      }
+      if (raw) {
+        expect(create).toHaveBeenCalledTimes(1)
+        expect(create.mock.calls[0]?.[0]).toMatchObject({ data: { receive_id: 'oc_group' } })
+        expect(reply.mock.calls.map(([input]) => input)).toEqual([
+          expect.objectContaining({
+            path: { message_id: 'om_source' },
+            data: expect.objectContaining({ reply_in_thread: false }),
+          }),
+          expect.objectContaining({
+            path: { message_id: 'om_source' },
+            data: expect.objectContaining({ reply_in_thread: true }),
+          }),
+        ])
+        expect(send).not.toHaveBeenCalled()
+      } else {
+        expect(send.mock.calls.map(([, , options]) => options)).toEqual([
+          {},
+          { replyTo: 'om_source', replyInThread: false },
+          { replyTo: 'om_source', replyInThread: true },
+        ])
+      }
+    } finally {
+      await active.stop('disposed')
+    }
+  })
+  it('accepts SDK empty thread IDs as conversations and preserves real reply chains for receive selectors', async () => {
+    let listener: ((message: NormalizedMessage) => Promise<void>) | undefined
+    let selectors: readonly string[] | undefined
+    const received: ChannelInboundEnvelope[] = []
+    const definition = createFeishuAdapterDefinition({
+      connection,
+      configurationRevision: 1,
+      source: 'test',
+      resolveSecret: async () => 'not-a-real-secret',
+      readConnection: () => ({ ...connection, selectors }) as never,
+      createChannel: () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          on: (_name: 'message', handler: typeof listener) => {
+            if (_name !== 'message') return () => {}
+            listener = handler
+            return () => {
+              listener = undefined
+            }
+          },
+          send: async () => ({ messageId: 'unused' }),
+        }) as never,
+    })
+    const active = await definition.start({
+      generation: 1,
+      ref: connection.ref,
+      receive: async envelope => {
+        validateInput(connection.ref, envelope)
+        received.push(envelope)
+        return { recordId: 'validated', duplicate: false, status: 'queued' }
+      },
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    })
+    try {
+      const message = await normalize({
+        sender: { sender_id: { open_id: 'ou_sender' }, sender_type: 'user', tenant_key: 'tenant-test' },
+        message: {
+          message_id: 'om_test',
+          chat_id: 'oc_test',
+          chat_type: 'group',
+          create_time: '1',
+          message_type: 'text',
+          content: JSON.stringify({ text: 'SDK normalized message' }),
+          root_id: '',
+          thread_id: '',
+        },
+      } as never, { includeRaw: false })
+      expect(message.rootId).toBe('')
+      expect(message.threadId).toBe('')
+      await listener!(message)
+      await listener!({ ...message, rootId: '  ', threadId: '\t' })
+      expect(received.map(value => value.input.source.event)).toEqual([
+        expect.objectContaining({ threadId: 'oc_test', semantics: 'conversation' }),
+        expect.objectContaining({ threadId: 'oc_test', semantics: 'conversation' }),
+      ])
+      selectors = ['replies']
+      await listener!(message)
+      expect(received).toHaveLength(2)
+      await listener!({ ...message, rootId: 'om_reply', threadId: '' })
+      expect(received[2]!.input.source.event).toMatchObject({ threadId: 'om_reply', semantics: 'reply-chain' })
+      await listener!({ ...message, rootId: 'om_topic', threadId: 'omt_topic' })
+      expect(received[3]!.input.source.event).toMatchObject({ threadId: 'om_topic', semantics: 'topic' })
+      expect(JSON.stringify(received)).not.toContain('not-a-real-secret')
+    } finally {
+      await active.stop('disposed')
+    }
+  })
+
   it('normalizes allowed inbound text, drains it, and sends an outbound reply without retaining raw payloads', async () => {
     const received: ChannelInboundEnvelope[] = []
     let inboundDrains = 0
@@ -50,6 +188,7 @@ describe('official Feishu direct-message adapter', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           on: (_name: 'message', handler: typeof listener) => {
+            if (_name !== 'message') return () => {}
             listener = handler
             return () => {
               listener = undefined
@@ -145,6 +284,7 @@ describe('official Feishu direct-message adapter', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           on: (_: 'message', value: typeof listener) => {
+            if (_ !== 'message') return () => {}
             listener = value
             return () => {}
           },

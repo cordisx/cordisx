@@ -16,6 +16,7 @@ import { loadStagedPluginPackage, stagedPluginBrowserArtifactDirectory } from '.
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 
 export type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
 
@@ -65,6 +66,7 @@ export interface RendererComposition {
 }
 
 export interface BuildRendererCompositionOptions {
+  readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   readonly profileId?: string
   readonly managerPresentationMode?: 'workspace'
   readonly nativeAppVersion?: string
@@ -173,6 +175,9 @@ export async function buildRendererComposition(
       ? {}
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
+    ...(options.serviceCapabilityOwners === undefined
+      ? {}
+      : { serviceCapabilityOwners: options.serviceCapabilityOwners }),
   }
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
   const hostGraphs = new HostGenerationGraphOwner(options.productionGraphCacheRoot)

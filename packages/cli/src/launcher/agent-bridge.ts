@@ -344,7 +344,7 @@ export function createCodexBridgeHandler(
     })
   }
 
-  return async (operation: unknown, input: unknown): Promise<unknown> => {
+  return async (operation: unknown, input: unknown, signal?: AbortSignal): Promise<unknown> => {
     const args = object(input) ?? {}
     try {
       if (operation === 'check_operation') return await turns.check(args)
@@ -372,6 +372,7 @@ export function createCodexBridgeHandler(
           // `dryRun` is where a missing directory is reported first.
           const missing = await providerKeyCheck(options, providerId)
           if (missing !== undefined) return turn.failed({ ...missing })
+          signal?.throwIfAborted()
           turn.uncertain()
           const started = object(
             await codex.nativeRequest('thread/start', {
@@ -392,7 +393,7 @@ export function createCodexBridgeHandler(
               .then(() => requestedTitle)
               .catch(() => undefined)
           }
-          const turnId = await startTurn(codex, threadId, handoffPrompt(prompt, handed))
+          const turnId = await startTurn(codex, threadId, handoffPrompt(prompt, handed), signal)
           const base = {
             sessionId: threadId,
             link,
@@ -428,10 +429,14 @@ export function createCodexBridgeHandler(
           const read = object(await codex.nativeRequest('thread/read', { threadId, includeTurns: false }))
           const status = object(object(read?.thread)?.status)?.type
           if (status === 'active') throw new BridgeOperationError('session-busy')
-          if (status === 'notLoaded') await codex.nativeRequest('thread/resume', { threadId })
+          if (status === 'notLoaded') {
+            signal?.throwIfAborted()
+            await codex.nativeRequest('thread/resume', { threadId })
+          }
+          signal?.throwIfAborted()
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
-          const turnId = await startTurn(codex, threadId, prompt)
+          const turnId = await startTurn(codex, threadId, prompt, signal)
           if (turnId === undefined) {
             return turn.failed({
               status: 'failed',
@@ -518,7 +523,9 @@ async function startTurn(
   codex: AgentBridgeCodexAuthority,
   threadId: string,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  signal?.throwIfAborted()
   const started = object(
     await codex.nativeRequest('turn/start', {
       threadId,
@@ -569,7 +576,7 @@ interface ClaudeRequest {
 export interface AgentBridge {
   readonly binding: AgentBridgeBinding
   /** One operation on the named app: Codex directly, Claude through the launched profile. */
-  call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown>
+  call(app: BridgeApp, operation: BridgeOperation, args: unknown, signal?: AbortSignal): Promise<unknown>
   /** The read-only integration report, as the `/status` route serves it. Never launches or writes. */
   status(args?: unknown): Promise<unknown>
   claudeLive(): boolean
@@ -706,10 +713,17 @@ export async function startAgentBridge(input: {
     })
   }
 
-  async function call(app: BridgeApp, operation: BridgeOperation, args: unknown): Promise<unknown> {
+  async function call(
+    app: BridgeApp,
+    operation: BridgeOperation,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     try {
+      signal?.throwIfAborted()
       const request = operation === 'start_session' ? await resolveCallerSummary(input.codex, args) : args
-      return app === 'codex' ? await codexHandler(operation, request) : await claudeHandler(operation, request)
+      signal?.throwIfAborted()
+      return app === 'codex' ? await codexHandler(operation, request, signal) : await claudeHandler(operation, request)
     } catch (error) {
       return failureFromError(error)
     }

@@ -26,6 +26,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly coordinator: PluginLifecycleCoordinator
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
+  readonly channel?: (operation: string, input: unknown) => Promise<unknown>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -53,6 +54,7 @@ export async function openProductionPluginManagementComposition(input: {
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
+      ...(input.channel === undefined ? {} : { channel: input.channel }),
     })
   } catch (error) {
     service.close()

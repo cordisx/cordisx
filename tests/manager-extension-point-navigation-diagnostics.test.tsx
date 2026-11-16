@@ -158,7 +158,7 @@ describe('Manager navigation extension point diagnostics', () => {
       expect(contract?.textContent).toContain('两者互不替代')
       expect(dom.window.document.querySelectorAll('[data-manager-navigation-group]')).toHaveLength(5)
       expect(contract?.textContent).toContain('资源resources · 顺序 100')
-      expect(contract?.textContent).toContain('外部账号external-accounts · 顺序 400')
+      expect(contract?.textContent).toContain('外部连接external-accounts · 顺序 400')
       expect(contract?.textContent).not.toContain('Raw resources')
 
       await clickTab('诊断')
@@ -199,7 +199,7 @@ describe('Manager navigation extension point diagnostics', () => {
         'Resourcesresources · Order 100',
       )
       expect(dom.window.document.querySelector('[data-manager-navigation-contract]')?.textContent).toContain(
-        'External accountsexternal-accounts · Order 400',
+        'External connectionsexternal-accounts · Order 400',
       )
       expect(dom.window.document.body.textContent).toContain('They are independent fields.')
     } finally {

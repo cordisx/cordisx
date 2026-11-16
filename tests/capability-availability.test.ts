@@ -68,7 +68,7 @@ describe('capability availability registry', () => {
     expect(available.resolve('agent.messages.append', {}).status).toBe('unavailable')
   })
 
-  it('publishes only the public Channel Manager read routes', () => {
+  it('publishes redacted Channel Manager reads and the Host connection workflow without message-send authority', () => {
     const provider = channelManagerCapabilityProvider()
     expect(provider).toMatchObject({
       providerId: 'host-channel-manager',
@@ -77,6 +77,7 @@ describe('capability availability registry', () => {
     })
     expect(provider.routes.map(route => route.capability)).toEqual([
       'channel.accounts.read',
+      'channel.accounts.connect',
       'channel.bindings.read',
     ])
   })

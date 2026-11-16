@@ -219,8 +219,25 @@ describe('Agent model-provider tools', () => {
         'send_message',
         'check_operation',
         'integration_status',
+        'channel_connections',
+        'channel_conversations',
+        'channel_bind',
+        'channel_unbind',
+        'channel_bind_status',
+        'channel_reply_mode',
+        'channel_history',
+        'channel_listen',
+        'channel_send',
+        'channel_send_many',
+        'channel_receipt',
+        'channel_policy',
+        'channel_policy_set',
       ])
       const startSchema = JSON.stringify(advertised.find((tool: any) => tool.name === 'start_session').inputSchema)
+      const channelSendSchema = advertised.find((tool: any) => tool.name === 'channel_send').inputSchema
+      expect(channelSendSchema.properties.target.properties.replyMode.enum).toEqual(['conversation', 'reply', 'thread'])
+      expect(advertised.find((tool: any) => tool.name === 'channel_reply_mode').inputSchema.required)
+        .toEqual(['operationId', 'mode'])
       for (const field of ['context', 'operationId', 'dryRun']) expect(startSchema).toContain(`"${field}"`)
       expect(JSON.stringify(advertised.find((tool: any) => tool.name === 'select_thread_model_provider').inputSchema))
         .not.toContain('"context"')
@@ -257,6 +274,23 @@ describe('Agent model-provider tools', () => {
       expect(JSON.parse(created.content[0].text)).toMatchObject({
         status: 'pending',
         metadata: { 'openai/toolCallId': 'real-call' },
+      })
+      const channel = vi.fn(async (operation: string, input: unknown, metadata: unknown) => ({
+        status: 'ok',
+        operation,
+        input,
+        metadata,
+      }))
+      taskAuthority.channel = channel
+      const channelResult = await request(6, 'tools/call', {
+        name: 'channel_bind_status',
+        arguments: {},
+        _meta: { 'openai/threadId': 'source-chat' },
+      })
+      expect(JSON.parse(channelResult.content[0].text)).toMatchObject({ status: 'ok', operation: 'bind-status' })
+      expect(channel).toHaveBeenCalledWith('bind-status', {}, {
+        'openai/threadId': 'source-chat',
+        'cordisx/mcpRequestId': 6,
       })
     } finally {
       child.stdin.end()

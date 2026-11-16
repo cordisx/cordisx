@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
@@ -35,6 +36,7 @@ export interface StagedPluginPackage {
       | CordisXPluginManifestV11
       | CordisXPluginManifestV12
       | CordisXPluginManifestV13
+      | PluginRuntimeManifestV16
       | PluginRuntimeManifestV14
       | PluginRuntimeManifestV15
   }
@@ -48,6 +50,8 @@ export interface StagedPluginPackage {
   readonly managedServiceResources: readonly ManagedServicePackageResource[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
+  readonly readmes?: Readonly<Record<string, string>>
+  readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   readonly identitySource: string
 }
 

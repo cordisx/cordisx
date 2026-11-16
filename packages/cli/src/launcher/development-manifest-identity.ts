@@ -1,3 +1,5 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V16 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V16 } from '../channel-exact-request-permissions.js'
+import { PLUGIN_PACKAGE_SCHEMA_V16 } from './packages/manifest.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V15 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15 } from './latest-runtime-manifest.js'
 import { PLUGIN_PACKAGE_SCHEMA_V15 } from './packages/manifest.js'
 import { createHash } from 'node:crypto'
@@ -52,6 +54,8 @@ export function declaredRuntimeManifestSchema(manifest: Record<string, unknown>)
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V14
     : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V15 && manifest.schemaVersion === 15
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V15
+    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V16 && manifest.schemaVersion === 16
+    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V16
     : undefined
 }
 

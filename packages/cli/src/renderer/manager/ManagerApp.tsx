@@ -37,6 +37,7 @@ import { MarketplaceSourceEditPage } from './pages/MarketplaceSourceEditPage.js'
 import { MarketplaceSourcesPage } from './pages/MarketplaceSourcesPage.js'
 import { NavigationDetailPage } from './pages/NavigationDetailPage.js'
 import { NotificationRulesPage } from './pages/NotificationRulesPage.js'
+import { ChatExecutionPage } from './pages/ChatExecutionPage.js'
 import { PermissionDetailPage } from './pages/PermissionDetailPage.js'
 import { PluginDetailPage } from './pages/PluginDetailPage.js'
 import { PluginBundleDetailPage } from './pages/PluginBundleDetailPage.js'
@@ -90,6 +91,11 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   if (route.kind === 'model-connection-create') return managerCopy(locale, 'catalog.addConnection')
   if (route.kind === 'notification-rules') {
     return productLocale(locale) === 'zh-CN' ? '通知规则' : 'Notification rules'
+  }
+  if (route.kind === 'chat-execution') {
+    return productLocale(locale) === 'zh-CN'
+      ? '新建对话默认配置'
+      : 'New chat defaults'
   }
   if (route.kind === 'manager-content') {
     return snapshot.settingsNavigationItems?.find(item => item.id === route.id)?.pageTitle ?? route.id
@@ -231,7 +237,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       />
     )
   }
-  if (route.kind === 'notification-rules') return <h2>{heading}</h2>
+  if (route.kind === 'notification-rules' || route.kind === 'chat-execution') return <h2>{heading}</h2>
   if (route.kind === 'marketplace-source-edit') {
     return (
       <HostBreadcrumbs
@@ -367,6 +373,15 @@ function Content(
         </div>
       )
       : <NotificationRulesPage center={notificationCenter} locale={snapshot.localization.locale} />
+  }
+  if (current.kind === 'chat-execution') {
+    return (
+      <ChatExecutionPage
+        model={model}
+        locale={snapshot.localization.locale}
+        {...(notificationCenter === undefined ? {} : { notifications: notificationCenter })}
+      />
+    )
   }
   if (current.kind === 'manager-content') {
     if (snapshot.settingsNavigationItems?.find(item => item.id === current.id)?.permissionReview !== undefined) {

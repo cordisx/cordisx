@@ -13,10 +13,13 @@ import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-cont
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
+import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
+import { readPluginDocuments } from './plugin-documents.js'
 import { resolveOwningPackageVersion } from './package-version.js'
 
 export interface BuildRendererBundleOptions {
+  readonly serviceCapabilityOwners?: readonly HostServiceCapabilityOwner[]
   /** Use only explicit CordisX Playground seats; never inspect Codex DOM. */
   readonly playground?: boolean
   /** Host-private preview mode; normal launches retain the overlay presentation. */
@@ -184,7 +187,7 @@ export async function buildRendererCompositionSource(
   }
   const enabled = config.plugins.filter(plugin => plugin.enabled)
   for (const plugin of enabled) await access(plugin.entry)
-  const [version, readmes, pluginBundles] = await Promise.all([
+  const [version, readmes, documentSets, pluginBundles] = await Promise.all([
     resolveOwningPackageVersion(import.meta.url, 'cordisx'),
     Promise.all(config.plugins.map(async plugin => {
       if (plugin.readmes !== undefined) {
@@ -201,6 +204,11 @@ export async function buildRendererCompositionSource(
       }
       return await readPluginReadmes(plugin.entry)
     })),
+    Promise.all(config.plugins.map(plugin =>
+      plugin.documents === undefined
+        ? readPluginDocuments(plugin.entry, plugin.id)
+        : Promise.resolve({ documents: plugin.documents, files: [] })
+    )),
     Promise.all(enabled.map(async plugin => {
       if (sourceOptions.omitPluginModules === true) {
         return {
@@ -300,6 +308,9 @@ export async function buildRendererCompositionSource(
       const readmesField = Object.keys(localizedReadmes).length === 0
         ? ''
         : `, readmes: ${JSON.stringify(localizedReadmes)}`
+      const documentsField = documentSets[pluginIndex]?.documents.length
+        ? `, documents: ${JSON.stringify(documentSets[pluginIndex]!.documents)}`
+        : ''
       const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
       const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
       const developmentField = plugin.development === undefined
@@ -309,7 +320,7 @@ export async function buildRendererCompositionSource(
         JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)
       }, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${
         plugin.revision ?? 0
-      }${readmeField}${readmesField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
+      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
     }).join(',')
   }]`
   const providers = [
@@ -344,6 +355,26 @@ export async function buildRendererCompositionSource(
       }
     })
   const permission = options.permission ?? { profileId: options.profileId ?? 'development', policies: [] }
+  // A service declaration is insufficient. Bind only the active launcher provider
+  // to the exact renderer artifact selected by this assembly.
+  const serviceCapabilityOwners = options.generation === undefined ? [] : (options.serviceCapabilityOwners ?? [])
+    .flatMap(owner => {
+      const index = enabled.findIndex(plugin =>
+        plugin.id === owner.pluginId
+        && (plugin.source ?? pathToFileURL(plugin.entry).href) === owner.source
+      )
+      const plugin = enabled[index]
+      if (
+        !plugin || !plugin.manifest || !('services' in plugin.manifest)
+        || !plugin.manifest.services?.some(service =>
+          service.id === owner.serviceId && service.kind === owner.serviceKind
+        )
+      ) return []
+      const moduleGeneration = plugin.package?.moduleGeneration ?? pluginBundles[index]?.artifactGeneration
+      return moduleGeneration === undefined
+        ? []
+        : [{ ...owner, runtimeGeneration: options.generation!, moduleGeneration }]
+    })
   if (options.playgroundSessionScenarios !== undefined && options.playground !== true) {
     throw new Error('Playground Session scenarios are available only in the explicit UI Playground')
   }
@@ -428,6 +459,8 @@ export async function buildRendererCompositionSource(
       ? ''
       : `, initialRegistryEpoch: ${JSON.stringify(options.initialRegistryEpoch)}`
   }${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${
+    serviceCapabilityOwners.length === 0 ? '' : `, serviceCapabilityOwners: ${JSON.stringify(serviceCapabilityOwners)}`
+  }${
     permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`
   } }`
   const runtimeGraphs = enabled.flatMap(plugin =>
@@ -496,7 +529,9 @@ return await ${boot}
     watchFiles: [
       ...new Set([
         ...enabled.map(plugin => plugin.entry),
+        ...enabled.flatMap(plugin => plugin.manifestFiles ?? []),
         ...readmes.flatMap(readme => readme.files),
+        ...documentSets.flatMap(value => value.files),
       ]),
     ],
   }

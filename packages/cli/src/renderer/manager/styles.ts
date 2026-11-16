@@ -1,5 +1,6 @@
 import managerNavigationCss from './manager-navigation.css?inline'
 import managerContentCss from './manager-content.css?inline'
+import managerRecordSummaryCss from './manager-record-summary.css?inline'
 import managerCatalogCss from './manager-catalog.css?inline'
 import managerDetailsCss from './manager-details.css?inline'
 import managerMarketplaceCss from './manager-marketplace.css?inline'
@@ -11,6 +12,7 @@ import managerBrowseCss from './manager-browse.css?inline'
 import managerCompactShellCss from './manager-compact-shell.css?inline'
 import searchCss from '../host-ui/search.css?inline'
 import actionGroupCss from '../host-ui/action-group.css?inline'
+import accountIdentityCss from '../host-ui/account-identity.css?inline'
 import { PLUGIN_CONSOLE_REACT_STYLES } from './components/PluginConsolePanel.js'
 import { HOST_FORM_REACT_STYLES } from '../host-ui/HostForm.js'
 import { HOST_COLLECTION_STYLES } from '../host-collection.js'
@@ -31,6 +33,7 @@ export const REACT_MANAGER_STYLES = [
   actionGroupCss,
   managerNavigationCss,
   managerContentCss,
+  managerRecordSummaryCss,
   managerCatalogCss,
   managerDetailsCss,
   managerMarketplaceCss,
@@ -38,6 +41,7 @@ export const REACT_MANAGER_STYLES = [
   managerPluginDetailsCss,
   managerAboutCss,
   managerCollectionCss,
+  accountIdentityCss,
   managerCompactShellCss,
   managerBrowseCss,
   PLUGIN_CONSOLE_REACT_STYLES,

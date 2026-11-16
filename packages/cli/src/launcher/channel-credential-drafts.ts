@@ -1,0 +1,285 @@
+import { randomBytes } from 'node:crypto'
+import { discoverChannelTenant } from './channel-credential-validation.js'
+import type { JsonValue } from '../config/home-config.js'
+import type { HostServiceConfigNarrowApi } from './service-config.js'
+import type { LauncherSecretStore } from './secret-store.js'
+
+export type ChannelCredentialRef = { readonly adapterId: string; readonly accountId: string; readonly tenantId: string }
+export type ChannelCredentialDraftResult = {
+  readonly status: 'applied' | 'conflict' | 'rejected' | 'unavailable'
+  readonly code: string
+  readonly draftId?: string
+  readonly ref?: ChannelCredentialRef
+  readonly expiresAt?: string
+}
+interface Draft {
+  readonly id: string
+  readonly owner: string
+  readonly documentId: string
+  readonly purpose: 'create' | 'rotate'
+  readonly ref: ChannelCredentialRef
+  readonly captureId: string
+  readonly revision: number
+  readonly expiresAt: number
+}
+const sameRef = (left: ChannelCredentialRef, right: ChannelCredentialRef) =>
+  left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
+const rejected = (code: string): ChannelCredentialDraftResult => ({ status: 'rejected', code })
+const record = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_REQUEST')
+  return value as Record<string, unknown>
+}
+const text = (value: unknown, maximum = 512): string => {
+  if (typeof value !== 'string' || !value.trim() || value.length > maximum || /[\u0000-\u001f]/u.test(value)) {
+    throw new Error('INVALID_REQUEST')
+  }
+  return value
+}
+const ref = (value: unknown): ChannelCredentialRef => {
+  const item = record(value)
+  if (Object.keys(item).some(key => !['adapterId', 'accountId', 'tenantId'].includes(key))) {
+    throw new Error('INVALID_REQUEST')
+  }
+  const adapterId = text(item.adapterId, 128)
+  if (!['feishu', 'lark'].includes(adapterId)) throw new Error('ADAPTER_UNAVAILABLE')
+  const accountId = text(item.accountId)
+  if (!/^cli_[A-Za-z0-9_]+$/u.test(accountId)) throw new Error('INVALID_APP_ID')
+  return {
+    adapterId,
+    accountId,
+    tenantId: item.tenantId === undefined || item.tenantId === '' ? '' : text(item.tenantId),
+  }
+}
+
+/** Launcher-only drafts. Raw credentials and Keychain references never leave this broker. */
+export class ChannelCredentialDraftBroker {
+  private readonly drafts = new Map<string, Draft>()
+  private readonly retiredDocuments = new Set<string>()
+  private disposed = false
+  private tail: Promise<void> = Promise.resolve()
+  private readonly timer: ReturnType<typeof setInterval>
+  constructor(
+    private readonly input: {
+      readonly profileId: string
+      readonly store: LauncherSecretStore
+      readonly service: Pick<HostServiceConfigNarrowApi, 'descriptor' | 'mutate'>
+      readonly projection?: () => Promise<unknown>
+      readonly now?: () => number
+      readonly discoverTenant?: typeof discoverChannelTenant
+    },
+  ) {
+    this.timer = setInterval(() => {
+      void this.serial(() => this.expire()).catch(() => undefined)
+    }, 30_000)
+    this.timer.unref()
+  }
+  private now() {
+    return this.input.now?.() ?? Date.now()
+  }
+  private serial<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(operation)
+    this.tail = result.then(() => undefined, () => undefined)
+    return result
+  }
+  handle(value: unknown, documentId: string): Promise<ChannelCredentialDraftResult & { projection?: unknown }> {
+    return this.serial(() => this.handleSerial(value, documentId))
+  }
+  private live(documentId: string): boolean {
+    return !this.disposed && !this.retiredDocuments.has(documentId)
+  }
+  private async handleSerial(
+    value: unknown,
+    documentId: string,
+  ): Promise<ChannelCredentialDraftResult & { projection?: unknown }> {
+    try {
+      await this.expire()
+      const request = record(value)
+      const owner = text(request.owner, 2048)
+      const allowed = request.operation === 'capture'
+        ? ['version', 'token', 'requestId', 'operation', 'owner', 'purpose', 'account', 'secret', 'expectedRevision']
+        : [
+          'version',
+          'token',
+          'requestId',
+          'operation',
+          'owner',
+          'draftId',
+          ...(request.operation === 'commit' ? ['draft'] : []),
+        ]
+      if (Object.keys(request).some(key => !allowed.includes(key))) return rejected('INVALID_REQUEST')
+      if (!this.live(documentId)) return rejected('STALE_GENERATION')
+      if (request.operation === 'capture') return await this.capture(request, owner, documentId)
+      const id = text(request.draftId, 128)
+      const draft = this.drafts.get(id)
+      if (!draft || draft.owner !== owner || draft.documentId !== documentId || draft.expiresAt <= this.now()) {
+        return rejected('TARGET_UNAVAILABLE')
+      }
+      if (request.operation === 'discard') {
+        if (!await this.remove(draft)) return { status: 'unavailable', code: 'CREDENTIAL_CLEANUP_UNAVAILABLE' }
+        return { status: 'applied', code: 'DISCARDED' }
+      }
+      if (request.operation !== 'commit') return rejected('OPERATION_UNAVAILABLE')
+      const configuration = await this.input.service.descriptor()
+      if (configuration.revision !== draft.revision || !configuration.writable) {
+        return { status: 'conflict', code: 'REVISION_CONFLICT' }
+      }
+      const current = record(configuration.configuration)
+      const connections = (current.connections as Array<Record<string, unknown>>).map(item => ({ ...item }))
+      const index = connections.findIndex(item => sameRef(item.ref as ChannelCredentialRef, draft.ref))
+      if (draft.purpose === 'create' ? index >= 0 || connections.length >= 64 : index < 0) {
+        return rejected('TARGET_UNAVAILABLE')
+      }
+      const reference = this.input.store.referenceFor(draft.captureId)
+      if (!reference) return rejected('CREDENTIAL_UNAVAILABLE')
+      const patch = draft.purpose === 'create' || request.draft !== undefined ? record(request.draft) : {}
+      if (Object.keys(patch).some(key => !['displayName', 'selectors'].includes(key))) {
+        return rejected('INVALID_REQUEST')
+      }
+      if (patch.displayName !== undefined) text(patch.displayName, 240)
+      if (
+        patch.selectors !== undefined && (!Array.isArray(patch.selectors) || !patch.selectors.length
+          || patch.selectors.some(item => !['direct', 'group', 'mentions', 'replies'].includes(item))
+          || new Set(patch.selectors).size !== patch.selectors.length)
+      ) return rejected('UNSUPPORTED_SELECTOR')
+      if (draft.purpose === 'create') {
+        connections.push({
+          ref: draft.ref,
+          adapterKind: draft.ref.adapterId,
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: reference,
+          displayName: text(patch.displayName, 240),
+          ...(patch.selectors === undefined ? {} : { selectors: patch.selectors }),
+        })
+      } else connections[index] = { ...connections[index]!, ...patch, secretRef: reference }
+      // Existing opaque references are restored by the narrow API's normal CAS normalization.
+      if (!this.live(documentId) || draft.expiresAt <= this.now()) return rejected('STALE_GENERATION')
+      const result = await this.input.service.mutate({
+        contract: 'cordisx.service-config-mutation/v1',
+        schemaVersion: 1,
+        identity: configuration.identity,
+        scope: configuration.scope,
+        expectedRevision: draft.revision,
+        configuration: { contract: 'cordisx.channel-service-config/v2', schemaVersion: 2, connections } as JsonValue,
+      })
+      if (result.status !== 'applied') {
+        return {
+          status: result.status === 'conflict' ? 'conflict' : 'rejected',
+          code: result.status === 'staged'
+            ? 'OPERATION_UNAVAILABLE'
+            : result.error.code.toUpperCase().replaceAll('-', '_'),
+        }
+      }
+      this.drafts.delete(id)
+      this.input.store.forget(draft.captureId)
+      const projection = await this.input.projection?.().catch(() => undefined)
+      return { status: 'applied', code: 'APPLIED', ref: draft.ref, ...(projection === undefined ? {} : { projection }) }
+    } catch (error) {
+      return rejected(
+        error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
+          ? error.message
+          : 'CREDENTIAL_OPERATION_FAILED',
+      )
+    }
+  }
+  private async capture(
+    request: Record<string, unknown>,
+    owner: string,
+    documentId: string,
+  ): Promise<ChannelCredentialDraftResult> {
+    if (this.drafts.size >= 16) return rejected('DRAFT_LIMIT')
+    let account = ref(request.account)
+    const secret = text(request.secret, 16 * 1024)
+    if (!['create', 'rotate'].includes(String(request.purpose))) return rejected('INVALID_REQUEST')
+    if (!account.tenantId) {
+      account = {
+        ...account,
+        tenantId: await (this.input.discoverTenant ?? discoverChannelTenant)({
+          adapterId: account.adapterId,
+          accountId: account.accountId,
+          secret,
+        }),
+      }
+    }
+    if (!this.live(documentId)) return rejected('STALE_GENERATION')
+    const configuration = await this.input.service.descriptor()
+    if (!configuration.writable) return rejected('PERMISSION_DENIED')
+    if (request.expectedRevision !== undefined) {
+      if (!Number.isSafeInteger(request.expectedRevision) || (request.expectedRevision as number) < 0) {
+        return rejected('INVALID_REQUEST')
+      }
+      if (configuration.revision !== request.expectedRevision) return { status: 'conflict', code: 'REVISION_CONFLICT' }
+    }
+    // This is a redacted descriptor; validate its identities without ever retrieving previous keys.
+    const current = record(configuration.configuration)
+    const connections = current.connections as Array<Record<string, unknown>>
+    const exists = connections.some(item => sameRef(item.ref as ChannelCredentialRef, account))
+    const duplicate = connections.some(item => {
+      const value = item.ref as ChannelCredentialRef
+      return value.adapterId === account.adapterId && value.accountId === account.accountId
+    })
+    if (request.purpose === 'rotate' ? !exists : duplicate) return rejected('TARGET_UNAVAILABLE')
+    const id = randomBytes(32).toString('base64url')
+    const capture = this.input.store.beginCapture({
+      profileId: this.input.profileId,
+      connectionId: `draft-${randomBytes(20).toString('hex')}`,
+    })
+    const draft: Draft = {
+      id,
+      owner,
+      documentId,
+      purpose: request.purpose as 'create' | 'rotate',
+      ref: account,
+      captureId: capture.captureId,
+      revision: configuration.revision,
+      expiresAt: this.now() + 10 * 60_000,
+    }
+    this.drafts.set(id, draft)
+    const captured = await this.input.store.capture({ captureId: capture.captureId, secret })
+    if (captured.state !== 'set' || !this.live(documentId)) {
+      await this.remove(draft)
+      return rejected('CREDENTIAL_UNAVAILABLE')
+    }
+    return {
+      status: 'applied',
+      code: 'CAPTURED',
+      draftId: id,
+      ref: account,
+      expiresAt: new Date(draft.expiresAt).toISOString(),
+    }
+  }
+  private async remove(draft: Draft): Promise<boolean> {
+    const result = await this.input.store.remove(draft.captureId)
+    if (result.state !== 'unset') return false
+    this.drafts.delete(draft.id)
+    this.input.store.forget(draft.captureId)
+    return true
+  }
+  private async expire() {
+    for (const draft of this.drafts.values()) {
+      if (
+        draft.expiresAt <= this.now()
+        || this.retiredDocuments.has(draft.documentId)
+      ) await this.remove(draft)
+    }
+  }
+  retireDocument(documentId: string): Promise<void> {
+    this.retiredDocuments.add(documentId)
+    return this.serial(async () => {
+      for (const draft of this.drafts.values()) {
+        if (draft.documentId === documentId && !await this.remove(draft)) {
+          throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+        }
+      }
+    })
+  }
+  dispose(): Promise<void> {
+    this.disposed = true
+    clearInterval(this.timer)
+    return this.serial(async () => {
+      for (const draft of this.drafts.values()) {
+        if (!await this.remove(draft)) throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+      }
+    })
+  }
+}

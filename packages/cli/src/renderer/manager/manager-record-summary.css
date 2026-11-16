@@ -1,0 +1,118 @@
+/* Fixed record chrome is shared by Agent and external-account detail routes. */
+.cxr-manager-record-summary[data-has-metrics="true"] {
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px 12px;
+  padding-block: 2px 12px;
+  margin-block-end: 10px;
+}
+
+.cxr-manager-record-summary[data-has-metrics="true"]
+  .cxr-manager-record-avatar {
+  width: 44px;
+  height: 44px;
+  overflow: visible;
+  background: transparent;
+}
+
+.cxr-manager-record-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--cx-muted);
+  font-size: 12px;
+}
+
+.cxr-manager-record-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--cx-hover);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.cxr-manager-record-status > .cordisx-host-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.cxr-manager-record-status[data-tone="success"] {
+  color: var(--cx-success);
+}
+
+.cxr-manager-record-status[data-tone="warning"] {
+  color: var(--cx-warning);
+}
+
+.cxr-manager-record-status[data-tone="danger"] {
+  color: var(--cx-danger);
+}
+
+.cxr-manager-record-metrics {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 112px), 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.cxr-manager-record-metrics > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--cx-hover);
+}
+
+.cxr-manager-record-metrics dt {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--cx-muted);
+  font-size: 11px;
+}
+
+.cxr-manager-record-metrics dt > .cordisx-host-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.cxr-manager-record-metrics dd {
+  margin: 0;
+  color: var(--cx-text);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cxr-manager-record-metrics > [data-tone="danger"] dd {
+  color: var(--cx-danger);
+}
+
+.cxr-channel-owned-form {
+  min-width: 0;
+  min-height: 0;
+}
+
+.cxr-channel-owned-form:has(.cxr-channel-policy-page) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.cxr-channel-policy-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}

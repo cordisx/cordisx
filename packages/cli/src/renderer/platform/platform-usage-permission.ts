@@ -11,7 +11,7 @@ interface UsageLease {
 }
 function usageManifest(registration: Registration): boolean {
   return registration.manifest.schemaVersion === 11 || registration.manifest.schemaVersion === 12
-    || registration.manifest.schemaVersion === 13
+    || registration.manifest.schemaVersion === 13 || registration.manifest.schemaVersion === 16
 }
 /** Usage leases never borrow message/history authority. */
 export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermissionBroker {

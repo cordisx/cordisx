@@ -255,6 +255,9 @@ export function PluginDetailPage(
       />
       {route.page === 'readme' && (
         <div role="tabpanel" aria-label="README">
+          {plugin.documents?.length
+            ? <PluginDocuments documents={plugin.documents} locale={snapshot.localization.locale} />
+            : null}
           {(plugin.readme ?? plugin.description) !== undefined
             ? <MarkdownDocument source={(plugin.readme ?? plugin.description)!} />
             : (
@@ -299,7 +302,9 @@ export function PluginDetailPage(
                 <code className="cxr-card-code">{item.capability}</code>
               </span>
               <span className="cxr-status">
-                {item.authorizationOrigin === 'local-development'
+                {item.authorizationOrigin === 'service-owner'
+                  ? managerCopy(snapshot.localization.locale, 'permission.service-owner')
+                  : item.authorizationOrigin === 'local-development'
                   ? managerCopy(snapshot.localization.locale, 'permission.development-authorized')
                   : item.authorizationOrigin === 'certified-implicit' && item.policy === 'ask'
                   ? managerCopy(snapshot.localization.locale, 'permission.certified-automatic-authorization')
@@ -321,7 +326,9 @@ export function PluginDetailPage(
                 <code className="cxr-card-code">{item.capability}</code>
               </span>
               <span className="cxr-status">
-                {plugin.development?.origin === 'local-dev' && plugin.development.state === 'ready'
+                {item.authorizationOrigin === 'service-owner'
+                  ? managerCopy(snapshot.localization.locale, 'permission.service-owner')
+                  : plugin.development?.origin === 'local-dev' && plugin.development.state === 'ready'
                   ? managerCopy(snapshot.localization.locale, 'permission.development-authorized')
                   : snapshot.localization.locale.toLowerCase().startsWith('zh')
                   ? '按请求'
@@ -442,5 +449,34 @@ export function PluginDetailPage(
         </>
       )}
     </section>
+  )
+}
+
+function PluginDocuments(
+  props: { readonly documents: NonNullable<ManagerPluginSnapshot['documents']>; readonly locale: string },
+) {
+  const candidates = props.documents.filter(document =>
+    !document.locale || document.locale.toLowerCase() === props.locale.toLowerCase()
+    || props.locale.toLowerCase().startsWith(document.locale.toLowerCase())
+  )
+  const documents = candidates.length ? candidates : props.documents
+  const [id, setId] = useState(documents[0]?.id)
+  const selected = documents.find(document => document.id === id) ?? documents[0]
+  return (
+    <div data-plugin-documents="true">
+      <div className="cxf-form-action-buttons">
+        {documents.map(document => (
+          <Button
+            key={`${document.id}:${document.locale ?? ''}`}
+            type="button"
+            variant={selected?.id === document.id ? 'base' : 'outline'}
+            onClick={() => setId(document.id)}
+          >
+            {document.title}
+          </Button>
+        ))}
+      </div>
+      {selected ? <MarkdownDocument source={selected.content} /> : null}
+    </div>
   )
 }

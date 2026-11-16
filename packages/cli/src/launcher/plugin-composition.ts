@@ -48,6 +48,8 @@ export async function loadPluginComposition(
         ...(item.canonicalSource === undefined ? {} : { canonicalSource: item.canonicalSource }),
       },
       ...(staged.readme === undefined ? {} : { readme: staged.readme }),
+      ...(staged.readmes === undefined ? {} : { readmes: staged.readmes }),
+      ...(staged.documents === undefined ? {} : { documents: staged.documents }),
     })
   }
   return output

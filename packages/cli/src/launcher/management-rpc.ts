@@ -27,6 +27,7 @@ export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
   | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
   | { readonly kind: 'terminal-provider'; readonly request: TerminalProviderRequest }
+  | { readonly kind: 'channel'; readonly operation: string; readonly input: unknown }
   | { readonly kind: 'refresh-catalog'; readonly sourceUrl?: string }
   | { readonly kind: 'query-catalog'; readonly query?: PluginManagementCatalogQuery }
   | {
@@ -114,6 +115,7 @@ export function parsePluginManagementRpcRequest(
       'query',
       'model-export',
       'terminal-provider',
+      'channel',
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
@@ -123,6 +125,10 @@ export function parsePluginManagementRpcRequest(
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
+  if (
+    operation.kind === 'channel' && (typeof operation.operation !== 'string'
+      || !/^[a-z][a-z-]{0,48}$/u.test(operation.operation))
+  ) throw new Error('invalid Channel operation')
   return request as unknown as PluginManagementRpcRequest
 }
 
@@ -132,6 +138,7 @@ export async function handlePluginManagementRpcRequest(
 ): Promise<unknown> {
   const operation = request.operation
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
+  if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
   if (operation.kind === 'query') return await service.query()
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
@@ -194,6 +201,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly service: PluginManagementService
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
+  readonly channel?: (operation: string, input: unknown) => Promise<unknown>
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
@@ -224,7 +232,10 @@ export async function startPluginManagementRpcServer(input: {
           respond(socket, {
             requestId,
             ok: true,
-            value: request.operation.kind === 'terminal-provider'
+            value: request.operation.kind === 'channel'
+              ? await (input.channel?.(request.operation.operation, request.operation.input)
+                ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }))
+              : request.operation.kind === 'terminal-provider'
               ? await (input.terminalProvider?.(request.operation.request)
                 ?? Promise.reject(new Error('Terminal provider unavailable; update the running CordisX Host')))
               : request.operation.kind === 'model-export'

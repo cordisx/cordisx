@@ -9,6 +9,7 @@ import type { NativeExistingThreadSwitch, NativeSubmissionController } from './n
 import { NativeAgentModelSelectionRejected } from './native-agent-models.js'
 import type { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeThreadSwitchError } from './native-thread-switch-error.js'
+import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
 
 // Requests stay small; authenticated native responses may contain history.
 const MAX_LINE = 256 * 1024
@@ -45,6 +46,9 @@ export type NativeBridgeMethod =
   | 'thread/name/set'
   | 'turn/start'
   | 'turn/interrupt'
+  | 'threadSection/list'
+  | 'threadSection/create'
+  | 'thread/section/move'
 
 export interface NativeSubmissionControlServer {
   readonly socketPath: string
@@ -74,6 +78,9 @@ export interface NativeSubmissionControlServer {
   bindUnmarkedProviderGuard(guard: (input: { threadId?: string; providerId?: string }) => Promise<boolean>): void
   bindController(controller: NativeSubmissionController): void
   bindTaskRouting(routing: NativeAgentTaskRouting): void
+  bindChatExecution(preferences: ChatExecutionPreferences): void
+  subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void): () => void
+  respondNativeApproval(input: Record<string, unknown>): Promise<unknown>
   invokeTask(
     input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
   ): Promise<unknown>
@@ -97,6 +104,8 @@ export async function startNativeSubmissionControlServer(
   let unmarkedGuard: ((input: { threadId?: string; providerId?: string }) => Promise<boolean>) | undefined
   let controller: NativeSubmissionController | undefined
   let taskRouting: NativeAgentTaskRouting | undefined
+  let chatExecution: ChatExecutionPreferences | undefined
+  const approvalListeners = new Set<(event: Record<string, unknown>) => void>()
   let closed = false
   let closePromise: Promise<void> | undefined
   // Retire only timed-out IDs; a late response cannot resolve a new request.
@@ -250,6 +259,33 @@ export async function startNativeSubmissionControlServer(
       }
     })
     const handle = async (value: Record<string, unknown>): Promise<void> => {
+      if (value.type === 'execution-observed') {
+        if (!authenticated || !valid(value.threadId)) throw new Error('Control unavailable')
+        await chatExecution?.observe(value.threadId, value.settings)
+        return
+      }
+      if (value.type === 'execution-persistence-failed') {
+        if (!authenticated) throw new Error('Control unavailable')
+        diagnostic({
+          event: 'chat-execution-persistence-failed',
+          accepted: value.accepted === true,
+          serviceRef: peerRef,
+        })
+        return
+      }
+      if (value.type === 'native-approval-event') {
+        if (
+          !authenticated || !['requested', 'resolved', 'answered', 'cancelled', 'unknown'].includes(String(value.event))
+        ) {
+          throw new Error('Control unavailable')
+        }
+        for (const listener of approvalListeners) {
+          try {
+            listener(value)
+          } catch {}
+        }
+        return
+      }
       if (!valid(value.id, 256) || activeIds.has(value.id)) throw new Error('Invalid control id')
       if (typeof value.ok === 'boolean') {
         if (!authenticated) throw new Error('Unauthenticated response')
@@ -336,6 +372,43 @@ export async function startNativeSubmissionControlServer(
         if (!authenticated) throw new Error('Unauthenticated diagnostic')
         if (typeof value.event === 'string' && /^model-[a-z-]{1,40}$/u.test(value.event)) {
           diagnostic({ ...projectDiagnostic(value as { event: string }), event: value.event, serviceRef: peerRef })
+        }
+        return
+      }
+      if (value.type === 'execution-prepare' || value.type === 'execution-complete') {
+        if (!authenticated || active >= 32) throw new Error('Control unavailable')
+        active++
+        activeIds.add(value.id)
+        try {
+          if (value.type === 'execution-prepare') {
+            if (!['thread/start', 'thread/resume', 'turn/start'].includes(String(value.method))) {
+              throw new Error('Invalid native method')
+            }
+            const params = record(value.params) ?? {}
+            const prepared = await chatExecution?.prepare(String(value.method), params, record(value.context))
+            await write(socket, {
+              id: value.id,
+              ok: true,
+              value: prepared
+                ? {
+                  fields: prepared.params,
+                  captureId: prepared.captureId,
+                  contextRequired: prepared.contextRequired === true,
+                }
+                : { fields: {} },
+            })
+          } else {
+            if (!valid(value.captureId) || typeof value.accepted !== 'boolean') {
+              throw new Error('Invalid execution completion')
+            }
+            await chatExecution?.complete(value.captureId, value.accepted, value.result)
+            await write(socket, { id: value.id, ok: true })
+          }
+        } catch {
+          await write(socket, { id: value.id, ok: false })
+        } finally {
+          active--
+          activeIds.delete(value.id)
         }
         return
       }
@@ -666,6 +739,16 @@ export async function startNativeSubmissionControlServer(
     ) {
       return await callPeer({ type: 'native-request', method, params, configuredProviderOverrides })
     },
+    bindChatExecution(value: ChatExecutionPreferences) {
+      chatExecution = value
+    },
+    subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void) {
+      approvalListeners.add(listener)
+      return () => approvalListeners.delete(listener)
+    },
+    respondNativeApproval(input: Record<string, unknown>) {
+      return callPeer({ ...input, type: 'native-approval-response' })
+    },
     bindUnmarkedProviderGuard(value: (input: { threadId?: string; providerId?: string }) => Promise<boolean>) {
       unmarkedGuard = value
     },
@@ -684,6 +767,7 @@ export async function startNativeSubmissionControlServer(
     async close() {
       closePromise ??= (async () => {
         closed = true
+        approvalListeners.clear()
         failPending()
         expiredIds.clear()
         peer?.destroy()

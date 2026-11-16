@@ -8,6 +8,7 @@ import { createStartupHostBridge } from './startup-host-bridge.js'
 import { recordRuntimeGeneration, runWithLaunchDiagnostics } from './launch-diagnostics.js'
 import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import path from 'node:path'
+import { configuredPluginDocuments } from '../launcher/plugin-documents.js'
 import {
   createNativeSubmissionComposition,
   NativeSubmissionCompatibilityError,
@@ -58,12 +59,8 @@ import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/service-config.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
-import {
-  type ChannelCredentialBridgeHandler,
-  createChannelCredentialBridgeHandler,
-} from '../launcher/channel-credential-rpc.js'
-import { type ChannelActionsBridgeHandler, createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
-import { LauncherSecretStore } from '../launcher/secret-store.js'
+import { type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+import type { ChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
 import { markServiceConfigAppRestartApplied, readServiceConfigState } from '../config/service-config.js'
 import {
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
@@ -75,7 +72,6 @@ import {
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
 } from '../providers/cli-proxy-service-config.js'
-import { createChannelHostServiceConfigContract } from '../launcher/channel-service.js'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
@@ -143,7 +139,9 @@ import {
 } from './renderer-composition.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
-import { createRendererChannelComposition } from './renderer-channel-composition.js'
+import { createChannelLaunchBridges, createRendererChannelComposition } from './renderer-channel-composition.js'
+import { configuredLaunchCleanup, createConfiguredChannelConsumer } from './channel-consumer-composition.js'
+import { chatExecutionOperation } from '../launcher/chat-execution-operation.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import {
@@ -331,13 +329,24 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     }
     const channel = await createRendererChannelComposition({
       composition,
+      dryRun: invocation.options.dryRun,
+      appId,
       profileId: selection.profileId,
       configPath,
       homeDir: rootFromConfigPath(configPath),
       environment: runtime.env ?? process.env,
     })
-    const channelPlugin = channel.plugin
     const channelService = channel.service
+    const { consumer: channelConsumer, tools: channelTools, dispose: disposeChannel } =
+      await createConfiguredChannelConsumer({
+        documents: input => configuredPluginDocuments(composition.plugins, input),
+        service: channelService,
+        homeDir: rootFromConfigPath(configPath),
+        appId,
+        profileId: selection.profileId,
+        native: () => nativeSubmission?.channelSession,
+        report: code => stdout('[cordisx-channel] ' + JSON.stringify({ event: 'consumer-error', code })),
+      })
     const channelManager = channel.manager
     const channelCredentialBridgeToken = channel.credentialBridgeToken
     const channelActionsBridgeToken = channel.actionsBridgeToken
@@ -358,6 +367,18 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     } = rendererLifecycle
     const managedServiceUI = startupBridge
     const nativeCatalogOptions = {
+      channelName: (event: import('@cordisx/channel-runtime').ChannelEventRef) =>
+        channelService?.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
+      channelSectionName: () =>
+        channelConsumer?.policy().policy.sidebarGroup === null
+          ? undefined
+          : channelConsumer?.policy().policy.sidebarGroup ?? '外部连接',
+      ...(channelTools === undefined
+        ? {}
+        : {
+          channel: (operation: string, input: unknown, metadata?: unknown) =>
+            channelTools.call(operation, input, metadata),
+        }),
       ...(runtime.internalRemoteTerminalProvider === undefined
         ? {}
         : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
@@ -390,6 +411,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         },
       ).then(composition => {
         nativeSubmission = composition
+        channelConsumer?.setNativeExtras(() => nativeSubmission?.channelSession)
       })
       void nativeSubmissionCompletion.catch(() => undefined)
     }
@@ -420,6 +442,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       pluginBundles: await pluginBundleCoordinator.snapshot(),
       ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
       ...(channelManager === undefined ? {} : { channelManager }),
+      ...(channel.serviceCapabilityOwners === undefined
+        ? {}
+        : { serviceCapabilityOwners: channel.serviceCapabilityOwners }),
       ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
       ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
       managedServiceUICapabilities,
@@ -652,7 +677,6 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const services: Array<
       { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }
     > = []
-    let channelConfigApi: HostServiceConfigNarrowApi | undefined
     if (serviceConfigToken !== undefined && providerFleet !== undefined) {
       services.push(...cliProxyServiceConfigApis({
         token: serviceConfigToken,
@@ -668,28 +692,17 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           : { persistence: cliProxyPackageServiceConfig.persistence }),
       }))
     }
-    if (serviceConfigToken !== undefined && channelPlugin !== undefined && channelService !== undefined) {
-      const contract = createChannelHostServiceConfigContract({
-        source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
-        pluginId: 'channel',
-        serviceId: 'runtime',
-      })
-      channelConfigApi = new HostServiceConfigNarrowApi({
-        contract: contract as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
+    const { configApi: channelConfigApi, credentials: channelCredentialBridge, actions: channelActionsBridge } =
+      createChannelLaunchBridges({
+        channel,
+        token: serviceConfigToken,
         profileId: selection.profileId,
         generation: rendererComposition.generation,
-        ownerToken: serviceConfigToken,
         configPath,
-        writable: true,
-        authorize: () => true,
-        restartService: async candidate => await channelService!.restart(candidate),
+        consumer: channelConsumer,
+        execution: (operation, args) => chatExecutionOperation(nativeSubmission?.channelSession, operation, args),
       })
-      services.push({
-        pluginId: 'channel',
-        serviceId: 'runtime',
-        api: channelConfigApi,
-      })
-    }
+    if (channelConfigApi) services.push({ pluginId: 'channel', serviceId: 'runtime', api: channelConfigApi })
     const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
       ? undefined
       : createServiceConfigBridgeHandler({
@@ -698,36 +711,23 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         generation: rendererComposition.generation,
         services,
       })
-    const channelCredentialBridge = channelCredentialBridgeToken === undefined || channelConfigApi === undefined
-      ? undefined
-      : createChannelCredentialBridgeHandler({
-        token: channelCredentialBridgeToken,
-        profileId: selection.profileId,
-        store: new LauncherSecretStore(),
-        service: channelConfigApi,
-      })
-    const channelActionsBridge = channelActionsBridgeToken === undefined || channelService === undefined
-      ? undefined
-      : createChannelActionsBridgeHandler({ token: channelActionsBridgeToken, api: channelService.manager })
+    const disposeConfiguredLaunch = configuredLaunchCleanup({
+      documents: ownerDocuments,
+      credentials: channelCredentialBridge,
+      channel: disposeChannel,
+      providers: closeProviderFleet,
+    })
     if (invocation.options.attach) {
       try {
         assertProductionGraphLaunchOwnership(true, rendererComposition.hasLoopbackGraph)
       } catch (error) {
-        ownerDocuments.walletSpend?.dispose()
-        await ownerDocuments.http.dispose()
-        await ownerDocuments.agentTools?.close()
-        await channelService?.dispose()
-        await closeProviderFleet()
+        await disposeConfiguredLaunch()
         throw error
       }
       const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
       if (invocation.options.dryRun) {
         stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
-        ownerDocuments.walletSpend?.dispose()
-        await ownerDocuments.http.dispose()
-        await ownerDocuments.agentTools?.close()
-        await channelService?.dispose()
-        await closeProviderFleet()
+        await disposeConfiguredLaunch()
         return
       }
       productionPluginManagement = await openProductionPluginManagementComposition({
@@ -739,6 +739,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        ...(channelTools === undefined
+          ? {}
+          : { channel: (operation: string, input: unknown) => channelTools.call(operation, input) }),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
@@ -792,11 +795,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           stdout,
         })
       } finally {
-        ownerDocuments.walletSpend?.dispose()
-        await ownerDocuments.http.dispose()
-        await ownerDocuments.agentTools?.close()
-        await channelService?.dispose()
-        await closeProviderFleet()
+        await disposeConfiguredLaunch()
       }
       return
     }
@@ -805,11 +804,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     printPlan(plan, stdout, invocation.options.dryRun ? 'ready' : 'launching')
     if (invocation.options.dryRun) {
       stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
-      ownerDocuments.walletSpend?.dispose()
-      await ownerDocuments.http.dispose()
-      await ownerDocuments.agentTools?.close()
-      await channelService?.dispose()
-      await closeProviderFleet()
+      await disposeConfiguredLaunch()
       return
     }
     if (debugPort === undefined) throw new Error('loopback CDP port was not resolved')
@@ -855,6 +850,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
                 codexHome({ ...environment, ...plan.environment }),
                 nativeCatalogOptions,
               )
+            channelConsumer?.setNativeExtras(() => nativeSubmission?.channelSession)
           }
         } catch (error) {
           if (invocation.options.service) throw error
@@ -896,6 +892,9 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        ...(channelTools === undefined
+          ? {}
+          : { channel: (operation: string, input: unknown) => channelTools.call(operation, input) }),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
@@ -967,11 +966,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       prelaunchedHostHandedOff = prelaunchedHost !== undefined
       await runHost(runHostInput)
     } finally {
-      ownerDocuments.walletSpend?.dispose()
-      await ownerDocuments.http.dispose()
-      await ownerDocuments.agentTools?.close()
-      await channelService?.dispose()
-      await closeProviderFleet()
+      await disposeConfiguredLaunch()
     }
   } catch (error) {
     await supervisorRuntime.markFailed(error instanceof Error ? error.message : String(error)).catch(() => undefined)

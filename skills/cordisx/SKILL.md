@@ -1,6 +1,6 @@
 ---
 name: cordisx
-description: Route and complete CordisX user requests from one goal-oriented entry point. Use for installation, startup, configuration, portable model-service export, Marketplace sources, installing or managing plugins, current CordisX documentation, experience-based Q&A, and creating, updating, debugging, or verifying a CordisX plugin. Select the relevant bundled guidance without asking the user to choose a lower-level Skill.
+description: Route and complete CordisX user requests from one goal-oriented entry point. Use for installation, startup, configuration, portable model-service export, Marketplace sources, installing or managing plugins, Channel connection listening/binding/sending, current CordisX documentation, experience-based Q&A, and creating, updating, debugging, or verifying a CordisX plugin. Select the relevant bundled guidance without asking the user to choose a lower-level Skill.
 ---
 
 # CordisX
@@ -28,6 +28,8 @@ The bundled revision and owning source for this entry are recorded in
 - For plugin feasibility, creation, implementation, debugging, packaging, or
   verification, read
   [cordisx-plugin-development](../cordisx-plugin-development/SKILL.md).
+- For Channel connection listing, chat bindings, message listening/history, or
+  sending through a configured account, read [the Channel guide](references/channel.md).
 - For a mixed request, use each relevant guide in dependency order. Resolve
   product facts before applying experience or changing plugin code.
 

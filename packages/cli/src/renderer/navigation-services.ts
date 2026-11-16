@@ -26,6 +26,7 @@ import {
   CordisXManagerContentNavigationDeclarationV3,
   CordisXManagerContentNavigationDeclarationV4,
   CordisXManagerContentNavigationDeclarationV5,
+  CordisXManagerContentNavigationDeclarationV6,
   CordisXManagerContentRecordTitleV1,
   CordisXMessageDefinition,
   CordisXOutletName,
@@ -380,6 +381,7 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 /** Exposes only versioned Manager-content data declarations to plugin fibers. */
 export class CordisXManagerContentNavigationService extends Service implements CordisXManagerContentNavigation {
   static readonly inject = ['routes']
+  readonly supportedSchemaVersions = Object.freeze([1, 2, 3, 4, 5, 6] as const)
 
   constructor(ctx: Context) {
     super(ctx, 'managerContent')
@@ -393,13 +395,15 @@ export class CordisXManagerContentNavigationService extends Service implements C
   register(declaration: CordisXManagerContentNavigationDeclarationV3): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV4): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV5): Disposable<void | Promise<void>>
+  register(declaration: CordisXManagerContentNavigationDeclarationV6): Disposable<void | Promise<void>>
   register(
     declaration:
       | CordisXManagerContentNavigationDeclarationV1
       | CordisXManagerContentNavigationDeclarationV2
       | CordisXManagerContentNavigationDeclarationV3
       | CordisXManagerContentNavigationDeclarationV4
-      | CordisXManagerContentNavigationDeclarationV5,
+      | CordisXManagerContentNavigationDeclarationV5
+      | CordisXManagerContentNavigationDeclarationV6,
   ): Disposable<void | Promise<void>> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(
@@ -419,6 +423,9 @@ export class CordisXManagerContentNavigationService extends Service implements C
   }
 
   replaceProjection(
+    projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV5,
+  ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(
     projection: import('../contracts.js').CordisXManagerContentNavigationProjectionV1,
   ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
   replaceProjection(
@@ -435,7 +442,8 @@ export class CordisXManagerContentNavigationService extends Service implements C
       | import('../contracts.js').CordisXManagerContentNavigationProjectionV1
       | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2
       | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3
-      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4,
+      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4
+      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV5,
   ): ReturnType<CordisXManagerContentNavigation['replaceProjection']> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(

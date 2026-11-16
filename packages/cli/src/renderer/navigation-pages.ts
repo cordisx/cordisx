@@ -1,4 +1,5 @@
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
+import { MANAGER_NAVIGATION_COPY } from './ui-copy/manager.js'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
 import type { AgentPageComposerCommandAdapter } from '@cordisx/protocol/agent-page-admission/v2'
@@ -94,6 +95,7 @@ export const MANAGER_COLLECTION_HOST_COPY = {
     empty: 'Nothing here yet',
     'error-description': 'Try again later.',
     'error-title': 'This list could not be loaded',
+    filters: MANAGER_NAVIGATION_COPY['manager.collection.filters'].en,
     loading: 'Loading…',
     'more-actions': 'More actions',
     retry: 'Try again',
@@ -106,6 +108,7 @@ export const MANAGER_COLLECTION_HOST_COPY = {
     empty: '暂无数据',
     'error-description': '请稍后重试。',
     'error-title': '无法加载此列表',
+    filters: MANAGER_NAVIGATION_COPY['manager.collection.filters']['zh-CN'],
     loading: '正在加载…',
     'more-actions': '更多操作',
     retry: '重试',

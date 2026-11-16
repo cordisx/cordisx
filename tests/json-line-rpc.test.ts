@@ -65,4 +65,37 @@ describe('JSON-line RPC client', () => {
     })
     client.close()
   })
+
+  it.each([7, 'approval-7'])('preserves the exact native request identity %s for resolution correlation', async id => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const pending = new Map<string | number, string>()
+    let resolved: string | undefined
+    const client = new JsonLineRpcClient({
+      input,
+      output,
+      timeoutMs: 1_000,
+      onRequest: async (_method, params, requestId) => {
+        pending.set(requestId, (params as { itemId: string }).itemId)
+        return { decision: 'accept' }
+      },
+      onNotification: (method, params) => {
+        if (method === 'serverRequest/resolved') {
+          resolved = pending.get((params as { requestId: string | number }).requestId)
+        }
+      },
+    })
+    try {
+      const response = line(output)
+      input.write(
+        `${JSON.stringify({ id, method: 'item/commandExecution/requestApproval', params: { itemId: 'item-7' } })}\n`,
+      )
+      await expect(response).resolves.toEqual({ id, result: { decision: 'accept' } })
+      expect([...pending.keys()]).toEqual([id])
+      input.write(`${JSON.stringify({ method: 'serverRequest/resolved', params: { requestId: id } })}\n`)
+      expect(resolved).toBe('item-7')
+    } finally {
+      client.close()
+    }
+  })
 })

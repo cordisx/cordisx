@@ -81,6 +81,7 @@ describe('embedded Manager page header actions', () => {
     })
     const header = document.querySelector('header')!
     const container = document.querySelector('main')!
+    let updateLabel: (() => boolean) | undefined
     outlets.declare(
       {
         schemaVersion: 1,
@@ -110,6 +111,7 @@ describe('embedded Manager page header actions', () => {
         command: { id: 'refresh' },
       }],
     }, context => {
+      updateLabel = () => context.controls.setHeaderActionLabel('refresh', { key: 'reconnect', fallback: 'Reconnect' })
       const iframe = document.createElement('iframe')
       iframe.style.height = '100%'
       context.container.append(iframe)
@@ -131,6 +133,8 @@ describe('embedded Manager page header actions', () => {
       )
       const button = header.querySelector('button')!
       expect(button.getAttribute('aria-label')).toBe('Refresh console')
+      expect(updateLabel?.()).toBe(true)
+      expect(button.getAttribute('aria-label')).toBe('Reconnect')
       expect(button.disabled).toBe(false)
       expect(container.querySelector('header')).toBeNull()
       const page = container.querySelector<HTMLElement>('[data-cordisx-manager-page]')!

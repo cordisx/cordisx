@@ -2,7 +2,7 @@ import { EmptyState } from '../../host-ui/EmptyState.js'
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ManagerModel } from '../../manager.js'
 import { HostBrandIcon } from '../../host-ui/HostBrandIcon.js'
-import { HostAgentAvatar } from '../../host-ui/avatar/AgentAvatar.js'
+import { ManagerRecordSummary } from '../../manager-record-summary.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 
@@ -84,34 +84,9 @@ export function ManagerContentPage(
   }
   return (
     <section className="cxr-page cxr-manager-content-page" data-manager-content-page="true">
-      {presentation?.recordSummary === undefined ? null : (
-        <section
-          className="cxr-manager-record-summary"
-          data-manager-content-record-summary="true"
-          aria-label={presentation.recordSummary.title}
-        >
-          <span
-            className="cxr-manager-record-avatar"
-            role="img"
-            aria-label={presentation.recordSummary.title}
-            data-manager-content-record-avatar-kind={presentation.recordSummary.leadingVisual.kind}
-          >
-            <HostAgentAvatar
-              participant={{
-                id: 'manager-record-summary',
-                name: presentation.recordSummary.title,
-                avatar: presentation.recordSummary.leadingVisual.avatar,
-              }}
-            />
-          </span>
-          <span className="cxr-manager-record-copy">
-            <strong>{presentation.recordSummary.title}</strong>
-            {presentation.recordSummary.description === undefined
-              ? null
-              : <span>{presentation.recordSummary.description}</span>}
-          </span>
-        </section>
-      )}
+      {presentation?.recordSummary === undefined
+        ? null
+        : <ManagerRecordSummary summary={presentation.recordSummary} locale={locale} />}
       {presentation === undefined || contributionId === undefined || presentation.tabs.length === 0
         ? null
         : (

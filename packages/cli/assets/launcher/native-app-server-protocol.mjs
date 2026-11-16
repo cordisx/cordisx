@@ -9,11 +9,12 @@ import { configuredOverrides, optionsAuthority } from './native-configured-overr
 import { withStableComputerUseCli } from './native-computer-use-config.mjs'
 import { nativeInput } from './native-app-server-input.mjs'
 import { createNativeProviderTransport } from './native-provider-transport.mjs'
-import { nativeProviderFailure } from './native-provider-errors.mjs'
-import { switchNativeThread } from './native-thread-switch.mjs'
+import { missingManagedProvider, nativeProviderFailure } from './native-provider-errors.mjs'
+import { preparedSwitchResumeSucceeded, reconcileNativeSwitch, switchNativeThread } from './native-thread-switch.mjs'
 import { createNativeProviderContinuation, dispatchNativeSelectionMutation } from './native-provider-continuation.mjs'
 import { inheritNativeFork } from './native-session-fork.mjs'
 import { readNativeLines } from './native-json-lines.mjs'
+import { createNativeChatControl } from './native-chat-control.mjs'
 
 const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
 const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
@@ -84,6 +85,13 @@ const privatePrefix = `cordisx-private-${nonce}-`
 let sequence = 0
 let closed = false
 let inputQueue = Promise.resolve()
+const chatControl = createNativeChatControl({
+  controlCall,
+  readNative: (method, params) => call(nativeTransport.stdin, privateCalls, { method, params }),
+  writeNative: value => write(nativeTransport.stdin, value),
+  emit: value => ready.then(() => write(control, value)),
+  closed: () => closed,
+})
 let droppedDiagnostics = 0
 let pendingDiagnostics = 0
 const emitDiagnostic = event => {
@@ -214,6 +222,7 @@ function stop(reason = 'transport-closed') {
   switchRequests.clear()
   firstTurns.clear()
   agentFirstTurns.clear()
+  chatControl.dispose()
   control.destroy()
   nativeInput.destroy()
   nativeTransport.stdin.destroy()
@@ -239,23 +248,23 @@ function call(stream, calls, request, timeout = 30_000) {
 function controlCall(type, input = {}) {
   return call(control, controlCalls, { type, ...input })
 }
-function nativeCall(method, params) {
+async function nativeCall(method, params) {
+  const prepared = await chatControl.prepare(method, params)
+  params = prepared.params
   if (object(params?.config)?.[optionsAuthority] !== undefined) {
     params = { ...params, config: configuredOverrides(undefined, params.config) }
   }
-  return call(nativeTransport.stdin, privateCalls, { method, params })
-}
-function acknowledgedSwitchResume(message, expected) {
-  return expected && message.error === undefined && message.result?.thread?.id === expected.threadId
-    && message.result.thread.status?.type === 'idle' && message.result.modelProvider === expected.providerId
-    && message.result.model === expected.model
+  try {
+    const result = await call(nativeTransport.stdin, privateCalls, { method, params })
+    await chatControl.complete(prepared.captureId, true, result)
+    return result
+  } catch (error) {
+    await chatControl.complete(prepared.captureId, false, undefined).catch(() => undefined)
+    throw error
+  }
 }
 function reconcileSwitch(message, expected, hostAdmitted = false) {
-  if (
-    acknowledgedSwitchResume(message, expected) && uncertainSwitches.get(expected.threadId) === expected
-    && (expected.providerId === 'openai' || hostAdmitted) && !lifecycleUncertain
-    && ![...lifecycleCalls.values()].includes(expected.threadId)
-  ) uncertainSwitches.delete(expected.threadId)
+  reconcileNativeSwitch(message, expected, { uncertainSwitches, lifecycleUncertain, lifecycleCalls }, hostAdmitted)
 }
 function settle(calls, message, isControl) {
   const pending = calls.get(message.id)
@@ -269,16 +278,6 @@ function settle(calls, message, isControl) {
     )
     : pending.resolve(isControl ? message.value : message.result)
   return true
-}
-
-function missingManagedProvider(message) {
-  const structured = nativeProviderFailure(message)
-  if (structured !== undefined) return structured
-  if (message?.error?.code !== -32600 || typeof message.error.message !== 'string') return undefined
-  const match = /^failed to load configuration: Model provider `([^`\0\r\n]{1,128})` not found$/u.exec(
-    message.error.message,
-  )
-  return match?.[1]
 }
 
 // Only framed messages are buffered. Many small lines in one chunk do not count as one large request.
@@ -343,7 +342,24 @@ async function forward(line) {
     await write(nativeTransport.stdin, line)
     return
   }
-  const params = object(message?.params)
+  let params = object(message?.params)
+  if (chatControl.desktopResponse(message)) return
+  if (['thread/start', 'thread/resume', 'turn/start'].includes(message.method) && params && message.id !== undefined) {
+    try {
+      const prepared = await chatControl.prepare(message.method, params)
+      message.params = prepared.params
+      // Routing below must mutate the same object that is actually sent.
+      params = prepared.params
+      chatControl.track(message.id, prepared.captureId)
+      line = JSON.stringify(message)
+    } catch {
+      await write(process.stdout, {
+        id: message.id,
+        error: { code: -32000, message: 'CordisX chat execution settings could not be applied' },
+      })
+      return
+    }
+  }
   const clientMetadata = object(params?.responsesapiClientMetadata)
   if (clientMetadata && Object.hasOwn(clientMetadata, marker)) {
     const carried = clientMetadata[marker]
@@ -806,6 +822,7 @@ readLines(nativeTransport.stdout, line => {
     initializeRequestId = undefined
   }
   turnDiagnostics.received(message)
+  chatControl.received(message)
   if (settle(privateCalls, message, false)) return
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return
@@ -827,10 +844,7 @@ readLines(nativeTransport.stdout, line => {
   if (preparedResume !== undefined) {
     preparedResumes.delete(message.id)
     resumeCalls.take(message.id)
-    const succeeded = message.error === undefined && message.result?.thread?.id === preparedResume.threadId
-      && (reconciliation === undefined
-        || (acknowledgedSwitchResume(message, reconciliation)
-          && uncertainSwitches.get(reconciliation.threadId) === reconciliation))
+    const succeeded = preparedSwitchResumeSucceeded(message, preparedResume, reconciliation, uncertainSwitches)
     void controlCall('resume-complete', { ...preparedResume, succeeded })
       .then(completed => {
         if (completed === true) reconcileSwitch(message, reconciliation, true)
@@ -890,6 +904,9 @@ const BRIDGE_NATIVE_METHODS = new Set([
   'thread/name/set',
   'turn/start',
   'turn/interrupt',
+  'threadSection/list',
+  'threadSection/create',
+  'thread/section/move',
 ])
 readLines(control, line => {
   let message
@@ -900,6 +917,11 @@ readLines(control, line => {
     return
   }
   if (settle(controlCalls, message, true)) return
+  if (message.type === 'native-approval-response' && typeof message.id === 'string') {
+    void chatControl.respond(message).then(value => write(control, { id: message.id, ok: true, value }))
+      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+    return
+  }
   if (
     message.type === 'switch-cancel' && typeof message.switchId === 'string'
     && switchRequests.get(message.switchId) === message.threadId

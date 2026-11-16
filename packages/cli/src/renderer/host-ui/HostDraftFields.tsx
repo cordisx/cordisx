@@ -8,6 +8,8 @@ export interface HostDraftFieldDefinition {
   readonly id: string
   readonly field: CordisXConfigFieldSnapshot
   readonly initialValue: unknown
+  /** Host may refresh the baseline while retaining an edited value on an explicit reset. */
+  readonly resetValue?: unknown
   readonly forceFullWidth?: boolean
   readonly controlId?: string
   readonly transientSecret?: boolean
@@ -38,7 +40,7 @@ function DraftField({ definition, error, resetVersion, locale, onClearError }: {
 }) {
   const [value, setValue] = useState(definition.initialValue)
   useEffect(() => {
-    setValue(definition.initialValue)
+    setValue(Object.hasOwn(definition, 'resetValue') ? definition.resetValue : definition.initialValue)
   }, [definition.initialValue, resetVersion])
   const commit = (next: unknown) => {
     setValue(next)

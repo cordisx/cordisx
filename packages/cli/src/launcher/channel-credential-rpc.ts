@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { ChannelCredentialDraftBroker, type ChannelCredentialDraftResult } from './channel-credential-drafts.js'
 import type {
   HostServiceConfigMutation,
   HostServiceConfigMutationResult,
@@ -19,7 +20,9 @@ interface CredentialRequest {
 
 export interface ChannelCredentialBridgeHandler {
   readonly token: string
-  handle(value: unknown): Promise<HostServiceConfigMutationResult>
+  handle(value: unknown, documentId?: string): Promise<HostServiceConfigMutationResult | ChannelCredentialDraftResult>
+  retireDocument?(documentId: string): Promise<void>
+  dispose?(): Promise<void>
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -80,34 +83,97 @@ export function createChannelCredentialBridgeHandler(input: {
   readonly profileId: string
   readonly store: LauncherSecretStore
   readonly service: HostServiceConfigNarrowApi
+  readonly projection?: () => Promise<unknown>
 }): ChannelCredentialBridgeHandler {
+  const drafts = new ChannelCredentialDraftBroker(input)
+  const retired = new Set<string>()
+  const legacyCaptures = new Map<string, string>()
+  let disposed = false
+  let legacyTail: Promise<void> = Promise.resolve()
+  const serialLegacy = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = legacyTail.then(operation)
+    legacyTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+  const live = (documentId: string) => !disposed && !retired.has(documentId)
+  const cleanup = async (captureId: string): Promise<boolean> => {
+    const result = await input.store.remove(captureId)
+    if (result.state !== 'unset') return false
+    legacyCaptures.delete(captureId)
+    input.store.forget(captureId)
+    return true
+  }
+  const cleanupDocument = async (documentId?: string) => {
+    const results = await Promise.allSettled(
+      [...legacyCaptures].filter(([, owner]) => documentId === undefined || owner === documentId)
+        .map(([captureId]) => cleanup(captureId)),
+    )
+    if (results.some(result => result.status === 'rejected' || !result.value)) {
+      throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+    }
+  }
   return {
     token: input.token,
-    async handle(value) {
-      const request = parse(value, input.token)
-      const capture = input.store.beginCapture({
-        profileId: input.profileId,
-        connectionId: connectionId(request.account),
-      })
-      const captured = await input.store.capture({ captureId: capture.captureId, secret: request.secret })
-      const reference = captured.state === 'set' ? input.store.referenceFor(capture.captureId) : undefined
-      if (reference === undefined) return rejected(request.mutation, 'Host credential capture is unavailable.')
-      const configuration = structuredClone(request.mutation.configuration) as {
-        connections?: Array<Record<string, unknown>>
+    retireDocument: async documentId => {
+      retired.add(documentId)
+      const results = await Promise.allSettled([
+        drafts.retireDocument(documentId),
+        serialLegacy(() => cleanupDocument(documentId)),
+      ])
+      if (results.some(result => result.status === 'rejected')) throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+    },
+    dispose: async () => {
+      disposed = true
+      const results = await Promise.allSettled([drafts.dispose(), serialLegacy(() => cleanupDocument())])
+      if (results.some(result => result.status === 'rejected')) throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+    },
+    async handle(value, documentId = 'legacy') {
+      const envelope = record(value, 'channel credential request')
+      if (envelope.version === 2) {
+        if (
+          envelope.token !== input.token || typeof envelope.requestId !== 'string'
+          || !/^[A-Za-z0-9-]{1,96}$/u.test(envelope.requestId)
+        ) throw new Error('unauthorized channel credential request')
+        return await drafts.handle(envelope, documentId)
       }
-      const target = configuration.connections?.find(connection => {
-        const ref = connection.ref as Record<string, unknown> | undefined
-        return ref?.adapterId === request.account.adapterId && ref.accountId === request.account.accountId
-          && ref.tenantId === request.account.tenantId
+      const request = parse(value, input.token)
+      return await serialLegacy(async () => {
+        if (!live(documentId)) return rejected(request.mutation, 'The originating document is no longer active.')
+        const capture = input.store.beginCapture({
+          profileId: input.profileId,
+          connectionId: `${connectionId(request.account).slice(0, 63)}-${randomBytes(12).toString('hex')}`,
+        })
+        legacyCaptures.set(capture.captureId, documentId)
+        let committed = false
+        try {
+          const captured = await input.store.capture({ captureId: capture.captureId, secret: request.secret })
+          const reference = captured.state === 'set' ? input.store.referenceFor(capture.captureId) : undefined
+          if (reference === undefined) return rejected(request.mutation, 'Host credential capture is unavailable.')
+          const configuration = structuredClone(request.mutation.configuration) as {
+            connections?: Array<Record<string, unknown>>
+          }
+          const target = configuration.connections?.find(connection => {
+            const ref = connection.ref as Record<string, unknown> | undefined
+            return ref?.adapterId === request.account.adapterId && ref.accountId === request.account.accountId
+              && ref.tenantId === request.account.tenantId
+          })
+          if (target === undefined || !live(documentId)) {
+            return rejected(request.mutation, 'Channel connection is unavailable.')
+          }
+          target.secretRef = reference
+          const result = await input.service.mutate({
+            ...request.mutation,
+            configuration: configuration as HostServiceConfigMutation['configuration'],
+          })
+          committed = result.status === 'applied'
+          return result
+        } finally {
+          if (committed) {
+            legacyCaptures.delete(capture.captureId)
+            input.store.forget(capture.captureId)
+          } else if (!await cleanup(capture.captureId)) throw new Error('CREDENTIAL_CLEANUP_UNAVAILABLE')
+        }
       })
-      if (target === undefined) return rejected(request.mutation, 'Channel connection is unavailable.')
-      target.secretRef = reference
-      const result = await input.service.mutate({
-        ...request.mutation,
-        configuration: configuration as HostServiceConfigMutation['configuration'],
-      })
-      if (result.status !== 'applied') await input.store.remove(capture.captureId).catch(() => undefined)
-      return result
     },
   }
 }

@@ -49,6 +49,11 @@ export function replayKey(event: ChannelEventRef): string {
   return canonical([event.adapterId, event.accountId, event.eventId])
 }
 
+/** Preserve the durable replay identity; adapters must stage metadata under this same ID. */
+export function channelInboxRecordId(event: ChannelEventRef): string {
+  return `inbox:${digest(replayKey(event))}`
+}
+
 export function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
   return accountKey(left) === accountKey(right)
 }

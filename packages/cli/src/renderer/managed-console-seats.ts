@@ -25,11 +25,15 @@ export function activeManagedConsolePage(owner: string): ManagedConsoleSeat | un
     : undefined
 }
 
-export function activeManagedConsoleSeat(target: Element, owner: string): boolean {
-  if (!target.isConnected || target.ownerDocument !== document) return false
+export function managedConsoleSeatFor(target: Element, owner: string): ManagedConsoleSeat | undefined {
+  if (!target.isConnected || target.ownerDocument !== document) return undefined
   for (let node: Element | null = target; node; node = node.parentElement) {
     const seat = seats.get(node)
-    if (seat) return seat.owner === owner && !seat.signal.aborted
+    if (seat) return seat.owner === owner && !seat.signal.aborted ? seat : undefined
   }
-  return false
+  return undefined
+}
+
+export function activeManagedConsoleSeat(target: Element, owner: string): boolean {
+  return managedConsoleSeatFor(target, owner) !== undefined
 }

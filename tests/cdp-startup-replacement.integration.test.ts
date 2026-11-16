@@ -26,6 +26,7 @@ async function fixture(options: {
   launcherOwned?: boolean
   lifecycle?: WatchInjectionOptions['pluginLifecycle']
   browserUnavailable?: boolean
+  holdInitialReadiness?: boolean
 } = {}) {
   const calls: string[] = []
   const scopes = new Map<string, { socket: WebSocket; context: Context; scripts: Map<string, string> }>()
@@ -35,6 +36,8 @@ async function fixture(options: {
   let replacementVisible = true
   let replacementBootAllowed = true
   let interrupted = false
+  let releaseInitialReadiness: (() => void) | undefined
+  const initialReadiness = new Promise<void>(resolve => releaseInitialReadiness = resolve)
   const target = (id: string, document = 'index.html'): CdpTarget => ({
     id,
     title: 'Codex',
@@ -155,6 +158,9 @@ async function fixture(options: {
           runInContext(Buffer.from(String(params.body), 'base64').toString(), scope.context)
         } else if (item.method === 'Runtime.evaluate') {
           const expression = String(params.expression)
+          if (options.holdInitialReadiness && expression.includes('document.readyState === "complete"')) {
+            await initialReadiness
+          }
           if (expression.includes('cordisx:production-boot-pending') && !options.transforms && shouldInterrupt(id)) {
             if (options.interruption === 'activation') {
               result = { result: { value: { ok: false, error: 'fixture plugin activation failed' } } }
@@ -254,6 +260,7 @@ async function fixture(options: {
     statuses,
     interrupted: () => interrupted,
     scopes,
+    releaseInitialReadiness: () => releaseInitialReadiness?.(),
     showInitialWorkspace: () => initialWorkspaceVisible = true,
     markHostExited: () => hostExited = true,
     abort: () => abort.abort(),
@@ -261,6 +268,7 @@ async function fixture(options: {
     allowBoot: (value: boolean) => replacementBootAllowed = value,
     start: () => watching = watchAndInject(settings).then(() => ({}), error => ({ error })),
     stop: async () => {
+      releaseInitialReadiness?.()
       abort.abort()
       await watching
       for (const socket of sockets.clients) socket.terminate()
@@ -270,6 +278,24 @@ async function fixture(options: {
 }
 
 describe('first owned workspace during production installation', () => {
+  it('waits for a cold document response before installing short-deadline runtime bindings', async () => {
+    const app = await fixture({ holdInitialReadiness: true, replacements: 0, transforms: true })
+    try {
+      app.start()
+      await vi.waitFor(() => expect(app.calls).toContain('workspace-0:Runtime.evaluate'))
+      expect(app.calls).not.toContain('workspace-0:Runtime.addBinding')
+      expect(app.ready).not.toHaveBeenCalled()
+      app.releaseInitialReadiness()
+      await vi.waitFor(() => expect(app.ready).toHaveBeenCalledOnce(), { timeout: 3_000 })
+      expect(app.calls).toContain('workspace-0:Runtime.addBinding')
+      expect(app.calls.indexOf('workspace-0:Runtime.evaluate')).toBeLessThan(
+        app.calls.indexOf('workspace-0:Runtime.addBinding'),
+      )
+    } finally {
+      await app.stop()
+    }
+  })
+
   it('waits through a helper-only target list and admits only the native workspace', async () => {
     const app = await fixture({ initialWorkspaceVisible: false, replacements: 0 })
     try {

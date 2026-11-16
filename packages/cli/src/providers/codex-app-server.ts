@@ -15,7 +15,9 @@ export interface CodexAppServerRpc {
   readonly generation: string
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result>
   subscribeNotifications?(listener: (method: string, params: unknown) => void): () => void
-  subscribeRequests?(listener: (method: string, params: unknown) => unknown | Promise<unknown>): () => void
+  subscribeRequests?(
+    listener: (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>,
+  ): () => void
   close(): Promise<void>
 }
 
@@ -56,7 +58,9 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
   private closed = false
   private readonly rpc: JsonLineRpcClient
   private readonly notifications = new Set<(method: string, params: unknown) => void>()
-  private readonly requests = new Set<(method: string, params: unknown) => unknown | Promise<unknown>>()
+  private readonly requests = new Set<
+    (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>
+  >()
 
   constructor(private readonly child: ChildProcessWithoutNullStreams, timeoutMs: number) {
     child.stderr.resume()
@@ -67,12 +71,12 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
       onNotification: (method, params) => {
         for (const listener of this.notifications) listener(method, params)
       },
-      onRequest: async (method, params) => {
+      onRequest: async (method, params, requestId) => {
         const listener = this.requests.values().next().value as
-          | ((method: string, params: unknown) => unknown | Promise<unknown>)
+          | ((method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>)
           | undefined
         if (listener === undefined) throw new Error(`Unsupported App Server request: ${method}`)
-        return await listener(method, params)
+        return await listener(method, params, requestId)
       },
     })
     child.once('error', error => this.rpc.close(`Codex app-server process failed: ${error.message}`))
@@ -90,7 +94,9 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     return () => this.notifications.delete(listener)
   }
 
-  subscribeRequests(listener: (method: string, params: unknown) => unknown | Promise<unknown>): () => void {
+  subscribeRequests(
+    listener: (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>,
+  ): () => void {
     this.requests.add(listener)
     return () => this.requests.delete(listener)
   }

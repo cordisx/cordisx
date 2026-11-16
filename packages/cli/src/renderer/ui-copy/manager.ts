@@ -11,7 +11,7 @@ export const MANAGER_NAVIGATION_COPY = {
   'manager.nav.group.resources': { en: 'Resources', 'zh-CN': '资源' },
   'manager.nav.group.development': { en: 'Development', 'zh-CN': '开发' },
   'manager.nav.group.collaboration': { en: 'Collaboration', 'zh-CN': '协作' },
-  'manager.nav.group.external-accounts': { en: 'External accounts', 'zh-CN': '外部账号' },
+  'manager.nav.group.external-accounts': { en: 'External connections', 'zh-CN': '外部连接' },
   'manager.nav.group.other': { en: 'Other', 'zh-CN': '其他' },
   'manager.trigger.manage': { en: 'Manage CordisX plugins', 'zh-CN': '管理 CordisX 插件' },
   'manager.close': { en: 'Close CordisX Manager', 'zh-CN': '关闭 CordisX 管理器' },
@@ -24,6 +24,7 @@ export const MANAGER_NAVIGATION_COPY = {
   'manager.back': { en: 'Back', 'zh-CN': '返回' },
   'manager.content.loading': { en: 'Loading page…', 'zh-CN': '正在加载页面…' },
   'manager.content.failed': { en: 'This page could not be loaded.', 'zh-CN': '无法加载此页面。' },
+  'manager.collection.filters': { en: 'Filters', 'zh-CN': '筛选' },
 } satisfies ProductCopyCatalog<'manager'>
 
 export const EXTENSION_TAB_COPY = {
@@ -77,6 +78,11 @@ export const STATUS_COPY = {
 } satisfies ProductCopyCatalog<'status'>
 
 export const PERMISSION_COPY = {
+  'permission.service-owner': { en: 'Own service', 'zh-CN': '插件自有能力' },
+  'permission.service-owner-reason': {
+    en: 'This plugin invokes its own active service. No user approval is required.',
+    'zh-CN': '插件内部调用自己提供的服务，无需用户审批。',
+  },
   'permission.certified-automatic-authorization': {
     en: 'Certified automatic authorization',
     'zh-CN': '认证自动授权',

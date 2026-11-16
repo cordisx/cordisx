@@ -99,7 +99,7 @@ export const CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG = Object.freeze({
         label: Object.freeze({
           namespace: 'cordisx.manager.extension-points',
           key: 'manager.settings.navigation-group.external-accounts',
-          fallback: 'External accounts',
+          fallback: 'External connections',
         }),
         order: 400,
       }),

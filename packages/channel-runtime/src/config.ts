@@ -1,5 +1,8 @@
 import type { ChannelAdapterKind, ChannelTenantRef } from './types.js'
 import Schema from '@deepseek-ai/schemastery'
+import { type ChannelServiceConfigV2, parseChannelConfigV2 } from './config-v2.js'
+export type { ChannelServiceConfigV2 } from './config-v2.js'
+export type ChannelServiceConfig = ChannelServiceConfigV1 | ChannelServiceConfigV2
 
 export const CHANNEL_SERVICE_CONFIG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
@@ -305,7 +308,14 @@ function channelConnectionSchemasteryProjection(): {
   })
 }
 
-export function parseChannelServiceConfig(value: unknown): ChannelServiceConfigV1 {
+export function parseChannelServiceConfig(value: unknown): ChannelServiceConfig {
+  if ((value as { schemaVersion?: unknown } | null)?.schemaVersion === 2) {
+    return parseChannelConfigV2(value, parseChannelServiceConfigV1)
+  }
+  return parseChannelServiceConfigV1(value)
+}
+
+export function parseChannelServiceConfigV1(value: unknown): ChannelServiceConfigV1 {
   const config = record(value, 'Channel service configuration')
   exactKeys(config, ['contract', 'schemaVersion', 'connections'], 'Channel service configuration')
   if (config.contract !== 'cordisx.channel-service-config/v1' || config.schemaVersion !== 1) {
@@ -430,21 +440,27 @@ export function projectChannelServiceConfig(
       projection: channelConnectionSchemasteryProjection(),
     },
     configuration: {
-      contract: configuration.contract,
-      schemaVersion: configuration.schemaVersion,
-      connections,
+      contract: 'cordisx.channel-service-config/v1',
+      schemaVersion: 1,
+      connections: connections.map(({ ref, adapterKind, enabled, transport, secretState }) => ({
+        ref,
+        adapterKind,
+        enabled,
+        transport,
+        secretState,
+      })),
     },
   })
 }
 
 /** Safe disabled default for the generic Host service-configuration store. */
-export const CHANNEL_SERVICE_CONFIG_INITIAL: ChannelServiceConfigV1 = parseChannelServiceConfig({
+export const CHANNEL_SERVICE_CONFIG_INITIAL: ChannelServiceConfigV1 = parseChannelServiceConfigV1({
   contract: 'cordisx.channel-service-config/v1',
   schemaVersion: 1,
   connections: [],
 })
 
-function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServiceConfigV1 {
+function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServiceConfig {
   const candidate = record(structuredClone(value), 'Channel service configuration mutation')
   const stored = parseChannelServiceConfig(current)
   const storedByTenant = new Map(stored.connections.map(connection => [tenantKey(connection.ref), connection]))

@@ -35,8 +35,9 @@ const AGENT_INPUT_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.fr
   'agent.prompt.section',
   'agent.prompt.context',
 ])
-const CHANNEL_MANAGER_READ_CAPABILITIES: readonly CordisXPermissionCapabilityV2[] = Object.freeze([
+const CHANNEL_MANAGER_CAPABILITIES: readonly CordisXPermissionCapabilityV2[] = Object.freeze([
   'channel.accounts.read',
+  'channel.accounts.connect',
   'channel.bindings.read',
 ])
 
@@ -128,11 +129,11 @@ export function platformAdapterCapabilityProvider(
   })
 }
 
-/** Public Channel Manager snapshot reads are served by the single Host provider. */
+/** Public Channel Manager reads and credential workflows are served by the single Host provider. */
 export function channelManagerCapabilityProvider(): CordisXCapabilityProviderReport {
   const reason = message(
     'provider.channel-manager.supported',
-    'The Host Channel Manager can project redacted accounts and bindings.',
+    'The Host Channel Manager can project redacted accounts and bindings and configure connections.',
   )
   return report({
     providerId: 'host-channel-manager',
@@ -141,7 +142,7 @@ export function channelManagerCapabilityProvider(): CordisXCapabilityProviderRep
     family: 'channel',
     status: 'supported',
     reason,
-    routes: CHANNEL_MANAGER_READ_CAPABILITIES.map(capability => route(capability, 'supported', reason)),
+    routes: CHANNEL_MANAGER_CAPABILITIES.map(capability => route(capability, 'supported', reason)),
   })
 }
 

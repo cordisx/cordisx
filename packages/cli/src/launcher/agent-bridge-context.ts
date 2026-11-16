@@ -227,3 +227,20 @@ export function callerThreadId(metadata: unknown): string | undefined {
   const value = turn?.thread_id ?? meta['openai/threadId']
   return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : undefined
 }
+
+/** Native turn metadata correlates a Channel reply choice; it cannot grant send authority. */
+export function callerTurnId(metadata: unknown): string | undefined {
+  const meta = record(metadata)
+  if (meta === undefined) return undefined
+  const raw = meta['x-codex-turn-metadata']
+  let turn: Record<string, unknown> | undefined
+  if (typeof raw === 'string') {
+    try {
+      turn = record(JSON.parse(raw))
+    } catch {
+      turn = undefined
+    }
+  } else turn = record(raw)
+  const value = turn?.turn_id ?? meta['openai/turnId']
+  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : undefined
+}

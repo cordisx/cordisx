@@ -13,7 +13,7 @@ export function managerHeaderBackRoute(
       ? undefined
       : { kind: 'manager-content', id: route.id, reference: managerContentParent }
   }
-  if (route.kind === 'notification-rules') return previous
+  if (route.kind === 'notification-rules' || route.kind === 'chat-execution') return previous
   if (route.kind === 'extension-point') return { kind: 'primary', page: 'extension-points' }
   if (route.kind === 'route' || route.kind === 'page') return { kind: 'primary', page: 'routes' }
   if (route.kind === 'marketplace-source-edit') return { kind: 'marketplace-sources' }

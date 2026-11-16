@@ -196,12 +196,16 @@ export class NavigationRegistry extends NavigationRegistryRouting {
         return dispose
       }
       const localization = this.i18n.seatFor(page.owner, page.metadata.localeNamespace ?? page.owner, own)
+      let updateHeaderLabel:
+        | ((id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => boolean)
+        | undefined
       if (headerActions !== undefined && page.metadata.chrome !== 'body-only') {
         const headerSites = new Set<string>()
         effects.push(() => {
           for (const site of headerSites) this.i18n.clearDiagnosticSite(page.owner, site)
         })
         effects.push(mountPageHeaderActions({
+          registerLabelUpdater: update => updateHeaderLabel = update,
           chrome: headerActions,
           actions: page.metadata.headerActions ?? [],
           button: (label, icon) => pageChromeButton(content.ownerDocument, label, icon),
@@ -249,7 +253,7 @@ export class NavigationRegistry extends NavigationRegistryRouting {
       registerManagedConsoleSeat(pageBody, page.owner, abortController.signal)
       pageBody.dataset.cordisxPageContentInset = page.metadata.contentInset ?? 'standard'
       content.append(collectionRoot, pageBody)
-      const controls = new HostPageControls(content.ownerDocument, pageBody)
+      const controls = new HostPageControls(content.ownerDocument, pageBody, undefined, undefined, updateHeaderLabel)
       effects.push(() => controls.dispose())
       const collection = mountManagerCollectionHost(collectionRoot, {
         document: content.ownerDocument,

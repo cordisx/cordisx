@@ -8,6 +8,13 @@ import type {
   ChannelManagerTargetResultV1,
 } from '@cordisx/protocol/channel-manager/v2'
 import type { ChannelAdapterKind } from '@cordisx/protocol/channel-runtime/v1'
+import type { ChannelManagerSnapshotV4 } from '@cordisx/protocol/channel-manager/v3'
+import type { ChannelManagerBindingPageV1 } from '@cordisx/protocol/channel-manager/v4'
+import type {
+  ChannelCredentialAuthorizer,
+  ChannelCredentialConfigurationWrite,
+  ChannelCredentialWorkflow,
+} from './channel-credential-workflow.js'
 import type { ChannelManagerActionResult } from '../launcher/channel-manager-api.js'
 import type {
   ChannelManagerBindingProjection,
@@ -30,6 +37,12 @@ interface PublicChannelManagerInput {
   readonly profileId: string
   readonly hostGeneration: string
   readonly projection: () => ChannelManagerProjectionV1
+  readonly credentials?: ChannelCredentialWorkflow
+  readonly configurationAvailable?: () => boolean
+  readonly update?: (
+    ref: ChannelManagerConnectionProjection['ref'],
+    patch: { displayName?: string; selectors?: readonly string[] },
+  ) => Promise<{ status: 'applied' | 'conflict' | 'rejected' | 'unavailable'; code: string }>
   readonly actionsAvailable: () => boolean
   readonly runAction: (
     action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
@@ -125,12 +138,75 @@ export class PublicChannelManagerController {
   private readonly sessionTokens = new Map<string, string>()
   private readonly routeTokens = new Map<string, string>()
   private readonly logCursors = new Map<string, LogCursor>()
+  private readonly bindingCursors = new Map<string, { connectionToken: string; revision: number; offset: number }>()
   private revision = 0
   private projectionFingerprint: string | undefined
 
   constructor(private readonly input: PublicChannelManagerInput) {}
 
+  snapshotWithIdentity(): ChannelManagerSnapshotV4 {
+    const snapshot = this.snapshot()
+    const connections = this.input.projection()
+    const accounts = snapshot.accounts.map(account => {
+      const target = this.connectionTargets.get(account.connectionToken)
+      const identity = target === undefined
+        ? undefined
+        : connections.accounts.find(candidate => connectionKey(candidate.ref) === connectionKey(target.ref))
+      return {
+        ...account,
+        ...(identity?.accountName === undefined ? {} : { accountName: identity.accountName }),
+        ...(identity?.accountAvatar === undefined ? {} : { accountAvatar: identity.accountAvatar }),
+      }
+    })
+    return immutable({ ...snapshot, contract: 'cordisx.channel-runtime-snapshot/v4', schemaVersion: 4, accounts })
+  }
+
   snapshot(): ChannelManagerSnapshotV3 {
+    const full = this.fullSnapshot()
+    return immutable({ ...full, bindings: full.bindings.slice(0, 10_000) })
+  }
+
+  bindingPage(request: { connectionToken: string; afterCursor?: string; limit?: number }): ChannelManagerBindingPageV1 {
+    const full = this.fullSnapshot()
+    if (Object.keys(request).some(key => !['connectionToken', 'afterCursor', 'limit'].includes(key))) {
+      throw new Error('INVALID_REQUEST')
+    }
+    const target = this.connectionTargets.get(request.connectionToken)
+    if (!target || !this.connectionExists(target.ref)) throw new Error('TARGET_UNAVAILABLE')
+    const limit = request.limit ?? 50
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_REQUEST')
+    const cursor = request.afterCursor === undefined ? undefined : this.bindingCursors.get(request.afterCursor)
+    if (
+      request.afterCursor !== undefined && (!cursor || cursor.connectionToken !== request.connectionToken
+        || cursor.revision !== full.revision)
+    ) throw new Error('STALE_CURSOR')
+    const all = full.bindings.filter(binding => binding.connectionToken === request.connectionToken)
+    const offset = cursor?.offset ?? 0
+    const bindings = all.slice(offset, offset + limit)
+    let nextCursor: string | undefined
+    if (offset + bindings.length < all.length) {
+      nextCursor = opaqueToken()
+      this.bindingCursors.set(nextCursor, {
+        connectionToken: request.connectionToken,
+        revision: full.revision,
+        offset: offset + bindings.length,
+      })
+      if (this.bindingCursors.size > 256) this.bindingCursors.delete(this.bindingCursors.keys().next().value!)
+    }
+    return immutable({
+      contract: 'cordisx.channel-manager-binding-page/v1',
+      schemaVersion: 1,
+      profileId: this.input.profileId,
+      hostGeneration: this.input.hostGeneration,
+      snapshotRevision: full.revision,
+      connectionToken: request.connectionToken,
+      total: all.length,
+      bindings,
+      ...(nextCursor === undefined ? {} : { nextCursor }),
+    })
+  }
+
+  private fullSnapshot(): ChannelManagerSnapshotV3 {
     const projection = this.input.projection()
     this.revision = Math.max(this.revision, projection.service.revision)
     const connections = new Map<string, ChannelManagerConnectionProjection>()
@@ -149,9 +225,16 @@ export class PublicChannelManagerController {
           ? ['connection.enable'] as const
           : ['connection.disable', 'connection.reconnect'] as const)
         : []
-      const availableOperations = projection.logs === undefined
-        ? actionOperations
-        : [...actionOperations, 'logs.query'] as const
+      const credentialOperations = this.input.credentials !== undefined
+          && ['feishu', 'lark'].includes(kind)
+        ? ['target.credential.capture.rotate', 'connection.rotate-credential'] as const
+        : []
+      const availableOperations = [
+        ...actionOperations,
+        ...credentialOperations,
+        ...(this.input.configurationAvailable?.() ? ['connection.update'] as const : []),
+        ...(projection.logs === undefined ? [] : ['logs.query'] as const),
+      ]
       return [{
         connectionToken: token,
         adapterKind: kind,
@@ -227,31 +310,78 @@ export class PublicChannelManagerController {
       hostGeneration: this.input.hostGeneration,
       revision: this.revision,
       observedAt: new Date().toISOString(),
-      availableOperations: [],
+      availableOperations: this.input.credentials === undefined
+        ? []
+        : ['target.credential.capture.create', 'credential.capture', 'target.connection.create', 'connection.create'],
       accounts,
       bindings,
       pendingAuthorizations: [],
     })
   }
 
-  issue(request: ChannelManagerTargetRequestV1): Promise<ChannelManagerTargetResultV1> {
+  async issue(request: ChannelManagerTargetRequestV1, owner = 'host'): Promise<ChannelManagerTargetResultV1> {
     const fence = this.fence(request)
     const result = fence.status === 'applied'
-      ? { status: 'unavailable' as const, code: 'OPERATION_UNAVAILABLE' }
+      ? await this.input.credentials?.issue(request, owner)
+        ?? { status: 'unavailable' as const, code: 'OPERATION_UNAVAILABLE' }
       : fence
-    return Promise.resolve(immutable({
-      ...this.resultFence(request),
-      contract: 'cordisx.channel-manager-target-result/v1',
-      schemaVersion: 1,
-      operation: request.operation,
-      status: result.status,
-      code: result.code,
-    } as ChannelManagerTargetResultV1))
+    return immutable(
+      {
+        ...this.resultFence(request),
+        contract: 'cordisx.channel-manager-target-result/v1',
+        schemaVersion: 1,
+        operation: request.operation,
+        ...result,
+      } as ChannelManagerTargetResultV1,
+    )
   }
 
-  async execute(request: ChannelManagerRequestV2): Promise<ChannelManagerResultV2> {
+  async execute(
+    request: ChannelManagerRequestV2,
+    owner = 'host',
+    active = () => true,
+    signal?: AbortSignal,
+    authorizeCredential: ChannelCredentialAuthorizer = async () => false,
+    callerOperations?: Partial<Pick<PublicChannelManagerInput, 'update' | 'runAction'>>,
+    credentialConfiguration?: ChannelCredentialConfigurationWrite,
+  ): Promise<ChannelManagerResultV2> {
     const fence = this.fence(request)
     if (fence.status !== 'applied') return this.operationResult(request, fence.status, fence.code)
+    if (!active()) return this.operationResult(request, 'unavailable', 'STALE_GENERATION')
+    if (
+      request.operation === 'credential.capture' || request.operation === 'connection.create'
+      || request.operation === 'connection.rotate-credential'
+    ) {
+      const result = await this.input.credentials?.execute(
+        request,
+        owner,
+        active,
+        authorizeCredential,
+        signal,
+        undefined,
+        credentialConfiguration,
+      )
+        ?? { status: 'unavailable' as const, code: 'OPERATION_UNAVAILABLE' }
+      return immutable(
+        {
+          ...this.resultFence(request),
+          contract: 'cordisx.channel-manager-result/v2',
+          schemaVersion: 2,
+          operation: request.operation,
+          target: request.target,
+          ...result,
+        } as ChannelManagerResultV2,
+      )
+    }
+    if (request.operation === 'connection.update') {
+      const target = this.connectionTargets.get(request.target.connectionToken)
+      if (!target || !this.connectionExists(target.ref)) {
+        return this.operationResult(request, 'rejected', 'TARGET_UNAVAILABLE')
+      }
+      const result = await (callerOperations?.update ?? this.input.update)?.(target.ref, request.patch)
+        ?? { status: 'unavailable' as const, code: 'OPERATION_UNAVAILABLE' }
+      return this.operationResult(request, result.status, result.code)
+    }
     if (request.operation === 'logs.query') {
       try {
         this.validateLogRequest(request)
@@ -268,7 +398,7 @@ export class PublicChannelManagerController {
       if (target === undefined || !this.connectionExists(target.ref)) {
         return this.operationResult(request, 'rejected', 'TARGET_UNAVAILABLE')
       }
-      const result = await this.input.runAction(
+      const result = await (callerOperations?.runAction ?? this.input.runAction)(
         request.operation.slice('connection.'.length) as 'enable' | 'disable' | 'reconnect',
         {
           ref: target.ref,
@@ -287,7 +417,7 @@ export class PublicChannelManagerController {
       ) {
         return this.operationResult(request, 'rejected', 'TARGET_UNAVAILABLE')
       }
-      const result = await this.input.runAction(
+      const result = await (callerOperations?.runAction ?? this.input.runAction)(
         request.operation.slice('binding.'.length) as 'archive' | 'restore' | 'unbind',
         {
           bindingId: target.binding.bindingId,
@@ -400,6 +530,46 @@ export class PublicChannelManagerController {
   private actionResult(request: ChannelManagerRequestV2, result: ChannelManagerActionResult): ChannelManagerResultV2 {
     if (result.status !== 'applied') return this.operationResult(request, 'unavailable', 'OPERATION_UNAVAILABLE')
     return this.operationResult(request, 'applied', 'APPLIED')
+  }
+
+  target(token: string): ChannelManagerConnectionProjection['ref'] | undefined {
+    const ref = this.connectionTargets.get(token)?.ref
+    return ref && this.connectionExists(ref) ? ref : undefined
+  }
+
+  /** Bound internally to the current opaque token incarnation, never supplied by the plugin. */
+  bindingTarget(token: string) {
+    this.fullSnapshot()
+    const target = this.bindingTargets.get(token)
+    return target && this.input.projection().bindings.some(binding => binding.bindingId === target.binding.bindingId)
+      ? target.binding
+      : undefined
+  }
+
+  tokenFor(ref: ChannelManagerConnectionProjection['ref']): string {
+    const key = connectionKey(ref)
+    const token = this.connectionTokens.get(key) ?? opaqueToken()
+    this.connectionTokens.set(key, token)
+    this.connectionTargets.set(token, { ref })
+    return token
+  }
+
+  currentRevision(): number {
+    return this.revision
+  }
+
+  /** Resolve an existing opaque target internally; callers never provide a second permission scope. */
+  permissionTarget(request: ChannelManagerRequestV2): ChannelManagerConnectionProjection['ref'] | undefined {
+    if (this.fence(request).status !== 'applied') return undefined
+    if ('bindingToken' in request.target) {
+      const value = this.bindingTargets.get(request.target.bindingToken)
+      return value && request.target.bindingRevision === value.bindingRevision
+          && this.input.projection().bindings.some(binding => binding.bindingId === value.binding.bindingId)
+        ? value.binding.channel
+        : undefined
+    }
+    if ('connectionToken' in request.target) return this.target(request.target.connectionToken)
+    return undefined
   }
 
   invalidate(): void {

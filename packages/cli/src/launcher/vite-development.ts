@@ -1,3 +1,4 @@
+import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import { nativeViteBootModuleSource, nativeViteEntryModuleSource } from './vite-development-bootstrap.js'
 export { nativeViteBootModuleSource, nativeViteEntryModuleSource } from './vite-development-bootstrap.js'
@@ -99,6 +100,7 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
+  readonly documents?: readonly import('@cordisx/protocol/plugin-documents/v1').PluginDocumentReadbackV1[]
   readonly manifest?:
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
@@ -107,6 +109,7 @@ interface DevelopmentGeneration {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV16
     | PluginRuntimeManifestV14
     | PluginRuntimeManifestV15
   /** Executable only by the Host-owned isolated Worker boundary. */
@@ -313,7 +316,13 @@ export async function startNativeViteServer(
     }
     const realEntry = await realpath(plugin.entry)
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
-    const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
+    const packageFiles = [
+      ...new Set([
+        path.join(realRoot, 'cordisx-package.json'),
+        path.join(realRoot, 'cordisx-documents.json'),
+        ...info.packageFiles,
+      ]),
+    ]
     await rememberPluginMetadata(realEntry, realRoot, packageFiles)
     const durablePackage = plugin.package !== undefined && plugin.development === undefined
     const identitySource = durablePackage
@@ -332,6 +341,7 @@ export async function startNativeViteServer(
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
+      documents: info.documents,
       ...(info.manifest === undefined ? {} : { manifest: info.manifest }),
       ...(isolatedBuild === undefined ? {} : { isolatedArtifactSource: isolatedBuild.runtimeArtifactSource }),
       watchFiles: isolatedBuild?.watchFiles ?? [realEntry, ...packageFiles],
@@ -351,7 +361,13 @@ export async function startNativeViteServer(
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
-    const packageFiles = [...new Set([path.join(previous.realRoot, 'cordisx-package.json'), ...info.packageFiles])]
+    const packageFiles = [
+      ...new Set([
+        path.join(previous.realRoot, 'cordisx-package.json'),
+        path.join(previous.realRoot, 'cordisx-documents.json'),
+        ...info.packageFiles,
+      ]),
+    ]
     await rememberPluginMetadata(previous.realEntry, previous.realRoot, packageFiles)
     const watchFiles = isolatedBuild?.watchFiles ?? [previous.realEntry, ...packageFiles]
     server?.watcher.add(watchFiles)
@@ -363,6 +379,7 @@ export async function startNativeViteServer(
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
+      documents: info.documents,
       ...(info.manifest === undefined ? {} : { manifest: info.manifest }),
       ...(isolatedBuild === undefined ? {} : { isolatedArtifactSource: isolatedBuild.runtimeArtifactSource }),
       watchFiles,
@@ -401,6 +418,7 @@ export async function startNativeViteServer(
         lastSuccessfulAt: generation.lastSuccessfulAt,
       },
       ...(generation.manifest === undefined ? {} : { manifest: generation.manifest }),
+      ...(generation.documents === undefined ? {} : { documents: generation.documents }),
     }
   }
   const compiledConfig = async (): Promise<CordisXConfig> => ({

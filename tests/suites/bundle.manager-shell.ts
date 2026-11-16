@@ -43,7 +43,16 @@ export async function verifyManagerShell(context: Awaited<ReturnType<typeof veri
     .toBe('true')
   expect(managerNavigation?.querySelector('.cxr-nav')?.getAttribute('aria-label')).toBe('CordisX 管理器页面')
   expect([...managerNavigation!.querySelectorAll<HTMLElement>('.cxr-nav [data-tab]')].map(item => item.dataset.tab))
-    .toEqual(['plugins', 'model-services', 'marketplace', 'extension-points', 'routes', 'notifications', 'about'])
+    .toEqual([
+      'plugins',
+      'model-services',
+      'marketplace',
+      'extension-points',
+      'routes',
+      'chat-execution',
+      'notifications',
+      'about',
+    ])
   managerNavigation?.querySelector<HTMLButtonElement>('[data-tab="notifications"]')?.click()
   await settle()
   expect(managerCard?.querySelector('[data-notification-rules-page="true"]')?.textContent).toContain('没有屏蔽规则')

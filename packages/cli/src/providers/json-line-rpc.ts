@@ -34,7 +34,7 @@ export interface JsonLineRpcClientOptions {
   readonly maxLineBytes?: number
   readonly onProtocolError?: (error: Error) => void
   readonly onNotification?: (method: string, params: unknown) => void
-  readonly onRequest?: (method: string, params: unknown) => unknown | Promise<unknown>
+  readonly onRequest?: (method: string, params: unknown, requestId: string | number) => unknown | Promise<unknown>
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -175,7 +175,7 @@ export class JsonLineRpcClient {
       if (handler === undefined) {
         void this.write({ id: message.id, error: { code: -32601, message: 'Method not found' } }).catch(() => undefined)
       } else {
-        void Promise.resolve(handler(message.method, message.params)).then(
+        void Promise.resolve(handler(message.method, message.params, message.id)).then(
           result => this.write({ id: message.id, result }),
           error =>
             this.write({

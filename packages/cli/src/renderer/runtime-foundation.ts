@@ -286,6 +286,7 @@ export const createRuntimeBroker = (runtimeScope: RuntimeClosureScope) =>
     runtimeScope.generationVisibility()!,
     runtimeScope.pluginConsole()!,
     new BrowserPermissionAuthorizationPromptV2(document),
+    runtimeScope.metadata()!.serviceCapabilityOwners ?? [],
   )
 
 export const createRuntimeHostDomAuthority = (runtimeScope: RuntimeClosureScope) =>
@@ -739,7 +740,7 @@ export const createRuntimeRequiredBlockReason = (
 ): string | undefined => {
   if (
     (controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12
-      || controller.manifest.schemaVersion === 13)
+      || controller.manifest.schemaVersion === 13 || controller.manifest.schemaVersion === 16)
     && controller.manifest.capabilities.some(item => item.name === 'usage.read' && item.required)
   ) {
     if (runtimeScope.metadata()!.agentHistoryBridgeToken === undefined) {
