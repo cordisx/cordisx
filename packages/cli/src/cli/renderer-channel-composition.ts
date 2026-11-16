@@ -38,6 +38,7 @@ export async function createRendererChannelComposition(input: {
   readonly configPath: string
   readonly homeDir: string
   readonly environment: NodeJS.ProcessEnv
+  readonly dryRun?: boolean
 }): Promise<RendererChannelComposition> {
   const plugin = input.composition.plugins.find(plugin => plugin.enabled && plugin.id === 'channel')
   let service: LocalChannelService | undefined
@@ -61,7 +62,10 @@ export async function createRendererChannelComposition(input: {
       identity: ref => service!.identity(ref),
     })
   }
-  if (plugin === undefined) return { loadManagerProjection, actionsBridgeToken: randomBytes(32).toString('hex') }
+  // Planning must not create a profile runtime, subscribe to messages or resolve credentials.
+  if (plugin === undefined || input.dryRun) {
+    return { loadManagerProjection, actionsBridgeToken: randomBytes(32).toString('hex') }
+  }
   const state = await readServiceConfigState({
     profileId: input.profileId,
     pluginId: 'channel',
