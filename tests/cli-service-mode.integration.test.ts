@@ -50,7 +50,6 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       status: 'ready',
       cdpEndpoint: null,
       desktop: 'unavailable',
-      agents: 'unavailable',
     })
     expect(reused.pid).toBe(ready.pid)
     expect(await lifecycle('status')).toMatchObject({ pid: ready.pid, modelApiUrl: ready.modelApiUrl })

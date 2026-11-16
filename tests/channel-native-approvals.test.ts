@@ -134,6 +134,31 @@ describe('Channel custom approval lifecycle', () => {
     expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
     f.approvals.dispose()
   })
+  it('waits for confirmation after an uncertain write and later accepts the native resolution', async () => {
+    const f = fixture()
+    f.emit(request)
+    await vi.waitFor(() => expect(f.cards).toHaveLength(1))
+    const id = /审批 ([a-f0-9]+)/u.exec(JSON.stringify(f.cards[0]))![1]!
+    f.native.answerApproval.mockRejectedValue(new Error('write acknowledgement unavailable'))
+    expect(await f.approvals.answer(event, id, 'accept', 'om_card')).toContain('尚未确认')
+    f.emit({ event: 'resolved', reference: 'request' })
+    await vi.waitFor(() => expect(JSON.stringify(f.updates.at(-1))).toContain('已处理'))
+    expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
+    f.approvals.dispose()
+  })
+  it('reports a native confirmation that races a lost write acknowledgement', async () => {
+    const f = fixture()
+    f.emit(request)
+    await vi.waitFor(() => expect(f.cards).toHaveLength(1))
+    const id = /审批 ([a-f0-9]+)/u.exec(JSON.stringify(f.cards[0]))![1]!
+    f.native.answerApproval.mockImplementation(async () => {
+      f.emit({ event: 'resolved', reference: 'request' })
+      throw new Error('write acknowledgement unavailable')
+    })
+    expect(await f.approvals.answer(event, id, 'accept', 'om_card')).toContain('原生已确认')
+    expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
+    f.approvals.dispose()
+  })
   it('rejects another account/conversation, cancels late cards, and expires text decisions without native effects', async () => {
     const f = fixture()
     f.emit(request)

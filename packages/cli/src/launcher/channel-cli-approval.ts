@@ -108,17 +108,19 @@ export function configuredChannelApprovalOperation(
   const operation = words[5]
   if (!operation) return undefined
   if (operation === 'help' && words.length <= 7) return { operation, kind: 'read', input: {} }
+  const helpTopic = operation === 'help' && words[6] && !words[6].startsWith('--') ? words[6] : undefined
+  if (helpTopic && !channelCliOperationKind(helpTopic)) return undefined
   const kind = channelCliOperationKind(operation)
   if (!kind) return undefined
   const options = new Map<string, string>()
-  for (let i = 6; i < words.length; i += 2) {
+  for (let i = helpTopic ? 7 : 6; i < words.length; i += 2) {
     const flag = words[i], value = words[i + 1]
     if (!flag || !['--profile', '--input', '--context'].includes(flag) || value === undefined || options.has(flag)) {
       return undefined
     }
     options.set(flag, value)
   }
-  if (options.get('--profile') !== context.profile) return undefined
+  if (options.get('--profile') !== context.profile || helpTopic && !options.has('--context')) return undefined
   try {
     const input: unknown = JSON.parse(options.get('--input') ?? '{}')
     if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined

@@ -13,6 +13,7 @@ const OPERATIONS = [
   'bind',
   'unbind',
   'bind-status',
+  'local-bindings',
   'reply-mode',
   'history',
   'listen',

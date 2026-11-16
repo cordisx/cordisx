@@ -1,0 +1,248 @@
+import { describe, expect, it, vi } from 'vitest'
+import { startHeadlessCodexBackend } from '../packages/cli/src/launcher/headless-codex-backend.js'
+import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
+
+describe('headless Codex backend', () => {
+  it('uses the existing bridge and forwards native requests and notifications', async () => {
+    const calls: string[] = []
+    let onRequest: ((method: string, params: unknown, requestId?: string | number) => unknown) | undefined
+    let onNotification: ((method: string, params: unknown) => void) | undefined
+    const close = vi.fn(async () => {})
+    const rpc: CodexAppServerRpc = {
+      generation: 'own-process',
+      request: async <T>(method: string) => {
+        calls.push(method)
+        if (method === 'config/read') return { config: { model: 'available' } } as T
+        if (method === 'model/list') {
+          return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }] } as T
+        }
+        if (method === 'thread/start') return { thread: { id: 'thread-1' } } as T
+        if (method === 'turn/start') return { turn: { id: 'turn-1' } } as T
+        return {} as T
+      },
+      subscribeRequests: listener => {
+        onRequest = listener
+        return () => {
+          onRequest = undefined
+        }
+      },
+      subscribeNotifications: listener => {
+        onNotification = listener
+        return () => {
+          onNotification = undefined
+        }
+      },
+      close,
+    }
+    const start = vi.fn(async () => rpc)
+    const notification = vi.fn()
+    const approval = vi.fn(() => ({ decision: 'decline' }))
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      environment: { PATH: '/bin' },
+      onRequest: approval,
+      onNotification: notification,
+      startServer: start,
+    })
+    expect(start.mock.calls[0]?.[0]).toMatchObject({ codexExecutable: '/codex', codexHome: '/login' })
+    expect(start.mock.calls[0]?.[1]?.environment).toEqual({ PATH: '/bin', HOME: '/user' })
+    expect(start.mock.calls[0]?.[1]?.experimentalApi).toBe(true)
+    expect(onRequest?.('approval', { id: 1 }, 'native-id')).toEqual({ decision: 'decline' })
+    expect(approval).toHaveBeenCalledWith('approval', { id: 1 }, 'native-id')
+    onNotification?.('event', { id: 2 })
+    expect(notification).toHaveBeenCalledWith('event', { id: 2 })
+    const result = await backend.call('codex', 'start_session', { operationId: 'op-1', cwd: '/tmp', prompt: 'hello' })
+    expect(result).toMatchObject({ status: 'started', sessionId: 'thread-1', turnId: 'turn-1' })
+    expect(calls).toEqual(['config/read', 'model/list', 'thread/start', 'turn/start'])
+    await Promise.all([backend.close(), backend.close()])
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(onRequest).toBeUndefined()
+    expect(onNotification).toBeUndefined()
+  })
+  it('exposes the native catalog and applies only an explicitly admitted selection', async () => {
+    const request = vi.fn(async (method: string, params: unknown) => {
+      if (method === 'model/list') {
+        return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }], nextCursor: null }
+      }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: 'idle' } } }
+      }
+      if (method === 'thread/settings/update') return {}
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'available' }
+      throw new Error(`unexpected ${method} ${JSON.stringify(params)}`)
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    expect(await backend.models('list', {})).toMatchObject({
+      providers: [{
+        providerId: 'openai',
+        defaultModelId: 'available',
+        models: [{ id: 'available' }],
+      }],
+    })
+    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'other', model: 'available' }))
+      .toMatchObject({ status: 'rejected' })
+    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'missing' }))
+      .toMatchObject({ status: 'rejected' })
+    expect(
+      await backend.models(
+        'select',
+        { threadId: 'thread-1', providerId: 'openai', model: 'available' },
+        async () => false,
+      ),
+    )
+      .toMatchObject({ status: 'rejected', reason: 'selection-changed' })
+    expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
+    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'available' }))
+      .toMatchObject({ status: 'selected' })
+    expect(request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread-1', model: 'available' })
+    expect(request).toHaveBeenCalledWith('thread/resume', { threadId: 'thread-1' })
+    await backend.close()
+  })
+  it('rejects busy targets and reports unconfirmed native selections', async () => {
+    let busy = true
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') {
+        return {
+          data: [
+            { id: 'visible-id', model: 'visible', hidden: false, isDefault: true },
+            { id: 'hidden-id', model: 'hidden', hidden: true, isDefault: false },
+          ],
+        }
+      }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: busy ? 'active' : 'idle' } } }
+      }
+      if (method === 'thread/settings/update') return {}
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'different' }
+      throw new Error('unexpected request')
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    expect(await backend.models('list', {})).toMatchObject({
+      providers: [{
+        defaultModelId: 'visible',
+        models: [{ id: 'visible' }],
+      }],
+    })
+    const selection = { threadId: 'thread-1', providerId: 'openai', model: 'visible' }
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
+    expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
+    busy = false
+    expect(await backend.models('select', selection)).toMatchObject({
+      status: 'reconciliation-required',
+      reason: 'native-selection-unconfirmed',
+    })
+    await backend.close()
+  })
+  it('recovers a failed system-error thread only after native terminal and readback checks', async () => {
+    let status = 'systemError', turn = 'failed', actual = 'new'
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'new', model: 'new', hidden: false }] }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: status } } }
+      }
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: turn }] }
+      if (method === 'thread/settings/update') return {}
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: actual }
+      throw new Error('unexpected request')
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    const selection = { threadId: 'thread-1', providerId: 'openai', model: 'new' }
+    turn = 'inProgress'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
+    turn = 'failed'
+    expect(
+      await backend.models('select', selection, async () => {
+        status = 'active'
+        return true
+      }),
+    )
+      .toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
+    expect(request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
+    status = 'systemError'
+    actual = 'old'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'reconciliation-required' })
+    actual = 'new'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'selected' })
+    await backend.close()
+  })
+  it('resumes a not-loaded thread with the exact selected provider and model', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'new', model: 'new', hidden: false }] }
+      if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: 'notLoaded' } } }
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'new' }
+      throw new Error('unexpected request')
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'new' }))
+      .toMatchObject({ status: 'selected' })
+    expect(request).toHaveBeenCalledWith('thread/resume', {
+      threadId: 'thread-1',
+      modelProvider: 'openai',
+      model: 'new',
+    })
+    expect(request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
+    await backend.close()
+  })
+  it('closes the process if request handling is unavailable', async () => {
+    const close = vi.fn(async () => {})
+    const rpc: CodexAppServerRpc = { generation: 'own', request: async <T>() => ({} as T), close }
+    await expect(startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })).rejects.toThrow('request handling is unavailable')
+    expect(close).toHaveBeenCalledOnce()
+  })
+})

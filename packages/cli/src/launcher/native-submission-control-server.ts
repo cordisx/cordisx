@@ -40,6 +40,7 @@ export type NativeBridgeMethod =
   | 'thread/list'
   | 'thread/read'
   | 'thread/turns/list'
+  | 'thread/settings/update'
   | 'thread/items/list'
   | 'thread/start'
   | 'thread/resume'

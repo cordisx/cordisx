@@ -73,6 +73,30 @@ describe('configured Channel CLI routine approval', () => {
       () => ({ policy, bindings: {}, jobs: {}, inputs: {} }) as never,
       () => native as never,
     )
+    const help = (topic: string, token: string) => [
+      'env',
+      `CORDISX_HOME=${context.home}`,
+      context.node,
+      context.entry,
+      'channel',
+      'help',
+      topic,
+      '--profile',
+      context.profile,
+      '--context',
+      token,
+    ]
+    expect(access.routine(help('send', 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(help('receipt', 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(help('receipt', 'old'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(help('unknown', 'current'), 'chat', 'turn')).toBe(false)
+    expect(
+      access.routine(
+        help('send', 'current').map(value => value === context.node ? '/other/node' : value),
+        'chat',
+        'turn',
+      ),
+    ).toBe(false)
     expect(access.routine(argv('history', { sessionId: 'chat' }), 'chat', 'turn')).toBe(true)
     expect(access.routine(argv('history', { sessionId: 'other' }), 'chat', 'turn')).toBe(false)
     const send = {
