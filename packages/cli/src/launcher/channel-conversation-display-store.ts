@@ -108,12 +108,15 @@ export class ChannelConversationDisplayStore {
   put(
     ref: ChannelConversationRef,
     value: { readonly name?: string | undefined; readonly avatar?: RasterImageSnapshotV1 | undefined },
+    options?: { readonly refreshSame?: boolean },
   ): void {
     if (this.disposed || this.allowedAccounts && !this.allowedAccounts.has(accountKey(ref))) return
     const key = recordKey(ref), prior = this.records.get(key)
     const name = conversationDisplayName(value.name, ref) ?? prior?.name
     const avatar = avatarSnapshot(value.avatar) ?? prior?.avatar
-    if (!name && !avatar || name === prior?.name && avatar?.data === prior?.avatar?.data) return
+    if (!name && !avatar || !options?.refreshSame && name === prior?.name && avatar?.data === prior?.avatar?.data) {
+      return
+    }
     this.records.delete(key)
     this.records.set(
       key,

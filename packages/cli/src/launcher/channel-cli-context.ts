@@ -29,6 +29,9 @@ export function channelCliSendInstructions(
   return [
     `Read the installed Channel manual with ${prefix} docs ${scope} --input '{"pluginId":"channel","id":"usage"}'. Use help <operation> for exact arguments.`,
     `Use this exact running Host CLI: ${prefix} send ${scope} --input '<JSON>'.`,
+    `For historical context use ${prefix} remote-history ${scope} --input '<JSON>' with {account,conversationId,kind,startTime,endTime,pageSize?,pageToken?,order?}. Times are Unix seconds; read hasMore/pageToken and request only needed pages.`,
+    'Local history contains accepted inputs after the active binding, not complete remote history. Remote history requires message read scope and may not include all thread replies; report permission errors and incompleteness.',
+    'For the official Lark CLI/Skill, check command -v lark-cli, then use lark-cli skills read lark-shared, lark-im, and the chat-messages-list reference. Use only an explicitly confirmed matching --profile and --as bot; never switch identity or authorize silently. If unavailable, consult https://github.com/larksuite/cli for installation.',
     'The send JSON is {account:{adapterId,accountId,tenantId},target:{id,kind,replyMode,replyTo?},text,operationId}.',
     'Use the incoming source account and conversation identifiers below for a reply; do not guess another account or destination.',
     'Choose target.replyMode per send: conversation posts in the main stream; reply quotes replyTo; thread replies in a topic. Reply/thread require the source messageId as replyTo.',

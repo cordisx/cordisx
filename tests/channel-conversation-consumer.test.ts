@@ -343,8 +343,15 @@ describe('persistent Channel chat consumer', () => {
     await f.consumer.bind({ channel: channel() }, a)
     await f.consumer.bind({ channel: channel('oc_two') }, a)
     await f.consumer.bind({ channel: channel() }, b)
-    await f.consumer.receive('inbox:1', message('om_1'))
+    await f.consumer.receive('inbox:1', message('om_1'), false, true, {
+      senderName: 'Alice',
+      mentions: [{ key: '@1', userId: 'ou_bob', name: 'Bob' }],
+    })
     await settle(f.consumer)
+    expect(f.consumer.history({}, a).messages[0]?.addressing).toEqual({
+      senderName: 'Alice',
+      mentions: [{ key: '@1', userId: 'ou_bob', name: 'Bob' }],
+    })
     expect(f.consumer.bindings()).toHaveLength(3)
     expect(f.consumer.history({}, a).messages).toHaveLength(1)
     expect(f.consumer.history({}, b).messages).toHaveLength(1)
@@ -353,6 +360,30 @@ describe('persistent Channel chat consumer', () => {
     expect(next.consumer.bindings()).toHaveLength(3)
     expect(next.consumer.history({}, b).messages).toHaveLength(1)
     expect(f.native.start).not.toHaveBeenCalled()
+  })
+  it('preserves enriched sender names for local history and uses the scoped cache for late lookups', async () => {
+    const f = await fixture(), source = channel('oc_one', 'direct')
+    f.access.messageContext = async () => ({
+      platform: '飞书',
+      conversation: { id: 'oc_one', kind: 'direct' },
+      sender: { userId: 'alice', name: 'Alice' },
+      mentions: [{ key: '@1', userId: 'ou_bob', name: 'Bob' }],
+    })
+    await f.consumer.policySet({ enabled: true }, 0)
+    await f.consumer.bind({ channel: source, mode: 'deliver' }, a)
+    await f.consumer.receive('inbox:named', message('om_named', 'hello', source), false, true, {
+      mentions: [{ key: '@1', userId: 'ou_bob', name: 'Bob' }],
+    })
+    await settle(f.consumer)
+    expect(f.consumer.history({}, a).messages[0]?.addressing).toEqual({
+      senderName: 'Alice',
+      mentions: [{ key: '@1', userId: 'ou_bob', name: 'Bob' }],
+    })
+    f.access.senderName = () => 'Cached name'
+    f.access.messageContext = undefined
+    await f.consumer.receive('inbox:late', message('om_late', 'later', source))
+    await settle(f.consumer)
+    expect(f.consumer.history({}, a).messages[1]?.addressing?.senderName).toBe('Cached name')
   })
   it('never dispatches unrelated group chatter and waits for persisted mention metadata', async () => {
     const f = await fixture(), source = channel('oc_group', 'group')

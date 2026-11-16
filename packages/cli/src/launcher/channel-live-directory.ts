@@ -152,6 +152,9 @@ export class ChannelLiveDirectory {
   channel(ref: ChannelTenantRef) {
     return this.channels.get(key(ref))
   }
+  senderName(event: ChannelEventRef): string | undefined {
+    return this.senders.cachedName(event)
+  }
   async messageContext(message: ChannelUserInput, addressing?: ChannelCommandAddressing) {
     const event = message.source.event
     if (addressing?.senderName) this.senders.observe(event, addressing.senderName)

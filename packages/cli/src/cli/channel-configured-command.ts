@@ -15,6 +15,7 @@ const OPERATIONS = [
   'bind-status',
   'reply-mode',
   'history',
+  'remote-history',
   'listen',
   'send',
   'send-many',

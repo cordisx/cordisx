@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChannelUserInput } from '@cordisx/channel-runtime'
 import type { AgentBridge } from '../packages/cli/src/launcher/agent-bridge.js'
 import { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
+import { channelRemoteHistory } from '../packages/cli/src/launcher/channel-remote-history.js'
 import { ChannelConversationConsumer } from '../packages/cli/src/launcher/channel-conversation-consumer.js'
 import { ensureHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { runConfiguredChannelCommand } from '../packages/cli/src/cli/channel-configured-command.js'
@@ -85,10 +86,23 @@ describe('configured Channel CLI production endpoint', () => {
       }),
       deliverySnapshot: (deliveryId: string) => receipts.get(deliveryId),
     }
+    const remoteList = vi.fn(async () => ({
+      code: 0,
+      data: {
+        has_more: false,
+        items: [{
+          chat_id: source.conversationId,
+          message_id: 'om_previous',
+          sender: { id: 'ou_sender', id_type: 'open_id', sender_type: 'user', sender_name: 'Alice' },
+        }],
+      },
+    }))
+    const remoteChannel = { rawClient: { im: { v1: { message: { list: remoteList } } } } } as never
     const access = {
       generation: 'fixture-runtime',
       runtime,
       accounts: () => [{ ref, state: 'ready' }],
+      remoteHistory: vi.fn((account, request) => channelRemoteHistory(account, request, remoteChannel)),
       drain: vi.fn(async () => {}),
     } as unknown as ChannelConversationAccess
     const nativeRequest = vi.fn(async (method: string, params: Record<string, unknown>) => {
@@ -104,11 +118,27 @@ describe('configured Channel CLI production endpoint', () => {
         expect(request.prompt).toContain(cli.entry)
         expect(request.prompt).toContain('Automatic final-response delivery is disabled')
         expect(request.prompt).toContain("send --profile 'default'")
+        expect(request.prompt).toContain('remote-history')
         contextToken = /--context '([a-f0-9]{48})'/u.exec(request.prompt)?.[1]
         expect(contextToken).toBeDefined()
         native.observedDispatch(request.operationId, sessionId, 'fixture-turn')
         await expect(command('send', send, '0'.repeat(48))).rejects.toThrow()
         expect(runtime.notifyOnce).not.toHaveBeenCalled()
+        const remote = {
+          account: ref,
+          conversationId: source.conversationId,
+          kind: source.kind,
+          startTime: '1',
+          endTime: '2',
+        }
+        expect(await command('remote-history', remote, contextToken)).toMatchObject({
+          status: 'ok',
+          source: 'remote',
+          messages: [{ messageId: 'om_previous', sender: { id: 'ou_sender', name: 'Alice' } }],
+        })
+        expect(remoteList).toHaveBeenCalledOnce()
+        await expect(command('remote-history', { ...remote, conversationId: 'oc_other' }, contextToken)).rejects
+          .toThrow('CHANNEL_SOURCE_SCOPE_MISMATCH')
         expect(await command('send', send, contextToken)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
         return { status: 'started', sessionId, turnId: 'fixture-turn' }
       },
@@ -171,7 +201,14 @@ describe('configured Channel CLI production endpoint', () => {
       })
       await expect(command('send', { ...send, operationId: 'expired-context' }, contextToken)).rejects.toThrow()
       expect(runtime.notifyOnce).toHaveBeenCalledOnce()
-      expect(channel.mock.calls.map(([operation]) => operation)).toEqual(['send', 'send', 'receipt', 'send'])
+      expect(channel.mock.calls.map(([operation]) => operation)).toEqual([
+        'send',
+        'remote-history',
+        'remote-history',
+        'send',
+        'receipt',
+        'send',
+      ])
       expect(channel).toHaveBeenCalledWith('send', send, {
         'cordisx/channelContext': contextToken,
         'openai/threadId': sessionId,
