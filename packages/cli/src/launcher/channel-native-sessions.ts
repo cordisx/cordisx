@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTurn } from './agent-bridge-codex-history.js'
+import { channelNativeIdle } from './channel-native-idle.js'
 import type { ChannelReplyDefaults } from './channel-reply-routing.js'
 import { channelCliSendInstructions, type ChannelNativeCliContext } from './channel-cli-context.js'
 import { ChannelChatOrganization, channelChatTitle } from './channel-chat-organization.js'
@@ -62,8 +63,7 @@ export class ChannelNativeSessions {
       ?? Promise.resolve({ status: 'unavailable', code: 'MODEL_CATALOG_UNAVAILABLE' })
   }
   async idle(threadId: string) {
-    const metadata = await codexThreadMetadata(this.input, threadId)
-    return metadata?.id === threadId && ['idle', 'notLoaded'].includes(String(object(metadata.status).type))
+    return (await channelNativeIdle(this.input, threadId)) !== undefined
   }
   async taskSelection(threadId: string): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
     const metadata = await codexThreadMetadata(this.input, threadId)

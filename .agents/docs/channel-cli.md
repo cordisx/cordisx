@@ -9,9 +9,12 @@ a second SDK connection or require credentials in arguments.
 ```text
 cordisx channel connections
 cordisx channel conversations --input '{"account":{"adapterId":"feishu","accountId":"<app-id>","tenantId":"<tenant-id>"}}'
+cordisx channel local-bindings --input '{"account":{"adapterId":"feishu","accountId":"<app-id>","tenantId":"<tenant-id>"},"conversationId":"<chat-id>"}'
 cordisx channel bind-status --input '{"sessionId":"<Codex chat UUID>"}'
 cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence":0,"limit":50}'
 ```
+
+`local-bindings` is a local management CLI read, not an Agent tool. It lists profile binding IDs, sessions, channel identities, states and modes at one revision and service generation, without messages or credentials. An empty input lists the profile; a conversation filter requires the complete account identity. Older running Hosts do not implement this operation; use a matching Host runtime.
 
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
 shape as native `channel_*` tools. `connections`, `conversations`, `bind`,

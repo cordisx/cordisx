@@ -384,7 +384,7 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
     ...(state.mode === 'service'
-      ? { mode: state.mode, modelApiUrl: state.modelApiUrl ?? null, desktop: 'unavailable', agents: 'unavailable' }
+      ? { mode: state.mode, modelApiUrl: state.modelApiUrl ?? null, desktop: 'unavailable' }
       : {}),
     ...(state.startupSurface === undefined ? {} : { startupSurface: state.startupSurface }),
     ...(state.failure === undefined ? {} : { failure: state.failure }),

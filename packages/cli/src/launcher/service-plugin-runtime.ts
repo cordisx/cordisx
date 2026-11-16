@@ -36,6 +36,12 @@ export function createServicePluginRuntime(runtimeGeneration: string): PluginLif
       return { transactionEpoch: transaction.epoch, expectedRegistryEpoch: registryEpoch }
     },
     async stage(mutation) {
+      // Channel is a profile-owned ingress/consumer, not a managed-backend transaction.
+      // Until it can be replaced transactionally, change it only with the service stopped.
+      const channel = (plugins: typeof mutation.previous.plugins) => plugins.find(plugin => plugin.id === 'channel')
+      if (JSON.stringify(channel(mutation.previous.plugins)) !== JSON.stringify(channel(mutation.candidate.plugins))) {
+        throw new Error('Stop service mode before changing Channel activation')
+      }
       if (
         transaction?.id !== mutation.transactionId || mutation.transactionEpoch !== transaction.epoch
         || mutation.expectedRegistryEpoch !== registryEpoch || mutation.afterRegistryEpoch !== registryEpoch + 1

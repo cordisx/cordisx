@@ -69,6 +69,60 @@ export class ChannelConversationTools {
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
   ) {}
 
+  /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
+  async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
+    if (operation !== 'local-bindings') return this.call(operation, value, metadata)
+    try {
+      if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
+      if (metadata !== undefined) throw new Error('LOCAL_CLI_REQUIRED')
+      const current = this.access()
+      if (!current || !this.consumer) return { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
+      const input = object(value)
+      if (Object.keys(input).some(key => !['account', 'conversationId'].includes(key))) {
+        throw new Error('INVALID_REQUEST')
+      }
+      let account: ChannelTenantRef | undefined
+      if (input.account !== undefined) {
+        const raw = object(input.account)
+        if (Object.keys(raw).some(key => !['adapterId', 'accountId', 'tenantId'].includes(key))) {
+          throw new Error('INVALID_REQUEST')
+        }
+        account = { adapterId: text(raw.adapterId), accountId: text(raw.accountId), tenantId: text(raw.tenantId) }
+      }
+      const conversationId = input.conversationId === undefined ? undefined : text(input.conversationId)
+      if (conversationId !== undefined && !account) {
+        throw new Error('INVALID_REQUEST')
+      }
+      const snapshot = this.consumer.status()
+      return {
+        status: 'ok',
+        generation: current.generation,
+        revision: snapshot.revision,
+        bindings: snapshot.bindings.filter(binding =>
+          (!account || sameAccount(binding.channel, account))
+          && (conversationId === undefined || binding.channel.conversationId === conversationId)
+        ).map(binding => ({
+          bindingId: binding.id,
+          sessionId: binding.sessionId,
+          state: binding.state,
+          mode: binding.mode,
+          channel: {
+            adapterId: binding.channel.adapterId,
+            accountId: binding.channel.accountId,
+            tenantId: binding.channel.tenantId,
+            conversationId: binding.channel.conversationId,
+            kind: binding.channel.kind,
+          },
+        })),
+      }
+    } catch (error) {
+      const code = error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
+        ? error.message
+        : 'CHANNEL_OPERATION_FAILED'
+      return { status: 'rejected', code }
+    }
+  }
+
   async call(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
     try {
       if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
@@ -151,7 +205,7 @@ export class ChannelConversationTools {
         // Native metadata defaults to the current chat. Local CLI may explicitly address a chat in this profile.
         const sessionId = input.sessionId === undefined ? callerSession : text(input.sessionId)
         if (!sessionId) throw new Error('SESSION_REQUIRED')
-        if (source && sessionId !== callerSession) throw new Error('SESSION_SCOPE_MISMATCH')
+        if (callerSession !== undefined && sessionId !== callerSession) throw new Error('SESSION_SCOPE_MISMATCH')
         if (source && ['bind', 'unbind'].includes(operation) && !this.consumer.commandAllowed(source, operation)) {
           throw new Error('CHANNEL_POLICY_DENIED')
         }
