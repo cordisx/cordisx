@@ -316,7 +316,13 @@ export async function startNativeViteServer(
     }
     const realEntry = await realpath(plugin.entry)
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
-    const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
+    const packageFiles = [
+      ...new Set([
+        path.join(realRoot, 'cordisx-package.json'),
+        path.join(realRoot, 'cordisx-documents.json'),
+        ...info.packageFiles,
+      ]),
+    ]
     await rememberPluginMetadata(realEntry, realRoot, packageFiles)
     const durablePackage = plugin.package !== undefined && plugin.development === undefined
     const identitySource = durablePackage
@@ -355,7 +361,13 @@ export async function startNativeViteServer(
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
-    const packageFiles = [...new Set([path.join(previous.realRoot, 'cordisx-package.json'), ...info.packageFiles])]
+    const packageFiles = [
+      ...new Set([
+        path.join(previous.realRoot, 'cordisx-package.json'),
+        path.join(previous.realRoot, 'cordisx-documents.json'),
+        ...info.packageFiles,
+      ]),
+    ]
     await rememberPluginMetadata(previous.realEntry, previous.realRoot, packageFiles)
     const watchFiles = isolatedBuild?.watchFiles ?? [previous.realEntry, ...packageFiles]
     server?.watcher.add(watchFiles)

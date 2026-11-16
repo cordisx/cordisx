@@ -145,7 +145,9 @@ export async function localDevelopmentPackageInfo(entry: string): Promise<LocalD
     version: typeof manifest.version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)
       ? manifest.version
       : '0.0.0-local-dev',
-    packageFiles: [...rendererPackage.files, path.join(root, 'cordisx-documents.json'), ...documentSet.files],
+    // Vite treats registered composition inputs as imports; optional descriptors
+    // belong here only after they exist and have passed document validation.
+    packageFiles: [...rendererPackage.files, ...documentSet.files],
     entityTemplates: rendererPackage.entityTemplates,
     ...(rendererPackage.manifest === undefined ? {} : { manifest: rendererPackage.manifest }),
   }

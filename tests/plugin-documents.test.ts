@@ -9,8 +9,21 @@ import {
   removeStagedPluginPackage,
   stageLocalPluginPackage,
 } from '../packages/cli/src/launcher/plugin-package.js'
-import { buildLocalDevelopmentPlugin } from '../packages/cli/src/launcher/development.js'
+import { buildLocalDevelopmentPlugin, localDevelopmentPackageInfo } from '../packages/cli/src/launcher/development.js'
 describe('package documentation and safe display', () => {
+  it('keeps an absent optional document descriptor out of development composition imports', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'plugin-no-docs-'))
+    const entry = path.join(root, 'index.ts')
+    try {
+      await writeFile(entry, 'export function apply() {}')
+      await writeFile(path.join(root, 'package.json'), '{}')
+      const info = await localDevelopmentPackageInfo(entry)
+      expect(info.documents).toEqual([])
+      expect(info.packageFiles).not.toContain(path.join(root, 'cordisx-documents.json'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('discovers exact package Markdown, provides a path-free readback, and rejects escapes and symbolic links', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'plugin-docs-'))
     const entry = path.join(root, 'dist', 'plugin.js')

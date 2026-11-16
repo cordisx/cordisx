@@ -33,7 +33,7 @@ describe('external Channel consumer', () => {
     const imported = await import(pathToFileURL(entry).href) as {
       readonly manifest: { readonly id: string; readonly schemaVersion: number; readonly services: readonly unknown[] }
     }
-    expect(imported.manifest).toMatchObject({ id: 'channel', schemaVersion: 8 })
+    expect(imported.manifest).toMatchObject({ id: 'channel', schemaVersion: 16 })
     expect(imported.manifest.services).toHaveLength(1)
     await expect(access(path.join(packageRoot, 'dist', 'service.mjs'))).resolves.toBeUndefined()
     await expect(readFile(path.join(packageRoot, 'src', 'channel.ts'))).rejects.toThrow()
