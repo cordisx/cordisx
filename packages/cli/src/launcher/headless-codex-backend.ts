@@ -1,6 +1,7 @@
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from './agent-bridge.js'
 import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/codex-app-server.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
+import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
@@ -128,22 +129,25 @@ export async function startHeadlessCodexBackend(input: {
       ) {
         return { status: 'rejected', reason: 'selection-outside-catalog' }
       }
-      const observed = await authority.nativeRequest('thread/read', {
-        threadId: selection.threadId,
-        includeTurns: false,
-      }) as { thread?: { id?: string; status?: { type?: string } } }
-      if (
-        observed.thread?.id !== selection.threadId
-        || !['idle', 'notLoaded'].includes(observed.thread.status?.type ?? '')
-      ) {
-        return { status: 'rejected', reason: 'thread-not-idle' }
-      }
+      let observed = await channelNativeIdle(authority, selection.threadId)
+      if (!observed) return { status: 'rejected', reason: 'thread-not-idle' }
       if (beforeEffect && !await beforeEffect()) return { status: 'rejected', reason: 'selection-changed' }
+      observed = await channelNativeIdle(authority, selection.threadId)
+      if (!observed) return { status: 'rejected', reason: 'thread-not-idle' }
+      const status = (observed.status as { type?: string } | undefined)?.type
+      if (status !== 'notLoaded' && observed.modelProvider !== selection.providerId) {
+        return { status: 'rejected', reason: 'provider-switch-unavailable' }
+      }
       try {
+        if (status !== 'notLoaded') {
+          await authority.nativeRequest('thread/settings/update', {
+            threadId: selection.threadId,
+            model: selection.model,
+          })
+        }
         const resumed = await authority.nativeRequest('thread/resume', {
           threadId: selection.threadId,
-          modelProvider: 'openai',
-          model: selection.model,
+          ...(status === 'notLoaded' ? { modelProvider: 'openai', model: selection.model } : {}),
         }) as { thread?: { id?: string }; model?: string; modelProvider?: string }
         if (
           resumed.thread?.id !== selection.threadId || resumed.model !== selection.model

@@ -66,7 +66,10 @@ describe('headless Codex backend', () => {
       if (method === 'model/list') {
         return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }], nextCursor: null }
       }
-      if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: 'idle' } } }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: 'idle' } } }
+      }
+      if (method === 'thread/settings/update') return {}
       if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'available' }
       throw new Error(`unexpected ${method} ${JSON.stringify(params)}`)
     })
@@ -105,11 +108,8 @@ describe('headless Codex backend', () => {
     expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
     expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'available' }))
       .toMatchObject({ status: 'selected' })
-    expect(request).toHaveBeenCalledWith('thread/resume', {
-      threadId: 'thread-1',
-      modelProvider: 'openai',
-      model: 'available',
-    })
+    expect(request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread-1', model: 'available' })
+    expect(request).toHaveBeenCalledWith('thread/resume', { threadId: 'thread-1' })
     await backend.close()
   })
   it('rejects busy targets and reports unconfirmed native selections', async () => {
@@ -123,7 +123,10 @@ describe('headless Codex backend', () => {
           ],
         }
       }
-      if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: busy ? 'active' : 'idle' } } }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: busy ? 'active' : 'idle' } } }
+      }
+      if (method === 'thread/settings/update') return {}
       if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'different' }
       throw new Error('unexpected request')
     })
@@ -154,6 +157,80 @@ describe('headless Codex backend', () => {
       status: 'reconciliation-required',
       reason: 'native-selection-unconfirmed',
     })
+    await backend.close()
+  })
+  it('recovers a failed system-error thread only after native terminal and readback checks', async () => {
+    let status = 'systemError', turn = 'failed', actual = 'new'
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'new', model: 'new', hidden: false }] }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: 'openai', status: { type: status } } }
+      }
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: turn }] }
+      if (method === 'thread/settings/update') return {}
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: actual }
+      throw new Error('unexpected request')
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    const selection = { threadId: 'thread-1', providerId: 'openai', model: 'new' }
+    turn = 'inProgress'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
+    turn = 'failed'
+    expect(
+      await backend.models('select', selection, async () => {
+        status = 'active'
+        return true
+      }),
+    )
+      .toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
+    expect(request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
+    status = 'systemError'
+    actual = 'old'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'reconciliation-required' })
+    actual = 'new'
+    expect(await backend.models('select', selection)).toMatchObject({ status: 'selected' })
+    await backend.close()
+  })
+  it('resumes a not-loaded thread with the exact selected provider and model', async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'new', model: 'new', hidden: false }] }
+      if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: 'notLoaded' } } }
+      if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'new' }
+      throw new Error('unexpected request')
+    })
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () => rpc,
+    })
+    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'new' }))
+      .toMatchObject({ status: 'selected' })
+    expect(request).toHaveBeenCalledWith('thread/resume', {
+      threadId: 'thread-1',
+      modelProvider: 'openai',
+      model: 'new',
+    })
+    expect(request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
     await backend.close()
   })
   it('closes the process if request handling is unavailable', async () => {
