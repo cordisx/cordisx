@@ -15,7 +15,7 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolVersion = '0.1.0-beta.13'
+const protocolVersion = '0.1.0-beta.14'
 const protocolResolvedSource = `https://registry.npmjs.org/@cordisx/protocol/-/protocol-${protocolVersion}.tgz`
 const protocolIntegrity =
   'sha512-esPGLZV5iH5eyYPzkIvymh+udAAQx4M7AfSlZrJ7hCkLHzpafJ8bEjjCeEubu3IL3XYeu5p4I8Pub/X+/M6UKw=='
