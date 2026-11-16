@@ -9,6 +9,7 @@ import type { ChannelSettingsFormSectionV1 } from '@cordisx/protocol/channel-man
 import { ChannelSettingsDraft } from './channel-settings-draft.js'
 import { parseChannelConversationPolicy } from '../launcher/channel-conversation-policy.js'
 import {
+  channelPolicyChoiceIcons,
   channelPolicyFieldIcons,
   channelPolicyFormValue,
   channelPolicySectionFields,
@@ -102,6 +103,7 @@ export function ChannelPolicyForm(props: {
           schema,
           baseline,
           fieldIcons: channelPolicyFieldIcons,
+          choiceIcons: channelPolicyChoiceIcons,
           ...(props.section === undefined
             ? {}
             : {

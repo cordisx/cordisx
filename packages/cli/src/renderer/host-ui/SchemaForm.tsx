@@ -10,6 +10,7 @@ import { hostFormValidationIssueText } from './HostFormValidation.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HOST_TDESIGN_REACT_STYLES } from './tdesign-styles.js'
 import type { SemanticIconKey } from '../../icon-theme-contracts.js'
+import type { HostFormChoiceIcons } from './HostRadioChoices.js'
 
 export function schemaFormSnapshot(
   schema: SchemaFormOptionsV1['schema'],
@@ -84,6 +85,7 @@ export type HostSchemaFormOptions = SchemaFormOptionsV1 & {
   readonly renderArrayItemSupplement?: import('./ArrayEditor.js').ArrayEditorProps['renderItemSupplement']
   /** Host-authored forms may assign semantic field icons without widening the public form schema. */
   readonly fieldIcons?: Readonly<Record<string, SemanticIconKey>>
+  readonly choiceIcons?: Readonly<Record<string, HostFormChoiceIcons>>
   readonly fieldPaths?: readonly string[]
   readonly baseline?: Readonly<Record<string, unknown>>
 }
@@ -118,6 +120,7 @@ export function SchemaForm(
     disabled = false,
     renderArrayItemSupplement,
     fieldIcons,
+    choiceIcons,
     fieldPaths,
     baseline: providedBaseline,
     onChange,
@@ -165,6 +168,9 @@ export function SchemaForm(
             {...(fieldIcons?.[field.path.join('.')] === undefined
               ? {}
               : { iconOverride: fieldIcons[field.path.join('.')] })}
+            {...(choiceIcons?.[field.path.join('.')] === undefined
+              ? {}
+              : { choiceIcons: choiceIcons[field.path.join('.')] })}
             value={field.value}
             locale={locale}
             changed={JSON.stringify(field.value) !== JSON.stringify(ownValue(baseline, field.path))}

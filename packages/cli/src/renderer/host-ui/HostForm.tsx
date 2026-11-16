@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  RadioGroup,
   Select,
   Slider,
   Switch,
@@ -27,6 +26,7 @@ import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { HostIcon } from './HostIcon.js'
+import { HOST_RADIO_CHOICE_STYLES, type HostFormChoiceIcons, HostRadioChoices } from './HostRadioChoices.js'
 import type { SemanticIconKey } from '../../icon-theme-contracts.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
@@ -34,7 +34,7 @@ export { hostFormValidationIssueText } from './HostFormValidation.js'
 
 import { HOST_FORM_PAGE_STYLES } from './HostFormPages.styles.js'
 
-export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + String.raw`
+export const HOST_FORM_REACT_STYLES = HOST_FORM_PAGE_STYLES + HOST_RADIO_CHOICE_STYLES + String.raw`
   .cxf-react-form { --cxf-field-padding-block: 14px; --cxf-field-title-line-height: 24px; --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
   .cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content; gap: 1.35rem; padding: 4px 0 16px; }
   .cxf-section { display: grid; min-width: 0; gap: 9px; }
@@ -174,6 +174,7 @@ function Control({
   controlId,
   locale,
   transientSecret,
+  choiceIcons,
   renderArrayItemSupplement,
 }: {
   readonly field: CordisXConfigFieldSnapshot
@@ -183,6 +184,7 @@ function Control({
   readonly controlId?: string
   readonly locale: string
   readonly transientSecret?: boolean
+  readonly choiceIcons?: HostFormChoiceIcons
   readonly renderArrayItemSupplement?: ArrayEditorProps['renderItemSupplement']
 }) {
   // TDesign values exclude null. Stable option keys preserve every JSON scalar,
@@ -272,13 +274,11 @@ function Control({
   }
   if (resolved === 'radio') {
     return (
-      <RadioGroup
-        {...(field.presenter?.kind === 'choice.segmented' ? { className: 'cxf-segmented' } : {})}
-        variant={field.presenter?.kind === 'choice.segmented' ? 'primary-filled' : 'default-filled'}
-        value={choiceKey(value)}
-        options={choices}
-        disabled={field.disabled}
-        onChange={next => onChange(choiceValue(next))}
+      <HostRadioChoices
+        field={field}
+        value={value}
+        onChange={onChange}
+        {...(choiceIcons === undefined ? {} : { icons: choiceIcons })}
       />
     )
   }
@@ -549,6 +549,7 @@ function FieldLabel(props: FieldLabelProps) {
 interface HostFieldRowBaseProps {
   readonly field: CordisXConfigFieldSnapshot
   readonly iconOverride?: SemanticIconKey
+  readonly choiceIcons?: HostFormChoiceIcons
   readonly value: unknown
   readonly changed: boolean
   readonly locale: string
@@ -691,6 +692,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
               onChange={onChange}
               controlId={resolvedControlId}
               locale={locale}
+              {...(props.choiceIcons === undefined ? {} : { choiceIcons: props.choiceIcons })}
               {...(transientSecret === undefined ? {} : { transientSecret })}
               {...(renderArrayItemSupplement === undefined ? {} : { renderArrayItemSupplement })}
             />

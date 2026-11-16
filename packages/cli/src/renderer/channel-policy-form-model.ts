@@ -32,6 +32,21 @@ export const channelPolicyFieldIcons = {
   sidebarGroup: 'action.edit',
 } as const satisfies Readonly<Record<string, SemanticIconKey>>
 
+const replyChoiceIcons = {
+  agent: 'agent.reasoning',
+  conversation: 'navigation.channels',
+  reply: 'action.back',
+  thread: 'content.layers',
+  none: 'action.disable',
+} as const
+
+export const channelPolicyChoiceIcons = {
+  replyMode: replyChoiceIcons,
+  replyFallbackMode: replyChoiceIcons,
+  groupReception: { mentions: 'content.tags', all: 'navigation.overview' },
+  sidebarGrouping: { inherit: 'content.folder', custom: 'action.edit', none: 'action.disable' },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, SemanticIconKey>>>>
+
 export function channelPolicyFormValue(
   policy: ChannelConversationPolicyV3,
   workflowFields: boolean,

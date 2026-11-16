@@ -17,6 +17,23 @@ const fieldIcons = {
   network: 'navigation.routes',
 } as const
 
+const choiceIcons = {
+  execution: {
+    inherit: 'action.follow',
+    'read-only': 'content.files',
+    'workspace-write': 'action.edit',
+    'full-access': 'content.key',
+  },
+  approval: {
+    inherit: 'action.follow',
+    untrusted: 'status.warning',
+    'on-request': 'status.pending',
+    never: 'action.disable',
+  },
+  workMode: { inherit: 'action.follow', default: 'action.resume', plan: 'agent.reasoning' },
+  network: { inherit: 'action.follow', allow: 'action.enable', deny: 'action.close' },
+} as const
+
 function schema(zh: boolean): SchemaFormSourceV1 {
   const choice = (value: string, en: string, cn: string) => Schema.const(value).extra('extra', { label: zh ? cn : en })
   const result = Schema.object({
@@ -164,6 +181,7 @@ export function ChatExecutionForm(props: {
           schema: source,
           baseline,
           fieldIcons,
+          choiceIcons,
           value,
           locale: props.locale,
           disabled: busy,
