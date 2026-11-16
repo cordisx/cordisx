@@ -194,12 +194,14 @@ describe('conversation relationships and scoped public readback', () => {
   it('keeps a real directory name when cold lookup takes more than a second and decoration falls back to the raw ID', async () => {
     vi.useFakeTimers()
     const f = fixture()
-    f.access.conversations = () => new Promise(resolve => {
-      setTimeout(() => resolve({
-        conversations: [{ id: 'group', name: 'Actual group', kind: 'group' }],
-        complete: true,
-      }), 1_500)
-    })
+    f.access.conversations = () =>
+      new Promise(resolve => {
+        setTimeout(() =>
+          resolve({
+            conversations: [{ id: 'group', name: 'Actual group', kind: 'group' }],
+            complete: true,
+          }), 1_500)
+      })
     f.access.conversationIdentity = async () => ({ name: 'group' })
     try {
       const reading = f.management.read('conversation-page', { ref, limit: 1 })
