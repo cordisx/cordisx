@@ -157,6 +157,7 @@ export class ChannelConversationConsumer {
       event,
       result,
     )
+    await this.approvals.synchronizeCard(event, value.channelApproval, action.messageId)
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
     return chatExecutionOperation(this.extraNative?.(), operation, args)

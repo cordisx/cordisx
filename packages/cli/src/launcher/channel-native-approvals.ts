@@ -192,6 +192,17 @@ export class ChannelNativeApprovals {
       ? rows.map(item => `${item.display.id} · ${item.display.chat} · ${item.display.reason}`).join('\n')
       : '当前会话没有待处理审批。'
   }
+  /** A topic reply can materialize a snapshot of its root card. Replace the current state after that reply. */
+  async synchronizeCard(event: ChannelEventRef, token: string, messageId: string) {
+    const pending = [...this.pending.values()].find(item =>
+      item.display.token === token && item.targets.some(target => same(target, event))
+    )
+    const card = pending?.cards.find(card => same(card.event, event) && card.messageId === messageId)
+    if (!pending || !card || pending.state === 'pending' || this.disposed) return
+    delete card.updatedState
+    // A known failed state already emitted its fallback; this is not a network retry.
+    await this.update(pending)
+  }
   async expire() {
     for (const [id, value] of this.terminal) if (Date.now() - value.at > 20 * 60_000) this.terminal.delete(id)
     for (const [id, item] of this.pending) {

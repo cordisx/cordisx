@@ -88,6 +88,65 @@ async function settle(consumer: ChannelConversationConsumer) {
 }
 
 describe('persistent Channel chat consumer', () => {
+  it('replaces the terminal approval card after the topic receipt materializes its root snapshot', async () => {
+    const f = await fixture(), source = channel('oc_cards', 'group')
+    let listener!: (event: Record<string, unknown>) => void
+    let visible: object | undefined
+    const sendCard = vi.fn(async (_event: unknown, card: object) => {
+      visible = card
+      return 'om_card'
+    })
+    const updateCard = vi.fn(async (_event: unknown, _messageId: string, card: object) => {
+      visible = card
+    })
+    f.access.sendCard = sendCard
+    f.access.updateCard = updateCard
+    const answerApproval = vi.fn(async () => {
+      listener({ event: 'resolved', reference: 'native-request' })
+      return { status: 'submitted' }
+    })
+    f.consumer.setNativeExtras(() =>
+      ({
+        ...f.native,
+        label: async () => '飞书 · 卡片群',
+        approvalEvents: (callback: typeof listener) => {
+          listener = callback
+          return () => {}
+        },
+        answerApproval,
+      }) as never
+    )
+    await f.consumer.policySet({ enabled: true, rules: [commandGrant] }, 0)
+    await f.consumer.bind({ channel: source, mode: 'listen', autoReply: false }, a)
+    listener({
+      event: 'requested',
+      reference: 'native-request',
+      requestId: 7,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: a, turnId: 'turn', itemId: 'item', command: 'printf hello' },
+    })
+    await vi.waitFor(() => expect(sendCard).toHaveBeenCalledTimes(1))
+    const initial = visible as { elements: { actions?: { value: { channelApproval: string } }[] }[] }
+    const token = initial.elements.find(row => row.actions)?.actions?.[0]?.value.channelApproval!
+    f.runtime.notifyOnce.mockImplementation(async (value, _caller, id) => {
+      expect(value.target).toMatchObject({ semantics: 'topic', threadId: 'om_card' })
+      expect(JSON.stringify(visible)).toContain('已处理')
+      visible = initial // Materializing the topic root must not become the final card state.
+      return { deliveryId: id }
+    })
+    await f.consumer.cardAction(account, {
+      messageId: 'om_card',
+      chatId: source.conversationId,
+      operator: { openId: 'alice' },
+      action: { tag: 'button', value: { channelApproval: token, decision: 'decline' } },
+    })
+    expect(JSON.stringify(visible)).toContain('已处理')
+    expect(JSON.stringify(visible)).not.toContain('等待批准')
+    expect(answerApproval).toHaveBeenCalledTimes(1)
+    expect(f.runtime.notifyOnce).toHaveBeenCalledTimes(1)
+    expect(updateCard).toHaveBeenCalledTimes(2)
+    expect(f.native.start).not.toHaveBeenCalled()
+  })
   it.each(['conversation', 'none'])(
     'routes all Host command result paths independently of Agent mode %s',
     async replyMode => {
