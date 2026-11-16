@@ -22,6 +22,7 @@ import type { ChannelServiceConfig, ChannelServiceConnectionConfigV2 } from '@co
 import type { ChannelAccountIdentityStore, FeishuBotProfile } from './channel-account-identity.js'
 import { feishuProfileHttp } from './feishu-profile-http.js'
 import { createFeishuDiagnostics } from './feishu-diagnostics.js'
+import { FeishuCardActionQueue } from './feishu-card-action-queue.js'
 import { type ChannelCommandAddressing, channelCommandAddressing } from './channel-command-users.js'
 import {
   LauncherSecretResolutionError,
@@ -164,6 +165,12 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       // Never retain raw event bodies; the normalized text-only envelope is all
       // that crosses into the durable Channel core.
       let stopped = false
+      const cardActions = new FeishuCardActionQueue(
+        async event => {
+          if (!stopped) await input.onCardAction?.(input.connection.ref, event)
+        },
+        (phase, error) => observation.failure(phase, error),
+      )
       const unsubscribe = channel.on('message', async message => {
         if (stopped) return
         observation.message('normalized', message.messageId, {
@@ -209,7 +216,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       })
       const subscriptions = [
         unsubscribe,
-        channel.on('cardAction', event => input.onCardAction?.(input.connection.ref, event)),
+        channel.on('cardAction', event => cardActions.enqueue(event)),
         channel.on('reject', value => observation.reject(value.messageId, value.reason)),
         channel.on('error', error => observation.failure('channel-error', error)),
         channel.on('reconnecting', () => observation.event('reconnecting')),
@@ -224,6 +231,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
         observation.event('connected')
       } catch {
         stopped = true
+        await cardActions.dispose()
         disposeObservation()
         await channel.disconnect().catch(() => undefined)
         throw new FeishuAdapterError('CONNECTION_UNAVAILABLE')
@@ -271,6 +279,7 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
           if (stopped) return
           stopped = true
           clearInterval(interval)
+          await cardActions.dispose()
           disposeObservation()
           input.channelConnected?.(input.connection.ref, undefined)
           await channel.disconnect()

@@ -205,7 +205,7 @@ CLI 返回固定 code 和 submitted 状态，区分未运行、身份无法核�
 
 `execution-defaults`/`execution-defaults-set` 维护 CordisX profile 的新建默认值；`execution-settings`/`execution-settings-set` 维护 host+chat 覆盖，CAS `expectedRevision`，下一 turn 应用。`never` 不扩大执行权限。Native effective 状态与保存、提交分开。
 
-飞书审批使用自定义交互卡片，按钮与 `/approve`、`/deny` 都提交同一原生请求。卡片更新必须取得平台业务成功；HTTP 成功本身不代表更新成功。更新失败时发送独立状态回执，诊断只记录阶段、数字 HTTP 状态与平台错误码。原生确认保持有效，重复点击不会重新执行；卡片通知不依赖 `autoReply`。
+飞书审批使用自定义交互卡片，按钮与 `/approve`、`/deny` 都提交同一原生请求。按钮回调先由 SDK 确认接收，再通过有界生命周期队列执行审批和更新，避免同步回调结束时保留旧卡片。卡片更新必须取得平台业务成功；HTTP 成功本身不代表更新成功。更新失败时发送独立状态回执，诊断只记录阶段、数字 HTTP 状态与平台错误码。原生确认保持有效，重复点击不会重新执行；卡片通知不依赖 `autoReply`。
 
 `docs --input '{"pluginId":"channel"}'` 列出已激活插件文档；加 `id` 读取一个随包 Markdown。Host 只读 package 内常规文件，拒绝越界及 symlink。通用插件 README 页面提供独立文档选择，文档不自动获得 prompt 权限。
 
