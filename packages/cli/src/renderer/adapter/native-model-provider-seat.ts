@@ -44,6 +44,18 @@ function reactFiber(element: HTMLElement): ReactFiber | undefined {
   return key === undefined ? undefined : (element as unknown as Record<string, unknown>)[key] as ReactFiber | undefined
 }
 
+/** Read the execution target owned by this native composer, when exposed by Codex. */
+export function nativeModelProviderExecutionHost(trigger: HTMLElement): string | undefined {
+  let fiber = reactFiber(trigger)
+  for (let depth = 0; fiber && depth < 128; depth++, fiber = fiber.return ?? undefined) {
+    const props = record(fiber.memoizedProps)
+    if (!props || !Object.hasOwn(props, 'executionTargetHostId')) continue
+    const host = props.executionTargetHostId
+    return typeof host === 'string' && host.length > 0 ? host : undefined
+  }
+  return undefined
+}
+
 function visible(element: HTMLElement): boolean {
   const view = element.ownerDocument.defaultView
   if (

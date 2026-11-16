@@ -10,6 +10,7 @@ import {
   hideNativeModelProviderTrigger,
   locateNativeModelProviderMountSeat,
   nativeModelProviderComposers,
+  nativeModelProviderExecutionHost,
 } from './adapter/native-model-provider-seat.js'
 import {
   nativeModelProviderInteractionAllowed,
@@ -47,13 +48,20 @@ export async function installModelProviderSelector(
     if (disposed) return
     const composers = new Set(nativeModelProviderComposers(document))
     for (const [composer, entry] of entries) {
-      if (composers.has(composer)) continue
+      const seat = locateNativeModelProviderMountSeat(document, composer)
+      const host = seat && nativeModelProviderExecutionHost(seat.trigger)
+      if (composers.has(composer) && (host === undefined || host === 'local')) continue
       entry.disposed = true
       entry.cleanup?.()
       entries.delete(composer)
     }
     for (const composer of composers) {
       if (entries.has(composer)) continue
+      const seat = locateNativeModelProviderMountSeat(document, composer)
+      const host = seat && nativeModelProviderExecutionHost(seat.trigger)
+      // The Host selection channel and catalog belong to the local app-server.
+      // Let Codex own remote selectors until routing is scoped to that host.
+      if (host !== undefined && host !== 'local') continue
       const entry: { disposed: boolean; cleanup?: () => void } = { disposed: false }
       entries.set(composer, entry)
       void installComposerModelProviderSelector(
@@ -155,6 +163,11 @@ async function installComposerModelProviderSelector(
     if (disposed) return
     const state = transport.getSnapshot()
     const seat = locateNativeModelProviderMountSeat(document, composer)
+    const host = seat && nativeModelProviderExecutionHost(seat.trigger)
+    if (host !== undefined && host !== 'local') {
+      unmount()
+      return
+    }
     const catalog = registry.snapshot()
     if (!seat && root && (transport.hasActiveSubmission() || state.submissionError !== undefined)) {
       root.render(<ModelProviderSelector registry={registry} transport={transport} locale={locale()} suspended />)
