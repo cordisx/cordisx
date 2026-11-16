@@ -137,6 +137,7 @@ function fixture() {
     navigate,
   })
   return {
+    access,
     workflow,
     management,
     controller,
@@ -190,6 +191,26 @@ function fixture() {
 }
 const signal = () => new AbortController().signal
 describe('conversation relationships and scoped public readback', () => {
+  it('keeps a real directory name when cold lookup takes more than a second and decoration falls back to the raw ID', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.access.conversations = () => new Promise(resolve => {
+      setTimeout(() => resolve({
+        conversations: [{ id: 'group', name: 'Actual group', kind: 'group' }],
+        complete: true,
+      }), 1_500)
+    })
+    f.access.conversationIdentity = async () => ({ name: 'group' })
+    try {
+      const reading = f.management.read('conversation-page', { ref, limit: 1 })
+      await vi.advanceTimersByTimeAsync(1_500)
+      await expect(reading).resolves.toMatchObject({
+        conversationPage: { directoryComplete: true, conversations: [{ name: 'Actual group' }] },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it('returns actual inbound/outbound records, names, all binding controls and navigation without a model dispatch', async () => {
     const f = fixture()
     const page = await f.workflow.page({ connectionToken: f.connectionToken }, signal())

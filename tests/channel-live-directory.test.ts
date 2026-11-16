@@ -147,7 +147,7 @@ describe('configured live Channel directory', () => {
       expect(await directory.conversations(account)).toEqual({
         complete: false,
         code: 'CHANNEL_DIRECTORY_UNAVAILABLE',
-        conversations: [{ id: 'oc_observed', name: 'oc_observed', kind: 'direct' }],
+        conversations: partial.conversations,
       })
     } finally {
       directory.clear()

@@ -182,7 +182,16 @@ export class ChannelLiveDirectory {
         }
         for (const chat of response.data?.items ?? []) {
           if (chat.chat_id) {
-            result.set(chat.chat_id, { id: chat.chat_id, name: chat.name ?? chat.chat_id, kind: 'group' })
+            const prior = result.get(chat.chat_id)
+            const name = valid(chat.name) && chat.name !== chat.chat_id ? chat.name : prior?.name ?? chat.chat_id
+            const row = { id: chat.chat_id, name, kind: 'group' as const }
+            result.set(chat.chat_id, row)
+            // Retain successful display names for a later transient directory failure.
+            if (this.channels.get(key(ref))?.rawClient === client) {
+              const observed = this.observed.get(key(ref)) ?? new Map()
+              observed.set(chat.chat_id, row)
+              this.observed.set(key(ref), observed)
+            }
           }
         }
         if (!response.data?.has_more) return { conversations: [...result.values()], complete: true }

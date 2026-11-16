@@ -183,7 +183,7 @@ export class ChannelConversationManagement {
     for (const ref of current.runtime.localConversationRefs(account)) refs.set(ref.conversationId, ref)
     for (const binding of bindings) refs.set(binding.channel.conversationId, binding.channel)
     if (action === 'conversation-page' || action === 'conversation-detail') {
-      const directory = await bounded(current.conversations(account), { conversations: [], complete: false }, 1_000)
+      const directory = await bounded(current.conversations(account), { conversations: [], complete: false }, 3_000)
       check()
       const names = new Map(directory.conversations.map(item => [item.id, item.name]))
       for (const item of directory.conversations) {
@@ -230,7 +230,10 @@ export class ChannelConversationManagement {
           : {}
         const related = bindings.filter(binding => sameConversation(binding.channel, ref))
         const count = counts.get(ref.conversationId) ?? { receivedCount: 0, sentCount: 0 }
-        const name = identity.name ?? names.get(ref.conversationId)
+        // A failed decoration may return the raw ID; it must not hide a directory name.
+        const name = identity.name && identity.name !== ref.conversationId
+          ? identity.name
+          : names.get(ref.conversationId)
         return {
           ref,
           ...identity,
