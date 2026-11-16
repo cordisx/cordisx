@@ -15,7 +15,8 @@ Retrieve locally retained accepted inputs after the active binding with
 needed, `channel_remote_history` or the exact configured CLI's `remote-history`
 reads one page from the selected connected account and source conversation.
 Supply `account`, `conversationId`, `kind`, `startTime` and `endTime` (Unix
-seconds), optionally `pageSize` (1–50), `order`, and `pageToken`; continue only
+seconds as decimal strings; CLI also accepts integers), optionally `pageSize`
+(1–50), `order`, and `pageToken`; continue only
 while needed using `hasMore` and the returned token. Permission errors are not
 empty history, and conversation pages need not include all thread replies. Read
 the owning CLI guide for scope requirements and official Lark CLI/Skill usage.

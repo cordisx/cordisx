@@ -106,6 +106,17 @@ describe('remote Channel history', () => {
     const tools = new ChannelConversationTools(() => access as never, consumer as never)
     const input = { account, ...request }
     expect(await tools.call('remote-history', input, {})).toEqual({ status: 'ok' })
+    expect(await tools.call('remote-history', { ...input, startTime: 100, endTime: 200 }, {})).toEqual({ status: 'ok' })
+    expect(history).toHaveBeenLastCalledWith(account, expect.objectContaining({ startTime: '100', endTime: '200' }))
+    expect(await tools.call('remote-history', { ...input, startTime: 100.5 }, {})).toEqual({
+      status: 'rejected',
+      code: 'INVALID_REQUEST',
+    })
+    for (const invalidTime of [-1, 1_794_864_967_000, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(await tools.call('remote-history', { ...input, startTime: invalidTime }, {})).toMatchObject({
+        status: 'rejected',
+      })
+    }
     expect(await tools.call('remote-history', { ...input, conversationId: 'oc_other' }, {})).toEqual({
       status: 'rejected',
       code: 'CHANNEL_SOURCE_SCOPE_MISMATCH',
@@ -118,7 +129,7 @@ describe('remote Channel history', () => {
       status: 'rejected',
       code: 'INVALID_TIME_RANGE',
     })
-    expect(history).toHaveBeenCalledOnce()
+    expect(history).toHaveBeenCalledTimes(2)
     tools.dispose()
   })
 })

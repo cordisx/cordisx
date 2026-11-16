@@ -130,7 +130,7 @@ export const channelAgentTools = [
   ),
   tool(
     'remote-history',
-    'Read one remote Feishu/Lark conversation page using the selected connected account. Supply a bounded Unix-seconds time range and follow hasMore/pageToken; thread replies may require separate platform thread APIs. Incoming Channel turns are limited to their source account and conversation. Requires message-read scope; never change identity to bypass permission errors.',
+    'Read one remote Feishu/Lark conversation page using the selected connected account. Supply the bounded Unix-seconds time range as decimal strings and follow hasMore/pageToken; thread replies may require separate platform thread APIs. Incoming Channel turns are limited to their source account and conversation. Requires message-read scope; never change identity to bypass permission errors.',
     {
       account,
       conversationId: string,

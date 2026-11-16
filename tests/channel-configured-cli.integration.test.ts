@@ -136,7 +136,14 @@ describe('configured Channel CLI production endpoint', () => {
           source: 'remote',
           messages: [{ messageId: 'om_previous', sender: { id: 'ou_sender', name: 'Alice' } }],
         })
-        expect(remoteList).toHaveBeenCalledOnce()
+        expect(await command('remote-history', { ...remote, startTime: 1, endTime: 2 }, contextToken)).toMatchObject({
+          status: 'ok',
+          source: 'remote',
+        })
+        expect(remoteList).toHaveBeenLastCalledWith({
+          params: expect.objectContaining({ start_time: '1', end_time: '2' }),
+        })
+        expect(remoteList).toHaveBeenCalledTimes(2)
         await expect(command('remote-history', { ...remote, conversationId: 'oc_other' }, contextToken)).rejects
           .toThrow('CHANNEL_SOURCE_SCOPE_MISMATCH')
         expect(await command('send', send, contextToken)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
@@ -203,6 +210,7 @@ describe('configured Channel CLI production endpoint', () => {
       expect(runtime.notifyOnce).toHaveBeenCalledOnce()
       expect(channel.mock.calls.map(([operation]) => operation)).toEqual([
         'send',
+        'remote-history',
         'remote-history',
         'remote-history',
         'send',

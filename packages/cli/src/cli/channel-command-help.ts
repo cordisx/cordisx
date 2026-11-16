@@ -8,7 +8,7 @@ const HELP: Readonly<Record<string, string>> = {
   history:
     'Retrieve accepted messages from all the chat bindings. Input: {sessionId,afterSequence?:number,limit?:number}.',
   'remote-history':
-    'Read one remote Feishu/Lark page. Input: {account,conversationId,kind,startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds; use hasMore/pageToken for continuation. Requires message read scope.',
+    'Read one remote Feishu/Lark page. Input: {account,conversationId,kind:"direct"|"group",startTime,endTime,pageSize?:1..50,pageToken?:string,order?:"asc"|"desc"}. Times are Unix seconds as decimal strings or integers; use hasMore/pageToken for continuation. Requires message read scope.',
   listen:
     'Wait for messages in multiple conversations. Input: {account,conversationIds:[string],afterCursor?:string,timeoutSeconds?:0..60}.',
   send:

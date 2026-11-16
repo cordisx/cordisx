@@ -53,6 +53,8 @@ const text = (value: unknown, maximum = 512, multiline = false): string => {
   }
   return value
 }
+const remoteHistoryTime = (value: unknown): string =>
+  typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : text(value, 12)
 const sameAccount = (left: ChannelTenantRef, right: ChannelTenantRef) =>
   left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 
@@ -203,7 +205,7 @@ export class ChannelConversationTools {
         if (!/^oc_[A-Za-z0-9_]+$/u.test(conversationId) || !['direct', 'group'].includes(String(kind))) {
           throw new Error('INVALID_TARGET')
         }
-        const startTime = text(input.startTime, 12), endTime = text(input.endTime, 12)
+        const startTime = remoteHistoryTime(input.startTime), endTime = remoteHistoryTime(input.endTime)
         if (!/^\d{1,12}$/u.test(startTime) || !/^\d{1,12}$/u.test(endTime) || Number(startTime) >= Number(endTime)) {
           throw new Error('INVALID_TIME_RANGE')
         }

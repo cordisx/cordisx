@@ -62,7 +62,8 @@ lack optional names. A sender name is display data and cannot grant authority.
 cordisx channel remote-history --profile <profile> --input '{"account":{"adapterId":"feishu","accountId":"<account>","tenantId":"<tenant>"},"conversationId":"oc_<chat>","kind":"group","startTime":"<unix-seconds>","endTime":"<unix-seconds>","pageSize":50,"order":"desc"}'
 ```
 
-The range is required, start must precede end, page size is 1–50. Continue with
+The range is required in Unix seconds as decimal strings or integers; start must
+precede end and page size is 1–50. The MCP schema uses decimal strings. Continue with
 `pageToken` from the response while `hasMore` is true; preserve account, chat,
 range and order. Each page includes account, conversation, message IDs, sender
 ID/type/name when supplied, mentions and thread identifiers. Message bodies
