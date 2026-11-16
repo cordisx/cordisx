@@ -248,6 +248,7 @@ describe('Agent model-provider tools', () => {
         'channel_bind_status',
         'channel_reply_mode',
         'channel_history',
+        'channel_remote_history',
         'channel_listen',
         'channel_send',
         'channel_send_many',
@@ -256,6 +257,8 @@ describe('Agent model-provider tools', () => {
         'channel_policy_set',
       ])
       const startSchema = JSON.stringify(advertised.find((tool: any) => tool.name === 'start_session').inputSchema)
+      expect(advertised.find((tool: any) => tool.name === 'channel_remote_history').inputSchema.required)
+        .toEqual(['account', 'conversationId', 'kind', 'startTime', 'endTime'])
       const channelSendSchema = advertised.find((tool: any) => tool.name === 'channel_send').inputSchema
       expect(channelSendSchema.properties.target.properties.replyMode.enum).toEqual(['conversation', 'reply', 'thread'])
       expect(advertised.find((tool: any) => tool.name === 'channel_reply_mode').inputSchema.required)

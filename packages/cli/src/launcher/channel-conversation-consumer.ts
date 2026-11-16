@@ -396,7 +396,12 @@ export class ChannelConversationConsumer {
     return {
       status: 'ok',
       afterSequence: messages.at(-1)?.sequence ?? Number(afterSequence),
-      messages: messages.map(({ addressing: _addressing, ...record }) => record),
+      messages: messages.map(record => {
+        const name = record.addressing?.senderName ?? this.input.access()?.senderName?.(record.input.source.event)
+        return name
+          ? { ...record, addressing: { mentions: record.addressing?.mentions ?? [], senderName: name } }
+          : record
+      }),
     }
   }
   async receive(
@@ -819,6 +824,13 @@ export class ChannelConversationConsumer {
           job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
         )
         await this.store.mutate(state => {
+          const input = state.inputs[job.recordId]
+          if (input && context.sender.name && !input.addressing?.senderName) {
+            state.inputs[job.recordId] = {
+              ...input,
+              addressing: { mentions: input.addressing?.mentions ?? [], senderName: context.sender.name },
+            }
+          }
           const current = state.jobs[job.id]!
           current.state = result.state === 'busy' ? 'queued' : result.state
           if (result.sessionId) current.sessionId = result.sessionId

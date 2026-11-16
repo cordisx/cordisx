@@ -5,6 +5,7 @@ import type {
   ChannelThreadRef,
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
+import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 import type { ChannelDirectoryReadback } from './channel-live-directory.js'
@@ -16,6 +17,7 @@ export interface ChannelConversationAccess {
   readonly runtime: ChannelRuntime
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
+  remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
   /** Display-only cache-first directory. Never use for permissions or command target resolution. */
   displayConversations?(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   conversationDisplay?(
@@ -23,6 +25,7 @@ export interface ChannelConversationAccess {
   ): import('./channel-conversation-directory.js').ChannelConversationIdentity
   /** Launcher-only identity/capability lookups; no new plugin or Agent authority. */
   users?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<ChannelCommandUserReadback>
+  senderName?(event: import('@cordisx/channel-runtime').ChannelEventRef): string | undefined
   messageContext?(
     message: import('@cordisx/channel-runtime').ChannelUserInput,
     addressing?: import('./channel-command-users.js').ChannelCommandAddressing,
@@ -50,6 +53,8 @@ const text = (value: unknown, maximum = 512, multiline = false): string => {
   }
   return value
 }
+const remoteHistoryTime = (value: unknown): string =>
+  typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : text(value, 12)
 const sameAccount = (left: ChannelTenantRef, right: ChannelTenantRef) =>
   left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 
@@ -241,6 +246,50 @@ export class ChannelConversationTools {
         if (Object.keys(input).some(key => key !== 'account')) throw new Error('INVALID_REQUEST')
         const directory = await current.conversations(ref)
         return { status: directory.complete ? 'ok' : 'partial', generation: current.generation, ...directory }
+      }
+      if (operation === 'remote-history') {
+        if (
+          Object.keys(input).some(key =>
+            !['account', 'conversationId', 'kind', 'startTime', 'endTime', 'pageSize', 'pageToken', 'order'].includes(
+              key,
+            )
+          )
+        ) throw new Error('INVALID_REQUEST')
+        const conversationId = text(input.conversationId), kind = input.kind
+        if (!/^oc_[A-Za-z0-9_]+$/u.test(conversationId) || !['direct', 'group'].includes(String(kind))) {
+          throw new Error('INVALID_TARGET')
+        }
+        const startTime = remoteHistoryTime(input.startTime), endTime = remoteHistoryTime(input.endTime)
+        if (!/^\d{1,12}$/u.test(startTime) || !/^\d{1,12}$/u.test(endTime) || Number(startTime) >= Number(endTime)) {
+          throw new Error('INVALID_TIME_RANGE')
+        }
+        const pageSize = input.pageSize ?? 50, order = input.order ?? 'desc'
+        if (
+          !Number.isInteger(pageSize) || Number(pageSize) < 1 || Number(pageSize) > 50
+          || !['asc', 'desc'].includes(String(order))
+        ) throw new Error('INVALID_REQUEST')
+        const pageToken = input.pageToken === undefined ? undefined : text(input.pageToken, 2048)
+        // A remotely triggered agent may inspect only its authenticated source, not other accounts or chats.
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        if (source && (!sameAccount(source, ref) || source.conversationId !== conversationId || source.kind !== kind)) {
+          throw new Error('CHANNEL_SOURCE_SCOPE_MISMATCH')
+        }
+        if (!current.remoteHistory) return { status: 'unavailable', code: 'CHANNEL_REMOTE_HISTORY_UNAVAILABLE' }
+        const result = await current.remoteHistory(ref, {
+          conversationId,
+          kind: kind as 'direct' | 'group',
+          startTime,
+          endTime,
+          pageSize: Number(pageSize),
+          order: order as 'asc' | 'desc',
+          ...(pageToken ? { pageToken } : {}),
+        })
+        if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+          throw new Error('CHANNEL_GENERATION_CHANGED')
+        }
+        return result
       }
       if (operation === 'send' || operation === 'send-many' || operation === 'receipt') {
         const allowed = operation === 'send'

@@ -16,6 +16,7 @@ const OPERATIONS = [
   'local-bindings',
   'reply-mode',
   'history',
+  'remote-history',
   'listen',
   'send',
   'send-many',

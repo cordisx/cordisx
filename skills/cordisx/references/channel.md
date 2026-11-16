@@ -10,7 +10,17 @@ App ID/App Key through the Host Channel form when there is no connection.
 
 For listening from the current chat, use `channel_bind` with mode `listen`;
 MCP defaults the session to its caller. CLI callers supply `sessionId`.
-Retrieve retained messages with `channel_history` and keep `afterSequence`.
+Retrieve locally retained accepted inputs after the active binding with
+`channel_history` and keep `afterSequence`; this is not remote history. When
+needed, `channel_remote_history` or the exact configured CLI's `remote-history`
+reads one page from the selected connected account and source conversation.
+Supply `account`, `conversationId`, `kind`, `startTime` and `endTime` (Unix
+seconds as decimal strings; CLI also accepts integers), optionally `pageSize`
+(1–50), `order`, and `pageToken`; continue only
+while needed using `hasMore` and the returned token. Permission errors are not
+empty history, and conversation pages need not include all thread replies. Read
+the owning CLI guide for scope requirements and official Lark CLI/Skill usage.
+Never silently change identity, profile or authorization to bypass a failure.
 One chat can bind many destinations, and destinations can bind many chats.
 `deliver` queues addressed messages as model turns. Automatic final-response
 forwarding is off by default: local commentary and final answers stay in the

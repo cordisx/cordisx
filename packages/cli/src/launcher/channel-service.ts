@@ -1,3 +1,4 @@
+import { channelRemoteHistory } from './channel-remote-history.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -506,9 +507,11 @@ export function createLocalChannelService(input: {
               ?.connectionState ?? 'disabled',
           })),
         conversations: ref => current.directory.conversations(ref),
+        remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
         displayConversations: ref => current.directory.displayConversations(ref),
         conversationDisplay: ref => current.directory.conversationDisplay(ref),
         users: event => current.directory.users(event),
+        senderName: event => current.directory.senderName(event),
         messageContext: (message, addressing) => current.directory.messageContext(message, addressing),
         name: event => current.directory.name(event),
         conversationIdentity: event => current.directory.conversationIdentity(event),

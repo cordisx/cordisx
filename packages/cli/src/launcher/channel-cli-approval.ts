@@ -6,6 +6,7 @@ const READS = new Set([
   'conversations',
   'bind-status',
   'history',
+  'remote-history',
   'listen',
   'receipt',
   'policy',
