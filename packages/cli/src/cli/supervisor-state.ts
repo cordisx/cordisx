@@ -296,7 +296,16 @@ export async function processIdentityStatus(pid: number, startedAt: string): Pro
     return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown'
   }
   const current = await processStartIdentity(pid)
-  if (current === undefined) return 'unknown'
+  if (current === undefined) {
+    // The process may have exited between the first probe and the ps read.
+    // Only an explicit ESRCH proves absence; all other outcomes remain unknown.
+    try {
+      process.kill(pid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'dead'
+    }
+    return 'unknown'
+  }
   return compareProcessStartTimes(current, startedAt)
 }
 

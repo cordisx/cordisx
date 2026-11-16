@@ -168,6 +168,36 @@ describe.skipIf(process.platform === 'win32')('identity collection through both 
     fixture.present = false
     expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
   })
+
+  it('detects an exit between the first PID probe and an empty ps response', async () => {
+    fixture.present = false
+    const probe = vi.spyOn(process, 'kill')
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('process exited'), { code: 'ESRCH' })
+      })
+    try {
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('dead')
+      expect(probe).toHaveBeenCalledTimes(2)
+    } finally {
+      probe.mockRestore()
+    }
+  })
+
+  it('keeps a failed second PID probe unknown when absence is not proven', async () => {
+    fixture.present = false
+    const probe = vi.spyOn(process, 'kill')
+      .mockImplementationOnce(() => true)
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('permission denied'), { code: 'EPERM' })
+      })
+    try {
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
+      expect(probe).toHaveBeenCalledTimes(2)
+    } finally {
+      probe.mockRestore()
+    }
+  })
 })
 
 describe('Darwin native process identity fallback', () => {
