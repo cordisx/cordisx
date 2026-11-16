@@ -1,3 +1,4 @@
+import { clearTimeout, setTimeout } from 'node:timers'
 import type { ChannelEventRef, ChannelTenantRef } from '@cordisx/channel-runtime'
 import type { FeishuSdkChannel } from './feishu-adapter.js'
 import type { ChannelUserInput } from '@cordisx/channel-runtime'
@@ -9,6 +10,8 @@ import type {
 import type { ChannelReplyCapabilities } from './channel-reply-routing.js'
 import { ChannelConversationDirectory } from './channel-conversation-directory.js'
 import { ChannelConversationDisplayStore, conversationDisplayName } from './channel-conversation-display-store.js'
+import { ChannelSenderDirectory } from './channel-sender-directory.js'
+import { channelMessageContext } from './channel-message-context.js'
 import {
   feishuDirectoryFailureCode,
   type FeishuFailureDiagnostic,
@@ -30,6 +33,7 @@ const valid = (value: string | undefined): value is string =>
 /** Directory reads use the same SDK that owns the live connection. No second authentication or transport. */
 export class ChannelLiveDirectory {
   private readonly identities: ChannelConversationDirectory
+  private readonly senders: ChannelSenderDirectory
   private readonly channels = new Map<string, FeishuSdkChannel>()
   private readonly channelVersions = new Map<string, number>()
   private readonly observed = new Map<string, Map<string, { id: string; name: string; kind: 'direct' | 'group' }>>()
@@ -44,12 +48,18 @@ export class ChannelLiveDirectory {
   }>()
   private disposed = false
 
-  constructor(private readonly display = new ChannelConversationDisplayStore()) {
+  constructor(
+    private readonly display = new ChannelConversationDisplayStore(),
+    private readonly senderDisplay = new ChannelConversationDisplayStore(),
+  ) {
     this.identities = new ChannelConversationDirectory(display)
+    this.senders = new ChannelSenderDirectory(senderDisplay)
   }
 
   retainAccounts(refs: readonly ChannelTenantRef[]): void {
     this.display.retainAccounts(refs)
+    this.senderDisplay.retainAccounts(refs)
+    this.senders.retainAccounts(refs)
     const allowed = new Set(refs.map(key))
     for (const id of this.observed.keys()) if (!allowed.has(id)) this.observed.delete(id)
     for (const [id, read] of this.displayReads) {
@@ -77,10 +87,12 @@ export class ChannelLiveDirectory {
     const users = this.observedUsers.get(conversationKey(event)) ?? new Map<string, ChannelCommandUser>()
     if (valid(event.actor?.userId) && valid(addressing?.senderName)) {
       users.set(event.actor.userId, { id: event.actor.userId, name: addressing.senderName })
+      this.senders.observe(event, addressing.senderName)
     }
     for (const mention of addressing?.mentions ?? []) {
       if (valid(mention.userId) && valid(mention.name)) {
         users.set(mention.userId, { id: mention.userId, name: mention.name })
+        this.senders.observe({ ...event, actor: { ...event, userId: mention.userId } }, mention.name)
       }
     }
     this.observedUsers.set(conversationKey(event), users)
@@ -88,6 +100,7 @@ export class ChannelLiveDirectory {
   connected(ref: ChannelTenantRef, channel: FeishuSdkChannel | undefined): void {
     if (this.disposed) return
     if (this.channels.get(key(ref)) !== channel) {
+      this.senders.invalidate(ref)
       this.channelVersions.set(key(ref), (this.channelVersions.get(key(ref)) ?? 0) + 1)
       this.identities.invalidate(ref)
       this.displayReads.get(key(ref))?.abort?.()
@@ -138,6 +151,18 @@ export class ChannelLiveDirectory {
   }
   channel(ref: ChannelTenantRef) {
     return this.channels.get(key(ref))
+  }
+  async messageContext(message: ChannelUserInput, addressing?: ChannelCommandAddressing) {
+    const event = message.source.event
+    if (addressing?.senderName) this.senders.observe(event, addressing.senderName)
+    const [sender, conversation] = await Promise.all([
+      this.senders.name(event, this.channels.get(key(event))),
+      boundedIdentityName(this.name(event)),
+    ])
+    return channelMessageContext(message, addressing, {
+      ...(sender ? { sender } : {}),
+      ...(conversation ? { conversation } : {}),
+    })
   }
   conversationIdentity(event: ChannelEventRef) {
     return this.identities.identity(
@@ -319,6 +344,7 @@ export class ChannelLiveDirectory {
   }
 
   clear(): void {
+    this.senders.clear()
     this.disposed = true
     this.identities.dispose()
     this.channels.clear()
@@ -328,5 +354,20 @@ export class ChannelLiveDirectory {
     this.observedEvents.clear()
     for (const read of this.displayReads.values()) read.abort?.()
     this.displayReads.clear()
+  }
+}
+
+/** A slow conversation directory must never delay an incoming model turn indefinitely. */
+async function boundedIdentityName(read: Promise<string | undefined>): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      read.catch(() => undefined),
+      new Promise<undefined>(resolve => {
+        timer = setTimeout(() => resolve(undefined), 2_000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
   }
 }

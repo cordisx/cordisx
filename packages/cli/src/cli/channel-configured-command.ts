@@ -26,6 +26,12 @@ const OPERATIONS = [
   'execution-settings',
   'execution-settings-set',
   'docs',
+  'model-list',
+  'task-settings',
+  'task-settings-set',
+  'task-config',
+  'task-config-set',
+  'task-requests',
 ]
 
 /** Normal commands use the exact configured launcher. No new SDK, secret input, or inactive fallback. */
@@ -38,7 +44,7 @@ export async function runConfiguredChannelCommand(
   const options: Record<string, string> = {}
   for (let i = 1; i < args.length; i += 2) {
     const key = args[i], value = args[i + 1]
-    if (!key || !['--profile', '--input'].includes(key) || value === undefined || options[key]) {
+    if (!key || !['--profile', '--input', '--context'].includes(key) || value === undefined || options[key]) {
       throw new Error('INVALID_CHANNEL_OPTIONS')
     }
     options[key] = value
@@ -65,7 +71,13 @@ export async function runConfiguredChannelCommand(
   }
   let result: unknown
   try {
-    result = await requestPluginManagementRpc(paths, endpoint, { kind: 'channel', operation, input })
+    result = await requestPluginManagementRpc(paths, endpoint, {
+      kind: 'channel',
+      operation,
+      input,
+      ...(options['--context'] ? { context: options['--context'] } : {}),
+      ...(process.env.CODEX_THREAD_ID ? { callerThreadId: process.env.CODEX_THREAD_ID } : {}),
+    })
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     throw new Error(

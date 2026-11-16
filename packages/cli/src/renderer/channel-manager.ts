@@ -27,8 +27,9 @@ import type {
 import type { ChannelManagerV8 } from '@cordisx/protocol/channel-manager/v8'
 import type { ChannelManagerBindingPageV2, ChannelManagerV9 } from '@cordisx/protocol/channel-manager/v9'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
-import type { ChannelManagerV11, ChannelSettingsFormSectionV1 } from '@cordisx/protocol/channel-manager/v11'
+import type { ChannelManagerV12, ChannelSettingsFormSectionV2 } from '@cordisx/protocol/channel-manager/v12'
 import { ChannelSettingsWorkflow } from './channel-settings-workflow.js'
+import { ChannelTaskSettingsWorkflow } from './channel-task-settings-workflow.js'
 import { registerChannelSettingsDestination } from './channel-settings-destination.js'
 import { ChannelConversationWorkflow } from './channel-conversation-workflow.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
@@ -90,6 +91,11 @@ export interface ChannelManagerActionsApi {
       | 'execution-defaults-set'
       | 'execution-settings'
       | 'execution-settings-set'
+      | 'model-list'
+      | 'task-config'
+      | 'task-config-set'
+      | 'task-settings'
+      | 'task-settings-set'
       | 'binding-labels'
       | 'conversation-page'
       | 'conversation-detail'
@@ -128,7 +134,7 @@ export interface ChannelManagerServiceInput {
 }
 
 /** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
-export class CordisXChannelManagerService extends Service implements ChannelManagerV11 {
+export class CordisXChannelManagerService extends Service implements ChannelManagerV12 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
@@ -173,6 +179,12 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       })
     }
     if (wrapped.document && wrapped.actions) {
+      state.tasks = new ChannelTaskSettingsWorkflow({
+        document: wrapped.document,
+        lifetime: state.lifetime.signal,
+        live: () => !state.disposed && state.isCurrent(),
+        run: (action, request) => wrapped.actions!.run(action, request),
+      })
       state.execution = new ChannelExecutionWorkflow({
         document: wrapped.document,
         profileId: wrapped.profileId ?? 'default',
@@ -301,18 +313,18 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   forOwnConversationService(): ChannelManagerV10 | undefined {
     return this.forOwnService() as ChannelManagerV10 | undefined
   }
-  forOwnSettingsService(): ChannelManagerV11 | undefined {
-    return this.forOwnService() as ChannelManagerV11 | undefined
+  forOwnSettingsService(): ChannelManagerV12 | undefined {
+    return this.forOwnService() as ChannelManagerV12 | undefined
   }
 
   async mountSettingsForm(
-    section: ChannelSettingsFormSectionV1,
+    section: ChannelSettingsFormSectionV2,
     target: HTMLElement,
     options: ChannelManagerFormOptionsV1,
   ) {
     const owner = ownerFromContext(this.ctx), state = stateFor(this)
     if (
-      !['new-chats', 'messages', 'permissions', 'organization'].includes(section)
+      !['new-chats', 'messages', 'permissions', 'organization', 'task-models'].includes(section)
       || !managedConsoleSeatFor(target, owner) || options.signal.aborted
       || !await this.authorizeChannel('channel.bindings.read')
     ) return { status: 'unavailable' as const, code: 'HOST_FORM_UNAVAILABLE' }
@@ -326,6 +338,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       options,
       ...(state.policy === undefined ? {} : { policy: state.policy }),
       ...(state.execution === undefined ? {} : { execution: state.execution }),
+      ...(state.tasks === undefined ? {} : { tasks: state.tasks }),
       live: () => this.operationLive() && this.ownedReadAllowed(),
       authorizeWrite: () => this.authorizeChannel('channel.bindings.write'),
     })
@@ -424,6 +437,29 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   mountBindingExecutionForm(bindingToken: string, target: HTMLElement, options: ChannelManagerFormOptionsV1) {
     return this.mountExecutionForm(bindingToken, target, options)
+  }
+  async mountBindingModelForm(
+    bindingToken: string,
+    target: HTMLElement,
+    options: ChannelManagerFormOptionsV1,
+  ): Promise<ChannelManagerFormMountResultV1> {
+    const owner = ownerFromContext(this.ctx),
+      state = stateFor(this),
+      binding = state.publicController!.bindingTarget(bindingToken)
+    if (
+      !binding || !state.tasks || !managedConsoleSeatFor(target, owner) || options.signal.aborted
+      || !await this.authorizeChannel('channel.bindings.read')
+    ) return { status: 'unavailable', code: 'TARGET_UNAVAILABLE' }
+    return state.tasks.mount({
+      target,
+      owner,
+      options,
+      sessionId: binding.session.remoteSessionId,
+      live: () =>
+        this.operationLive() && this.ownedReadAllowed()
+        && state.publicController!.bindingTarget(bindingToken)?.bindingId === binding.bindingId,
+      authorize: () => this.authorizeChannel('channel.bindings.write'),
+    })
   }
 
   private async mountExecutionForm(

@@ -27,10 +27,22 @@ const HELP: Readonly<Record<string, string>> = {
     'Save one chat override for its next turn. Input: {sessionId,settings:object|null,expectedRevision}. null clears the override; never does not mean full access.',
   docs:
     'List or read packaged plugin documentation. Input: {pluginId?:string,id?:string,locale?:string}. Select pluginId to disambiguate a document ID. Read-only; never loads credential files.',
+  'model-list': 'Read admitted providers/models and supported efforts. Input: {}.',
+  'task-settings':
+    'Read one Channel task model settings. Input: {sessionId?}. Incoming tasks retain --context from the prompt.',
+  'task-settings-set':
+    'Request an exact task change. Input: {sessionId?,settings:{providerId?,model?,effort?},expectedRevision?}. Authorized users change directly; others receive an approval-required receipt. Idle application never interrupts the active turn.',
+  'task-config': 'Read Channel-scoped creation defaults and field/provider/model permission rules. Input: {}.',
+  'task-config-set':
+    'Local-user CAS replacement of Channel task config. Input: {config:{defaults,scopes,permissions},expectedRevision}. Agent context cannot change global permission rules.',
+  'task-requests':
+    'Read pending task setting requests. Input: {}. Approval is through the authenticated Channel user command or card, never an Agent-claimed user.',
 }
 export function channelCliHelp(operation?: string): string {
   if (operation && HELP[operation]) {
-    return `cordisx channel ${operation} [--profile <id>] [--input <JSON>]\n${HELP[operation]}`
+    return `cordisx channel ${operation} [--profile <id>] [--context <incoming-context>] [--input <JSON>]\n${
+      HELP[operation]
+    }`
   }
   if (operation) throw new Error('INVALID_CHANNEL_OPERATION')
   return `cordisx channel <operation> [--profile <id>] [--input <JSON>]\n${

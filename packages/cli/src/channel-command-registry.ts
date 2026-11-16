@@ -67,6 +67,38 @@ export const CHANNEL_COMMAND_DEFINITIONS = [
   },
   { name: 'deny', usage: '/deny [审批编号]', summary: '拒绝对应原生请求；需要当前用户的审批权限。', readOnly: false },
   { name: 'approvals', usage: '/approvals', summary: '查看当前频道会话的待处理请求。', readOnly: true },
+  { name: 'models', usage: '/models', summary: '查看当前已认证的服务商、模型目录。', readOnly: true },
+  {
+    name: 'model',
+    usage: '/model [模型] [--provider 服务商] [--effort 强度] [--target ID | --all]',
+    summary: '查看或设置任务模型；无权限时申请具体变更，空闲后应用。',
+    readOnly: false,
+  },
+  {
+    name: 'provider',
+    usage: '/provider [服务商] [--model 模型] [--target ID | --all]',
+    summary: '查看或设置服务商和模型；多个绑定可逐步选择。',
+    readOnly: false,
+  },
+  {
+    name: 'task-settings',
+    usage: '/task-settings [--provider 服务商] [--model 模型] [--effort 强度] [--target ID | --all]',
+    summary: '查看或设置任务参数；按字段、服务商、模型权限判断。',
+    readOnly: false,
+  },
+  { name: 'task-requests', usage: '/task-requests', summary: '查看当前频道的模型配置申请。', readOnly: true },
+  {
+    name: 'task-approve',
+    usage: '/task-approve <审批编号>',
+    summary: '批准一次具体模型变更；必须有对应字段和目标模型权限。',
+    readOnly: false,
+  },
+  {
+    name: 'task-deny',
+    usage: '/task-deny <审批编号>',
+    summary: '拒绝具体模型变更；使用当前指令审批权限。',
+    readOnly: false,
+  },
 ] as const
 export const CHANNEL_COMMAND_NAMES = CHANNEL_COMMAND_DEFINITIONS.map(item => item.name)
 export function channelCommandHelp(name?: string, allowed: (command: string) => boolean = () => true): string {

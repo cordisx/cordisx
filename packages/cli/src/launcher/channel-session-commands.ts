@@ -4,6 +4,8 @@ import { type ChatExecutionSettings, parseChatExecutionSettings } from '../chat-
 import type { ChannelChatBinding } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { type ChannelTargetAction, ChannelTargetChoices } from './channel-target-choice.js'
+import { ChannelModelCommands } from './channel-model-commands.js'
+import type { ChannelTaskSettings } from './channel-task-settings.js'
 
 const same = (binding: ChannelChatBinding, event: ChannelEventRef) =>
   ['adapterId', 'accountId', 'tenantId', 'conversationId'].every(field =>
@@ -13,14 +15,24 @@ const same = (binding: ChannelChatBinding, event: ChannelEventRef) =>
 
 export class ChannelSessionCommands {
   private readonly choices = new ChannelTargetChoices()
+  private readonly models: ChannelModelCommands
   constructor(
     private readonly input: {
       bindings(): readonly ChannelChatBinding[]
       native(): ChannelNativeSessions | undefined
+      denied?(event: ChannelEventRef, command: string): boolean
       allowed(event: ChannelEventRef, command: string): boolean
       unbind(id: string): Promise<boolean>
+      tasks?: ChannelTaskSettings
     },
-  ) {}
+  ) {
+    this.models = new ChannelModelCommands({
+      ...input,
+      denied: (event, command) => input.denied?.(event, command) ?? false,
+      choices: this.choices,
+      targets: event => this.targets(event),
+    })
+  }
   private bindings(event: ChannelEventRef) {
     return this.input.bindings().filter(binding => binding.state === 'active' && same(binding, event))
   }
@@ -31,6 +43,8 @@ export class ChannelSessionCommands {
     )
   }
   async handle(event: ChannelEventRef, command: string, argument: string): Promise<string | undefined> {
+    const modelResult = await this.models.handle(event, command, argument)
+    if (modelResult !== undefined) return modelResult
     if (command === 'help') return channelCommandHelp(argument, name => this.input.allowed(event, name))
     if (command === 'bind-status') {
       const targets = await this.targets(event)
@@ -46,11 +60,13 @@ export class ChannelSessionCommands {
       const [token, selected, extra] = argument.trim().split(/\s+/u)
       if (!token || !selected || extra) return channelCommandHelp('choose')
       const choice = this.choices.take(event, token, selected, targets.map(target => target.id))
+      if (choice.action.kind === 'model') return this.models.apply(event, choice.action, choice.targets)
       if (
-        !this.input.allowed(
-          event,
-          choice.action.kind === 'execution' && choice.action.readOnly ? 'bind-status' : choice.command,
-        )
+        !(choice.action.kind === 'execution' && !choice.action.readOnly
+          && Object.keys(choice.action.patch).every(field => field === 'effort')) && !this.input.allowed(
+            event,
+            choice.action.kind === 'execution' && choice.action.readOnly ? 'bind-status' : choice.command,
+          )
       ) return '当前用户没有执行此操作的权限；未修改配置。'
       return this.apply(event, choice.action, choice.targets)
     }
@@ -82,7 +98,10 @@ export class ChannelSessionCommands {
       patch: parseChatExecutionSettings(settings),
       readOnly: Object.keys(settings).length === 0,
     }
-    if (!this.input.allowed(event, action.kind === 'execution' && action.readOnly ? 'bind-status' : command)) {
+    if (
+      !(action.kind === 'execution' && Object.keys(action.patch).every(field => field === 'effort'))
+      && !this.input.allowed(event, action.kind === 'execution' && action.readOnly ? 'bind-status' : command)
+    ) {
       return '当前用户没有执行此操作的权限；未修改配置。'
     }
     if (!targets.length) return '当前会话尚未绑定。用 /bind <对话 ID> 或 /bind new 开始，再设置权限。'
@@ -113,7 +132,22 @@ export class ChannelSessionCommands {
           await this.input.unbind(binding.id)
         }
         results.push(`${target.name}：已解除绑定，对话保留。`)
-      } else {
+      } else if (action.kind === 'execution') {
+        if (action.patch.effort !== undefined && this.input.tasks) {
+          const { effort, ...rest } = action.patch
+          const result = await this.input.tasks.request(event, target.id, { effort }) as {
+            application?: string
+            requestId?: string
+          }
+          results.push(
+            `${target.name}：${
+              result.application === 'approval-required'
+                ? `等待模型权限批准 ${result.requestId}`
+                : '强度已保存，空闲后应用'
+            }。`,
+          )
+          if (!Object.keys(rest).length) continue
+        }
         if (!preferences) return '当前 Host 不支持会话执行配置。'
         const current = preferences.read('local', target.id)
         if (action.readOnly) {
@@ -130,7 +164,8 @@ export class ChannelSessionCommands {
             }`,
           )
         } else {
-          const patch: ChatExecutionSettings = { ...current?.override, ...action.patch }
+          const { effort: _effort, ...rest } = action.patch
+          const patch: ChatExecutionSettings = { ...current?.override, ...(this.input.tasks ? rest : action.patch) }
           await preferences.set('local', target.id, patch, current?.revision ?? 0)
           results.push(`${target.name}：已保存，下一 turn 应用。当前审批仍需单独批准或拒绝。`)
         }

@@ -6,6 +6,7 @@ import type { ChannelPolicyWorkflow } from './channel-policy-workflow.js'
 import type { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import type { ChannelConversationWorkflow } from './channel-conversation-workflow.js'
 import type { ChannelSettingsWorkflow } from './channel-settings-workflow.js'
+import type { ChannelTaskSettingsWorkflow } from './channel-task-settings-workflow.js'
 import type { PermissionBroker } from './platform.js'
 import type { PublicChannelManagerController } from './channel-manager-public.js'
 import {
@@ -24,6 +25,7 @@ export interface ChannelManagerState {
   execution?: ChannelExecutionWorkflow
   conversations?: ChannelConversationWorkflow
   settings: ChannelSettingsWorkflow
+  tasks?: ChannelTaskSettingsWorkflow
   readonly lifetime: AbortController
   readonly serviceConfig?: ChannelManagerServiceConfigApi
   readonly createCredentialedConnection?: ChannelManagerServiceInput['createCredentialedConnection']

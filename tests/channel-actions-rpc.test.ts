@@ -1,7 +1,26 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createChannelActionsBridgeHandler } from '../packages/cli/src/launcher/channel-actions-rpc.js'
 
 describe('Channel action Host bridge', () => {
+  it('exposes the actual task-settings handler and strips transport identity from strict task arguments', async () => {
+    const call = vi.fn(async () => ({ status: 'ok', revision: 2 }))
+    const handler = createChannelActionsBridgeHandler({
+      token: 'a'.repeat(64),
+      api: {} as never,
+      consumer: { taskSettings: { call } } as never,
+    })
+    expect(
+      await handler.handle({
+        version: 1,
+        token: handler.token,
+        requestId: 'one',
+        action: 'task-settings',
+        sessionId: 'chat',
+        generation: 'generation',
+      }),
+    ).toEqual({ status: 'applied', task: { status: 'ok', revision: 2 } })
+    expect(call).toHaveBeenCalledWith('task-settings', { sessionId: 'chat' })
+  })
   it('forwards only token-bound connection and binding actions to the launcher API', async () => {
     const calls: unknown[] = []
     const handler = createChannelActionsBridgeHandler({

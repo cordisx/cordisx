@@ -1,9 +1,43 @@
+import { parseChannelTaskRecords } from './channel-task-records.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type { ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import type { ChannelCommandAddressing } from './channel-command-users.js'
 import type { ChannelAutoReplyMode, ChannelReplyDefaults, ChannelReplyMode } from './channel-reply-routing.js'
+import {
+  CHANNEL_TASK_CONFIG_INITIAL,
+  type ChannelTaskConfig,
+  type ChannelTaskPatch,
+  parseChannelTaskConfig,
+} from './channel-task-config.js'
+
+export interface ChannelTaskRequest {
+  readonly id: string
+  readonly token: string
+  readonly source: import('@cordisx/channel-runtime').ChannelEventRef
+  readonly threadId: string
+  readonly patch: ChannelTaskPatch
+  readonly selection: ChannelTaskPatch
+  readonly baseSelection: ChannelTaskPatch
+  readonly createdAt: number
+  readonly expectedRevision: number
+  readonly expiresAt: number
+  state: 'pending' | 'queued' | 'applying' | 'submitted' | 'applied' | 'denied' | 'expired' | 'unknown'
+  approvedBy?: import('@cordisx/channel-runtime').ChannelEventRef
+  code?: string
+  cardMessageId?: string
+}
+export interface ChannelTaskSetting {
+  revision: number
+  settings: ChannelTaskPatch
+  pending?: ChannelTaskPatch
+  pendingPatch?: ChannelTaskPatch
+  baseSelection?: ChannelTaskPatch
+  requested?: ChannelTaskPatch
+  application: 'saved' | 'applying' | 'submitted' | 'applied' | 'unknown'
+  code?: string
+}
 import {
   CHANNEL_CONVERSATION_POLICY_INITIAL,
   type ChannelConversationPolicy,
@@ -70,6 +104,10 @@ export interface ChannelConversationState {
   bindings: Record<string, ChannelChatBinding>
   inputs: Record<string, ChannelConversationInput>
   jobs: Record<string, ChannelConversationJob>
+  taskConfigRevision: number
+  taskConfig: ChannelTaskConfig
+  taskSettings: Record<string, ChannelTaskSetting>
+  taskRequests: Record<string, ChannelTaskRequest>
 }
 
 function initial(): ChannelConversationState {
@@ -84,6 +122,10 @@ function initial(): ChannelConversationState {
     bindings: {},
     inputs: {},
     jobs: {},
+    taskConfigRevision: 0,
+    taskConfig: CHANNEL_TASK_CONFIG_INITIAL,
+    taskSettings: {},
+    taskRequests: {},
   }
 }
 
@@ -102,8 +144,16 @@ export class ChannelConversationStore {
         || !parsed.bindings || !parsed.inputs || !parsed.jobs
       ) throw new Error('INVALID_CONVERSATION_STORE')
       parsed.policy = parseChannelConversationPolicy(parsed.policy)
+      parsed.taskConfig = parseChannelTaskConfig(parsed.taskConfig ?? CHANNEL_TASK_CONFIG_INITIAL)
+      parsed.taskConfigRevision ??= 0
+      parsed.taskSettings ??= {}
+      parsed.taskRequests ??= {}
+      Object.assign(parsed, parseChannelTaskRecords(parsed.taskSettings, parsed.taskRequests))
       parsed.policyRevision ??= 0
-      if (!Number.isSafeInteger(parsed.policyRevision) || parsed.policyRevision < 0) {
+      if (
+        !Number.isSafeInteger(parsed.policyRevision) || parsed.policyRevision < 0
+        || !Number.isSafeInteger(parsed.taskConfigRevision) || parsed.taskConfigRevision < 0
+      ) {
         throw new Error('INVALID_CONVERSATION_STORE')
       }
       value = parsed
@@ -113,6 +163,20 @@ export class ChannelConversationStore {
     const store = new ChannelConversationStore(file, value)
     // A process died after reserving a native effect. Never blindly recreate/resend it.
     await store.mutate(state => {
+      for (const [threadId, setting] of Object.entries(state.taskSettings)) {
+        if (setting.application === 'applying') {
+          setting.application = 'unknown'
+          setting.code = 'NATIVE_EFFECT_UNCERTAIN'
+          delete setting.pending
+          delete setting.pendingPatch
+          for (const request of Object.values(state.taskRequests)) {
+            if (request.threadId === threadId && request.state === 'applying') {
+              request.state = 'unknown'
+              request.code = 'NATIVE_EFFECT_UNCERTAIN'
+            }
+          }
+        }
+      }
       for (const job of Object.values(state.jobs)) {
         if (job.state === 'dispatching') {
           job.state = 'reconciliation-required'

@@ -57,7 +57,7 @@ describe('configured Channel CLI production endpoint', () => {
       text: 'Explicit CLI message',
       operationId: 'explicit-send-fixture',
     }
-    const command = async (operation: string, value: unknown) => {
+    const command = async (operation: string, value: unknown, context?: string) => {
       const result = await promisify(execFile)(cli.node, [
         cli.entry,
         'channel',
@@ -66,7 +66,14 @@ describe('configured Channel CLI production endpoint', () => {
         cli.profile,
         '--input',
         JSON.stringify(value),
-      ], { env: { ...process.env, CORDISX_HOME: root }, timeout: 10_000, maxBuffer: 131_072 })
+        ...(context ? ['--context', context] : []),
+      ], {
+        env: { ...process.env, CORDISX_HOME: root, CODEX_THREAD_ID: sessionId },
+        timeout: 10_000,
+        maxBuffer: 131_072,
+      }).catch((error: Error & { stdout?: string }) => {
+        throw new Error(error.stdout || error.message)
+      })
       return JSON.parse(result.stdout.trim())
     }
     const receipts = new Map<string, { state: string; externalMessageId: string }>()
@@ -91,13 +98,21 @@ describe('configured Channel CLI production endpoint', () => {
       if (method !== 'thread/turns/list') throw new Error('Local assistant items must not be read for delivery')
       return { data: [{ id: 'fixture-turn', status: 'completed' }] }
     })
-    const bridgeCall = vi.fn(async (_app: string, _operation: string, request: { prompt: string }) => {
-      expect(request.prompt).toContain(cli.entry)
-      expect(request.prompt).toContain('Automatic final-response delivery is disabled')
-      expect(request.prompt).toContain("send --profile 'default'")
-      expect(await command('send', send)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
-      return { status: 'started', sessionId, turnId: 'fixture-turn' }
-    })
+    let contextToken: string | undefined
+    const bridgeCall = vi.fn(
+      async (_app: string, _operation: string, request: { prompt: string; operationId: string }) => {
+        expect(request.prompt).toContain(cli.entry)
+        expect(request.prompt).toContain('Automatic final-response delivery is disabled')
+        expect(request.prompt).toContain("send --profile 'default'")
+        contextToken = /--context '([a-f0-9]{48})'/u.exec(request.prompt)?.[1]
+        expect(contextToken).toBeDefined()
+        native.observedDispatch(request.operationId, sessionId, 'fixture-turn')
+        await expect(command('send', send, '0'.repeat(48))).rejects.toThrow()
+        expect(runtime.notifyOnce).not.toHaveBeenCalled()
+        expect(await command('send', send, contextToken)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
+        return { status: 'started', sessionId, turnId: 'fixture-turn' }
+      },
+    )
     const native = new ChannelNativeSessions({
       bridge: () => ({ call: bridgeCall }) as unknown as AgentBridge,
       nativeRequest,
@@ -112,8 +127,11 @@ describe('configured Channel CLI production endpoint', () => {
       access: () => access,
       native: () => native,
     })
+    consumer.setNativeExtras(() => native)
     const tools = new ChannelConversationTools(() => access, consumer)
-    const channel = vi.fn((operation: string, value: unknown) => tools.call(operation, value))
+    const channel = vi.fn((operation: string, value: unknown, metadata?: unknown) =>
+      tools.call(operation, value, metadata)
+    )
     const identity = await processStartIdentity(process.pid)
     const server = await startPluginManagementRpcServer({
       homeDir: root,
@@ -129,8 +147,10 @@ describe('configured Channel CLI production endpoint', () => {
       await consumer.policySet({ enabled: true }, 0)
       await consumer.receive('inbox:fixture', input, true)
       await consumer.pump()
+      await bridgeCall.mock.results[0]!.value
       await consumer.pump()
       await consumer.pump()
+      expect(bridgeCall).toHaveBeenCalledOnce()
       expect(consumer.policy().policy.autoReply).toBe(false)
       expect(consumer.status(sessionId).jobs).toMatchObject([{ state: 'completed', turnId: 'fixture-turn' }])
       expect(bridgeCall).toHaveBeenCalledOnce()
@@ -149,7 +169,13 @@ describe('configured Channel CLI production endpoint', () => {
         status: 'ok',
         receipt: { state: 'sent', externalMessageId: 'om_explicit_result' },
       })
-      expect(channel.mock.calls.map(([operation]) => operation)).toEqual(['send', 'receipt'])
+      await expect(command('send', { ...send, operationId: 'expired-context' }, contextToken)).rejects.toThrow()
+      expect(runtime.notifyOnce).toHaveBeenCalledOnce()
+      expect(channel.mock.calls.map(([operation]) => operation)).toEqual(['send', 'send', 'receipt', 'send'])
+      expect(channel).toHaveBeenCalledWith('send', send, {
+        'cordisx/channelContext': contextToken,
+        'openai/threadId': sessionId,
+      })
       expect(await readFile(configPath, 'utf8')).toBe(before)
     } finally {
       tools.dispose()
@@ -180,6 +206,7 @@ describe('configured Channel CLI production endpoint', () => {
       channel,
     })
     vi.stubEnv('CORDISX_HOME', root)
+    vi.stubEnv('CODEX_THREAD_ID', '')
     try {
       const output: string[] = []
       await runConfiguredChannelCommand(['connections'], line => output.push(line))
@@ -202,7 +229,7 @@ describe('configured Channel CLI production endpoint', () => {
         sessionId: 'fixture-chat',
         operationId: 'incoming-operation',
         mode: 'thread',
-      })
+      }, undefined)
       expect(JSON.parse(output.at(-1)!)).toMatchObject({ status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' })
       expect(await readFile(configPath, 'utf8')).toBe(before)
       await expect(runConfiguredChannelCommand(['connections', '--profile', 'other'], () => {})).rejects.toThrow(

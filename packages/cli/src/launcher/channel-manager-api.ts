@@ -78,6 +78,7 @@ export interface ChannelManagerActionResult {
     readonly policy: import('./channel-conversation-policy.js').ChannelConversationPolicy
   }
   readonly code?: string
+  readonly task?: unknown
   readonly execution?: {
     readonly status: string
     readonly revision?: number

@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
-import { channelApprovalCard, type ChannelApprovalDisplay, channelApprovalPreview } from './channel-approval-card.js'
+import {
+  channelApprovalCard,
+  type ChannelApprovalDisplay,
+  channelApprovalPreview,
+  channelApprovalSummary,
+} from './channel-approval-card.js'
 import type { ChannelChatBinding } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 
@@ -24,6 +29,7 @@ interface Pending {
 }
 export class ChannelNativeApprovals {
   private readonly pending = new Map<string, Pending>()
+  private readonly processing = new Set<string>()
   private readonly terminal = new Map<string, { event: string; at: number }>()
   private native: ChannelNativeSessions | undefined
   private unsubscribe: (() => void) | undefined
@@ -31,6 +37,7 @@ export class ChannelNativeApprovals {
   constructor(
     private readonly input: {
       bindings(): readonly ChannelChatBinding[]
+      routineAllowed?(command: unknown, threadId: string, turnId: string): boolean
       allowed(event: ChannelEventRef, command: string): boolean
       sendCard(event: ChannelEventRef, card: object): Promise<string>
       updateCard(event: ChannelEventRef, messageId: string, card: object): Promise<void>
@@ -49,6 +56,7 @@ export class ChannelNativeApprovals {
   private async event(event: Record<string, unknown>) {
     if (this.disposed || typeof event.reference !== 'string') return
     if (event.event !== 'requested') {
+      if (!['answered', 'resolved', 'cancelled', 'unknown'].includes(String(event.event))) return
       const pending = this.pending.get(event.reference)
       if (!pending) {
         this.terminal.set(event.reference, { event: String(event.event), at: Date.now() })
@@ -64,10 +72,52 @@ export class ChannelNativeApprovals {
       await this.update(pending)
       return
     }
-    if (this.pending.has(event.reference) || this.terminal.has(event.reference) || this.pending.size >= 128) return
+    if (
+      this.pending.has(event.reference) || this.processing.has(event.reference) || this.terminal.has(event.reference)
+      || this.pending.size + this.processing.size >= 128
+    ) return
+    this.processing.add(event.reference)
+    try {
+      await this.requested(event)
+    } finally {
+      this.processing.delete(event.reference)
+    }
+  }
+  private async requested(event: Record<string, unknown> & { reference?: unknown }) {
+    if (typeof event.reference !== 'string') return
     const params = object(event.params)
     if (typeof params.threadId !== 'string' || typeof params.turnId !== 'string' || typeof params.itemId !== 'string') {
       return
+    }
+    // Routine replies can precede the first-turn acknowledgement. The dispatch owner supplies their source.
+    if (
+      event.method === 'item/commandExecution/requestApproval'
+      && this.input.routineAllowed?.(params.command, params.threadId, params.turnId)
+    ) {
+      this.terminal.set(event.reference, { event: 'automatic', at: Date.now() })
+      if (this.terminal.size > 256) this.terminal.delete(this.terminal.keys().next().value!)
+      try {
+        const result = object(
+          await this.native?.answerApproval({
+            reference: event.reference,
+            requestId: event.requestId,
+            threadId: params.threadId,
+            turnId: params.turnId,
+            itemId: params.itemId,
+            decision: 'accept',
+          }),
+        )
+        if (
+          ['submitted', 'expired'].includes(String(result.status))
+          || this.terminal.get(event.reference)?.event !== 'automatic'
+        ) return
+        this.terminal.delete(event.reference)
+      } catch {
+        // A lost response can follow a successful approval. Keep an unknown card, never silently retry.
+        if (this.terminal.get(event.reference)?.event !== 'automatic') return
+        this.terminal.set(event.reference, { event: 'unknown', at: Date.now() })
+        this.input.report?.('CHANNEL_ROUTINE_APPROVAL_RESULT_UNKNOWN')
+      }
     }
     // Approval can precede the first-turn acknowledgement that attaches the new binding.
     let bindings = this.input.bindings().filter(binding =>
@@ -79,7 +129,8 @@ export class ChannelNativeApprovals {
         binding.sessionId === params.threadId && binding.state === 'active'
       )
     }
-    if (!bindings.length || this.disposed || this.terminal.has(event.reference)) return
+    const unknown = this.terminal.get(event.reference)?.event === 'unknown'
+    if (!bindings.length || this.disposed || this.terminal.has(event.reference) && !unknown) return
     const targets = [...new Map(bindings.map(binding => {
       const event: ChannelEventRef = { ...binding.channel, eventId: `approval:${params.itemId}` }
       return [JSON.stringify([event.adapterId, event.accountId, event.tenantId, event.conversationId]), event] as const
@@ -88,8 +139,12 @@ export class ChannelNativeApprovals {
     const display: ChannelApprovalDisplay = {
       id,
       token,
-      state: 'pending',
+      state: unknown ? 'unknown' : 'pending',
       chat: await this.native?.label(params.threadId).catch(() => undefined) ?? 'Codex 对话',
+      summary: channelApprovalSummary(event.method, params.command),
+      ...(this.native?.sourceFor?.(params.threadId, params.turnId)?.actor?.userId
+        ? { requester: this.native.sourceFor(params.threadId, params.turnId)!.actor!.userId }
+        : {}),
       reason: channelApprovalPreview(params.reason, '原生执行器请求操作授权。'),
       scope: event.method === 'item/fileChange/requestApproval'
         ? `文件修改${typeof params.grantRoot === 'string' ? `：${channelApprovalPreview(params.grantRoot, '')}` : ''}`
@@ -99,7 +154,7 @@ export class ChannelNativeApprovals {
           params.networkApprovalContext ? '包含网络操作授权' : '',
         ].filter(Boolean).join('\n'),
     }
-    if (this.terminal.has(event.reference) || this.disposed) return
+    if (this.disposed || this.terminal.has(event.reference) && !unknown) return
     const pending: Pending = {
       display,
       native: {
@@ -111,7 +166,7 @@ export class ChannelNativeApprovals {
       },
       targets,
       cards: [],
-      state: 'pending',
+      state: display.state,
       updates: Promise.resolve(),
       expiresAt: Date.now() + 10 * 60_000,
     }
@@ -124,7 +179,11 @@ export class ChannelNativeApprovals {
       } catch {
         await this.input.notify(
           target,
-          `${display.chat}需要授权：${display.reason}\n${display.scope}\n回复 /approve ${id} once 或 /deny ${id}。`,
+          display.state === 'unknown'
+            ? `${display.chat}：${display.summary ?? display.reason}；提交结果未知，请核对原生审批。不会重复提交。`
+            : `${display.chat}需要授权：${
+              display.summary ?? display.reason
+            }\n回复 /approve ${id} once 或 /deny ${id}。`,
           `approval:${id}:fallback`,
         )
       }
@@ -256,5 +315,6 @@ export class ChannelNativeApprovals {
     this.unsubscribe?.()
     this.pending.clear()
     this.terminal.clear()
+    this.processing.clear()
   }
 }

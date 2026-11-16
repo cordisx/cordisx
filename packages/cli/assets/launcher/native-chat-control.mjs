@@ -23,6 +23,7 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
         const field of [
           'threadId',
           'model',
+          'modelProvider',
           'cwd',
           'approvalPolicy',
           'sandbox',
@@ -34,6 +35,14 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       ) {
         if (params[field] !== undefined) safe[field] = params[field]
       }
+      // Forward only execution configuration; provider credentials remain in the native transport.
+      const executionConfig = object(params.config)
+      const config = Object.fromEntries(
+        ['model_reasoning_effort', 'sandbox_workspace_write.network_access'].flatMap(field =>
+          executionConfig[field] === undefined ? [] : [[field, executionConfig[field]]]
+        ),
+      )
+      if (Object.keys(config).length) safe.config = config
       let prepared = object(await controlCall('execution-prepare', { method, params: safe }))
       if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string' && readNative) {
         const context = {}
@@ -66,6 +75,7 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       for (
         const field of [
           'model',
+          'modelProvider',
           'cwd',
           'approvalPolicy',
           'sandbox',
@@ -76,7 +86,21 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       ) {
         if (result[field] !== undefined) safe[field] = result[field]
       }
-      if (object(result.thread).id) safe.thread = { id: result.thread.id }
+      if (object(result.thread).id) {
+        const thread = object(result.thread)
+        safe.thread = Object.fromEntries(
+          [
+            'id',
+            'model',
+            'modelProvider',
+            'cwd',
+            'approvalPolicy',
+            'sandbox',
+            'reasoningEffort',
+            'activePermissionProfile',
+          ].flatMap(field => thread[field] === undefined ? [] : [[field, thread[field]]]),
+        )
+      }
       if (object(result.turn).id) safe.turn = { id: result.turn.id }
       // Native effect has already happened. A persistence failure must not turn it into a rejected send.
       try {
@@ -135,6 +159,7 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
         for (
           const field of [
             'model',
+            'modelProvider',
             'cwd',
             'approvalPolicy',
             'sandboxPolicy',

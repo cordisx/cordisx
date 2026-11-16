@@ -1,10 +1,15 @@
 import { randomBytes } from 'node:crypto'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import type { ChatExecutionSettings } from '../chat-execution-settings.js'
+import type { ChannelTaskPatch } from './channel-task-config.js'
 
 export type ChannelTargetAction = { readonly kind: 'unbind' } | {
   readonly kind: 'execution'
   readonly patch: ChatExecutionSettings
+  readonly readOnly: boolean
+} | {
+  readonly kind: 'model'
+  readonly patch: ChannelTaskPatch
   readonly readOnly: boolean
 }
 const context = (event: ChannelEventRef) =>

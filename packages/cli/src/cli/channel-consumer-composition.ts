@@ -108,3 +108,12 @@ export async function createConfiguredChannelConsumer(input: {
       })(),
   }
 }
+
+/** All native and management Channel callers retain their real incoming metadata. */
+export function configuredChannelToolHandler(
+  tools: import('../launcher/channel-conversation-tools.js').ChannelConversationTools | undefined,
+) {
+  return tools === undefined
+    ? {}
+    : { channel: (operation: string, input: unknown, metadata?: unknown) => tools.call(operation, input, metadata) }
+}

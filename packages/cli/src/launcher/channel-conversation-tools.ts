@@ -23,6 +23,10 @@ export interface ChannelConversationAccess {
   ): import('./channel-conversation-directory.js').ChannelConversationIdentity
   /** Launcher-only identity/capability lookups; no new plugin or Agent authority. */
   users?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<ChannelCommandUserReadback>
+  messageContext?(
+    message: import('@cordisx/channel-runtime').ChannelUserInput,
+    addressing?: import('./channel-command-users.js').ChannelCommandAddressing,
+  ): Promise<import('./channel-message-context.js').ChannelMessageContext>
   replyCapabilities?(event: import('@cordisx/channel-runtime').ChannelEventRef): ChannelReplyCapabilities
   name?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<string | undefined>
   conversationIdentity?(
@@ -69,9 +73,39 @@ export class ChannelConversationTools {
           : { status: 'unavailable', code: 'DOCUMENTS_UNAVAILABLE' }
       }
       const input = object(value)
+      if (operation === 'task-model-select') return await this.consumer?.taskSettings.externalSelection(input, metadata)
+      if (operation.startsWith('task-') || operation === 'model-list') {
+        if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        return await this.consumer.taskSettings.call(operation, input, metadata)
+      }
+      const scopedCaller = this.consumer?.agentAccess.caller(metadata)
+      const nativeCaller = callerThreadId(metadata)
+      const metadataObject = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+      if (metadataObject['cordisx/channelContext'] !== undefined && !scopedCaller) {
+        throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+      }
+      const source = scopedCaller?.source
+        ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
+      const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (
+        nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller)
+        && ['send', 'send-many', 'bind', 'unbind', 'policy-set', 'execution-defaults-set', 'execution-settings-set']
+          .includes(operation)
+        && !source
+      ) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+      if (source && ['policy-set', 'execution-defaults-set'].includes(operation)) {
+        throw new Error('PROFILE_SETTINGS_REQUIRE_LOCAL_USER')
+      }
+      if (source && operation === 'execution-settings-set') {
+        const patch = object(input.settings)
+        if (Object.keys(patch).some(key => key !== 'effort')) {
+          throw new Error('EXECUTION_SETTINGS_REQUIRE_CHANNEL_COMMAND')
+        }
+        return await this.consumer!.taskSettings.request(source, String(input.sessionId ?? callerSession), patch)
+      }
       if (operation.startsWith('execution-')) {
         if (!this.consumer && !this.execution) return { status: 'unavailable', code: 'EXECUTION_SETTINGS_UNAVAILABLE' }
-        const callerSession = callerThreadId(metadata)
+        const callerSession = scopedCaller?.threadId ?? callerThreadId(metadata)
         if (callerSession && operation.endsWith('-set') && operation.includes('defaults')) {
           throw new Error('PROFILE_SETTINGS_REQUIRE_LOCAL_USER')
         }
@@ -90,7 +124,7 @@ export class ChannelConversationTools {
       if (!current) return { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }
       if (operation === 'reply-mode') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
-        const callerSession = callerThreadId(metadata)
+        const callerSession = scopedCaller?.threadId ?? callerThreadId(metadata)
         const sessionId = input.sessionId === undefined ? callerSession : text(input.sessionId)
         if (!sessionId) throw new Error('SESSION_REQUIRED')
         if (callerSession !== undefined && callerSession !== sessionId) throw new Error('REPLY_OPERATION_NOT_FOUND')
@@ -110,8 +144,12 @@ export class ChannelConversationTools {
           return { status: 'ok', ...await this.consumer.policySet(input.policy, Number(input.expectedRevision)) }
         }
         // Native metadata defaults to the current chat. Local CLI may explicitly address a chat in this profile.
-        const sessionId = input.sessionId === undefined ? callerThreadId(metadata) : text(input.sessionId)
+        const sessionId = input.sessionId === undefined ? callerSession : text(input.sessionId)
         if (!sessionId) throw new Error('SESSION_REQUIRED')
+        if (source && sessionId !== callerSession) throw new Error('SESSION_SCOPE_MISMATCH')
+        if (source && ['bind', 'unbind'].includes(operation) && !this.consumer.commandAllowed(source, operation)) {
+          throw new Error('CHANNEL_POLICY_DENIED')
+        }
         const { sessionId: _session, ...request } = input
         if (operation === 'bind') return { status: 'ok', binding: await this.consumer.bind(request, sessionId) }
         if (operation === 'unbind') return { status: 'ok', removed: await this.consumer.unbind(request, sessionId) }
@@ -193,7 +231,14 @@ export class ChannelConversationTools {
             eventId: operationId,
             ...(replyTo === undefined ? {} : { messageId: replyTo }),
           }, mode)
-          if (this.consumer && !this.consumer.sendAllowed({ ...target, eventId: input.operationId as string })) {
+          if (
+            this.consumer
+            && !this.consumer.sendAllowed({
+              ...target,
+              eventId: input.operationId as string,
+              ...(source?.actor ? { actor: source.actor } : {}),
+            })
+          ) {
             throw new Error('CHANNEL_POLICY_DENIED')
           }
           return target

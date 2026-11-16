@@ -245,7 +245,9 @@ export function createLocalChannelService(input: {
     const identities = new ChannelAccountIdentityStore()
     const display = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'conversation-display.json'))
     display.retainAccounts(configuration.connections.map(connection => connection.ref))
-    const directory = new ChannelLiveDirectory(display)
+    const senders = await ChannelConversationDisplayStore.open(path.join(input.dataDir, 'sender-display.json'))
+    senders.retainAccounts(configuration.connections.map(connection => connection.ref))
+    const directory = new ChannelLiveDirectory(display, senders)
     sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
     try {
       const serviceSource = path.join(artifactDirectory, 'service.mjs')
@@ -275,6 +277,7 @@ export function createLocalChannelService(input: {
         dispose: async () => {
           directory.clear()
           await display.close()
+          await senders.close()
           await identities.dispose()
           await host.dispose()
         },
@@ -301,6 +304,7 @@ export function createLocalChannelService(input: {
     } catch (error) {
       directory.clear()
       await display.close()
+      await senders.close()
       await identities.dispose()
       await host.dispose().catch(() => undefined)
       throw error
@@ -505,6 +509,7 @@ export function createLocalChannelService(input: {
         displayConversations: ref => current.directory.displayConversations(ref),
         conversationDisplay: ref => current.directory.conversationDisplay(ref),
         users: event => current.directory.users(event),
+        messageContext: (message, addressing) => current.directory.messageContext(message, addressing),
         name: event => current.directory.name(event),
         conversationIdentity: event => current.directory.conversationIdentity(event),
         replyCapabilities: event => current.directory.replyCapabilities(event),
