@@ -1,4 +1,5 @@
 import { resolveNativeViewportTitlebarOwner } from './adapter/native-viewport-titlebar.js'
+import { managerTitlebarPresentationRight } from './adapter/manager-titlebar-presentation.js'
 import {
   type ManagerCollapsedSidebarSeat,
   resolveManagerCollapsedSidebarSeat,
@@ -378,10 +379,12 @@ export function resolveManagerTitlebarSeat(document: Document): {
         && rect.right <= endRect.left + 2 && node.querySelector('button') !== null
     })
   if (pageActions.length > 1 || (!endToolbar && endButtons.length > 1)) return undefined
+  const native = [...nativeTitle, ...pageActions, ...(endButtons.length > 0 ? [ends[0]!] : [])]
+  const right = managerTitlebarPresentationRight(bar, slot, native, safeRight)
   return {
     slot,
-    native: [...nativeTitle, ...pageActions, ...(endButtons.length > 0 ? [ends[0]!] : [])],
-    bounds: { left: slotRect.left, top: slotRect.top, width: safeRight - slotRect.left, height: slotRect.height },
+    native,
+    bounds: { left: slotRect.left, top: slotRect.top, width: right - slotRect.left, height: slotRect.height },
   }
 }
 

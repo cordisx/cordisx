@@ -47,6 +47,23 @@ export const channelPolicyChoiceIcons = {
   sidebarGrouping: { inherit: 'content.folder', custom: 'action.edit', none: 'action.disable' },
 } as const satisfies Readonly<Record<string, Readonly<Record<string, SemanticIconKey>>>>
 
+const replyChoiceLabels = {
+  agent: '自主选择',
+  conversation: '主消息流',
+  reply: '引用回复',
+  thread: '话题回复',
+} as const
+
+export const channelPolicyChoiceLabels = {
+  replyMode: replyChoiceLabels,
+  replyFallbackMode: replyChoiceLabels,
+  groupReception: { mentions: '仅提及', all: '全部接收' },
+  sidebarGrouping: { custom: '自定义', none: '不分组' },
+  'replyModes.mode': replyChoiceLabels,
+  'replyModes.fallbackMode': replyChoiceLabels,
+  'rules.action': { dispatch: '交给模型' },
+} as const
+
 export function channelPolicyFormValue(
   policy: ChannelConversationPolicyV3,
   workflowFields: boolean,

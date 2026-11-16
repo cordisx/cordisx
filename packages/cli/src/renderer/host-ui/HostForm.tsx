@@ -26,7 +26,12 @@ import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
 import { HostIcon } from './HostIcon.js'
-import { HOST_RADIO_CHOICE_STYLES, type HostFormChoiceIcons, HostRadioChoices } from './HostRadioChoices.js'
+import {
+  HOST_RADIO_CHOICE_STYLES,
+  type HostFormChoiceIcons,
+  type HostFormChoiceLabels,
+  HostRadioChoices,
+} from './HostRadioChoices.js'
 import type { SemanticIconKey } from '../../icon-theme-contracts.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
@@ -175,6 +180,8 @@ function Control({
   locale,
   transientSecret,
   choiceIcons,
+  choiceLabels,
+  nestedChoiceLabels,
   renderArrayItemSupplement,
 }: {
   readonly field: CordisXConfigFieldSnapshot
@@ -185,6 +192,8 @@ function Control({
   readonly locale: string
   readonly transientSecret?: boolean
   readonly choiceIcons?: HostFormChoiceIcons
+  readonly choiceLabels?: HostFormChoiceLabels
+  readonly nestedChoiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
   readonly renderArrayItemSupplement?: ArrayEditorProps['renderItemSupplement']
 }) {
   // TDesign values exclude null. Stable option keys preserve every JSON scalar,
@@ -207,7 +216,13 @@ function Control({
         onChange={onChange}
         locale={locale}
         validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)}
-        renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />}
+        renderFieldRow={props => (
+          <ArrayItemFieldRow
+            {...props}
+            locale={locale}
+            {...(nestedChoiceLabels === undefined ? {} : { choiceLabels: nestedChoiceLabels })}
+          />
+        )}
         {...(renderArrayItemSupplement === undefined ? {} : { renderItemSupplement: renderArrayItemSupplement })}
       />
     )
@@ -279,6 +294,7 @@ function Control({
         value={value}
         onChange={onChange}
         {...(choiceIcons === undefined ? {} : { icons: choiceIcons })}
+        {...(choiceLabels === undefined ? {} : { labels: choiceLabels })}
       />
     )
   }
@@ -360,8 +376,12 @@ function Control({
 }
 
 function ArrayItemFieldRow(
-  { field, controlId, issueText, onChange, locale }: ArrayEditorFieldRowRenderProps & { readonly locale: string },
+  { field, controlId, issueText, onChange, locale, choiceLabels }: ArrayEditorFieldRowRenderProps & {
+    readonly locale: string
+    readonly choiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
+  },
 ) {
+  const path = field.path.filter((_, index) => index % 2 === 0).join('.')
   return (
     <HostFieldRow
       field={field}
@@ -372,6 +392,8 @@ function ArrayItemFieldRow(
       controlId={controlId}
       {...(issueText === undefined ? {} : { issueText })}
       fieldActions="static"
+      {...(choiceLabels?.[path] === undefined ? {} : { choiceLabels: choiceLabels[path] })}
+      {...(choiceLabels === undefined ? {} : { nestedChoiceLabels: choiceLabels })}
       onChange={onChange}
     />
   )
@@ -550,6 +572,8 @@ interface HostFieldRowBaseProps {
   readonly field: CordisXConfigFieldSnapshot
   readonly iconOverride?: SemanticIconKey
   readonly choiceIcons?: HostFormChoiceIcons
+  readonly choiceLabels?: HostFormChoiceLabels
+  readonly nestedChoiceLabels?: Readonly<Record<string, HostFormChoiceLabels>>
   readonly value: unknown
   readonly changed: boolean
   readonly locale: string
@@ -693,6 +717,8 @@ export function HostFieldRow(props: HostFieldRowProps) {
               controlId={resolvedControlId}
               locale={locale}
               {...(props.choiceIcons === undefined ? {} : { choiceIcons: props.choiceIcons })}
+              {...(props.choiceLabels === undefined ? {} : { choiceLabels: props.choiceLabels })}
+              {...(props.nestedChoiceLabels === undefined ? {} : { nestedChoiceLabels: props.nestedChoiceLabels })}
               {...(transientSecret === undefined ? {} : { transientSecret })}
               {...(renderArrayItemSupplement === undefined ? {} : { renderArrayItemSupplement })}
             />

@@ -34,6 +34,11 @@ const choiceIcons = {
   network: { inherit: 'action.follow', allow: 'action.enable', deny: 'action.close' },
 } as const
 
+const choiceLabels = {
+  execution: { 'workspace-write': '工作区' },
+  approval: { untrusted: '不可信时', 'on-request': '按需询问' },
+} as const
+
 function schema(zh: boolean): SchemaFormSourceV1 {
   const choice = (value: string, en: string, cn: string) => Schema.const(value).extra('extra', { label: zh ? cn : en })
   const result = Schema.object({
@@ -182,6 +187,7 @@ export function ChatExecutionForm(props: {
           baseline,
           fieldIcons,
           choiceIcons,
+          ...(zh ? { choiceLabels } : {}),
           value,
           locale: props.locale,
           disabled: busy,

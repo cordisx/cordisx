@@ -10,6 +10,7 @@ import { ChannelSettingsDraft } from './channel-settings-draft.js'
 import { parseChannelConversationPolicy } from '../launcher/channel-conversation-policy.js'
 import {
   channelPolicyChoiceIcons,
+  channelPolicyChoiceLabels,
   channelPolicyFieldIcons,
   channelPolicyFormValue,
   channelPolicySectionFields,
@@ -104,6 +105,7 @@ export function ChannelPolicyForm(props: {
           baseline,
           fieldIcons: channelPolicyFieldIcons,
           choiceIcons: channelPolicyChoiceIcons,
+          ...(zh ? { choiceLabels: channelPolicyChoiceLabels } : {}),
           ...(props.section === undefined
             ? {}
             : {
