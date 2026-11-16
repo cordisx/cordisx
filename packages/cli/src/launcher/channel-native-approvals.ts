@@ -13,7 +13,12 @@ interface Pending {
   readonly native: Record<string, unknown>
   readonly targets: readonly ChannelEventRef[]
   readonly expiresAt: number
-  cards: { event: ChannelEventRef; messageId: string }[]
+  cards: {
+    event: ChannelEventRef
+    messageId: string
+    updatedState?: ChannelApprovalDisplay['state']
+    failedState?: ChannelApprovalDisplay['state']
+  }[]
   state: ChannelApprovalDisplay['state']
   updates: Promise<void>
 }
@@ -174,7 +179,10 @@ export class ChannelNativeApprovals {
     const state = this.pending.get(String(pending.native.reference))?.state
     if (state === 'resolved') return '原生已确认处理此审批；未重复执行。'
     if (state === 'cancelled') return '原生请求已取消；未重复执行。'
-    return result.status === 'submitted' ? '决定已提交，等待原生确认；卡片会同步状态。' : '原生请求已失效；未重复批准。'
+    const cardFailed = pending.cards.some(card => card.failedState === state)
+    return result.status === 'submitted'
+      ? `决定已提交，等待原生确认；${cardFailed ? '原卡片更新失败，请以状态回执为准。' : '卡片会同步状态。'}`
+      : '原生请求已失效；未重复批准。'
   }
   list(event: ChannelEventRef) {
     const rows = [...this.pending.values()].filter(item =>
@@ -199,11 +207,34 @@ export class ChannelNativeApprovals {
       if (this.disposed) return
       const display = { ...pending.display, state: pending.state }
       await Promise.all(
-        pending.cards.map(card =>
-          this.input.updateCard(card.event, card.messageId, channelApprovalCard(display)).catch(() =>
+        pending.cards.map(async card => {
+          if (card.updatedState === display.state || card.failedState === display.state) return
+          try {
+            await this.input.updateCard(card.event, card.messageId, channelApprovalCard(display))
+            card.updatedState = display.state
+            delete card.failedState
+          } catch {
+            card.failedState = display.state
             this.input.report?.('CHANNEL_APPROVAL_CARD_UPDATE_FAILED')
-          )
-        ),
+            const state = {
+              pending: '等待批准',
+              submitted: '决定已提交，等待原生确认',
+              resolved: '原生已确认处理',
+              cancelled: '原生请求已取消',
+              expired: '审批已过期',
+              unknown: '提交结果未知，请核对原生审批',
+            }[display.state]
+            try {
+              await this.input.notify(
+                card.event,
+                `审批 ${display.id} · ${display.chat}：${state}。原卡片更新失败，请以此状态回执为准。`,
+                `approval:${display.id}:card-update:${display.state}`,
+              )
+            } catch {
+              this.input.report?.('CHANNEL_APPROVAL_NOTIFICATION_FAILED')
+            }
+          }
+        }),
       )
     })
     pending.updates = task.catch(() => undefined)

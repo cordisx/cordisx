@@ -26,6 +26,8 @@ import { ChannelLiveDirectory } from './channel-live-directory.js'
 import type { ChannelCommandAddressing } from './channel-command-users.js'
 import type { ChannelConversationAccess } from './channel-conversation-tools.js'
 import type { HostServiceCapabilityOwner } from '../service-capability-ownership.js'
+import { bindDiagnosticContext } from '../diagnostics/context.js'
+import { updateFeishuCard } from './feishu-card-update.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
 
@@ -175,6 +177,7 @@ export function createLocalChannelService(input: {
   readonly environment?: NodeJS.ProcessEnv
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
+  const updateCard = bindDiagnosticContext(updateFeishuCard)
   let active: ActiveRuntime | undefined
   let managementOwner: HostServiceCapabilityOwner | undefined
   let activeConfiguration: ReturnType<typeof parseChannelServiceConfig> | undefined
@@ -501,8 +504,8 @@ export function createLocalChannelService(input: {
         },
         updateCard: async (event, messageId, card) => {
           const channel = current.directory.channel(event)
-          if (!channel?.updateCard) throw new Error('CHANNEL_CARD_UNAVAILABLE')
-          await channel.updateCard(messageId, card)
+          if (!channel) throw new Error('CHANNEL_CARD_UNAVAILABLE')
+          await updateCard(channel, event.accountId, messageId, card)
         },
         drain: async ref => {
           await current.runtime.drainOutbound(ref, 100)

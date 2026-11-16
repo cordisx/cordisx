@@ -1,5 +1,5 @@
 export interface FeishuFailureDiagnostic {
-  readonly stage: 'directory' | 'inbound'
+  readonly stage: 'directory' | 'inbound' | 'card-update'
   readonly httpStatus?: number
   readonly platformCode?: number
 }

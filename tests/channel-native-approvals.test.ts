@@ -34,6 +34,10 @@ function fixture() {
     answerApproval: vi.fn(async () => ({ status: 'submitted' })),
   }
   const notify = vi.fn(async () => undefined)
+  const updateCard = vi.fn(async (_event: unknown, _id: string, card: object) => {
+    updates.push(card)
+  })
+  const report = vi.fn()
   const approvals = new ChannelNativeApprovals({
     bindings: () => bindings as never,
     allowed: () => allowed,
@@ -41,10 +45,9 @@ function fixture() {
       cards.push(card)
       return 'om_card'
     },
-    updateCard: async (_event, _id, card) => {
-      updates.push(card)
-    },
+    updateCard,
     notify,
+    report,
   })
   approvals.attach(native as never)
   return {
@@ -53,6 +56,8 @@ function fixture() {
     cards,
     updates,
     notify,
+    updateCard,
+    report,
     emit: (value: Record<string, unknown>) => listener(value),
     allow: (value: boolean) => {
       allowed = value
@@ -103,6 +108,29 @@ describe('Channel custom approval lifecycle', () => {
     f.emit({ event: 'cancelled', reference: 'cancelled-request' })
     await new Promise(resolve => setTimeout(resolve, 5))
     expect(f.cards).toHaveLength(1)
+    f.approvals.dispose()
+  })
+  it('keeps native confirmation authoritative and sends one status fallback when the card replace fails', async () => {
+    const f = fixture()
+    f.emit(request)
+    await vi.waitFor(() => expect(f.cards).toHaveLength(1))
+    const id = /审批 ([a-f0-9]+)/u.exec(JSON.stringify(f.cards[0]))![1]!
+    f.updateCard.mockRejectedValue(new Error('CHANNEL_APPROVAL_CARD_UPDATE_FAILED'))
+    f.native.answerApproval.mockImplementation(async () => {
+      f.emit({ event: 'resolved', reference: 'request' })
+      return { status: 'submitted' }
+    })
+    expect(await f.approvals.answer(event, id, 'decline', 'om_card')).toContain('原生已确认')
+    f.emit({ event: 'resolved', reference: 'request' })
+    expect(await f.approvals.answer(event, id, 'decline', 'om_card')).toContain('未重复执行')
+    expect(f.native.answerApproval).toHaveBeenCalledTimes(1)
+    expect(f.updateCard).toHaveBeenCalledTimes(1)
+    expect(f.notify).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ ...event, eventId: 'approval:item' }),
+      expect.stringContaining('原生已确认处理。原卡片更新失败'),
+      `approval:${id}:card-update:resolved`,
+    )
+    expect(f.report).toHaveBeenCalledExactlyOnceWith('CHANNEL_APPROVAL_CARD_UPDATE_FAILED')
     f.approvals.dispose()
   })
 })
