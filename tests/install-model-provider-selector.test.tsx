@@ -48,6 +48,88 @@ afterEach(() => {
 })
 
 describe('native model provider selector installation', () => {
+  it('restores the native selector when a composer changes to a remote execution host', async () => {
+    const dom = new JSDOM(
+      `<!doctype html><body><main data-codex-composer-root data-composer-placement="home">
+        <footer data-composer-footer-responsive><button data-codex-intelligence-trigger="true" aria-haspopup="menu">Model</button></footer>
+      </main></body>`,
+      { url: 'app://-/index.html' },
+    )
+    for (
+      const [name, value] of Object.entries({
+        window: dom.window,
+        document: dom.window.document,
+        location: dom.window.location,
+        HTMLElement: dom.window.HTMLElement,
+        Element: dom.window.Element,
+        Node: dom.window.Node,
+        MutationObserver: dom.window.MutationObserver,
+        IS_REACT_ACT_ENVIRONMENT: true,
+        codexWindowType: 'electron',
+      })
+    ) install(name, value)
+    for (const element of dom.window.document.querySelectorAll<HTMLElement>('*')) {
+      element.getBoundingClientRect = () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 20,
+        bottom: 20,
+        width: 20,
+        height: 20,
+        toJSON: () => ({}),
+      })
+    }
+    const trigger = dom.window.document.querySelector<HTMLElement>('[data-codex-intelligence-trigger]')!
+    const target = { executionTargetHostId: 'local' }
+    Object.defineProperty(trigger, '__reactFiber$test', {
+      value: { memoizedProps: {}, return: { memoizedProps: target } },
+    })
+    const snapshot = Object.freeze({ available: true, busy: false })
+    const transport = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      hasActiveSubmission: () => false,
+      dispose: vi.fn(),
+    }
+    const connect = vi.spyOn(CodexDesktopNativeModelProviderTransport, 'connect').mockResolvedValue(transport as never)
+    const registry = new ModelProviderRegistry(async () => [])
+    let dispose = () => {}
+    await act(async () => {
+      dispose = await installModelProviderSelector(
+        dom.window.document,
+        registry,
+        () => 'en',
+        true,
+        rendererOwner,
+        nativeProviderChannel(),
+      )
+    })
+    expect(trigger.hidden).toBe(true)
+    expect(connect).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      target.executionTargetHostId = 'remote-ssh-discovered:host'
+      dom.window.document.body.append(dom.window.document.createElement('aside'))
+      await Promise.resolve()
+    })
+    expect(trigger.hidden).toBe(false)
+    expect(dom.window.document.querySelector('[data-cordisx-model-provider-selector]')).toBeNull()
+    expect(transport.dispose).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      target.executionTargetHostId = 'local'
+      dom.window.document.body.append(dom.window.document.createElement('aside'))
+      await Promise.resolve()
+    })
+    expect(trigger.hidden).toBe(true)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await act(async () => dispose())
+    registry.dispose()
+    dom.window.close()
+  })
+
   it('restores the full enhanced selector from provider catalog data while native state is temporarily unavailable', async () => {
     const dom = new JSDOM(
       `<!doctype html><body>
