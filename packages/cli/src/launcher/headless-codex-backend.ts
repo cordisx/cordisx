@@ -41,7 +41,8 @@ export async function startHeadlessCodexBackend(input: {
         let selected = params
         if (method === 'thread/start' && params.model == null && params.modelProvider == null) {
           const config = await server.request<{ config?: Record<string, unknown> }>('config/read', {
-            includeLayers: false, ...(typeof params.cwd === 'string' ? { cwd: params.cwd } : {}),
+            includeLayers: false,
+            ...(typeof params.cwd === 'string' ? { cwd: params.cwd } : {}),
           })
           const native = config.config ?? {}
           if (native.model_provider == null || native.model_provider === 'openai') {
@@ -68,7 +69,8 @@ export async function startHeadlessCodexBackend(input: {
       do {
         if (++pages > 8) throw new Error('MODEL_CATALOG_PAGINATION_LIMIT')
         const page = await server.request<{ data: Record<string, unknown>[]; nextCursor?: string | null }>(
-          'model/list', { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
+          'model/list',
+          { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
         )
         if (!Array.isArray(page.data)) throw new Error('MODEL_CATALOG_UNAVAILABLE')
         rows.push(...page.data)
@@ -76,45 +78,77 @@ export async function startHeadlessCodexBackend(input: {
         if (cursor && cursors.has(cursor)) throw new Error('MODEL_CATALOG_UNAVAILABLE')
         if (cursor) cursors.add(cursor)
       } while (cursor)
-      const visible = rows.filter(row => row.hidden === false && typeof row.id === 'string'
-        && typeof row.model === 'string' && row.model.length > 0)
-      if (new Set(visible.map(row => row.model)).size !== visible.length
-        || new Set(visible.map(row => row.id)).size !== visible.length) throw new Error('MODEL_CATALOG_AMBIGUOUS')
+      const visible = rows.filter(row =>
+        row.hidden === false && typeof row.id === 'string'
+        && typeof row.model === 'string' && row.model.length > 0
+      )
+      if (
+        new Set(visible.map(row => row.model)).size !== visible.length
+        || new Set(visible.map(row => row.id)).size !== visible.length
+      ) throw new Error('MODEL_CATALOG_AMBIGUOUS')
       const catalog = visible.map(row => {
         const efforts = Array.isArray(row.supportedReasoningEfforts)
-          ? row.supportedReasoningEfforts.map(item => item && typeof item === 'object'
-            ? (item as Record<string, unknown>).reasoningEffort : undefined) : []
+          ? row.supportedReasoningEfforts.map(item =>
+            item && typeof item === 'object'
+              ? (item as Record<string, unknown>).reasoningEffort
+              : undefined
+          )
+          : []
         const reasoningCapabilities = parseModelReasoningCapabilities({
-          efforts, ...(typeof row.defaultReasoningEffort === 'string'
-            ? { defaultEffort: row.defaultReasoningEffort } : {}),
+          efforts,
+          ...(typeof row.defaultReasoningEffort === 'string'
+            ? { defaultEffort: row.defaultReasoningEffort }
+            : {}),
         })
-        return { id: row.model as string, label: typeof row.displayName === 'string' ? row.displayName : row.model as string,
-          aliases: [] as string[], ...(reasoningCapabilities ? { reasoningCapabilities } : {}) }
+        return {
+          id: row.model as string,
+          label: typeof row.displayName === 'string' ? row.displayName : row.model as string,
+          aliases: [] as string[],
+          ...(reasoningCapabilities ? { reasoningCapabilities } : {}),
+        }
       })
       if (operation === 'list') {
         const defaults = visible.filter(row => row.isDefault === true)
-        return { providers: [{ providerId: 'openai', pluginId: 'codex', models: catalog,
-          ...(defaults.length === 1 ? { defaultModelId: defaults[0]!.model as string } : {}) }] }
+        return {
+          providers: [{
+            providerId: 'openai',
+            pluginId: 'codex',
+            models: catalog,
+            ...(defaults.length === 1 ? { defaultModelId: defaults[0]!.model as string } : {}),
+          }],
+        }
       }
       const selection = value && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, unknown> : {}
-      if (operation !== 'select' || selection.providerId !== 'openai'
+        ? value as Record<string, unknown>
+        : {}
+      if (
+        operation !== 'select' || selection.providerId !== 'openai'
         || typeof selection.threadId !== 'string' || typeof selection.model !== 'string'
-        || !catalog.some(model => model.id === selection.model)) {
+        || !catalog.some(model => model.id === selection.model)
+      ) {
         return { status: 'rejected', reason: 'selection-outside-catalog' }
       }
-      const observed = await authority.nativeRequest('thread/read', { threadId: selection.threadId, includeTurns: false }) as
-        { thread?: { id?: string; status?: { type?: string } } }
-      if (observed.thread?.id !== selection.threadId || !['idle', 'notLoaded'].includes(observed.thread.status?.type ?? '')) {
+      const observed = await authority.nativeRequest('thread/read', {
+        threadId: selection.threadId,
+        includeTurns: false,
+      }) as { thread?: { id?: string; status?: { type?: string } } }
+      if (
+        observed.thread?.id !== selection.threadId
+        || !['idle', 'notLoaded'].includes(observed.thread.status?.type ?? '')
+      ) {
         return { status: 'rejected', reason: 'thread-not-idle' }
       }
       if (beforeEffect && !await beforeEffect()) return { status: 'rejected', reason: 'selection-changed' }
       try {
         const resumed = await authority.nativeRequest('thread/resume', {
-          threadId: selection.threadId, modelProvider: 'openai', model: selection.model,
+          threadId: selection.threadId,
+          modelProvider: 'openai',
+          model: selection.model,
         }) as { thread?: { id?: string }; model?: string; modelProvider?: string }
-        if (resumed.thread?.id !== selection.threadId || resumed.model !== selection.model
-          || resumed.modelProvider !== selection.providerId) {
+        if (
+          resumed.thread?.id !== selection.threadId || resumed.model !== selection.model
+          || resumed.modelProvider !== selection.providerId
+        ) {
           return { status: 'reconciliation-required', reason: 'native-selection-unconfirmed' }
         }
         return { status: 'selected' }

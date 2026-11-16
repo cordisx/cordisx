@@ -13,7 +13,9 @@ describe('headless Codex backend', () => {
       request: async <T>(method: string) => {
         calls.push(method)
         if (method === 'config/read') return { config: { model: 'available' } } as T
-        if (method === 'model/list') return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }] } as T
+        if (method === 'model/list') {
+          return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }] } as T
+        }
         if (method === 'thread/start') return { thread: { id: 'thread-1' } } as T
         if (method === 'turn/start') return { turn: { id: 'turn-1' } } as T
         return {} as T
@@ -61,58 +63,96 @@ describe('headless Codex backend', () => {
   })
   it('exposes the native catalog and applies only an explicitly admitted selection', async () => {
     const request = vi.fn(async (method: string, params: unknown) => {
-      if (method === 'model/list') return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }], nextCursor: null }
+      if (method === 'model/list') {
+        return { data: [{ id: 'available', model: 'available', hidden: false, isDefault: true }], nextCursor: null }
+      }
       if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: 'idle' } } }
       if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'available' }
       throw new Error(`unexpected ${method} ${JSON.stringify(params)}`)
     })
-    const rpc = { generation: 'own', request, subscribeRequests: () => () => {}, close: async () => {} } as unknown as CodexAppServerRpc
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
     const backend = await startHeadlessCodexBackend({
-      codexExecutable: '/codex', codexHome: '/login', home: '/user', onRequest: () => ({}),
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
       startServer: async () => rpc,
     })
-    expect(await backend.models('list', {})).toMatchObject({ providers: [{
-      providerId: 'openai', defaultModelId: 'available', models: [{ id: 'available' }],
-    }] })
+    expect(await backend.models('list', {})).toMatchObject({
+      providers: [{
+        providerId: 'openai',
+        defaultModelId: 'available',
+        models: [{ id: 'available' }],
+      }],
+    })
     expect(await backend.models('select', { threadId: 'thread-1', providerId: 'other', model: 'available' }))
       .toMatchObject({ status: 'rejected' })
     expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'missing' }))
       .toMatchObject({ status: 'rejected' })
-    expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'available' }, async () => false))
+    expect(
+      await backend.models(
+        'select',
+        { threadId: 'thread-1', providerId: 'openai', model: 'available' },
+        async () => false,
+      ),
+    )
       .toMatchObject({ status: 'rejected', reason: 'selection-changed' })
     expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
     expect(await backend.models('select', { threadId: 'thread-1', providerId: 'openai', model: 'available' }))
       .toMatchObject({ status: 'selected' })
     expect(request).toHaveBeenCalledWith('thread/resume', {
-      threadId: 'thread-1', modelProvider: 'openai', model: 'available',
+      threadId: 'thread-1',
+      modelProvider: 'openai',
+      model: 'available',
     })
     await backend.close()
   })
   it('rejects busy targets and reports unconfirmed native selections', async () => {
     let busy = true
     const request = vi.fn(async (method: string) => {
-      if (method === 'model/list') return { data: [
-        { id: 'visible-id', model: 'visible', hidden: false, isDefault: true },
-        { id: 'hidden-id', model: 'hidden', hidden: true, isDefault: false },
-      ] }
+      if (method === 'model/list') {
+        return {
+          data: [
+            { id: 'visible-id', model: 'visible', hidden: false, isDefault: true },
+            { id: 'hidden-id', model: 'hidden', hidden: true, isDefault: false },
+          ],
+        }
+      }
       if (method === 'thread/read') return { thread: { id: 'thread-1', status: { type: busy ? 'active' : 'idle' } } }
       if (method === 'thread/resume') return { thread: { id: 'thread-1' }, modelProvider: 'openai', model: 'different' }
       throw new Error('unexpected request')
     })
-    const rpc = { generation: 'own', request, subscribeRequests: () => () => {}, close: async () => {} } as unknown as CodexAppServerRpc
+    const rpc = {
+      generation: 'own',
+      request,
+      subscribeRequests: () => () => {},
+      close: async () => {},
+    } as unknown as CodexAppServerRpc
     const backend = await startHeadlessCodexBackend({
-      codexExecutable: '/codex', codexHome: '/login', home: '/user', onRequest: () => ({}),
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
       startServer: async () => rpc,
     })
-    expect(await backend.models('list', {})).toMatchObject({ providers: [{
-      defaultModelId: 'visible', models: [{ id: 'visible' }],
-    }] })
+    expect(await backend.models('list', {})).toMatchObject({
+      providers: [{
+        defaultModelId: 'visible',
+        models: [{ id: 'visible' }],
+      }],
+    })
     const selection = { threadId: 'thread-1', providerId: 'openai', model: 'visible' }
     expect(await backend.models('select', selection)).toMatchObject({ status: 'rejected', reason: 'thread-not-idle' })
     expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
     busy = false
     expect(await backend.models('select', selection)).toMatchObject({
-      status: 'reconciliation-required', reason: 'native-selection-unconfirmed',
+      status: 'reconciliation-required',
+      reason: 'native-selection-unconfirmed',
     })
     await backend.close()
   })
