@@ -119,7 +119,7 @@ jobs:
   native-helpers:
     if: github.event_name == 'push' || needs.scope.outputs.full == 'true' || needs.scope.outputs.package_checks == 'true' || needs.scope.outputs.skill_changed == 'true'
     needs: scope
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
