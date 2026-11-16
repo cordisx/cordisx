@@ -4,8 +4,15 @@ import type { ChannelConversationPolicyV2 } from '@cordisx/protocol/channel-conv
 import { createRoot } from 'react-dom/client'
 import { dialogCenterForDocument } from './dialogs/host.js'
 import { SchemaForm } from './host-ui/SchemaForm.js'
+import type { ChannelSettingsFormSectionV1 } from '@cordisx/protocol/channel-manager/v11'
+import { channelPolicySectionFields } from './channel-policy-form-model.js'
 
-export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflowFields = false): SchemaFormSourceV1 {
+export function channelPolicyFormSchema(
+  zh: boolean,
+  replyFields = true,
+  workflowFields = false,
+  section?: Exclude<ChannelSettingsFormSectionV1, 'new-chats'>,
+): SchemaFormSourceV1 {
   const label = (en: string, cn: string) => ({ label: zh ? cn : en })
   const text = (en: string, cn: string) => Schema.string().extra('extra', label(en, cn))
   const scope = () => ({
@@ -22,7 +29,7 @@ export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflo
       Schema.const('reply').extra('extra', label('Quote the source message', '引用原消息回复')),
       Schema.const('thread').extra('extra', label('Reply in a topic', '在话题中回复')),
       Schema.const('none').extra('extra', label('Do not deliver', '不发送')),
-    ])
+    ]).role('radio')
   const result = Schema.object({
     enabled: Schema.boolean().role('switch').extra(
       'extra',
@@ -54,20 +61,22 @@ export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflo
       : {}),
     ...(workflowFields
       ? {
-        sidebarGroup: Schema.union([
-          Schema.const(null).extra('extra', label('Do not group automatically', '不自动分组')),
-          Schema.string().extra('extra', label('Group name', '分组名称')),
-        ]).description(
+        sidebarGrouping: Schema.union([
+          Schema.const('inherit').extra('extra', label('External connections', '外部连接')),
+          Schema.const('custom').extra('extra', label('Custom group', '自定义分组')),
+          Schema.const('none').extra('extra', label('Do not group automatically', '不自动分组')),
+        ]).role('radio').extra('extra', label('Chat sidebar grouping', '对话侧栏分组')),
+        sidebarGroup: Schema.string().description(
           zh
             ? '新建的频道对话分组；留空使用外部连接。'
             : 'Group for new Channel chats; leave empty for External connections.',
-        ).extra('extra', label('Chat sidebar group', '对话侧栏分组')),
+        ).extra('extra', label('Group name', '分组名称')),
       }
       : {}),
     groupReception: Schema.union([
       Schema.const('mentions').extra('extra', label('Mentions only', '仅接收 @ 机器人')),
       Schema.const('all').extra('extra', label('Receive all; reply only when addressed', '接收全部；仅定向消息回复')),
-    ])
+    ]).role('radio')
       .extra('extra', label('Group reception', '群消息接收模式')),
     groups: Schema.array(
       Schema.object({
@@ -81,8 +90,15 @@ export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflo
       Schema.object({
         id: text('Rule ID', '规则 ID').required(),
         ...scope(),
-        action: Schema.union(['dispatch', 'command', 'send']).required().extra('extra', label('Action', '操作')),
-        effect: Schema.union(['allow', 'deny']).required().extra('extra', label('Allow / deny', '允许／拒绝')),
+        action: Schema.union([
+          Schema.const('dispatch').extra('extra', label('Deliver to Codex', '交给 Codex')),
+          Schema.const('command').extra('extra', label('Run a command', '执行指令')),
+          Schema.const('send').extra('extra', label('Send messages', '发送消息')),
+        ]).role('radio').required().extra('extra', label('Action', '操作')),
+        effect: Schema.union([
+          Schema.const('allow').extra('extra', label('Allow', '允许')),
+          Schema.const('deny').extra('extra', label('Deny', '拒绝')),
+        ]).role('radio').required().extra('extra', label('Allow / deny', '允许／拒绝')),
         kinds: Schema.array(Schema.union(['direct', 'group'])).extra('extra', label('Conversation types', '会话类型')),
         userIds: userIds(),
         userGroupIds: Schema.array(Schema.string()).extra('extra', label('User group IDs', '用户组 ID')),
@@ -96,13 +112,28 @@ export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflo
       }),
     ).extra('extra', label('Wake prefixes by scope', '分范围唤醒前缀')),
   })
-  const validation = result['~standard']
+  const selected = section === undefined
+    ? result
+    : Schema.object(Object.fromEntries(
+      Object.entries(result.dict!).filter(([key]) =>
+        (channelPolicySectionFields[section] as readonly string[]).includes(key)
+      ),
+    ))
+  const validation = selected['~standard']
   return {
-    ...result,
+    ...selected,
     '~standard': {
       version: 1,
       vendor: 'schemastery',
       validate: input => {
+        const draft = input as Record<string, unknown>
+        if (
+          workflowFields && draft && (section === undefined || section === 'organization')
+          && draft.sidebarGrouping === 'custom'
+          && (typeof draft.sidebarGroup !== 'string' || !draft.sidebarGroup.trim())
+        ) {
+          return { issues: [{ path: ['sidebarGroup'], message: zh ? '请填写分组名称' : 'Enter a group name' }] }
+        }
         const checked = validation.validate(input)
         if (checked instanceof Promise) throw new Error('ASYNC_SCHEMA_UNSUPPORTED')
         return checked.issues
@@ -120,6 +151,7 @@ export function channelPolicyFormSchema(zh: boolean, replyFields = true, workflo
 
 /** Empty optional controls express an absent predicate; required prefix/user fields stay validated. */
 export function normalizeChannelPolicyForm(value: Record<string, unknown>): Record<string, unknown> {
+  const { sidebarGrouping, sidebarGroup, ...policy } = value
   const scope = (input: unknown): Record<string, unknown> => {
     const row = { ...(input as Record<string, unknown>) }
     for (const key of ['adapterId', 'accountId', 'tenantId', 'conversationId']) {
@@ -128,8 +160,16 @@ export function normalizeChannelPolicyForm(value: Record<string, unknown>): Reco
     return row
   }
   return {
-    ...value,
-    ...(value.sidebarGroup === '' ? { sidebarGroup: undefined } : {}),
+    ...policy,
+    ...(sidebarGrouping === 'none'
+      ? { sidebarGroup: null }
+      : sidebarGrouping === 'inherit'
+      ? {}
+      : sidebarGrouping === 'custom'
+      ? { sidebarGroup: typeof sidebarGroup === 'string' ? sidebarGroup.trim() : sidebarGroup }
+      : sidebarGroup === undefined || sidebarGroup === ''
+      ? {}
+      : { sidebarGroup }),
     groups: (value.groups as unknown[] ?? []).map(input => {
       const row = scope(input)
       return { ...row, members: (row.members as unknown[] ?? []).map(scope) }

@@ -1,4 +1,9 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
+import {
+  availableChannelSettingsDestination,
+  channelSettingsDestinations,
+  subscribeChannelSettingsDestinations,
+} from '../../channel-settings-destination.js'
 import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
@@ -78,6 +83,11 @@ function groupLabel(locale: string, group: ManagerNavigationVisualGroup): string
 }
 
 export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
+  const settingsDestinations = useSyncExternalStore(
+    listener => subscribeChannelSettingsDestinations(document, listener),
+    () => channelSettingsDestinations(document),
+  )
+  const settingsDestination = availableChannelSettingsDestination(snapshot, settingsDestinations)
   const navigation = useRef<HTMLElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -104,7 +114,8 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
     return coreItems.length === 0 && contributedItems.length === 0 ? [] : [{ group, coreItems, contributedItems }]
   })
   const showNotifications = matches(locale.startsWith('zh') ? '通知规则' : 'Notification rules')
-  const showExecution = matches(locale.startsWith('zh') ? '新建对话默认配置' : 'New chat defaults')
+  const showExecution = settingsDestination === undefined
+    && matches(locale.startsWith('zh') ? '新建对话默认配置' : 'New chat defaults')
   const showAbout = matches(managerCopy(locale, 'manager.nav.about'))
   const hasResults = groups.length > 0 || showNotifications || showExecution || showAbout
   return (
@@ -216,7 +227,7 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
           {...(router.route.kind === 'chat-execution' ? { 'aria-current': 'page' as const } : {})}
           onClick={() => select({ kind: 'chat-execution' })}
         >
-          <HostIcon token="configuration" />
+          <HostIcon token="agent.turn-control" />
           <span>{locale.startsWith('zh') ? '新建对话默认配置' : 'New chat defaults'}</span>
         </button>
       )}

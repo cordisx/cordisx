@@ -11,12 +11,23 @@ import {
 import { configureChannelPolicyPrompt } from './channel-policy-prompt.js'
 import type { ChannelManagerFormOptionsV1, ChannelManagerFormOutcomeV1 } from '@cordisx/protocol/channel-manager/v7'
 import { ChannelPolicyForm } from './channel-policy-form.js'
+import {
+  channelPolicyFormValue,
+  channelPolicySectionChanged,
+  channelPolicySectionFields,
+  mergeChannelPolicySection,
+} from './channel-policy-form-model.js'
+import type { ChannelSettingsDraft } from './channel-settings-draft.js'
+import type { ChannelSettingsFormSectionV1 } from '@cordisx/protocol/channel-manager/v11'
 import { mountChannelHostForm } from './channel-form-mount.js'
 import { createElement } from 'react'
 
 /** Policy writes always originate from the Host form, never a plugin-owned draft or event. */
 export class ChannelPolicyWorkflow {
   private busy = false
+  get document(): Document {
+    return this.input.document
+  }
   constructor(
     private readonly input: {
       readonly document: Document
@@ -107,6 +118,10 @@ export class ChannelPolicyWorkflow {
     callerLive: () => boolean,
     authorizeWrite: () => Promise<boolean>,
     workflowFields = false,
+    settings?: {
+      readonly draft: ChannelSettingsDraft
+      readonly section: Exclude<ChannelSettingsFormSectionV1, 'new-chats'>
+    },
   ) {
     const readback = await this.readWorkflow(options.signal)
     let revision = readback.revision
@@ -121,6 +136,8 @@ export class ChannelPolicyWorkflow {
         createElement(ChannelPolicyForm, {
           policy: workflowFields ? readback.policy : channelConversationPolicyV2(readback.policy),
           workflowFields,
+          revision: readback.revision,
+          ...(settings === undefined ? {} : { draft: settings.draft, section: settings.section }),
           locale: this.input.document.documentElement.lang || 'en',
           signal,
           refresh: async () => {
@@ -128,12 +145,15 @@ export class ChannelPolicyWorkflow {
             const current = await this.readWorkflow(signal)
             if (!live() || signal.aborted) throw new Error('STALE_GENERATION')
             revision = current.revision
-            return workflowFields ? current.policy : channelConversationPolicyV2(current.policy)
+            return settings === undefined
+              ? workflowFields ? current.policy : channelConversationPolicyV2(current.policy)
+              : { policy: current.policy, revision: current.revision }
           },
           onResult: result => {
             if (live() && !signal.aborted) options.onResult?.(result)
           },
           save: async policy => {
+            const submittedDraft = settings?.draft.snapshot()
             if (!live() || signal.aborted) return { status: 'unavailable', code: 'STALE_GENERATION' }
             if (!await authorizeWrite()) return { status: 'rejected', code: 'PERMISSION_DENIED' }
             if (!live() || signal.aborted) return { status: 'unavailable', code: 'STALE_GENERATION' }
@@ -141,12 +161,38 @@ export class ChannelPolicyWorkflow {
             this.busy = true
             try {
               const latest = await this.readWorkflow(signal)
-              const submitted = workflowFields
+              let submitted: unknown = workflowFields
                 ? policy
                 : mergeLegacyChannelPolicy(latest.policy, parseChannelConversationPolicy(policy))
-              const result = await this.input.run('policy-set', { policy: submitted, expectedRevision: revision })
+              if (settings) {
+                const snapshot = submittedDraft!
+                if (
+                  latest.revision !== snapshot.revision
+                  && channelPolicySectionChanged(latest.policy, snapshot.baseline, settings.section)
+                ) {
+                  return { status: 'conflict', code: 'REVISION_CONFLICT' }
+                }
+                submitted = mergeChannelPolicySection(
+                  latest.policy,
+                  policy as Record<string, unknown>,
+                  settings.section,
+                )
+              }
+              if (!live() || signal.aborted) return { status: 'unavailable', code: 'STALE_GENERATION' }
+              const result = await this.input.run('policy-set', {
+                policy: submitted,
+                expectedRevision: settings ? latest.revision : revision,
+              })
               if (result.status === 'applied') {
                 revision = result.conversationPolicy?.revision ?? revision + 1
+                if (settings) {
+                  settings.draft.commitFields(
+                    channelPolicyFormValue(parseChannelConversationPolicy(submitted), true),
+                    revision,
+                    channelPolicySectionFields[settings.section],
+                    submittedDraft?.value,
+                  )
+                }
                 return { status: 'applied', code: 'APPLIED' }
               }
               return {

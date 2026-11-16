@@ -71,6 +71,7 @@ import Star from 'reicon/icons/Star'
 import Tag from 'reicon/icons/Tag'
 import Trash2 from 'reicon/icons/Trash2'
 import UserSearch from 'reicon/icons/UserSearch'
+import Undo from 'reicon/icons/Undo'
 import Verified from 'reicon/icons/Verified'
 import XCircle from 'reicon/icons/XCircle'
 import X from 'reicon/icons/X'
@@ -104,7 +105,7 @@ const REICON_GLYPHS = Object.freeze(
     'action.open': Folder,
     'action.pause': Pause,
     'action.refresh': Refresh,
-    'action.reset': Refresh,
+    'action.reset': Undo,
     'action.resume': Play,
     'action.save': Floppy,
     'action.search': Search,

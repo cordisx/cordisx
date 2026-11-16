@@ -27,6 +27,9 @@ import type {
 import type { ChannelManagerV8 } from '@cordisx/protocol/channel-manager/v8'
 import type { ChannelManagerBindingPageV2, ChannelManagerV9 } from '@cordisx/protocol/channel-manager/v9'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
+import type { ChannelManagerV11, ChannelSettingsFormSectionV1 } from '@cordisx/protocol/channel-manager/v11'
+import { ChannelSettingsWorkflow } from './channel-settings-workflow.js'
+import { registerChannelSettingsDestination } from './channel-settings-destination.js'
 import { ChannelConversationWorkflow } from './channel-conversation-workflow.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import {
@@ -125,7 +128,7 @@ export interface ChannelManagerServiceInput {
 }
 
 /** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
-export class CordisXChannelManagerService extends Service implements ChannelManagerV10 {
+export class CordisXChannelManagerService extends Service implements ChannelManagerV11 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
@@ -147,6 +150,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       refreshSequence: 0,
       lifetime: new AbortController(),
       disposed: false,
+      settings: new ChannelSettingsWorkflow(),
       isCurrent: wrapped.isCurrent ?? (() => true),
     })
     const state = stateFor(this)
@@ -214,6 +218,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       state.lifetime.abort()
       state.credentials?.dispose()
       state.conversations?.dispose()
+      state.settings.clear()
       state.refreshSequence += 1
       delete state.runtimeProjection
       state.listeners.clear()
@@ -295,6 +300,62 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   forOwnConversationService(): ChannelManagerV10 | undefined {
     return this.forOwnService() as ChannelManagerV10 | undefined
+  }
+  forOwnSettingsService(): ChannelManagerV11 | undefined {
+    return this.forOwnService() as ChannelManagerV11 | undefined
+  }
+
+  async mountSettingsForm(
+    section: ChannelSettingsFormSectionV1,
+    target: HTMLElement,
+    options: ChannelManagerFormOptionsV1,
+  ) {
+    const owner = ownerFromContext(this.ctx), state = stateFor(this)
+    if (
+      !['new-chats', 'messages', 'permissions', 'organization'].includes(section)
+      || !managedConsoleSeatFor(target, owner) || options.signal.aborted
+      || !await this.authorizeChannel('channel.bindings.read')
+    ) return { status: 'unavailable' as const, code: 'HOST_FORM_UNAVAILABLE' }
+    const caller = this.operationOwner()
+    return state.settings.mount({
+      ctx: this.ctx,
+      caller,
+      pageOwner: owner,
+      section,
+      target,
+      options,
+      ...(state.policy === undefined ? {} : { policy: state.policy }),
+      ...(state.execution === undefined ? {} : { execution: state.execution }),
+      live: () => this.operationLive() && this.ownedReadAllowed(),
+      authorizeWrite: () => this.authorizeChannel('channel.bindings.write'),
+    })
+  }
+
+  registerChatCreationSettingsDestination(reference: { readonly id: string }): { dispose(): void } | undefined {
+    const state = stateFor(this),
+      owner = ownerFromContext(this.ctx),
+      source = sourceFromContext(this.ctx),
+      facade = serviceOwnerFor(this)
+    if (
+      !reference || typeof reference.id !== 'string' || Object.keys(reference).some(key => key !== 'id')
+      || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(reference.id) || !facade || !source || !this.operationLive()
+      || !this.ownedReadAllowed()
+    ) return undefined
+    const document = state.policy?.document
+    if (!document) return undefined
+    const routeService = this.ctx.routes as {
+      registry?: { managerContentRoute(owner: string, reference: { id: string }): { state: string } }
+    } | undefined
+    const remove = registerChannelSettingsDestination(document, {
+      owner,
+      source,
+      routeId: reference.id,
+      live: () =>
+        this.operationLive() && this.ownedReadAllowed()
+        && routeService?.registry?.managerContentRoute(owner, reference).state === 'available',
+    })
+    const dispose = this.ctx.effect(() => remove, 'channelManager own settings destination')
+    return { dispose }
   }
   conversationPage(request: Parameters<ChannelManagerV10['conversationPage']>[0], signal: AbortSignal) {
     return this.conversationWorkflow().page(request, signal)

@@ -38,6 +38,16 @@ its image work; page disposal retires the consumer's request and refresh timer.
 
 ## Normative v1 boundary
 
+The [Manager v11 settings surface](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v11-settings.md)
+mounts the shared Host forms for new-chat defaults, messages, permissions and
+grouping. It uses the existing profile-defaults and Channel-policy stores,
+with no new configuration file or copied account state. Source/generation-owned
+drafts survive sibling tab navigation. Section saves merge into the latest
+complete policy under a revision fence; same-section conflicts require refresh.
+Undo affects only the current section. The registered own destination hides
+the duplicate Host shortcut only while its actual route, page, service owner
+and render permission remain available, and retirement restores the fallback.
+
 The explicit [Manager v10 conversation contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v10-conversations.md)
 adds read-only remote-conversation summaries and paged local transport activity.
 The launcher combines its existing transport store, consumer bindings and the

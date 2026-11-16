@@ -26,6 +26,8 @@ import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps, type ArrayEditorProps } from './ArrayEditor.js'
 import { HostFormPage, HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
+import { HostIcon } from './HostIcon.js'
+import type { SemanticIconKey } from '../../icon-theme-contracts.js'
 import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
 
 export { hostFormValidationIssueText } from './HostFormValidation.js'
@@ -455,7 +457,7 @@ function ConfigControl({ model, pluginId, field, blocked, value, resolved, onCha
 }
 
 type FieldLabelProps =
-  & { readonly field: CordisXConfigFieldSnapshot; readonly labelId: string }
+  & { readonly field: CordisXConfigFieldSnapshot; readonly labelId: string; readonly iconOverride?: SemanticIconKey }
   & (
     | { readonly mode: 'static' }
     | {
@@ -473,18 +475,24 @@ function FieldLabel(props: FieldLabelProps) {
   if (props.mode === 'static') {
     return (
       <span className="cxf-field-label">
-        {field.icon === undefined ? null : (
-          <span className="cxf-field-icon" aria-hidden="true">
-            <HostSurfaceIcon token={field.icon} />
-          </span>
-        )}
+        {field.icon === undefined && props.iconOverride === undefined
+          ? null
+          : (
+            <span className="cxf-field-icon" aria-hidden="true">
+              {props.iconOverride === undefined
+                ? <HostSurfaceIcon token={field.icon!} />
+                : <HostIcon token={props.iconOverride} />}
+            </span>
+          )}
         <span id={props.labelId} className="cxf-field-label-text cxf-label">
           {field.label ?? humanizeFieldName(field.path.at(-1))}
         </span>
       </span>
     )
   }
-  const icon = <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
+  const icon = props.iconOverride === undefined
+    ? <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
+    : <HostIcon token={props.iconOverride} />
   const { changed, locale, onUseDefault, onRollback, onCopyPath } = props
   const options: DropdownOption[] = [
     {
@@ -527,7 +535,7 @@ function FieldLabel(props: FieldLabelProps) {
           aria-label={managerCopy(locale, 'form.field-actions')}
           aria-haspopup="menu"
           data-host-form-action="field-actions"
-          data-host-form-action-icon={field.icon ?? 'host:settings'}
+          data-host-form-action-icon={props.iconOverride ?? field.icon ?? 'host:settings'}
           icon={icon}
         />
       </Dropdown>
@@ -540,6 +548,7 @@ function FieldLabel(props: FieldLabelProps) {
 
 interface HostFieldRowBaseProps {
   readonly field: CordisXConfigFieldSnapshot
+  readonly iconOverride?: SemanticIconKey
   readonly value: unknown
   readonly changed: boolean
   readonly locale: string
@@ -629,11 +638,19 @@ export function HostFieldRow(props: HostFieldRowProps) {
     >
       <div className="cxf-label-row" id={labelId}>
         {props.fieldActions === 'static'
-          ? <FieldLabel field={controlField} labelId={`${labelId}-text`} mode="static" />
+          ? (
+            <FieldLabel
+              field={controlField}
+              labelId={`${labelId}-text`}
+              mode="static"
+              {...(props.iconOverride === undefined ? {} : { iconOverride: props.iconOverride })}
+            />
+          )
           : (
             <FieldLabel
               field={controlField}
               labelId={`${labelId}-text`}
+              {...(props.iconOverride === undefined ? {} : { iconOverride: props.iconOverride })}
               mode="menu"
               changed={changed}
               locale={locale}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import Schema from '@deepseek-ai/schemastery'
 import { Button } from 'tdesign-react'
 import type { ChatExecutionReadbackV1, ChatExecutionSettingsV1 } from '@cordisx/protocol/chat-execution-settings/v1'
@@ -7,6 +7,15 @@ import type { SchemaFormSourceV1 } from '@cordisx/protocol/schema-form/v1'
 import { parseChatExecutionSettings } from '../chat-execution-settings.js'
 import { HostSchemaFormPage } from './host-ui/SchemaForm.js'
 import { HostIcon } from './host-ui/HostIcon.js'
+import { ChannelSettingsDraft } from './channel-settings-draft.js'
+
+const fieldIcons = {
+  execution: 'content.key',
+  approval: 'control.check',
+  workMode: 'agent.turn-control',
+  effort: 'agent.reasoning',
+  network: 'navigation.routes',
+} as const
 
 function schema(zh: boolean): SchemaFormSourceV1 {
   const choice = (value: string, en: string, cn: string) => Schema.const(value).extra('extra', { label: zh ? cn : en })
@@ -16,7 +25,7 @@ function schema(zh: boolean): SchemaFormSourceV1 {
       choice('read-only', 'Read only', '只读'),
       choice('workspace-write', 'Workspace write', '工作区可写'),
       choice('full-access', 'Full access', '完整访问'),
-    ]).extra('extra', { label: zh ? '执行权限' : 'Execution permissions' }),
+    ]).role('radio').extra('extra', { label: zh ? '执行权限' : 'Execution permissions' }),
     approval: Schema.union([
       choice('inherit', 'Inherit', '继承'),
       choice('untrusted', 'Ask for untrusted commands', '不可信命令时询问'),
@@ -26,12 +35,12 @@ function schema(zh: boolean): SchemaFormSourceV1 {
       zh
         ? '审批策略与执行范围分别设置；不询问不会扩大执行权限。'
         : 'Approval is separate from execution scope. Never ask does not grant full access.',
-    ).extra('extra', { label: zh ? '审批策略' : 'Approval policy' }),
+    ).role('radio').extra('extra', { label: zh ? '审批策略' : 'Approval policy' }),
     workMode: Schema.union([
       choice('inherit', 'Inherit', '继承'),
       choice('default', 'Execute', '执行'),
       choice('plan', 'Plan', '规划'),
-    ]).extra('extra', { label: zh ? '工作模式' : 'Work mode' }),
+    ]).role('radio').extra('extra', { label: zh ? '工作模式' : 'Work mode' }),
     effort: Schema.string().pattern(/^[a-z][a-z0-9-]{0,31}$/u).description(
       zh
         ? 'inherit 或当前模型支持的强度，如 low、medium、high、max。'
@@ -41,7 +50,7 @@ function schema(zh: boolean): SchemaFormSourceV1 {
       choice('inherit', 'Inherit', '继承'),
       choice('allow', 'Allow', '允许'),
       choice('deny', 'Deny', '禁止'),
-    ]).extra('extra', { label: zh ? '网络访问' : 'Network access' }),
+    ]).role('radio').extra('extra', { label: zh ? '网络访问' : 'Network access' }),
   })
   const validation = result['~standard']
   return {
@@ -83,6 +92,7 @@ const toSettings = (value: Record<string, unknown>) =>
 /** Shared Host form for ordinary profile defaults and individual native chats. */
 export function ChatExecutionForm(props: {
   readonly initial: ChatExecutionReadbackV1
+  readonly draft?: ChannelSettingsDraft
   readonly locale: string
   readonly signal: AbortSignal
   readonly read: () => Promise<ChatExecutionReadbackV1>
@@ -90,13 +100,13 @@ export function ChatExecutionForm(props: {
   readonly onResult: (result: ChannelManagerFormOutcomeV1) => void
 }) {
   const zh = props.locale.startsWith('zh')
+  const localDraft = useMemo(() => new ChannelSettingsDraft(), [])
+  const draft = props.draft ?? localDraft
+  draft.initialize(formValue(props.initial.settings), props.initial.revision)
+  const { value, baseline, revision, conflict, formRevision } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [readback, setReadback] = useState(props.initial)
-  const [value, setValue] = useState(() => formValue(props.initial.settings))
-  const [baseline, setBaseline] = useState(value)
   const [valid, setValid] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [conflict, setConflict] = useState(false)
-  const [formRevision, setFormRevision] = useState(0)
   const lock = useRef(false)
   const source = useMemo(() => schema(zh), [zh])
   const dirty = JSON.stringify(value) !== JSON.stringify(baseline)
@@ -105,20 +115,18 @@ export function ChatExecutionForm(props: {
     lock.current = true
     setBusy(true)
     try {
-      const latest = await props.save(toSettings(value), readback.revision)
+      const latest = await props.save(toSettings(value), revision)
       if (props.signal.aborted) return
       const next = formValue(latest.settings)
       setReadback(latest)
-      setValue(next)
-      setBaseline(next)
-      setFormRevision(n => n + 1)
+      draft.commit(next, latest.revision)
       props.onResult({ status: 'applied', code: 'SAVED' })
     } catch (error) {
       if (props.signal.aborted) return
       const code = error instanceof Error && /^[A-Z_]+$/u.test(error.message)
         ? error.message
         : 'EXECUTION_SETTINGS_UNAVAILABLE'
-      if (code === 'REVISION_CONFLICT') setConflict(true)
+      if (code === 'REVISION_CONFLICT') draft.markConflict()
       props.onResult({ status: code === 'REVISION_CONFLICT' ? 'conflict' : 'rejected', code })
     } finally {
       lock.current = false
@@ -132,14 +140,8 @@ export function ChatExecutionForm(props: {
     try {
       const latest = await props.read()
       if (props.signal.aborted) return
-      const next = formValue(latest.settings), retained = { ...next }
-      for (const field of Object.keys(value)) {
-        if (JSON.stringify(value[field]) !== JSON.stringify(baseline[field])) retained[field] = value[field]
-      }
       setReadback(latest)
-      setValue(retained)
-      setBaseline(next)
-      setConflict(false)
+      draft.refresh(formValue(latest.settings), latest.revision)
     } catch {
       if (!props.signal.aborted) props.onResult({ status: 'unavailable', code: 'EXECUTION_SETTINGS_UNAVAILABLE' })
     } finally {
@@ -160,11 +162,13 @@ export function ChatExecutionForm(props: {
         form={{
           identity: `chat-execution-${formRevision}`,
           schema: source,
+          baseline,
+          fieldIcons,
           value,
           locale: props.locale,
           disabled: busy,
           onChange: next => {
-            setValue(next.value)
+            draft.change(next.value)
             setValid(next.valid)
           },
           onValidationChange: next => setValid(next.valid),
@@ -188,7 +192,7 @@ export function ChatExecutionForm(props: {
               <Button
                 type="button"
                 variant="outline"
-                icon={<HostIcon token="refresh" />}
+                icon={<HostIcon token="action.refresh" />}
                 disabled={busy}
                 onClick={() => void refresh()}
               >
@@ -197,11 +201,10 @@ export function ChatExecutionForm(props: {
               <Button
                 type="button"
                 variant="outline"
-                icon={<HostIcon token="reset" />}
+                icon={<HostIcon token="action.reset" />}
                 disabled={busy || !dirty}
                 onClick={() => {
-                  setValue(structuredClone(baseline))
-                  setFormRevision(n => n + 1)
+                  draft.reset()
                 }}
               >
                 {zh ? '撤销修改' : 'Undo changes'}
@@ -209,7 +212,7 @@ export function ChatExecutionForm(props: {
               <Button
                 type="submit"
                 theme="primary"
-                icon={<HostIcon token="save" />}
+                icon={<HostIcon token="action.save" />}
                 loading={busy}
                 disabled={busy || !valid || !dirty || conflict}
               >
