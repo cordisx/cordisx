@@ -20,6 +20,9 @@ export interface ChannelConversationAccess {
   users?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<ChannelCommandUserReadback>
   replyCapabilities?(event: import('@cordisx/channel-runtime').ChannelEventRef): ChannelReplyCapabilities
   name?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<string | undefined>
+  conversationIdentity?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+  ): Promise<import('./channel-conversation-directory.js').ChannelConversationIdentity>
   sendCard?(event: import('@cordisx/channel-runtime').ChannelEventRef, card: object): Promise<string>
   updateCard?(event: import('@cordisx/channel-runtime').ChannelEventRef, messageId: string, card: object): Promise<void>
   drain(ref: ChannelTenantRef): Promise<void>

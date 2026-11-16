@@ -7,6 +7,7 @@ import type {
   ChannelCommandUserReadback,
 } from './channel-command-users.js'
 import type { ChannelReplyCapabilities } from './channel-reply-routing.js'
+import { ChannelConversationDirectory } from './channel-conversation-directory.js'
 import {
   feishuDirectoryFailureCode,
   type FeishuFailureDiagnostic,
@@ -27,11 +28,14 @@ const valid = (value: string | undefined): value is string =>
 
 /** Directory reads use the same SDK that owns the live connection. No second authentication or transport. */
 export class ChannelLiveDirectory {
+  private readonly identities = new ChannelConversationDirectory()
   private readonly channels = new Map<string, FeishuSdkChannel>()
   private readonly observed = new Map<string, Map<string, { id: string; name: string; kind: 'direct' | 'group' }>>()
   private readonly observedUsers = new Map<string, Map<string, ChannelCommandUser>>()
+  private readonly observedEvents = new Map<string, ChannelEventRef>()
   observe(input: ChannelUserInput, addressing?: ChannelCommandAddressing): void {
     const event = input.source.event
+    this.observedEvents.set(conversationKey(event), event)
     if (event.kind !== 'direct' && event.kind !== 'group') return
     const rows = this.observed.get(key(event)) ?? new Map()
     rows.set(event.conversationId, {
@@ -53,6 +57,7 @@ export class ChannelLiveDirectory {
     this.observedUsers.set(conversationKey(event), users)
   }
   connected(ref: ChannelTenantRef, channel: FeishuSdkChannel | undefined): void {
+    if (this.channels.get(key(ref)) !== channel) this.identities.invalidate(ref)
     if (channel) this.channels.set(key(ref), channel)
     else this.channels.delete(key(ref))
   }
@@ -86,6 +91,14 @@ export class ChannelLiveDirectory {
   }
   channel(ref: ChannelTenantRef) {
     return this.channels.get(key(ref))
+  }
+  conversationIdentity(event: ChannelEventRef) {
+    return this.identities.identity(
+      event,
+      this.channels.get(key(event)),
+      this.observed.get(key(event))?.get(event.conversationId)?.name,
+      this.observedEvents.get(conversationKey(event)) ?? event,
+    )
   }
   /** Only a connected Feishu/Lark adapter declares these supported routes; unknown adapters use main-stream replies. */
   replyCapabilities(event: ChannelEventRef): ChannelReplyCapabilities {
@@ -183,8 +196,10 @@ export class ChannelLiveDirectory {
     return partial('CHANNEL_DIRECTORY_PAGINATION_LIMIT')
   }
   clear(): void {
+    this.identities.dispose()
     this.channels.clear()
     this.observed.clear()
     this.observedUsers.clear()
+    this.observedEvents.clear()
   }
 }

@@ -65,6 +65,11 @@ export interface ChannelManagerLogsExport {
 }
 
 export interface ChannelManagerActionResult {
+  readonly conversationPage?: import('./channel-conversation-management.js').ChannelConversationManagementPage
+  readonly conversationDetail?: import('./channel-conversation-management.js').ChannelConversationManagementDetail
+  readonly conversationActivity?: import('./channel-conversation-management.js').ChannelConversationManagementActivity
+  readonly conversationBindings?: import('./channel-conversation-management.js').ChannelConversationManagementBindings
+  readonly bindingNavigation?: string
   readonly status: ChannelManagerActionStatus
   readonly generation?: string
   readonly projection?: ChannelManagerRuntimeProjection

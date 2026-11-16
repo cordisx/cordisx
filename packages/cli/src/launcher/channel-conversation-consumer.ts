@@ -162,10 +162,40 @@ export class ChannelConversationConsumer {
   async executionOperation(operation: string, args: Record<string, unknown>) {
     return chatExecutionOperation(this.extraNative?.(), operation, args)
   }
-  async bindingLabels() {
+  managementReadback() {
+    const state = this.store.snapshot()
+    return {
+      revision: state.revision,
+      bindings: Object.values(state.bindings),
+      senders: Object.values(state.inputs).flatMap(record =>
+        record.addressing?.senderName
+          ? [{ event: record.input.source.event, name: record.addressing.senderName }]
+          : []
+      ),
+      deliveries: Object.values(state.jobs).flatMap(job =>
+        job.deliveryId && job.sessionId && state.inputs[job.recordId]
+          ? [{
+            deliveryId: job.deliveryId,
+            sessionId: job.sessionId,
+            event: state.inputs[job.recordId]!.input.source.event,
+          }]
+          : []
+      ),
+    }
+  }
+  async bindingNavigation(id: string) {
+    const binding = this.bindings().find(binding => binding.id === id)
+    const native = this.extraNative?.()
+    if (!binding || !native || this.lifetime.signal.aborted || !await native.exists(binding.sessionId)) return undefined
+    if (this.lifetime.signal.aborted || this.bindings().find(item => item.id === id)?.sessionId !== binding.sessionId) {
+      return undefined
+    }
+    return binding.sessionId
+  }
+  async bindingLabels(ids?: readonly string[]) {
     const native = this.extraNative?.()
     return Promise.all(
-      this.bindings().map(async binding => {
+      this.bindings().filter(binding => ids === undefined || ids.includes(binding.id)).map(async binding => {
         const event: ChannelEventRef = { ...binding.channel, eventId: 'display' }
         const conversationName = await this.input.access()?.name?.(event).catch(() => undefined)
         return {

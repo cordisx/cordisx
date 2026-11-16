@@ -7,12 +7,15 @@ export interface SearchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElem
   readonly onChange: (value: string) => void
   readonly clearLabel?: string
   readonly embedded?: boolean
+  readonly clearable?: boolean
 }
 
 /** One Host search control for standalone fields and toolbar composition. */
 export function SearchField(
-  { className, value, onChange, clearLabel = 'Clear search', embedded, onKeyDown, ...props }: SearchFieldProps,
+  { className, value, onChange, clearLabel = 'Clear search', clearable = true, embedded, onKeyDown, ...props }:
+    SearchFieldProps,
 ) {
+  clearLabel = clearLabel.trim() || 'Clear search'
   const input = useRef<HTMLInputElement>(null)
   const editable = !props.disabled && !props.readOnly
   return (
@@ -20,6 +23,7 @@ export function SearchField(
       className={['cxh-search-field', className].filter(Boolean).join(' ')}
       data-embedded={embedded ? 'true' : undefined}
       data-disabled={props.disabled ? 'true' : undefined}
+      data-clearable={clearable ? 'true' : undefined}
       onClick={event => {
         if ((event.target as Element).closest('button,input') === null) input.current?.focus()
       }}
@@ -35,14 +39,14 @@ export function SearchField(
         onChange={event => onChange(event.currentTarget.value)}
         onKeyDown={event => {
           onKeyDown?.(event)
-          if (!event.defaultPrevented && event.key === 'Escape' && value !== '' && editable) {
+          if (clearable && !event.defaultPrevented && event.key === 'Escape' && value !== '' && editable) {
             event.preventDefault()
             event.stopPropagation()
             onChange('')
           }
         }}
       />
-      {value === '' ? null : (
+      {!clearable || value === '' ? null : (
         <button
           type="button"
           className="cxh-search-clear"

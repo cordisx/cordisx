@@ -38,6 +38,15 @@ its image work; page disposal retires the consumer's request and refresh timer.
 
 ## Normative v1 boundary
 
+The explicit [Manager v10 conversation contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v10-conversations.md)
+adds read-only remote-conversation summaries and paged local transport activity.
+The launcher combines its existing transport store, consumer bindings and the
+connected account's directory. It returns normalized avatar bytes, safe labels
+and delivery states, without credentials, image URLs or a Codex transcript.
+The own-service facade uses actual caller tracing and account/service lifetime;
+delegated activity readers need exact-conversation event permission. Opening
+an issued binding uses Host navigation and does not resume its native turn.
+
 This section supersedes the older task-routing, binding, selector, and
 notification design notes below. They are historical planning material only:
 no Channel core configuration, persistence, or runtime path may depend on

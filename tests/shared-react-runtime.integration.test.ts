@@ -100,7 +100,7 @@ describe('shared React plugin runtime', () => {
     expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
       'export const SearchField = runtime.ui.SearchField;',
     )
-    for (const name of ['Dialog', 'Disclosure', 'FieldList', 'StatusBadge']) {
+    for (const name of ['Dialog', 'Disclosure', 'FieldList', 'StatusBadge', 'IdentityVisual']) {
       expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(`export const ${name} = runtime.ui.${name};`)
     }
 

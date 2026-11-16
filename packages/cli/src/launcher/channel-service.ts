@@ -457,6 +457,7 @@ export function createLocalChannelService(input: {
             'channel.accounts.connect',
             'channel.bindings.read',
             'channel.bindings.write',
+            'channel.events.subscribe',
           ].map(name => Object.freeze({ name, scope: Object.freeze({}) }))) as HostServiceCapabilityOwner[
             'capabilities'
           ],
@@ -496,6 +497,7 @@ export function createLocalChannelService(input: {
         conversations: ref => current.directory.conversations(ref),
         users: event => current.directory.users(event),
         name: event => current.directory.name(event),
+        conversationIdentity: event => current.directory.conversationIdentity(event),
         replyCapabilities: event => current.directory.replyCapabilities(event),
         sendCard: async (event, card) => {
           const channel = current.directory.channel(event)

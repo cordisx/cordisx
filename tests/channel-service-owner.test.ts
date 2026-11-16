@@ -16,6 +16,7 @@ import type { RuntimeServiceCapabilityOwner } from '../packages/cli/src/service-
 import type { ChannelManagerV4 } from '@cordisx/protocol/channel-manager/v4'
 import type { ChannelManagerV5 } from '@cordisx/protocol/channel-manager/v5'
 import type { ChannelManagerV6 } from '@cordisx/protocol/channel-manager/v6'
+import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import { parseChannelConversationPolicy } from '../packages/cli/src/launcher/channel-conversation-policy.js'
 import * as credentialPrompt from '../packages/cli/src/renderer/channel-credential-prompt.js'
 
@@ -138,6 +139,67 @@ function unbind(manager: ChannelManagerV4) {
 }
 
 describe('Channel owned management service', () => {
+  it('reads actual own-service activity through traced callers and rejects a borrowed or retired facade', async () => {
+    const f = await fixture([{
+      ...owner,
+      capabilities: [...owner.capabilities, { name: 'channel.events.subscribe', scope: {} }],
+    }])
+    const conversation = { ...ref, conversationId: 'oc_test', kind: 'group' as const }
+    const fence = { generation: 'service-one', accountGeneration: 1, revision: 'records-one' }
+    try {
+      f.run.mockImplementation(async (action: string) =>
+        action === 'conversation-page'
+          ? {
+            status: 'applied',
+            conversationPage: {
+              ...fence,
+              offset: 0,
+              total: 1,
+              directoryComplete: true,
+              conversations: [{
+                ref: conversation,
+                name: 'Owned group',
+                bindingCount: 1,
+                activeBindingCount: 1,
+                receivedCount: 1,
+                sentCount: 0,
+              }],
+            },
+          }
+          : {
+            status: 'applied',
+            conversationActivity: {
+              ...fence,
+              conversation,
+              offset: 0,
+              total: 1,
+              entries: [{
+                conversation,
+                id: 'record',
+                direction: 'incoming',
+                state: 'received',
+                occurredAt: '2026-11-16T00:00:00Z',
+                text: 'Actual message',
+              }],
+            },
+          } as never
+      )
+      const own = (f.ctx.channelManager as ChannelManagerV10).forOwnConversationService()!
+      const connectionToken = own.snapshot().accounts[0]!.connectionToken
+      const page = await own.conversationPage({ connectionToken }, new AbortController().signal)
+      const conversationToken = page.conversations[0]!.conversationToken
+      await expect(own.conversationActivity({ conversationToken }, new AbortController().signal)).resolves
+        .toMatchObject({ entries: [{ text: 'Actual message' }] })
+      const borrowed = getTraceable(f.ctx.extend({ [CORDISX_PLUGIN_ID]: 'different' }), own)
+      await expect(borrowed.conversationActivity({ conversationToken }, new AbortController().signal)).rejects.toThrow()
+      expect(f.prompt).not.toHaveBeenCalled()
+      expect(f.store.records).toHaveLength(0)
+      f.retire()
+      await expect(own.conversationActivity({ conversationToken }, new AbortController().signal)).rejects.toThrow()
+    } finally {
+      await f.cleanup()
+    }
+  })
   it('publishes the reply-policy successor through actual owned-service tracing and preserves frozen reads', async () => {
     const f = await fixture()
     try {

@@ -509,6 +509,11 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
             broker: runtimeScope.broker()!,
             hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
             isCurrent: () => !runtimeScope.disposed,
+            navigateConversation: sessionId =>
+              runtimeScope.agentDetailNavigator().navigateAgentDetail({
+                kind: 'host',
+                ref: `codex-thread:${sessionId}`,
+              }, sessionId),
             ...(runtimeScope.metadata()!.channelManager === undefined
               ? {}
               : { projection: runtimeScope.metadata()!.channelManager }),
