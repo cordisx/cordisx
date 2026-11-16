@@ -106,6 +106,7 @@ export async function startHeadlessService(input: {
     const native = new ChannelNativeSessions({
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
+      models: backend.models,
       cwd: input.cwd,
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,

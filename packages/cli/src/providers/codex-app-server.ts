@@ -7,6 +7,8 @@ import { JsonLineRpcClient } from './json-line-rpc.js'
 export interface CodexAppServerOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly spawnProcess?: typeof spawn
+  /** Opt in only when the caller needs experimental app-server methods. */
+  readonly experimentalApi?: boolean
   /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
   readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
 }
@@ -101,10 +103,10 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     return () => this.requests.delete(listener)
   }
 
-  async initialize(): Promise<void> {
+  async initialize(experimentalApi = false): Promise<void> {
     await this.request('initialize', {
       clientInfo: { name: 'cordisx', title: 'CordisX Provider Fleet', version: '0.1.0' },
-      capabilities: { experimentalApi: false, requestAttestation: false },
+      capabilities: { experimentalApi, requestAttestation: false },
     })
     await this.rpc.notify('initialized')
   }
@@ -145,7 +147,7 @@ export async function startLocalCodexAppServer(
   }) as ChildProcessWithoutNullStreams
   const server = new SpawnedCodexAppServer(child, config.timeoutMs)
   try {
-    await server.initialize()
+    await server.initialize(options.experimentalApi === true)
     return server
   } catch (error) {
     await server.close().catch(() => undefined)
