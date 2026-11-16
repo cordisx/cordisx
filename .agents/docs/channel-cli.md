@@ -101,6 +101,12 @@ Use a CLI profile only after explicitly confirming that its application ID and
 tenant match the selected Channel account and the bot can access the chat.
 Pass both `--profile <confirmed-profile>` and `--as bot`; never silently use the
 machine's default user identity, switch profiles, refresh login or authorize.
+Device-flow user authorization is separate from bot scope: the current upstream
+CLI requests `offline_access` and stores user tokens and profile state. A
+short-lived access token does not make that authorization one-time; explicitly
+manage its lifecycle if revocation is needed. Verify the installed CLI's behavior
+before authorizing. See upstream [device flow](https://github.com/larksuite/cli/blob/main/internal/auth/device_flow.go)
+and [login](https://github.com/larksuite/cli/blob/main/cmd/auth/login.go).
 For example, after confirmation:
 
 ```text

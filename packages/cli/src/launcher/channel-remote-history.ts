@@ -1,28 +1,33 @@
 import type { ChannelTenantRef } from '@cordisx/channel-runtime'
+import type {
+  ChannelRemoteHistoryRequestV1,
+  ChannelRemoteHistoryResultV1,
+} from '@cordisx/protocol/channel-remote-history/v1'
 import type { FeishuSdkChannel } from './feishu-adapter.js'
 import { channelParticipantName } from './channel-message-context.js'
 import { feishuDirectoryFailureCode, feishuFailureDiagnostic } from './feishu-operation-error.js'
 
-export interface ChannelRemoteHistoryRequest {
-  readonly conversationId: string
-  readonly kind: 'direct' | 'group'
-  /** Decimal Unix seconds; platform boundary semantics apply. */
-  readonly startTime: string
-  readonly endTime: string
+export interface ChannelRemoteHistoryRequest
+  extends Omit<ChannelRemoteHistoryRequestV1, 'account' | 'pageSize' | 'order'>
+{
   readonly pageSize: number
-  readonly pageToken?: string
   readonly order: 'asc' | 'desc'
 }
 
 const activeReads = new WeakMap<object, number>()
 const MAX_ACTIVE_READS = 8
+type DefinedProperties<T> =
+  & { [K in keyof T as undefined extends T[K] ? never : K]: T[K] }
+  & { [K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined> }
+const defined = <T extends object>(value: T): DefinedProperties<T> =>
+  Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as DefinedProperties<T>
 
 /** Exactly one bounded platform page, using the already-connected account. */
 export async function channelRemoteHistory(
   ref: ChannelTenantRef,
   request: ChannelRemoteHistoryRequest,
   channel: FeishuSdkChannel | undefined,
-) {
+): Promise<ChannelRemoteHistoryResultV1> {
   const client = channel?.rawClient
   const list = client?.im.v1.message?.list
   if (!client || !list) return { status: 'unavailable', code: 'CHANNEL_REMOTE_HISTORY_UNAVAILABLE' } as const
@@ -80,34 +85,38 @@ export async function channelRemoteHistory(
       order: request.order,
       hasMore: result.data.has_more,
       ...(result.data.page_token ? { pageToken: result.data.page_token } : {}),
-      messages: result.data.items.map(item => ({
-        messageId: item.message_id,
-        type: item.msg_type,
-        createTime: item.create_time,
-        deleted: item.deleted,
-        updated: item.updated,
-        content: item.body?.content,
-        threadId: item.thread_id,
-        rootId: item.root_id,
-        parentId: item.parent_id,
-        sender: item.sender && {
-          id: item.sender.id,
-          idType: item.sender.id_type,
-          type: item.sender.sender_type,
-          tenantId: item.sender.tenant_key,
-          name: channelParticipantName(item.sender.sender_name)
-            ?? channelParticipantName(item.sender.sender_i18n_names?.zh_cn)
-            ?? channelParticipantName(item.sender.sender_i18n_names?.en_us)
-            ?? channelParticipantName(item.sender.sender_i18n_names?.ja_jp),
-        },
-        mentions: (item.mentions ?? []).map(mention => ({
-          key: mention.key,
-          id: mention.id,
-          idType: mention.id_type,
-          tenantId: mention.tenant_key,
-          name: channelParticipantName(mention.name),
-        })),
-      })),
+      messages: result.data.items.map(item =>
+        defined({
+          messageId: item.message_id,
+          type: item.msg_type,
+          createTime: item.create_time,
+          deleted: item.deleted,
+          updated: item.updated,
+          content: item.body?.content,
+          threadId: item.thread_id,
+          rootId: item.root_id,
+          parentId: item.parent_id,
+          sender: item.sender && defined({
+            id: item.sender.id,
+            idType: item.sender.id_type,
+            type: item.sender.sender_type,
+            tenantId: item.sender.tenant_key,
+            name: channelParticipantName(item.sender.sender_name)
+              ?? channelParticipantName(item.sender.sender_i18n_names?.zh_cn)
+              ?? channelParticipantName(item.sender.sender_i18n_names?.en_us)
+              ?? channelParticipantName(item.sender.sender_i18n_names?.ja_jp),
+          }),
+          mentions: (item.mentions ?? []).map(mention =>
+            defined({
+              key: mention.key,
+              id: mention.id,
+              idType: mention.id_type,
+              tenantId: mention.tenant_key,
+              name: channelParticipantName(mention.name),
+            })
+          ),
+        })
+      ),
     } as const
   } catch (error) {
     if (error instanceof Error && error.message === 'CHANNEL_REMOTE_HISTORY_TIMEOUT') {

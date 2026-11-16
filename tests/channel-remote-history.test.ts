@@ -78,6 +78,8 @@ describe('remote Channel history', () => {
       status: 'ok',
       messages: [{ messageId: 'om_one' }],
     })
+    const sparse = await channelRemoteHistory(account, request, sdk(async () => page()))
+    expect(sparse.status === 'ok' && sparse.messages[0]).toEqual({ messageId: 'om_one', mentions: [] })
   })
   it('bounds slow platform calls without issuing unlimited overlapping requests', async () => {
     vi.useFakeTimers()
