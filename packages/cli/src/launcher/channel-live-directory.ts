@@ -8,6 +8,7 @@ import type {
 } from './channel-command-users.js'
 import type { ChannelReplyCapabilities } from './channel-reply-routing.js'
 import { ChannelConversationDirectory } from './channel-conversation-directory.js'
+import { ChannelConversationDisplayStore, conversationDisplayName } from './channel-conversation-display-store.js'
 import {
   feishuDirectoryFailureCode,
   type FeishuFailureDiagnostic,
@@ -28,23 +29,51 @@ const valid = (value: string | undefined): value is string =>
 
 /** Directory reads use the same SDK that owns the live connection. No second authentication or transport. */
 export class ChannelLiveDirectory {
-  private readonly identities = new ChannelConversationDirectory()
+  private readonly identities: ChannelConversationDirectory
   private readonly channels = new Map<string, FeishuSdkChannel>()
+  private readonly channelVersions = new Map<string, number>()
   private readonly observed = new Map<string, Map<string, { id: string; name: string; kind: 'direct' | 'group' }>>()
   private readonly observedUsers = new Map<string, Map<string, ChannelCommandUser>>()
   private readonly observedEvents = new Map<string, ChannelEventRef>()
+  private readonly displayReads = new Map<string, {
+    channel: FeishuSdkChannel
+    until: number
+    complete: boolean
+    pending: Promise<ChannelDirectoryReadback> | undefined
+    abort: (() => void) | undefined
+  }>()
+  private disposed = false
+
+  constructor(private readonly display = new ChannelConversationDisplayStore()) {
+    this.identities = new ChannelConversationDirectory(display)
+  }
+
+  retainAccounts(refs: readonly ChannelTenantRef[]): void {
+    this.display.retainAccounts(refs)
+    const allowed = new Set(refs.map(key))
+    for (const id of this.observed.keys()) if (!allowed.has(id)) this.observed.delete(id)
+    for (const [id, read] of this.displayReads) {
+      if (!allowed.has(id)) {
+        read.abort?.()
+        this.displayReads.delete(id)
+      }
+    }
+  }
+
   observe(input: ChannelUserInput, addressing?: ChannelCommandAddressing): void {
+    if (this.disposed) return
     const event = input.source.event
     this.observedEvents.set(conversationKey(event), event)
     if (event.kind !== 'direct' && event.kind !== 'group') return
     const rows = this.observed.get(key(event)) ?? new Map()
     rows.set(event.conversationId, {
       id: event.conversationId,
-      name: rows.get(event.conversationId)?.name
+      name: this.display.get(event)?.name ?? rows.get(event.conversationId)?.name
         ?? (event.kind === 'direct' && valid(addressing?.senderName) ? addressing.senderName : event.conversationId),
       kind: event.kind,
     })
     this.observed.set(key(event), rows)
+    this.display.put(event, { name: rows.get(event.conversationId)?.name })
     const users = this.observedUsers.get(conversationKey(event)) ?? new Map<string, ChannelCommandUser>()
     if (valid(event.actor?.userId) && valid(addressing?.senderName)) {
       users.set(event.actor.userId, { id: event.actor.userId, name: addressing.senderName })
@@ -57,18 +86,33 @@ export class ChannelLiveDirectory {
     this.observedUsers.set(conversationKey(event), users)
   }
   connected(ref: ChannelTenantRef, channel: FeishuSdkChannel | undefined): void {
-    if (this.channels.get(key(ref)) !== channel) this.identities.invalidate(ref)
+    if (this.disposed) return
+    if (this.channels.get(key(ref)) !== channel) {
+      this.channelVersions.set(key(ref), (this.channelVersions.get(key(ref)) ?? 0) + 1)
+      this.identities.invalidate(ref)
+      this.displayReads.get(key(ref))?.abort?.()
+      this.displayReads.delete(key(ref))
+    }
     if (channel) this.channels.set(key(ref), channel)
     else this.channels.delete(key(ref))
   }
   async name(event: ChannelEventRef): Promise<string | undefined> {
+    const stored = this.display.get(event)?.name
+    if (stored) {
+      void this.conversationIdentity(event).catch(() => undefined)
+      return stored
+    }
     const observed = this.observed.get(key(event))?.get(event.conversationId)?.name
     if (observed && observed !== event.conversationId && !/^(?:oc_|ou_)[A-Za-z0-9_]+$/u.test(observed)) return observed
     const channel = this.channels.get(key(event))
+    const version = this.channelVersions.get(key(event))
+    const live = () =>
+      !this.disposed && this.channels.get(key(event)) === channel && this.channelVersions.get(key(event)) === version
     try {
       if (event.kind === 'group' && channel?.getChatInfo) {
         const chat = await channel.getChatInfo(event.conversationId)
-        if (valid(chat.name) && chat.name !== event.conversationId) {
+        if (live() && valid(chat.name) && chat.name !== event.conversationId) {
+          this.display.put(event, { name: chat.name })
           this.observed.get(key(event))?.set(event.conversationId, {
             id: event.conversationId,
             name: chat.name,
@@ -84,7 +128,10 @@ export class ChannelLiveDirectory {
           path: { user_id: event.actor.userId },
           params: { user_id_type: 'open_id' },
         })
-        if (response.code === 0 && valid(response.data?.user?.name)) return response.data.user.name
+        if (live() && response.code === 0 && valid(response.data?.user?.name)) {
+          this.display.put(event, { name: response.data.user.name })
+          return response.data.user.name
+        }
       }
     } catch {}
     return undefined
@@ -99,6 +146,13 @@ export class ChannelLiveDirectory {
       this.observed.get(key(event))?.get(event.conversationId)?.name,
       this.observedEvents.get(conversationKey(event)) ?? event,
     )
+  }
+  conversationDisplay(ref: import('@cordisx/channel-runtime').ChannelConversationRef) {
+    const hint = this.display.get(ref)
+    return {
+      ...(hint?.name === undefined ? {} : { name: hint.name }),
+      ...(hint?.avatar === undefined ? {} : { avatar: hint.avatar }),
+    }
   }
   /** Only a connected Feishu/Lark adapter declares these supported routes; unknown adapters use main-stream replies. */
   replyCapabilities(event: ChannelEventRef): ChannelReplyCapabilities {
@@ -160,8 +214,9 @@ export class ChannelLiveDirectory {
     }
     return partial('CHANNEL_DIRECTORY_PAGINATION_LIMIT')
   }
-  async conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback> {
+  async conversations(ref: ChannelTenantRef, signal?: AbortSignal): Promise<ChannelDirectoryReadback> {
     const client = this.channels.get(key(ref))?.rawClient
+    const version = this.channelVersions.get(key(ref))
     const result = new Map(this.observed.get(key(ref)) ?? [])
     const partial = (code: string, diagnostic?: FeishuFailureDiagnostic): ChannelDirectoryReadback => ({
       conversations: [...result.values()],
@@ -172,10 +227,12 @@ export class ChannelLiveDirectory {
     if (!client) return partial('CHANNEL_DIRECTORY_UNAVAILABLE')
     let pageToken: string | undefined
     for (let page = 0; page < 20; page += 1) {
+      if (signal?.aborted || this.disposed) return partial('CHANNEL_DIRECTORY_UNAVAILABLE')
       try {
         const response = await client.im.v1.chat.list({
           params: { page_size: 100, ...(pageToken === undefined ? {} : { page_token: pageToken }) },
         })
+        if (signal?.aborted || this.disposed) return partial('CHANNEL_DIRECTORY_UNAVAILABLE')
         if (response.code !== 0) {
           const diagnostic = feishuFailureDiagnostic('directory', response)
           return partial(feishuDirectoryFailureCode(diagnostic), diagnostic)
@@ -183,11 +240,16 @@ export class ChannelLiveDirectory {
         for (const chat of response.data?.items ?? []) {
           if (chat.chat_id) {
             const prior = result.get(chat.chat_id)
-            const name = valid(chat.name) && chat.name !== chat.chat_id ? chat.name : prior?.name ?? chat.chat_id
+            const conversation = { ...ref, conversationId: chat.chat_id, kind: 'group' as const }
+            const name = conversationDisplayName(chat.name, conversation) ?? prior?.name ?? chat.chat_id
             const row = { id: chat.chat_id, name, kind: 'group' as const }
             result.set(chat.chat_id, row)
             // Retain successful display names for a later transient directory failure.
-            if (this.channels.get(key(ref))?.rawClient === client) {
+            if (
+              !this.disposed && this.channels.get(key(ref))?.rawClient === client
+              && this.channelVersions.get(key(ref)) === version
+            ) {
+              this.display.put(conversation, { name })
               const observed = this.observed.get(key(ref)) ?? new Map()
               observed.set(chat.chat_id, row)
               this.observed.set(key(ref), observed)
@@ -204,11 +266,67 @@ export class ChannelLiveDirectory {
     }
     return partial('CHANNEL_DIRECTORY_PAGINATION_LIMIT')
   }
+
+  /** Manager display reads may be stale; CLI directory/member authority still uses fresh reads above. */
+  async displayConversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback> {
+    const account = key(ref), channel = this.channels.get(account)
+    const rows = () => {
+      const result = new Map(this.observed.get(account) ?? [])
+      for (const hint of this.display.list(ref)) {
+        if (hint.ref.kind === 'broadcast') continue
+        result.set(hint.ref.conversationId, {
+          id: hint.ref.conversationId,
+          name: hint.name ?? hint.ref.conversationId,
+          kind: hint.ref.kind,
+        })
+      }
+      return [...result.values()]
+    }
+    if (this.disposed || !channel) return { conversations: rows(), complete: false }
+    let read = this.displayReads.get(account)
+    if (read?.channel !== channel) read = undefined
+    if (!read) {
+      read = { channel, until: 0, complete: false, pending: undefined, abort: undefined }
+      this.displayReads.set(account, read)
+    }
+    if (!read.pending && read.until <= Date.now()) {
+      const current = read
+      const operation = new AbortController()
+      current.abort = () => operation.abort()
+      let timer: ReturnType<typeof setTimeout>
+      const timeout = new Promise<ChannelDirectoryReadback>(resolve => {
+        operation.signal.addEventListener('abort', () => resolve({ conversations: rows(), complete: false }), {
+          once: true,
+        })
+        timer = setTimeout(() => operation.abort(), 2_500)
+      })
+      current.pending = Promise.race([this.conversations(ref, operation.signal), timeout]).then(result => {
+        if (!this.disposed && this.channels.get(account) === channel && this.displayReads.get(account) === current) {
+          current.complete = result.complete
+          current.until = Date.now() + (result.complete ? 60_000 : 10_000)
+        }
+        return result
+      }).finally(() => {
+        clearTimeout(timer!)
+        operation.abort()
+        current.pending = undefined
+        current.abort = undefined
+      })
+    }
+    const cached = rows()
+    if (cached.length || !read.pending) return { conversations: cached, complete: read.complete }
+    return read.pending
+  }
+
   clear(): void {
+    this.disposed = true
     this.identities.dispose()
     this.channels.clear()
+    this.channelVersions.clear()
     this.observed.clear()
     this.observedUsers.clear()
     this.observedEvents.clear()
+    for (const read of this.displayReads.values()) read.abort?.()
+    this.displayReads.clear()
   }
 }

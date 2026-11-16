@@ -16,6 +16,11 @@ export interface ChannelConversationAccess {
   readonly runtime: ChannelRuntime
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
+  /** Display-only cache-first directory. Never use for permissions or command target resolution. */
+  displayConversations?(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
+  conversationDisplay?(
+    ref: import('@cordisx/channel-runtime').ChannelConversationRef,
+  ): import('./channel-conversation-directory.js').ChannelConversationIdentity
   /** Launcher-only identity/capability lookups; no new plugin or Agent authority. */
   users?(event: import('@cordisx/channel-runtime').ChannelEventRef): Promise<ChannelCommandUserReadback>
   replyCapabilities?(event: import('@cordisx/channel-runtime').ChannelEventRef): ChannelReplyCapabilities

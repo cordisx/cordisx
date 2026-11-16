@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { ChannelLiveDirectory } from '../packages/cli/src/launcher/channel-live-directory.js'
 import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-conversation-tools.js'
+import { ChannelConversationDisplayStore } from '../packages/cli/src/launcher/channel-conversation-display-store.js'
 
 const account = { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'test' }
 const observed = {
@@ -9,6 +10,47 @@ const observed = {
 } as ChannelUserInput
 
 describe('configured live Channel directory', () => {
+  it('returns saved display rows without waiting for the SDK, coalesces refresh and keeps CLI lookup fresh', async () => {
+    vi.useFakeTimers()
+    const store = new ChannelConversationDisplayStore()
+    const ref = { ...account, conversationId: 'oc_group', kind: 'group' as const }
+    store.put(ref, { name: 'Saved group' })
+    const directory = new ChannelLiveDirectory(store)
+    let resolve!: (value: unknown) => void
+    const list = vi.fn(() =>
+      new Promise(done => {
+        resolve = done
+      })
+    )
+    const channel = { rawClient: { im: { v1: { chat: { list } } } } } as never
+    directory.connected(account, channel)
+    try {
+      expect(await directory.displayConversations(account)).toMatchObject({ conversations: [{ name: 'Saved group' }] })
+      await directory.displayConversations(account)
+      expect(list).toHaveBeenCalledTimes(1)
+      resolve({ code: 0, data: { items: [{ chat_id: 'oc_group', name: 'New group' }], has_more: false } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await directory.displayConversations(account)).toMatchObject({
+        complete: true,
+        conversations: [{ name: 'New group' }],
+      })
+      list.mockRejectedValueOnce(new Error('offline'))
+      expect(await directory.conversations(account)).toMatchObject({ complete: false })
+      expect(list).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(60_001)
+      list.mockRejectedValueOnce(new Error('still offline'))
+      await directory.displayConversations(account)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await directory.displayConversations(account)).toMatchObject({
+        complete: false,
+        conversations: [{ name: 'New group' }],
+      })
+    } finally {
+      directory.clear()
+      vi.useRealTimers()
+    }
+  })
+
   it('reads current group members using the live SDK, pages by open ID and does not treat stale observations as current members', async () => {
     const directory = new ChannelLiveDirectory()
     const event = {

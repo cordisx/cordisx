@@ -57,6 +57,17 @@ The own-service facade uses actual caller tracing and account/service lifetime;
 delegated activity readers need exact-conversation event permission. Opening
 an issued binding uses Host navigation and does not resume its native turn.
 
+Conversation names and normalized PNG avatars are durable display hints in
+`$CORDISX_HOME/apps/<app>/profiles/<profile>/channel-runtime/conversation-display.json`,
+scoped by adapter, account, tenant and conversation. Manager list and detail
+reads return saved hints immediately and coalesce background revalidation.
+Failed reads retain the last known name and image; name updates do not wait
+for an avatar download. The atomic local file contains no messages, secrets,
+membership authority or issued Manager tokens. Its disposable display limits
+do not limit bindings. Removing a configured account retires its hints, and
+account replacement or disposal prevents late network replies from restoring
+old data. Ordinary CLI conversation/member lookup remains a fresh read.
+
 This section supersedes the older task-routing, binding, selector, and
 notification design notes below. They are historical planning material only:
 no Channel core configuration, persistence, or runtime path may depend on
