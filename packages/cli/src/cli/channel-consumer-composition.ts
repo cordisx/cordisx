@@ -117,3 +117,14 @@ export function configuredChannelToolHandler(
     ? {}
     : { channel: (operation: string, input: unknown, metadata?: unknown) => tools.call(operation, input, metadata) }
 }
+
+/** Local management calls retain source context while allowing local-only inventory. */
+export function configuredChannelManagementToolHandler(
+  tools: import('../launcher/channel-conversation-tools.js').ChannelConversationTools | undefined,
+) {
+  return tools === undefined
+    ? {}
+    : {
+      channel: (operation: string, input: unknown, metadata?: unknown) => tools.callLocal(operation, input, metadata),
+    }
+}

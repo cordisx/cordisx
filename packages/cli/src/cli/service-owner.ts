@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
+import os from 'node:os'
+import { startHeadlessService } from './headless-service.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { mergeHomeEnvironment } from '../config/home-config-environment.js'
 import { diagnostic, diagnosticError, diagnosticId, withDiagnostics } from '../diagnostics/context.js'
@@ -48,6 +50,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+      let channel: Awaited<ReturnType<typeof startHeadlessService>>
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let failure: unknown
@@ -113,6 +116,23 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         await startup.coreReady
         lifetime.signal.removeEventListener('abort', stopServices)
         lifetime.signal.throwIfAborted()
+        if (appId === 'codex') {
+          const userHome = environment.HOME || os.homedir()
+          channel = await startHeadlessService({
+            configPath,
+            homeDir,
+            appId,
+            profileId,
+            generation,
+            userHome,
+            codexHome: environment.CODEX_HOME || path.join(userHome, '.codex'),
+            codexExecutable: 'codex',
+            cwd: userHome,
+            environment,
+            report: code => diagnostic({ event: 'service-channel-error', code }),
+          })
+        }
+        lifetime.signal.throwIfAborted()
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -122,6 +142,12 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           mode: 'service',
+          ...(channel === undefined
+            ? {}
+            : {
+              channel: (operation: string, value: unknown, metadata?: unknown) =>
+                channel!.channel.tools.callLocal(operation, value, metadata),
+            }),
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
         diagnostic({ event: 'service-ready' })
@@ -134,6 +160,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => management?.close(),
+            () => channel?.close(),
             () => services?.dispose(),
             () => managed?.close(),
             () => certified?.dispose(),

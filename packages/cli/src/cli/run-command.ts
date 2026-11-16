@@ -141,6 +141,7 @@ import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createChannelLaunchBridges, createRendererChannelComposition } from './renderer-channel-composition.js'
 import {
+  configuredChannelManagementToolHandler,
   configuredChannelToolHandler,
   configuredLaunchCleanup,
   createConfiguredChannelConsumer,
@@ -333,7 +334,6 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     }
     const channel = await createRendererChannelComposition({
       composition,
-      dryRun: invocation.options.dryRun,
       appId,
       profileId: selection.profileId,
       configPath,
@@ -738,7 +738,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        ...configuredChannelToolHandler(channelTools),
+        ...configuredChannelManagementToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
@@ -889,7 +889,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
-        ...configuredChannelToolHandler(channelTools),
+        ...configuredChannelManagementToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)

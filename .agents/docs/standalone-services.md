@@ -15,16 +15,23 @@ cordisx stop --mode service
 Append the default App namespace and a profile to each command (for example,
 `cordisx start --mode service codex work`) to select a named profile. The App
 name selects a configuration namespace. Service mode starts a Node supervisor
-and managed backends. It starts neither a desktop application nor a local Codex
-or Claude Code Agent. A second `start` returns the existing owner. Use
+and managed backends. It does not start a desktop application. When Channel is
+enabled for a Codex profile, the service also starts Channel and an independent
+Codex CLI app-server; the CLI must be available on `PATH`. A second `start`
+returns the existing owner. Use
 `restart --mode service` to apply launch environment changes. If an App already
 owns the selected scope, stop that instance explicitly before switching modes.
 
 Use `cordisx plugin list --profile work` and the usual plugin management
 commands. Existing permissions and plugin configuration still apply.
 `--yes` does not approve new permissions. Browser-only plugins are shown as
-unavailable in service mode; there is no native Manager, session context or
-local Agent API. Compatible plugins that expose their own loopback web console
+unavailable in service mode; there is no native Manager or Desktop session context.
+For Channel, use `cordisx channel connections --profile work` to inspect connection
+state and `cordisx channel help` for listening, binding and explicit sends. A
+started service does not guarantee an account is connected. The profile owns
+Channel configuration and permissions; stop service mode before changing Channel
+plugin activation, then start it again. Automatic final-response forwarding is
+off by default; local commentary and final answers are not sent unless configured. Compatible plugins that expose their own loopback web console
 can still be configured there. For example, the fakemodel console normally
 opens at `http://127.0.0.1:8397/login`; use its configured port and existing
 browser session. Plugin-owned data follows the plugin's existing storage rules:

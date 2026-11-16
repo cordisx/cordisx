@@ -188,10 +188,26 @@ describe('configured Channel CLI production endpoint', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-configured-cli-'))
     const configPath = path.join(root, 'config.json')
     const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
-    const tools = new ChannelConversationTools(() =>
+    const consumer = {
+      status: () => ({
+        status: 'ok',
+        revision: 7,
+        bindings: [{
+          id: 'binding',
+          sessionId: 'own-chat',
+          state: 'active',
+          mode: 'deliver',
+          channel: { ...ref, conversationId: 'oc_group', kind: 'group' },
+        }],
+      }),
+    }
+    const access = () =>
       ({ generation: 'fixture-runtime', accounts: () => [{ ref, state: 'ready' }] }) as ChannelConversationAccess
+    const tools = new ChannelConversationTools(access)
+    const inventoryTools = new ChannelConversationTools(access, consumer as never)
+    const channel = vi.fn((operation: string, input: unknown) =>
+      (operation === 'local-bindings' ? inventoryTools : tools).callLocal(operation, input)
     )
-    const channel = vi.fn((operation: string, input: unknown) => tools.call(operation, input))
     await ensureHomeConfig(configPath)
     const before = await readFile(configPath, 'utf8')
     const identity = await processStartIdentity(process.pid)
@@ -216,6 +232,17 @@ describe('configured Channel CLI production endpoint', () => {
         connections: [{ ref, state: 'ready' }],
       })
       expect(channel).toHaveBeenCalledOnce()
+      await runConfiguredChannelCommand([
+        'local-bindings',
+        '--input',
+        JSON.stringify({ account: ref, conversationId: 'oc_group' }),
+      ], line => output.push(line))
+      expect(JSON.parse(output.at(-1)!)).toMatchObject({
+        status: 'ok',
+        generation: 'fixture-runtime',
+        revision: 7,
+        bindings: [{ bindingId: 'binding', sessionId: 'own-chat', state: 'active', mode: 'deliver' }],
+      })
       await expect(runConfiguredChannelCommand([
         'reply-mode',
         '--input',
@@ -252,7 +279,7 @@ describe('configured Channel CLI production endpoint', () => {
       await expect(runConfiguredChannelCommand(['connections'], () => {})).rejects.toThrow(
         'CHANNEL_HOST_IDENTITY_STALE',
       )
-      expect(channel).toHaveBeenCalledTimes(2)
+      expect(channel).toHaveBeenCalledTimes(3)
       await writeFile(endpointPath, JSON.stringify(endpoint), { mode: 0o600 })
       await expect(runConfiguredChannelCommand(['send', '--input', '{}'], line => output.push(line))).rejects.toThrow(
         'CHANNEL_OPERATION_REJECTED',
@@ -261,6 +288,7 @@ describe('configured Channel CLI production endpoint', () => {
     } finally {
       vi.unstubAllEnvs()
       tools.dispose()
+      inventoryTools.dispose()
       await server.close()
       await rm(root, { recursive: true, force: true })
     }
