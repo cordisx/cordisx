@@ -334,6 +334,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     }
     const channel = await createRendererChannelComposition({
       composition,
+      dryRun: invocation.options.dryRun,
       appId,
       profileId: selection.profileId,
       configPath,
