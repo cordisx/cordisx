@@ -16,11 +16,11 @@ import type {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.15'
-const protocolSpec = 'github:cordisx/cordisx-protocol#52f4016addd281284a82e4c53d04578dd337be31'
+const protocolSpec = 'github:cordisx/cordisx-protocol#be1e7fcb49c730c5806db6ca1925958804288674'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#52f4016addd281284a82e4c53d04578dd337be31'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#be1e7fcb49c730c5806db6ca1925958804288674'
 const protocolIntegrity =
-  'sha512-w+zLrqhr8Y+nBtf5KBsVgZyWlxDmBQ7nqVBeke/6Kig+Oyl5sBerciZAUJozbWjI+53Z+E2gJKpQ+GMwYpNGQw=='
+  'sha512-fhKvmXwsQG2uck/Pwu4kW3X1Dhccz54qqhgr+y2U05e9tZPwdlA5w7cb7eL4H0aiQISEc9UtSQbuH6CQOKjrnw=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
@@ -41,22 +41,29 @@ interface PackageLock {
 interface ProtocolPinDocuments {
   readonly rootManifest: PackageManifest
   readonly cliManifest: PackageManifest
+  readonly channelRuntimeManifest: PackageManifest
   readonly lockfile: PackageLock
 }
 
 function protocolEdges(documents: ProtocolPinDocuments): ReadonlyArray<readonly [string, string | undefined]> {
   const rootLock = documents.lockfile.packages['']
   const cliLock = documents.lockfile.packages['packages/cli']
+  const runtimeLock = documents.lockfile.packages['packages/channel-runtime']
   const installed = documents.lockfile.packages['node_modules/@cordisx/protocol']
   return [
     ['package.json dependencies', documents.rootManifest.dependencies?.['@cordisx/protocol']],
     ['package.json devDependencies', documents.rootManifest.devDependencies?.['@cordisx/protocol']],
     ['packages/cli/package.json dependencies', documents.cliManifest.dependencies?.['@cordisx/protocol']],
     ['packages/cli/package.json devDependencies', documents.cliManifest.devDependencies?.['@cordisx/protocol']],
+    [
+      'packages/channel-runtime/package.json dependencies',
+      documents.channelRuntimeManifest.dependencies?.['@cordisx/protocol'],
+    ],
     ['package-lock root dependencies', rootLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock root devDependencies', rootLock?.devDependencies?.['@cordisx/protocol']],
     ['package-lock CLI dependencies', cliLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock CLI devDependencies', cliLock?.devDependencies?.['@cordisx/protocol']],
+    ['package-lock channel runtime dependencies', runtimeLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock installed version', installed?.version],
     ['package-lock installed resolution', installed?.resolved],
     ['package-lock installed integrity', installed?.integrity],
@@ -94,17 +101,19 @@ const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsume
 
 describe('formal Connector Protocol public type import', () => {
   it('pins the Host root, publishable CLI, and lockfile to one exact merged Protocol dependency', async () => {
-    const [rootManifestText, cliManifestText, lockfileText] = await Promise.all([
+    const [rootManifestText, cliManifestText, channelRuntimeManifestText, lockfileText] = await Promise.all([
       readFile(path.join(root, 'package.json'), 'utf8'),
       readFile(path.join(root, 'packages/cli/package.json'), 'utf8'),
+      readFile(path.join(root, 'packages/channel-runtime/package.json'), 'utf8'),
       readFile(path.join(root, 'package-lock.json'), 'utf8'),
     ])
     const documents: ProtocolPinDocuments = {
       rootManifest: JSON.parse(rootManifestText) as PackageManifest,
       cliManifest: JSON.parse(cliManifestText) as PackageManifest,
+      channelRuntimeManifest: JSON.parse(channelRuntimeManifestText) as PackageManifest,
       lockfile: JSON.parse(lockfileText) as PackageLock,
     }
-    expect(protocolEdges(documents)).toHaveLength(11)
+    expect(protocolEdges(documents)).toHaveLength(13)
     expect(protocolPinViolations(documents)).toEqual([])
     expect(protocolEdges(documents).map(([, value]) => value)).toContain(protocolSpec)
     expect(formalConnectorConsumerSurface).toBeNull()
@@ -117,10 +126,12 @@ describe('formal Connector Protocol public type import', () => {
     const current: ProtocolPinDocuments = {
       rootManifest: currentManifest,
       cliManifest: currentManifest,
+      channelRuntimeManifest: currentManifest,
       lockfile: {
         packages: {
           '': currentManifest,
           'packages/cli': currentManifest,
+          'packages/channel-runtime': currentManifest,
           'node_modules/@cordisx/protocol': {
             version: protocolVersion,
             resolved: protocolResolvedSource,
@@ -141,6 +152,10 @@ describe('formal Connector Protocol public type import', () => {
       ...current,
       cliManifest: { dependencies: { '@cordisx/protocol': staleProtocolVersion } },
     })).toEqual(['packages/cli/package.json dependencies'])
+    expect(protocolPinViolations({
+      ...current,
+      channelRuntimeManifest: { dependencies: { '@cordisx/protocol': staleProtocolVersion } },
+    })).toEqual(['packages/channel-runtime/package.json dependencies'])
     expect(protocolPinViolations({
       ...current,
       lockfile: {

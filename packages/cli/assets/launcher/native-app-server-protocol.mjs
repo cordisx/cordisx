@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
@@ -16,61 +15,14 @@ import { inheritNativeFork } from './native-session-fork.mjs'
 import { readNativeLines } from './native-json-lines.mjs'
 import { createNativeChatControl } from './native-chat-control.mjs'
 import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
+import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
 
-const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
-const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
-const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
-const nativeCliEntry = process.env.CORDISX_NATIVE_CLI_ENTRY_PATH
-const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
-const staticCatalog = {
-  path: process.env.CORDISX_NATIVE_STATIC_CATALOG_PATH,
-  sha256: process.env.CORDISX_NATIVE_STATIC_CATALOG_SHA256,
-  nativeVersion: process.env.CORDISX_NATIVE_STATIC_CATALOG_VERSION,
-}
+const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
+  process.env,
+  process.argv.slice(2),
+)
 const marker = 'cordisx.operation_token'
 const maxControlLineBytes = 8 * 1024 * 1024
-if (!socketPath || !nonce || !executable?.startsWith('/')) throw new Error('Native intermediary is not configured')
-for (
-  const key of [
-    'CODEX_CLI_PATH',
-    'CORDISX_NATIVE_CONTROL_SOCKET',
-    'CORDISX_NATIVE_CONTROL_NONCE',
-    'CORDISX_NATIVE_REAL_CODEX_PATH',
-    'CORDISX_NATIVE_CLI_ENTRY_PATH',
-    'CORDISX_NATIVE_NODE_PATH',
-    'CORDISX_NATIVE_AGENT_MODELS_BINDING',
-    'CORDISX_NATIVE_STATIC_CATALOG_PATH',
-    'CORDISX_NATIVE_STATIC_CATALOG_SHA256',
-    'CORDISX_NATIVE_STATIC_CATALOG_VERSION',
-  ]
-) delete process.env[key]
-
-const nativeArgs = process.argv.slice(2)
-if (
-  staticCatalog.path?.startsWith('/') && /^[a-f0-9]{64}$/u.test(staticCatalog.sha256 ?? '')
-  && staticCatalog.nativeVersion === '0.167.0-alpha.3.2' && nativeArgs.includes('app-server')
-) {
-  nativeArgs.unshift('-c', `model_catalog_json=${JSON.stringify(staticCatalog.path)}`, '-c', 'model_provider="openai"')
-}
-if (agentModelsBinding && nativeArgs.includes('app-server')) {
-  nativeArgs.unshift(
-    '-c',
-    `mcp_servers.cordisx_models.command=${JSON.stringify(process.execPath)}`,
-    '-c',
-    `mcp_servers.cordisx_models.args=${
-      JSON.stringify([
-        fileURLToPath(new URL('./native-agent-models-mcp.mjs', import.meta.url)),
-        agentModelsBinding,
-      ])
-    }`,
-    // A message to an open Claude session waits for that session to take it.
-    '-c',
-    'mcp_servers.cordisx_models.tool_timeout_sec=90',
-    // CordisX's own tools run without a per-call prompt; the agent still acts only when asked.
-    '-c',
-    'mcp_servers.cordisx_models.default_tools_approval_mode="approve"',
-  )
-}
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
 const nativeTransport = createNativeProviderTransport(child, {
   executable,
