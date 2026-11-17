@@ -4,7 +4,7 @@ import { ManagerPaneRecapture } from '../packages/cli/src/renderer/manager/manag
 import { nativeRouteIdentity } from '../packages/cli/src/renderer/manager/native-route-transition.js'
 
 function fixture() {
-  const dom = new JSDOM('<body><nav></nav><main></main><main id="other"></main></body>')
+  const dom = new JSDOM('<body><nav></nav><main></main><main id="other"></main></body>', { pretendToBeVisual: true })
   const document = dom.window.document
   const rail = document.querySelector<HTMLElement>('nav')!
   const main = document.querySelector<HTMLElement>('main')!
@@ -56,7 +56,83 @@ describe('bounded Manager split recapture', () => {
       expect(f.schedule).toHaveBeenCalledTimes(1)
       vi.advanceTimersByTime(975)
       expect(f.recapture.resume(f.seat, activate)).toBe('lost')
+      expect(activate).toHaveBeenCalledTimes(2)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      f.recapture.dispose()
+      f.dom.window.close()
+    }
+  })
+
+  it('restores a valid same-page seat when native background throttling delays the retry', () => {
+    const f = fixture()
+    try {
+      const activate = vi.fn(() => true)
+      f.recapture.start(f.identity)
+      vi.advanceTimersByTime(1200)
+      expect(f.recapture.resume(f.seat, activate)).toBe('restored')
       expect(activate).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      f.recapture.dispose()
+      f.dom.window.close()
+    }
+  })
+
+  it('waits for actual paint in an offscreen renderer and restores without polling stale geometry', () => {
+    const f = fixture()
+    try {
+      let paint: FrameRequestCallback | undefined
+      Object.defineProperty(f.document, 'visibilityState', { configurable: true, value: 'hidden' })
+      const request = vi.spyOn(f.dom.window, 'requestAnimationFrame').mockImplementation(callback => {
+        paint = callback
+        return 1
+      })
+      const cancel = vi.spyOn(f.dom.window, 'cancelAnimationFrame').mockImplementation(() => {})
+      const activate = vi.fn(() => false)
+      f.recapture.start(f.identity)
+      expect(f.recapture.resume(f.seat, activate)).toBe('waiting')
+      vi.advanceTimersByTime(5000)
+      expect(f.schedule).not.toHaveBeenCalled()
+      expect(f.recapture.resume(f.seat, activate)).toBe('waiting')
+      expect(request).toHaveBeenCalledTimes(1)
+      paint!(5000)
+      expect(f.schedule).toHaveBeenCalledTimes(1)
+      activate.mockReturnValue(true)
+      expect(f.recapture.resume(f.seat, activate)).toBe('restored')
+      f.document.dispatchEvent(new f.dom.window.Event('visibilitychange'))
+      expect(f.schedule).toHaveBeenCalledTimes(1)
+      expect(cancel).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      f.recapture.dispose()
+      f.dom.window.close()
+    }
+  })
+
+  it('resumes the foreground deadline and still revokes a changed page while waiting for paint', () => {
+    const f = fixture()
+    try {
+      let visibility = 'hidden'
+      Object.defineProperty(f.document, 'visibilityState', { get: () => visibility })
+      vi.spyOn(f.dom.window, 'requestAnimationFrame').mockReturnValue(1)
+      const cancel = vi.spyOn(f.dom.window, 'cancelAnimationFrame').mockImplementation(() => {})
+      const activate = vi.fn(() => false)
+      f.recapture.start(f.identity)
+      vi.advanceTimersByTime(5000)
+      visibility = 'visible'
+      f.document.dispatchEvent(new f.dom.window.Event('visibilitychange'))
+      expect(f.schedule).toHaveBeenCalledTimes(1)
+      expect(f.recapture.resume(f.seat, activate)).toBe('waiting')
+      vi.advanceTimersByTime(1000)
+      expect(f.recapture.resume(f.seat, activate)).toBe('lost')
+      expect(cancel).toHaveBeenCalledWith(1)
+
+      visibility = 'hidden'
+      f.recapture.start(f.identity)
+      f.route.key = 'other-thread'
+      expect(f.recapture.resume(undefined, activate)).toBe('lost')
+      expect(cancel).toHaveBeenCalledTimes(2)
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       f.recapture.dispose()

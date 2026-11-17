@@ -121,6 +121,29 @@ describe('26.924 Manager titlebar seat', () => {
     expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
   })
 
+  it('accepts the existing-thread inset and its 43px layout toggle after the right tabs close', () => {
+    const f = titlebarFixture()
+    const title = f.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!
+    title.getClientRects = () => ({ length: 1 }) as DOMRectList
+    title.getBoundingClientRect = () => f.rect(290, 1429)
+    placeNativeWorkspaceTitlebar(f.bar)
+    insetNativeWorkspaceTitle(f.bar)
+    f.bar.dataset.appShellHeaderLayout = 'thread-edge-scroll'
+    f.end.getBoundingClientRect = () => f.rect(1676, 43)
+    const before = f.document.body.innerHTML
+    expect(resolveManagerTitlebarSeat(f.document)).toEqual({
+      slot: f.slot,
+      native: [f.native, f.end],
+      bounds: { left: 290, top: 0, width: 1386, height: 44 },
+    })
+    expect(f.document.body.innerHTML).toBe(before)
+    f.end.getBoundingClientRect = () => f.rect(1667, 52)
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+    f.end.getBoundingClientRect = () => f.rect(1676, 43)
+    f.bar.dataset.appShellHeaderLayout = 'full-bleed'
+    expect(resolveManagerTitlebarSeat(f.document)).toBeUndefined()
+  })
+
   it('leases only the right page-action group and end control beside the Host title seat', () => {
     const fixture = titlebarFixture()
     const title = fixture.document.querySelector<HTMLElement>('[data-app-shell-main-titlebar]')!

@@ -6,8 +6,19 @@ import {
   openManagedConsoleBrowserGateway,
 } from './managed-console-browser-gateway.js'
 
-/** The browser resolver and cookie boundary was exercised against this signed App build. */
-const VERIFIED_CODE_DIRECTORY = 'f056dea6c8c27d5221903826d59e2becfa209a4d'
+/** App builds whose browser resolver and cookie boundary have native evidence. */
+const VERIFIED_CODE_DIRECTORIES = new Map([
+  ['25679', 'f056dea6c8c27d5221903826d59e2becfa209a4d'],
+  ['25894', '699937d138fa785a0e6c724bbc5d01f243f4e4a4'],
+])
+
+export function verifiedManagedConsoleBrowserApp(executable: string, build: string, signature: string): boolean {
+  const hash = VERIFIED_CODE_DIRECTORIES.get(build.trim())
+  const fields = new Set(signature.split(/\r?\n/u))
+  return hash !== undefined && fields.has('Executable=' + executable)
+    && fields.has('Identifier=com.openai.codex') && fields.has('TeamIdentifier=2DC432GLL2')
+    && fields.has('CDHash=' + hash)
+}
 
 export async function supportsManagedConsoleBrowserLaunch(
   executable: string,
@@ -33,11 +44,7 @@ export async function supportsManagedConsoleBrowserLaunch(
         timeout: 2_000,
       }),
     ])
-    const fields = new Set(signature.stderr.split(/\r?\n/u))
-    return !signal.aborted && build.stdout.trim() === '25679'
-      && fields.has('Executable=' + executable) && fields.has('Identifier=com.openai.codex')
-      && fields.has('TeamIdentifier=2DC432GLL2')
-      && fields.has('CDHash=' + VERIFIED_CODE_DIRECTORY)
+    return !signal.aborted && verifiedManagedConsoleBrowserApp(executable, build.stdout, signature.stderr)
   } catch {
     return false
   }

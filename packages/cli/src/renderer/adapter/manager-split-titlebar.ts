@@ -93,7 +93,7 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
   ) return undefined
 
   // Compact titles keep a 6px inset. 26.1023 full-bleed leaves a 4px seam;
-  // the measured 26.1103 default split puts the right strip against the title.
+  // the measured 26.1103 default and thread splits put it against the title.
   // In both cases, the main pane and exact native tab identities bound our seat.
   const compact = header.parentElement?.getAttribute('data-app-shell-compact-page-gutter') === 'true'
     && header.parentElement?.getAttribute('data-app-shell-header-placement') === 'titlebar'
@@ -102,7 +102,7 @@ export function resolveManagerSplitTitlebarSeat(document: Document): ManagerSpli
     && near(titleRect.right, anchorRect.right)
     && near(titleRect.right - slotRect.right, 6)
     && (near(endRect.left - titleRect.right, 4)
-      || (header.getAttribute('data-app-shell-header-layout') === 'default'
+      || (['default', 'thread-edge-scroll'].includes(header.getAttribute('data-app-shell-header-layout') ?? '')
         && near(endRect.left, titleRect.right)))
   const legacy = near(titleRect.right, slotRect.right) && near(slotRect.right, anchorRect.right)
     && endRect.left >= slotRect.right - 2 && endRect.left <= slotRect.right + 8
