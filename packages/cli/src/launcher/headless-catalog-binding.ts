@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import type { CodexAppServerRpc } from '../providers/codex-app-server.js'
 import type { NativeStaticCatalogReceipt } from './native-context-budget-provenance.js'
+import { unmanagedCatalogProvider } from './headless-static-catalog.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -18,12 +19,10 @@ export async function bindHeadlessCatalog(input: {
       object(await input.server.request('config/read', { cwd: input.cwd, includeLayers: false })).config,
     )
     const requirementsValue = object(await input.server.request('configRequirements/read', {})).requirements
-    const requirements = object(requirementsValue)
     const bytes = await readFile(input.catalog.path)
     if (
-      config.model_catalog_json !== input.catalog.path
-      || requirementsValue !== null
-        && (!Object.hasOwn(requirements, 'modelCatalogJson') || requirements.modelCatalogJson !== null)
+      config.model_catalog_json !== input.catalog.path || config.model_provider !== 'openai'
+      || !unmanagedCatalogProvider(requirementsValue)
       || createHash('sha256').update(bytes).digest('hex') !== input.catalog.sha256
       || !bytes.equals(Buffer.from(input.catalog.bytes))
     ) return undefined

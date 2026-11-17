@@ -32,6 +32,8 @@ measurement for a request; it can lag current activity and is not cumulative
 billing usage. Its accounting scope and budget must be compatible. Stale or
 unavailable measurements do not become threshold events. A notification is
 best effort and cannot guarantee that it precedes native compaction.
+The Channel monitor also evaluates a first fresh measurement already at or
+above the threshold, provided the same session has an owned running turn.
 
 ## Target-ready handoff
 
@@ -55,8 +57,10 @@ queue is not claimed to migrate with Channel jobs.
 
 ## Availability and evidence
 
-The headless adapter's current-connection tools and Desktop next-owned startup
-budget capture are under integration. A public type, a locally installed package,
+For the supported 0.167 native runtime, a newly owned server can capture a
+verified startup catalog and its effective budget. The capture remains
+unavailable when the provider, managed requirements, catalog, or other budget
+inputs cannot be proven. A public type, a locally installed package,
 or a settings tab does not by itself prove a resolved budget, an active Host
 capability, a real threshold crossing, or successful takeover. Read the active
 Host's capability and operation results; preserve unavailable states. An

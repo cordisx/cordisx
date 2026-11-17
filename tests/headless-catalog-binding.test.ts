@@ -13,13 +13,15 @@ describe('headless catalog binding', () => {
       await writeFile(file, bytes)
       const sha256 = createHash('sha256').update(bytes).digest('hex')
       let reported = file
+      let startupProvider = 'openai'
+      let requirements: unknown = null
       const server = {
         generation: 'server-1',
         close: async () => {},
         request: async (method: string) =>
           method === 'config/read'
-            ? { config: { model_catalog_json: reported } }
-            : { requirements: { modelCatalogJson: null } },
+            ? { config: { model_catalog_json: reported, model_provider: startupProvider } }
+            : { requirements },
       }
       const input = {
         server: server as never,
@@ -31,6 +33,13 @@ describe('headless catalog binding', () => {
       reported = '/different/catalog'
       expect(await bindHeadlessCatalog(input)).toBeUndefined()
       reported = file
+      startupProvider = 'gcp'
+      expect(await bindHeadlessCatalog(input)).toBeUndefined()
+      startupProvider = 'openai'
+      requirements = { modelProvider: 'gcp', modelProviders: null, modelCatalogJson: null }
+      expect(await bindHeadlessCatalog(input)).toBeUndefined()
+      requirements = { modelProvider: null, modelProviders: null, modelCatalogJson: null }
+      expect(await bindHeadlessCatalog(input)).toBeDefined()
       await writeFile(file, '{}')
       expect(await bindHeadlessCatalog(input)).toBeUndefined()
     } finally {

@@ -60,8 +60,8 @@ const probe = () => {
   const close = vi.fn(async () => {})
   const request = vi.fn(async (method: string) =>
     method === 'config/read'
-      ? { config: { model_catalog_json: null } }
-      : { requirements: { modelCatalogJson: null } }
+      ? { config: { model_provider: 'openai', model_catalog_json: null } }
+      : { requirements: null }
   )
   const startProbe = vi.fn(async () => ({ request, close }))
   return { startProbe, request, close }
@@ -155,13 +155,13 @@ describe('Desktop launch catalog lease', () => {
     )
     p.request.mockImplementation(async method =>
       method === 'config/read'
-        ? { config: { model_catalog_json: '/user/catalog.json' } }
-        : { requirements: { modelCatalogJson: null } }
+        ? { config: { model_provider: 'openai', model_catalog_json: '/user/catalog.json' } }
+        : { requirements: null }
     )
     expect(await prepareDesktopStaticCatalog(input(f, p.startProbe))).toBeUndefined()
     p.request.mockImplementation(async method =>
       method === 'config/read'
-        ? { config: { model_catalog_json: null } }
+        ? { config: { model_provider: 'openai', model_catalog_json: null } }
         : { requirements: { modelCatalogJson: '/managed/catalog.json' } }
     )
     expect(await prepareDesktopStaticCatalog(input(f, p.startProbe))).toBeUndefined()

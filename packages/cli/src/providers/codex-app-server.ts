@@ -65,7 +65,9 @@ export function localCodexAppServerArguments(modelCatalogPath?: string): readonl
     '--stdio',
     '-c',
     'analytics.enabled=false',
-    ...(modelCatalogPath ? ['-c', `model_catalog_json=${tomlString(modelCatalogPath)}`] : []),
+    ...(modelCatalogPath
+      ? ['-c', `model_catalog_json=${tomlString(modelCatalogPath)}`, '-c', 'model_provider="openai"']
+      : []),
   ])
 }
 

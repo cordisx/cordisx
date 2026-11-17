@@ -82,6 +82,7 @@ export async function prepareDesktopStaticCatalog(input: {
       codexHome,
       userHome,
       cwd,
+      startupCwd: cwd,
       environment,
       ...(startProbe === undefined ? {} : { startProbe }),
     })

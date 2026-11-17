@@ -130,6 +130,10 @@ export function attachNativeContextObserver(
       return
     }
     const params = object(value)
+    if (method === 'cordisx/context/invalidate' && validId(params.threadId) && observer.has(params.threadId)) {
+      observer.track(params.threadId, generation, { status: 'unavailable', reason: 'unknown' })
+      return
+    }
     if (method === 'thread/tokenUsage/updated' && validId(params.threadId) && !observer.has(params.threadId)) {
       observer.track(params.threadId, generation, { status: 'unavailable', reason: 'unknown' })
     }

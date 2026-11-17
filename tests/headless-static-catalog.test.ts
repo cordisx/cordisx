@@ -16,14 +16,15 @@ describe('owned headless catalog', () => {
         JSON.stringify({ identity: 'not-catalog', models: [{ slug: 'model' }] }),
       )
       let custom = false
+      let provider = 'openai'
       const close = vi.fn(async () => {})
       const startProbe = vi.fn(async () => ({
         generation: 'probe',
         close,
         request: async (method: string) =>
           method === 'config/read'
-            ? { config: { model_catalog_json: custom ? '/existing/catalog.json' : null } }
-            : { requirements: { modelCatalogJson: null } },
+            ? { config: { model_provider: provider, model_catalog_json: custom ? '/existing/catalog.json' : null } }
+            : { requirements: null },
       }))
       const input = {
         enabled: true,
@@ -43,7 +44,10 @@ describe('owned headless catalog', () => {
       await expect(stat(lease!.path)).rejects.toMatchObject({ code: 'ENOENT' })
       custom = true
       expect(await prepareHeadlessStaticCatalog(input)).toBeUndefined()
-      expect(close).toHaveBeenCalledTimes(2)
+      custom = false
+      provider = 'gcp'
+      expect(await prepareHeadlessStaticCatalog(input)).toBeUndefined()
+      expect(close).toHaveBeenCalledTimes(3)
       expect(JSON.parse(await readFile(path.join(directory, 'models_cache.json'), 'utf8')).identity).toBe('not-catalog')
     } finally {
       await rm(directory, { recursive: true, force: true })

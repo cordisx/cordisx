@@ -45,10 +45,10 @@ export class ChannelLiveThreshold {
       }
     }
     for (const [source, target] of wanted) {
-      if (this.watches.has(source) || this.watches.size >= 128) continue
+      if (this.watches.has(source)) continue
       try {
         const watch = this.observations.watch(source, target.ratio, async event => {
-          if (event.reason !== 'crossed' || !event.sample.turnId) return
+          if (!event.sample.turnId) return
           const current = this.store.snapshot()
           const matching = Object.values(current.jobs).filter(job =>
             job.state === 'running'

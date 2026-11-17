@@ -41,7 +41,8 @@ import { startNativeAgentModelsServer } from './native-agent-models.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
 import { createChannelNativeSession } from './channel-native-composition.js'
-import { attachNativeContextObserver } from './native-context-observer.js'
+import * as desktopContext from './desktop-native-context-observer.js'
+import type { DesktopStaticCatalogLease } from './desktop-static-catalog.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -78,6 +79,8 @@ type NativeSubmissionActivation =
     readonly startupObserver?: ManagedServiceNativeActivation['startupObserver']
     subscribeNativeProviders?(listener: () => void): () => void
   }
+
+const attachDesktopContext = desktopContext.attachDesktopNativeContextObserver
 
 export interface NativeSubmissionInstallation {
   readonly authority: NativeSubmissionCdpAuthority
@@ -213,6 +216,7 @@ export async function prepareNativeSubmissionBootstrap(
     environment?: Readonly<Record<string, string | undefined>>
     signal?: AbortSignal
     remoteTerminalProvider?: ExistingTerminalProviderSource
+    staticCatalog?: DesktopStaticCatalogLease
   }> = {},
 ): Promise<NativeSubmissionBootstrap> {
   options.signal?.throwIfAborted()
@@ -315,7 +319,7 @@ export async function prepareNativeSubmissionBootstrap(
             try {
               await control.close()
             } finally {
-              await nativeEntry.close()
+              await nativeEntry.close().finally(() => options.staticCatalog?.close())
             }
           }
         }
@@ -331,6 +335,7 @@ export async function prepareNativeSubmissionBootstrap(
     CORDISX_NATIVE_CLI_ENTRY_PATH: nativeEntry.executable,
     CORDISX_NATIVE_NODE_PATH: node,
     CORDISX_NATIVE_AGENT_MODELS_BINDING: agentModels.bindingPath,
+    ...desktopContext.desktopStaticCatalogEnvironment(options.staticCatalog),
   }
   return {
     environment,
@@ -355,10 +360,8 @@ export async function prepareNativeSubmissionBootstrap(
         let channelSession: import('./channel-native-sessions.js').ChannelNativeSessions | undefined
         if (completeOptions.contextObserver) {
           contextObserver = completeOptions.contextObserver
-          unsubscribeContext = attachNativeContextObserver(
-            listener => control.subscribeContinuationEvents(listener),
-            contextObserver,
-          )
+          const subscribe = control.subscribeContinuationEvents
+          unsubscribeContext = attachDesktopContext(subscribe, contextObserver, options.staticCatalog)
         }
         let discovered: Pick<NativeSubmissionInstallation, 'transforms' | 'accountCapability' | 'adapterLifecycle'>
         try {
