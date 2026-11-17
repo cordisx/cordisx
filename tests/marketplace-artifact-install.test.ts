@@ -18,6 +18,8 @@ const DOWNLOAD = 'https://registry.example/@example/marketplace-demo/-/marketpla
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
@@ -154,6 +156,69 @@ describe('Marketplace artifact installation boundary', () => {
       request(Buffer.from('artifact')),
       controller.signal,
     )).rejects.toBe(controller.signal.reason)
+    expect(lifecycle.stage).not.toHaveBeenCalled()
+  })
+
+  it('can stage a verified artifact after a download exceeds the old 30-second limit', async () => {
+    const bytes = await packageArchive()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new DOMException('expired', 'TimeoutError')), milliseconds)
+      return controller.signal
+    })
+    let started!: () => void
+    const fetchStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: { signal: AbortSignal }) => {
+        started()
+        return await new Promise<Response>((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+          setTimeout(() => resolve(new Response(bytes, { status: 200 })), 31_000)
+        })
+      }),
+    )
+    const lifecycle = handler()
+    const inspection = inspectMarketplaceArtifactPackage(lifecycle.value, request(bytes), new AbortController().signal)
+    await fetchStarted
+    await vi.advanceTimersByTimeAsync(31_000)
+    await expect(inspection).resolves.toMatchObject({ outcome: 'planned' })
+    expect(lifecycle.stage).toHaveBeenCalledOnce()
+  })
+
+  it('stops a stalled artifact before staging at the extended deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new DOMException('expired', 'TimeoutError')), milliseconds)
+      return controller.signal
+    })
+    let started!: () => void
+    const fetchStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: { signal: AbortSignal }) => {
+        started()
+        return await new Promise<Response>((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+        })
+      }),
+    )
+    const lifecycle = handler()
+    const inspection = inspectMarketplaceArtifactPackage(
+      lifecycle.value,
+      request(Buffer.from('artifact')),
+      new AbortController().signal,
+    )
+    const rejected = expect(inspection).rejects.toThrow('Plugin download from registry.example timed out')
+    await fetchStarted
+    await vi.advanceTimersByTimeAsync(120_000)
+    await rejected
     expect(lifecycle.stage).not.toHaveBeenCalled()
   })
 
