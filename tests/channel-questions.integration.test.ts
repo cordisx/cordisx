@@ -46,6 +46,9 @@ async function fixture(adapterId = 'feishu') {
     }),
   } as unknown as ChannelConversationAccess
   const native = {
+    contextObservations: () => undefined,
+    hasPreparation: () => false,
+    isPreparing: () => false,
     exists: vi.fn(async () => true),
     start: vi.fn(async (_id: string, _input: unknown, sessionId?: string) => ({
       state: 'running' as const,
