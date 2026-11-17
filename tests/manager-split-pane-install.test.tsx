@@ -15,9 +15,15 @@ vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
 
 /** Exercise the installed Host entry, seat assembly and cleanup together, without a browser process. */
 describe('Manager installation beside native right tabs', () => {
-  it.each(['overlay', 'workspace'] as const)(
-    'opens %s on the main Host seat and preserves the selected right panel, native draft and route',
-    async presentationMode => {
+  it.each(
+    [
+      { presentationMode: 'overlay', headerLayout: 'full-bleed', touchingSeam: false },
+      { presentationMode: 'workspace', headerLayout: 'default', touchingSeam: true },
+      { presentationMode: 'workspace', headerLayout: 'thread-edge-scroll', touchingSeam: true },
+    ] as const,
+  )(
+    'opens $presentationMode with $headerLayout and preserves the selected right panel, native draft and route',
+    async ({ presentationMode, headerLayout, touchingSeam }) => {
       const f = reactManagerFixture()
       const { document, dom } = f
       installNativeManagerShell(dom)
@@ -42,8 +48,7 @@ describe('Manager installation beside native right tabs', () => {
       workspace.dataset.appShellHeaderPlacement = 'titlebar'
       header.replaceWith(workspace)
       workspace.append(header)
-      const touchingSeam = presentationMode === 'workspace'
-      header.dataset.appShellHeaderLayout = touchingSeam ? 'default' : 'full-bleed'
+      header.dataset.appShellHeaderLayout = headerLayout
       const titleSlot = element('[data-app-shell-titlebar-slot="main"]')
       const obstacle = document.createElement('div')
       obstacle.dataset.appShellHeaderObstacle = 'true'
@@ -193,6 +198,64 @@ describe('Manager installation beside native right tabs', () => {
         expect(frame.inert).toBe(true)
         expect(browser.getAttribute('src')).toBe(sourceBefore)
         expect(draft.value).toBe('unsent draft')
+        if (headerLayout === 'thread-edge-scroll') {
+          const toggle = document.createElement('button')
+          toggle.dataset.appShellWorkspaceLayoutToggle = 'main'
+          toggle.textContent = 'Show tabs'
+          toggle.style.pointerEvents = 'auto'
+          toggle.style.setProperty('-webkit-app-region', 'no-drag')
+          setRect(toggle, rect(1683, 8, 28, 28))
+          let paint: FrameRequestCallback | undefined
+          Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+          const animationFrame = vi.spyOn(dom.window, 'requestAnimationFrame').mockImplementation(callback => {
+            paint = callback
+            return 1
+          })
+          await act(async () => {
+            workspace.dataset.appShellUnifiedTabStrip = 'false'
+            workspace.dataset.appShellCompactPageGutter = 'false'
+            end.replaceChildren(toggle)
+            panel.remove()
+            // The offscreen native renderer commits the new controls before
+            // painting their geometry. Preserve the actual iframe until paint.
+            await new Promise(resolve => setTimeout(resolve, 1200))
+          })
+          expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull()
+          expect(embedded.contentDocument).toBe(embeddedDocument)
+          await act(async () => {
+            setRect(end, rect(1676, 0, 43, 44))
+            setRect(element('[data-app-shell-main-titlebar]'), rect(290, 0, 1429, 44))
+            element('[data-app-shell-main-titlebar]').style.position = 'absolute'
+            setRect(titleSlot, rect(290, 0, 1423, 44))
+            setRect(obstacle, rect(290, 0, 1423, 44))
+            setRect(main, rect(290, 44, 1429, 800))
+            setRect(frame, rect(290, 44, 1429, 800))
+            paint!(0)
+            await new Promise(resolve => setTimeout(resolve, 40))
+          })
+          animationFrame.mockRestore()
+          Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+          await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
+          expect(document.querySelector('[data-cordisx-react-manager]')).toBe(manager)
+          expect(embedded.contentDocument).toBe(embeddedDocument)
+          expect(embeddedDocument.querySelector('input')?.value).toBe('plugin draft')
+          expect(route.key).toBe('thread')
+          await act(async () => {
+            workspace.dataset.appShellUnifiedTabStrip = 'true'
+            workspace.dataset.appShellCompactPageGutter = 'true'
+            end.replaceChildren(replacement)
+            document.body.append(panel)
+            setRect(end, rect(endLeft, 0, 1719 - endLeft, 44))
+            setRect(element('[data-app-shell-main-titlebar]'), rect(290, 0, 560, 44))
+            setRect(titleSlot, rect(290, 0, 554, 44))
+            setRect(main, rect(290, 44, 560, 800))
+            setRect(frame, rect(290, 44, 560, 800))
+            await new Promise(resolve => setTimeout(resolve, 40))
+          })
+          await vi.waitFor(() => expect(document.querySelector('[data-cordisx-manager-pane="true"]')).not.toBeNull())
+          expect(document.querySelector('[data-cordisx-react-manager]')).toBe(manager)
+          expect(embedded.contentDocument).toBe(embeddedDocument)
+        }
         for (const expanded of [false, true]) {
           await act(async () => {
             changeSidebar(expanded)

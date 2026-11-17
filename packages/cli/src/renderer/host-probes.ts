@@ -277,7 +277,7 @@ function isTabRowTitle(bar: HTMLElement, title: HTMLElement | undefined, slot: H
   return contents.length === 1 && contents[0]!.contains(slot) && rows?.length === 1 && visible(rows[0]!)
 }
 
-/** 26.1103 insets the ordinary main title 6px beneath its single 36px layout action. */
+/** 26.1103 insets the main title 6px beneath its single native layout action. */
 function isInsetWorkspaceTitle(bar: HTMLElement, title: HTMLElement, slot: HTMLElement, end: HTMLElement): boolean {
   const view = bar.ownerDocument.defaultView
   const owner = resolveNativeViewportTitlebarOwner(bar)
@@ -285,7 +285,7 @@ function isInsetWorkspaceTitle(bar: HTMLElement, title: HTMLElement, slot: HTMLE
   const buttons = end.querySelectorAll('button')
   if (
     view === null || owner?.workspace === undefined
-    || bar.getAttribute('data-app-shell-header-layout') !== 'default'
+    || !['default', 'thread-edge-scroll'].includes(bar.getAttribute('data-app-shell-header-layout') ?? '')
     || owner.surface?.getAttribute('data-app-shell-unified-tab-strip') !== 'false'
     || wrapper?.getAttribute('data-app-shell-header-obstacle') !== 'true' || wrapper.parentElement !== title
     || !visible(wrapper) || buttons.length !== 1
@@ -303,7 +303,8 @@ function isInsetWorkspaceTitle(bar: HTMLElement, title: HTMLElement, slot: HTMLE
   const near = (a: number, b: number) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 2
   return near(titleRect.left, slotRect.left) && near(titleRect.top, barRect.top)
     && near(titleRect.right, barRect.right) && near(titleRect.bottom, barRect.bottom)
-    && near(titleRect.right - slotRect.right, 6) && near(endRect.width, 36)
+    && near(titleRect.right - slotRect.right, 6)
+    && near(endRect.width, bar.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll' ? 43 : 36)
     && near(wrapperRect.left, slotRect.left) && near(wrapperRect.top, slotRect.top)
     && near(wrapperRect.right, slotRect.right) && near(wrapperRect.bottom, slotRect.bottom)
 }
