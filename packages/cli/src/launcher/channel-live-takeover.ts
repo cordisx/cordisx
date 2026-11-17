@@ -53,7 +53,8 @@ const sameToken = (token: string, digest: string): boolean => {
 export function mayFinishChannelJob(state: ChannelConversationState, observed: ChannelConversationJob): boolean {
   const current = state.jobs[observed.id]
   const takeover = observed.sessionId ? state.liveTakeovers[observed.sessionId] : undefined
-  return current?.state === 'running' && current.sessionId === observed.sessionId && current.turnId === observed.turnId
+  return current?.state === observed.state && ['running', 'replying'].includes(current.state)
+    && current.sessionId === observed.sessionId && current.turnId === observed.turnId
     && (!takeover || ['preparing', 'ready', 'abandoned'].includes(takeover.state))
 }
 

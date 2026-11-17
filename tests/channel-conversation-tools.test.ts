@@ -170,7 +170,12 @@ describe('local binding inventory boundary', () => {
     ]
     const consumer = {
       status: vi.fn(() => ({ status: 'ok', revision: 42, bindings, jobs: [{ prompt: 'never-export' }] })),
-      agentAccess: { caller: () => undefined, source: () => undefined },
+      agentAccess: {
+        caller: () => undefined,
+        source: () => undefined,
+        hasPreparation: () => false,
+        preparation: () => false,
+      },
       taskSettings: { isBound: () => false },
     }
     const tools = new ChannelConversationTools(() => f.access, consumer as never)

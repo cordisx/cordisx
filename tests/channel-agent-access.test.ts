@@ -59,6 +59,8 @@ describe('configured Channel CLI routine approval', () => {
   it('allows reads and policy-approved source replies, preserves explicit send denials and fences old context', () => {
     let policy = parseChannelConversationPolicy({ enabled: true })
     const native = {
+      hasPreparation: () => false,
+      isPreparing: () => false,
       sourceFor: (thread: string, turn?: string) =>
         thread === 'chat' && (!turn || turn === 'turn') ? source : undefined,
       contextFor: (token: string) =>
