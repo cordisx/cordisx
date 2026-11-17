@@ -74,6 +74,10 @@ export class ChannelLiveTakeover {
     const reserved = await this.store.mutate(state => {
       const job = state.jobs[input.sourceJob], entry = state.continuations[input.source]
       const policy = effectiveLivePolicy(state.continuationDefaults, entry)
+      const previous = state.liveTakeovers[input.source]
+      if (previous?.state === 'abandoned' && previous.sourceTurn !== input.sourceTurn) {
+        delete state.liveTakeovers[input.source]
+      }
       if (
         !policy.policy.enabled || entry?.intent || state.liveTakeovers[input.source]
         || !job || job.sessionId !== input.source || job.turnId !== input.sourceTurn || job.state !== 'running'

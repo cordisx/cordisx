@@ -42,6 +42,7 @@ interface Session {
 /** Current-connection state only. Authorization and lifecycle ownership live in the service boundary. */
 export class ContextObservations {
   private readonly sessions = new Map<string, Session>()
+  private readonly sessionListeners = new Set<(sessionId: string) => void>()
   private disposed = false
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -52,7 +53,17 @@ export class ContextObservations {
     if (old) { for (const watch of old.watches) this.close(old, watch, 'session-replaced') }
     const current: Session = { generation, reset: randomUUID(), config: randomUUID(), sequence: -1, watches: new Set() }
     this.sessions.set(sessionId, current)
+    for (const listener of this.sessionListeners) {
+      try {
+        listener(sessionId)
+      } catch { /* Observation listeners cannot block native input. */ }
+    }
     return { resetEpoch: current.reset, configEpoch: current.config }
+  }
+
+  onSession(listener: (sessionId: string) => void): () => void {
+    this.sessionListeners.add(listener)
+    return () => this.sessionListeners.delete(listener)
   }
 
   invalidate(sessionId: string, kind: 'reset' | 'config'): { resetEpoch: string; configEpoch: string } | undefined {
@@ -143,6 +154,7 @@ export class ContextObservations {
       }
     }
     this.sessions.clear()
+    this.sessionListeners.clear()
   }
 
   private evaluate(session: Session, watch: Watch, sample: ContextObservation): void {
