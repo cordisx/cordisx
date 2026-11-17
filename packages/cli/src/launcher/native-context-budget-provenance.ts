@@ -262,6 +262,7 @@ export function deriveNativeBudgetProvenance(
     if (explicit && record(configured)) {
       const prompt = configured.auto_compact_fallback_prompt
       if (prompt !== undefined && prompt !== null && typeof prompt !== 'string') return unknown
+      // Native resolve_token_budget_config trims explicit prompts and drops empty results.
       if (typeof prompt === 'string' && prompt.trim().length > 0) {
         if (!positive(configured.auto_compact_fallback_buffer_tokens)) return unknown
         fallbackBufferTokens = configured.auto_compact_fallback_buffer_tokens
@@ -277,6 +278,7 @@ export function deriveNativeBudgetProvenance(
         || !positive(modelBudget.reminder_threshold_tokens) || !positive(buffer) || !reminder.trim()
         || Buffer.byteLength(prompt) > 2000 || Buffer.byteLength(reminder) > 2000 || Buffer.byteLength(guidance) > 2000
       ) return unknown
+      // Native resolve_token_budget wraps model-owned prompts in Some, even when blank.
       fallbackBufferTokens = buffer
     }
   }

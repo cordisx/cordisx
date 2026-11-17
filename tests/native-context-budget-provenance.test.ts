@@ -193,6 +193,30 @@ describe('deriving fresh-thread configuration', () => {
     })
   })
 
+  it('matches native blank-prompt handling for configured and model-owned fallbacks', () => {
+    for (const prompt of ['', ' \t\n ']) {
+      const configured = deriveNativeBudgetProvenance(catalog(modelDefaults), {
+        ...receipt,
+        mergedConfig: {
+          features: {
+            token_budget: {
+              enabled: true,
+              auto_compact_fallback_prompt: prompt,
+              auto_compact_fallback_buffer_tokens: 3000,
+            },
+          },
+        },
+      })
+      expect(configured.status === 'verified' && configured.evidence.configuration.fallbackBufferTokens).toBe(0)
+
+      const modelOwned = deriveNativeBudgetProvenance(
+        catalog({ ...modelDefaults, enabled: true, auto_compact_fallback_prompt: prompt }),
+        receipt,
+      )
+      expect(modelOwned.status === 'verified' && modelOwned.evidence.configuration.fallbackBufferTokens).toBe(16384)
+    }
+  })
+
   it('refuses unresolved managed requirements and experimental activation', () => {
     for (
       const value of [
