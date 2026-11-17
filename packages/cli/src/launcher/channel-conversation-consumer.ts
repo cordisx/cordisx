@@ -1,5 +1,6 @@
+import { ChannelQuestions } from './channel-questions.js'
 import { channelCardAction } from './channel-card-actions.js'
-import { createHash } from 'node:crypto'
+import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
 import type {
   ChannelEventRef,
   ChannelPluginIdentity,
@@ -42,20 +43,11 @@ import {
   ChannelConversationStore,
 } from './channel-conversation-store.js'
 
-const identity = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const CALLER: ChannelPluginIdentity = {
   source: 'cordisx:channel-consumer',
   pluginId: 'host-channel-consumer',
   generation: 'profile',
 }
-const sameConversation = (left: ChannelThreadRef, right: ChannelThreadRef): boolean =>
-  ['adapterId', 'accountId', 'tenantId', 'conversationId'].every(key =>
-    left[key as keyof ChannelThreadRef] === right[key as keyof ChannelThreadRef]
-  )
-const bindingIdentity = (profileId: string, channel: ChannelThreadRef, sessionId: string): string =>
-  `binding:${
-    identity([profileId, channel.adapterId, channel.accountId, channel.tenantId, channel.conversationId, sessionId])
-  }`
 const isThread = (id: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(id)
 export interface ChannelConversationConsumerInput {
   readonly profileId: string
@@ -63,29 +55,6 @@ export interface ChannelConversationConsumerInput {
   readonly native: () => Pick<ChannelNativeSessions, 'exists' | 'start' | 'completion' | 'reconcile'> | undefined
   readonly report?: (code: string) => void
 }
-function eventThread(event: ChannelEventRef): ChannelThreadRef {
-  const { adapterId, accountId, tenantId, conversationId, kind, threadId, semantics } = event
-  return { adapterId, accountId, tenantId, conversationId, kind, threadId, semantics }
-}
-function thread(value: unknown): ChannelThreadRef {
-  const ref = channelRecord(value)
-  channelExact(ref, ['adapterId', 'accountId', 'tenantId', 'conversationId', 'kind', 'threadId', 'semantics'])
-  if (!['direct', 'group'].includes(String(ref.kind))) throw new Error('INVALID_TARGET')
-  const conversationId = channelText(ref.conversationId)
-  if (!/^oc_[A-Za-z0-9_]+$/u.test(conversationId)) throw new Error('INVALID_TARGET')
-  const semantics = ref.semantics ?? 'conversation'
-  if (!['conversation', 'topic', 'reply-chain'].includes(String(semantics))) throw new Error('INVALID_TARGET')
-  return {
-    adapterId: channelText(ref.adapterId),
-    accountId: channelText(ref.accountId),
-    tenantId: channelText(ref.tenantId),
-    conversationId,
-    kind: ref.kind as 'direct' | 'group',
-    threadId: channelText(ref.threadId ?? conversationId),
-    semantics: semantics as ChannelThreadRef['semantics'],
-  }
-}
-
 /** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {
   private readonly lifetime = new AbortController()
@@ -99,12 +68,16 @@ export class ChannelConversationConsumer {
   readonly agentAccess = new ChannelAgentAccess(() => this.store.snapshot(), () => this.extraNative?.())
   readonly taskSettings: ChannelTaskSettings
   private readonly creationDefaults: ChannelCreationDefaults
+  readonly questions: ChannelQuestions
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput,
   ) {
     this.creationDefaults = new ChannelCreationDefaults(this.store)
+    this.questions = new ChannelQuestions(this.store, this.input.access, () => {
+      void this.pump()
+    })
     this.taskSettings = new ChannelTaskSettings({
       store: this.store,
       native: () => this.extraNative?.(),
@@ -154,6 +127,7 @@ export class ChannelConversationConsumer {
     ref: import('@cordisx/channel-runtime').ChannelTenantRef,
     action: import('@larksuiteoapi/node-sdk').CardActionEvent,
   ) {
+    if (await this.questions.action(ref, action)) return
     return channelCardAction(
       {
         bindings: () => this.bindings(),

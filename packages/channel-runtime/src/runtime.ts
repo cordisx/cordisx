@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { type ChannelQuestionCard, validateQuestionCard } from './question-card.js'
 import { deliverySnapshot, inputsSince, latestInputCursor } from './consumer-readback.js'
 import { conversationReadback, localConversationRefs } from './conversation-readback.js'
 import {
@@ -347,6 +348,25 @@ export class ChannelRuntime {
     caller: ChannelPluginIdentity,
     deliveryId: string,
   ): Promise<ChannelDeliveryHandle> {
+    return this.#enqueueNotification(notification, caller, deliveryId)
+  }
+
+  /** Host-only bounded question; plugin notifications remain text-only. */
+  async notifyQuestionOnce(
+    notification: ChannelNotification,
+    caller: ChannelPluginIdentity,
+    deliveryId: string,
+    card: ChannelQuestionCard,
+  ): Promise<ChannelDeliveryHandle> {
+    return this.#enqueueNotification(notification, caller, deliveryId, validateQuestionCard(card))
+  }
+
+  async #enqueueNotification(
+    notification: ChannelNotification,
+    caller: ChannelPluginIdentity,
+    deliveryId: string,
+    questionCard?: ChannelQuestionCard,
+  ): Promise<ChannelDeliveryHandle> {
     this.#assertRuntimeActive()
     const target = sanitizedThread(notification.target)
     if (!['completion', 'approval', 'failure', 'reply'].includes(notification.kind)) {
@@ -376,6 +396,7 @@ export class ChannelRuntime {
         if (
           canonical(prior.caller) !== canonical(caller) || canonical(prior.target) !== canonical(target)
           || prior.kind !== notification.kind || prior.text !== notification.text
+          || canonical(prior.questionCard ?? null) !== canonical(questionCard ?? null)
         ) throw new ChannelIntegrityError('Operation conflict')
         return
       }
@@ -387,6 +408,7 @@ export class ChannelRuntime {
         target,
         kind: notification.kind,
         text: notification.text,
+        ...(questionCard ? { questionCard } : {}),
         createdAt: now,
         updatedAt: now,
         status: 'queued',
@@ -798,6 +820,7 @@ export class ChannelRuntime {
           target: claimed.target,
           kind: claimed.kind,
           text: claimed.text,
+          ...(claimed.questionCard ? { questionCard: claimed.questionCard } : {}),
           createdAt: claimed.createdAt,
         })
         const completedAt = this.#now()

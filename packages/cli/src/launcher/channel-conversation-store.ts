@@ -110,6 +110,7 @@ export interface ChannelConversationState {
   taskSettings: Record<string, ChannelTaskSetting>
   taskRequests: Record<string, ChannelTaskRequest>
   creationDefaults: ChatExecutionDefaults
+  questions: Record<string, import('./channel-questions.js').ChannelQuestionRecord>
 }
 
 function initial(): ChannelConversationState {
@@ -129,6 +130,7 @@ function initial(): ChannelConversationState {
     taskSettings: {},
     taskRequests: {},
     creationDefaults: { revision: 0, settings: {} },
+    questions: {},
   }
 }
 
@@ -152,6 +154,7 @@ export class ChannelConversationStore {
       parsed.taskSettings ??= {}
       parsed.taskRequests ??= {}
       parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
+      parsed.questions ??= {}
       Object.assign(parsed, parseChannelTaskRecords(parsed.taskSettings, parsed.taskRequests))
       parsed.policyRevision ??= 0
       if (

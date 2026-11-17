@@ -28,9 +28,10 @@ const WRITES = new Set([
   'execution-settings-set',
   'task-settings-set',
   'task-config-set',
+  'question-cancel',
 ])
 export function channelCliOperationKind(operation: string): ChannelCliOperationKind | undefined {
-  return READS.has(operation) ? 'read' : ['send', 'send-many'].includes(operation)
+  return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask'].includes(operation)
     ? 'send'
     : WRITES.has(operation)
     ? 'write'

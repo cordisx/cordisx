@@ -233,6 +233,8 @@ export interface ChannelOutboundDelivery {
   readonly kind: 'completion' | 'approval' | 'failure' | 'reply'
   readonly text: string
   readonly createdAt: string
+  /** Launcher-only validated question payload; never part of plugin notifications. */
+  readonly questionCard?: import('./question-card.js').ChannelQuestionCard
 }
 
 export interface ChannelSendResult {

@@ -1,5 +1,7 @@
 import type { CardActionEvent } from '@larksuiteoapi/node-sdk'
 
+export type FeishuQuestionAction = CardActionEvent & { readonly questionText?: string }
+
 /** Acknowledge the SDK callback before doing native work or replacing the clicked card. */
 export class FeishuCardActionQueue {
   private readonly queued: CardActionEvent[] = []
@@ -18,13 +20,20 @@ export class FeishuCardActionQueue {
       this.failure('card-action-queue-full')
       return
     }
-    // Transport raw bodies never enter this lifecycle queue.
-    this.queued.push({
+    // Extract only this bounded form field; transport raw bodies never enter the queue.
+    const raw = event.raw as { action?: { form_value?: { answer?: unknown } } } | undefined
+    const answer = event.action.name === 'channel_question_submit' ? raw?.action?.form_value?.answer : undefined
+    const questionText = typeof answer === 'string' && answer.trim() && answer.length <= 1000 && !/\0/u.test(answer)
+      ? answer
+      : undefined
+    const normalized: FeishuQuestionAction = {
       messageId: event.messageId,
       chatId: event.chatId,
       operator: { ...event.operator },
       action: { ...event.action },
-    })
+      ...(questionText === undefined ? {} : { questionText }),
+    }
+    this.queued.push(normalized)
     this.schedule()
   }
 

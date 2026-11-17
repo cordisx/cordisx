@@ -1,7 +1,7 @@
 # Configured Channel operations
 
 Use the running profile's `channel_*` MCP tools when present. The CLI has the
-same request shapes through `cordisx channel <operation> --input '<JSON>'`.
+equivalent request shapes through `cordisx channel <operation> --input '<JSON>'`; question cards are CLI-only.
 For fields and compatibility, read the owning [CLI reference](https://raw.githubusercontent.com/cordisx/cordisx/main/.agents/docs/channel-cli.md).
 
 List `channel_connections`, select the requested configured account, then use
@@ -25,7 +25,7 @@ One chat can bind many destinations, and destinations can bind many chats.
 `deliver` queues addressed messages as model turns. Automatic final-response
 forwarding is off by default: local commentary and final answers stay in the
 Codex chat. An incoming task supplies the exact Host CLI, CordisX home and
-profile; use that command for explicit `send` / `send-many` replies. Do not
+profile; use that command for explicit `send` / `send-many` replies or `ask` questions. Prefer an external CLI question over native `request_user_input`, which may be invisible to the Channel user. Choose a plain message or an optional-choice card; after sending, wait for a subsequent Channel user message. Card buttons and the card text form both answer; ordinary text replies follow the existing group mention or wake-prefix policy. Platforms without cards receive numbered text. Do not
 use another CLI from PATH or another profile. Writing a final answer or stopping
 a turn is not an external send.
 

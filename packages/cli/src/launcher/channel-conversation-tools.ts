@@ -148,7 +148,17 @@ export class ChannelConversationTools {
       const callerSession = scopedCaller?.threadId ?? nativeCaller
       if (
         nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller)
-        && ['send', 'send-many', 'bind', 'unbind', 'policy-set', 'execution-defaults-set', 'execution-settings-set']
+        && [
+          'send',
+          'send-many',
+          'ask',
+          'question-cancel',
+          'bind',
+          'unbind',
+          'policy-set',
+          'execution-defaults-set',
+          'execution-settings-set',
+        ]
           .includes(operation)
         && !source
       ) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
@@ -231,7 +241,7 @@ export class ChannelConversationTools {
       }
       if (
         !current.accounts().some(item =>
-          sameAccount(item.ref, ref) && (operation === 'receipt' || item.state === 'ready')
+          sameAccount(item.ref, ref) && (['receipt', 'question-cancel'].includes(operation) || item.state === 'ready')
         )
       ) {
         throw new Error('CONNECTION_NOT_READY')
@@ -241,6 +251,12 @@ export class ChannelConversationTools {
         pluginId: 'host-channel-tools',
         // Correlation is not an ownership or permission grant. The endpoint is launch/user scoped.
         generation: callerThreadId(metadata) ?? 'local-cli',
+      }
+      if (operation === 'ask' || operation === 'question-cancel') {
+        if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        return operation === 'ask'
+          ? await this.consumer.questions.ask(input, ref, caller, source)
+          : await this.consumer.questions.cancel(input, ref, caller)
       }
       if (operation === 'conversations') {
         if (Object.keys(input).some(key => key !== 'account')) throw new Error('INVALID_REQUEST')

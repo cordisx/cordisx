@@ -17,8 +17,8 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 `local-bindings` is a local management CLI read, not an Agent tool. It lists profile binding IDs, sessions, channel identities, states and modes at one revision and service generation, without messages or credentials. An empty input lists the profile; a conversation filter requires the complete account identity. Older running Hosts do not implement this operation; use a matching Host runtime.
 
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
-shape as native `channel_*` tools. `connections`, `conversations`, `bind`,
-`unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `listen`, `send`, `send-many`, `receipt`,
+shape as native `channel_*` tools where an equivalent tool exists; `ask` and `question-cancel` are CLI-only. `connections`, `conversations`, `bind`,
+`unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `listen`, `send`, `send-many`, `ask`, `question-cancel`, `receipt`,
 `policy`, `policy-set`, `model-list`, `task-settings`, `task-settings-set`,
 `task-config`, `task-config-set` and `task-requests` use the existing management endpoint and verify the
 launcher identity. An inactive runtime reports unavailable.
@@ -50,6 +50,48 @@ defaults to the conversation and `semantics` defaults to `conversation`.
 `listen` bindings retain input for retrieval; `deliver` queues a native turn
 when the bound chat is idle. Binding cardinality is unrestricted. Message
 history starts at each binding’s creation sequence and survives restart.
+
+### Questions for a Channel user
+
+A Channel-triggered Agent should ask through the exact configured CLI when it
+needs an external user's input. Use ordinary `send` for a plain question, or
+`ask` for a question with choices. Native `request_user_input` may not be
+visible to the Channel user. After a successful send, end the turn and wait for
+a later Channel message; neither operation waits for the answer.
+
+```text
+cordisx channel ask --profile <profile> --context <incoming-context> --input '{"account":{"adapterId":"feishu","accountId":"<account>","tenantId":"<tenant>"},"target":{"id":"oc_<chat>","kind":"group"},"question":"Which option?","options":[{"label":"First","value":"First option"},{"label":"Second","value":"Second option"}],"operationId":"<stable-id>"}'
+```
+
+Supply one to five short `label`/`value` choices, and optionally `targetUserId`
+to accept card submissions only from that account-scoped user (the card remains
+visible to the conversation), or
+`expiresInSeconds` (60–604800; default one day). Choose an existing target
+conversation with a deliver binding, or the source conversation of the active
+incoming turn while its automatic binding is being created. Resolve identifiers
+rather than guessing.
+The optional `target.replyMode` and `replyTo` use the same routing rules as
+`send`. Normal send policy and approvals still apply. Feishu/Lark presents buttons and a text field with a submit button;
+other adapters receive a numbered text question and no clickable claim. A
+non-card adapter rejects `targetUserId`, since this fallback cannot restrict
+who replies. Anyone
+may answer through a normal text message according to the existing message
+policy, including when a card has a target user. In a group, a text reply must
+address the bot with a mention or configured wake prefix; a bare unaddressed
+group message is not treated as an answer.
+
+A verified button click becomes a user message containing the question and the
+stored choice value; a submitted card form carries its bounded text instead.
+Both use the actual interacting user's identity and work without a group mention. It follows the
+normal message policy and all eligible bindings. Repeated button or form submissions by the same user
+on the same question produce one input. `question-cancel` with the same account
+and operationId disables later card submissions, even if that configured account is
+offline; expiry does likewise. Neither recalls the
+message nor removes an already queued answer. An ordinary text answer is not
+linked to or used to close a card. Read the normal `receipt` using the same
+operationId after uncertainty, and never blindly resend. Only a `sent` receipt
+confirms delivery; a failed, pending or unknown result does not confirm a user
+saw the question or answered it.
 
 ### Local and remote history
 
