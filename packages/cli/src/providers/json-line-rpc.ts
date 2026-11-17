@@ -71,13 +71,14 @@ export class JsonLineRpcClient {
     options.output.once('error', this.onOutputError)
   }
 
-  request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result> {
+  request<Result>(method: string, params: unknown, signal?: AbortSignal, onId?: (id: number) => void): Promise<Result> {
     if (this.closed) return Promise.reject(new JsonLineRpcError('RPC client is closed'))
     if (!/^[a-zA-Z][a-zA-Z0-9._/-]{0,127}$/.test(method)) {
       return Promise.reject(new JsonLineRpcError('RPC method is invalid'))
     }
     if (signal?.aborted === true) return Promise.reject(new JsonLineRpcError(`RPC request aborted: ${method}`))
     const id = this.nextId++
+    onId?.(id)
     return new Promise<Result>((resolve, reject) => {
       const abort = (): void => {
         const pending = this.pending.get(id)

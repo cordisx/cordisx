@@ -27,6 +27,56 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('expires only the global preparation fence while keeping the known target restricted', async () => {
+    vi.useFakeTimers()
+    try {
+      const sessions = new ChannelNativeSessions({
+        bridge: () =>
+          ({
+            call: async () => ({ status: 'started', sessionId: 'target', turnId: 'prep' }),
+          }) as unknown as AgentBridge,
+        nativeRequest: async () => ({}),
+        cwd: '/tmp',
+      })
+      await sessions.startContinuation('prepare', 'brief', {} as never, input.source.event, {
+        token: 'a'.repeat(64),
+        sourceId: 'source',
+      })
+      expect(sessions.hasPreparation()).toBe(true)
+      expect(sessions.isPreparing('target')).toBe(true)
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(sessions.hasPreparation()).toBe(false)
+      expect(sessions.isPreparing('target')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('redacts live source context tokens from the bounded history even after the source ends', async () => {
+    let token = '', notify: ((method: string, params: unknown) => void) | undefined
+    const call = vi.fn(async (_app, _operation, args) => {
+      token = /--context '([a-f0-9]{48})'/u.exec(args.prompt)?.[1] ?? ''
+      return { status: 'started', sessionId: 'source', turnId: 'turn' }
+    })
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      nativeRequest: async method =>
+        method === 'thread/items/list'
+          ? { data: [{ item: { type: 'agentMessage', text: `context ${token}` } }] }
+          : {},
+      cwd: '/tmp',
+      cli: configuredChannelCliContext('/tmp/cx', 'profile'),
+      subscribeContinuationEvents: listener => {
+        notify = listener
+        return () => {}
+      },
+    })
+    await sessions.start('operation', input)
+    expect(token).toHaveLength(48)
+    notify?.('turn/completed', { threadId: 'source', turn: { id: 'turn', status: 'completed' } })
+    const page = await sessions.continuationHistory('source', { limit: 8 })
+    expect(JSON.stringify(page)).not.toContain(token)
+    expect(page.entries[0]?.text).toContain('[context redacted]')
+  })
   it('correlates the first native approval before the first-turn acknowledgement and forwards scoped model/effort defaults', async () => {
     const message = structuredClone(input)
     message.source.event = {

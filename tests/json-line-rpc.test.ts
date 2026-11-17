@@ -13,9 +13,13 @@ describe('JSON-line RPC client', () => {
     const input = new PassThrough()
     const output = new PassThrough()
     const client = new JsonLineRpcClient({ input, output, timeoutMs: 1_000 })
-    const first = client.request<{ value: number }>('model/list', { limit: 1 })
+    let allocated: number | undefined
+    const first = client.request<{ value: number }>('model/list', { limit: 1 }, undefined, id => {
+      allocated = id
+    })
     const request = await line(output)
     expect(request).toMatchObject({ method: 'model/list', params: { limit: 1 } })
+    expect(allocated).toBe(request.id)
     input.write(`${JSON.stringify({ id: request.id, result: { value: 7 } })}\n`)
     await expect(first).resolves.toEqual({ value: 7 })
 

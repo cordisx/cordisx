@@ -109,6 +109,7 @@ export class ChannelConversationConsumer {
   }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
     this.extraNative = native
+    this.continuation.attachContext()
     this.approvals.attach(native())
   }
   async cardAction(
@@ -440,7 +441,6 @@ export class ChannelConversationConsumer {
       const jobs = Object.values(this.store.snapshot().jobs).filter(job =>
         ['queued', 'running', 'replying', 'reconciliation-required'].includes(job.state)
       )
-      // Concurrency is an execution budget, not a limit on binding cardinality.
       const offset = jobs.length ? this.jobOffset % jobs.length : 0
       const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 8)
       this.jobOffset = offset + selected.length
@@ -458,6 +458,7 @@ export class ChannelConversationConsumer {
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
+      await this.continuation.pumpLive()
     })().catch(error =>
       this.input.report?.(
         error instanceof Error && /^[A-Z_]+$/u.test(error.message)
@@ -860,7 +861,6 @@ export class ChannelConversationConsumer {
     const includeFinal = job.finalDeliveryEnabled === true && state.policy.enabled && state.policy.autoReply
       && binding?.state === 'active' && binding.autoReply && mode !== 'none'
       && channelPolicyAllows(state.policy, 'dispatch', event) && channelPolicyAllows(state.policy, 'send', event)
-    // Default task completion is status-only. Local assistant text is never an outbound message source.
     const completion = await native.completion(job.sessionId, job.turnId, includeFinal)
     if (completion.state === 'running') return
     if (completion.state === 'failed') {
@@ -897,7 +897,6 @@ export class ChannelConversationConsumer {
         return undefined
       }
       try {
-        // Serialize choice and reservation. A policy change/retry never retargets an existing outbox operation.
         current.replyTarget ??= existingTarget ?? channelReplyTarget(event, mode)
       } catch (error) {
         current.state = 'failed'
@@ -992,6 +991,7 @@ export class ChannelConversationConsumer {
     this.commandUsers.dispose()
     this.sessionCommands.dispose()
     this.approvals.dispose()
+    this.continuation.dispose()
     await this.store.close()
   }
   sendAllowed(event: ChannelEventRef): boolean {

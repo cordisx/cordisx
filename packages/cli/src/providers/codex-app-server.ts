@@ -9,6 +9,8 @@ export interface CodexAppServerOptions {
   readonly spawnProcess?: typeof spawn
   /** Opt in only when the caller needs experimental app-server methods. */
   readonly experimentalApi?: boolean
+  /** A launch-owned immutable catalog, fixed before this app-server starts. */
+  readonly modelCatalogPath?: string
   /** Resolve a Host-owned keychain/secret reference without exposing its value to the renderer. */
   readonly resolveSecretReference?: (reference: string) => Promise<string | undefined>
 }
@@ -16,6 +18,11 @@ export interface CodexAppServerOptions {
 export interface CodexAppServerRpc {
   readonly generation: string
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result>
+  requestWithReceipt?<Result>(
+    method: string,
+    params: unknown,
+    signal?: AbortSignal,
+  ): Promise<{ requestId: string; responseRequestId: string; result: Result }>
   subscribeNotifications?(listener: (method: string, params: unknown) => void): () => void
   subscribeRequests?(
     listener: (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>,
@@ -51,8 +58,14 @@ export function codexAppServerArguments(
 }
 
 /** Local App Server uses the existing Codex login/configuration and receives no injected credential. */
-export function localCodexAppServerArguments(): readonly string[] {
-  return Object.freeze(['app-server', '--stdio', '-c', 'analytics.enabled=false'])
+export function localCodexAppServerArguments(modelCatalogPath?: string): readonly string[] {
+  return Object.freeze([
+    'app-server',
+    '--stdio',
+    '-c',
+    'analytics.enabled=false',
+    ...(modelCatalogPath ? ['-c', `model_catalog_json=${tomlString(modelCatalogPath)}`] : []),
+  ])
 }
 
 class SpawnedCodexAppServer implements CodexAppServerRpc {
@@ -89,6 +102,16 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
 
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result> {
     return this.rpc.request<Result>(method, params, signal)
+  }
+
+  async requestWithReceipt<Result>(method: string, params: unknown, signal?: AbortSignal) {
+    let requestId: number | undefined
+    const result = await this.rpc.request<Result>(method, params, signal, id => {
+      requestId = id
+    })
+    if (requestId === undefined) throw new Error('RPC_REQUEST_ID_UNAVAILABLE')
+    // JsonLineRpcClient resolves only the pending request with this exact response ID.
+    return { requestId: String(requestId), responseRequestId: String(requestId), result }
   }
 
   subscribeNotifications(listener: (method: string, params: unknown) => void): () => void {
@@ -139,7 +162,7 @@ export async function startLocalCodexAppServer(
   const environment = options.environment ?? process.env
   await mkdir(config.codexHome, { recursive: true, mode: 0o700 })
   const launch = options.spawnProcess ?? spawn
-  const child = launch(config.codexExecutable, localCodexAppServerArguments(), {
+  const child = launch(config.codexExecutable, localCodexAppServerArguments(options.modelCatalogPath), {
     cwd: config.codexHome,
     env: { ...environment, CODEX_HOME: config.codexHome },
     shell: false,

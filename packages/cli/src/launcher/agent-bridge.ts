@@ -94,6 +94,7 @@ export interface AgentBridgeCodexAuthority {
   nativeRequest(method: NativeBridgeMethod, params: Readonly<Record<string, unknown>>): Promise<unknown>
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   observedDispatch?(operationId: string, threadId: string, turnId?: string): void
+  preparationTools?(operationId: string): readonly unknown[] | undefined
 }
 
 export interface AgentBridgeBinding {
@@ -403,6 +404,9 @@ export function createCodexBridgeHandler(
             await codex.nativeRequest('thread/start', {
               ...executionStart,
               cwd,
+              ...(codex.preparationTools?.(String(args.operationId))
+                ? { dynamicTools: codex.preparationTools(String(args.operationId)) }
+                : {}),
               ...(providerId === undefined ? {} : { modelProvider: providerId }),
               ...(model === undefined ? {} : { model }),
               ...(serviceTier === undefined ? {} : { serviceTier }),

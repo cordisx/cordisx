@@ -3,7 +3,7 @@ type Evidence = { readonly mode?: WorkMode; readonly revision: number }
 
 /**
  * Evidence for an exclusively owned app-server, separate from native readback.
- * Codex 0.149.1 initializes newly started sessions in default mode. A resumed
+ * Codex 0.149.1 and 0.167.0-alpha.3.2 initialize new sessions in default mode. A resumed
  * or otherwise unknown thread is never assigned that default here.
  */
 export class HeadlessWorkMode {

@@ -14,6 +14,22 @@ export function configuredChannelCliContext(home: string, profile: string): Chan
 
 const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
+export function channelCliPreparationInstructions(
+  context: ChannelNativeCliContext | undefined,
+  contextToken: string,
+  takeoverToken: string,
+): readonly string[] {
+  if (!context) return []
+  const prefix = `env CORDISX_HOME=${quote(context.home)} ${quote(context.node)} ${quote(context.entry)} channel`
+  const scope = `--profile ${quote(context.profile)} --context ${quote(contextToken)}`
+  return [
+    `If the takeover tool is unavailable, use ${prefix} continuation-takeover-ready ${scope} --input ${
+      quote(JSON.stringify({ token: takeoverToken }))
+    }.`,
+    `Use ${prefix} continuation-history ${scope} --input '{}' for bounded source history.`,
+  ]
+}
+
 /** Only executable/configuration paths and a profile identifier are exposed; no credential or RPC token. */
 export function channelCliSendInstructions(
   context: ChannelNativeCliContext | undefined,

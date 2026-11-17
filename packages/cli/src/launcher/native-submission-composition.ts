@@ -49,6 +49,7 @@ import { combinedNativeModelProviderCatalog } from './native-model-provider-cata
 import { dynamicConfiguredCatalog } from './model-catalog/configured-source.js'
 import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
+import { callerThreadId } from './agent-bridge-context.js'
 import { startModelApiServer } from './model-api-server.js'
 import { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import { nativeProviderConfig } from './native-provider-config.js'
@@ -931,6 +932,10 @@ export async function prepareNativeSubmissionBootstrap(
         }
         lifetime.signal.throwIfAborted()
         const modelHandler = agentModels.bind({
+          preparing: metadata => {
+            const threadId = callerThreadId(metadata)
+            return threadId ? channelSession?.isPreparing(threadId) === true : channelSession?.hasPreparation() === true
+          },
           ...(completeOptions.channel === undefined ? {} : { channel: completeOptions.channel }),
           ...(startup === undefined ? {} : { startup }),
           catalog,

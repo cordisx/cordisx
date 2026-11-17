@@ -50,6 +50,7 @@ async function fixture() {
       return { sessionId: 'target', turnId: 'prepare' }
     }),
     turnState: vi.fn(async (): Promise<'active' | 'completed' | 'failed' | 'unknown'> => 'active'),
+    validateSource: vi.fn(async () => true),
     interruptExact: vi.fn(async (): Promise<'interrupted' | 'already-completed' | 'uncertain'> => 'interrupted'),
     catchup: vi.fn(async () => ({ delta: 'latest bounded source activity' })),
   }
@@ -64,6 +65,11 @@ describe('live takeover fencing', () => {
       const oldJob = f.store.snapshot().jobs.active!
       expect(await f.takeover.begin({ source: 'source', sourceTurn: 'turn', sourceJob: 'active' })).toBe(true)
       expect(mayFinishChannelJob(f.store.snapshot(), oldJob)).toBe(true)
+      expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: f.token() }))
+        .toBe(false)
+      await f.store.mutate(state => {
+        state.liveTakeovers.source!.historyRead = true
+      })
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'other', token: f.token() }))
         .toBe(false)
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: 'wrong' }))
@@ -95,6 +101,9 @@ describe('live takeover fencing', () => {
     try {
       await f.takeover.begin({ source: 'source', sourceTurn: 'turn', sourceJob: 'active' })
       await f.store.mutate(state => {
+        state.liveTakeovers.source!.historyRead = true
+      })
+      await f.store.mutate(state => {
         state.bindings.a!.state = 'archived'
       })
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: f.token() }))
@@ -110,6 +119,9 @@ describe('live takeover fencing', () => {
     try {
       f.native.interruptExact.mockRejectedValueOnce(new Error('transport lost'))
       await f.takeover.begin({ source: 'source', sourceTurn: 'turn', sourceJob: 'active' })
+      await f.store.mutate(state => {
+        state.liveTakeovers.source!.historyRead = true
+      })
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: f.token() }))
         .toBe(false)
       const reopened = await ChannelConversationStore.open(f.file)
@@ -132,6 +144,9 @@ describe('live takeover fencing', () => {
     const f = await fixture()
     try {
       await f.takeover.begin({ source: 'source', sourceTurn: 'turn', sourceJob: 'active' })
+      await f.store.mutate(state => {
+        state.liveTakeovers.source!.historyRead = true
+      })
       f.native.turnState.mockResolvedValueOnce('completed')
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: f.token() }))
         .toBe(false)
@@ -148,6 +163,9 @@ describe('live takeover fencing', () => {
     const f = await fixture()
     try {
       await f.takeover.begin({ source: 'source', sourceTurn: 'turn', sourceJob: 'active' })
+      await f.store.mutate(state => {
+        state.liveTakeovers.source!.historyRead = true
+      })
       f.native.interruptExact.mockResolvedValueOnce('already-completed')
       expect(await f.takeover.ready({ source: 'source', target: 'target', targetTurn: 'prepare', token: f.token() }))
         .toBe(false)

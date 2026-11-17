@@ -30,6 +30,7 @@ export function createChannelNativeSession(input: {
     sourceConfiguration: input.selection,
     nativeRequest: (method, params) => control.nativeRequest(method, params),
     ...(execution ? { execution } : {}),
+    ...(options.contextObserver ? { contextObserver: options.contextObserver } : {}),
     ...(options.channelName ? { name: options.channelName } : {}),
     ...(options.channelSectionName ? { sectionName: options.channelSectionName } : {}),
     subscribeApprovals: listener => control.subscribeNativeApprovals(listener),

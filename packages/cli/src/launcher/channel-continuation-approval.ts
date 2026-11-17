@@ -10,7 +10,8 @@ export function continuationRoutine(
   native: ChannelNativeSessions | undefined,
 ): boolean | undefined {
   if (
-    !['continuation-checkpoint', 'continuation-checkpoint-set', 'continuation-history'].includes(operation.operation)
+    !['continuation-checkpoint', 'continuation-checkpoint-set', 'continuation-history', 'continuation-takeover-ready']
+      .includes(operation.operation)
   ) {
     return undefined
   }
@@ -18,6 +19,9 @@ export function continuationRoutine(
   const entry = native?.contextFor(operation.context)
   if (entry?.threadId !== threadId || entry.turnId !== turnId) return false
   const input = operation.input
+  if (operation.operation === 'continuation-takeover-ready') {
+    return Object.keys(input).length === 1 && typeof input.token === 'string' && /^[a-f0-9]{64}$/u.test(input.token)
+  }
   if (operation.operation === 'continuation-checkpoint') return Object.keys(input).length === 0
   if (operation.operation === 'continuation-history') {
     return Object.keys(input).every(key => ['limit', 'cursor'].includes(key))

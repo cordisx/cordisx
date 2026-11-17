@@ -198,10 +198,22 @@ export class ChannelConversationStore {
             typeof value === 'string' && value.length > 0
           )
           || !/^[a-f0-9]{64}$/u.test(intent.tokenHash)
-          || !['preparing', 'ready', 'interrupting', 'committed', 'abandoned', 'unknown'].includes(intent.state)
-          || ['ready', 'interrupting', 'committed'].includes(intent.state) && (!intent.target || !intent.targetTurn)
+          || !Number.isSafeInteger(intent.createdAt) || intent.createdAt < 0
+          || ![
+            'preparing',
+            'ready',
+            'interrupting',
+            'committed',
+            'business-starting',
+            'finished',
+            'abandoned',
+            'unknown',
+          ].includes(intent.state)
+          || ['ready', 'interrupting', 'committed', 'business-starting', 'finished'].includes(intent.state)
+            && (!intent.target || !intent.targetTurn)
           || intent.catchup !== undefined && (typeof intent.catchup !== 'string' || intent.catchup.length > 16_000)
-          || intent.state === 'committed' && intent.catchup === undefined
+          || intent.historyRead !== undefined && typeof intent.historyRead !== 'boolean'
+          || ['committed', 'business-starting', 'finished'].includes(intent.state) && intent.catchup === undefined
         ) {
           throw new Error('INVALID_LIVE_TAKEOVER_STORE')
         }
@@ -252,7 +264,7 @@ export class ChannelConversationStore {
     await store.mutate(state => {
       for (const intent of Object.values(state.liveTakeovers)) {
         if (['preparing', 'ready'].includes(intent.state)) intent.state = 'abandoned'
-        else if (intent.state === 'interrupting') intent.state = 'unknown'
+        else if (intent.state === 'interrupting' || intent.state === 'business-starting') intent.state = 'unknown'
       }
       for (const entry of Object.values(state.continuations)) {
         if (entry.intent?.state === 'dispatching') entry.intent.state = 'unknown'

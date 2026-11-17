@@ -11,11 +11,21 @@ export interface LiveTakeoverIntent {
   readonly source: string
   readonly sourceTurn: string
   readonly sourceJob: string
+  readonly createdAt: number
   readonly tokenHash: string
   readonly fence: string
-  state: 'preparing' | 'ready' | 'interrupting' | 'committed' | 'abandoned' | 'unknown'
+  state:
+    | 'preparing'
+    | 'ready'
+    | 'interrupting'
+    | 'committed'
+    | 'business-starting'
+    | 'finished'
+    | 'abandoned'
+    | 'unknown'
   target?: string
   targetTurn?: string
+  historyRead?: boolean
   catchup?: string
 }
 
@@ -25,6 +35,7 @@ export interface LiveTakeoverNative {
     input: { operationId: string; source: string; sourceTurn: string; token: string },
   ): Promise<{ sessionId: string; turnId: string }>
   turnState(sessionId: string, turnId: string): Promise<'active' | 'completed' | 'failed' | 'unknown'>
+  validateSource(sessionId: string, turnId: string): Promise<boolean>
   /** Only returns interrupted after an exact-turn interrupt is accepted and terminal state is verified. */
   interruptExact(sessionId: string, turnId: string): Promise<'interrupted' | 'already-completed' | 'uncertain'>
   /** Reads a bounded final source-history delta after terminal confirmation. */
@@ -99,6 +110,7 @@ export class ChannelLiveTakeover {
         source: input.source,
         sourceTurn: input.sourceTurn,
         sourceJob: input.sourceJob,
+        createdAt: Date.now(),
         tokenHash: hash(token),
         fence: fence(state, input.source),
         state: 'preparing',
@@ -145,7 +157,7 @@ export class ChannelLiveTakeover {
     if (!id(input.source) || !id(input.target) || !id(input.targetTurn) || !id(input.token)) return false
     const snapshot = this.store.snapshot().liveTakeovers[input.source]
     if (
-      !snapshot || snapshot.state !== 'ready' || snapshot.target !== input.target
+      !snapshot || snapshot.state !== 'ready' || snapshot.historyRead !== true || snapshot.target !== input.target
       || snapshot.targetTurn !== input.targetTurn || !sameToken(input.token, snapshot.tokenHash)
     ) return false
     let armedByThisCall = false
@@ -159,6 +171,10 @@ export class ChannelLiveTakeover {
         return false
       }
       if (await this.native.turnState(input.target, input.targetTurn) !== 'active') {
+        await this.abandon(input.source, snapshot.operationId)
+        return false
+      }
+      if (!await this.native.validateSource(snapshot.source, snapshot.sourceTurn)) {
         await this.abandon(input.source, snapshot.operationId)
         return false
       }
