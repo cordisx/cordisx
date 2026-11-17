@@ -23,6 +23,7 @@ export interface ChannelManagerState {
   credentials?: ChannelCredentialWorkflow
   policy?: ChannelPolicyWorkflow
   execution?: ChannelExecutionWorkflow
+  creationExecution?: ChannelExecutionWorkflow
   conversations?: ChannelConversationWorkflow
   settings: ChannelSettingsWorkflow
   tasks?: ChannelTaskSettingsWorkflow

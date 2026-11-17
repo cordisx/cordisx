@@ -2,6 +2,7 @@ import { parseChannelTaskRecords } from './channel-task-records.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
+import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-execution-settings.js'
 import type { ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import type { ChannelCommandAddressing } from './channel-command-users.js'
 import type { ChannelAutoReplyMode, ChannelReplyDefaults, ChannelReplyMode } from './channel-reply-routing.js'
@@ -108,6 +109,7 @@ export interface ChannelConversationState {
   taskConfig: ChannelTaskConfig
   taskSettings: Record<string, ChannelTaskSetting>
   taskRequests: Record<string, ChannelTaskRequest>
+  creationDefaults: ChatExecutionDefaults
 }
 
 function initial(): ChannelConversationState {
@@ -126,6 +128,7 @@ function initial(): ChannelConversationState {
     taskConfig: CHANNEL_TASK_CONFIG_INITIAL,
     taskSettings: {},
     taskRequests: {},
+    creationDefaults: { revision: 0, settings: {} },
   }
 }
 
@@ -148,6 +151,7 @@ export class ChannelConversationStore {
       parsed.taskConfigRevision ??= 0
       parsed.taskSettings ??= {}
       parsed.taskRequests ??= {}
+      parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
       Object.assign(parsed, parseChannelTaskRecords(parsed.taskSettings, parsed.taskRequests))
       parsed.policyRevision ??= 0
       if (

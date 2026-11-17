@@ -427,6 +427,7 @@ describe('persistent Channel chat consumer', () => {
       expect.objectContaining({ enabled: false }),
       expect.objectContaining({ sender: { userId: 'alice' }, platform: '飞书' }),
       {},
+      {},
     )
     await f.consumer.policySet({ enabled: true, autoReply: true }, f.consumer.policy().revision)
     f.native.completion.mockResolvedValue({ state: 'completed', text: 'local answer' })

@@ -10,7 +10,12 @@ import type { Context } from '@deepseek-ai/cordis'
 export class ChannelSettingsWorkflow {
   private readonly owners = new Map<
     string,
-    { policy: ChannelSettingsDraft; execution: ChannelSettingsDraft; tasks: ChannelSettingsDraft }
+    {
+      policy: ChannelSettingsDraft
+      execution: ChannelSettingsDraft
+      channelExecution: ChannelSettingsDraft
+      tasks: ChannelSettingsDraft
+    }
   >()
   retire(owner: string): void {
     this.owners.delete(owner)
@@ -22,7 +27,7 @@ export class ChannelSettingsWorkflow {
     readonly ctx: Context
     readonly caller: string
     readonly pageOwner: string
-    readonly section: ChannelSettingsFormSectionV2
+    readonly section: ChannelSettingsFormSectionV2 | 'channel-new-chats'
     readonly target: HTMLElement
     readonly options: ChannelManagerFormOptionsV1
     readonly policy?: ChannelPolicyWorkflow
@@ -39,6 +44,7 @@ export class ChannelSettingsWorkflow {
       drafts = {
         policy: new ChannelSettingsDraft(),
         execution: new ChannelSettingsDraft(),
+        channelExecution: new ChannelSettingsDraft(),
         tasks: new ChannelSettingsDraft(),
       }
       this.owners.set(input.caller, drafts)
@@ -59,7 +65,7 @@ export class ChannelSettingsWorkflow {
             draft: drafts.tasks,
           })
           : { status: 'unavailable' as const, code: 'TASK_SETTINGS_UNAVAILABLE' }
-        : input.section === 'new-chats'
+        : input.section === 'new-chats' || input.section === 'channel-new-chats'
         ? input.execution
           ? await input.execution.mount({
             target: input.target,
@@ -67,7 +73,7 @@ export class ChannelSettingsWorkflow {
             options,
             live: input.live,
             authorize: input.authorizeWrite,
-            draft: drafts.execution,
+            draft: input.section === 'channel-new-chats' ? drafts.channelExecution : drafts.execution,
           })
           : { status: 'unavailable' as const, code: 'EXECUTION_SETTINGS_UNAVAILABLE' }
         : input.policy

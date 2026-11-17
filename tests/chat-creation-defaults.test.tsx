@@ -3,16 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { dom, root } from './helpers/host-react-form.js'
 import { managerModel, managerRouter, managerSnapshot } from './helpers/react-manager.js'
 import { registerChannelSettingsDestination } from '../packages/cli/src/renderer/channel-settings-destination.js'
+import { primaryFor } from '../packages/cli/src/renderer/manager/model/routes.js'
+import { managerHeaderBackRoute } from '../packages/cli/src/renderer/manager/model/header-navigation.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({ BrandMark: () => <span /> }))
 
 let Navigation: typeof import('../packages/cli/src/renderer/manager/components/Navigation.js').Navigation
+let ChatCreationDefaultsAction:
+  typeof import('../packages/cli/src/renderer/manager/components/ChatCreationDefaultsAction.js').ChatCreationDefaultsAction
 let ChatExecutionPage:
   typeof import('../packages/cli/src/renderer/manager/pages/ChatExecutionPage.js').ChatExecutionPage
 let ChannelExecutionWorkflow:
   typeof import('../packages/cli/src/renderer/channel-execution-workflow.js').ChannelExecutionWorkflow
 beforeEach(async () => {
   ;({ Navigation } = await import('../packages/cli/src/renderer/manager/components/Navigation.js'))
+  ;({ ChatCreationDefaultsAction } = await import(
+    '../packages/cli/src/renderer/manager/components/ChatCreationDefaultsAction.js'
+  ))
   ;({ ChatExecutionPage } = await import('../packages/cli/src/renderer/manager/pages/ChatExecutionPage.js'))
   ;({ ChannelExecutionWorkflow } = await import('../packages/cli/src/renderer/channel-execution-workflow.js'))
 })
@@ -62,14 +69,25 @@ function channelSettings() {
 }
 
 describe('Host new-chat defaults independent of Channel settings', () => {
-  it('keeps both navigation entries and their distinct routes while Channel is active or retired', async () => {
+  it('opens general defaults from the model-services icon and keeps Channel navigation independent', async () => {
     const channel = channelSettings(), router = managerRouter()
     try {
-      await act(async () => root.render(<Navigation snapshot={channel.snapshot} router={router} />))
-      const defaults = dom.window.document.querySelector<HTMLButtonElement>('[data-tab="chat-execution"]')
-      expect(defaults?.textContent).toContain('New chat defaults')
+      await act(async () =>
+        root.render(
+          <>
+            <Navigation snapshot={channel.snapshot} router={router} />
+            <ChatCreationDefaultsAction router={router} locale="en" />
+          </>,
+        )
+      )
+      expect(dom.window.document.querySelector('[data-tab="chat-execution"]')).toBeNull()
+      const defaults = dom.window.document.querySelector<HTMLButtonElement>('[data-chat-creation-defaults-action]')
+      expect(defaults?.getAttribute('aria-label')).toBe('New chat defaults')
+      expect(defaults?.querySelector('svg')).not.toBeNull()
       await act(async () => defaults!.click())
-      expect(router.navigate).toHaveBeenLastCalledWith({ kind: 'chat-execution' })
+      expect(router.openDetail).toHaveBeenLastCalledWith({ kind: 'primary', page: 'model-services' }, {
+        kind: 'chat-execution',
+      })
       await act(async () =>
         dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
           .click()
@@ -83,9 +101,12 @@ describe('Host new-chat defaults independent of Channel settings', () => {
         channel.dispose()
         root.render(<Navigation snapshot={managerSnapshot()} router={managerRouter({ kind: 'chat-execution' })} />)
       })
-      expect(dom.window.document.querySelector('[data-tab="chat-execution"]')?.getAttribute('aria-current')).toBe(
+      expect(dom.window.document.querySelector('[data-tab="model-services"]')?.getAttribute('aria-current')).toBe(
         'page',
       )
+      expect(primaryFor({ kind: 'chat-execution' })).toBe('model-services')
+      expect(managerHeaderBackRoute({ kind: 'chat-execution' }, undefined, { kind: 'primary', page: 'plugins' }))
+        .toEqual({ kind: 'primary', page: 'model-services' })
     } finally {
       channel.dispose()
     }

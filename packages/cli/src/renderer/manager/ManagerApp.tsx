@@ -17,6 +17,7 @@ import { notificationCenterForDocument } from '../notifications/host.js'
 import type { NotificationCenter } from '../notifications/model.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
+import { ChatCreationDefaultsAction } from './components/ChatCreationDefaultsAction.js'
 import { managerHeaderBackRoute } from './model/header-navigation.js'
 import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
@@ -237,7 +238,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
       />
     )
   }
-  if (route.kind === 'notification-rules' || route.kind === 'chat-execution') return <h2>{heading}</h2>
+  if (route.kind === 'notification-rules') return <h2>{heading}</h2>
   if (route.kind === 'marketplace-source-edit') {
     return (
       <HostBreadcrumbs
@@ -264,7 +265,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
     }
     : route.kind === 'route' || route.kind === 'page'
     ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.routes'), page: 'routes' as const }
-    : route.kind === 'model-connection-create'
+    : route.kind === 'model-connection-create' || route.kind === 'chat-execution'
     ? {
       label: managerCopy(snapshot.localization.locale, 'manager.nav.model-services'),
       page: 'model-services' as const,
@@ -764,6 +765,10 @@ export function ManagerApp(
       </div>
       <div className="cxr-titlebar-actions">
         <div className="cxr-titlebar-actions" ref={setHeaderActionsSeat} data-manager-page-header-actions="true" />
+        {router.route.kind === 'primary' && router.route.page === 'model-services'
+            && modelServicesSecondaryPage === undefined
+          ? <ChatCreationDefaultsAction router={router} locale={snapshot.localization.locale} />
+          : null}
         {!workspaceMode && surface === 'modal'
           ? (
             <Button

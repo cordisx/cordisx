@@ -13,6 +13,7 @@ import { ChannelSessionCommands } from './channel-session-commands.js'
 import { channelCommandHelp } from '../channel-command-registry.js'
 import { ChannelNativeApprovals } from './channel-native-approvals.js'
 import { chatExecutionOperation } from './chat-execution-operation.js'
+import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
@@ -97,11 +98,13 @@ export class ChannelConversationConsumer {
   private readonly approvals: ChannelNativeApprovals
   readonly agentAccess = new ChannelAgentAccess(() => this.store.snapshot(), () => this.extraNative?.())
   readonly taskSettings: ChannelTaskSettings
+  private readonly creationDefaults: ChannelCreationDefaults
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
     private readonly input: ChannelConversationConsumerInput,
   ) {
+    this.creationDefaults = new ChannelCreationDefaults(this.store)
     this.taskSettings = new ChannelTaskSettings({
       store: this.store,
       native: () => this.extraNative?.(),
@@ -163,6 +166,7 @@ export class ChannelConversationConsumer {
     )
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
+    if (operation.startsWith('channel-execution-defaults')) return this.creationDefaults.operation(operation, args)
     return chatExecutionOperation(this.extraNative?.(), operation, args)
   }
   managementReadback() {
@@ -822,6 +826,7 @@ export class ChannelConversationConsumer {
           },
           context,
           job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
+          job.autoCreate ? this.creationDefaults.read().settings : undefined,
         )
         await this.store.mutate(state => {
           const input = state.inputs[job.recordId]
