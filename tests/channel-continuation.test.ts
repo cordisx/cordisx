@@ -88,7 +88,10 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { ChannelConversationStore } from '../packages/cli/src/launcher/channel-conversation-store.js'
 import { ChannelContinuationManager } from '../packages/cli/src/launcher/channel-continuation-manager.js'
-import { continuationConfiguration } from '../packages/cli/src/launcher/channel-continuation-config.js'
+import {
+  continuationConfiguration,
+  continuationStartMatches,
+} from '../packages/cli/src/launcher/channel-continuation-config.js'
 import type { ChannelNativeSessions } from '../packages/cli/src/launcher/channel-native-sessions.js'
 import { createNativeChatControl } from '../packages/cli/assets/launcher/native-chat-control.mjs'
 
@@ -227,6 +230,44 @@ describe('Channel continuation durability', () => {
         networkAccess: false,
       },
     }, undefined)).toBeUndefined()
+  })
+  it('reproduces an observed default tier and empty workspace roots only with exact native readback', () => {
+    const effective = {
+      cwd: '/tmp',
+      modelProvider: 'openai',
+      model: 'model',
+      reasoningEffort: 'xhigh',
+      serviceTier: 'default',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      workMode: 'default',
+      activePermissionProfile: null,
+      sandbox: {
+        type: 'workspaceWrite',
+        writableRoots: [],
+        networkAccess: true,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    }
+    const expected = continuationConfiguration(effective, undefined)
+    expect(expected?.serviceTier).toBe('default')
+    expect(expected?.execution).toMatchObject({ workMode: 'default', networkAccess: true })
+    expect(continuationStartMatches(effective, expected)).toBe(true)
+    expect(continuationStartMatches({ ...effective, serviceTier: null }, expected)).toBe(false)
+    expect(continuationStartMatches({ ...effective, cwd: '/elsewhere' }, expected)).toBe(false)
+    for (
+      const sandbox of [
+        { ...effective.sandbox, writableRoots: ['/tmp'] },
+        { ...effective.sandbox, networkAccess: false },
+        { ...effective.sandbox, excludeTmpdirEnvVar: true },
+        { ...effective.sandbox, excludeSlashTmp: true },
+      ]
+    ) expect(continuationStartMatches({ ...effective, sandbox }, expected)).toBe(false)
+    const { workMode: _mode, ...unknownMode } = effective
+    expect(continuationConfiguration(unknownMode, undefined)).toBeUndefined()
+    expect(continuationConfiguration(unknownMode, undefined, 'default')?.execution.workMode).toBe('default')
+    expect(continuationConfiguration(effective, undefined, 'plan')).toBeUndefined()
   })
   it('moves every binding and queued job once, retaining the old checkpoint and future policy', async () => {
     const f = await fixture()

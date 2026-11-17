@@ -428,6 +428,13 @@ before its first turn. An unavailable or mismatched configuration stops the
 continuation rather than claiming it was preserved. These checks do not prove
 that every native or project setting was inherited.
 
+For a new thread owned by a headless backend, Codex CLI 0.149.1 starts in
+default work mode. The Host tracks that version-specific evidence and later
+accepted mode changes separately from native readback. Unknown versions,
+resumed threads, failed changes and concurrent uncertain changes stay blocked
+until the mode is independently confirmed. Desktop threads do not use this
+headless-only inference.
+
 An existing question card keeps its original outbox and caller identity;
 answers continue to route through the current Channel bindings. A new thread
 cannot necessarily cancel a card created under the old thread's caller identity.

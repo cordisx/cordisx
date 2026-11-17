@@ -10,7 +10,7 @@ export interface ContinuationConfiguration {
   readonly model: string
   readonly cwd: string
   readonly execution: ChatExecutionSettings
-  readonly serviceTier: 'priority' | null
+  readonly serviceTier: 'default' | 'priority' | null
   readonly permissions?: string
   readonly approvalsReviewer: string
   readonly sandbox: Record<string, unknown>
@@ -21,6 +21,7 @@ export interface ContinuationConfiguration {
 export function continuationConfiguration(
   effective: Record<string, unknown> | undefined,
   live: NativeSourceConfiguration | undefined,
+  confirmedWorkMode?: 'default' | 'plan',
 ): ContinuationConfiguration | undefined {
   if (!effective || !Object.hasOwn(effective, 'activePermissionProfile')) return undefined
   if (live && (effective.modelProvider !== live.providerId || effective.model !== live.model)) return undefined
@@ -33,19 +34,22 @@ export function continuationConfiguration(
   const permissions = profile === null || profile === undefined ? undefined : object(profile).id
   const sandbox = object(effective.sandbox)
   const settings = observedExecutionSettings(effective)
+  if (settings.workMode && confirmedWorkMode && settings.workMode !== confirmedWorkMode) return undefined
+  const workMode = settings.workMode ?? confirmedWorkMode
   if (
     typeof providerId !== 'string' || !providerId || typeof model !== 'string' || !model
     || typeof cwd !== 'string' || !cwd.startsWith('/') || typeof effort !== 'string'
     || !['readOnly', 'workspaceWrite', 'dangerFullAccess'].includes(String(sandbox.type))
-    || (serviceTier !== null && serviceTier !== 'priority')
+    || (serviceTier !== null && serviceTier !== 'priority' && serviceTier !== 'default')
     || !['user', 'auto_review', 'guardian_subagent'].includes(String(effective.approvalsReviewer))
     || (permissions !== undefined && (typeof permissions !== 'string' || !permissions))
-    || settings.approval === undefined || settings.workMode === undefined
+    || settings.approval === undefined || workMode === undefined
     || (permissions === undefined && settings.execution === undefined)
   ) return undefined
   if (permissions === undefined && sandbox.type === 'workspaceWrite') {
     if (
-      !Array.isArray(sandbox.writableRoots) || sandbox.writableRoots.length !== 1 || sandbox.writableRoots[0] !== cwd
+      !Array.isArray(sandbox.writableRoots) || sandbox.writableRoots.length > 1
+      || (sandbox.writableRoots.length === 1 && sandbox.writableRoots[0] !== cwd)
       || sandbox.excludeTmpdirEnvVar === true || sandbox.excludeSlashTmp === true
     ) return undefined
   }
@@ -61,7 +65,7 @@ export function continuationConfiguration(
     ...(typeof permissions === 'string' ? { permissions } : {}),
     execution: {
       approval: settings.approval,
-      workMode: settings.workMode,
+      workMode,
       effort,
       ...(permissions === undefined ? { execution: settings.execution, networkAccess: settings.networkAccess } : {}),
     },

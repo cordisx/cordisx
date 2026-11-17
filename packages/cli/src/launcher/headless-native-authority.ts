@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import { HeadlessWorkMode } from './headless-work-mode.js'
 import type { HeadlessNativeAuthority } from '../cli/headless-service.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 
@@ -20,7 +21,9 @@ export async function createHeadlessNativeAuthority(input: {
   appId: string
   profileId: string
   report(code: string): void
+  knownNewThreadDefault?: boolean
 }) {
+  const workMode = new HeadlessWorkMode(input.knownNewThreadDefault === true)
   const execution = await ChatExecutionPreferences.open({
     file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'chat-execution.json'),
     configPath: input.configPath,
@@ -86,6 +89,10 @@ export async function createHeadlessNativeAuthority(input: {
     notification: (method, params) => {
       control.received({ method, params })
       const value = record(params)
+      if (method === 'thread/closed' && typeof value.threadId === 'string') workMode.forget(value.threadId)
+      if (method === 'thread/settings/updated' && typeof value.threadId === 'string') {
+        workMode.observe(value.threadId, record(record(value.threadSettings).collaborationMode).mode)
+      }
       if (
         method === 'serverRequest/resolved'
         && (typeof value.requestId === 'string' || typeof value.requestId === 'number')
@@ -115,6 +122,7 @@ export async function createHeadlessNativeAuthority(input: {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    confirmedWorkMode: threadId => workMode.get(threadId),
     subscribeContinuationEvents: listener => {
       continuationListeners.add(listener)
       return () => continuationListeners.delete(listener)
@@ -127,24 +135,49 @@ export async function createHeadlessNativeAuthority(input: {
       return result
     },
     nativeRequest: async (method, params, next) => {
-      if (!['thread/start', 'thread/resume', 'turn/start'].includes(method)) return next(params)
-      let prepared = await execution.prepare(method, params)
-      if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string') {
-        if (!read) throw new Error('HEADLESS_BACKEND_UNAVAILABLE')
-        const thread = record(
-          record(await read('thread/read', { threadId: params.threadId, includeTurns: false })).thread,
-        )
-        if (thread.id !== params.threadId) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
-        prepared = await execution.prepare(method, params, thread)
+      const threadId = typeof params.threadId === 'string' ? params.threadId : undefined
+      if (method === 'thread/resume' && threadId) workMode.forget(threadId)
+      const modeChange = threadId && (method === 'turn/start' || method === 'thread/settings/update')
+        ? workMode.begin(threadId)
+        : undefined
+      try {
+        if (!['thread/start', 'thread/resume', 'turn/start'].includes(method)) {
+          const result = await next(params)
+          if (modeChange) {
+            const mode = params.collaborationMode
+            modeChange(true, record(mode).mode, mode === undefined || mode === null)
+          }
+          return result
+        }
+        let prepared = await execution.prepare(method, params)
+        if (prepared.contextRequired && method === 'turn/start' && typeof params.threadId === 'string') {
+          if (!read) throw new Error('HEADLESS_BACKEND_UNAVAILABLE')
+          const thread = record(
+            record(await read('thread/read', { threadId: params.threadId, includeTurns: false })).thread,
+          )
+          if (thread.id !== params.threadId) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
+          prepared = await execution.prepare(method, params, thread)
+        }
+        if (prepared.contextRequired) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
+        const result = await next(prepared.params)
+        if (method === 'thread/start') {
+          const started = record(record(result).thread).id
+          if (typeof started === 'string') workMode.started(started)
+        }
+        if (modeChange) {
+          const mode = prepared.params.collaborationMode
+          modeChange(true, record(mode).mode, mode === undefined || mode === null)
+        }
+        if (prepared.captureId) {
+          await execution.complete(prepared.captureId, true, result).catch(() =>
+            input.report('EXECUTION_PERSISTENCE_FAILED')
+          )
+        }
+        return result
+      } catch (error) {
+        modeChange?.(false, undefined, false)
+        throw error
       }
-      if (prepared.contextRequired) throw new Error('EXECUTION_CONTEXT_UNAVAILABLE')
-      const result = await next(prepared.params)
-      if (prepared.captureId) {
-        await execution.complete(prepared.captureId, true, result).catch(() =>
-          input.report('EXECUTION_PERSISTENCE_FAILED')
-        )
-      }
-      return result
     },
   }
   return {
@@ -160,6 +193,7 @@ export async function createHeadlessNativeAuthority(input: {
       pending.clear()
       listeners.clear()
       continuationListeners.clear()
+      workMode.clear()
       await execution.close()
     },
   }

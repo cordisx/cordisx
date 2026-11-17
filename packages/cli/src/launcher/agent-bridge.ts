@@ -375,7 +375,9 @@ export function createCodexBridgeHandler(
           ) {
             throw new BridgeOperationError('invalid-arguments')
           }
-          if (serviceTier !== undefined && serviceTier !== null && serviceTier !== 'priority') {
+          if (
+            serviceTier !== undefined && serviceTier !== null && serviceTier !== 'priority' && serviceTier !== 'default'
+          ) {
             throw new BridgeOperationError('invalid-arguments')
           }
           let model = text(args.model)

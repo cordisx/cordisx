@@ -53,4 +53,56 @@ describe('headless native authority', () => {
     expect(execution.complete).toHaveBeenCalledWith('capture', true, { thread: { id: 'thread' } })
     await native.close()
   })
+  it('tracks only proven owned modes and invalidates uncertain or stale changes', async () => {
+    const native = await createHeadlessNativeAuthority({ ...input, knownNewThreadDefault: true })
+    const request = native.authority.nativeRequest!
+    const mode = native.authority.confirmedWorkMode!
+    await request('thread/start', {}, async () => ({ thread: { id: 'owned' } }))
+    expect(mode('owned')).toBe('default')
+    expect(mode('external')).toBeUndefined()
+    await request('turn/start', { threadId: 'owned', collaborationMode: { mode: 'plan' } }, async () => ({}))
+    expect(mode('owned')).toBe('plan')
+    await expect(request('turn/start', { threadId: 'owned' }, async () => {
+      throw new Error('failed')
+    }))
+      .rejects.toThrow('failed')
+    expect(mode('owned')).toBeUndefined()
+    native.authority.notification!('thread/settings/updated', {
+      threadId: 'owned',
+      threadSettings: { collaborationMode: { mode: 'default' } },
+    })
+    expect(mode('owned')).toBe('default')
+    let finish!: () => void
+    const pending = request(
+      'turn/start',
+      { threadId: 'owned', collaborationMode: { mode: 'plan' } },
+      () =>
+        new Promise(resolve => {
+          finish = () => resolve({})
+        }),
+    )
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(mode('owned')).toBeUndefined()
+    native.authority.notification!('thread/settings/updated', {
+      threadId: 'owned',
+      threadSettings: { collaborationMode: { mode: 'default' } },
+    })
+    finish()
+    await pending
+    expect(mode('owned')).toBeUndefined()
+    native.authority.notification!('thread/settings/updated', {
+      threadId: 'owned',
+      threadSettings: { collaborationMode: { mode: 'default' } },
+    })
+    expect(mode('owned')).toBe('default')
+    await request('thread/resume', { threadId: 'owned' }, async () => ({}))
+    expect(mode('owned')).toBeUndefined()
+    native.authority.notification!('thread/closed', { threadId: 'owned' })
+    expect(mode('owned')).toBeUndefined()
+    await native.close()
+    const unknownVersion = await createHeadlessNativeAuthority(input)
+    await unknownVersion.authority.nativeRequest!('thread/start', {}, async () => ({ thread: { id: 'thread' } }))
+    expect(unknownVersion.authority.confirmedWorkMode!('thread')).toBeUndefined()
+    await unknownVersion.close()
+  })
 })

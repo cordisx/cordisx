@@ -50,6 +50,7 @@ export class ChannelNativeSessions {
       readonly model?: string
       readonly cli?: ChannelNativeCliContext
       readonly execution?: ChatExecutionPreferences
+      readonly confirmedWorkMode?: (threadId: string) => 'default' | 'plan' | undefined
       readonly models?: (operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) => Promise<unknown>
       readonly sourceConfiguration?: (
         threadId: string,
@@ -87,7 +88,9 @@ export class ChannelNativeSessions {
     if (!record || record.application !== 'applied' || !this.input.execution?.observationConfirmed(threadId)) {
       return undefined
     }
-    return continuationConfiguration(record.effective, live)
+    const confirmedMode = this.input.confirmedWorkMode?.(threadId)
+    if (this.input.confirmedWorkMode && confirmedMode === undefined) return undefined
+    return continuationConfiguration(record.effective, live, confirmedMode)
   }
   async continuationTurnActive(threadId: string, turnId: string): Promise<boolean> {
     const thread = await codexThreadMetadata(this.input, threadId)

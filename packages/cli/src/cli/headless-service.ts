@@ -1,5 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { readServiceConfigState } from '../config/service-config.js'
 import { loadConfig } from '../launcher/config.js'
 import { CHANNEL_SERVICE_CONFIG_INITIAL, createLocalChannelService } from '../launcher/channel-service.js'
@@ -14,6 +16,8 @@ import type { AgentBridge } from '../launcher/agent-bridge.js'
 import type { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
 
+const execFileAsync = promisify(execFile)
+
 /** Native approval and execution are supplied by the shared Host authority, never recreated here. */
 export interface HeadlessNativeAuthority {
   request(method: string, params: unknown, id?: string | number): unknown | Promise<unknown>
@@ -22,6 +26,7 @@ export interface HeadlessNativeAuthority {
   subscribeContinuationEvents?(listener: (method: string, params: unknown) => void): () => void
   respondApproval?(input: Record<string, unknown>): Promise<unknown>
   execution?: ChatExecutionPreferences
+  confirmedWorkMode?(threadId: string): 'default' | 'plan' | undefined
   /** Applies and records the existing execution settings around native calls when available. */
   nativeRequest?(
     method: string,
@@ -84,12 +89,18 @@ export async function startHeadlessService(input: {
     // Register cleanup before starting: an early failure must not strand the transport.
     const disposeService = () => service.dispose()
     cleanup.push(disposeService)
+    // Only the validated app-server version has documented fresh-session default-mode evidence.
+    const version = await execFileAsync(input.codexExecutable, ['--version'], {
+      env: input.environment,
+      timeout: 5_000,
+    }).then(value => value.stdout.trim()).catch(() => '')
     const nativeAuthority = await createHeadlessNativeAuthority({
       homeDir: input.homeDir,
       configPath: input.configPath,
       appId: input.appId,
       profileId: input.profileId,
       report: input.report,
+      knownNewThreadDefault: version === 'codex-cli 0.149.1',
     })
     cleanup.push(() => nativeAuthority.close())
     const authority = nativeAuthority.authority
@@ -115,6 +126,7 @@ export async function startHeadlessService(input: {
       sectionName: () => undefined,
       name: event => service.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
       ...(authority.execution ? { execution: authority.execution } : {}),
+      ...(authority.confirmedWorkMode ? { confirmedWorkMode: authority.confirmedWorkMode } : {}),
       ...(authority.subscribeApprovals
         ? { subscribeApprovals: authority.subscribeApprovals }
         : {}),
