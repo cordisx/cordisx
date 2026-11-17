@@ -41,6 +41,7 @@ import { startNativeAgentModelsServer } from './native-agent-models.js'
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import { NativeAgentTasks } from './native-agent-tasks.js'
 import { createChannelNativeSession } from './channel-native-composition.js'
+import { attachNativeContextObserver } from './native-context-observer.js'
 import type { NativeResourceTransform } from './native-predispatch-interception.js'
 import type { NativeScriptResource } from './native-submission-structure.js'
 import type { NativeAccountCapabilityDescriptor } from '../native-account-capability.js'
@@ -111,6 +112,7 @@ export class NativeSubmissionCompatibilityError extends Error {
   }
 }
 export interface NativeSubmissionCatalogOptions {
+  readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
   readonly channelSectionName?: () => string | undefined
@@ -275,6 +277,8 @@ export async function prepareNativeSubmissionBootstrap(
   let closePromise: Promise<void> | undefined
   let agentBridge: AgentBridge | undefined
   let chatExecution: ChatExecutionPreferences | undefined
+  let contextObserver: import('./native-context-observer.js').NativeContextObserver | undefined
+  let unsubscribeContext: (() => void) | undefined
   let modelApi: Awaited<ReturnType<typeof startModelApiServer>> | undefined
   const apiAgentCredentials = new Map<string, { dispose(): void }>()
   const close = (): Promise<void> =>
@@ -284,6 +288,8 @@ export async function prepareNativeSubmissionBootstrap(
       await preparation.close()
       await completion?.catch(() => undefined)
       await modelApi?.close()
+      unsubscribeContext?.()
+      contextObserver?.dispose()
       apiAgentCredentials.forEach(lease => lease.dispose())
       apiAgentCredentials.clear()
       await agentBridge?.close()
@@ -346,6 +352,13 @@ export async function prepareNativeSubmissionBootstrap(
         }
         reportStage('native-submission-completion-start')
         let channelSession: import('./channel-native-sessions.js').ChannelNativeSessions | undefined
+        if (completeOptions.contextObserver) {
+          contextObserver = completeOptions.contextObserver
+          unsubscribeContext = attachNativeContextObserver(
+            listener => control.subscribeContinuationEvents(listener),
+            contextObserver,
+          )
+        }
         let discovered: Pick<NativeSubmissionInstallation, 'transforms' | 'accountCapability' | 'adapterLifecycle'>
         try {
           discovered = await preparation.ready

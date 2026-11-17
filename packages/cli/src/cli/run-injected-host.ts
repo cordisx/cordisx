@@ -86,6 +86,7 @@ export async function runInjectedHost(input: {
   readonly serviceConfigBridge?: ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: ChannelActionsBridgeHandler
+  readonly agentContext?: WatchInjectionOptions['agentContext']
   readonly permissionPersistence?: PermissionPersistenceContext
   readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
   readonly pluginLifecycle?: {
@@ -171,6 +172,7 @@ export async function runInjectedHost(input: {
     ...(input.serviceConfigBridge === undefined ? {} : { serviceConfigBridge: input.serviceConfigBridge }),
     ...(input.channelCredentialBridge === undefined ? {} : { channelCredentialBridge: input.channelCredentialBridge }),
     ...(input.channelActionsBridge === undefined ? {} : { channelActionsBridge: input.channelActionsBridge }),
+    ...(input.agentContext === undefined ? {} : { agentContext: input.agentContext }),
     ...(input.permissionPersistence === undefined ? {} : { permissionPersistence: input.permissionPersistence }),
     ...(input.iconThemePreferencePersistence === undefined
       ? {}

@@ -18,6 +18,7 @@ import { nativeSubmissionCatalogOptions } from './native-submission-catalog-opti
 import { codexHomeOfPlan, modelServiceLaunchHook } from '../launcher/model-service-projection.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
+import { rendererAgentContext } from './renderer-agent-context.js'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
 import {
@@ -355,6 +356,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const channelManager = channel.manager
     const channelCredentialBridgeToken = channel.credentialBridgeToken
     const channelActionsBridgeToken = channel.actionsBridgeToken
+    const agentContext = rendererAgentContext()
     const rendererLifecycle = createRendererLifecycleProjection({
       homeDir: rootFromConfigPath(configPath),
       profileId: selection.profileId,
@@ -372,6 +374,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     } = rendererLifecycle
     const managedServiceUI = startupBridge
     const nativeCatalogOptions = {
+      contextObserver: agentContext.observer,
       channelName: (event: import('@cordisx/channel-runtime').ChannelEventRef) =>
         channelService?.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
       channelSectionName: () =>
@@ -447,6 +450,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         : { serviceCapabilityOwners: channel.serviceCapabilityOwners }),
       ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
       ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
+      agentContextBridgeToken: agentContext.token,
       managedServiceUICapabilities,
       startupHostCapability: startupBridge.capability,
       productionGraph: !invocation.options.attach,
@@ -919,6 +923,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
         ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
         ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
+        agentContext: agentContext.binding,
         managedServiceUI,
         ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
         ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),

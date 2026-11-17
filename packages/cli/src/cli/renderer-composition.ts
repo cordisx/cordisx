@@ -94,6 +94,7 @@ export interface BuildRendererCompositionOptions {
   /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
+  readonly agentContextBridgeToken?: string
   readonly startupHostCapability?: { readonly token: string }
   readonly managedServiceUICapabilities?: readonly {
     readonly pluginId: string
@@ -150,6 +151,9 @@ export async function buildRendererComposition(
     ...(options.channelActionsBridgeToken === undefined
       ? {}
       : { channelActionsBridgeToken: options.channelActionsBridgeToken }),
+    ...(options.agentContextBridgeToken === undefined
+      ? {}
+      : { agentContextBridgeToken: options.agentContextBridgeToken }),
     ...(options.startupHostCapability === undefined ? {} : { startupHostCapability: options.startupHostCapability }),
     ...(options.managedServiceUICapabilities === undefined
       ? {}

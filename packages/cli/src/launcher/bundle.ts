@@ -40,6 +40,7 @@ export interface BuildRendererBundleOptions {
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
+  readonly agentContextBridgeToken?: string
   readonly generation?: string
   readonly pluginLifecycleBridgeToken?: string
   /** Host-private Manager bridge; never exposed through plugin Contexts. */
@@ -430,6 +431,10 @@ export async function buildRendererCompositionSource(
     options.channelActionsBridgeToken === undefined
       ? ''
       : `, channelActionsBridgeToken: ${JSON.stringify(options.channelActionsBridgeToken)}`
+  }${
+    options.agentContextBridgeToken === undefined
+      ? ''
+      : `, agentContextBridgeToken: ${JSON.stringify(options.agentContextBridgeToken)}`
   }${
     options.pluginLifecycleBridgeToken === undefined
       ? ''
