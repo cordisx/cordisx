@@ -37,6 +37,49 @@ export function createChannelActionsBridgeHandler(
       const action = request.action
       const generation = typeof request.generation === 'string' ? request.generation : undefined
       if (typeof action !== 'string') throw new Error('invalid channel action')
+      if (action === 'continuation-live-policy' || action === 'continuation-live-policy-set') {
+        if (!input.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        const { version: _version, token: _token, requestId: _id, action: _action, generation: _generation, ...args } =
+          request
+        try {
+          const { status: _status, ...value } = await input.consumer.executionOperation(action, args) as {
+            status: string
+            policy: { enabled: boolean; thresholdRatio: number }
+            overrides: { enabled?: boolean; thresholdRatio?: number }
+            defaultsRevision: number
+            overrideRevision: number
+            legacy: boolean
+          }
+          return { status: 'applied', continuationLivePolicy: value }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'CONTINUATION_UNAVAILABLE',
+          }
+        }
+      }
+      if (action === 'continuation-defaults' || action === 'continuation-defaults-set') {
+        if (!input.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        const { version: _version, token: _token, requestId: _id, action: _action, generation: _generation, ...args } =
+          request
+        try {
+          const value = await input.consumer.executionOperation(action, args) as {
+            status: string
+            revision: number
+            policy: { enabled: boolean; thresholdRatio: number }
+          }
+          return { status: 'applied', continuationDefaults: { revision: value.revision, policy: value.policy } }
+        } catch (error) {
+          return {
+            status: 'unavailable',
+            code: error instanceof Error && /^[A-Z_]+$/u.test(error.message)
+              ? error.message
+              : 'CONTINUATION_UNAVAILABLE',
+          }
+        }
+      }
       if (['model-list', 'task-config', 'task-config-set', 'task-settings', 'task-settings-set'].includes(action)) {
         if (!input.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
         const { version: _version, token: _token, requestId: _id, action: _action, generation: _generation, ...args } =

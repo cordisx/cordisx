@@ -4,6 +4,7 @@ import { historicalNativeSessionDetails } from './native-agent-session-recovery.
 import { CordisXEntitySettingsNavigationService } from './entity-settings-navigation.js'
 import { CordisXManagerSelfConfigurationService } from './manager-self-configuration.js'
 import { installUsageService } from './usage.js'
+import { CordisXAgentContextService, CordisXAgentTurnControlService } from './agent-context-service.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { installModelProviderSelector } from './install-model-provider-selector.js'
@@ -542,6 +543,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       executionPlatform: runtimeScope.metadata()!.executionPlatform,
     })
     await runtimeScope.platformFiber
+    await runtimeScope.ctx.plugin(CordisXAgentContextService, {
+      broker: runtimeScope.broker()!,
+      ...(runtimeScope.agentContextBridge() === undefined ? {} : { bridge: runtimeScope.agentContextBridge()! }),
+      live: () => !runtimeScope.disposed,
+    })
+    await runtimeScope.ctx.plugin(CordisXAgentTurnControlService)
     await installUsageService(
       runtimeScope.ctx,
       runtimeScope.broker()!,

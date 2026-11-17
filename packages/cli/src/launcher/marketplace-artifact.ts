@@ -14,7 +14,7 @@ const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 const MAX_PACKAGE_JSON_BYTES = 64 * 1024
 const MAX_README_BYTES = 1024 * 1024
 const MAX_REDIRECTS = 4
-const DOWNLOAD_TIMEOUT_MS = 30_000
+const DOWNLOAD_TIMEOUT_MS = 120_000
 const README_PATH = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/
 
 function downloadError(error: unknown, url: URL, signal: AbortSignal): Error {

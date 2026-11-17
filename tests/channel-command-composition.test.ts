@@ -63,6 +63,9 @@ describe('production Channel command composition with SDK transport fixtures', (
         }],
       })
       const native = {
+        contextObservations: () => undefined,
+        hasPreparation: () => false,
+        isPreparing: () => false,
         exists: vi.fn(async () => true),
         start: vi.fn(async (_id, _message, sessionId) => ({ state: 'running', sessionId, turnId: 'turn' })),
         completion: vi.fn(async () => ({ state: 'completed' })),
@@ -178,7 +181,15 @@ describe('production Channel command composition with SDK transport fixtures', (
           secretRef: 'host-secret:env/CHANNEL_COMMAND_FIXTURE',
         }],
       })
-      const native = { exists: vi.fn(async () => true), start: vi.fn(), completion: vi.fn(), reconcile: vi.fn() }
+      const native = {
+        contextObservations: () => undefined,
+        hasPreparation: () => false,
+        isPreparing: () => false,
+        exists: vi.fn(async () => true),
+        start: vi.fn(),
+        completion: vi.fn(),
+        reconcile: vi.fn(),
+      }
       owner = await createConfiguredChannelConsumer({
         service,
         homeDir: root,

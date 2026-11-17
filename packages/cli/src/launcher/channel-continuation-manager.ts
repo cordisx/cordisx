@@ -15,6 +15,11 @@ import type { ContinuationConfiguration } from './channel-continuation-config.js
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { continuationDefaultsOperation } from './channel-continuation-defaults.js'
+import { livePolicyOperation } from './channel-live-policy.js'
+import { ChannelLiveNative } from './channel-live-native.js'
+import { ChannelLiveTakeover } from './channel-live-takeover.js'
+import { ChannelLiveThreshold } from './channel-live-threshold.js'
 
 export interface ContinuationReservation {
   readonly operationId: string
@@ -28,11 +33,84 @@ export interface ContinuationReservation {
 /** All durable mutation happens in the existing serialized Channel store. */
 export class ChannelContinuationManager {
   private idleOffset = 0
+  private readonly liveNative: ChannelLiveNative
+  readonly liveTakeover: ChannelLiveTakeover
+  private liveThreshold?: ChannelLiveThreshold
   constructor(
     private readonly store: ChannelConversationStore,
     private readonly native: () => ChannelNativeSessions | undefined,
     private readonly sessionClaims = new Set<string>(),
-  ) {}
+  ) {
+    this.liveNative = new ChannelLiveNative(store, native)
+    this.liveTakeover = new ChannelLiveTakeover(store, this.liveNative)
+  }
+
+  defaultsOperation(operation: string, args: Record<string, unknown>) {
+    return operation.startsWith('continuation-live-policy')
+      ? livePolicyOperation(this.store, operation, args)
+      : continuationDefaultsOperation(this.store, operation, args)
+  }
+  attachContext() {
+    this.liveThreshold?.dispose()
+    const observations = this.native()?.contextObservations()
+    if (observations) {
+      this.liveThreshold = new ChannelLiveThreshold(this.store, observations, input => this.liveTakeover.begin(input))
+      this.liveThreshold.sync()
+    } else delete this.liveThreshold
+  }
+  dispose() {
+    this.liveThreshold?.dispose()
+  }
+
+  async pumpLive() {
+    this.liveThreshold?.sync()
+    for (const intent of Object.values(this.store.snapshot().liveTakeovers)) {
+      if (['preparing', 'ready'].includes(intent.state) && Date.now() - intent.createdAt >= 90_000) {
+        await this.store.mutate(state => {
+          const current = state.liveTakeovers[intent.source]
+          if (current?.operationId === intent.operationId && ['preparing', 'ready'].includes(current.state)) {
+            current.state = 'abandoned'
+          }
+        })
+      }
+      if (this.store.snapshot().liveTakeovers[intent.source]?.state === 'abandoned') {
+        await this.native()?.stopPreparation(intent.operationId)
+        continue
+      }
+      if (intent.state !== 'committed' || !intent.target || !intent.targetTurn) continue
+      const native = this.native(), config = this.liveNative.configuration(intent.source)
+      if (!native || !config) continue
+      const prep = await native.liveTurnControl().turnState(intent.target, intent.targetTurn)
+      if (prep === 'active' || prep === 'unknown') continue
+      const started = await this.store.mutate(state => {
+        const current = state.liveTakeovers[intent.source], job = state.jobs[intent.sourceJob]
+        if (
+          !current || current.operationId !== intent.operationId || current.state !== 'committed'
+          || !job || job.state !== 'reconciliation-required' || job.code !== 'CONTINUATION_BUSINESS_TURN_PENDING'
+          || job.sessionId !== intent.target
+        ) return false
+        current.state = prep === 'completed' ? 'business-starting' : 'unknown'
+        return prep === 'completed'
+      })
+      if (!started) continue
+      const result = await this.liveNative.business(intent.source)
+      await this.store.mutate(state => {
+        const current = state.liveTakeovers[intent.source], job = state.jobs[intent.sourceJob]
+        if (!current || current.operationId !== intent.operationId || current.state !== 'business-starting' || !job) {
+          return
+        }
+        if (result.state === 'running' && result.sessionId === intent.target && result.turnId) {
+          current.state = 'finished'
+          job.state = 'running'
+          job.turnId = result.turnId
+          delete job.code
+        } else {
+          current.state = 'unknown'
+          job.code = result.code ?? 'CONTINUATION_BUSINESS_UNCERTAIN'
+        }
+      })
+    }
+  }
 
   async turnActive(threadId: string, turnId: string) {
     return await this.native()?.continuationTurnActive(threadId, turnId) === true
@@ -180,6 +258,27 @@ export class ChannelContinuationManager {
 
   async history(threadId: string, options: { readonly limit?: number; readonly cursor?: unknown }) {
     const state = this.store.snapshot()
+    const live = Object.values(state.liveTakeovers).filter(intent => {
+      if (
+        intent.target !== threadId
+        || !['ready', 'interrupting', 'committed', 'business-starting', 'finished'].includes(intent.state)
+      ) return false
+      if (!['business-starting', 'finished'].includes(intent.state)) return true
+      const job = state.jobs[intent.sourceJob]
+      return job?.sessionId === threadId && !!job.bindingId && state.bindings[job.bindingId]?.state === 'active'
+        && state.bindings[job.bindingId]?.sessionId === threadId
+    })
+    if (live.length === 1 && this.native()) {
+      const intent = live[0]!
+      const page = await this.native()!.continuationHistory(intent.source, options)
+      await this.store.mutate(current => {
+        const active = current.liveTakeovers[intent.source]
+        if (active?.operationId === intent.operationId && active.target === threadId && active.state === 'ready') {
+          active.historyRead = true
+        }
+      })
+      return { source: intent.source, ...page }
+    }
     if (!Object.values(state.bindings).some(binding => binding.sessionId === threadId && binding.state === 'active')) {
       throw new Error('CHANNEL_TARGET_NOT_BOUND')
     }
@@ -190,6 +289,15 @@ export class ChannelContinuationManager {
     if (matches.length !== 1 || !native) throw new Error('CONTINUATION_HISTORY_UNAVAILABLE')
     const source = matches[0]![0]
     return { source, ...await native.continuationHistory(source, options) }
+  }
+
+  async liveReady(target: string, targetTurn: string, token: string) {
+    const matches = Object.values(this.store.snapshot().liveTakeovers).filter(intent =>
+      intent.target === target && intent.targetTurn === targetTurn && intent.state === 'ready'
+    )
+    if (matches.length !== 1) return { status: 'unavailable' as const, code: 'PREPARATION_NOT_READY' }
+    const accepted = await this.liveTakeover.ready({ source: matches[0]!.source, target, targetTurn, token })
+    return accepted ? { status: 'accepted' as const } : { status: 'rejected' as const, code: 'TAKEOVER_NOT_ACCEPTED' }
   }
 
   async setCheckpoint(threadId: string, value: unknown, expectedRevision: number) {
@@ -309,7 +417,12 @@ export class ChannelContinuationManager {
     for (const job of Object.values(state.jobs)) {
       if (job.sessionId === reservation.source && job.state === 'queued') job.sessionId = target
     }
-    if (entry.policy) state.continuations[target] = { policy: entry.policy }
+    if (entry.policy || entry.livePolicy) {
+      state.continuations[target] = {
+        ...(entry.policy ? { policy: entry.policy } : {}),
+        ...(entry.livePolicy ? { livePolicy: structuredClone(entry.livePolicy) } : {}),
+      }
+    }
     const sourceSettings = state.taskSettings[reservation.source]
     if (sourceSettings) {
       state.taskSettings[target] = structuredClone(sourceSettings)

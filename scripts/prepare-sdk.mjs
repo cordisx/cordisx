@@ -110,12 +110,12 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-if (protocolSpec !== 'github:cordisx/cordisx-protocol#52f4016addd281284a82e4c53d04578dd337be31') {
+if (protocolSpec !== 'github:cordisx/cordisx-protocol#a474700a998ca4fe2a61eba2776dbcdfebdb7fa6') {
   throw new Error('Host SDK must pin the merged Channel Manager v13 Protocol source')
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')
 const protocolManifest = await verifyPackage(protocolSource)
-if (protocolManifest.version !== '0.1.0-beta.15') throw new Error('Installed Protocol version mismatch')
+if (protocolManifest.version !== '0.1.0-beta.16') throw new Error('Installed Protocol version mismatch')
 await pack(protocolSource, artifacts)
 await run(process.execPath, ['scripts/prepare-bundled-runtime-plugins.mjs'], host)
 const cliTarball = await pack(cli, artifacts)

@@ -140,6 +140,14 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
             threadId: params.threadId,
             ...(params.turnId === undefined ? {} : { turnId: params.turnId }),
             ...(message.method === 'turn/completed' ? { turn: { id: turn.id, status: turn.status } } : {}),
+            ...(message.method === 'thread/settings/updated'
+              ? {
+                threadSettings: {
+                  model: object(params.threadSettings).model,
+                  modelProvider: object(params.threadSettings).modelProvider,
+                },
+              }
+              : {}),
             ...(['item/started', 'item/completed'].includes(message.method)
               ? { item: { type: 'contextCompaction' } }
               : {}),

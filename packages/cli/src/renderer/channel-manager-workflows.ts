@@ -3,12 +3,13 @@ import type { ChannelManagerState } from './channel-manager-state.js'
 import { ChannelExecutionWorkflow } from './channel-execution-workflow.js'
 import { ChannelPolicyWorkflow } from './channel-policy-workflow.js'
 import { ChannelTaskSettingsWorkflow } from './channel-task-settings-workflow.js'
+import { ChannelContinuationDefaultsWorkflow } from './channel-continuation-defaults-workflow.js'
 
 /** Compose Host settings clients once; all inherit the owning Channel generation lifetime. */
 export function initializeChannelManagerWorkflows(
   state: Pick<
     ChannelManagerState,
-    'tasks' | 'execution' | 'creationExecution' | 'policy' | 'lifetime' | 'disposed' | 'isCurrent'
+    'tasks' | 'continuation' | 'execution' | 'creationExecution' | 'policy' | 'lifetime' | 'disposed' | 'isCurrent'
   >,
   input: Pick<ChannelManagerServiceInput, 'document' | 'actions' | 'profileId' | 'hostGeneration'>,
 ) {
@@ -22,6 +23,7 @@ export function initializeChannelManagerWorkflows(
     run: (action, request) => input.actions!.run(action, request),
   } satisfies ConstructorParameters<typeof ChannelExecutionWorkflow>[0]
   state.tasks = new ChannelTaskSettingsWorkflow(common)
+  state.continuation = new ChannelContinuationDefaultsWorkflow(common)
   state.execution = new ChannelExecutionWorkflow(common)
   state.creationExecution = new ChannelExecutionWorkflow({ ...common, defaultsScope: 'channel' })
   state.policy = new ChannelPolicyWorkflow({ ...common, signal: common.lifetime, isCurrent: common.live })

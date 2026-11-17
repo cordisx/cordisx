@@ -11,6 +11,21 @@ export class ChannelAgentAccess {
     private readonly state: () => ChannelConversationState,
     private readonly native: () => ChannelNativeSessions | undefined,
   ) {}
+  hasPreparation(): boolean {
+    return this.native()?.hasPreparation() === true
+  }
+  preparation(metadata: unknown): boolean {
+    const row = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+    const token = row['cordisx/channelContext']
+    const threadId = callerThreadId(metadata)
+    const tokenThread = typeof token === 'string' ? this.native()?.contextFor(token)?.threadId : undefined
+    return (
+      typeof threadId === 'string' && this.native()?.isPreparing(threadId) === true
+      || typeof tokenThread === 'string' && this.native()?.isPreparing(tokenThread) === true
+      || this.native()?.hasPreparation() === true && row['cordisx/mcpRequestId'] !== undefined && !threadId
+        && !tokenThread
+    )
+  }
   source(threadId: string, turnId?: string): ChannelEventRef | undefined {
     const active = this.native()?.sourceFor?.(threadId, turnId)
     if (active) return active
@@ -41,6 +56,10 @@ export class ChannelAgentAccess {
   routine(command: unknown, threadId: string, turnId: string): boolean {
     const operation = this.native()?.cliApprovalOperation?.(command)
     if (!operation || operation.kind === 'write') return false
+    if (
+      this.native()?.isPreparing(threadId)
+      && !['continuation-history', 'continuation-takeover-ready'].includes(operation.operation)
+    ) return false
     const source = this.source(threadId, turnId)
     if (!source) return false
     const continuation = continuationRoutine(operation, threadId, turnId, this.native())

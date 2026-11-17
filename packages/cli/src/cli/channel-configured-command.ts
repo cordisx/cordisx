@@ -20,6 +20,7 @@ const OPERATIONS = [
   'continuation-checkpoint',
   'continuation-checkpoint-set',
   'continuation-history',
+  'continuation-takeover-ready',
   'reply-mode',
   'history',
   'remote-history',

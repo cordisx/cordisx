@@ -17,6 +17,7 @@ import {
 } from './cdp-session.js'
 import { AGENT_HISTORY_BINDING, AGENT_HISTORY_RECEIVER } from './agent-history-rpc.js'
 import { CHANNEL_ACTIONS_BINDING, CHANNEL_ACTIONS_RECEIVER } from './channel-actions-rpc.js'
+import { AGENT_CONTEXT_BINDING } from './agent-context-cdp.js'
 import { CHANNEL_CREDENTIAL_BINDING, CHANNEL_CREDENTIAL_RECEIVER } from './channel-credential-rpc.js'
 import { CONFIG_BINDING, CONFIG_RECEIVER } from './config-rpc.js'
 import { ICON_THEME_PREFERENCE_BINDING, ICON_THEME_PREFERENCE_RECEIVER } from './icon-theme-rpc.js'
@@ -306,6 +307,7 @@ export interface InstalledScript {
   readonly actionsController?: AbortController
   readonly removeActionsBindingListener?: () => void
   readonly actionsBindingInstalled: boolean
+  readonly agentContextBindingInstalled?: boolean
   readonly permissionController?: AbortController
   readonly removePermissionBindingListener?: () => void
   readonly permissionBindingInstalled: boolean
@@ -472,6 +474,7 @@ export function installedBindingNames(installed: InstalledScript): readonly stri
     ...(installed.serviceConfigBindingInstalled ? [SERVICE_CONFIG_BINDING] : []),
     ...(installed.credentialBindingInstalled ? [CHANNEL_CREDENTIAL_BINDING] : []),
     ...(installed.actionsBindingInstalled ? [CHANNEL_ACTIONS_BINDING] : []),
+    ...(installed.agentContextBindingInstalled ? [AGENT_CONTEXT_BINDING] : []),
     ...(installed.permissionBindingInstalled ? [PERMISSION_BINDING] : []),
     ...(installed.iconThemePreferenceBindingInstalled ? [ICON_THEME_PREFERENCE_BINDING] : []),
     ...(installed.lifecycleBindingInstalled ? [PLUGIN_LIFECYCLE_BINDING] : []),

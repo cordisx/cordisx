@@ -16,6 +16,7 @@ import * as support from './cdp-installation-support.js'
 import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js'
 import { installManagementCdpBinding, type ManagementCdpBinding } from './management-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
+import { type AgentContextCdpOptions, installAgentContextCdpBinding } from './agent-context-cdp.js'
 
 export async function install(
   target: support.CdpTarget,
@@ -57,6 +58,7 @@ export async function install(
   nativeSubmission?: NativeSubmissionInstallation,
   activateDocument?: (identifier: string) => Promise<void>,
   observeRetirement?: (session: support.CdpSession) => Promise<CdpTargetRetirementObserver>,
+  agentContext?: AgentContextCdpOptions,
 ): Promise<support.InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
@@ -82,6 +84,7 @@ export async function install(
   const managedServiceUIController = managedServiceUI === undefined ? undefined : new AbortController()
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
   let removeBindingListener = (): void => {}
+  let removeAgentContextBinding = (): void => {}
   let removeMarketplaceArtifactBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
@@ -151,6 +154,7 @@ export async function install(
         }),
       )
     }
+    if (agentContext) removeAgentContextBinding = await installAgentContextCdpBinding(session, agentContext)
     await installRuntimeBindings(session, [
       support.MARKETPLACE_BINDING,
       ...(lifecycle === undefined ? [] : [support.MARKETPLACE_ARTIFACT_BINDING]),
@@ -884,7 +888,9 @@ export async function install(
       removeBindingListener: () => {
         removeBindingListener()
         removeMarketplaceArtifactBindingListener()
+        removeAgentContextBinding()
       },
+      agentContextBindingInstalled: agentContext !== undefined,
       ...(providerController === undefined ? {} : { providerController, removeProviderBindingListener }),
       providerBindingInstalled: provider !== undefined,
       ...(historyController === undefined ? {} : { historyController, removeHistoryBindingListener }),
@@ -961,6 +967,7 @@ export async function install(
         publisherGrantController?.abort()
         managedServiceUIController?.abort()
         removeBindingListener()
+        removeAgentContextBinding()
         removeMarketplaceArtifactBindingListener()
         removeProviderBindingListener()
         removeHistoryBindingListener()

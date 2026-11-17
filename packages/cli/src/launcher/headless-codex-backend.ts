@@ -3,6 +3,8 @@ import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/c
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
+import { bindHeadlessCatalog } from './headless-catalog-binding.js'
+import { HeadlessContextCapture } from './headless-context-capture.js'
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
 export async function startHeadlessCodexBackend(input: {
@@ -11,10 +13,19 @@ export async function startHeadlessCodexBackend(input: {
   readonly home: string
   readonly timeoutMs?: number
   readonly environment?: NodeJS.ProcessEnv
+  readonly modelCatalogPath?: string
+  readonly staticCatalog?: {
+    readonly path: string
+    readonly bytes: Uint8Array
+    readonly sha256: string
+    readonly nativeVersion: string
+  }
+  readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
   /** The launch's existing approval authority owns responses to native requests. */
   readonly onRequest: (method: string, params: unknown, id?: string | number) => unknown | Promise<unknown>
   readonly onNotification?: (method: string, params: unknown) => void
   readonly onDispatch?: (operationId: string, threadId: string, turnId?: string) => void
+  readonly preparationTools?: (operationId: string) => readonly unknown[] | undefined
   readonly nativeRequest?: (
     method: NativeBridgeMethod,
     params: Readonly<Record<string, unknown>>,
@@ -31,8 +42,23 @@ export async function startHeadlessCodexBackend(input: {
     codexHome: input.codexHome,
     enabled: true,
     timeoutMs: input.timeoutMs ?? 30_000,
-  }, { environment: { ...input.environment ?? process.env, HOME: input.home }, experimentalApi: true })
+  }, {
+    environment: { ...input.environment ?? process.env, HOME: input.home },
+    experimentalApi: true,
+    ...(input.modelCatalogPath ? { modelCatalogPath: input.modelCatalogPath } : {}),
+  })
   try {
+    const catalogReceipt = input.staticCatalog && server.requestWithReceipt
+      ? await bindHeadlessCatalog({
+        server,
+        catalog: input.staticCatalog,
+        nativeVersion: input.staticCatalog.nativeVersion,
+        cwd: input.codexHome,
+      })
+      : undefined
+    const contextCapture = catalogReceipt && input.contextObserver
+      ? new HeadlessContextCapture(server, catalogReceipt, input.contextObserver)
+      : undefined
     if (!server.subscribeRequests) throw new Error('App-server request handling is unavailable')
     const unsubscribeRequests = server.subscribeRequests(input.onRequest)
     const unsubscribeNotifications = input.onNotification === undefined
@@ -40,6 +66,7 @@ export async function startHeadlessCodexBackend(input: {
       : server.subscribeNotifications?.(input.onNotification)
     const authority: AgentBridgeCodexAuthority = {
       ...(input.onDispatch ? { observedDispatch: input.onDispatch } : {}),
+      ...(input.preparationTools ? { preparationTools: input.preparationTools } : {}),
       nativeRequest: async (method: NativeBridgeMethod, params) => {
         let selected = params
         if (method === 'thread/start' && params.model == null && params.modelProvider == null) {
@@ -59,8 +86,11 @@ export async function startHeadlessCodexBackend(input: {
             }
           }
         }
-        return input.nativeRequest?.(method, selected, value => server.request(method, value))
-          ?? server.request(method, selected)
+        const dispatch = (value: Readonly<Record<string, unknown>>) =>
+          contextCapture
+            ? contextCapture.dispatch(method, value, params => server.request(method, params))
+            : server.request(method, value)
+        return input.nativeRequest ? input.nativeRequest(method, selected, dispatch) : dispatch(selected)
       },
       catalog: async () => (await models('list', {})).providers ?? [],
     }
@@ -165,6 +195,7 @@ export async function startHeadlessCodexBackend(input: {
     const handler = createCodexBridgeHandler(authority, input.home)
     let closed: Promise<void> | undefined
     return {
+      ...(catalogReceipt ? { catalogReceipt } : {}),
       nativeRequest: authority.nativeRequest,
       models,
       call: (app: string, operation: unknown, args: unknown) => {

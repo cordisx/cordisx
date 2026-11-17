@@ -39,6 +39,9 @@ async function fixture(existingFile?: string) {
   const file = existingFile ?? path.join(root, 'consumer.json')
   const receipts = new Map<string, { state: string }>()
   const native = {
+    contextObservations: () => undefined,
+    hasPreparation: () => false,
+    isPreparing: () => false,
     exists: vi.fn(async () => true),
     start: vi.fn(async (_id: string, _input: ChannelUserInput, session?: string) => ({
       state: 'running' as const,

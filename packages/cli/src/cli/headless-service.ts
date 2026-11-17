@@ -15,6 +15,11 @@ import { startHeadlessCodexBackend } from '../launcher/headless-codex-backend.js
 import type { AgentBridge } from '../launcher/agent-bridge.js'
 import type { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
+import { ContextObservations } from '../launcher/context-observations.js'
+import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
+import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../launcher/headless-static-catalog.js'
+import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
+import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -100,18 +105,49 @@ export async function startHeadlessService(input: {
       appId: input.appId,
       profileId: input.profileId,
       report: input.report,
-      knownNewThreadDefault: version === 'codex-cli 0.149.1',
+      knownNewThreadDefault: ['codex-cli 0.149.1', 'codex-cli 0.167.0-alpha.3.2'].includes(version),
     })
     cleanup.push(() => nativeAuthority.close())
     const authority = nativeAuthority.authority
+    const contextObserver = new NativeContextObserver(new ContextObservations())
+    const unsubscribeContext = authority.subscribeContinuationEvents
+      ? attachNativeContextObserver(listener => authority.subscribeContinuationEvents!(listener), contextObserver)
+      : undefined
+    cleanup.push(async () => {
+      unsubscribeContext?.()
+      contextObserver.dispose()
+    })
+    const catalog = await prepareHeadlessStaticCatalog({
+      enabled: await headlessLiveBudgetEnabled(
+        path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-conversations.json'),
+      ),
+      nativeVersion: version.replace(/^codex-cli\s+/u, ''),
+      executable: input.codexExecutable,
+      codexHome: input.codexHome,
+      userHome: input.userHome,
+      cwd: input.cwd,
+      environment: input.environment,
+    })
+    if (catalog) cleanup.push(catalog.close)
     let native: ChannelNativeSessions | undefined
+    let channelTools: ChannelConversationTools | undefined
     const backend = await startHeadlessCodexBackend({
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
       environment: input.environment,
-      onRequest: (method, params, id) => authority.request(method, params, id),
+      ...(catalog ? { modelCatalogPath: catalog.path } : {}),
+      ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
+      contextObserver,
+      onRequest: (method, params, id) =>
+        method === 'item/tool/call'
+          ? handlePreparationToolCall(params, native, channelTools)
+          : authority.request(method, params, id),
       onDispatch: (operationId, threadId, turnId) => native?.observedDispatch(operationId, threadId, turnId),
+      preparationTools: operationId =>
+        version === 'codex-cli 0.167.0-alpha.3.2' && native?.isPreparationOperation(operationId)
+          ? CHANNEL_PREPARATION_TOOLS
+          : undefined,
       ...(authority.nativeRequest ? { nativeRequest: authority.nativeRequest } : {}),
       ...(authority.notification ? { onNotification: authority.notification } : {}),
     })
@@ -126,6 +162,7 @@ export async function startHeadlessService(input: {
       sectionName: () => undefined,
       name: event => service.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
       ...(authority.execution ? { execution: authority.execution } : {}),
+      contextObserver,
       ...(authority.confirmedWorkMode ? { confirmedWorkMode: authority.confirmedWorkMode } : {}),
       ...(authority.subscribeApprovals
         ? { subscribeApprovals: authority.subscribeApprovals }
@@ -145,6 +182,7 @@ export async function startHeadlessService(input: {
       report: input.report,
       documents: value => configuredPluginDocuments(plugins, value),
     })
+    channelTools = channel.tools
     // Consumer disposal owns service disposal from here on.
     cleanup.splice(cleanup.indexOf(disposeService), 1)
     cleanup.push(() => channel.dispose())

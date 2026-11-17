@@ -154,6 +154,7 @@ export interface WatchInjectionOptions {
   readonly serviceConfigBridge?: support.ServiceConfigBridgeHandler
   readonly channelCredentialBridge?: support.ChannelCredentialBridgeHandler
   readonly channelActionsBridge?: support.ChannelActionsBridgeHandler
+  readonly agentContext?: import('./agent-context-cdp.js').AgentContextCdpOptions
   readonly permissionPersistence?: support.PermissionPersistenceContext
   readonly iconThemePreferencePersistence?: support.IconThemePreferencePersistenceContext
   /** Host-private injection seam for profile-wide launcher integration tests. */
@@ -577,6 +578,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               options.launcherOwnedNativeTarget === true && nativeWorkspaceTarget(target) && !ownedWorkspaceInstalled
                 ? session => observeCdpTargetRetirement(options.port, target, session)
                 : undefined,
+              target.url === 'app://-/index.html' ? options.agentContext : undefined,
             ).finally(() => installationDeadline?.release())
             installed.set(target.id, record)
             if (nativeWorkspaceTarget(target)) {

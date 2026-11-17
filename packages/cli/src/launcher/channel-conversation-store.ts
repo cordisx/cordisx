@@ -1,4 +1,10 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import { type ChannelLivePolicyOverride, parseLivePolicy } from './channel-live-policy.js'
+import {
+  type ChannelContinuationDefaults,
+  INITIAL_CONTINUATION_DEFAULTS,
+  parseContinuationDefaults,
+} from './channel-continuation-defaults.js'
 import {
   type ContinuationCheckpoint,
   continuationCheckpoint,
@@ -98,6 +104,8 @@ export interface ChannelConversationJob {
   replyDefaults?: ChannelReplyDefaults
   replyMode?: ChannelReplyMode
   replyTarget?: ChannelThreadRef
+  /** Target created for this job's latest live handoff; fences immediate repeated handoffs. */
+  liveContinuationTarget?: string
   code?: string
 }
 export interface ChannelConversationState {
@@ -118,9 +126,12 @@ export interface ChannelConversationState {
   creationDefaults: ChatExecutionDefaults
   questions: Record<string, import('./channel-questions.js').ChannelQuestionRecord>
   continuations: Record<string, ChannelContinuationRecord>
+  continuationDefaults: ChannelContinuationDefaults
+  liveTakeovers: Record<string, import('./channel-live-takeover.js').LiveTakeoverIntent>
 }
 
 export interface ChannelContinuationRecord {
+  livePolicy?: ChannelLivePolicyOverride
   policy?: ContinuationPolicy
   checkpoint?: ContinuationCheckpoint
   intent?: {
@@ -151,6 +162,8 @@ function initial(): ChannelConversationState {
     creationDefaults: { revision: 0, settings: {} },
     questions: {},
     continuations: {},
+    continuationDefaults: INITIAL_CONTINUATION_DEFAULTS,
+    liveTakeovers: {},
   }
 }
 
@@ -176,15 +189,50 @@ export class ChannelConversationStore {
       parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
       parsed.questions ??= {}
       parsed.continuations ??= {}
+      parsed.liveTakeovers ??= {}
+      if (!parsed.liveTakeovers || typeof parsed.liveTakeovers !== 'object' || Array.isArray(parsed.liveTakeovers)) {
+        throw new Error('INVALID_LIVE_TAKEOVER_STORE')
+      }
+      for (const [source, intent] of Object.entries(parsed.liveTakeovers)) {
+        if (
+          !intent || typeof intent !== 'object' || source !== intent.source
+          || ![intent.operationId, intent.source, intent.sourceTurn, intent.sourceJob, intent.fence].every(value =>
+            typeof value === 'string' && value.length > 0
+          )
+          || !/^[a-f0-9]{64}$/u.test(intent.tokenHash)
+          || !Number.isSafeInteger(intent.createdAt) || intent.createdAt < 0
+          || ![
+            'preparing',
+            'ready',
+            'interrupting',
+            'committed',
+            'business-starting',
+            'finished',
+            'abandoned',
+            'unknown',
+          ].includes(intent.state)
+          || ['ready', 'interrupting', 'committed', 'business-starting', 'finished'].includes(intent.state)
+            && (!intent.target || !intent.targetTurn)
+          || intent.catchup !== undefined && (typeof intent.catchup !== 'string' || intent.catchup.length > 16_000)
+          || intent.historyRead !== undefined && typeof intent.historyRead !== 'boolean'
+          || ['committed', 'business-starting', 'finished'].includes(intent.state) && intent.catchup === undefined
+        ) {
+          throw new Error('INVALID_LIVE_TAKEOVER_STORE')
+        }
+      }
+      parsed.continuationDefaults = parseContinuationDefaults(
+        parsed.continuationDefaults ?? INITIAL_CONTINUATION_DEFAULTS,
+      )
       if (typeof parsed.continuations !== 'object' || Array.isArray(parsed.continuations)) {
         throw new Error('INVALID_CONTINUATION_STORE')
       }
       for (const [threadId, entry] of Object.entries(parsed.continuations)) {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('INVALID_CONTINUATION_STORE')
-        if (Object.keys(entry).some(key => !['policy', 'checkpoint', 'intent'].includes(key))) {
+        if (Object.keys(entry).some(key => !['policy', 'livePolicy', 'checkpoint', 'intent'].includes(key))) {
           throw new Error('INVALID_CONTINUATION_STORE')
         }
         if (entry.policy !== undefined) entry.policy = continuationPolicy(entry.policy)
+        if (entry.livePolicy !== undefined) entry.livePolicy = parseLivePolicy(entry.livePolicy)
         if (entry.checkpoint !== undefined) {
           const { threadId: checkpointThread, revision, ...body } = entry.checkpoint
           if (checkpointThread !== threadId) throw new Error('INVALID_CONTINUATION_STORE')
@@ -216,6 +264,10 @@ export class ChannelConversationStore {
     const store = new ChannelConversationStore(file, value)
     // A process died after reserving a native effect. Never blindly recreate/resend it.
     await store.mutate(state => {
+      for (const intent of Object.values(state.liveTakeovers)) {
+        if (['preparing', 'ready'].includes(intent.state)) intent.state = 'abandoned'
+        else if (intent.state === 'interrupting' || intent.state === 'business-starting') intent.state = 'unknown'
+      }
       for (const entry of Object.values(state.continuations)) {
         if (entry.intent?.state === 'dispatching') entry.intent.state = 'unknown'
       }

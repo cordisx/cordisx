@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import net from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
@@ -15,47 +14,15 @@ import { createNativeProviderContinuation, dispatchNativeSelectionMutation } fro
 import { inheritNativeFork } from './native-session-fork.mjs'
 import { readNativeLines } from './native-json-lines.mjs'
 import { createNativeChatControl } from './native-chat-control.mjs'
+import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
+import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
 
-const socketPath = process.env.CORDISX_NATIVE_CONTROL_SOCKET
-const nonce = process.env.CORDISX_NATIVE_CONTROL_NONCE
-const executable = process.env.CORDISX_NATIVE_REAL_CODEX_PATH
-const nativeCliEntry = process.env.CORDISX_NATIVE_CLI_ENTRY_PATH
-const agentModelsBinding = process.env.CORDISX_NATIVE_AGENT_MODELS_BINDING
+const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
+  process.env,
+  process.argv.slice(2),
+)
 const marker = 'cordisx.operation_token'
 const maxControlLineBytes = 8 * 1024 * 1024
-if (!socketPath || !nonce || !executable?.startsWith('/')) throw new Error('Native intermediary is not configured')
-for (
-  const key of [
-    'CODEX_CLI_PATH',
-    'CORDISX_NATIVE_CONTROL_SOCKET',
-    'CORDISX_NATIVE_CONTROL_NONCE',
-    'CORDISX_NATIVE_REAL_CODEX_PATH',
-    'CORDISX_NATIVE_CLI_ENTRY_PATH',
-    'CORDISX_NATIVE_NODE_PATH',
-    'CORDISX_NATIVE_AGENT_MODELS_BINDING',
-  ]
-) delete process.env[key]
-
-const nativeArgs = process.argv.slice(2)
-if (agentModelsBinding && nativeArgs.includes('app-server')) {
-  nativeArgs.unshift(
-    '-c',
-    `mcp_servers.cordisx_models.command=${JSON.stringify(process.execPath)}`,
-    '-c',
-    `mcp_servers.cordisx_models.args=${
-      JSON.stringify([
-        fileURLToPath(new URL('./native-agent-models-mcp.mjs', import.meta.url)),
-        agentModelsBinding,
-      ])
-    }`,
-    // A message to an open Claude session waits for that session to take it.
-    '-c',
-    'mcp_servers.cordisx_models.tool_timeout_sec=90',
-    // CordisX's own tools run without a per-call prompt; the agent still acts only when asked.
-    '-c',
-    'mcp_servers.cordisx_models.default_tools_approval_mode="approve"',
-  )
-}
 const child = spawn(executable, nativeArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env })
 const nativeTransport = createNativeProviderTransport(child, {
   executable,
@@ -120,6 +87,15 @@ const emitDiagnostic = event => {
 const turnDiagnostics = new NativeTurnDiagnostics(emitDiagnostic)
 const nativeStartedAt = performance.now()
 const nativeInvocationId = randomUUID()
+const contextCapture = createDesktopNativeContextCapture({
+  ...staticCatalog,
+  serverId: nativeInvocationId,
+  read: (method, params) => call(nativeTransport.stdin, privateCalls, { method, params }),
+  emit: async (method, params) => {
+    await ready
+    await write(control, { type: 'continuation-event', method, params })
+  },
+})
 let nativeObservation = 0
 let initializeRequestId
 let initialized = false
@@ -229,9 +205,10 @@ function stop(reason = 'transport-closed') {
   nativeTransport.close()
   if (child.exitCode === null) child.kill('SIGTERM')
 }
-function call(stream, calls, request, timeout = 30_000) {
+function call(stream, calls, request, timeout = 30_000, beforeSend) {
   if (closed || calls.size >= 32) return Promise.reject(new Error('Native transport unavailable'))
   const id = `${privatePrefix}${++sequence}`
+  beforeSend?.(id)
   return new Promise((resolve, reject) => {
     const settle = (error, value) => {
       const current = calls.get(id)
@@ -255,7 +232,14 @@ async function nativeCall(method, params) {
     params = { ...params, config: configuredOverrides(undefined, params.config) }
   }
   try {
-    const result = await call(nativeTransport.stdin, privateCalls, { method, params })
+    await contextCapture?.invalidate(method, params)
+    const preflight = await contextCapture?.prepare(method, params)
+    let requestId, handle
+    const result = await call(nativeTransport.stdin, privateCalls, { method, params }, 30_000, id => {
+      requestId = id
+      handle = contextCapture?.bind(preflight, id, params)
+    })
+    await contextCapture?.finish(handle, requestId, params, result)
     await chatControl.complete(prepared.captureId, true, result)
     return result
   } catch (error) {
@@ -343,6 +327,7 @@ async function forward(line) {
     return
   }
   let params = object(message?.params)
+  await contextCapture?.invalidate(message.method, params)
   if (chatControl.desktopResponse(message)) return
   if (['thread/start', 'thread/resume', 'turn/start'].includes(message.method) && params && message.id !== undefined) {
     try {

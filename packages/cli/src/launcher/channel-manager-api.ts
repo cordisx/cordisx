@@ -65,6 +65,14 @@ export interface ChannelManagerLogsExport {
 }
 
 export interface ChannelManagerActionResult {
+  readonly continuationDefaults?: import('./channel-continuation-defaults.js').ChannelContinuationDefaults
+  readonly continuationLivePolicy?: {
+    readonly policy: { readonly enabled: boolean; readonly thresholdRatio: number }
+    readonly overrides: { readonly enabled?: boolean; readonly thresholdRatio?: number }
+    readonly defaultsRevision: number
+    readonly overrideRevision: number
+    readonly legacy: boolean
+  }
   readonly conversationPage?: import('./channel-conversation-management.js').ChannelConversationManagementPage
   readonly conversationDetail?: import('./channel-conversation-management.js').ChannelConversationManagementDetail
   readonly conversationActivity?: import('./channel-conversation-management.js').ChannelConversationManagementActivity

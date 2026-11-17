@@ -30,6 +30,8 @@ export class NativeAgentModelSelectionRejected extends Error {
   readonly reason = 'thread-not-idle'
 }
 export interface NativeAgentModelsAuthority {
+  /** Preparation callers cannot use other Host-owned side-effecting tools. */
+  preparing?(metadata: unknown): boolean
   readonly startup?: StartupProviderAdmission
   catalog(): Promise<readonly NativeModelProviderCatalogEntry[]>
   controller: Pick<NativeSubmissionController, 'prepareThreadResume' | 'completeThreadResume'>
@@ -60,6 +62,12 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     metadata?: unknown,
     beforeEffect?: () => Promise<boolean>,
   ): Promise<unknown> => {
+    if (
+      authority.preparing?.(metadata)
+      && !['channel:continuation-history', 'channel:continuation-takeover-ready'].includes(String(operation))
+    ) {
+      return { status: 'rejected', reason: 'preparation-read-only' }
+    }
     if (typeof operation === 'string' && operation.startsWith('channel:')) {
       return authority.channel === undefined
         ? { status: 'unavailable', code: 'CHANNEL_NOT_CONFIGURED' }

@@ -102,7 +102,11 @@ describe('remote Channel history', () => {
     const history = vi.fn(async () => ({ status: 'ok' }))
     const access = { generation: 'one', accounts: () => [{ ref: account, state: 'ready' }], remoteHistory: history }
     const consumer = {
-      agentAccess: { caller: () => ({ source, threadId: 'chat' }) },
+      agentAccess: {
+        caller: () => ({ source, threadId: 'chat' }),
+        hasPreparation: () => false,
+        preparation: () => false,
+      },
       taskSettings: { isBound: () => true },
     }
     const tools = new ChannelConversationTools(() => access as never, consumer as never)

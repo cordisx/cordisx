@@ -11,6 +11,7 @@ import type { ChannelConversationConsumer } from './channel-conversation-consume
 import type { ChannelDirectoryReadback } from './channel-live-directory.js'
 import type { ChannelCommandUserReadback } from './channel-command-users.js'
 import { type ChannelReplyCapabilities, channelReplyMode, channelReplyTarget } from './channel-reply-routing.js'
+import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
 
 export interface ChannelConversationAccess {
   readonly generation: string
@@ -71,6 +72,12 @@ export class ChannelConversationTools {
 
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
+    if (
+      this.consumer?.agentAccess.hasPreparation() && !channelOperationDuringPreparation(operation)
+      && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
+    ) {
+      return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+    }
     if (['continuation-policy', 'continuation-policy-set', 'continuation-start'].includes(operation)) {
       try {
         if (metadata !== undefined) throw new Error('LOCAL_USER_REQUIRED')
@@ -94,7 +101,10 @@ export class ChannelConversationTools {
         return { status: 'rejected', code }
       }
     }
-    if (operation.startsWith('continuation-checkpoint') || operation === 'continuation-history') {
+    if (
+      operation.startsWith('continuation-checkpoint')
+      || ['continuation-history', 'continuation-takeover-ready'].includes(operation)
+    ) {
       if (!this.consumer?.agentAccess.caller(metadata)) {
         return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
       }
@@ -155,12 +165,22 @@ export class ChannelConversationTools {
   async call(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
     try {
       if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
+      if (
+        this.consumer?.agentAccess.hasPreparation() && !channelOperationDuringPreparation(operation)
+        && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
+      ) throw new Error('PREPARATION_READ_ONLY')
       if (operation === 'docs') {
         return this.documents
           ? await this.documents(value)
           : { status: 'unavailable', code: 'DOCUMENTS_UNAVAILABLE' }
       }
       const input = object(value)
+      if (
+        this.consumer?.agentAccess.preparation(metadata)
+        && !['continuation-history', 'continuation-takeover-ready'].includes(operation)
+      ) {
+        throw new Error('PREPARATION_READ_ONLY')
+      }
       if (operation === 'task-model-select') return await this.consumer?.taskSettings.externalSelection(input, metadata)
       if (operation.startsWith('task-') || operation === 'model-list') {
         if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
@@ -175,6 +195,16 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (operation === 'continuation-takeover-ready') {
+        const turnId = scopedCaller?.turnId ?? callerTurnId(metadata)
+        if (
+          !this.consumer || !callerSession || !turnId || !source || !this.consumer.agentAccess.preparation(metadata)
+          || Object.keys(input).some(key => key !== 'token') || typeof input.token !== 'string'
+        ) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        return await this.consumer.continuation.liveReady(callerSession, turnId, input.token)
+      }
       if (['continuation-checkpoint', 'continuation-checkpoint-set', 'continuation-history'].includes(operation)) {
         if (!this.consumer || !callerSession || !source) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
         const turnId = scopedCaller?.turnId ?? callerTurnId(metadata)

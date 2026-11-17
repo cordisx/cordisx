@@ -256,6 +256,13 @@ export async function startNativeSubmissionControlServer(
       }
       forkLeases.clear()
       if (peer === socket) {
+        if (authenticated) {
+          for (const listener of continuationListeners) {
+            try {
+              listener('cordisx/connection/closed', {})
+            } catch {}
+          }
+        }
         peer = undefined
         authenticated = false
         failPending()

@@ -325,7 +325,9 @@ export async function requestPluginManagementRpc(
       clearTimeout(timer)
       operation()
     }
-    const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), 60_000)
+    // Executing an install/update can download and stage a large package.
+    const deadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), deadline)
     socket.setEncoding('utf8')
     socket.once('error', error => settle(() => reject(error)))
     socket.on('data', chunk => {

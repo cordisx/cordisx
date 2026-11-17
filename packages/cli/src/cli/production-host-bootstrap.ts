@@ -23,6 +23,7 @@ import { shouldEnableNativeSubmission } from './native-submission-launch-policy.
 import { loadHomeConfig } from '../config/home-config.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import { codexHomeOfPlan, projectModelServicesBeforeLaunch } from '../launcher/model-service-projection.js'
+import { prepareDesktopStaticCatalog } from '../launcher/desktop-static-catalog.js'
 
 export interface ProductionHostBootstrap {
   readonly plan?: ResolvedLaunchPlan
@@ -119,17 +120,27 @@ export async function prepareProductionHostBootstrap(
     ) {
       try {
         const cacheDirectory = (runtime.env ?? process.env).CORDISX_INTERNAL_NATIVE_SUBMISSION_CACHE_DIRECTORY
-        nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(
-          plan.executable,
-          {
+        const catalog = await prepareDesktopStaticCatalog({
+          plan,
+          cordisxHome: rootFromConfigPath(configPath),
+          userHome: configuredEnvironment.HOME ?? process.env.HOME ?? '',
+          cwd: process.cwd(),
+          environment: configuredEnvironment,
+        })
+        try {
+          nativeSubmissionBootstrap = await prepareNativeSubmissionBootstrap(plan.executable, {
             ...(cacheDirectory === undefined ? {} : { cacheDirectory }),
             environment: configuredEnvironment,
+            ...(catalog === undefined ? {} : { staticCatalog: catalog }),
             ...(runtime.internalRemoteTerminalProvider === undefined
               ? {}
               : { remoteTerminalProvider: runtime.internalRemoteTerminalProvider }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
-          },
-        )
+          })
+        } catch (error) {
+          await catalog?.close().catch(() => undefined)
+          throw error
+        }
       } catch (error) {
         input.signal?.throwIfAborted()
         nativeSubmissionUnavailable = true

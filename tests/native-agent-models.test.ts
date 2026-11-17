@@ -39,6 +39,14 @@ function fixture() {
 const target = { threadId: 'target-thread', providerId: 'configured', model: 'shared-model' }
 
 describe('Agent model-provider tools', () => {
+  it('restricts preparation callers to the bounded history and ready tools', async () => {
+    const f = fixture(), channel = vi.fn(async () => ({ status: 'ok' }))
+    const handler = createNativeAgentModelsHandler({ ...f.authority, preparing: () => true, channel })
+    expect(await handler('session:send_message', {})).toEqual({ status: 'rejected', reason: 'preparation-read-only' })
+    expect(await handler('channel:send', {})).toEqual({ status: 'rejected', reason: 'preparation-read-only' })
+    expect(await handler('channel:continuation-takeover-ready', { token: 'x' })).toEqual({ status: 'ok' })
+    expect(channel).toHaveBeenCalledExactlyOnceWith('continuation-takeover-ready', { token: 'x' }, undefined)
+  })
   it('routes status without resolving credentials or mutating a conversation', async () => {
     const f = fixture()
     const integrationStatus = vi.fn(async () => ({ version: 1, app: 'claude', status: 'degraded' }))
@@ -236,6 +244,7 @@ describe('Agent model-provider tools', () => {
         'send_message',
         'check_operation',
         'integration_status',
+        'channel_continuation_takeover_ready',
         'channel_continuation_history',
         'channel_continuation_checkpoint',
         'channel_continuation_checkpoint_set',

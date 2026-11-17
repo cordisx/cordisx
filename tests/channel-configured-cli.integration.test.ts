@@ -257,6 +257,7 @@ describe('configured Channel CLI production endpoint', () => {
     const configPath = path.join(root, 'config.json')
     const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
     const consumer = {
+      agentAccess: { hasPreparation: () => false, preparation: () => false, caller: () => undefined },
       status: () => ({
         status: 'ok',
         revision: 7,

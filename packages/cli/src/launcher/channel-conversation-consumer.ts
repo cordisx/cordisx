@@ -15,6 +15,7 @@ import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
+import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
   channelCommandReplyTarget,
   channelReplyDefaults,
@@ -108,6 +109,7 @@ export class ChannelConversationConsumer {
   }
   setNativeExtras(native: () => ChannelNativeSessions | undefined) {
     this.extraNative = native
+    this.continuation.attachContext()
     this.approvals.attach(native())
   }
   async cardAction(
@@ -127,6 +129,9 @@ export class ChannelConversationConsumer {
     )
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
+    if (operation.startsWith('continuation-defaults') || operation.startsWith('continuation-live-policy')) {
+      return this.continuation.defaultsOperation(operation, args)
+    }
     if (operation.startsWith('channel-execution-defaults')) return this.creationDefaults.operation(operation, args)
     return chatExecutionOperation(this.extraNative?.(), operation, args)
   }
@@ -316,8 +321,7 @@ export class ChannelConversationConsumer {
     channelExact(args, ['operationId', 'mode'])
     const operationId = channelText(args.operationId, 128)
     const mode = channelReplyMode(args.mode) as ChannelReplyMode
-    // A native tool can arrive just before start() returns the created chat/turn.
-    // Wait only for this already reserved operation; never create or retry a native effect.
+    // Wait for the reserved dispatch if a native tool arrives before start() returns; never retry it.
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const job = this.store.snapshot().jobs[operationId]
       if (!job || job.state !== 'dispatching' || this.lifetime.signal.aborted) break
@@ -437,7 +441,6 @@ export class ChannelConversationConsumer {
       const jobs = Object.values(this.store.snapshot().jobs).filter(job =>
         ['queued', 'running', 'replying', 'reconciliation-required'].includes(job.state)
       )
-      // Concurrency is an execution budget, not a limit on binding cardinality.
       const offset = jobs.length ? this.jobOffset % jobs.length : 0
       const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 8)
       this.jobOffset = offset + selected.length
@@ -455,6 +458,7 @@ export class ChannelConversationConsumer {
         }
       }))
       await this.continuation.pumpIdle(this.lifetime.signal)
+      await this.continuation.pumpLive()
     })().catch(error =>
       this.input.report?.(
         error instanceof Error && /^[A-Z_]+$/u.test(error.message)
@@ -708,7 +712,7 @@ export class ChannelConversationConsumer {
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
       if (
-        job.code === 'CONTINUATION_EFFECT_UNCERTAIN'
+        job.code === 'CONTINUATION_EFFECT_UNCERTAIN' || job.code === 'CONTINUATION_BUSINESS_TURN_PENDING'
         || job.sessionId && state.continuations[job.sessionId]?.intent?.state === 'unknown'
       ) return
       if (job.turnId && job.sessionId) {
@@ -850,18 +854,18 @@ export class ChannelConversationConsumer {
       }
       return
     }
-    if (!job.sessionId || !job.turnId) return
+    if (!job.sessionId || !job.turnId || !mayFinishChannelJob(state, job)) return
     const binding = job.bindingId === undefined ? undefined : state.bindings[job.bindingId]
     const defaults = job.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
     const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
     const includeFinal = job.finalDeliveryEnabled === true && state.policy.enabled && state.policy.autoReply
       && binding?.state === 'active' && binding.autoReply && mode !== 'none'
       && channelPolicyAllows(state.policy, 'dispatch', event) && channelPolicyAllows(state.policy, 'send', event)
-    // Default task completion is status-only. Local assistant text is never an outbound message source.
     const completion = await native.completion(job.sessionId, job.turnId, includeFinal)
     if (completion.state === 'running') return
     if (completion.state === 'failed') {
       await this.store.mutate(state => {
+        if (!mayFinishChannelJob(state, job)) return
         state.jobs[job.id]!.state = 'failed'
         state.jobs[job.id]!.code = completion.code ?? 'NATIVE_TURN_FAILED'
       })
@@ -870,6 +874,7 @@ export class ChannelConversationConsumer {
     if (this.lifetime.signal.aborted) return
     if (!includeFinal) {
       await this.store.mutate(state => {
+        if (!mayFinishChannelJob(state, job)) return
         state.jobs[job.id]!.state = 'completed'
       })
       return
@@ -878,6 +883,7 @@ export class ChannelConversationConsumer {
     const deliveryId = `delivery:${identity([job.id, event])}`
     const existingTarget = access?.runtime.deliverySnapshot(deliveryId, CALLER)?.target
     const target = await this.store.mutate(state => {
+      if (!mayFinishChannelJob(state, job)) return undefined
       const current = state.jobs[job.id]!
       const binding = current.bindingId === undefined ? undefined : state.bindings[current.bindingId]
       const defaults = current.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
@@ -891,7 +897,6 @@ export class ChannelConversationConsumer {
         return undefined
       }
       try {
-        // Serialize choice and reservation. A policy change/retry never retargets an existing outbox operation.
         current.replyTarget ??= existingTarget ?? channelReplyTarget(event, mode)
       } catch (error) {
         current.state = 'failed'
@@ -974,8 +979,7 @@ export class ChannelConversationConsumer {
         channelCommandReplyTarget(event, this.input.access()?.replyCapabilities?.(event)),
       )
     } catch {
-      // The first reply may already have left the process. A second error reply
-      // is another outbound effect, not a safe way to explain an unknown result.
+      // A second error reply could duplicate an outbound effect whose result is unknown.
       this.input.report?.('CHANNEL_COMMAND_REPLY_RESULT_UNKNOWN')
       return 'unknown'
     }
@@ -987,6 +991,7 @@ export class ChannelConversationConsumer {
     this.commandUsers.dispose()
     this.sessionCommands.dispose()
     this.approvals.dispose()
+    this.continuation.dispose()
     await this.store.close()
   }
   sendAllowed(event: ChannelEventRef): boolean {

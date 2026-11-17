@@ -166,6 +166,7 @@ describe('Vite development native submission assembly', () => {
             channel: expect.any(Function),
             channelName: expect.any(Function),
             channelSectionName: expect.any(Function),
+            contextObserver: expect.anything(),
             configModelCatalogs: { fixture: 'scoped.json' },
             dynamicModelCatalog: true,
             managedCatalog: { homeDir: f.home, profileId: 'default' },

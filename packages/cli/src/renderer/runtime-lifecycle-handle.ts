@@ -499,6 +499,7 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.finalizedTransactions()!.clear()
   runtimeScope.rollbackReceipts()!.clear()
   runtimeScope.configBridge()!?.dispose()
+  runtimeScope.agentContextBridge()?.dispose()
   runtimeScope.serviceConfigBridge()!?.dispose()
   runtimeScope.managedServiceBridge()!?.dispose()
   runtimeScope.modelProviders()!.dispose()

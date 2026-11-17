@@ -65,6 +65,12 @@ const taskSettings = {
 }
 export const channelAgentTools = [
   tool(
+    'continuation-takeover-ready',
+    'For the Host-designated preparation turn only: confirm readiness using the supplied one-time token. On acceptance end this turn immediately; business resumes separately after source catch-up.',
+    { token: { type: 'string', minLength: 1, maxLength: 512 } },
+    ['token'],
+  ),
+  tool(
     'continuation-history',
     'Read a bounded page from this active continuation task’s confirmed source. No arbitrary source can be selected.',
     {

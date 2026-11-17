@@ -35,7 +35,7 @@ const WRITES = new Set([
 export function channelCliOperationKind(operation: string): ChannelCliOperationKind | undefined {
   return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask'].includes(operation)
     ? 'send'
-    : operation === 'continuation-checkpoint-set'
+    : ['continuation-checkpoint-set', 'continuation-takeover-ready'].includes(operation)
     ? 'checkpoint'
     : WRITES.has(operation)
     ? 'write'
