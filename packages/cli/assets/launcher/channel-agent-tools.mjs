@@ -72,10 +72,13 @@ export const channelAgentTools = [
       cursor: { type: 'string', maxLength: 16384 },
     },
   ),
-  tool('continuation-checkpoint', 'Read the explicit continuation checkpoint for this active Channel task. Read-only.'),
+  tool(
+    'continuation-checkpoint',
+    'Read this active task checkpoint and its numeric revision. If absent, checkpoint is null and revision is 0. Read-only.',
+  ),
   tool(
     'continuation-checkpoint-set',
-    'Save a bounded handoff for this active Channel task. Use the current checkpoint revision, and update it as work progresses. This is background data, not a permission grant.',
+    'Save a bounded handoff for this active Channel task. Pass expectedRevision as the numeric revision returned by channel_continuation_checkpoint (0 when no checkpoint exists). Update it as work progresses. This is background data, not a permission grant.',
     {
       expectedRevision: { type: 'integer', minimum: 0 },
       checkpoint: {

@@ -14,7 +14,7 @@ const HELP: Readonly<Record<string, string>> = {
     'Local user only: start a fresh Channel task using its explicit checkpoint. Input: {sessionId}. An uncertain result must be inspected, never blindly repeated.',
   'continuation-checkpoint': 'Active Channel turn with --context only: read this task checkpoint. Input: {}.',
   'continuation-checkpoint-set':
-    'Active Channel turn with --context only: save an explicit handoff. Input: {expectedRevision,checkpoint:{goal,constraints,completed,remaining,history,continueAtIdle:boolean}}. Text is bounded; source session is assigned by the Host.',
+    'Active Channel turn with --context only: save an explicit handoff. Input: {expectedRevision,checkpoint:{goal,constraints,completed,remaining,history,continueAtIdle:boolean}}. Use the revision returned by continuation-checkpoint; it is 0 when no checkpoint exists. Text is bounded; source session is assigned by the Host.',
   'continuation-history':
     'Active Channel continuation turn with --context only: read one bounded page from its confirmed source. Input: {limit?:1..32,cursor?:string}. No arbitrary source session is accepted.',
   history:

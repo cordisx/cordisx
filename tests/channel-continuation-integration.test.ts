@@ -283,6 +283,13 @@ describe('Channel continuation dispatch composition', () => {
         history: 'source',
         continueAtIdle: true,
       }
+      expect(await tools.callLocal('continuation-checkpoint', {}, { 'cordisx/channelContext': 'valid' }))
+        .toMatchObject({ status: 'ok', revision: 0, checkpoint: null })
+      expect(
+        await tools.callLocal('continuation-checkpoint-set', { expectedRevision: null, checkpoint }, {
+          'cordisx/channelContext': 'valid',
+        }),
+      ).toMatchObject({ status: 'rejected', code: 'INVALID_REQUEST' })
       expect(
         await tools.callLocal('continuation-checkpoint-set', { expectedRevision: 0, checkpoint }, {
           'cordisx/channelContext': 'forged',
@@ -300,6 +307,8 @@ describe('Channel continuation dispatch composition', () => {
           'openai/threadId': source,
         }),
       ).toMatchObject({ status: 'ok', checkpoint: { threadId: source, revision: 1 } })
+      expect(await tools.callLocal('continuation-checkpoint', {}, { 'cordisx/channelContext': 'valid' }))
+        .toMatchObject({ status: 'ok', revision: 1, checkpoint: { threadId: source } })
       active = false
       expect(await tools.callLocal('continuation-checkpoint', {}, { 'cordisx/channelContext': 'valid' }))
         .toMatchObject({ status: 'rejected' })

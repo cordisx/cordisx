@@ -381,7 +381,8 @@ An active Channel Agent can maintain a checkpoint through
 when the native MCP tools are available. The configured Channel CLI also
 provides `continuation-checkpoint` and `continuation-checkpoint-set` with the
 incoming `--context`, including in headless service mode. Read first, then write
-with `expectedRevision`; the structured body has nonempty `goal`,
+with `expectedRevision` from the read result (0 when there is no checkpoint);
+the structured body has nonempty `goal`,
 `constraints`, `completed`, `remaining`, and `history` strings, plus a
 `continueAtIdle` boolean. Set it to true only while autonomous work remains;
 set it to false when the task is done or waiting for input. The Host sets the
@@ -428,8 +429,9 @@ before its first turn. An unavailable or mismatched configuration stops the
 continuation rather than claiming it was preserved. These checks do not prove
 that every native or project setting was inherited.
 
-For a new thread owned by a headless backend, Codex CLI 0.149.1 starts in
-default work mode. The Host tracks that version-specific evidence and later
+For a new thread owned by a headless backend, [Codex CLI 0.149.1 initializes
+the session in default work mode](https://github.com/openai/codex/blob/rust-v0.149.1/codex-rs/core/src/session/mod.rs#L671).
+The Host tracks that version-specific evidence and later
 accepted mode changes separately from native readback. Unknown versions,
 resumed threads, failed changes and concurrent uncertain changes stay blocked
 until the mode is independently confirmed. Desktop threads do not use this

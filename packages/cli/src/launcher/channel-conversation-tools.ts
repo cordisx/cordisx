@@ -200,7 +200,8 @@ export class ChannelConversationTools {
         }
         if (operation === 'continuation-checkpoint') {
           if (Object.keys(input).length) throw new Error('INVALID_REQUEST')
-          return { status: 'ok', checkpoint: this.consumer.continuation.read(callerSession).checkpoint ?? null }
+          const checkpoint = this.consumer.continuation.read(callerSession).checkpoint ?? null
+          return { status: 'ok', revision: checkpoint?.revision ?? 0, checkpoint }
         }
         if (
           Object.keys(input).some(key => !['checkpoint', 'expectedRevision'].includes(key))
