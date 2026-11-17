@@ -11,6 +11,17 @@ export interface ChatExecutionDefaults {
   readonly settings: ChatExecutionSettings
 }
 
+/** A sparse layer inherits omitted fields and explicit inherit choices; false is an intentional value. */
+export function mergeChatExecutionSettings(
+  base: ChatExecutionSettings,
+  overrides: ChatExecutionSettings,
+): ChatExecutionSettings {
+  return {
+    ...base,
+    ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined && value !== 'inherit')),
+  }
+}
+
 /** Execution settings are separate from plugin capabilities and model-provider credentials. */
 export function parseChatExecutionSettings(value: unknown): ChatExecutionSettings {
   if (value === undefined) return {}

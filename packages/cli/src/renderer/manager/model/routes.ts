@@ -65,7 +65,7 @@ export function primaryFor(route: ManagerRoute): ManagerPrimaryPage {
   if (route.kind === 'primary') {
     return route.page === 'plugin-bundles' ? 'plugins' : route.page
   }
-  if (route.kind === 'model-connection-create') return 'model-services'
+  if (route.kind === 'model-connection-create' || route.kind === 'chat-execution') return 'model-services'
   if (route.kind === 'extension-point') return 'extension-points'
   if (route.kind === 'route' || route.kind === 'page') return 'routes'
   if (route.kind === 'about-acknowledgements') return 'about'

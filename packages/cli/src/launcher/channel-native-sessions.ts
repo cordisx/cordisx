@@ -10,6 +10,7 @@ import { ChannelChatOrganization, channelChatTitle } from './channel-chat-organi
 import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
 import { configuredChannelApprovalOperation } from './channel-cli-approval.js'
 import { type ChannelMessageContext, channelMessageContext } from './channel-message-context.js'
+import { type ChatExecutionSettings, mergeChatExecutionSettings } from '../chat-execution-settings.js'
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -161,6 +162,7 @@ export class ChannelNativeSessions {
     reply?: ChannelReplyDefaults & { readonly enabled: boolean },
     context?: ChannelMessageContext,
     settings?: import('./channel-task-config.js').ChannelTaskPatch,
+    creationOverrides?: ChatExecutionSettings,
   ): Promise<ChannelNativeTurnResult> {
     if (signal?.aborted) return { state: 'failed', code: 'CANCELLED' }
     const bridge = this.input.bridge()
@@ -207,6 +209,12 @@ export class ChannelNativeSessions {
       message.content.filter(block => block.type === 'text').map(block => block.text).join('\n'),
     ].join('\n')
     try {
+      const execution = sessionId === undefined
+        ? mergeChatExecutionSettings(
+          mergeChatExecutionSettings((await this.input.execution?.defaults())?.settings ?? {}, creationOverrides ?? {}),
+          settings?.effort === undefined ? {} : { effort: settings.effort },
+        )
+        : undefined
       if (signal?.aborted) {
         this.sources.delete(operationId)
         return { state: 'failed', code: 'CANCELLED' }
@@ -223,7 +231,7 @@ export class ChannelNativeSessions {
                 ? { providerId: settings?.providerId ?? this.input.providerId }
                 : {}),
               ...(settings?.model ?? this.input.model ? { model: settings?.model ?? this.input.model } : {}),
-              ...(settings?.effort === undefined ? {} : { execution: { effort: settings.effort } }),
+              ...(execution === undefined || !Object.keys(execution).length ? {} : { execution }),
             }
             : { sessionId }),
         }, signal),

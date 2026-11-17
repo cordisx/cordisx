@@ -403,7 +403,12 @@ export function createCodexBridgeHandler(
             threadId,
             handoffPrompt(prompt, handed),
             signal,
-            nativeExecutionTurn(execution, { model: started?.model ?? model, cwd }, {}),
+            nativeExecutionTurn(execution, {
+              ...object(started?.thread),
+              ...started,
+              model: started?.model ?? object(started?.thread)?.model ?? model,
+              cwd,
+            }, {}),
           )
           codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           const base = {

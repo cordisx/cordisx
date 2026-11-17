@@ -37,6 +37,7 @@ export class ChannelExecutionWorkflow {
       hostGeneration: string
       lifetime: AbortSignal
       live?: () => boolean
+      defaultsScope?: 'channel'
       run: ChannelManagerActionsApi['run']
     },
   ) {}
@@ -45,7 +46,7 @@ export class ChannelExecutionWorkflow {
     this.input.lifetime.throwIfAborted()
     if (this.input.live?.() === false) throw new Error('STALE_GENERATION')
     const result = await this.input.run(
-      sessionId ? 'execution-settings' : 'execution-defaults',
+      sessionId ? 'execution-settings' : this.defaultsAction(),
       sessionId ? { sessionId } : {},
     )
     signal.throwIfAborted()
@@ -55,6 +56,16 @@ export class ChannelExecutionWorkflow {
       throw new Error(result.code ?? 'EXECUTION_SETTINGS_UNAVAILABLE')
     }
     return this.project(result.execution, sessionId)
+  }
+  private defaultsAction() {
+    return this.input.defaultsScope === 'channel'
+      ? 'channel-execution-defaults' as const
+      : 'execution-defaults' as const
+  }
+  private defaultsSaveAction() {
+    return this.input.defaultsScope === 'channel'
+      ? 'channel-execution-defaults-set' as const
+      : 'execution-defaults-set' as const
   }
   private project(value: unknown, sessionId: string | undefined): ChatExecutionReadbackV1 {
     const response = object(value), record = sessionId ? object(response.settings) : response
@@ -81,7 +92,7 @@ export class ChannelExecutionWorkflow {
   async saveDefaults(settings: ChatExecutionSettingsV1, expectedRevision: number): Promise<ChatExecutionReadbackV1> {
     this.input.lifetime.throwIfAborted()
     if (this.input.live?.() === false) throw new Error('STALE_GENERATION')
-    const result = await this.input.run('execution-defaults-set', { settings, expectedRevision })
+    const result = await this.input.run(this.defaultsSaveAction(), { settings, expectedRevision })
     this.input.lifetime.throwIfAborted()
     if (this.input.live?.() === false) throw new Error('STALE_GENERATION')
     if (result.status !== 'applied' || !result.execution) {
@@ -110,6 +121,7 @@ export class ChannelExecutionWorkflow {
       render: signal =>
         createElement(ChatExecutionForm, {
           initial,
+          ...(this.input.defaultsScope === 'channel' ? { defaultsScope: 'channel' as const } : {}),
           ...(input.draft === undefined ? {} : { draft: input.draft }),
           locale: this.input.document.documentElement.lang || 'en',
           signal,
@@ -118,11 +130,14 @@ export class ChannelExecutionWorkflow {
             if (!input.live() || signal.aborted) throw new Error('STALE_GENERATION')
             if (!await input.authorize()) throw new Error('PERMISSION_DENIED')
             if (!input.live() || signal.aborted) throw new Error('STALE_GENERATION')
-            const result = await this.input.run(input.sessionId ? 'execution-settings-set' : 'execution-defaults-set', {
-              settings,
-              expectedRevision,
-              ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-            })
+            const result = await this.input.run(
+              input.sessionId ? 'execution-settings-set' : this.defaultsSaveAction(),
+              {
+                settings,
+                expectedRevision,
+                ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+              },
+            )
             if (!input.live() || signal.aborted || this.input.live?.() === false) throw new Error('STALE_GENERATION')
             if (result.status !== 'applied' || !result.execution) {
               throw new Error(result.code ?? 'EXECUTION_SETTINGS_UNAVAILABLE')

@@ -33,8 +33,8 @@ for (const [name, spec] of Object.entries(expectedGitDependencies)) {
   }
 }
 const expectedProtocolSpec = sourceCordisXManifest.dependencies?.['@cordisx/protocol']
-if (expectedProtocolSpec !== '0.1.0-beta.15') {
-  throw new Error('source cordisx must consume @cordisx/protocol@0.1.0-beta.15')
+if (expectedProtocolSpec !== 'github:cordisx/cordisx-protocol#52f4016addd281284a82e4c53d04578dd337be31') {
+  throw new Error('source cordisx must pin the merged Channel Manager v13 Protocol source')
 }
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined

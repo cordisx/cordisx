@@ -49,7 +49,6 @@ export async function verifyManagerShell(context: Awaited<ReturnType<typeof veri
       'marketplace',
       'extension-points',
       'routes',
-      'chat-execution',
       'notifications',
       'about',
     ])

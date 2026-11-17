@@ -81,13 +81,15 @@ export function createChannelActionsBridgeHandler(
         [
           'execution-defaults',
           'execution-defaults-set',
+          'channel-execution-defaults',
+          'channel-execution-defaults-set',
           'execution-settings',
           'execution-settings-set',
           'binding-labels',
         ].includes(action)
       ) {
         if (
-          action === 'binding-labels' && !input.consumer
+          (action === 'binding-labels' || action.startsWith('channel-execution-defaults')) && !input.consumer
           || action !== 'binding-labels' && !input.consumer && !input.execution
         ) return { status: 'unavailable', code: 'EXECUTION_SETTINGS_UNAVAILABLE' }
         try {
@@ -95,8 +97,9 @@ export function createChannelActionsBridgeHandler(
             return { status: 'applied', bindingLabels: await input.consumer!.bindingLabels() }
           }
           const { version: _version, token: _token, requestId: _id, action: _action, ...args } = request
-          const value =
-            await (input.execution ? input.execution(action, args) : input.consumer!.executionOperation(action, args))
+          const value = await (input.execution && !action.startsWith('channel-execution-defaults')
+            ? input.execution(action, args)
+            : input.consumer!.executionOperation(action, args)) as { status: string; code?: string }
           return value.status === 'ok'
             ? { status: 'applied', execution: value }
             : { status: 'unavailable', code: value.code ?? 'EXECUTION_SETTINGS_UNAVAILABLE' }

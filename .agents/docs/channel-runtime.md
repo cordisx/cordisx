@@ -44,9 +44,21 @@ grouping. It uses the existing profile-defaults and Channel-policy stores,
 with no new configuration file or copied account state. Source/generation-owned
 drafts survive sibling tab navigation. Section saves merge into the latest
 complete policy under a revision fence; same-section conflicts require refresh.
-Undo affects only the current section. The registered own destination hides
-the duplicate Host shortcut only while its actual route, page, service owner
-and render permission remain available, and retirement restores the fallback.
+Undo affects only the current section. **New chat defaults** is an icon action
+in the **Model services** page header, opening its profile-defaults form as a
+child page. It is independent of Channel installation and activation. There
+is no separate sidebar shortcut; a Channel settings destination cannot hide
+or replace the general Host entry.
+
+The additive [Manager v13 creation-default form](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v13-creation-defaults.md)
+edits a separate sparse Channel overlay, persisted in `creationDefaults` in
+`$CORDISX_HOME/apps/<app>/profiles/<profile>/channel-conversations.json`. General
+defaults remain `apps.<app>.profiles.<profile>.chatExecution` in the CordisX home
+configuration. At creation, general defaults are merged with explicit Channel
+fields; missing fields and `inherit` fall through, while `false` overrides.
+Scoped Channel task-model rules then override the fields they control. Ordinary
+chats use only general defaults; existing/resumed chats are not reconfigured.
+Frozen v9-v12 general-default methods keep their original storage semantics.
 
 The explicit [Manager v10 conversation contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/manager-v10-conversations.md)
 adds read-only remote-conversation summaries and paged local transport activity.

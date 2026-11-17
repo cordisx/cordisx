@@ -115,6 +115,7 @@ const toSettings = (value: Record<string, unknown>) =>
 export function ChatExecutionForm(props: {
   readonly initial: ChatExecutionReadbackV1
   readonly draft?: ChannelSettingsDraft
+  readonly defaultsScope?: 'channel'
   readonly locale: string
   readonly signal: AbortSignal
   readonly read: () => Promise<ChatExecutionReadbackV1>
@@ -205,7 +206,13 @@ export function ChatExecutionForm(props: {
                 : dirty
                 ? zh ? '有未保存的修改' : 'Unsaved changes'
                 : readback.scope === 'creation-defaults'
-                ? zh ? '只对新创建的对话生效。' : 'Applies to newly created chats.'
+                ? props.defaultsScope === 'channel'
+                  ? zh
+                    ? '继承通用默认配置；显式设置仅覆盖新频道对话。'
+                    : 'Inherits general defaults; explicit fields override newly created Channel chats.'
+                  : zh
+                  ? '只对新创建的对话生效。'
+                  : 'Applies to newly created chats.'
                 : readback.application === 'applied'
                 ? zh ? '原生已确认配置。' : 'Native settings confirmed.'
                 : zh
