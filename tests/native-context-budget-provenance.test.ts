@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   captureNativeBudgetProvenance,
+  deriveNativeBudgetProvenance,
   type NativeStaticCatalogReceipt,
   type NativeThreadBudgetReceipt,
 } from '../packages/cli/src/launcher/native-context-budget-provenance.js'
@@ -18,6 +19,8 @@ function startup(models: unknown[] = [{
   return {
     nativeVersion: '0.167.0-alpha.3.2',
     serverId: 'server-1',
+    providerKind: 'openai-compatible',
+    providerId: 'openai',
     catalogBytes,
     catalogSha256: createHash('sha256').update(catalogBytes).digest('hex'),
   }
@@ -31,6 +34,7 @@ const thread: NativeThreadBudgetReceipt = {
   sessionId: 'thread-1',
   requestedModel: 'actual-model',
   responseModel: 'actual-model',
+  responseProviderId: 'openai',
   modelContextWindow: 220_000,
   modelAutoCompactLimit: 120_000,
   scope: 'total',
@@ -93,6 +97,9 @@ describe('native budget provenance', () => {
         [startup(), null],
         [{ ...startup(), nativeVersion: '0.149.1' }, thread],
         [{ ...startup(), serverId: 'other' }, thread],
+        [{ ...startup(), providerId: 'other' }, thread],
+        [startup(), { ...thread, responseProviderId: 'other' }],
+        [startup(), { ...thread, originator: '' }],
         [startup(), { ...thread, responseRequestId: 'other' }],
         [startup(), { ...thread, sessionId: '' }],
         [startup(), { ...thread, responseModel: 'other' }],
@@ -111,5 +118,93 @@ describe('native budget provenance', () => {
     ) {
       expect(captureNativeBudgetProvenance(startup(models), thread).status).toBe('unavailable')
     }
+  })
+})
+
+describe('deriving fresh-thread configuration', () => {
+  const receipt = {
+    serverId: 'server-1',
+    requestId: 'request-1',
+    responseRequestId: 'request-1',
+    originator: 'host-client',
+    sessionId: 'thread-1',
+    requestedModel: 'actual-model',
+    responseModel: 'actual-model',
+    responseProviderId: 'openai',
+    mergedConfig: {},
+    featureRequirements: null,
+  }
+  const modelDefaults = {
+    enabled: false,
+    reminder_threshold_tokens: 2000,
+    reminder_message_template: 'remaining',
+    guidance_message: 'guidance',
+    auto_compact_fallback_prompt: 'note',
+    auto_compact_fallback_buffer_tokens: 16384,
+  }
+  const catalog = (budget: unknown) =>
+    startup([{
+      slug: 'actual-model',
+      context_window: 200000,
+      model_messages: { token_budget: budget },
+    }])
+
+  it('derives ordinary native defaults and preserves explicit thread overrides', () => {
+    const result = deriveNativeBudgetProvenance(catalog(modelDefaults), {
+      ...receipt,
+      mergedConfig: { model_context_window: 100000, model_auto_compact_token_limit: 75000 },
+    })
+    expect(result.status).toBe('verified')
+    if (result.status !== 'verified') return
+    expect(result.evidence.configuration).toEqual({
+      sessionId: 'thread-1',
+      modelContextWindow: 100000,
+      modelAutoCompactLimit: 75000,
+      scope: 'total',
+      asyncCompaction: false,
+      postTurnCompactPercent: 0,
+      fallbackBufferTokens: 0,
+    })
+  })
+
+  it('derives activated model fallback and explicit fallback overrides', () => {
+    const activated = deriveNativeBudgetProvenance(catalog({ ...modelDefaults, enabled: true }), receipt)
+    expect(activated.status === 'verified' && activated.evidence.configuration.fallbackBufferTokens).toBe(16384)
+    const explicit = deriveNativeBudgetProvenance(catalog(modelDefaults), {
+      ...receipt,
+      mergedConfig: {
+        features: {
+          token_budget: {
+            enabled: true,
+            auto_compact_fallback_prompt: 'custom',
+            auto_compact_fallback_buffer_tokens: 3000,
+          },
+        },
+      },
+    })
+    expect(explicit.status === 'verified' && explicit.evidence.configuration.fallbackBufferTokens).toBe(3000)
+    const enabled = deriveNativeBudgetProvenance(catalog(modelDefaults), {
+      ...receipt,
+      mergedConfig: { features: { token_budget: true, async_compaction: true } },
+    })
+    expect(enabled.status === 'verified' && enabled.evidence.configuration).toMatchObject({
+      fallbackBufferTokens: 16384,
+      asyncCompaction: false,
+    })
+  })
+
+  it('refuses unresolved managed requirements and experimental activation', () => {
+    for (
+      const value of [
+        { ...receipt, featureRequirements: undefined },
+        { ...receipt, featureRequirements: { token_budget: true } },
+        { ...receipt, mergedConfig: { model_auto_compact_token_limit_scope: 'invalid' } },
+        { ...receipt, mergedConfig: { features: { context_management: true } } },
+        {
+          ...receipt,
+          mergedConfig: { features: { token_budget: { enabled: true, auto_compact_fallback_prompt: 'custom' } } },
+        },
+      ]
+    ) expect(deriveNativeBudgetProvenance(catalog(modelDefaults), value).status).toBe('unavailable')
   })
 })
