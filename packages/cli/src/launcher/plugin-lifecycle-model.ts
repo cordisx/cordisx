@@ -464,7 +464,7 @@ export function authorizationPlanV4(
   if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) {
     throw new LifecycleFailure(
       'permission-denied',
-      'Permission V4 review requires manifest-v5 through manifest-v14.',
+      'Permission V4 review requires manifest-v5 through manifest-v16.',
     )
   }
   const catalog = new CapabilityRiskCatalog()
@@ -491,7 +491,7 @@ export function authorizationPlanV4(
 }
 
 export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {
-  return schemaVersion >= 5 && schemaVersion <= 15
+  return schemaVersion >= 5 && schemaVersion <= 16
 }
 
 export function isLegacyPermissionDeclarationV4(

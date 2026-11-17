@@ -56,4 +56,6 @@ export const nativeModelProviderObservedAttributes = [
   'data-codex-intelligence-trigger',
   'data-composer-navigation-target',
   'data-selected-reasoning-effort',
+  'aria-busy',
+  'disabled',
 ]

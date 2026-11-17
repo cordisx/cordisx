@@ -14,6 +14,22 @@ import { resolveTargetReasoning } from './native-model-reasoning.js'
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
 import { locateNativeComposerCreationSelection } from './adapter/native-composer-creation.js'
 import { locateNativeModelProviderMountSeat } from './adapter/native-model-provider-seat.js'
+import type { NativeComposerCreationHandoff } from './native-composer-creation-handoff.js'
+
+/** Creation display expires only after the exact live native binding is acknowledged. */
+export function nativeComposerCreationDisplay(
+  next: SelectionSnapshot,
+  composer: HTMLElement | undefined,
+  control: NativeModelSelectionControl | undefined,
+  handoff: NativeComposerCreationHandoff | undefined,
+) {
+  const actualBinding = next.threadId !== undefined && next.available
+    && next.modelProvider !== undefined && next.model !== undefined
+    && isModelReasoningEffort(next.reasoningEffort) && next.serviceTier !== undefined
+    && control?.model === next.model && control.reasoningEffort === next.reasoningEffort
+  if (actualBinding) handoff?.acknowledge(composer, next.threadId!)
+  return actualBinding ? undefined : handoff?.read(composer, next.threadId)
+}
 
 export function nativeComposerCreationSelection(document: Document, composer?: HTMLElement) {
   const owner = composer ?? locateNativeModelProviderMountSeat(document)?.trigger.closest<HTMLElement>(
@@ -69,13 +85,27 @@ export async function readNativeComposerBaseline(
   threadId: string | undefined,
   current: () => boolean,
 ): Promise<{ thread: Record<string, unknown> | undefined; config: Record<string, unknown> } | undefined> {
-  const response = threadId === undefined
-    ? undefined
-    : record(await request('thread/read', { threadId, includeTurns: false }))
+  const [response, result] = await Promise.all([
+    threadId === undefined ? undefined : request('thread/read', { threadId, includeTurns: false }),
+    request('config/read', { includeLayers: false, cwd: null }),
+  ])
   if (!current()) return undefined
-  const result = record(await request('config/read', { includeLayers: false, cwd: null }))
-  if (!current()) return undefined
-  return { thread: record(response?.thread), config: record(result?.config) ?? {} }
+  return { thread: record(record(response)?.thread), config: record(record(result)?.config) ?? {} }
+}
+
+/** Directory enrichment runs independently of selection readiness. */
+export function refreshNativeComposerModels(
+  source: NativeModelSource,
+  catalogIdentity: string | undefined,
+  providerId: string,
+  request: (params: Readonly<{ cursor?: string; limit: number; includeHidden: false }>) => Promise<unknown>,
+  current: () => boolean,
+  refreshed: () => void,
+): void {
+  if (catalogIdentity !== undefined) source.clear()
+  else {void source.refresh(providerId, request).then(() => {
+      if (current()) refreshed()
+    })}
 }
 
 export function refreshedNativeComposerSelection(

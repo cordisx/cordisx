@@ -12,7 +12,7 @@ import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { PluginLifecycleCoordinator } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
-import { FakeRuntime, localPackage, localPackageV4 } from './suites/plugin-lifecycle.fixtures.js'
+import { FakeRuntime, localPackage, localPackageV4, writeLocalPackageV14 } from './suites/plugin-lifecycle.fixtures.js'
 
 const roots: string[] = []
 const servers: Server[] = []
@@ -64,6 +64,49 @@ async function listen(
 }
 
 describe('plugin management service', () => {
+  it('installs a manifest-v16 package through V4 review instead of remaining planned', async () => {
+    const { homeDir, service } = await fixture()
+    const sourceDirectory = await writeLocalPackageV14(path.join(homeDir, 'manifest-v16'), 'manifest-v16')
+    const runtimePath = path.join(sourceDirectory, 'runtime-manifest.json')
+    const schema =
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
+    const runtime = {
+      ...JSON.parse(await readFile(runtimePath, 'utf8')),
+      $schema: schema,
+      schemaVersion: 16,
+      services: [],
+    }
+    const text = JSON.stringify(runtime)
+    await writeFile(runtimePath, text)
+    const packagePath = path.join(sourceDirectory, 'cordisx-package.json')
+    const metadata = JSON.parse(await readFile(packagePath, 'utf8'))
+    await writeFile(
+      packagePath,
+      JSON.stringify({
+        ...metadata,
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v16.schema.json',
+        schemaVersion: 16,
+        compatibility: { ...metadata.compatibility, protocolSchemas: [schema] },
+        runtimeManifest: {
+          ...metadata.runtimeManifest,
+          schema,
+          digest: `sha256:${createHash('sha256').update(text).digest('hex')}`,
+        },
+      }),
+    )
+    const installedV16 = await executePlan(service, { kind: 'plugin-plan-local', sourceDirectory })
+    expect(installedV16).toMatchObject({
+      status: 'applied',
+      pendingActivation: true,
+    })
+    expect((await service.query()).plugins).toMatchObject([{
+      id: 'manifest-v16',
+      enabled: true,
+      status: 'pending-activation',
+    }])
+    service.close()
+  })
   it('plans config without persistence and executes through the shared home document', async () => {
     const { service } = await fixture()
     const request = {

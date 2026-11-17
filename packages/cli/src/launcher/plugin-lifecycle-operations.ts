@@ -205,7 +205,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     )
   }
 
-  /** Host-private manifest-v5 through manifest-v14 review on the same lifecycle authority. */
+  /** Host-private manifest-v5 through manifest-v16 review on the same lifecycle authority. */
   async permissionReviewPlanV4(
     input: HostPermissionLifecycleReviewV4Request,
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
