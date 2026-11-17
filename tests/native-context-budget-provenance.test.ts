@@ -95,7 +95,7 @@ describe('native budget provenance', () => {
       const [server, request] of [
         [null, thread],
         [startup(), null],
-        [{ ...startup(), nativeVersion: '0.149.1' }, thread],
+        [{ ...startup(), nativeVersion: '0.149.0' }, thread],
         [{ ...startup(), serverId: 'other' }, thread],
         [{ ...startup(), providerId: 'other' }, thread],
         [startup(), { ...thread, responseProviderId: 'other' }],
@@ -215,6 +215,42 @@ describe('deriving fresh-thread configuration', () => {
       )
       expect(modelOwned.status === 'verified' && modelOwned.evidence.configuration.fallbackBufferTokens).toBe(16384)
     }
+  })
+
+  it('uses 0.149 feature activation instead of 0.167 model-driven activation', () => {
+    const legacy = { ...catalog({ ...modelDefaults, enabled: true }), nativeVersion: '0.149.1' }
+    const disabled = deriveNativeBudgetProvenance(legacy, receipt)
+    expect(disabled.status === 'verified' && disabled.evidence.configuration.fallbackBufferTokens).toBe(0)
+    const enabled = deriveNativeBudgetProvenance(legacy, {
+      ...receipt,
+      mergedConfig: { features: { token_budget: true } },
+    })
+    expect(enabled.status === 'verified' && enabled.evidence.configuration.fallbackBufferTokens).toBe(16384)
+    const explicit = deriveNativeBudgetProvenance(legacy, {
+      ...receipt,
+      mergedConfig: {
+        features: {
+          token_budget: {
+            enabled: true,
+            auto_compact_fallback_prompt: 'custom',
+            auto_compact_fallback_buffer_tokens: 3000,
+          },
+        },
+      },
+    })
+    expect(explicit.status === 'verified' && explicit.evidence.configuration.fallbackBufferTokens).toBe(3000)
+    expect(
+      deriveNativeBudgetProvenance(legacy, {
+        ...receipt,
+        mergedConfig: { features: { async_compaction: true } },
+      }).status,
+    ).toBe('unavailable')
+    expect(
+      deriveNativeBudgetProvenance(legacy, {
+        ...receipt,
+        mergedConfig: { model_post_turn_compact_threshold_percent: 5 },
+      }).status,
+    ).toBe('unavailable')
   })
 
   it('refuses unresolved managed requirements and experimental activation', () => {
