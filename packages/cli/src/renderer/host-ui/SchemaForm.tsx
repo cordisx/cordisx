@@ -92,15 +92,17 @@ export type HostSchemaFormOptions = SchemaFormOptionsV1 & {
 }
 
 /** Host shell integration only; the public embedded SchemaForm contract remains unchanged. */
-export function HostSchemaFormPage({ form, footer, children }: {
+export function HostSchemaFormPage({ form, footer, toolbar, children }: {
   readonly form: HostSchemaFormOptions
   readonly footer: ReactNode
+  readonly toolbar?: ReactNode
   readonly children?: ReactNode
 }) {
   return (
     <SchemaFormTheme identity={form.identity} fill>
       <HostFormPageStack resetKey={form.identity} layout="fill">
         <HostFormPage footer={footer}>
+          {toolbar}
           <HostSchemaFormSurfaceContext.Provider value={form.identity}>
             <SchemaForm {...form} />
           </HostSchemaFormSurfaceContext.Provider>

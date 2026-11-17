@@ -260,6 +260,8 @@ export interface CordisXRuntimeMetadata {
   readonly permissionBridgeToken?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
+  /** Host-private bootstrap token, stripped before runtime metadata is retained. */
+  readonly agentContextBridgeToken?: string
   readonly configBridgeToken?: string
   readonly nativeSessionBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string

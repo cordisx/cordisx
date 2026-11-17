@@ -28,8 +28,9 @@ import type { ChannelManagerV8 } from '@cordisx/protocol/channel-manager/v8'
 import type { ChannelManagerBindingPageV2, ChannelManagerV9 } from '@cordisx/protocol/channel-manager/v9'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import type { ChannelSettingsFormSectionV2 } from '@cordisx/protocol/channel-manager/v12'
-import type { ChannelManagerV13 } from '@cordisx/protocol/channel-manager/v13'
+import type { ChannelManagerV14 } from '@cordisx/protocol/channel-manager/v14'
 import { mountChannelManagerSettings } from './channel-manager-settings-mount.js'
+import { mountContinuationDefaults } from './channel-continuation-defaults-workflow.js'
 import { ChannelSettingsWorkflow } from './channel-settings-workflow.js'
 import { initializeChannelManagerWorkflows } from './channel-manager-workflows.js'
 import { registerChannelSettingsDestination } from './channel-settings-destination.js'
@@ -87,6 +88,8 @@ export interface ChannelManagerActionsApi {
       | 'snapshot'
       | 'policy'
       | 'policy-set'
+      | 'continuation-defaults'
+      | 'continuation-defaults-set'
       | 'execution-defaults'
       | 'execution-defaults-set'
       | 'channel-execution-defaults'
@@ -136,7 +139,7 @@ export interface ChannelManagerServiceInput {
 }
 
 /** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
-export class CordisXChannelManagerService extends Service implements ChannelManagerV13 {
+export class CordisXChannelManagerService extends Service implements ChannelManagerV14 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
     const candidate = input as ChannelManagerProjectionV1 | ChannelManagerServiceInput
@@ -292,8 +295,21 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   forOwnConversationService(): ChannelManagerV10 | undefined {
     return this.forOwnService() as ChannelManagerV10 | undefined
   }
-  forOwnSettingsService(): ChannelManagerV13 | undefined {
-    return this.forOwnService() as ChannelManagerV13 | undefined
+  forOwnSettingsService(): ChannelManagerV14 | undefined {
+    return this.forOwnService() as ChannelManagerV14 | undefined
+  }
+
+  mountContinuationDefaultsForm(target: HTMLElement, options: ChannelManagerFormOptionsV1) {
+    return mountContinuationDefaults({
+      ctx: this.ctx,
+      owner: ownerFromContext(this.ctx),
+      target,
+      options,
+      workflow: stateFor(this).continuation,
+      live: () => this.operationLive() && this.ownedReadAllowed(),
+      authorizeRead: () => this.authorizeChannel('channel.bindings.read'),
+      authorizeWrite: () => this.authorizeChannel('channel.bindings.write'),
+    })
   }
 
   async mountSettingsForm(
