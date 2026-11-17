@@ -39,4 +39,19 @@ describe('Channel exact native turn control', () => {
     ).toBe('already-completed')
     expect(nativeRequest).toHaveBeenCalledTimes(1)
   })
+  it('treats a timed-out interrupt as uncertain without issuing another one', async () => {
+    vi.useFakeTimers()
+    try {
+      const nativeRequest = vi.fn(async (method: string) => {
+        if (method === 'turn/interrupt') return await new Promise(() => {})
+        return { data: [{ id: 'turn', status: 'inProgress' }] }
+      })
+      const result = new ChannelLiveTurnControl({ nativeRequest }, async () => {}, 1).interruptExact('source', 'turn')
+      await vi.advanceTimersByTimeAsync(5_001)
+      expect(await result).toBe('uncertain')
+      expect(nativeRequest.mock.calls.filter(call => call[0] === 'turn/interrupt')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
