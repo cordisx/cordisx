@@ -4,6 +4,7 @@ import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { bindHeadlessCatalog } from './headless-catalog-binding.js'
+import { HeadlessContextCapture } from './headless-context-capture.js'
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
 export async function startHeadlessCodexBackend(input: {
@@ -55,6 +56,9 @@ export async function startHeadlessCodexBackend(input: {
         cwd: input.codexHome,
       })
       : undefined
+    const contextCapture = catalogReceipt && input.contextObserver
+      ? new HeadlessContextCapture(server, catalogReceipt, input.contextObserver)
+      : undefined
     if (!server.subscribeRequests) throw new Error('App-server request handling is unavailable')
     const unsubscribeRequests = server.subscribeRequests(input.onRequest)
     const unsubscribeNotifications = input.onNotification === undefined
@@ -82,8 +86,11 @@ export async function startHeadlessCodexBackend(input: {
             }
           }
         }
-        return input.nativeRequest?.(method, selected, value => server.request(method, value))
-          ?? server.request(method, selected)
+        const dispatch = (value: Readonly<Record<string, unknown>>) =>
+          contextCapture
+            ? contextCapture.dispatch(method, value, params => server.request(method, params))
+            : server.request(method, value)
+        return input.nativeRequest ? input.nativeRequest(method, selected, dispatch) : dispatch(selected)
       },
       catalog: async () => (await models('list', {})).providers ?? [],
     }

@@ -8,7 +8,12 @@ const validId = (value: unknown): value is string =>
 
 /** Projects only the current authenticated connection's native usage notifications. */
 export class NativeContextObserver {
-  private readonly sessions = new Map<string, { generation: number; sequence: number; budget: NativeContextBudget }>()
+  private readonly sessions = new Map<string, {
+    generation: number
+    sequence: number
+    budget: NativeContextBudget
+    identity?: { model: string; providerId: string }
+  }>()
   constructor(
     readonly observations: ContextObservations,
     private readonly now: () => number = Date.now,
@@ -16,14 +21,21 @@ export class NativeContextObserver {
   ) {}
 
   /** The caller owns session admission and the evidence behind any resolved budget. */
-  track(sessionId: string, generation: number, budget: NativeContextBudget): void {
+  track(
+    sessionId: string,
+    generation: number,
+    budget: NativeContextBudget,
+    identity?: { model: string; providerId: string },
+  ): void {
     if (!validId(sessionId)) throw new Error('invalid')
     this.observations.open(sessionId, generation)
     const old = this.sessions.get(sessionId)
     if (old?.generation === generation) {
       if (JSON.stringify(old.budget) !== JSON.stringify(budget)) this.observations.invalidate(sessionId, 'config')
       old.budget = budget
-    } else this.sessions.set(sessionId, { generation, sequence: 0, budget })
+      if (identity) old.identity = identity
+      else delete old.identity
+    } else this.sessions.set(sessionId, { generation, sequence: 0, budget, ...(identity ? { identity } : {}) })
   }
 
   has(sessionId: string): boolean {
@@ -46,7 +58,14 @@ export class NativeContextObserver {
       return
     }
     if (method === 'thread/settings/updated') {
-      current.budget = { status: 'unavailable', reason: 'unknown' }
+      const settings = object(params.threadSettings)
+      if (
+        !current.identity || settings.model !== current.identity.model
+        || settings.modelProvider !== current.identity.providerId
+      ) {
+        current.budget = { status: 'unavailable', reason: 'unknown' }
+        delete current.identity
+      }
       this.observations.invalidate(sessionId, 'config')
       return
     }

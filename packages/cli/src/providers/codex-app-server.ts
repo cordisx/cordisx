@@ -22,7 +22,8 @@ export interface CodexAppServerRpc {
     method: string,
     params: unknown,
     signal?: AbortSignal,
-  ): Promise<{ requestId: string; responseRequestId: string; result: Result }>
+    onId?: (id: number) => void,
+  ): Promise<{ requestId: number; responseRequestId: number; result: Result }>
   subscribeNotifications?(listener: (method: string, params: unknown) => void): () => void
   subscribeRequests?(
     listener: (method: string, params: unknown, requestId?: string | number) => unknown | Promise<unknown>,
@@ -104,14 +105,15 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
     return this.rpc.request<Result>(method, params, signal)
   }
 
-  async requestWithReceipt<Result>(method: string, params: unknown, signal?: AbortSignal) {
+  async requestWithReceipt<Result>(method: string, params: unknown, signal?: AbortSignal, onId?: (id: number) => void) {
     let requestId: number | undefined
     const result = await this.rpc.request<Result>(method, params, signal, id => {
       requestId = id
+      onId?.(id)
     })
     if (requestId === undefined) throw new Error('RPC_REQUEST_ID_UNAVAILABLE')
     // JsonLineRpcClient resolves only the pending request with this exact response ID.
-    return { requestId: String(requestId), responseRequestId: String(requestId), result }
+    return { requestId, responseRequestId: requestId, result }
   }
 
   subscribeNotifications(listener: (method: string, params: unknown) => void): () => void {
