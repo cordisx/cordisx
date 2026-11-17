@@ -370,6 +370,11 @@ before the native change.
 
 ## Fresh Channel continuation
 
+The live threshold and target-ready path has a separate
+[context threshold and continuation reference](context-threshold-continuation.md).
+Its ratio uses the effective native automatic compaction threshold; the existing
+idle/send-boundary policy described below retains its own window-based semantics.
+
 Fresh continuation is disabled by default and applies only to Host-managed
 Channel tasks. It starts a new Codex thread; it does not fork the old thread or
 copy the full transcript. The prior conversation remains available for bounded,

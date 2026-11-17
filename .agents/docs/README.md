@@ -189,3 +189,4 @@ or protocol sources. Availability depends on the installed CordisX version.
 - [Local model and Agent API](local-model-api.md) — experimental loopback API candidate.
 
 - [Channel CLI and chat bindings](channel-cli.md): configured-runtime message tools, persistent bindings and receipt reconciliation.
+- [Context threshold and live continuation](context-threshold-continuation.md): effective compaction budget, observed usage, and target-ready handoff boundaries.
