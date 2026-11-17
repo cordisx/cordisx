@@ -7,6 +7,78 @@ import { ContextObservations } from '../packages/cli/src/launcher/context-observ
 import { ChannelLiveThreshold } from '../packages/cli/src/launcher/channel-live-threshold.js'
 
 describe('Channel live threshold', () => {
+  it('does not cascade a continued job on its initial above-threshold sample', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-threshold-continuation-'))
+    try {
+      const store = await ChannelConversationStore.open(path.join(dir, 'store.json'))
+      await store.mutate(state => {
+        state.continuationDefaults = { revision: 1, policy: { enabled: true, thresholdRatio: 0.5 } }
+        state.bindings.a = {
+          id: 'a',
+          sessionId: 'target',
+          hostId: 'local',
+          profileId: 'p',
+          channel: { adapterId: 'test', accountId: 'a', tenantId: 't', conversationId: 'c', kind: 'group' },
+          createdAt: '2026-01-01',
+          fromSequence: 1,
+          mode: 'deliver',
+          autoReply: false,
+          state: 'active',
+        }
+        state.jobs.j = {
+          id: 'j',
+          recordId: 'r',
+          bindingId: 'a',
+          autoCreate: false,
+          state: 'running',
+          sessionId: 'target',
+          turnId: 'turn',
+          liveContinuationTarget: 'target',
+        }
+      })
+      let now = 100
+      let generation = 1
+      const observations = new ContextObservations(() => now)
+      let epoch = observations.open('target', 1)
+      const cross = vi.fn(async () => {}), monitor = new ChannelLiveThreshold(store, observations, cross)
+      monitor.sync()
+      const sample = (sequence: number, usedTokens: number) => ({
+        sessionId: 'target',
+        sessionGeneration: generation,
+        turnId: 'turn',
+        usedTokens,
+        budget: { status: 'resolved' as const, tokens: 100 },
+        observedAt: now,
+        expiresAt: now + 100,
+        sequence,
+        ...epoch,
+      })
+      observations.observe(sample(1, 50))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(cross).not.toHaveBeenCalled()
+      epoch = observations.invalidate('target', 'config')!
+      observations.observe(sample(2, 50))
+      await new Promise(resolve => setImmediate(resolve))
+      now = 201
+      observations.observe(sample(3, 50))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(cross).not.toHaveBeenCalled()
+      generation = 2
+      epoch = observations.open('target', generation)
+      observations.observe(sample(4, 50))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(cross).not.toHaveBeenCalled()
+      observations.observe(sample(5, 49))
+      observations.observe(sample(6, 50))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(cross).toHaveBeenCalledExactlyOnceWith({ source: 'target', sourceTurn: 'turn', sourceJob: 'j' })
+      monitor.dispose()
+      observations.dispose()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('evaluates a fresh above-threshold initial sample and a new configuration epoch', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'cx-threshold-initial-'))
     try {

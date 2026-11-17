@@ -249,6 +249,7 @@ export class ChannelLiveTakeover {
       state.taskSettings[target] = structuredClone(state.taskSettings[snapshot.source]!)
     }
     job.sessionId = target
+    job.liveContinuationTarget = target
     delete job.turnId
     job.state = 'reconciliation-required'
     job.code = 'CONTINUATION_BUSINESS_TURN_PENDING'

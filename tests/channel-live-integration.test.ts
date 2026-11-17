@@ -132,12 +132,21 @@ describe('Channel live continuation integration', () => {
         configuration,
         delta: '[{"role":"command","text":"finished"},{"role":"assistant","text":"new progress"}]',
       })
-      expect(store.snapshot().jobs.j).toMatchObject({ sessionId: 'target', turnId: 'business', state: 'running' })
+      expect(store.snapshot().jobs.j).toMatchObject({
+        sessionId: 'target',
+        turnId: 'business',
+        state: 'running',
+        liveContinuationTarget: 'target',
+      })
       expect(await manager.history('target', { limit: 8 })).toMatchObject({ source: 'source' })
       await manager.pumpLive()
       expect(business).toHaveBeenCalledTimes(1)
       manager.dispose()
       observations.dispose()
+      await store.close()
+      const reopened = await ChannelConversationStore.open(path.join(directory, 'store.json'))
+      expect(reopened.snapshot().jobs.j?.liveContinuationTarget).toBe('target')
+      await reopened.close()
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

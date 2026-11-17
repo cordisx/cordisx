@@ -1,8 +1,8 @@
 # Context threshold and live continuation
 
 This reference describes the intended Host integration of the optional
-[Agent context v1](https://github.com/cordisx/cordisx-protocol/blob/be1e7fcb49c730c5806db6ca1925958804288674/.agents/docs/agent-context/README.md)
-and [Channel Manager v14](https://github.com/cordisx/cordisx-protocol/blob/be1e7fcb49c730c5806db6ca1925958804288674/.agents/docs/channel-runtime/manager-v14-continuation.md)
+[Agent context v1](https://github.com/cordisx/cordisx-protocol/blob/a474700a998ca4fe2a61eba2776dbcdfebdb7fa6/.agents/docs/agent-context/README.md)
+and [Channel Manager v14](https://github.com/cordisx/cordisx-protocol/blob/a474700a998ca4fe2a61eba2776dbcdfebdb7fa6/.agents/docs/channel-runtime/manager-v14-continuation.md)
 contracts. Runtime availability depends on the active adapter and its evidence;
 this page does not establish a released Host or real-App acceptance. The
 [Channel CLI guide](channel-cli.md#fresh-channel-continuation) separately

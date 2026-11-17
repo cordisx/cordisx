@@ -171,11 +171,7 @@ export class ContextObservations {
     watch.epoch = epoch
     watch.above = above
     watch.lastExpiresAt = sample.expiresAt
-    const reason = above && (newEpoch || previous === undefined)
-      ? 'epoch-initial'
-      : previous === false && above
-      ? 'crossed'
-      : undefined
+    const reason = newEpoch && above ? 'epoch-initial' : previous === false && above ? 'crossed' : undefined
     if (!reason) return
     const event: Event = { reason, sample: structuredClone(sample) }
     watch.pending = watch.pending.then(async () => {

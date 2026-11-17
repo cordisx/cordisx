@@ -57,6 +57,15 @@ export class ChannelLiveThreshold {
           )
           if (matching.length !== 1) return
           const job = matching[0]!, turn = event.sample.turnId
+          // A freshly continued job can start above a low threshold from its
+          // preparation/history alone. Require a subsequent real crossing for
+          // that same job, so one handoff cannot cascade indefinitely.
+          if (
+            event.reason === 'epoch-initial' && (job.liveContinuationTarget === source
+              || Object.values(current.liveTakeovers).some(previous =>
+                previous.state === 'finished' && previous.target === source && previous.sourceJob === job.id
+              ))
+          ) return
           const policy = effectiveLivePolicy(current.continuationDefaults, current.continuations[source])
           const latest = this.observations.read(source)
           const key = JSON.stringify([policy.defaultsRevision, policy.overrideRevision, policy.policy.thresholdRatio])

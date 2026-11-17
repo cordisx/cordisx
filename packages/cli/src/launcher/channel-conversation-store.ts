@@ -104,6 +104,8 @@ export interface ChannelConversationJob {
   replyDefaults?: ChannelReplyDefaults
   replyMode?: ChannelReplyMode
   replyTarget?: ChannelThreadRef
+  /** Target created for this job's latest live handoff; fences immediate repeated handoffs. */
+  liveContinuationTarget?: string
   code?: string
 }
 export interface ChannelConversationState {
