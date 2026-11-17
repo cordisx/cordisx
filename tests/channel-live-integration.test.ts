@@ -74,8 +74,11 @@ describe('Channel live continuation integration', () => {
         continuationConfiguration: async () => configuration,
         continuationHistory: async () => ({
           entries: historyReads++ === 0
-            ? [{ role: 'user', text: 'goal' }]
-            : [{ role: 'user', text: 'goal' }, { role: 'assistant', text: 'new progress' }],
+            ? [{ role: 'user', text: 'goal' }, { role: 'command', text: 'working' }]
+            : [{ role: 'user', text: 'goal' }, { role: 'command', text: 'finished' }, {
+              role: 'assistant',
+              text: 'new progress',
+            }],
           clippedCharacters: 0,
           truncated: false,
         }),
@@ -127,7 +130,7 @@ describe('Channel live continuation integration', () => {
       expect(business.mock.calls[0]![0]).toMatchObject({
         target: 'target',
         configuration,
-        delta: '[{"role":"assistant","text":"new progress"}]',
+        delta: '[{"role":"command","text":"finished"},{"role":"assistant","text":"new progress"}]',
       })
       expect(store.snapshot().jobs.j).toMatchObject({ sessionId: 'target', turnId: 'business', state: 'running' })
       expect(await manager.history('target', { limit: 8 })).toMatchObject({ source: 'source' })

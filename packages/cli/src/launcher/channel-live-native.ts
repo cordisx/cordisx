@@ -71,15 +71,17 @@ export class ChannelLiveNative implements LiveTakeoverNative {
     let offset = 0
     if (before.length) {
       let found = false
-      for (let length = Math.min(before.length, 4); length >= 1 && !found; length--) {
-        const tail = before.slice(-length), matches: number[] = []
-        for (let i = 0; i + length <= after.length; i++) {
-          if (tail.every((item, j) => item === after[i + j])) matches.push(i + length)
+      for (let end = before.length; end > 0 && !found; end--) {
+        for (let length = Math.min(end, 4); length >= 1 && !found; length--) {
+          const tail = before.slice(end - length, end), matches: number[] = []
+          for (let i = 0; i + length <= after.length; i++) {
+            if (tail.every((item, j) => item === after[i + j])) matches.push(i + length)
+          }
+          if (matches.length === 1) {
+            offset = matches[0]!
+            found = true
+          } else if (matches.length > 1) return undefined
         }
-        if (matches.length === 1) {
-          offset = matches[0]!
-          found = true
-        } else if (matches.length > 1) return undefined
       }
       if (!found) return undefined
     } else if (page.truncated) return undefined

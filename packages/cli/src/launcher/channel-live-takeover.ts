@@ -30,7 +30,7 @@ export interface LiveTakeoverIntent {
 }
 
 export interface LiveTakeoverNative {
-  /** Creates a fresh, read-only preparation session with all side-effecting tools fenced. */
+  /** Creates a fresh read-only preparation session and fences Host-owned Channel effects. */
   prepare(
     input: { operationId: string; source: string; sourceTurn: string; token: string },
   ): Promise<{ sessionId: string; turnId: string }>
