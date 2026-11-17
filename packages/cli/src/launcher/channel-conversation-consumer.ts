@@ -15,6 +15,7 @@ import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
 import { ChannelContinuationManager } from './channel-continuation-manager.js'
+import { mayFinishChannelJob } from './channel-live-takeover.js'
 import {
   channelCommandReplyTarget,
   channelReplyDefaults,
@@ -319,8 +320,7 @@ export class ChannelConversationConsumer {
     channelExact(args, ['operationId', 'mode'])
     const operationId = channelText(args.operationId, 128)
     const mode = channelReplyMode(args.mode) as ChannelReplyMode
-    // A native tool can arrive just before start() returns the created chat/turn.
-    // Wait only for this already reserved operation; never create or retry a native effect.
+    // Wait for the reserved dispatch if a native tool arrives before start() returns; never retry it.
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const job = this.store.snapshot().jobs[operationId]
       if (!job || job.state !== 'dispatching' || this.lifetime.signal.aborted) break
@@ -711,7 +711,7 @@ export class ChannelConversationConsumer {
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
       if (
-        job.code === 'CONTINUATION_EFFECT_UNCERTAIN'
+        job.code === 'CONTINUATION_EFFECT_UNCERTAIN' || job.code === 'CONTINUATION_BUSINESS_TURN_PENDING'
         || job.sessionId && state.continuations[job.sessionId]?.intent?.state === 'unknown'
       ) return
       if (job.turnId && job.sessionId) {
@@ -853,7 +853,7 @@ export class ChannelConversationConsumer {
       }
       return
     }
-    if (!job.sessionId || !job.turnId) return
+    if (!job.sessionId || !job.turnId || !mayFinishChannelJob(state, job)) return
     const binding = job.bindingId === undefined ? undefined : state.bindings[job.bindingId]
     const defaults = job.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
     const mode = job.replyMode ?? (defaults.mode === 'agent' ? defaults.fallbackMode : defaults.mode)
@@ -865,6 +865,7 @@ export class ChannelConversationConsumer {
     if (completion.state === 'running') return
     if (completion.state === 'failed') {
       await this.store.mutate(state => {
+        if (!mayFinishChannelJob(state, job)) return
         state.jobs[job.id]!.state = 'failed'
         state.jobs[job.id]!.code = completion.code ?? 'NATIVE_TURN_FAILED'
       })
@@ -873,6 +874,7 @@ export class ChannelConversationConsumer {
     if (this.lifetime.signal.aborted) return
     if (!includeFinal) {
       await this.store.mutate(state => {
+        if (!mayFinishChannelJob(state, job)) return
         state.jobs[job.id]!.state = 'completed'
       })
       return
@@ -881,6 +883,7 @@ export class ChannelConversationConsumer {
     const deliveryId = `delivery:${identity([job.id, event])}`
     const existingTarget = access?.runtime.deliverySnapshot(deliveryId, CALLER)?.target
     const target = await this.store.mutate(state => {
+      if (!mayFinishChannelJob(state, job)) return undefined
       const current = state.jobs[job.id]!
       const binding = current.bindingId === undefined ? undefined : state.bindings[current.bindingId]
       const defaults = current.replyDefaults ?? channelReplyDefaults(state.policy, event, binding)
@@ -977,8 +980,7 @@ export class ChannelConversationConsumer {
         channelCommandReplyTarget(event, this.input.access()?.replyCapabilities?.(event)),
       )
     } catch {
-      // The first reply may already have left the process. A second error reply
-      // is another outbound effect, not a safe way to explain an unknown result.
+      // A second error reply could duplicate an outbound effect whose result is unknown.
       this.input.report?.('CHANNEL_COMMAND_REPLY_RESULT_UNKNOWN')
       return 'unknown'
     }

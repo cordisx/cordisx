@@ -125,6 +125,7 @@ export interface ChannelConversationState {
   questions: Record<string, import('./channel-questions.js').ChannelQuestionRecord>
   continuations: Record<string, ChannelContinuationRecord>
   continuationDefaults: ChannelContinuationDefaults
+  liveTakeovers: Record<string, import('./channel-live-takeover.js').LiveTakeoverIntent>
 }
 
 export interface ChannelContinuationRecord {
@@ -160,6 +161,7 @@ function initial(): ChannelConversationState {
     questions: {},
     continuations: {},
     continuationDefaults: INITIAL_CONTINUATION_DEFAULTS,
+    liveTakeovers: {},
   }
 }
 
@@ -185,6 +187,25 @@ export class ChannelConversationStore {
       parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
       parsed.questions ??= {}
       parsed.continuations ??= {}
+      parsed.liveTakeovers ??= {}
+      if (!parsed.liveTakeovers || typeof parsed.liveTakeovers !== 'object' || Array.isArray(parsed.liveTakeovers)) {
+        throw new Error('INVALID_LIVE_TAKEOVER_STORE')
+      }
+      for (const [source, intent] of Object.entries(parsed.liveTakeovers)) {
+        if (
+          !intent || typeof intent !== 'object' || source !== intent.source
+          || ![intent.operationId, intent.source, intent.sourceTurn, intent.sourceJob, intent.fence].every(value =>
+            typeof value === 'string' && value.length > 0
+          )
+          || !/^[a-f0-9]{64}$/u.test(intent.tokenHash)
+          || !['preparing', 'ready', 'interrupting', 'committed', 'abandoned', 'unknown'].includes(intent.state)
+          || ['ready', 'interrupting', 'committed'].includes(intent.state) && (!intent.target || !intent.targetTurn)
+          || intent.catchup !== undefined && (typeof intent.catchup !== 'string' || intent.catchup.length > 16_000)
+          || intent.state === 'committed' && intent.catchup === undefined
+        ) {
+          throw new Error('INVALID_LIVE_TAKEOVER_STORE')
+        }
+      }
       parsed.continuationDefaults = parseContinuationDefaults(
         parsed.continuationDefaults ?? INITIAL_CONTINUATION_DEFAULTS,
       )
@@ -229,6 +250,10 @@ export class ChannelConversationStore {
     const store = new ChannelConversationStore(file, value)
     // A process died after reserving a native effect. Never blindly recreate/resend it.
     await store.mutate(state => {
+      for (const intent of Object.values(state.liveTakeovers)) {
+        if (['preparing', 'ready'].includes(intent.state)) intent.state = 'abandoned'
+        else if (intent.state === 'interrupting') intent.state = 'unknown'
+      }
       for (const entry of Object.values(state.continuations)) {
         if (entry.intent?.state === 'dispatching') entry.intent.state = 'unknown'
       }
