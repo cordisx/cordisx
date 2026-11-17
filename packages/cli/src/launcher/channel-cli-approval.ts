@@ -1,6 +1,6 @@
 import type { ChannelNativeCliContext } from './channel-cli-context.js'
 
-export type ChannelCliOperationKind = 'read' | 'send' | 'write'
+export type ChannelCliOperationKind = 'read' | 'send' | 'write' | 'checkpoint'
 const READS = new Set([
   'connections',
   'conversations',
@@ -18,6 +18,8 @@ const READS = new Set([
   'task-settings',
   'task-config',
   'task-requests',
+  'continuation-checkpoint',
+  'continuation-history',
 ])
 const WRITES = new Set([
   'bind',
@@ -33,6 +35,8 @@ const WRITES = new Set([
 export function channelCliOperationKind(operation: string): ChannelCliOperationKind | undefined {
   return READS.has(operation) ? 'read' : ['send', 'send-many', 'ask'].includes(operation)
     ? 'send'
+    : operation === 'continuation-checkpoint-set'
+    ? 'checkpoint'
     : WRITES.has(operation)
     ? 'write'
     : undefined

@@ -71,6 +71,35 @@ export class ChannelConversationTools {
 
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
+    if (['continuation-policy', 'continuation-policy-set', 'continuation-start'].includes(operation)) {
+      try {
+        if (metadata !== undefined) throw new Error('LOCAL_USER_REQUIRED')
+        if (!this.consumer) return { status: 'unavailable', code: 'CHANNEL_CONSUMER_UNAVAILABLE' }
+        const input = object(value)
+        const sessionId = text(input.sessionId)
+        if (operation === 'continuation-policy') {
+          if (Object.keys(input).some(key => key !== 'sessionId')) throw new Error('INVALID_REQUEST')
+          return { status: 'ok', ...this.consumer.continuation.read(sessionId) }
+        }
+        if (operation === 'continuation-policy-set') {
+          if (Object.keys(input).some(key => !['sessionId', 'policy'].includes(key))) throw new Error('INVALID_REQUEST')
+          return { status: 'ok', policy: await this.consumer.continuation.setPolicy(sessionId, input.policy) }
+        }
+        if (Object.keys(input).some(key => key !== 'sessionId')) throw new Error('INVALID_REQUEST')
+        return await this.consumer.continuation.startManual(sessionId)
+      } catch (error) {
+        const code = error instanceof Error && /^[A-Z_]{3,80}$/u.test(error.message)
+          ? error.message
+          : 'CHANNEL_OPERATION_FAILED'
+        return { status: 'rejected', code }
+      }
+    }
+    if (operation.startsWith('continuation-checkpoint') || operation === 'continuation-history') {
+      if (!this.consumer?.agentAccess.caller(metadata)) {
+        return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+      }
+      return this.call(operation, value, metadata)
+    }
     if (operation !== 'local-bindings') return this.call(operation, value, metadata)
     try {
       if (this.lifetime.signal.aborted) throw new Error('CHANNEL_UNAVAILABLE')
@@ -146,6 +175,46 @@ export class ChannelConversationTools {
       const source = scopedCaller?.source
         ?? (nativeCaller ? this.consumer?.agentAccess.source(nativeCaller, callerTurnId(metadata)) : undefined)
       const callerSession = scopedCaller?.threadId ?? nativeCaller
+      if (['continuation-checkpoint', 'continuation-checkpoint-set', 'continuation-history'].includes(operation)) {
+        if (!this.consumer || !callerSession || !source) throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        const turnId = scopedCaller?.turnId ?? callerTurnId(metadata)
+        if (!turnId || !await this.consumer.continuation.turnActive(callerSession, turnId)) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        if (operation === 'continuation-history') {
+          if (
+            Object.keys(input).some(key => !['limit', 'cursor'].includes(key))
+            || input.limit !== undefined
+              && (!Number.isInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 32)
+            || input.cursor !== undefined && (typeof input.cursor !== 'string' || input.cursor.length > 16384)
+          ) {
+            throw new Error('INVALID_REQUEST')
+          }
+          return {
+            status: 'ok',
+            ...await this.consumer.continuation.history(callerSession, {
+              ...(input.limit === undefined ? {} : { limit: Number(input.limit) }),
+              ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+            }),
+          }
+        }
+        if (operation === 'continuation-checkpoint') {
+          if (Object.keys(input).length) throw new Error('INVALID_REQUEST')
+          return { status: 'ok', checkpoint: this.consumer.continuation.read(callerSession).checkpoint ?? null }
+        }
+        if (
+          Object.keys(input).some(key => !['checkpoint', 'expectedRevision'].includes(key))
+          || !Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 0
+        ) throw new Error('INVALID_REQUEST')
+        return {
+          status: 'ok',
+          checkpoint: await this.consumer.continuation.setCheckpoint(
+            callerSession,
+            input.checkpoint,
+            Number(input.expectedRevision),
+          ),
+        }
+      }
       if (
         nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller)
         && [

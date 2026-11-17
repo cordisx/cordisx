@@ -89,6 +89,74 @@ async function fixture(adapterId = 'feishu') {
 }
 
 describe('Channel question delivery and real consumer routing', () => {
+  it('keeps an already-sent card routable after a bound task moves to a fresh continuation', async () => {
+    const f = await fixture()
+    const source = '01a10000-0000-7000-8000-000000000001'
+    const target = '01a10000-0000-7000-8000-000000000003'
+    f.native.start.mockImplementation(async (_id, _input, sessionId) => ({
+      state: 'running',
+      sessionId: sessionId ?? target,
+      turnId: 'turn',
+    }))
+    f.consumer.setNativeExtras(() =>
+      ({
+        ...f.native,
+        idle: async () => true,
+        continuationEligible: () => true,
+        continuationConfiguration: async () => ({
+          providerId: 'openai',
+          model: 'model',
+          cwd: '/tmp',
+          serviceTier: null,
+          approvalsReviewer: 'user',
+          sandbox: { type: 'readOnly' },
+          permissionProfile: null,
+          execution: { approval: 'never', workMode: 'default', effort: 'high', execution: 'read-only' },
+        }),
+      }) as never
+    )
+    expect(await f.tools.call('ask', f.question)).toMatchObject({ deliveryState: 'sent' })
+    const token = f.adapter.sent[0]!.questionCard!.token
+    await f.consumer.continuation.setCheckpoint(source, {
+      goal: 'continue',
+      constraints: 'retain bindings',
+      completed: 'asked',
+      remaining: 'wait for answer',
+      history: 'original conversation',
+      continueAtIdle: false,
+    }, 0)
+    await f.consumer.continuation.setPolicy(source, {
+      enabled: true,
+      threshold: 0.8,
+      reserveTokens: 100,
+      maxAgeMs: 60000,
+    })
+    await f.consumer.receive('before-migration', {
+      contract: 'cordisx.channel-user-input/v1',
+      schemaVersion: 1,
+      role: 'user',
+      content: [{ type: 'text', text: 'continue' }],
+      source: {
+        kind: 'channel',
+        event: { ...f.channel, eventId: 'om_before', messageId: 'om_before', actor: { ...f.ref, userId: 'ou_alice' } },
+      },
+      receivedAt: new Date().toISOString(),
+    }, true)
+    await vi.waitFor(() => expect(f.consumer.bindings().some(binding => binding.sessionId === target)).toBe(true))
+    const click = {
+      chatId: 'oc_group',
+      messageId: 'sim-message-1',
+      operator: { openId: 'ou_alice' },
+      action: { tag: 'button', value: { channelQuestion: token, option: 0 } },
+    } as never
+    await f.consumer.cardAction(f.ref, click)
+    await f.consumer.cardAction(f.ref, click)
+    await vi.waitFor(() => expect(f.consumer.status().jobs.filter(job => job.sessionId === target)).toHaveLength(2))
+    expect(f.consumer.status().jobs.filter(job => job.sessionId === target).map(job => job.state).sort())
+      .toEqual(['queued', 'running'])
+    expect(await f.tools.call('ask', f.question)).toMatchObject({ deliveryState: 'sent' })
+    expect(f.adapter.sent).toHaveLength(1)
+  })
   it('persists a card receipt, rejects forged or duplicate callbacks, and routes real actors to every binding', async () => {
     const f = await fixture()
     const sent = await f.tools.call('ask', f.question)

@@ -14,6 +14,7 @@ export async function startHeadlessCodexBackend(input: {
   /** The launch's existing approval authority owns responses to native requests. */
   readonly onRequest: (method: string, params: unknown, id?: string | number) => unknown | Promise<unknown>
   readonly onNotification?: (method: string, params: unknown) => void
+  readonly onDispatch?: (operationId: string, threadId: string, turnId?: string) => void
   readonly nativeRequest?: (
     method: NativeBridgeMethod,
     params: Readonly<Record<string, unknown>>,
@@ -38,6 +39,7 @@ export async function startHeadlessCodexBackend(input: {
       ? undefined
       : server.subscribeNotifications?.(input.onNotification)
     const authority: AgentBridgeCodexAuthority = {
+      ...(input.onDispatch ? { observedDispatch: input.onDispatch } : {}),
       nativeRequest: async (method: NativeBridgeMethod, params) => {
         let selected = params
         if (method === 'thread/start' && params.model == null && params.modelProvider == null) {

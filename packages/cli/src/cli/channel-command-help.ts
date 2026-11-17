@@ -7,6 +7,16 @@ const HELP: Readonly<Record<string, string>> = {
   'bind-status': 'Read bindings and jobs for a chat. Input: {sessionId}.',
   'local-bindings':
     'Local CLI only: list profile bindings, optionally filtered. Input: {account?:{adapterId,accountId,tenantId},conversationId?:string}.',
+  'continuation-policy': 'Local user only: read continuation policy and checkpoint state. Input: {sessionId}.',
+  'continuation-policy-set':
+    'Local user only: configure best-effort idle-boundary continuation. Input: {sessionId,policy:{enabled:boolean,threshold:number,reserveTokens:integer,maxAgeMs:integer}}. Disabled by default; no guarantee against compaction.',
+  'continuation-start':
+    'Local user only: start a fresh Channel task using its explicit checkpoint. Input: {sessionId}. An uncertain result must be inspected, never blindly repeated.',
+  'continuation-checkpoint': 'Active Channel turn with --context only: read this task checkpoint. Input: {}.',
+  'continuation-checkpoint-set':
+    'Active Channel turn with --context only: save an explicit handoff. Input: {expectedRevision,checkpoint:{goal,constraints,completed,remaining,history,continueAtIdle:boolean}}. Text is bounded; source session is assigned by the Host.',
+  'continuation-history':
+    'Active Channel continuation turn with --context only: read one bounded page from its confirmed source. Input: {limit?:1..32,cursor?:string}. No arbitrary source session is accepted.',
   history:
     'Retrieve accepted messages from all the chat bindings. Input: {sessionId,afterSequence?:number,limit?:number}.',
   'remote-history':

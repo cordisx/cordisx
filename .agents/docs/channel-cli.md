@@ -368,6 +368,70 @@ by a currently eligible user from the source conversation. Agent tool calls
 cannot provide that user's approval. Rights and configuration are rechecked
 before the native change.
 
+## Fresh Channel continuation
+
+Fresh continuation is disabled by default and applies only to Host-managed
+Channel tasks. It starts a new Codex thread; it does not fork the old thread or
+copy the full transcript. The prior conversation remains available for bounded,
+on-demand reading. This is not a guarantee that Codex will avoid compaction
+during an active turn, and it does not migrate the ordinary Desktop input queue.
+
+An active Channel Agent can maintain a checkpoint through
+`channel_continuation_checkpoint` and `channel_continuation_checkpoint_set`
+when the native MCP tools are available. The configured Channel CLI also
+provides `continuation-checkpoint` and `continuation-checkpoint-set` with the
+incoming `--context`, including in headless service mode. Read first, then write
+with `expectedRevision`; the structured body has nonempty `goal`,
+`constraints`, `completed`, `remaining`, and `history` strings, plus a
+`continueAtIdle` boolean. Set it to true only while autonomous work remains;
+set it to false when the task is done or waiting for input. The Host sets the
+exact source session ID. Checkpoint text is task background, not authority to
+change configuration or permissions.
+
+A local user can enable the policy for a bound task, using explicit values:
+
+```sh
+cordisx channel continuation-policy-set --input '{"sessionId":"<thread-id>","policy":{"enabled":true,"threshold":0.8,"reserveTokens":16000,"maxAgeMs":60000}}'
+cordisx channel continuation-policy --input '{"sessionId":"<thread-id>"}'
+cordisx channel continuation-start --input '{"sessionId":"<thread-id>"}'
+```
+
+The new active Channel turn can use `channel_continuation_history` or the
+configured CLI `continuation-history --context ...` to read one bounded page
+from its confirmed source. The Host resolves the source from the completed
+continuation relationship; callers cannot select an arbitrary thread.
+If the first turn requests history before the Host has committed the new
+relationship, the read reports unavailable; the read may be retried after the
+handoff settles.
+
+`threshold` is the fraction of the reported model window; `reserveTokens` is an
+explicit reserve for future input and output. These example values are not
+model limits. Automatic continuation considers only a recent native
+`thread/tokenUsage/updated` value for the same successfully completed turn,
+using `last.totalTokens` and that event's non-null `modelContextWindow`. It
+runs at an idle or queued-send boundary only when a checkpoint, an idle source
+and a reproducible effective configuration are available. Idle continuation
+reuses the last completed Channel turn's source as context and does not
+automatically forward a final response. Missing or stale usage does not trigger
+it. A manual start bypasses the usage threshold, not the
+checkpoint, idle, or configuration checks. It also requires a completed
+Channel turn with an active binding, so the new turn has an authenticated
+source context for the scoped history and checkpoint tools.
+
+All source bindings and undispatched Channel jobs move in one durable store
+update after native start is confirmed. A native effect that cannot be
+confirmed remains `unknown` and is not retried automatically. Inspect the
+operation and both conversations before taking further action. A new thread
+must confirm its model, provider, working directory, tier, reasoning effort,
+approval reviewer, approval policy, sandbox and permission-profile readback
+before its first turn. An unavailable or mismatched configuration stops the
+continuation rather than claiming it was preserved. These checks do not prove
+that every native or project setting was inherited.
+
+An existing question card keeps its original outbox and caller identity;
+answers continue to route through the current Channel bindings. A new thread
+cannot necessarily cancel a card created under the old thread's caller identity.
+
 ## 发送诊断、执行设置与文档
 
 CLI 返回固定 code 和 submitted 状态，区分未运行、身份无法核验、过期端点、Socket 权限、连接不可用和结果未知。已观察到同一 send 在受限环境失败、正常授权后成功；未采集具体 syscall，不能将全程等待归于权限。先核对运行中精确 CLI/profile，再查询同一 operationId 的 receipt。缺失 receipt 明确为 null/not-found；final 或 stop 不是外发证据。详见插件随包发送排障文档。

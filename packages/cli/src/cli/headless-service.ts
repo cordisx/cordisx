@@ -19,6 +19,7 @@ export interface HeadlessNativeAuthority {
   request(method: string, params: unknown, id?: string | number): unknown | Promise<unknown>
   notification?(method: string, params: unknown): void
   subscribeApprovals?(listener: (event: Record<string, unknown>) => void): () => void
+  subscribeContinuationEvents?(listener: (method: string, params: unknown) => void): () => void
   respondApproval?(input: Record<string, unknown>): Promise<unknown>
   execution?: ChatExecutionPreferences
   /** Applies and records the existing execution settings around native calls when available. */
@@ -92,18 +93,20 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => nativeAuthority.close())
     const authority = nativeAuthority.authority
+    let native: ChannelNativeSessions | undefined
     const backend = await startHeadlessCodexBackend({
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
       environment: input.environment,
       onRequest: (method, params, id) => authority.request(method, params, id),
+      onDispatch: (operationId, threadId, turnId) => native?.observedDispatch(operationId, threadId, turnId),
       ...(authority.nativeRequest ? { nativeRequest: authority.nativeRequest } : {}),
       ...(authority.notification ? { onNotification: authority.notification } : {}),
     })
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
-    const native = new ChannelNativeSessions({
+    native = new ChannelNativeSessions({
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
       models: backend.models,
@@ -114,6 +117,9 @@ export async function startHeadlessService(input: {
       ...(authority.execution ? { execution: authority.execution } : {}),
       ...(authority.subscribeApprovals
         ? { subscribeApprovals: authority.subscribeApprovals }
+        : {}),
+      ...(authority.subscribeContinuationEvents
+        ? { subscribeContinuationEvents: authority.subscribeContinuationEvents }
         : {}),
       ...(authority.respondApproval ? { respondApproval: authority.respondApproval } : {}),
       report: input.report,

@@ -1,13 +1,9 @@
 import { ChannelQuestions } from './channel-questions.js'
 import { channelCardAction } from './channel-card-actions.js'
 import { bindingIdentity, eventThread, identity, sameConversation, thread } from './channel-conversation-refs.js'
-import type {
-  ChannelEventRef,
-  ChannelPluginIdentity,
-  ChannelThreadRef,
-  ChannelUserInput,
-} from '@cordisx/channel-runtime'
-import type { ChannelConversationAccess } from './channel-conversation-tools.js'
+import type { ChannelEventRef, ChannelThreadRef, ChannelUserInput } from '@cordisx/channel-runtime'
+import { CALLER, type ChannelConversationConsumerInput, isThread } from './channel-conversation-consumer-contract.js'
+export type { ChannelConversationConsumerInput } from './channel-conversation-consumer-contract.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { type ChannelCommandAddressing, ChannelCommandUsers } from './channel-command-users.js'
 import { ChannelSessionCommands } from './channel-session-commands.js'
@@ -18,6 +14,7 @@ import { ChannelCreationDefaults } from './channel-creation-defaults.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { ChannelAgentAccess } from './channel-agent-access.js'
 import { ChannelTaskSettings } from './channel-task-settings.js'
+import { ChannelContinuationManager } from './channel-continuation-manager.js'
 import {
   channelCommandReplyTarget,
   channelReplyDefaults,
@@ -43,18 +40,6 @@ import {
   ChannelConversationStore,
 } from './channel-conversation-store.js'
 
-const CALLER: ChannelPluginIdentity = {
-  source: 'cordisx:channel-consumer',
-  pluginId: 'host-channel-consumer',
-  generation: 'profile',
-}
-const isThread = (id: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(id)
-export interface ChannelConversationConsumerInput {
-  readonly profileId: string
-  readonly access: () => ChannelConversationAccess | undefined
-  readonly native: () => Pick<ChannelNativeSessions, 'exists' | 'start' | 'completion' | 'reconcile'> | undefined
-  readonly report?: (code: string) => void
-}
 /** The Host consumes sourced Channel inputs; transport core never learns about Codex tasks or policies. */
 export class ChannelConversationConsumer {
   private readonly lifetime = new AbortController()
@@ -69,6 +54,7 @@ export class ChannelConversationConsumer {
   readonly taskSettings: ChannelTaskSettings
   private readonly creationDefaults: ChannelCreationDefaults
   readonly questions: ChannelQuestions
+  readonly continuation: ChannelContinuationManager
   private jobOffset = 0
   private constructor(
     private readonly store: ChannelConversationStore,
@@ -78,6 +64,7 @@ export class ChannelConversationConsumer {
     this.questions = new ChannelQuestions(this.store, this.input.access, () => {
       void this.pump()
     })
+    this.continuation = new ChannelContinuationManager(this.store, () => this.extraNative?.(), this.sessionClaims)
     this.taskSettings = new ChannelTaskSettings({
       store: this.store,
       native: () => this.extraNative?.(),
@@ -467,6 +454,7 @@ export class ChannelConversationConsumer {
           })
         }
       }))
+      await this.continuation.pumpIdle(this.lifetime.signal)
     })().catch(error =>
       this.input.report?.(
         error instanceof Error && /^[A-Z_]+$/u.test(error.message)
@@ -719,6 +707,10 @@ export class ChannelConversationConsumer {
     if (!record || !native || this.lifetime.signal.aborted) return
     const event = record.input.source.event
     if (job.state === 'reconciliation-required') {
+      if (
+        job.code === 'CONTINUATION_EFFECT_UNCERTAIN'
+        || job.sessionId && state.continuations[job.sessionId]?.intent?.state === 'unknown'
+      ) return
       if (job.turnId && job.sessionId) {
         await this.store.mutate(state => {
           state.jobs[job.id]!.state = 'running'
@@ -754,8 +746,15 @@ export class ChannelConversationConsumer {
         )
       ) return
       if (job.sessionId && (!this.taskSettings.ready(job.sessionId) || this.sessionClaims.has(job.sessionId))) return
+      if (
+        job.sessionId && ['dispatching', 'unknown'].includes(state.continuations[job.sessionId]?.intent?.state ?? '')
+      ) return
       if (job.sessionId) this.sessionClaims.add(job.sessionId)
+      let continuation: Awaited<ReturnType<ChannelContinuationManager['reserve']>>
       try {
+        continuation = job.sessionId
+          ? await this.continuation.reserve(job.sessionId, 'auto')
+          : undefined
         await this.store.mutate(state => {
           const current = state.jobs[job.id]!
           current.state = 'dispatching'
@@ -771,7 +770,9 @@ export class ChannelConversationConsumer {
         })
         if (this.lifetime.signal.aborted) {
           await this.store.mutate(state => {
-            state.jobs[job.id]!.state = 'queued'
+            if (continuation) {
+              this.continuation.failDispatch(state, continuation, job.id)
+            } else state.jobs[job.id]!.state = 'queued'
           })
           return
         }
@@ -792,7 +793,7 @@ export class ChannelConversationConsumer {
         const result = await native.start(
           job.id,
           message,
-          job.sessionId,
+          continuation ? undefined : job.sessionId,
           this.lifetime.signal,
           {
             ...defaults,
@@ -801,7 +802,16 @@ export class ChannelConversationConsumer {
           context,
           job.autoCreate ? await this.taskSettings.defaults(event) : undefined,
           job.autoCreate ? this.creationDefaults.read().settings : undefined,
+          ...(continuation
+            ? [{
+              operationId: continuation.operationId,
+              brief: this.continuation.brief(continuation),
+              configuration: continuation.configuration,
+            }]
+            : []),
         )
+        const sourceCurrent = !continuation
+          || result.state === 'running' && await this.continuation.sourceCurrent(continuation)
         await this.store.mutate(state => {
           const input = state.inputs[job.recordId]
           if (input && context.sender.name && !input.addressing?.senderName) {
@@ -811,6 +821,15 @@ export class ChannelConversationConsumer {
             }
           }
           const current = state.jobs[job.id]!
+          if (
+            continuation
+            && !this.continuation.finishDispatch(
+              state,
+              continuation,
+              job.id,
+              sourceCurrent ? result : { ...result, state: 'reconciliation-required' },
+            )
+          ) return
           current.state = result.state === 'busy' ? 'queued' : result.state
           if (result.sessionId) current.sessionId = result.sessionId
           if (result.turnId) current.turnId = result.turnId
@@ -819,6 +838,13 @@ export class ChannelConversationConsumer {
             this.attachCreatedBinding(state, current, record, result.sessionId)
           }
         })
+      } catch (error) {
+        if (continuation) {
+          await this.store.mutate(state => {
+            this.continuation.failDispatch(state, continuation!, job.id)
+          })
+        }
+        throw error
       } finally {
         if (job.sessionId) this.sessionClaims.delete(job.sessionId)
       }

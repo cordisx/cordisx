@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { continuationStartMatches } from './channel-continuation-config.js'
 import {
   beginScan,
   capScan,
@@ -360,6 +361,23 @@ export function createCodexBridgeHandler(
           const handed = context === 'summary' ? handedSummary(args) : undefined
           const providerId = text(args.providerId, 128)
           const execution = parseChatExecutionSettings(args.execution)
+          const serviceTier = args.serviceTier
+          const permissions = args.permissions
+          const approvalsReviewer = args.approvalsReviewer
+          if (
+            approvalsReviewer !== undefined
+            && !['user', 'auto_review', 'guardian_subagent'].includes(String(approvalsReviewer))
+          ) {
+            throw new BridgeOperationError('invalid-arguments')
+          }
+          if (
+            permissions !== undefined && (typeof permissions !== 'string' || !permissions || permissions.length > 128)
+          ) {
+            throw new BridgeOperationError('invalid-arguments')
+          }
+          if (serviceTier !== undefined && serviceTier !== null && serviceTier !== 'priority') {
+            throw new BridgeOperationError('invalid-arguments')
+          }
           let model = text(args.model)
           if (providerId !== undefined) {
             const provider = (await codex.catalog()).find(entry => entry.providerId === providerId)
@@ -377,12 +395,17 @@ export function createCodexBridgeHandler(
           if (missing !== undefined) return turn.failed({ ...missing })
           signal?.throwIfAborted()
           turn.uncertain()
+          const executionStart = nativeExecutionStart(execution)
+          if (permissions !== undefined) delete executionStart.sandbox
           const started = object(
             await codex.nativeRequest('thread/start', {
-              ...nativeExecutionStart(execution),
+              ...executionStart,
               cwd,
               ...(providerId === undefined ? {} : { modelProvider: providerId }),
               ...(model === undefined ? {} : { model }),
+              ...(serviceTier === undefined ? {} : { serviceTier }),
+              ...(permissions === undefined ? {} : { permissions }),
+              ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
             }),
           )
           const threadId = text(object(started?.thread)?.id)
@@ -391,6 +414,18 @@ export function createCodexBridgeHandler(
           const link = codexThreadLink(threadId)
           turn.effected(threadId, link)
           codex.observedDispatch?.(String(args.operationId), threadId)
+          if (
+            args.expectedContinuation !== undefined && !continuationStartMatches(started, args.expectedContinuation)
+          ) {
+            return turn.failed({
+              status: 'failed',
+              sessionId: threadId,
+              link,
+              reason: 'turn-failed',
+              retryable: false,
+              message: 'Fresh thread configuration did not match the source; its first turn was not started.',
+            })
+          }
           const requestedTitle = text(args.title, 120)
           let title: string | undefined
           if (requestedTitle !== undefined) {
@@ -403,12 +438,17 @@ export function createCodexBridgeHandler(
             threadId,
             handoffPrompt(prompt, handed),
             signal,
-            nativeExecutionTurn(execution, {
-              ...object(started?.thread),
-              ...started,
-              model: started?.model ?? object(started?.thread)?.model ?? model,
-              cwd,
-            }, {}),
+            {
+              ...nativeExecutionTurn(execution, {
+                ...object(started?.thread),
+                ...started,
+                model: started?.model ?? object(started?.thread)?.model ?? model,
+                cwd,
+              }, {}),
+              ...(permissions === undefined ? {} : { permissions }),
+              ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
+              ...(serviceTier === undefined ? {} : { serviceTier }),
+            },
           )
           codex.observedDispatch?.(String(args.operationId), threadId, turnId)
           const base = {

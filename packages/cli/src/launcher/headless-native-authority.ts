@@ -28,6 +28,7 @@ export async function createHeadlessNativeAuthority(input: {
     profileId: input.profileId,
   })
   const listeners = new Set<(event: Record<string, unknown>) => void>()
+  const continuationListeners = new Set<(method: string, params: unknown) => void>()
   const pending = new Map<
     RequestId,
     { threadId: string; turnId: string; resolve(value: unknown): void; reject(error: Error): void }
@@ -58,6 +59,9 @@ export async function createHeadlessNativeAuthority(input: {
     },
     emit: async (event: Record<string, unknown>) => {
       if (event.type === 'native-approval-event') { for (const listener of listeners) listener(event) }
+      if (event.type === 'continuation-event' && typeof event.method === 'string') {
+        for (const listener of continuationListeners) listener(event.method, event.params)
+      }
     },
   })
   const authority: HeadlessNativeAuthority = {
@@ -111,6 +115,10 @@ export async function createHeadlessNativeAuthority(input: {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    subscribeContinuationEvents: listener => {
+      continuationListeners.add(listener)
+      return () => continuationListeners.delete(listener)
+    },
     respondApproval: async value => {
       const result = record(await control.respond(value))
       // Resolving the RPC handler does not acknowledge the subsequent transport write.
@@ -151,6 +159,7 @@ export async function createHeadlessNativeAuthority(input: {
       for (const request of pending.values()) request.reject(new Error('HEADLESS_SERVICE_CLOSED'))
       pending.clear()
       listeners.clear()
+      continuationListeners.clear()
       await execution.close()
     },
   }

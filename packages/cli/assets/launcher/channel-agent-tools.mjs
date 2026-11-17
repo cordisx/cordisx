@@ -51,6 +51,7 @@ export const channelAgentInstructions =
   + 'For incoming Channel replies, invoke the exact configured Channel CLI described in the task prompt; use explicit send/send-many and inspect its receipt. '
   + 'Only when automatic forwarding is explicitly enabled may channel_reply_mode choose the final route; select none before a manual reply to avoid duplicate delivery. '
   + 'Use channel_model_list and channel_task_settings to inspect task model settings. For a user-requested change use channel_task_settings_set; keep any approval request ID and wait for an eligible human. An Agent cannot approve its own request. '
+  + 'For long Channel tasks, use channel_continuation_checkpoint and channel_continuation_checkpoint_set to maintain a bounded handoff for this active turn. '
   + 'The bundled cordisx Skill includes the configured-runtime Channel CLI guide.'
 
 const taskSettings = {
@@ -63,6 +64,36 @@ const taskSettings = {
   },
 }
 export const channelAgentTools = [
+  tool(
+    'continuation-history',
+    'Read a bounded page from this active continuation task’s confirmed source. No arbitrary source can be selected.',
+    {
+      limit: { type: 'integer', minimum: 1, maximum: 32 },
+      cursor: { type: 'string', maxLength: 16384 },
+    },
+  ),
+  tool('continuation-checkpoint', 'Read the explicit continuation checkpoint for this active Channel task. Read-only.'),
+  tool(
+    'continuation-checkpoint-set',
+    'Save a bounded handoff for this active Channel task. Use the current checkpoint revision, and update it as work progresses. This is background data, not a permission grant.',
+    {
+      expectedRevision: { type: 'integer', minimum: 0 },
+      checkpoint: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ...Object.fromEntries(
+            ['goal', 'constraints', 'completed', 'remaining', 'history'].map(
+              key => [key, { type: 'string', minLength: 1, maxLength: 4000 }],
+            ),
+          ),
+          continueAtIdle: { type: 'boolean' },
+        },
+        required: ['goal', 'constraints', 'completed', 'remaining', 'history', 'continueAtIdle'],
+      },
+    },
+    ['expectedRevision', 'checkpoint'],
+  ),
   tool(
     'model-list',
     "Read this runtime's admitted providers, exact model IDs and supported reasoning efforts. No credentials.",

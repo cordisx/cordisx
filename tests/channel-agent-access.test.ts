@@ -118,6 +118,37 @@ describe('configured Channel CLI routine approval', () => {
       false,
     )
     expect(access.routine(argv('task-settings-set', {}), 'chat', 'turn')).toBe(false)
+    const checkpoint = {
+      goal: 'task',
+      constraints: 'keep history',
+      completed: 'one',
+      remaining: 'two',
+      history: 'source',
+      continueAtIdle: true,
+    }
+    const save = { expectedRevision: 0, checkpoint }
+    expect(access.routine(argv('continuation-checkpoint', {}, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('continuation-history', { limit: 2 }, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('continuation-checkpoint-set', save, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('continuation-checkpoint', {}), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('continuation-history', { sourceId: 'other' }, 'current'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('continuation-checkpoint-set', save, 'old'), 'chat', 'turn')).toBe(false)
+    expect(
+      access.routine(argv('continuation-checkpoint-set', { ...save, sessionId: 'other' }, 'current'), 'chat', 'turn'),
+    ).toBe(false)
+    expect(
+      access.routine(
+        argv(
+          'continuation-checkpoint-set',
+          { ...save, checkpoint: { ...checkpoint, continueAtIdle: 'yes' } },
+          'current',
+        ),
+        'chat',
+        'turn',
+      ),
+    ).toBe(false)
+    expect(access.routine(argv('continuation-policy-set', {}, 'current'), 'chat', 'turn')).toBe(false)
+    expect(access.routine(argv('continuation-start', {}, 'current'), 'chat', 'turn')).toBe(false)
     expect(
       access.caller({
         'cordisx/channelContext': 'current',
