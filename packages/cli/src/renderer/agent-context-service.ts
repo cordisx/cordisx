@@ -6,7 +6,7 @@ import type {
   AgentContextV1,
   AgentContextWatchResultV1,
 } from '@cordisx/protocol/agent-context/v1'
-import type { AgentTurnControlV1 } from '@cordisx/protocol/agent-turn-control/v1'
+import type { AgentExactTurnControlV1, AgentTurnControlV1 } from '@cordisx/protocol/agent-turn-control/v1'
 import type { PermissionBroker } from './platform.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { generationVisibilityFromContext } from './generation-visibility.js'
@@ -84,9 +84,10 @@ export class CordisXAgentContextService extends Service implements AgentContextV
     request: { readonly sessionId: string; readonly thresholdRatio: number },
     observer: (event: AgentContextThresholdEventV1) => void | Promise<void>,
   ): Promise<AgentContextWatchResultV1> {
+    const { sessionId, thresholdRatio } = request
     if (
-      !validId(request.sessionId) || !Number.isFinite(request.thresholdRatio) || request.thresholdRatio <= 0
-      || request.thresholdRatio > .95 || typeof observer !== 'function'
+      !validId(sessionId) || !Number.isFinite(thresholdRatio) || thresholdRatio <= 0
+      || thresholdRatio > .95 || typeof observer !== 'function'
     ) return { status: 'unavailable', code: 'invalid-request' }
     const input = inputFor(this), bridge = input.bridge
     let active = true, handle: string | undefined
@@ -108,7 +109,7 @@ export class CordisXAgentContextService extends Service implements AgentContextV
       void close('generation-replaced')
     }, 'agentContext subscription')
     try {
-      const allowed = await this.authorize(request.sessionId)
+      const allowed = await this.authorize(sessionId)
       if (!active) {
         dispose()
         return { status: 'unavailable', code: 'generation-replaced' }
@@ -121,7 +122,7 @@ export class CordisXAgentContextService extends Service implements AgentContextV
         dispose()
         return { status: 'unavailable', code: 'unsupported' }
       }
-      const opened = await bridge.open(request)
+      const opened = await bridge.open({ sessionId, thresholdRatio })
       if (opened.status !== 'open') {
         dispose()
         return opened
@@ -151,7 +152,7 @@ export class CordisXAgentContextService extends Service implements AgentContextV
             cursor = page.cursor
             for (const event of page.events) {
               if (!active) break
-              if (!await this.authorize(request.sessionId)) {
+              if (!await this.authorize(sessionId)) {
                 await close('denied')
                 break
               }
@@ -185,13 +186,85 @@ export class CordisXAgentContextService extends Service implements AgentContextV
     }
   }
 }
+export interface AgentExactTurnControlBridge {
+  acquire(input: { sessionId: string; turnId: string; ownerAuthorization: string }): Promise<
+    { status: 'available'; handle: string } | {
+      status: 'unavailable'
+      code: 'denied' | 'unsupported' | 'stale' | 'host-unavailable'
+    }
+  >
+  cancel(input: { handle: string }): ReturnType<AgentExactTurnControlV1['cancel']>
+}
+interface TurnControlInput {
+  readonly bridge: AgentExactTurnControlBridge
+  readonly live: () => boolean
+  /** Host business authority, not a plugin argument or an observation permission. */
+  authorizeOwner(
+    input: { owner: string; source: string; generation: string; sessionId: string; turnId: string },
+  ): Promise<string | undefined>
+}
+const turnInputs = new WeakMap<object, TurnControlInput>()
 /** No observation grant can establish exact-turn business authority. */
 export class CordisXAgentTurnControlService extends Service implements AgentTurnControlV1 {
   readonly contract = 'cordisx.agent-turn-control/v1' as const
-  constructor(ctx: Context) {
+  constructor(ctx: Context, input?: TurnControlInput) {
     super(ctx, 'agentTurnControl')
+    if (input) turnInputs.set(this, input)
   }
-  async acquire(): ReturnType<AgentTurnControlV1['acquire']> {
-    return { status: 'unavailable', code: 'unsupported' }
+  async acquire(request: { sessionId: string; turnId: string }): ReturnType<AgentTurnControlV1['acquire']> {
+    const { sessionId, turnId } = request
+    if (!validId(sessionId) || !validId(turnId)) return { status: 'unavailable', code: 'denied' }
+    const input = turnInputs.get((this as { [original]?: object })[original] ?? this)
+    if (!input) return { status: 'unavailable', code: 'unsupported' }
+    const source = sourceFromContext(this.ctx), generation = generationFromContext(this.ctx)
+    if (!source || !generation || !input.live()) return { status: 'unavailable', code: 'denied' }
+    let active = true
+    const dispose = this.ctx.effect(() => () => {
+      active = false
+    }, 'agentTurnControl target')
+    try {
+      const proof = await input.authorizeOwner({
+        owner: ownerFromContext(this.ctx),
+        source,
+        generation,
+        sessionId,
+        turnId,
+      })
+      if (!active || !input.live()) {
+        dispose()
+        return { status: 'unavailable', code: 'stale' }
+      }
+      if (!proof) {
+        dispose()
+        return { status: 'unavailable', code: 'denied' }
+      }
+      const result = await input.bridge.acquire({ sessionId, turnId, ownerAuthorization: proof })
+      if (!active || !input.live()) {
+        dispose()
+        return { status: 'unavailable', code: 'stale' }
+      }
+      if (result.status !== 'available') {
+        dispose()
+        return result
+      }
+      const target = Object.freeze({
+        contract: 'cordisx.agent-exact-turn-control/v1' as const,
+        sessionId,
+        turnId,
+        cancel: async () => {
+          if (!active || !input.live()) return { status: 'unavailable' as const, code: 'stale' as const }
+          try {
+            const outcome = await input.bridge.cancel({ handle: result.handle })
+            return active && input.live() ? outcome : { status: 'unavailable' as const, code: 'stale' as const }
+          } catch {
+            return { status: 'unavailable' as const, code: 'host-unavailable' as const }
+          }
+        },
+      }) as AgentExactTurnControlV1
+      return { status: 'available', target }
+    } catch {
+      dispose()
+      return { status: 'unavailable', code: 'host-unavailable' }
+    }
   }
 }

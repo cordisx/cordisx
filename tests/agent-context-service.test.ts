@@ -84,4 +84,122 @@ describe('Agent context public service', () => {
     await contextFiber.dispose()
     await controlFiber.dispose()
   })
+
+  it('closes a late open when the owning plugin fiber is disposed', async () => {
+    const root = new Context()
+    let completeOpen!: (result: { status: 'open'; handle: string; cursor: number }) => void
+    const bridge = {
+      read: vi.fn(async () => ({ status: 'unavailable' as const, code: 'stale' as const })),
+      open: vi.fn(() =>
+        new Promise<{ status: 'open'; handle: string; cursor: number }>(resolve => {
+          completeOpen = resolve
+        })
+      ),
+      next: vi.fn(),
+      close: vi.fn(async () => {}),
+    }
+    const service = root.plugin(CordisXAgentContextService, {
+      broker: { authorize: vi.fn(async () => ({ ok: true })) } as never,
+      bridge,
+      live: () => true,
+    })
+    await service
+    let caller!: Context
+    const plugin = root.plugin({
+      inject: ['agentContext'],
+      apply(ctx) {
+        caller = ctx.extend({
+          [CORDISX_PLUGIN_ID]: 'reader',
+          [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+          [CORDISX_PLUGIN_GENERATION]: 'g1',
+        })
+      },
+    })
+    await plugin
+    const observer = vi.fn(), pending = caller.agentContext.watch({ sessionId: 's', thresholdRatio: .9 }, observer)
+    await vi.waitFor(() => expect(bridge.open).toHaveBeenCalledOnce())
+    await plugin.dispose()
+    completeOpen({ status: 'open', handle: 'late', cursor: 0 })
+    expect(await pending).toEqual({ status: 'unavailable', code: 'generation-replaced' })
+    expect(bridge.close).toHaveBeenCalledExactlyOnceWith({ handle: 'late' })
+    expect(observer).not.toHaveBeenCalled()
+    await service.dispose()
+  })
+
+  it('requires Host ownership proof and fences an exact turn target to the plugin lifetime', async () => {
+    const root = new Context(), live = { value: true }
+    const bridge = {
+      acquire: vi.fn(async () => ({ status: 'available' as const, handle: 'opaque' })),
+      cancel: vi.fn(async () => ({ status: 'accepted' as const, outcome: 'cancelled' as const })),
+    }
+    const authorizeOwner = vi.fn(async (input: { sessionId: string }) =>
+      input.sessionId === 'owned' ? 'host-proof' : undefined
+    )
+    const service = root.plugin(CordisXAgentTurnControlService, { bridge, authorizeOwner, live: () => live.value })
+    await service
+    let caller!: Context
+    const plugin = root.plugin({
+      inject: ['agentTurnControl'],
+      apply(ctx) {
+        caller = ctx.extend({
+          [CORDISX_PLUGIN_ID]: 'reader',
+          [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+          [CORDISX_PLUGIN_GENERATION]: 'g1',
+        })
+      },
+    })
+    await plugin
+    expect(await caller.agentTurnControl.acquire({ sessionId: 'other', turnId: 'turn-1' })).toEqual({
+      status: 'unavailable',
+      code: 'denied',
+    })
+    expect(bridge.acquire).not.toHaveBeenCalled()
+    const result = await caller.agentTurnControl.acquire({ sessionId: 'owned', turnId: 'turn-1' })
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error('acquire failed')
+    expect(bridge.acquire).toHaveBeenCalledWith({
+      sessionId: 'owned',
+      turnId: 'turn-1',
+      ownerAuthorization: 'host-proof',
+    })
+    expect(await result.target.cancel()).toEqual({ status: 'accepted', outcome: 'cancelled' })
+    expect(bridge.cancel).toHaveBeenCalledWith({ handle: 'opaque' })
+    await plugin.dispose()
+    expect(await result.target.cancel()).toEqual({ status: 'unavailable', code: 'stale' })
+    expect(bridge.cancel).toHaveBeenCalledOnce()
+    live.value = false
+    await service.dispose()
+  })
+
+  it('captures the exact session and turn before asynchronous ownership authorization', async () => {
+    const root = new Context()
+    let grant!: (proof: string) => void
+    const bridge = {
+      acquire: vi.fn(async () => ({ status: 'available' as const, handle: 'h' })),
+      cancel: vi.fn(async () => ({ status: 'accepted' as const, outcome: 'cancelled' as const })),
+    }
+    const service = root.plugin(CordisXAgentTurnControlService, {
+      bridge,
+      live: () => true,
+      authorizeOwner: () =>
+        new Promise<string>(resolve => {
+          grant = resolve
+        }),
+    })
+    await service
+    const caller = root.extend({
+      [CORDISX_PLUGIN_ID]: 'reader',
+      [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+      [CORDISX_PLUGIN_GENERATION]: 'g1',
+    })
+    const request = { sessionId: 'owned', turnId: 'first' }
+    const pending = caller.agentTurnControl.acquire(request)
+    request.sessionId = 'other'
+    request.turnId = 'second'
+    grant('proof')
+    const result = await pending
+    expect(bridge.acquire).toHaveBeenCalledWith({ sessionId: 'owned', turnId: 'first', ownerAuthorization: 'proof' })
+    expect(result).toMatchObject({ status: 'available', target: { sessionId: 'owned', turnId: 'first' } })
+    await service.dispose()
+  })
 })
