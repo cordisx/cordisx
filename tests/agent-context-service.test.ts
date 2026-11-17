@@ -1,5 +1,11 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/contracts.js'
+import {
+  MemoryPermissionPolicyStore,
+  normalizePluginManifest,
+  PermissionBroker,
+} from '../packages/cli/src/renderer/platform.js'
 import {
   CordisXAgentContextService,
   CordisXAgentTurnControlService,
@@ -9,6 +15,30 @@ import {
   CORDISX_PLUGIN_ID,
   CORDISX_PLUGIN_SOURCE,
 } from '../packages/cli/src/renderer/ownership.js'
+
+function fakeBroker(authorize = vi.fn(async (..._args: any[]) => ({ ok: true }))) {
+  const listeners = new Set<() => void>()
+  let policy = 'allow'
+  return {
+    authorize,
+    snapshots: () => [{
+      identity: { id: 'reader', source: 'file:///reader' },
+      capability: 'agent.events.read',
+      policy,
+      scope: { sessionIds: ['s'] },
+      fingerprint: 'f',
+    }],
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    revoke: () => {
+      policy = 'deny'
+      for (const listener of listeners) listener()
+    },
+    listeners,
+  }
+}
 
 describe('Agent context public service', () => {
   it('brokers the exact session and closes the private subscription on unsubscribe', async () => {
@@ -26,7 +56,11 @@ describe('Agent context public service', () => {
       next,
       close: vi.fn(async () => {}),
     }
-    const fiber = root.plugin(CordisXAgentContextService, { broker: { authorize } as never, bridge, live: () => true })
+    const fiber = root.plugin(CordisXAgentContextService, {
+      broker: fakeBroker(authorize) as never,
+      bridge,
+      live: () => true,
+    })
     await fiber
     const ctx = root.extend({
       [CORDISX_PLUGIN_ID]: 'reader',
@@ -61,7 +95,7 @@ describe('Agent context public service', () => {
   it('rejects unsafe thresholds and never upgrades a read grant into turn control', async () => {
     const root = new Context()
     const contextFiber = root.plugin(CordisXAgentContextService, {
-      broker: { authorize: vi.fn(async () => ({ ok: true })) } as never,
+      broker: fakeBroker() as never,
       live: () => true,
     })
     const controlFiber = root.plugin(CordisXAgentTurnControlService)
@@ -99,7 +133,7 @@ describe('Agent context public service', () => {
       close: vi.fn(async () => {}),
     }
     const service = root.plugin(CordisXAgentContextService, {
-      broker: { authorize: vi.fn(async () => ({ ok: true })) } as never,
+      broker: fakeBroker() as never,
       bridge,
       live: () => true,
     })
@@ -200,6 +234,149 @@ describe('Agent context public service', () => {
     const result = await pending
     expect(bridge.acquire).toHaveBeenCalledWith({ sessionId: 'owned', turnId: 'first', ownerAuthorization: 'proof' })
     expect(result).toMatchObject({ status: 'available', target: { sessionId: 'owned', turnId: 'first' } })
+    await service.dispose()
+  })
+
+  it('does not deliver a context sample from another session', async () => {
+    const root = new Context()
+    const bridge = {
+      read: vi.fn(async () => ({ status: 'available' as const, sample: { sessionId: 'other' } })),
+      open: vi.fn(async () => ({ status: 'open' as const, handle: 'h', cursor: 0 })),
+      next: vi.fn(async () => ({
+        status: 'events' as const,
+        cursor: 1,
+        events: [{ thresholdRatio: .9, sample: { sessionId: 'other' } }],
+      })),
+      close: vi.fn(async () => {}),
+    }
+    const service = root.plugin(CordisXAgentContextService, {
+      broker: fakeBroker() as never,
+      bridge: bridge as never,
+      live: () => true,
+    })
+    await service
+    const caller = root.extend({
+      [CORDISX_PLUGIN_ID]: 'reader',
+      [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+      [CORDISX_PLUGIN_GENERATION]: 'g1',
+    })
+    expect(await caller.agentContext.read('owned')).toEqual({ status: 'unavailable', code: 'unavailable' })
+    const observer = vi.fn(),
+      result = await caller.agentContext.watch({ sessionId: 'owned', thresholdRatio: .9 }, observer)
+    if (result.status !== 'subscribed') throw new Error('watch failed')
+    expect(await result.subscription.closed).toEqual({ code: 'unavailable' })
+    expect(observer).not.toHaveBeenCalled()
+    expect(bridge.close).toHaveBeenCalledOnce()
+    await service.dispose()
+  })
+
+  it('closes a quiet watch immediately when the exact read permission is revoked', async () => {
+    const root = new Context(), broker = fakeBroker()
+    const bridge = {
+      read: vi.fn(),
+      open: vi.fn(async () => ({ status: 'open' as const, handle: 'h', cursor: 0 })),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      close: vi.fn(async () => {}),
+    }
+    const service = root.plugin(CordisXAgentContextService, { broker: broker as never, bridge, live: () => true })
+    await service
+    const caller = root.extend({
+      [CORDISX_PLUGIN_ID]: 'reader',
+      [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+      [CORDISX_PLUGIN_GENERATION]: 'g1',
+    })
+    const observer = vi.fn(), result = await caller.agentContext.watch({ sessionId: 's', thresholdRatio: .9 }, observer)
+    if (result.status !== 'subscribed') throw new Error('watch failed')
+    broker.revoke()
+    expect(await result.subscription.closed).toEqual({ code: 'denied' })
+    expect(bridge.close).toHaveBeenCalledExactlyOnceWith({ handle: 'h' })
+    expect(observer).not.toHaveBeenCalled()
+    expect(broker.listeners.size).toBe(0)
+    await service.dispose()
+  })
+
+  it('tracks real broker policy changes without treating authorization audit updates as revocation', async () => {
+    const root = new Context(), identity = { id: 'reader', source: 'file:///reader' }
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
+      request: vi.fn(async () => 'allow' as const),
+    })
+    broker.register(
+      identity,
+      normalizePluginManifest({
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1,
+        id: identity.id,
+        capabilities: [{
+          name: 'agent.events.read',
+          required: false,
+          reason: { key: 'read', fallback: 'Read events' },
+          scope: { sessionIds: ['s'] },
+        }],
+      }, identity.id),
+      { pluginId: 'reader', moduleGeneration: 'g1' },
+    )
+    broker.setPolicy(identity, 'agent.events.read', 'allow')
+    const bridge = {
+      read: vi.fn(),
+      open: vi.fn(async () => ({ status: 'open' as const, handle: 'h', cursor: 0 })),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      close: vi.fn(async () => {}),
+    }
+    const service = root.plugin(CordisXAgentContextService, { broker, bridge, live: () => true })
+    await service
+    const caller = root.extend({
+      [CORDISX_PLUGIN_ID]: identity.id,
+      [CORDISX_PLUGIN_SOURCE]: identity.source,
+      [CORDISX_PLUGIN_GENERATION]: 'g1',
+    })
+    const result = await caller.agentContext.watch({ sessionId: 's', thresholdRatio: .9 }, vi.fn())
+    if (result.status !== 'subscribed') throw new Error('watch failed')
+    await broker.authorize(identity, 'agent.events.read', { agentSessionId: 's' })
+    expect(bridge.close).not.toHaveBeenCalled()
+    broker.setPolicy(identity, 'agent.events.read', 'deny')
+    expect(await result.subscription.closed).toEqual({ code: 'denied' })
+    expect(bridge.close).toHaveBeenCalledOnce()
+    await service.dispose()
+    broker.dispose()
+  })
+
+  it('withholds an in-flight read or open after permission is revoked', async () => {
+    const root = new Context(), broker = fakeBroker()
+    let finishRead!: (value: any) => void, finishOpen!: (value: any) => void
+    const bridge = {
+      read: vi.fn(() =>
+        new Promise<any>(resolve => {
+          finishRead = resolve
+        })
+      ),
+      open: vi.fn(() =>
+        new Promise<any>(resolve => {
+          finishOpen = resolve
+        })
+      ),
+      next: vi.fn(),
+      close: vi.fn(async () => {}),
+    }
+    const service = root.plugin(CordisXAgentContextService, { broker: broker as never, bridge, live: () => true })
+    await service
+    const caller = root.extend({
+      [CORDISX_PLUGIN_ID]: 'reader',
+      [CORDISX_PLUGIN_SOURCE]: 'file:///reader',
+      [CORDISX_PLUGIN_GENERATION]: 'g1',
+    })
+    const read = caller.agentContext.read('s'),
+      watch = caller.agentContext.watch({ sessionId: 's', thresholdRatio: .9 }, vi.fn())
+    await vi.waitFor(() => {
+      expect(bridge.read).toHaveBeenCalledOnce()
+      expect(bridge.open).toHaveBeenCalledOnce()
+    })
+    broker.revoke()
+    finishRead({ status: 'available', sample: { sessionId: 's' } })
+    finishOpen({ status: 'open', handle: 'late', cursor: 0 })
+    expect(await read).toEqual({ status: 'unavailable', code: 'denied' })
+    expect(await watch).toEqual({ status: 'unavailable', code: 'denied' })
+    expect(bridge.close).toHaveBeenCalledExactlyOnceWith({ handle: 'late' })
+    expect(broker.listeners.size).toBe(0)
     await service.dispose()
   })
 })

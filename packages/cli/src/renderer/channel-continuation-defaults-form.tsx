@@ -71,17 +71,17 @@ export function ChannelContinuationDefaultsForm(props: {
   const source = useMemo(() => schema(zh), [zh])
   const run = async (save: boolean) => {
     const percent = value.percent
+    const ratio = typeof percent === 'number' ? percent / 100 : NaN
     if (
       lock.current || props.signal.aborted
       || save
-        && (!dirty || conflict || !valid || typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0
-          || percent > 95)
+        && (!dirty || conflict || !valid || !Number.isFinite(ratio) || ratio <= 0 || ratio > .95)
     ) return
     lock.current = true
     setBusy(true)
     try {
       const latest = save
-        ? await props.save({ enabled: value.enabled === 'on', thresholdRatio: Number(percent) / 100 }, revision)
+        ? await props.save({ enabled: value.enabled === 'on', thresholdRatio: ratio }, revision)
         : await props.read()
       if (props.signal.aborted) return
       if (save) {

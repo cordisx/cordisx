@@ -545,6 +545,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     await runtimeScope.platformFiber
     await runtimeScope.ctx.plugin(CordisXAgentContextService, {
       broker: runtimeScope.broker()!,
+      ...(runtimeScope.agentContextBridge() === undefined ? {} : { bridge: runtimeScope.agentContextBridge()! }),
       live: () => !runtimeScope.disposed,
     })
     await runtimeScope.ctx.plugin(CordisXAgentTurnControlService)

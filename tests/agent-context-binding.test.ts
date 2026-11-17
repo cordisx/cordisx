@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserAgentContextBridge } from '../packages/cli/src/renderer/agent-context-binding.js'
+import {
+  BrowserAgentContextBridge,
+  prepareAgentContextBootstrap,
+} from '../packages/cli/src/renderer/agent-context-binding.js'
 
 afterEach(() => {
   globalThis.__cordisxAgentContextRequestV1 = undefined
   globalThis.__cordisxAgentContextReceiveV1 = undefined
 })
 describe('private Agent context transport', () => {
+  it('removes the launch token before retaining or projecting runtime metadata', () => {
+    const result = prepareAgentContextBootstrap({ agentContextBridgeToken: 'secret', profileId: 'test' } as never)
+    expect(result.metadata).toEqual({ profileId: 'test' })
+    expect(JSON.stringify(result.metadata)).not.toContain('secret')
+    expect(result.bridge).toBeDefined()
+    result.bridge?.dispose()
+  })
   it('sends authenticated methods and routes a long-poll response by request id', async () => {
     const requests: Record<string, unknown>[] = []
     globalThis.__cordisxAgentContextRequestV1 = payload => {

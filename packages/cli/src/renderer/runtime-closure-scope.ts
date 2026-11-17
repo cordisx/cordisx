@@ -181,6 +181,7 @@ import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
+import type { BrowserAgentContextBridge } from './agent-context-binding.js'
 import type {
   HostServiceConfigDescriptor,
   HostServiceConfigMutation,
@@ -325,6 +326,7 @@ export interface RuntimeClosureScope {
   readonly capabilityAvailability: () => CapabilityAvailabilityRegistry
   certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   readonly channelActionsBridge: () => BrowserChannelActionsBridge | undefined
+  readonly agentContextBridge: () => BrowserAgentContextBridge | undefined
   readonly channelCredentialBridge: () => BrowserChannelCredentialBridge | undefined
   channelManagerFiber: Fiber | undefined
   commandFiber: Fiber | undefined

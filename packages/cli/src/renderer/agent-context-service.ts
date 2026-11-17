@@ -46,6 +46,19 @@ function inputFor(service: object): Input {
   return input
 }
 const validId = (id: unknown): id is string => typeof id === 'string' && id.length > 0 && id.length <= 512
+/** Ignore audit timestamps: unrelated reads emit broker changes as well as policy mutations. */
+function permissionSignature(ctx: Context, broker: PermissionBroker): string | undefined {
+  const owner = ownerFromContext(ctx), source = sourceFromContext(ctx)
+  const entries = broker.snapshots().filter(entry =>
+    entry.identity.id === owner && entry.identity.source === source
+    && entry.capability === 'agent.events.read'
+  )
+  if (!entries.length || entries.some(entry => entry.policy === 'deny')) return undefined
+  return JSON.stringify(
+    entries.map(entry => [entry.policy, entry.scope, entry.fingerprint, entry.blockedReason, entry.authorizationOrigin])
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  )
+}
 export class CordisXAgentContextService extends Service implements AgentContextV1 {
   readonly contract = 'cordisx.agent-context/v1' as const
   constructor(ctx: Context, input: Input) {
@@ -63,20 +76,36 @@ export class CordisXAgentContextService extends Service implements AgentContextV
   async read(sessionId: string): Promise<AgentContextReadResultV1> {
     if (!validId(sessionId)) return { status: 'unavailable', code: 'invalid-request' }
     let active = true
+    const input = inputFor(this)
+    let signature: string | undefined
+    let revoked = false
+    const unsubscribe = input.broker.subscribe(() => {
+      if (signature !== undefined && permissionSignature(this.ctx, input.broker) !== signature) revoked = true
+    })
     const dispose = this.ctx.effect(() => () => {
       active = false
+      unsubscribe()
     }, 'agentContext read')
     try {
       const allowed = await this.authorize(sessionId)
       if (!active) return { status: 'unavailable', code: 'generation-replaced' }
       if (!allowed) return { status: 'unavailable', code: 'denied' }
-      const input = inputFor(this)
+      signature = permissionSignature(this.ctx, input.broker)
+      if (!signature || revoked) return { status: 'unavailable', code: 'denied' }
       if (!input.bridge) return { status: 'unavailable', code: 'unsupported' }
       const result = await input.bridge.read({ sessionId })
-      return active && input.live() ? result : { status: 'unavailable', code: 'generation-replaced' }
+      if (!active || !input.live()) return { status: 'unavailable', code: 'generation-replaced' }
+      if (revoked || permissionSignature(this.ctx, input.broker) !== signature) {
+        return { status: 'unavailable', code: 'denied' }
+      }
+      if (result.status === 'available' && result.sample.sessionId !== sessionId) {
+        return { status: 'unavailable', code: 'unavailable' }
+      }
+      return result
     } catch {
       return { status: 'unavailable', code: 'unavailable' }
     } finally {
+      unsubscribe()
       dispose()
     }
   }
@@ -84,6 +113,7 @@ export class CordisXAgentContextService extends Service implements AgentContextV
     request: { readonly sessionId: string; readonly thresholdRatio: number },
     observer: (event: AgentContextThresholdEventV1) => void | Promise<void>,
   ): Promise<AgentContextWatchResultV1> {
+    if (!request || typeof request !== 'object') return { status: 'unavailable', code: 'invalid-request' }
     const { sessionId, thresholdRatio } = request
     if (
       !validId(sessionId) || !Number.isFinite(thresholdRatio) || thresholdRatio <= 0
@@ -91,6 +121,10 @@ export class CordisXAgentContextService extends Service implements AgentContextV
     ) return { status: 'unavailable', code: 'invalid-request' }
     const input = inputFor(this), bridge = input.bridge
     let active = true, handle: string | undefined
+    const closure: { code: AgentContextUnavailableV1 | 'unsubscribed' | 'observer-failed' } = {
+      code: 'generation-replaced',
+    }
+    let signature: string | undefined
     let resolveClosed!: (value: { code: AgentContextUnavailableV1 | 'unsubscribed' | 'observer-failed' }) => void
     const closed = new Promise<{ code: AgentContextUnavailableV1 | 'unsubscribed' | 'observer-failed' }>(resolve => {
       resolveClosed = resolve
@@ -98,6 +132,8 @@ export class CordisXAgentContextService extends Service implements AgentContextV
     const close = async (code: AgentContextUnavailableV1 | 'unsubscribed' | 'observer-failed') => {
       if (!active) return
       active = false
+      closure.code = code
+      unsubscribe()
       if (handle !== undefined && bridge) {
         try {
           await bridge.close({ handle })
@@ -105,6 +141,9 @@ export class CordisXAgentContextService extends Service implements AgentContextV
       }
       resolveClosed({ code })
     }
+    const unsubscribe = input.broker.subscribe(() => {
+      if (signature !== undefined && permissionSignature(this.ctx, input.broker) !== signature) void close('denied')
+    })
     const dispose = this.ctx.effect(() => () => {
       void close('generation-replaced')
     }, 'agentContext subscription')
@@ -118,11 +157,20 @@ export class CordisXAgentContextService extends Service implements AgentContextV
         dispose()
         return { status: 'unavailable', code: 'denied' }
       }
+      signature = permissionSignature(this.ctx, input.broker)
+      if (!signature) {
+        dispose()
+        return { status: 'unavailable', code: 'denied' }
+      }
       if (!bridge) {
         dispose()
         return { status: 'unavailable', code: 'unsupported' }
       }
       const opened = await bridge.open({ sessionId, thresholdRatio })
+      if (!active && opened.status !== 'open') {
+        dispose()
+        return { status: 'unavailable', code: closure.code === 'denied' ? 'denied' : 'generation-replaced' }
+      }
       if (opened.status !== 'open') {
         dispose()
         return opened
@@ -133,7 +181,7 @@ export class CordisXAgentContextService extends Service implements AgentContextV
           await bridge.close({ handle })
         } catch {}
         dispose()
-        return { status: 'unavailable', code: 'generation-replaced' }
+        return { status: 'unavailable', code: closure.code === 'denied' ? 'denied' : 'generation-replaced' }
       }
       void (async () => {
         let cursor = opened.cursor
@@ -152,7 +200,11 @@ export class CordisXAgentContextService extends Service implements AgentContextV
             cursor = page.cursor
             for (const event of page.events) {
               if (!active) break
-              if (!await this.authorize(sessionId)) {
+              if (event.sample.sessionId !== sessionId || event.thresholdRatio !== thresholdRatio) {
+                await close('unavailable')
+                break
+              }
+              if (permissionSignature(this.ctx, input.broker) !== signature) {
                 await close('denied')
                 break
               }
@@ -212,6 +264,7 @@ export class CordisXAgentTurnControlService extends Service implements AgentTurn
     if (input) turnInputs.set(this, input)
   }
   async acquire(request: { sessionId: string; turnId: string }): ReturnType<AgentTurnControlV1['acquire']> {
+    if (!request || typeof request !== 'object') return { status: 'unavailable', code: 'denied' }
     const { sessionId, turnId } = request
     if (!validId(sessionId) || !validId(turnId)) return { status: 'unavailable', code: 'denied' }
     const input = turnInputs.get((this as { [original]?: object })[original] ?? this)

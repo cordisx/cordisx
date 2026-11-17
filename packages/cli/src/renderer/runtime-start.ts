@@ -77,6 +77,7 @@ import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { createRuntimeModelProviders } from './runtime-model-providers.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
+import { prepareAgentContextBootstrap } from './agent-context-binding.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { createRuntimeManagementBindings } from './runtime-management-bindings.js'
 import { PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
@@ -129,6 +130,9 @@ export async function start(
 ): Promise<CordisXRuntimeHandle> {
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
   options.signal?.throwIfAborted()
+
+  const { metadata: safeMetadata, bridge: agentContextBridge } = prepareAgentContextBootstrap(metadata)
+  metadata = safeMetadata
 
   let ctx = new Context()
   let disposeDialogs = () => {}
@@ -301,6 +305,7 @@ export async function start(
         (value: any) => certifiedPermissionChannel = value,
       ],
       channelActionsBridge: () => channelActionsBridge,
+      agentContextBridge: () => agentContextBridge,
       channelCredentialBridge: () => channelCredentialBridge,
       channelManagerFiber: [() => channelManagerFiber, (value: any) => channelManagerFiber = value],
       commandFiber: [() => commandFiber, (value: any) => commandFiber = value],
@@ -978,6 +983,7 @@ export async function start(
     await runtimeClosures6.runRuntimeStage4077(closureScope, options.signal)
     return await completeRuntimeStart(handle, controllers, options.signal)
   } catch (error) {
+    agentContextBridge?.dispose()
     disposeDialogs()
     disposeNotifications()
     certifiedPermissionChannel?.dispose()

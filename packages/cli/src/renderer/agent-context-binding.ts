@@ -1,4 +1,5 @@
 import type { AgentContextBridge } from './agent-context-service.js'
+import type { CordisXRuntimeMetadata } from './runtime-shared.js'
 
 const BINDING = '__cordisxAgentContextRequestV1'
 const RECEIVER = '__cordisxAgentContextReceiveV1'
@@ -76,5 +77,16 @@ export class BrowserAgentContextBridge implements AgentContextBridge {
       pending.reject(new Error('agent-context-unavailable'))
     }
     this.pending.clear()
+  }
+}
+
+/** Extract the launch secret before the runtime retains or projects metadata. */
+export function prepareAgentContextBootstrap(metadata: CordisXRuntimeMetadata) {
+  const { agentContextBridgeToken, ...safeMetadata } = metadata
+  return {
+    metadata: safeMetadata,
+    bridge: agentContextBridgeToken === undefined
+      ? undefined
+      : BrowserAgentContextBridge.connect(agentContextBridgeToken),
   }
 }
