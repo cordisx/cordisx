@@ -405,6 +405,17 @@ If the first turn requests history before the Host has committed the new
 relationship, the read reports unavailable; the read may be retried after the
 handoff settles.
 
+If the native app-server reports that item pagination is unsupported, the
+continuation history reader requests at most one complete native turn per
+request and pages its projected entries under the normal Host entry and
+character limits, reporting `pagination: "native-turn"`. Its opaque cursor binds the source, turn and projection;
+changed source data invalidates it. A native turn has no protocol-level item
+or byte limit. In headless mode the shared RPC connection has a 2 MiB line
+limit; an oversized native response can close that connection and reports
+`CONTINUATION_HISTORY_PAGE_TOO_LARGE` when the limit is observed. Desktop native
+responses have no fixed CordisX byte cap. This fallback therefore bounds each
+returned Host page, not the size of the native turn response.
+
 `threshold` is the fraction of the reported model window; `reserveTokens` is an
 explicit reserve for future input and output. These example values are not
 model limits. Automatic continuation considers only a recent native

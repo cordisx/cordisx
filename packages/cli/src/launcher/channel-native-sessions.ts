@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import type { AgentBridge } from './agent-bridge.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { codexThreadMetadata, codexTranscriptPage, codexTurn } from './agent-bridge-codex-history.js'
+import { continuationTurnHistoryPage, isTurnHistoryCursor } from './channel-continuation-turn-history.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { ChannelReplyDefaults } from './channel-reply-routing.js'
 import { channelCliSendInstructions, type ChannelNativeCliContext } from './channel-cli-context.js'
@@ -99,7 +100,14 @@ export class ChannelNativeSessions {
     return turn?.id === turnId && ['inProgress', 'running'].includes(String(turn.status))
   }
   async continuationHistory(threadId: string, options: { readonly limit?: number; readonly cursor?: unknown }) {
-    return await codexTranscriptPage(this.input, threadId, options)
+    if (isTurnHistoryCursor(options.cursor)) return continuationTurnHistoryPage(this.input, threadId, options)
+    try {
+      return await codexTranscriptPage(this.input, threadId, options)
+    } catch (error) {
+      const code = object(error).rpcCode
+      if (options.cursor !== undefined || code !== -32601) throw error
+      return continuationTurnHistoryPage(this.input, threadId, options)
+    }
   }
   async startContinuation(
     operationId: string,
