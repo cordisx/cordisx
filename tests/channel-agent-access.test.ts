@@ -106,6 +106,13 @@ describe('configured Channel CLI routine approval', () => {
       operationId: 'one',
     }
     expect(access.routine(argv('send', send, 'current'), 'chat', 'turn')).toBe(true)
+    expect(access.routine(argv('ask', send, 'current'), 'chat', 'turn')).toBe(true)
+    expect(
+      access.routine(argv('ask', { ...send, target: { id: 'oc_other', kind: 'group' } }, 'current'), 'chat', 'turn'),
+    ).toBe(false)
+    expect(
+      access.routine(argv('question-cancel', { account: send.account, operationId: 'one' }, 'current'), 'chat', 'turn'),
+    ).toBe(false)
     expect(access.routine(argv('send', send, 'old'), 'chat', 'turn')).toBe(false)
     expect(access.routine(argv('send', { ...send, target: { id: 'oc_other', kind: 'group' } }), 'chat', 'turn')).toBe(
       false,

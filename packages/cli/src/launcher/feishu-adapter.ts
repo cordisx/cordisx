@@ -1,3 +1,4 @@
+import { channelQuestionCard } from './channel-question-card.js'
 import { createHash } from 'node:crypto'
 import {
   type CardActionEvent,
@@ -137,6 +138,9 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       loggerLevel: LoggerLevel.debug,
       logger: options.logger,
       transport: 'websocket',
+      // The SDK drops form_value unless raw events are enabled. The queue extracts
+      // only the bounded answer and discards the raw body before retaining it.
+      includeRawEvent: true,
       policy: { dmMode: 'open', requireMention: options.requireMention },
       httpInstance: feishuProfileHttp(options.onProfile),
     }))
@@ -250,19 +254,23 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
             // The existing authenticated SDK supports server-side deduplication.
             // Reclaiming a delivery uses the same UUID rather than creating a second message.
             const uuid = createHash('sha256').update(delivery.deliveryId).digest('hex').slice(0, 32)
-            const content = JSON.stringify({ text: delivery.text })
+            const content = JSON.stringify(
+              delivery.questionCard ? channelQuestionCard(delivery.questionCard) : { text: delivery.text },
+            )
+            const msg_type = delivery.questionCard ? 'interactive' as const : 'text' as const
             const response = delivery.target.semantics !== 'conversation'
               ? await channel.rawClient.im.v1.message.reply({
                 path: { message_id: delivery.target.threadId },
-                data: { msg_type: 'text', content, uuid, reply_in_thread: delivery.target.semantics === 'topic' },
+                data: { msg_type, content, uuid, reply_in_thread: delivery.target.semantics === 'topic' },
               })
               : await channel.rawClient.im.v1.message.create({
                 params: { receive_id_type: delivery.target.conversationId.startsWith('ou_') ? 'open_id' : 'chat_id' },
-                data: { receive_id: delivery.target.conversationId, msg_type: 'text', content, uuid },
+                data: { receive_id: delivery.target.conversationId, msg_type, content, uuid },
               })
             if (response.code !== 0 || !response.data?.message_id) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
             messageId = response.data.message_id
           } else {
+            if (delivery.questionCard) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
             const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
               ...(delivery.target.semantics !== 'conversation'
                 ? { replyTo: delivery.target.threadId, replyInThread: delivery.target.semantics === 'topic' }

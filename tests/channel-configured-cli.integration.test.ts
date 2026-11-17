@@ -85,6 +85,10 @@ describe('configured Channel CLI production endpoint', () => {
         receipts.set(deliveryId, { state: 'sent', externalMessageId: 'om_explicit_result' })
         return { deliveryId }
       }),
+      notifyQuestionOnce: vi.fn(async (_value, _caller, deliveryId: string) => {
+        receipts.set(deliveryId, { state: 'sent', externalMessageId: 'om_question' })
+        return { deliveryId }
+      }),
       deliverySnapshot: (deliveryId: string) => receipts.get(deliveryId),
     }
     const remoteList = vi.fn(async () => ({
@@ -147,6 +151,21 @@ describe('configured Channel CLI production endpoint', () => {
         expect(remoteList).toHaveBeenCalledTimes(2)
         await expect(command('remote-history', { ...remote, conversationId: 'oc_other' }, contextToken)).rejects
           .toThrow('CHANNEL_SOURCE_SCOPE_MISMATCH')
+        const ask = {
+          account: ref,
+          target: { id: source.conversationId, kind: source.kind },
+          question: 'Choose?',
+          options: [{ label: 'Yes', value: 'Yes' }],
+          operationId: 'first-turn-question',
+        }
+        expect(await command('ask', ask, contextToken)).toMatchObject({
+          status: 'ok',
+          presentation: 'card',
+          receipt: { state: 'sent' },
+        })
+        expect(await command('receipt', { account: ref, operationId: ask.operationId }, contextToken)).toMatchObject({
+          deliveryState: 'sent',
+        })
         expect(await command('send', send, contextToken)).toMatchObject({ status: 'ok', receipt: { state: 'sent' } })
         return { status: 'started', sessionId, turnId: 'fixture-turn' }
       },
@@ -215,6 +234,8 @@ describe('configured Channel CLI production endpoint', () => {
         'remote-history',
         'remote-history',
         'remote-history',
+        'ask',
+        'receipt',
         'send',
         'receipt',
         'send',

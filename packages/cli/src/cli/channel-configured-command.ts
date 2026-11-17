@@ -20,6 +20,8 @@ const OPERATIONS = [
   'listen',
   'send',
   'send-many',
+  'ask',
+  'question-cancel',
   'receipt',
   'policy',
   'policy-set',

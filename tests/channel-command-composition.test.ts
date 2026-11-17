@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { type EventMap, normalize } from '@larksuiteoapi/node-sdk'
+import { type EventMap, normalize, normalizeCardAction } from '@larksuiteoapi/node-sdk'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { createConfiguredChannelConsumer } from '../packages/cli/src/cli/channel-consumer-composition.js'
 import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
@@ -14,6 +14,127 @@ vi.mock('@larksuiteoapi/node-sdk', async original => ({
 }))
 
 describe('production Channel command composition with SDK transport fixtures', () => {
+  it('routes a question card click through the SDK queue, configured service and consumer', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-question-composition-'))
+    const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
+    const handlers: Partial<EventMap> = {}
+    const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_card' } }))
+    const members = vi.fn(async () => ({
+      code: 0,
+      data: {
+        items: [{ member_id_type: 'open_id', member_id: 'ou_alice', name: 'Alice' }, {
+          member_id_type: 'open_id',
+          member_id: 'ou_bob',
+          name: 'Bob',
+        }],
+        has_more: false,
+      },
+    }))
+    sdkFactory.mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      on: (name: keyof EventMap, handler: EventMap[keyof EventMap]) => {
+        Object.assign(handlers, { [name]: handler })
+        return () => {
+          delete handlers[name]
+        }
+      },
+      send: vi.fn(),
+      rawClient: { im: { v1: { chatMembers: { get: members }, message: { create } } } },
+    })
+    const entry = bundledPluginEntry('channel')
+    const service = createLocalChannelService({
+      artifactDirectory: path.dirname(entry),
+      dataDir: path.join(root, 'transport'),
+      source: 'fixture:channel',
+      environment: { CHANNEL_QUESTION_FIXTURE: 'fixture-only' },
+    })
+    let owner: Awaited<ReturnType<typeof createConfiguredChannelConsumer>> | undefined
+    try {
+      await service.start({
+        contract: 'cordisx.channel-service-config/v1',
+        schemaVersion: 1,
+        connections: [{
+          ref,
+          adapterKind: 'feishu',
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: 'host-secret:env/CHANNEL_QUESTION_FIXTURE',
+        }],
+      })
+      const native = {
+        exists: vi.fn(async () => true),
+        start: vi.fn(async (_id, _message, sessionId) => ({ state: 'running', sessionId, turnId: 'turn' })),
+        completion: vi.fn(async () => ({ state: 'completed' })),
+        reconcile: vi.fn(),
+      }
+      owner = await createConfiguredChannelConsumer({
+        service,
+        homeDir: root,
+        appId: 'codex',
+        profileId: 'fixture',
+        native: () => native as never,
+        report: vi.fn(),
+      })
+      const consumer = owner.consumer!
+      await consumer.policySet({ enabled: true }, 0)
+      const channel = {
+        ...ref,
+        conversationId: 'oc_group',
+        kind: 'group',
+        threadId: 'oc_group',
+        semantics: 'conversation',
+      }
+      await consumer.bind({ channel, mode: 'deliver', autoReply: false }, '01a10000-0000-7000-8000-000000000001')
+      expect(
+        await owner.tools.call('ask', {
+          account: ref,
+          target: { id: 'oc_group', kind: 'group' },
+          question: 'Choose?',
+          options: [{ label: 'Yes', value: 'Yes please' }],
+          operationId: 'compose-question',
+        }),
+      ).toMatchObject({ status: 'ok', deliveryState: 'sent' })
+      const card = JSON.parse(create.mock.calls[0]![0].data.content)
+      const value = card.elements[1].actions[0].value
+      handlers.cardAction!({
+        chatId: 'oc_group',
+        messageId: 'om_card',
+        operator: { openId: 'ou_alice' },
+        action: { tag: 'button', value },
+      })
+      await vi.waitFor(() => expect(native.start).toHaveBeenCalledTimes(1))
+      expect(native.start.mock.calls[0]![1]).toMatchObject({
+        content: [{ text: expect.stringContaining('Yes please') }],
+        source: { event: { actor: { userId: 'ou_alice' } } },
+      })
+      expect(native.start.mock.calls[0]![5]).toMatchObject({ sender: { userId: 'ou_alice', name: 'Alice' } })
+      expect(sdkFactory.mock.calls[0]![0]).toMatchObject({ includeRawEvent: true })
+      const form = card.elements.find((element: { tag: string }) => element.tag === 'form')
+      expect(form.elements[0]).toMatchObject({ tag: 'input', name: 'answer' })
+      const submit = normalizeCardAction({
+        context: { open_message_id: 'om_card', open_chat_id: 'oc_group' },
+        operator: { open_id: 'ou_bob' },
+        action: { tag: 'button', name: 'channel_question_submit', form_value: { answer: 'A custom answer' } },
+      } as never, { includeRaw: true })!
+      handlers.cardAction!(submit)
+      await vi.waitFor(async () => {
+        await consumer.pump()
+        expect(native.start).toHaveBeenCalledTimes(2)
+      }, { timeout: 5000 })
+      expect(native.start.mock.calls[1]![1]).toMatchObject({
+        content: [{ text: expect.stringContaining('A custom answer') }],
+        source: { event: { actor: { userId: 'ou_bob' } } },
+      })
+      expect(native.start.mock.calls[1]![5]).toMatchObject({ sender: { userId: 'ou_bob', name: 'Bob' } })
+    } finally {
+      await owner?.dispose()
+      await service.dispose()
+      await rm(root, { recursive: true, force: true })
+      sdkFactory.mockReset()
+    }
+  })
+
   it('carries native mention identity and live member lookup through the configured launcher and sends command topics once', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-command-composition-'))
     const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }

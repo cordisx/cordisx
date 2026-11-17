@@ -17,8 +17,12 @@ const HELP: Readonly<Record<string, string>> = {
     'Send explicitly. Input: {account,target:{id,kind,replyMode:"conversation"|"reply"|"thread",replyTo?:messageId},text,operationId}. Quote JSON safely. Only receipt.state=sent proves delivery.',
   'send-many':
     'Send explicitly to multiple destinations. Input: {account,targets:[target],text,operationId}. Validate the whole batch first; receipts report each target.',
+  ask:
+    'Ask with options or free text. Input: {account,target:{id,kind,replyMode?,replyTo?},question,options:[{label,value}],targetUserId?:string,operationId,expiresInSeconds?:number}. Feishu/Lark use a card with buttons and a text form; unsupported adapters receive numbered text. targetUserId limits card clicks, not visibility or free-text replies; non-card adapters reject it. After sending, wait for a later Channel user message. Only receipt.state=sent proves delivery.',
+  'question-cancel':
+    'Revoke a question card. Input: {account,operationId}. This prevents later button answers; it does not recall the sent message.',
   receipt:
-    'Read an earlier send without resending. Input: {account,operationId,targetCount?:number}. Returns deliveryState and explicit receipt:null for not-found; not-found alone never proves a disconnected request was not sent.',
+    'Read an earlier send or question without resending. Input: {account,operationId,targetCount?:number}. Returns deliveryState and explicit receipt:null for not-found; not-found alone never proves a disconnected request was not sent.',
   'reply-mode':
     'Choose the optional automatic final-answer route, without sending. Input: {sessionId,operationId,mode:"conversation"|"reply"|"thread"|"none"}. Automatic final-answer forwarding is off by default.',
   policy: 'Read Channel policy. Input: {}.',

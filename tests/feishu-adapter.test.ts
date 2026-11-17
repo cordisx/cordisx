@@ -92,6 +92,68 @@ describe('official Feishu direct-message adapter', () => {
       await active.stop('disposed')
     }
   })
+  it('sends bounded question cards with the stable delivery UUID and never fabricates a text fallback', async () => {
+    const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_card' } }))
+    const send = vi.fn(async () => ({ messageId: 'om_text' }))
+    const build = (raw: boolean) =>
+      createFeishuAdapterDefinition({
+        connection,
+        configurationRevision: 1,
+        source: 'test',
+        resolveSecret: async () => 'fixture-only',
+        createChannel: () =>
+          ({
+            connect: async () => {},
+            disconnect: async () => {},
+            on: () => () => {},
+            send,
+            ...(raw ? { rawClient: { im: { v1: { message: { create } } } } } : {}),
+          }) as never,
+      })
+    const host = {
+      generation: 1,
+      ref: connection.ref,
+      receive: async () => ({ recordId: 'unused', duplicate: false, status: 'queued' as const }),
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    }
+    const delivery = {
+      deliveryId: 'delivery:question',
+      target: {
+        ...connection.ref,
+        conversationId: 'oc_group',
+        kind: 'group' as const,
+        threadId: 'oc_group',
+        semantics: 'conversation' as const,
+      },
+      kind: 'reply' as const,
+      text: 'Question',
+      createdAt: '2026-11-15T00:00:00Z',
+      questionCard: { token: 'a'.repeat(64), question: 'Question', options: ['Yes'] },
+    }
+    const active = await build(true).start(host)
+    try {
+      await active.send(delivery)
+      await active.send(delivery)
+      const calls = create.mock.calls.map(([input]) => input)
+      expect(calls[0].data).toMatchObject({ msg_type: 'interactive', receive_id: 'oc_group' })
+      expect(calls[0].data.uuid).toBe(calls[1].data.uuid)
+      expect(JSON.parse(calls[0].data.content).elements[1].actions[0].value).toEqual({
+        channelQuestion: 'a'.repeat(64),
+        option: 0,
+      })
+      expect(send).not.toHaveBeenCalled()
+    } finally {
+      await active.stop('disposed')
+    }
+    const noRaw = await build(false).start(host)
+    try {
+      await expect(noRaw.send(delivery)).rejects.toThrow()
+      expect(send).not.toHaveBeenCalled()
+    } finally {
+      await noRaw.stop('disposed')
+    }
+  })
   it('accepts SDK empty thread IDs as conversations and preserves real reply chains for receive selectors', async () => {
     let listener: ((message: NormalizedMessage) => Promise<void>) | undefined
     let selectors: readonly string[] | undefined

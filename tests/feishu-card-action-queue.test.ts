@@ -32,6 +32,29 @@ describe('Feishu card callback acknowledgement queue', () => {
     await queue.dispose()
   })
 
+  it('extracts only bounded submitted text and discards the raw form event', async () => {
+    vi.useFakeTimers()
+    const handle = vi.fn()
+    const queue = new FeishuCardActionQueue(handle, vi.fn())
+    queue.enqueue({
+      ...event,
+      action: { tag: 'button', name: 'channel_question_submit', value: {} },
+      raw: { action: { form_value: { answer: 'Custom answer', secret: 'must not survive' } }, unrelated: 'private' },
+    })
+    queue.enqueue({
+      ...event,
+      messageId: 'om_bad',
+      action: { tag: 'button', name: 'channel_question_submit', value: {} },
+      raw: { action: { form_value: { answer: 'x'.repeat(1001) } } },
+    })
+    await vi.runAllTimersAsync()
+    expect(handle.mock.calls[0]![0]).toMatchObject({ questionText: 'Custom answer' })
+    expect(handle.mock.calls[0]![0]).not.toHaveProperty('raw')
+    expect(JSON.stringify(handle.mock.calls[0]![0])).not.toContain('must not survive')
+    expect(handle.mock.calls[1]![0]).not.toHaveProperty('questionText')
+    await queue.dispose()
+  })
+
   it('serializes clicks, reports failures, and waits for active work while discarding queued work on stop', async () => {
     vi.useFakeTimers()
     let finish!: () => void
