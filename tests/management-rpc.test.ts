@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import type { PluginManagementSnapshot } from '../packages/cli/src/management/contracts.js'
 import type { PluginManagementService } from '../packages/cli/src/management/service.js'
@@ -13,6 +13,90 @@ import {
 } from '../packages/cli/src/launcher/management-rpc.js'
 
 describe('plugin management RPC', () => {
+  it('still times out a stalled installation request', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-timeout-rpc-'))
+    let started!: () => void
+    const executionStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const service = {
+      execute: async () => {
+        started()
+        return await new Promise(() => {})
+      },
+      close: () => {},
+    } as unknown as PluginManagementService
+    const processStartedAt = await processStartIdentity(process.pid)
+    const server = await startPluginManagementRpcServer({
+      homeDir,
+      appId: 'codex',
+      profileId: 'default',
+      configPath: path.join(homeDir, 'config.json'),
+      generation: 'generation-1',
+      processStartedAt: processStartedAt!,
+      service,
+    })
+    try {
+      const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      const endpoint = await readPluginManagementRpcEndpoint(paths)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const pending = requestPluginManagementRpc(paths, endpoint!, {
+        kind: 'execute',
+        request: { kind: 'plugin-execute-plan', executionToken: 'token' },
+      })
+      const rejected = expect(pending).rejects.toThrow('plugin management request timed out')
+      await executionStarted
+      await vi.advanceTimersByTimeAsync(180_000)
+      await rejected
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps an executing installation open beyond the old 60-second deadline', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-slow-rpc-'))
+    let started!: () => void
+    const executionStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const service = {
+      execute: async () => {
+        started()
+        await new Promise(resolve => setTimeout(resolve, 61_000))
+        return { status: 'applied' }
+      },
+      close: () => {},
+    } as unknown as PluginManagementService
+    const processStartedAt = await processStartIdentity(process.pid)
+    const server = await startPluginManagementRpcServer({
+      homeDir,
+      appId: 'codex',
+      profileId: 'default',
+      configPath: path.join(homeDir, 'config.json'),
+      generation: 'generation-1',
+      processStartedAt: processStartedAt!,
+      service,
+    })
+    try {
+      const paths = pluginManagementRpcPaths(homeDir, 'codex', 'default')
+      const endpoint = await readPluginManagementRpcEndpoint(paths)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const pending = requestPluginManagementRpc(paths, endpoint!, {
+        kind: 'execute',
+        request: { kind: 'plugin-execute-plan', executionToken: 'token' },
+      })
+      await executionStarted
+      await vi.advanceTimersByTimeAsync(61_000)
+      await expect(pending).resolves.toEqual({ status: 'applied' })
+    } finally {
+      vi.useRealTimers()
+      await server.close()
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
   it('awaits async responses over a bounded Unix socket path', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cx-rpc-'))
     const homeDir = path.join(root, 'a'.repeat(140))

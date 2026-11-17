@@ -330,7 +330,7 @@ export async function openPluginManagementService(
         version: plugin.version,
         canonicalSource: plugin.canonicalSource,
         artifact: plugin.artifact,
-      }, AbortSignal.timeout(40_000))
+      }, AbortSignal.timeout(150_000))
     }
     return await lifecycle.handle({
       $schema: CORDISX_PLUGIN_LIFECYCLE_OPERATION_SCHEMA_V1,

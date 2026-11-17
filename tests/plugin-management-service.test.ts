@@ -27,6 +27,8 @@ async function fixture(watch = false) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
   await Promise.all(
@@ -375,19 +377,36 @@ describe('plugin management service', () => {
     await expect(service.refreshCatalog(`${http.url}/unknown.json`)).rejects.toThrow('does not exist')
     expect(requests).toEqual(['/marketplace.json'])
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: URL | string) => {
-        expect(String(url)).toBe(artifactUrl)
-        return new Response(bytes, { status: 200, headers: { 'content-length': String(bytes.byteLength) } })
-      }),
-    )
     const planned = await service.plan({
       kind: 'plugin-plan-marketplace',
       pluginId: 'permission-v4',
       sourceUrl,
     })
-    const result = await service.execute(planned.executionRequest!)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(new DOMException('expired', 'TimeoutError')), milliseconds)
+      return controller.signal
+    })
+    let started!: () => void
+    const fetchStarted = new Promise<void>(resolve => {
+      started = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL | string, options: { signal: AbortSignal }) => {
+        expect(String(url)).toBe(artifactUrl)
+        started()
+        return await new Promise<Response>((resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+          setTimeout(() => resolve(new Response(bytes, { status: 200 })), 41_000)
+        })
+      }),
+    )
+    const pending = service.execute(planned.executionRequest!)
+    await fetchStarted
+    await vi.advanceTimersByTimeAsync(41_000)
+    const result = await pending
     expect(result).toMatchObject({ status: 'permission-review-required', candidateId: expect.any(String) })
     expect((await service.query()).activationRevision).toBe(0)
     if (result.status === 'permission-review-required') {
