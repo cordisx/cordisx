@@ -1,4 +1,5 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import { type ChannelLivePolicyOverride, parseLivePolicy } from './channel-live-policy.js'
 import {
   type ChannelContinuationDefaults,
   INITIAL_CONTINUATION_DEFAULTS,
@@ -127,6 +128,7 @@ export interface ChannelConversationState {
 }
 
 export interface ChannelContinuationRecord {
+  livePolicy?: ChannelLivePolicyOverride
   policy?: ContinuationPolicy
   checkpoint?: ContinuationCheckpoint
   intent?: {
@@ -191,10 +193,11 @@ export class ChannelConversationStore {
       }
       for (const [threadId, entry] of Object.entries(parsed.continuations)) {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('INVALID_CONTINUATION_STORE')
-        if (Object.keys(entry).some(key => !['policy', 'checkpoint', 'intent'].includes(key))) {
+        if (Object.keys(entry).some(key => !['policy', 'livePolicy', 'checkpoint', 'intent'].includes(key))) {
           throw new Error('INVALID_CONTINUATION_STORE')
         }
         if (entry.policy !== undefined) entry.policy = continuationPolicy(entry.policy)
+        if (entry.livePolicy !== undefined) entry.livePolicy = parseLivePolicy(entry.livePolicy)
         if (entry.checkpoint !== undefined) {
           const { threadId: checkpointThread, revision, ...body } = entry.checkpoint
           if (checkpointThread !== threadId) throw new Error('INVALID_CONTINUATION_STORE')

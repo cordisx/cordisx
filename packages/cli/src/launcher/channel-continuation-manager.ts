@@ -16,6 +16,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { continuationDefaultsOperation } from './channel-continuation-defaults.js'
+import { livePolicyOperation } from './channel-live-policy.js'
 
 export interface ContinuationReservation {
   readonly operationId: string
@@ -36,7 +37,9 @@ export class ChannelContinuationManager {
   ) {}
 
   defaultsOperation(operation: string, args: Record<string, unknown>) {
-    return continuationDefaultsOperation(this.store, operation, args)
+    return operation.startsWith('continuation-live-policy')
+      ? livePolicyOperation(this.store, operation, args)
+      : continuationDefaultsOperation(this.store, operation, args)
   }
 
   async turnActive(threadId: string, turnId: string) {
@@ -314,7 +317,12 @@ export class ChannelContinuationManager {
     for (const job of Object.values(state.jobs)) {
       if (job.sessionId === reservation.source && job.state === 'queued') job.sessionId = target
     }
-    if (entry.policy) state.continuations[target] = { policy: entry.policy }
+    if (entry.policy || entry.livePolicy) {
+      state.continuations[target] = {
+        ...(entry.policy ? { policy: entry.policy } : {}),
+        ...(entry.livePolicy ? { livePolicy: structuredClone(entry.livePolicy) } : {}),
+      }
+    }
     const sourceSettings = state.taskSettings[reservation.source]
     if (sourceSettings) {
       state.taskSettings[target] = structuredClone(sourceSettings)

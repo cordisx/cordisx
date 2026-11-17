@@ -2,6 +2,32 @@ import { describe, expect, it, vi } from 'vitest'
 import { createChannelActionsBridgeHandler } from '../packages/cli/src/launcher/channel-actions-rpc.js'
 
 describe('Channel action Host bridge', () => {
+  it('projects sparse live policy without forwarding transport fields', async () => {
+    const executionOperation = vi.fn(async () => ({
+      status: 'ok',
+      policy: { enabled: true, thresholdRatio: 0.1 },
+      overrides: { thresholdRatio: 0.1 },
+      defaultsRevision: 2,
+      overrideRevision: 3,
+      legacy: false,
+    }))
+    const handler = createChannelActionsBridgeHandler({
+      token: 'a'.repeat(64),
+      api: {} as never,
+      consumer: { executionOperation } as never,
+    })
+    expect(
+      await handler.handle({
+        version: 1,
+        token: handler.token,
+        requestId: 'r',
+        generation: 'g',
+        action: 'continuation-live-policy',
+        sessionId: 'chat',
+      }),
+    ).toMatchObject({ status: 'applied', continuationLivePolicy: { overrideRevision: 3, legacy: false } })
+    expect(executionOperation).toHaveBeenCalledWith('continuation-live-policy', { sessionId: 'chat' })
+  })
   it('projects the continuation defaults through the token-bound action seam', async () => {
     const executionOperation = vi.fn(async () => ({
       status: 'ok',
