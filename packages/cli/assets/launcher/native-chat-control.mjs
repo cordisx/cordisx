@@ -78,9 +78,11 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
           'modelProvider',
           'cwd',
           'approvalPolicy',
+          'approvalsReviewer',
           'sandbox',
           'reasoningEffort',
           'activePermissionProfile',
+          'serviceTier',
           'collaborationMode',
         ]
       ) {
@@ -95,9 +97,11 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
             'modelProvider',
             'cwd',
             'approvalPolicy',
+            'approvalsReviewer',
             'sandbox',
             'reasoningEffort',
             'activePermissionProfile',
+            'serviceTier',
           ].flatMap(field => thread[field] === undefined ? [] : [[field, thread[field]]]),
         )
       }
@@ -116,6 +120,37 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
         if (captureId) void this.complete(captureId, message.error === undefined, message.result).catch(() => undefined)
       }
       const params = object(message.params)
+      if (
+        [
+          'thread/tokenUsage/updated',
+          'turn/started',
+          'turn/completed',
+          'thread/compacted',
+          'thread/closed',
+          'thread/settings/updated',
+        ].includes(message.method)
+        || (['item/started', 'item/completed'].includes(message.method)
+          && object(params.item).type === 'contextCompaction')
+      ) {
+        const turn = object(params.turn), usage = object(params.tokenUsage), last = object(usage.last)
+        emitEvent({
+          type: 'continuation-event',
+          method: message.method,
+          params: {
+            threadId: params.threadId,
+            ...(params.turnId === undefined ? {} : { turnId: params.turnId }),
+            ...(message.method === 'turn/completed' ? { turn: { id: turn.id, status: turn.status } } : {}),
+            ...(['item/started', 'item/completed'].includes(message.method)
+              ? { item: { type: 'contextCompaction' } }
+              : {}),
+            ...(message.method === 'thread/tokenUsage/updated'
+              ? {
+                tokenUsage: { last: { totalTokens: last.totalTokens }, modelContextWindow: usage.modelContextWindow },
+              }
+              : {}),
+          },
+        })
+      }
       if (APPROVALS.has(message.method) && message.id !== undefined && typeof params.threadId === 'string') {
         if (requests.size >= 128) return
         answered.delete(key(message.id))
@@ -162,10 +197,12 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
             'modelProvider',
             'cwd',
             'approvalPolicy',
+            'approvalsReviewer',
             'sandboxPolicy',
             'effort',
             'collaborationMode',
             'activePermissionProfile',
+            'serviceTier',
           ]
         ) {
           if (settings[field] !== undefined) safe[field] = settings[field]

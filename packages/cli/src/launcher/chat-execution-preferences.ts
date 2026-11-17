@@ -43,6 +43,8 @@ const identity = (value: unknown): value is string =>
 export class ChatExecutionPreferences {
   private readonly records: Document = { schema: 'cordisx.chat-execution-preferences/v1', records: {} }
   private tail: Promise<void> = Promise.resolve()
+  private readonly pendingObservations = new Map<string, number>()
+  private readonly unconfirmedObservations = new Set<string>()
   private readonly captures = new Map<string, {
     createdAt: number
     method: string
@@ -127,6 +129,12 @@ export class ChatExecutionPreferences {
     if (!identity(hostId) || !identity(threadId)) throw new Error('INVALID_THREAD')
     const current = this.records.records[key(hostId, threadId)]
     return current === undefined ? undefined : structuredClone(current)
+  }
+  async settled() {
+    await this.tail
+  }
+  observationConfirmed(threadId: string) {
+    return !this.unconfirmedObservations.has(threadId)
   }
   async set(hostId: string, threadId: string, value: unknown, expectedRevision: number) {
     if (!identity(hostId) || !identity(threadId)) throw new Error('INVALID_THREAD')
@@ -250,15 +258,18 @@ export class ChatExecutionPreferences {
         for (
           const field of [
             'approvalPolicy',
+            'approvalsReviewer',
             'sandbox',
             'cwd',
             'model',
             'modelProvider',
             'reasoningEffort',
             'activePermissionProfile',
+            'serviceTier',
           ]
         ) {
-          if ((result[field] ?? thread[field]) !== undefined) effective[field] = result[field] ?? thread[field]
+          if (result[field] !== undefined) effective[field] = result[field]
+          else if (thread[field] !== undefined) effective[field] = thread[field]
         }
         if (capture.method === 'turn/start' && typeof object(result.turn).id === 'string') {
           record.turnId = String(object(result.turn).id)
@@ -300,12 +311,25 @@ export class ChatExecutionPreferences {
   /** Native settings events are independent confirmation, including changes made in another window. */
   async observe(threadId: string, value: unknown) {
     if (!identity(threadId)) return
+    const version = (this.pendingObservations.get(threadId) ?? 0) + 1
+    this.pendingObservations.set(threadId, version)
+    this.unconfirmedObservations.add(threadId)
     const native = object(value)
     await this.mutate(() => {
       const record = this.records.records[key('local', threadId)]
       if (!record) return
       const effective = { ...record.effective }
-      for (const field of ['model', 'modelProvider', 'cwd', 'approvalPolicy', 'activePermissionProfile']) {
+      for (
+        const field of [
+          'model',
+          'modelProvider',
+          'cwd',
+          'approvalPolicy',
+          'approvalsReviewer',
+          'activePermissionProfile',
+          'serviceTier',
+        ]
+      ) {
         if (native[field] !== undefined) effective[field] = native[field]
       }
       if (native.sandboxPolicy !== undefined) effective.sandbox = native.sandboxPolicy
@@ -329,6 +353,10 @@ export class ChatExecutionPreferences {
         delete record.code
       }
     })
+    if (this.pendingObservations.get(threadId) === version) {
+      this.pendingObservations.delete(threadId)
+      this.unconfirmedObservations.delete(threadId)
+    }
   }
   async close() {
     this.captures.clear()

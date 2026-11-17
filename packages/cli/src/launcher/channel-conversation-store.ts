@@ -1,4 +1,10 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
+import {
+  type ContinuationCheckpoint,
+  continuationCheckpoint,
+  type ContinuationPolicy,
+  continuationPolicy,
+} from './channel-continuation.js'
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -111,6 +117,19 @@ export interface ChannelConversationState {
   taskRequests: Record<string, ChannelTaskRequest>
   creationDefaults: ChatExecutionDefaults
   questions: Record<string, import('./channel-questions.js').ChannelQuestionRecord>
+  continuations: Record<string, ChannelContinuationRecord>
+}
+
+export interface ChannelContinuationRecord {
+  policy?: ContinuationPolicy
+  checkpoint?: ContinuationCheckpoint
+  intent?: {
+    operationId: string
+    checkpointRevision: number
+    state: 'dispatching' | 'unknown' | 'completed'
+    targetThreadId?: string
+    targetTurnId?: string
+  }
 }
 
 function initial(): ChannelConversationState {
@@ -131,6 +150,7 @@ function initial(): ChannelConversationState {
     taskRequests: {},
     creationDefaults: { revision: 0, settings: {} },
     questions: {},
+    continuations: {},
   }
 }
 
@@ -155,6 +175,32 @@ export class ChannelConversationStore {
       parsed.taskRequests ??= {}
       parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
       parsed.questions ??= {}
+      parsed.continuations ??= {}
+      if (typeof parsed.continuations !== 'object' || Array.isArray(parsed.continuations)) {
+        throw new Error('INVALID_CONTINUATION_STORE')
+      }
+      for (const [threadId, entry] of Object.entries(parsed.continuations)) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('INVALID_CONTINUATION_STORE')
+        if (Object.keys(entry).some(key => !['policy', 'checkpoint', 'intent'].includes(key))) {
+          throw new Error('INVALID_CONTINUATION_STORE')
+        }
+        if (entry.policy !== undefined) entry.policy = continuationPolicy(entry.policy)
+        if (entry.checkpoint !== undefined) {
+          const { threadId: checkpointThread, revision, ...body } = entry.checkpoint
+          if (checkpointThread !== threadId) throw new Error('INVALID_CONTINUATION_STORE')
+          entry.checkpoint = continuationCheckpoint(body, threadId, revision)
+        }
+        if (
+          entry.intent !== undefined && (!entry.intent || typeof entry.intent !== 'object' || (
+            typeof entry.intent.operationId !== 'string' || !entry.intent.operationId
+            || !Number.isSafeInteger(entry.intent.checkpointRevision) || entry.intent.checkpointRevision < 1
+            || !['dispatching', 'unknown', 'completed'].includes(entry.intent.state)
+            || entry.intent.targetThreadId !== undefined && typeof entry.intent.targetThreadId !== 'string'
+            || entry.intent.targetTurnId !== undefined && typeof entry.intent.targetTurnId !== 'string'
+            || entry.intent.state === 'completed' && !entry.intent.targetThreadId
+          ))
+        ) throw new Error('INVALID_CONTINUATION_STORE')
+      }
       Object.assign(parsed, parseChannelTaskRecords(parsed.taskSettings, parsed.taskRequests))
       parsed.policyRevision ??= 0
       if (
@@ -170,6 +216,9 @@ export class ChannelConversationStore {
     const store = new ChannelConversationStore(file, value)
     // A process died after reserving a native effect. Never blindly recreate/resend it.
     await store.mutate(state => {
+      for (const entry of Object.values(state.continuations)) {
+        if (entry.intent?.state === 'dispatching') entry.intent.state = 'unknown'
+      }
       for (const [threadId, setting] of Object.entries(state.taskSettings)) {
         if (setting.application === 'applying') {
           setting.application = 'unknown'

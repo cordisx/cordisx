@@ -33,6 +33,7 @@ export function createChannelNativeSession(input: {
     ...(options.channelName ? { name: options.channelName } : {}),
     ...(options.channelSectionName ? { sectionName: options.channelSectionName } : {}),
     subscribeApprovals: listener => control.subscribeNativeApprovals(listener),
+    subscribeContinuationEvents: listener => control.subscribeContinuationEvents(listener),
     respondApproval: value => control.respondNativeApproval(value),
     cwd: options.managedCatalog?.homeDir ?? path.dirname(input.codexHome),
     ...(options.managedCatalog

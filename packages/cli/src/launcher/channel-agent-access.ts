@@ -3,6 +3,7 @@ import type { ChannelConversationState } from './channel-conversation-store.js'
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
+import { continuationRoutine } from './channel-continuation-approval.js'
 
 /** Resolve authority from a real dispatch, never from an Agent-supplied actor or name. */
 export class ChannelAgentAccess {
@@ -42,6 +43,8 @@ export class ChannelAgentAccess {
     if (!operation || operation.kind === 'write') return false
     const source = this.source(threadId, turnId)
     if (!source) return false
+    const continuation = continuationRoutine(operation, threadId, turnId, this.native())
+    if (continuation !== undefined) return continuation
     if (operation.context) {
       const entry = this.native()?.contextFor(operation.context)
       if (entry?.threadId !== threadId || entry.turnId !== undefined && entry.turnId !== turnId) return false

@@ -81,6 +81,7 @@ export interface NativeSubmissionControlServer {
   bindTaskRouting(routing: NativeAgentTaskRouting): void
   bindChatExecution(preferences: ChatExecutionPreferences): void
   subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void): () => void
+  subscribeContinuationEvents(listener: (method: string, params: unknown) => void): () => void
   respondNativeApproval(input: Record<string, unknown>): Promise<unknown>
   invokeTask(
     input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
@@ -107,6 +108,7 @@ export async function startNativeSubmissionControlServer(
   let taskRouting: NativeAgentTaskRouting | undefined
   let chatExecution: ChatExecutionPreferences | undefined
   const approvalListeners = new Set<(event: Record<string, unknown>) => void>()
+  const continuationListeners = new Set<(method: string, params: unknown) => void>()
   let closed = false
   let closePromise: Promise<void> | undefined
   // Retire only timed-out IDs; a late response cannot resolve a new request.
@@ -260,6 +262,15 @@ export async function startNativeSubmissionControlServer(
       }
     })
     const handle = async (value: Record<string, unknown>): Promise<void> => {
+      if (value.type === 'continuation-event') {
+        if (!authenticated || !valid(value.method)) throw new Error('Control unavailable')
+        for (const listener of continuationListeners) {
+          try {
+            listener(value.method, value.params)
+          } catch {}
+        }
+        return
+      }
       if (value.type === 'execution-observed') {
         if (!authenticated || !valid(value.threadId)) throw new Error('Control unavailable')
         await chatExecution?.observe(value.threadId, value.settings)
@@ -746,6 +757,10 @@ export async function startNativeSubmissionControlServer(
     subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void) {
       approvalListeners.add(listener)
       return () => approvalListeners.delete(listener)
+    },
+    subscribeContinuationEvents(listener: (method: string, params: unknown) => void) {
+      continuationListeners.add(listener)
+      return () => continuationListeners.delete(listener)
     },
     respondNativeApproval(input: Record<string, unknown>) {
       return callPeer({ ...input, type: 'native-approval-response' })
