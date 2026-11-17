@@ -91,13 +91,13 @@ const nonempty = (value: unknown): value is string => typeof value === 'string' 
  * at startup. A disk cache, a separate process, or a thread-level catalog path
  * is not an acceptable startup receipt. No prompts or full config are retained.
  *
- * Native source tag rust-v0.167.0-alpha.3.2: app-server/src/message_processor.rs
+ * Native source tags rust-v0.149.1 and rust-v0.167.0-alpha.3.2: app-server/src/message_processor.rs
  * builds ThreadManager at startup; core/src/thread_manager.rs passes its models
  * manager into Session::spawn. The OpenAI-compatible provider chooses the
  * unmodified StaticModelsManager for a startup catalog (model-provider/src/
  * provider.rs); other providers can transform the catalog. StaticModelsManager
  * inherits the default
- * for_originator (None), so originator selection retains this static manager. models-manager/src/model_info.rs applies config
+ * for_originator (None) in 0.167; 0.149 uses the same manager directly. models-manager/src/model_info.rs applies config
  * overrides; protocol/src/openai_models.rs supplies the default percent (95).
  */
 export function captureNativeBudgetProvenance(
@@ -105,7 +105,7 @@ export function captureNativeBudgetProvenance(
   thread: NativeThreadBudgetReceipt | null,
 ): NativeBudgetProvenance {
   if (
-    !startup || !thread || startup.nativeVersion !== '0.167.0-alpha.3.2'
+    !startup || !thread || !['0.149.1', '0.167.0-alpha.3.2'].includes(startup.nativeVersion)
     || startup.providerKind !== 'openai-compatible' || !nonempty(startup.providerId)
     || startup.providerId !== thread.responseProviderId
   ) return unknown
@@ -190,7 +190,7 @@ export interface NativeThreadConfigReceipt {
 }
 
 /**
- * Derive the common fresh-thread path using 0.167's feature defaults and
+ * Derive the common fresh-thread path using version-specific feature defaults and
  * model-owned token budget defaults. Requirements, config layers and startup
  * catalog must be captured atomically with the thread/start operation by the
  * caller. Experimental context management and managed budget-feature rules
@@ -212,8 +212,14 @@ export function deriveNativeBudgetProvenance(
     }
   }
   const config = thread.mergedConfig
+  const isLegacy = startup.nativeVersion === '0.149.1'
   const features = config.features === undefined || config.features === null ? {} : config.features
   if (!record(features)) return unknown
+  if (
+    isLegacy && (features.context_management != null || features.async_compaction != null
+      || config.model_post_turn_compact_threshold_percent != null
+      || (record(features.token_budget) && features.token_budget.use_history_notes_extension != null))
+  ) return unknown
   const enabled = (value: unknown, key: string): boolean | null => {
     if (value === undefined || value === null) return false
     if (typeof value === 'boolean') return value
@@ -249,12 +255,14 @@ export function deriveNativeBudgetProvenance(
   if (messages !== undefined && messages !== null && !record(messages)) return unknown
   const modelBudget = record(messages) ? messages.token_budget : undefined
   if (modelBudget !== undefined && modelBudget !== null && !record(modelBudget)) return unknown
-  if (record(modelBudget) && modelBudget.enabled !== undefined && typeof modelBudget.enabled !== 'boolean') {
+  if (
+    !isLegacy && record(modelBudget) && modelBudget.enabled !== undefined && typeof modelBudget.enabled !== 'boolean'
+  ) {
     return unknown
   }
 
   const configured = features.token_budget
-  if (configured === undefined && record(modelBudget) && modelBudget.enabled === true) tokenBudget = true
+  if (!isLegacy && configured === undefined && record(modelBudget) && modelBudget.enabled === true) tokenBudget = true
   let fallbackBufferTokens = 0
   if (tokenBudget) {
     const explicit = record(configured)
@@ -262,6 +270,7 @@ export function deriveNativeBudgetProvenance(
     if (explicit && record(configured)) {
       const prompt = configured.auto_compact_fallback_prompt
       if (prompt !== undefined && prompt !== null && typeof prompt !== 'string') return unknown
+      // Native resolve_token_budget_config trims explicit prompts and drops empty results.
       if (typeof prompt === 'string' && prompt.trim().length > 0) {
         if (!positive(configured.auto_compact_fallback_buffer_tokens)) return unknown
         fallbackBufferTokens = configured.auto_compact_fallback_buffer_tokens
@@ -277,6 +286,7 @@ export function deriveNativeBudgetProvenance(
         || !positive(modelBudget.reminder_threshold_tokens) || !positive(buffer) || !reminder.trim()
         || Buffer.byteLength(prompt) > 2000 || Buffer.byteLength(reminder) > 2000 || Buffer.byteLength(guidance) > 2000
       ) return unknown
+      // Native resolve_token_budget wraps model-owned prompts in Some, even when blank.
       fallbackBufferTokens = buffer
     }
   }
