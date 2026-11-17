@@ -1,5 +1,10 @@
 import { parseChannelTaskRecords } from './channel-task-records.js'
 import {
+  type ChannelContinuationDefaults,
+  INITIAL_CONTINUATION_DEFAULTS,
+  parseContinuationDefaults,
+} from './channel-continuation-defaults.js'
+import {
   type ContinuationCheckpoint,
   continuationCheckpoint,
   type ContinuationPolicy,
@@ -118,6 +123,7 @@ export interface ChannelConversationState {
   creationDefaults: ChatExecutionDefaults
   questions: Record<string, import('./channel-questions.js').ChannelQuestionRecord>
   continuations: Record<string, ChannelContinuationRecord>
+  continuationDefaults: ChannelContinuationDefaults
 }
 
 export interface ChannelContinuationRecord {
@@ -151,6 +157,7 @@ function initial(): ChannelConversationState {
     creationDefaults: { revision: 0, settings: {} },
     questions: {},
     continuations: {},
+    continuationDefaults: INITIAL_CONTINUATION_DEFAULTS,
   }
 }
 
@@ -176,6 +183,9 @@ export class ChannelConversationStore {
       parsed.creationDefaults = parseChatExecutionDefaults(parsed.creationDefaults) ?? { revision: 0, settings: {} }
       parsed.questions ??= {}
       parsed.continuations ??= {}
+      parsed.continuationDefaults = parseContinuationDefaults(
+        parsed.continuationDefaults ?? INITIAL_CONTINUATION_DEFAULTS,
+      )
       if (typeof parsed.continuations !== 'object' || Array.isArray(parsed.continuations)) {
         throw new Error('INVALID_CONTINUATION_STORE')
       }

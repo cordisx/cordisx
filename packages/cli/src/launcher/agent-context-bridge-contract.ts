@@ -22,3 +22,18 @@ export interface AgentContextBridge {
   >
   close(input: { readonly handle: string }): Promise<void>
 }
+
+/** Ownership proof is Host-issued by the business authority, never derived from a read grant. */
+export interface AgentExactTurnControlBridge {
+  acquire(input: { readonly sessionId: string; readonly turnId: string; readonly ownerAuthorization: string }): Promise<
+    | { readonly status: 'available'; readonly handle: string }
+    | { readonly status: 'unavailable'; readonly code: 'denied' | 'unsupported' | 'stale' | 'host-unavailable' }
+  >
+  cancel(input: { readonly handle: string }): Promise<
+    | { readonly status: 'accepted'; readonly outcome: 'cancelled' | 'already-terminal' }
+    | {
+      readonly status: 'unavailable'
+      readonly code: 'denied' | 'unsupported' | 'stale' | 'uncertain' | 'host-unavailable'
+    }
+  >
+}

@@ -15,6 +15,7 @@ import type { ContinuationConfiguration } from './channel-continuation-config.js
 import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { channelMessageContext } from './channel-message-context.js'
 import { channelPolicyAllows } from './channel-conversation-policy.js'
+import { continuationDefaultsOperation } from './channel-continuation-defaults.js'
 
 export interface ContinuationReservation {
   readonly operationId: string
@@ -33,6 +34,10 @@ export class ChannelContinuationManager {
     private readonly native: () => ChannelNativeSessions | undefined,
     private readonly sessionClaims = new Set<string>(),
   ) {}
+
+  defaultsOperation(operation: string, args: Record<string, unknown>) {
+    return continuationDefaultsOperation(this.store, operation, args)
+  }
 
   async turnActive(threadId: string, turnId: string) {
     return await this.native()?.continuationTurnActive(threadId, turnId) === true

@@ -127,6 +127,7 @@ export class ChannelConversationConsumer {
     )
   }
   async executionOperation(operation: string, args: Record<string, unknown>) {
+    if (operation.startsWith('continuation-defaults')) return this.continuation.defaultsOperation(operation, args)
     if (operation.startsWith('channel-execution-defaults')) return this.creationDefaults.operation(operation, args)
     return chatExecutionOperation(this.extraNative?.(), operation, args)
   }

@@ -65,6 +65,7 @@ export interface ChannelManagerLogsExport {
 }
 
 export interface ChannelManagerActionResult {
+  readonly continuationDefaults?: import('./channel-continuation-defaults.js').ChannelContinuationDefaults
   readonly conversationPage?: import('./channel-conversation-management.js').ChannelConversationManagementPage
   readonly conversationDetail?: import('./channel-conversation-management.js').ChannelConversationManagementDetail
   readonly conversationActivity?: import('./channel-conversation-management.js').ChannelConversationManagementActivity
