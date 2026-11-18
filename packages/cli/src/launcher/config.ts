@@ -41,6 +41,7 @@ import type {
 } from '../permission-contracts.js'
 import { bundledPluginEntry } from './bundled-plugin.js'
 import { configuredPluginManifest } from './configured-plugin-manifest.js'
+import { configuredPluginArchive } from './configured-plugin-archive.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -355,6 +356,9 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
   const absolutePath = path.resolve(configPath)
   const config = parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
   const plugins = await Promise.all(config.plugins.map(async plugin => {
+    if (plugin.enabled && /\.(?:tgz|tar\.gz)$/u.test(plugin.entry)) {
+      return configuredPluginArchive(plugin, config.configRoot!)
+    }
     if (plugin.id !== 'cli-proxy-api') return configuredPluginManifest(plugin)
     const packageRoot = path.resolve(path.dirname(plugin.entry), '..', '..')
     const resolved = await new JsonPackageManifestV2Resolver({

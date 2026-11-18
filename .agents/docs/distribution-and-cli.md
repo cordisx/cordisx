@@ -231,10 +231,19 @@ Profile fragment:
 
 The first generated configuration always uses `plugins: []`. CordisX itself is
 host infrastructure, not a bundled demo plugin, and setup must not silently
-activate `slot-showcase` or any other example. Version 1 may load explicitly
-configured trusted local plugin entries, but package installation, dependency
-resolution, signatures, and marketplace activation remain later authority
-work.
+activate `slot-showcase` or any other example. Version 1 loads explicitly
+configured trusted local plugin entries. Package management uses the separate
+Host-owned lifecycle authority.
+
+From beta.70, a configured `plugins[].entry` may also point to a local `.tgz`
+or `.tar.gz` package. The launcher hashes the actual archive, validates its
+package/runtime manifests, and loads an immutable staged graph. The verified
+archive digest, version and canonical source reach the PermissionBroker so an
+exact Marketplace certification can apply to Manager rendering. An unpacked
+JS entry does not acquire archive certification from its manifest. Configured
+packages remain separate from Marketplace activation records and reserve their
+plugin ids; the archive path does not create a lifecycle install or grant other
+permissions.
 
 The persisted document is versioned and strictly validated. Writes use a
 same-directory temporary file, fsync where available, atomic rename, and user-

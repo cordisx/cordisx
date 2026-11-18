@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -82,11 +82,11 @@ describe('actual direct Channel service ownership assembly', () => {
         const manifest = normalizePluginManifest(plugin.manifest, plugin.id)
         expect(metadata.serviceCapabilityOwners[0]).toMatchObject({
           source: plugin.source,
-          moduleGeneration: plugin.artifactGeneration,
+          moduleGeneration: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
           runtimeGeneration: 'runtime-owner',
           serviceGeneration: activeOwner.serviceGeneration,
         })
-        expect(bundle.watchFiles).toContain(path.resolve(path.dirname(entry), '../runtime-manifest.json'))
+        expect(bundle.watchFiles).toContain(/\.(?:tgz|tar\.gz)$/u.test(entry) ? entry : path.resolve(path.dirname(entry), '../runtime-manifest.json'))
         const store = new MemoryPermissionPolicyStore(), prompt = vi.fn(async () => undefined)
         broker = new PermissionBroker(
           store,
@@ -102,7 +102,7 @@ describe('actual direct Channel service ownership assembly', () => {
         )
         const retire = broker.register({ id: plugin.id, source: plugin.source }, manifest, {
           pluginId: plugin.id,
-          moduleGeneration: plugin.artifactGeneration,
+          moduleGeneration: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
         })
         const ctx = new Context()
         const bridges = createChannelLaunchBridges({
@@ -129,7 +129,7 @@ describe('actual direct Channel service ownership assembly', () => {
         const caller = ctx.extend({
           [CORDISX_PLUGIN_ID]: plugin.id,
           [CORDISX_PLUGIN_SOURCE]: plugin.source,
-          [CORDISX_PLUGIN_GENERATION]: plugin.artifactGeneration,
+          [CORDISX_PLUGIN_GENERATION]: plugin.package?.moduleGeneration ?? plugin.artifactGeneration,
         })
         const manager = (caller.channelManager as ChannelManagerV10).forOwnConversationService()!
         const snapshot = manager.snapshot(), account = snapshot.accounts[0]!
@@ -269,6 +269,13 @@ describe('actual direct Channel service ownership assembly', () => {
         configApi?.dispose()
         await channel?.service?.dispose()
         expect(channel?.service?.managementOwner()).toBeUndefined()
+        async function writable(directory: string): Promise<void> {
+          await chmod(directory, 0o700)
+          for (const file of await readdir(directory, { withFileTypes: true })) {
+            if (file.isDirectory()) await writable(path.join(directory, file.name))
+          }
+        }
+        await writable(root)
         await rm(root, { recursive: true, force: true })
       }
     },

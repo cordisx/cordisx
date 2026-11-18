@@ -87,6 +87,7 @@ export async function startHeadlessService(input: {
     }, input.configPath)
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
+      ...(plugin.package === undefined ? {} : { runtimeEntry: './services/runtime.mjs' as const }),
       dataDir: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-runtime'),
       source: plugin.source ?? pathToFileURL(plugin.entry).href,
       environment: input.environment,
