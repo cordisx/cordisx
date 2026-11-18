@@ -314,6 +314,9 @@ export async function buildRendererCompositionSource(
         : ''
       const manifestField = plugin.manifest === undefined ? '' : `, manifest: ${JSON.stringify(plugin.manifest)}`
       const packageField = plugin.package === undefined ? '' : `, package: ${JSON.stringify(plugin.package)}`
+      const distributionField = plugin.distributionArtifact === undefined
+        ? ''
+        : `, distributionArtifact: ${JSON.stringify(plugin.distributionArtifact)}`
       const developmentField = plugin.development === undefined
         ? ''
         : `, development: ${JSON.stringify(plugin.development)}`
@@ -321,7 +324,7 @@ export async function buildRendererCompositionSource(
         JSON.stringify(plugin.source ?? pathToFileURL(plugin.entry).href)
       }, enabled: ${plugin.enabled}, config: ${JSON.stringify(plugin.config)}, revision: ${
         plugin.revision ?? 0
-      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
+      }${readmeField}${readmesField}${documentsField}${manifestField}${packageField}${distributionField}${developmentField}${artifactGenerationField}${moduleField}${isolatedArtifactField} }`
     }).join(',')
   }]`
   const providers = [

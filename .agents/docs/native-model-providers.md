@@ -718,8 +718,19 @@ reports resource hashes; it does not prove a native submission or account read.
 
 ## Verification Boundaries
 
-Session display snapshots are scoped by Host and thread and are presentation
-hints, not selection or submission authority. A live, bound local Composer can
+Session display snapshots are scoped by Host and thread (or the profile's new-chat
+draft) and are presentation hints, not selection or submission authority. Confirmed
+provider/model labels are stored even when effort or Fast metadata is still unknown.
+Cached labels can occupy the disabled native loading seat; they cannot enable
+selection or sending. Thread and configuration reads run concurrently, and the
+model directory refresh does not block the confirmed selection display. Bounded
+`composer-readiness` records in the launch journal identify native read, binding,
+and control waits without including request or response contents.
+The native permissions label is retained separately by Host, chat and locale.
+When policy/configuration is pending, the known label replaces only the loading
+placeholder; the native control still owns permission changes. A `permissions`
+timing phase records the wait and restores the native trigger when it settles.
+A live, bound local Composer can
 supply a source tuple for ordinary native task creation when its provider, model,
 effort and Fast value are all known and consistent with the Host binding. The admitted native task route carries that tuple through start and first turn;
 explicit native choices take precedence. An ordinary fork with a matching live

@@ -41,6 +41,7 @@ import type {
 } from '../permission-contracts.js'
 import { bundledPluginEntry } from './bundled-plugin.js'
 import { configuredPluginManifest } from './configured-plugin-manifest.js'
+import { configuredPluginArchive } from './configured-plugin-archive.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -51,6 +52,10 @@ export interface CordisXConfigPlugin {
   readonly config: unknown
   readonly revision?: number
   readonly source?: string
+  /** Host-verified distribution identity for configured archives, independent of activation records. */
+  readonly distributionArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
+  /** Host-private immutable service entry for a configured archive. */
+  readonly configuredServiceEntry?: './services/runtime.mjs'
   readonly manifest?:
     | CordisXPluginManifestV1
     | CordisXPluginManifestV4
@@ -355,6 +360,9 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
   const absolutePath = path.resolve(configPath)
   const config = parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
   const plugins = await Promise.all(config.plugins.map(async plugin => {
+    if (plugin.enabled && /\.(?:tgz|tar\.gz)$/u.test(plugin.entry)) {
+      return configuredPluginArchive(plugin, config.configRoot!)
+    }
     if (plugin.id !== 'cli-proxy-api') return configuredPluginManifest(plugin)
     const packageRoot = path.resolve(path.dirname(plugin.entry), '..', '..')
     const resolved = await new JsonPackageManifestV2Resolver({

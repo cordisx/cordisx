@@ -85,7 +85,7 @@ export function parseConfigBindingRequest(
   }
   const identity = record(request.identity, 'config request identity')
   exactKeys(identity, ['source', 'pluginId'], 'config request identity')
-  if (typeof identity.source !== 'string' || !identity.source.startsWith('file:')) {
+  if (typeof identity.source !== 'string' || !/^(?:file:|https:\/\/)/u.test(identity.source)) {
     throw new Error('config request source is invalid')
   }
   if (typeof identity.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/.test(identity.pluginId)) {

@@ -77,6 +77,9 @@ export async function createRendererChannelComposition(input: {
   }, input.configPath)
   service = createLocalChannelService({
     artifactDirectory: path.dirname(plugin.entry),
+    ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
+      ? {}
+      : { runtimeEntry: plugin.configuredServiceEntry ?? './services/runtime.mjs' as const }),
     dataDir: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-runtime'),
     source: plugin.source ?? pathToFileURL(plugin.entry).href,
     environment: input.environment,

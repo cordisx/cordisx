@@ -17,6 +17,7 @@ import { installMarketplaceArtifactBinding } from './marketplace-artifact-cdp.js
 import { installManagementCdpBinding, type ManagementCdpBinding } from './management-cdp-binding.js'
 import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import { type AgentContextCdpOptions, installAgentContextCdpBinding } from './agent-context-cdp.js'
+import { observeComposerDiagnostics } from './composer-diagnostics.js'
 
 export async function install(
   target: support.CdpTarget,
@@ -85,6 +86,7 @@ export async function install(
   const lifecycleRequests = hostMutationGate ?? new support.CdpLifecycleRequestGate()
   let removeBindingListener = (): void => {}
   let removeAgentContextBinding = (): void => {}
+  let removeComposerDiagnostics = (): void => {}
   let removeMarketplaceArtifactBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
@@ -129,6 +131,7 @@ export async function install(
       })
     }
     await session.send('Runtime.enable')
+    removeComposerDiagnostics = observeComposerDiagnostics(session)
     await session.send('Page.enable')
     // An ordinary cold launch can expose its target before the initial document
     // becomes responsive. Drain that read-only readiness probe under the existing
@@ -889,6 +892,7 @@ export async function install(
         removeBindingListener()
         removeMarketplaceArtifactBindingListener()
         removeAgentContextBinding()
+        removeComposerDiagnostics()
       },
       agentContextBindingInstalled: agentContext !== undefined,
       ...(providerController === undefined ? {} : { providerController, removeProviderBindingListener }),
@@ -968,6 +972,7 @@ export async function install(
         managedServiceUIController?.abort()
         removeBindingListener()
         removeAgentContextBinding()
+        removeComposerDiagnostics()
         removeMarketplaceArtifactBindingListener()
         removeProviderBindingListener()
         removeHistoryBindingListener()

@@ -48,6 +48,82 @@ afterEach(() => {
 })
 
 describe('native model provider selector installation', () => {
+  it.each([false, true])('projects cached labels into a loading seat only when a cache exists: %s', async cached => {
+    const dom = new JSDOM(
+      `<!doctype html><body><main data-codex-composer-root data-composer-placement="home">
+        <footer data-composer-footer-responsive><button data-composer-navigation-target="reasoning" aria-busy="true" disabled>Loading</button></footer>
+      </main></body>`,
+      { url: 'app://-/index.html' },
+    )
+    for (
+      const [name, value] of Object.entries({
+        window: dom.window,
+        document: dom.window.document,
+        location: dom.window.location,
+        HTMLElement: dom.window.HTMLElement,
+        Element: dom.window.Element,
+        Node: dom.window.Node,
+        MutationObserver: dom.window.MutationObserver,
+        IS_REACT_ACT_ENVIRONMENT: true,
+        codexWindowType: 'electron',
+      })
+    ) install(name, value)
+    Object.assign(dom.window.HTMLElement.prototype, {
+      getBoundingClientRect: () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 20,
+        bottom: 20,
+        width: 20,
+        height: 20,
+        toJSON: () => ({}),
+      }),
+    })
+    const snapshot = {
+      available: false,
+      busy: false,
+      ...(cached
+        ? {
+          cachedDisplay: { providerId: 'openai', model: 'GPT-5', reasoningEffort: 'high', updatedAt: 1 },
+        }
+        : {}),
+    }
+    vi.spyOn(CodexDesktopNativeModelProviderTransport, 'connect').mockResolvedValue({
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      hasActiveSubmission: () => false,
+      dispose: vi.fn(),
+    } as never)
+    const registry = new ModelProviderRegistry(async () => [])
+    let dispose = () => {}
+    await act(async () => {
+      dispose = await installModelProviderSelector(
+        dom.window.document,
+        registry,
+        () => 'en',
+        true,
+        rendererOwner,
+        nativeProviderChannel(),
+      )
+    })
+    const trigger = dom.window.document.querySelector<HTMLButtonElement>('[aria-busy]')!
+    expect(trigger.hidden).toBe(cached)
+    const selector = dom.window.document.querySelector('[data-cordisx-model-provider-selector]')
+    if (cached) {
+      expect(selector?.textContent).toContain('GPT-5')
+      expect(selector?.querySelector('.cxmp-provider-trigger')?.getAttribute('aria-label')).toBe(
+        'Model services: Codex',
+      )
+      for (const button of selector!.querySelectorAll('button')) expect(button.disabled).toBe(true)
+    } else expect(selector).toBeNull()
+    await act(async () => dispose())
+    expect(trigger.hidden).toBe(false)
+    registry.dispose()
+    dom.window.close()
+  })
+
   it('restores the native selector when a composer changes to a remote execution host', async () => {
     const dom = new JSDOM(
       `<!doctype html><body><main data-codex-composer-root data-composer-placement="home">

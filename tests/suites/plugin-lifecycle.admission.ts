@@ -48,9 +48,9 @@ async function stageVerifiedArchive(
 }
 
 export function registerAdmissionTests() {
-  it('routes normalized manifest-v5 through manifest-v15 to V4 permission review', () => {
-    expect([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].every(isPermissionReviewV4ManifestVersion)).toBe(true)
-    expect([1, 4, 16].some(isPermissionReviewV4ManifestVersion)).toBe(false)
+  it('routes normalized manifest-v5 through manifest-v16 to V4 permission review', () => {
+    expect([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].every(isPermissionReviewV4ManifestVersion)).toBe(true)
+    expect([1, 4, 17].some(isPermissionReviewV4ManifestVersion)).toBe(false)
   })
 
   it('rejects first browser graph admission before authority prepare and preserves durable last-good', async () => {

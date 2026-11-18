@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
   currentNativeComposerThreadId,
+  locateNativeModelProviderMountSeat,
   locateNativeModelProviderSeat,
   locateNativeModelSelectionControl,
   nativeModelProviderComposers,
@@ -9,6 +10,21 @@ import {
 import { composer } from './fixtures/native-model-provider-composer.js'
 
 describe('native model provider seat', () => {
+  it('recognizes the disabled loading seat for cached display without enabling native interaction', () => {
+    const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://fixture.invalid' })
+    const { trigger } = composer(dom.window.document, 'loading-thread', 'model-a', false)
+    delete trigger.dataset.codexIntelligenceTrigger
+    trigger.removeAttribute('aria-haspopup')
+    trigger.dataset.composerNavigationTarget = 'reasoning'
+    trigger.setAttribute('aria-busy', 'true')
+    trigger.setAttribute('disabled', '')
+    expect(locateNativeModelProviderMountSeat(dom.window.document)?.trigger).toBe(trigger)
+    expect(currentNativeComposerThreadId(dom.window.document)).toBe('loading-thread')
+    expect(locateNativeModelSelectionControl(trigger)).toBeUndefined()
+    trigger.removeAttribute('aria-busy')
+    expect(locateNativeModelProviderMountSeat(dom.window.document)).toBeUndefined()
+    dom.window.close()
+  })
   it('mounts the unified reasoning trigger through deep native wrappers and rejects reasoning-only controls', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const { trigger } = composer(dom.window.document)

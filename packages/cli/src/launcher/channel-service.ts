@@ -173,12 +173,15 @@ function localPermissions() {
  */
 export function createLocalChannelService(input: {
   readonly artifactDirectory: string
+  /** Immutable package services use their stored module; direct source entries retain service.mjs. */
+  readonly runtimeEntry?: './services/runtime.mjs'
   readonly dataDir: string
   readonly source: string
   /** Effective launcher environment; never project it or any resolved secret. */
   readonly environment?: NodeJS.ProcessEnv
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
+  const runtimeEntry = input.runtimeEntry ?? './service.mjs'
   const updateCard = bindDiagnosticContext(updateFeishuCard)
   let active: ActiveRuntime | undefined
   let managementOwner: HostServiceCapabilityOwner | undefined
@@ -251,7 +254,7 @@ export function createLocalChannelService(input: {
     const directory = new ChannelLiveDirectory(display, senders)
     sequence = Math.max(sequence, ...runtime.snapshot().accounts.map(account => account.lastGoodRevision + 1))
     try {
-      const serviceSource = path.join(artifactDirectory, 'service.mjs')
+      const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
       const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
       const service = await host.activate({
         packageIdentity: { pluginId: 'channel', version: 'development', integrity },
@@ -261,7 +264,7 @@ export function createLocalChannelService(input: {
         configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
         configurationRevision: sequence,
         artifactDirectory,
-        runtimeEntry: './service.mjs',
+        runtimeEntry,
       }, simulatorConfiguration(configuration))
       // The official adapter is deliberately launcher-owned: it gets an
       // opaque secret reference only, resolves it privately, and publishes
@@ -346,7 +349,7 @@ export function createLocalChannelService(input: {
       }
       if (simulatorChanged) {
         await current.service.dispose()
-        const serviceSource = path.join(artifactDirectory, 'service.mjs')
+        const serviceSource = path.resolve(artifactDirectory, runtimeEntry)
         const integrity = `sha256:${createHash('sha256').update(await readFile(serviceSource)).digest('hex')}` as const
         current.service = await current.host.activate({
           packageIdentity: { pluginId: 'channel', version: 'development', integrity },
@@ -356,7 +359,7 @@ export function createLocalChannelService(input: {
           configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
           configurationRevision: sequence,
           artifactDirectory,
-          runtimeEntry: './service.mjs',
+          runtimeEntry,
         }, simulatorConfiguration(value))
       }
       activeConfiguration = value
