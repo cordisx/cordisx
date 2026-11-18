@@ -793,10 +793,11 @@ export const createRuntimeRegisterController = (
   registerAuthority = true,
 ): void => {
   if (registerAuthority) {
-    const artifact = controller.item.package?.artifactIntegrity === undefined ? undefined : {
-      version: controller.item.package.version,
-      integrity: controller.item.package.artifactIntegrity,
-    }
+    const artifact = controller.item.distributionArtifact
+      ?? (controller.item.package?.artifactIntegrity === undefined ? undefined : {
+        version: controller.item.package.version,
+        integrity: controller.item.package.artifactIntegrity,
+      })
     controller.unregisterPermissions = runtimeScope.broker()!.register(
       controller.identity,
       controller.manifest,

@@ -82,13 +82,14 @@ describe('direct configured package provenance', () => {
     expect(plugin).toMatchObject({
       source,
       manifest: f.runtime,
-      package: { version: '1.0.0', artifactIntegrity: integrity },
+      distributionArtifact: { version: '1.0.0', integrity },
     })
     expect(plugin.entry).toContain('/packages/sha256/')
     expect(plugin.manifestFiles).toEqual([archive])
     const composition = await buildRendererCompositionSource(config, {}, { omitPluginModules: true })
     expect(composition.source).toContain(`source: ${JSON.stringify(source)}`)
-    expect(composition.source).toContain(`package: ${JSON.stringify(plugin.package)}`)
+    expect(plugin.package).toBeUndefined()
+    expect(composition.source).toContain(`distributionArtifact: ${JSON.stringify(plugin.distributionArtifact)}`)
     // Rebuilt archives must not inherit the previously certified distribution identity.
     await writeFile(path.join(f.root, 'dist', 'index.js'), 'export const name = "changed"')
     await createTar({ cwd: f.root, file: archive, gzip: true }, [
@@ -97,7 +98,7 @@ describe('direct configured package provenance', () => {
       'runtime-manifest.json',
       'dist',
     ])
-    expect((await loadConfig(f.config)).plugins[0]!.package!.artifactIntegrity).not.toEqual(integrity)
+    expect((await loadConfig(f.config)).plugins[0]!.distributionArtifact!.integrity).not.toEqual(integrity)
   })
   it('loads service metadata only from the digest-validated descriptor for the exact entry', async () => {
     const f = await fixture(), plugin = (await loadConfig(f.config)).plugins[0]!

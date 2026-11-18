@@ -312,6 +312,8 @@ export interface CordisXRuntimeMetadata {
 }
 
 export interface RuntimeBrowserPlugin extends Omit<CordisXBrowserPlugin, 'package'> {
+  /** Host-private exact distribution provenance for configured local archives. */
+  readonly distributionArtifact?: { readonly version: string; readonly integrity: `sha256:${string}` }
   /** Host-private distribution provenance; never injected into plugin Contexts. */
   readonly package?: NonNullable<CordisXBrowserPlugin['package']> & {
     readonly artifactIntegrity?: `sha256:${string}`

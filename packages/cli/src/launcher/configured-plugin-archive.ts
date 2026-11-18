@@ -42,14 +42,8 @@ export async function configuredPluginArchive(
       source: staged.identitySource,
       manifest: staged.manifest.runtimeManifest,
       manifestFiles: [plugin.entry],
-      package: {
-        version: staged.manifest.version,
-        digest: staged.digest,
-        artifactIntegrity: integrity,
-        moduleGeneration: `configured-${staged.digest.slice(7)}`,
-        dependencies: staged.manifest.dependencies,
-        ...(staged.manifest.canonicalSource === undefined ? {} : { canonicalSource: staged.manifest.canonicalSource }),
-      },
+      distributionArtifact: { version: staged.manifest.version, integrity },
+      configuredServiceEntry: './services/runtime.mjs',
       ...(staged.readme === undefined ? {} : { readme: staged.readme }),
       ...(staged.documents === undefined ? {} : { documents: staged.documents }),
     }
