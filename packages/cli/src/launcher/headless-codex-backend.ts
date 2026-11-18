@@ -70,29 +70,30 @@ export async function startHeadlessCodexBackend(input: {
       ...(input.onDispatch ? { observedDispatch: input.onDispatch } : {}),
       ...(input.preparationTools ? { preparationTools: input.preparationTools } : {}),
       nativeRequest: async (method: NativeBridgeMethod, params) => {
-        let selected = params
-        if (method === 'thread/start' && params.model == null && params.modelProvider == null) {
-          const config = await server.request<{ config?: Record<string, unknown> }>('config/read', {
-            includeLayers: false,
-            ...(typeof params.cwd === 'string' ? { cwd: params.cwd } : {}),
-          })
-          const native = config.config ?? {}
-          if (native.model_provider == null || native.model_provider === 'openai') {
-            const provider = (await models('list', {})).providers?.[0]
-            if (typeof native.model === 'string' && !provider?.models.some(row => row.id === native.model)) {
-              throw new Error('MODEL_NOT_IN_NATIVE_CATALOG')
-            }
-            if (native.model == null) {
-              if (!provider?.defaultModelId) throw new Error('NATIVE_DEFAULT_MODEL_UNAVAILABLE')
-              selected = { ...params, model: provider.defaultModelId }
+        const dispatch = async (value: Readonly<Record<string, unknown>>) => {
+          let selected = value
+          if (method === 'thread/start' && value.model == null && value.modelProvider == null) {
+            const config = await server.request<{ config?: Record<string, unknown> }>('config/read', {
+              includeLayers: false,
+              ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
+            })
+            const native = config.config ?? {}
+            if (native.model_provider == null || native.model_provider === 'openai') {
+              const provider = (await models('list', {})).providers?.[0]
+              if (typeof native.model === 'string' && !provider?.models.some(row => row.id === native.model)) {
+                throw new Error('MODEL_NOT_IN_NATIVE_CATALOG')
+              }
+              if (native.model == null) {
+                if (!provider?.defaultModelId) throw new Error('NATIVE_DEFAULT_MODEL_UNAVAILABLE')
+                selected = { ...value, model: provider.defaultModelId }
+              }
             }
           }
+          return contextCapture
+            ? contextCapture.dispatch(method, selected, params => server.request(method, params))
+            : server.request(method, selected)
         }
-        const dispatch = (value: Readonly<Record<string, unknown>>) =>
-          contextCapture
-            ? contextCapture.dispatch(method, value, params => server.request(method, params))
-            : server.request(method, value)
-        return input.nativeRequest ? input.nativeRequest(method, selected, dispatch) : dispatch(selected)
+        return input.nativeRequest ? input.nativeRequest(method, params, dispatch) : dispatch(params)
       },
       catalog: async () => (await models('list', {})).providers ?? [],
     }
@@ -139,6 +140,9 @@ export async function startHeadlessCodexBackend(input: {
           id: row.model as string,
           label: typeof row.displayName === 'string' ? row.displayName : row.model as string,
           aliases: [] as string[],
+          supportsFastMode: Array.isArray(row.additionalSpeedTiers) && row.additionalSpeedTiers.includes('fast')
+            || Array.isArray(row.serviceTiers)
+              && row.serviceTiers.some(tier => ['priority', 'fast'].includes(String((tier as { id?: string }).id))),
           ...(reasoningCapabilities ? { reasoningCapabilities } : {}),
         }
       })

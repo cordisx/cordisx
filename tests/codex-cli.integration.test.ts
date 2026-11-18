@@ -11,6 +11,7 @@ import { ChannelConversationTools } from '../packages/cli/src/launcher/channel-c
 import { ChatExecutionPreferences } from '../packages/cli/src/launcher/chat-execution-preferences.js'
 import { createCodexChatSettings } from '../packages/cli/src/launcher/codex-chat-settings.js'
 import { nativeCodexSettings } from '../packages/cli/src/launcher/native-codex-settings-composition.js'
+import { CodexChatConfiguration } from '../packages/cli/src/launcher/codex-chat-configuration.js'
 import {
   pluginManagementRpcPaths,
   startPluginManagementRpcServer,
@@ -56,13 +57,49 @@ test(
       executionOperation: settings,
     }
     const tools = new ChannelConversationTools(() => undefined, consumer as never)
-    const nativeRead = vi.fn(async (_method: string, input: Record<string, unknown>) => ({
-      thread: {
-        id: ['current', 'other', 'channel-chat'].includes(String(input.threadId)) ? input.threadId : undefined,
-      },
-    }))
-    const { execution, modelServices: models } = nativeCodexSettings({
+    const nativeRead = vi.fn(async (method: string, input: Record<string, unknown>) => {
+      if (method === 'thread/settings/update') {
+        await preferences.observe(String(input.threadId), input)
+        return {}
+      }
+      return {
+        thread: {
+          id: ['current', 'other', 'channel-chat'].includes(String(input.threadId)) ? input.threadId : undefined,
+          modelProvider: 'configured',
+          model: 'model',
+          cwd: root,
+          status: { type: 'idle' },
+          sandbox: { type: 'workspaceWrite' },
+        },
+      }
+    })
+    const configuration = await CodexChatConfiguration.open({
+      preferences,
+      file: path.join(root, 'configuration.json'),
+      request: nativeRead,
+      catalog: async () => [{
+        providerId: 'configured',
+        pluginId: 'host',
+        defaultModelId: 'model',
+        models: [{ id: 'model', label: 'Model', aliases: [], supportsFastMode: true }],
+      }],
+      guard: configuredChannelToolHandler(tools).chatSettingsGuard,
+      tool: async input => ({
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            input.tool === 'list_projects'
+              ? { projects: [{ projectId: 'p', projectKind: 'local', hostId: 'local', path: root }] }
+              : input.tool === 'list_threads'
+              ? { threads: [{ id: 'other', hostId: 'local', projectId: 'p' }] }
+              : { status: 'moved' },
+          ),
+        }],
+      }),
+    })
+    const { execution, modelServices: models, configuration: configured } = nativeCodexSettings({
       execution: preferences,
+      configuration,
       configPath,
       options: configuredChannelToolHandler(tools),
       control: { nativeRequest: nativeRead } as never,
@@ -84,6 +121,7 @@ test(
       commit: () => {},
       release: () => {},
       execution,
+      configuration: configured,
       modelServices: models,
     })
     let current: { codex: typeof endpoint.call } | undefined = { codex: endpoint.call }
@@ -124,6 +162,36 @@ test(
         code: 0,
         result: { providers: [{ providerId: 'configured' }] },
       })
+      expect(
+        await command([
+          'codex',
+          'defaults',
+          'model',
+          'set',
+          '--revision',
+          '0',
+          '--provider',
+          'configured',
+          '--model',
+          'model',
+          '--fast',
+          'false',
+        ]),
+      )
+        .toMatchObject({
+          code: 0,
+          result: { status: 'ok', revision: 1, settings: { providerId: 'configured', model: 'model', fast: false } },
+        })
+      expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '0', '--fast', 'true'], 'current'))
+        .toMatchObject({ code: 0, result: { status: 'applied', fast: true, revision: 1 } })
+      expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '1', '--fast', 'false'], 'current'))
+        .toMatchObject({ code: 0, result: { status: 'applied', fast: false, revision: 2 } })
+      expect(
+        await command(['codex', 'chats', 'project', 'set', '--revision', '0', '--session', 'other', '--project', 'p']),
+      )
+        .toMatchObject({ code: 0, result: { status: 'applied', project: { projectId: 'p' }, revision: 1 } })
+      expect(await command(['codex', 'chats', 'fast', 'set', '--revision', '0', '--fast', 'true'], 'channel-chat'))
+        .toMatchObject({ code: 1, result: { code: 'CHANNEL_CONTEXT_UNAVAILABLE' } })
       expect(
         await command(['codex', 'chats', 'provider', 'set', '--provider', 'configured', '--model', 'model'], 'current'),
       )
@@ -245,6 +313,7 @@ test(
       await server.close()
       await endpoint.close()
       await preferences.close()
+      await configuration.close()
       await rm(root, { recursive: true, force: true })
     }
   },

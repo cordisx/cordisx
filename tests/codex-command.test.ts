@@ -62,3 +62,61 @@ test('provider-aware CLI creation preserves a stable operation and native projec
       input: { operationId: 'op', target: { type: 'project', projectId: 'project', environment: { type: 'local' } } },
     })
 })
+
+test('model defaults, Fast and project settings retain explicit scope and false values', async () => {
+  expect(
+    await parseCodexCommand([
+      'defaults',
+      'model',
+      'set',
+      '--revision',
+      '0',
+      '--provider',
+      'p',
+      '--model',
+      'm',
+      '--fast',
+      'false',
+    ]),
+  ).toMatchObject({
+    operation: 'configuration:model-defaults-set',
+    input: { settings: { providerId: 'p', model: 'm', fast: false }, expectedRevision: 0 },
+  })
+  expect(await parseCodexCommand(['chats', 'fast', 'set', '--revision', '1', '--fast', 'true'])).toMatchObject({
+    operation: 'configuration:fast-set',
+    input: { fast: true, expectedRevision: 1 },
+  })
+  expect(
+    await parseCodexCommand([
+      'chats',
+      'project',
+      'set',
+      '--session',
+      'chat',
+      '--revision',
+      '0',
+      '--project',
+      'p',
+      '--cwd',
+      '/repo',
+    ]),
+  ).toMatchObject({
+    operation: 'configuration:project-set',
+    input: { sessionId: 'chat', projectId: 'p', cwd: '/repo' },
+  })
+  expect(await parseCodexCommand(['chats', 'create', '--message', 'work', '--operation', 'op'])).toMatchObject({
+    operation: 'create',
+    input: { operationId: 'op' },
+  })
+  for (
+    const args of [['defaults', 'model', 'get', '--session', 'chat'], [
+      'chats',
+      'fast',
+      'set',
+      '--revision',
+      '0',
+      '--fast',
+      'yes',
+    ], ['chats', 'project', 'set', '--revision', '0']]
+  ) await expect(parseCodexCommand(args)).rejects.toThrow()
+})

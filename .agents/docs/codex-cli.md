@@ -40,8 +40,38 @@ remain errors rather than silent substitutions.
 Provider selection uses the existing admitted catalog and idle-thread native
 resume path. It does not send a message or interrupt a running turn. A result of
 `reconciliation-required` means the effect is uncertain; inspect the chat before
-retrying. Fast and project switching are not supplied by these commands. Native
-project membership changes do not alone prove a new cwd or writable boundary.
+retrying. Fast and project switching use the supplemental configuration service:
+
+```sh
+cordisx codex defaults model get
+cordisx codex defaults model set --revision 0 --provider PROVIDER --model MODEL --fast false
+cordisx codex chats fast get --session CHAT
+cordisx codex chats fast set --session CHAT --revision 0 --fast true
+cordisx codex chats project get --session CHAT
+cordisx codex chats project set --session CHAT --revision 0 --project NATIVE_PROJECT_ID
+```
+
+Model defaults are a separate profile-owned `chatCreation` layer in `config.json`.
+They apply to future ordinary native/API chats. Explicit native selections take
+precedence. Channel merges its own model rules over these defaults; changing
+provider without a model selects the new provider's own default. An explicit
+Fast `false` remains an intentional selection. Defaults never rewrite old chats.
+
+Fast and project share each chat's configuration revision in the private profile
+`codex-chat-configuration.json`. Writes require an idle loaded chat and never
+interrupt one. Fast validates native model-catalog support. Project switching
+uses the existing native project tools, canonicalizes the target directories,
+and updates cwd plus sandbox writable roots. It narrows an old full-access chat
+to workspace-write (read-only remains read-only) and excludes temporary-directory
+write grants. On subsequent turns the saved project binding wins over old cwd
+and sandbox payloads. A removed project or changed roots fail explicitly. Native
+settings observation confirms `applied`; `pending` and `reconciliation-required`
+require inspection. Sidebar membership alone is never reported as a write boundary.
+Project switching needs Desktop's native tool authority; headless has no sidebar
+project catalog. Channel callers may read their authenticated current chat's
+configuration, but Fast/project mutations remain unavailable until Channel's
+field-specific command and approval contract supports them. Generic commands
+cannot bypass those rules. Local user CLI can address a bound chat explicitly.
 
 ## Provider-aware creation
 
@@ -57,7 +87,8 @@ and turn through `CODEX_THREAD_ID`/`CODEX_TURN_ID`, or explicit `--source-sessio
 and `--source-turn`. The command does not fabricate them or substitute a backend
 thread for an App task. Keep the same operation ID after uncertain delivery;
 changing it can create another task. Runtime `providerCreation` availability is
-required. Native Codex creation tools remain preferred without a provider override.
+required. Provider/model/Fast flags can be omitted to use the profile creation
+defaults. Stable operation replay keeps its original result even after defaults change. Native Codex creation tools remain preferred without a provider override.
 
 ## Shared model services
 
@@ -79,7 +110,9 @@ as reported by `applies: app-restart`, and does not rotate a running connection.
 The launch-owned MCP catalog adds `codex_capabilities`, `codex_chat_settings`,
 `codex_chat_settings_set`, `codex_chat_defaults`, `codex_chat_defaults_set`,
 `model_services_read` and `model_services_save`. Existing provider tools are
-retained. Omitting their chat target means the calling chat, never global defaults.
+retained. Additional tools are `codex_model_defaults`, `codex_model_defaults_set`,
+`codex_chat_fast`, `codex_chat_fast_set`, `codex_chat_project` and
+`codex_chat_project_set`. Omitting their chat target means the calling chat, never global defaults.
 
 Channel-originated requests retain the real incoming source, context and field
 permissions. Changing from a Channel command to a generic Codex command does not
@@ -89,10 +122,13 @@ to ordinary local-user mutation. Continue using Channel commands for its approva
 workflow and source-scoped task configuration.
 
 In [service mode](standalone-services.md), shared model-service commands and
-creation defaults work without Channel or Desktop. Session operations require
+creation defaults work without Channel or Desktop. Without a backend catalog,
+model-default writes report `validation: deferred-until-creation`; actual creation
+validates the selection before dispatch. Session operations require
 an existing headless Codex backend, currently started by the enabled Channel
 consumer. That backend supplies its actual catalog and existing-session settings;
-provider-aware App task creation, Fast and project switching remain unavailable.
+Fast uses the same backend settings interface. Provider-aware App task creation
+and sidebar project switching remain unavailable.
 An idle loaded headless chat's model change is confirmed by a fresh native
 settings event. Older backends without that event retain the existing resume
 readback path; missing confirmation is reported as uncertain.
@@ -109,3 +145,9 @@ establish those paths or imply publication/installation.
 A temporary, isolated Codex CLI `0.149.1` app-server also confirmed creation of an
 empty chat and a model change through the native settings notification, without
 starting a model turn. This is headless protocol evidence, not Desktop UI evidence.
+The supplemental defaults/Fast verification used the production headless authority:
+provider/model creation defaults applied, Fast enable/disable both received native
+confirmation, and cwd plus workspace-write roots were read back after settings
+update. Native normalizes the cwd root out of `writableRoots` and reports a cleared
+tier as `default`. Resume alone did not apply directory overrides to a loaded chat;
+the project mutation uses settings update and confirms membership separately.

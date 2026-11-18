@@ -49,6 +49,21 @@ async function fixture() {
   return { controller, routing, authority, tasks: new NativeAgentTasks(authority) }
 }
 describe('provider-aware native task operation', () => {
+  it('uses captured model defaults and replays an operation after defaults change', async () => {
+    const f = await fixture()
+    let defaults = { providerId: 'configured', model: 'model', fast: false }
+    const tasks = new NativeAgentTasks({ ...f.authority, creationDefaults: async () => defaults })
+    const request = { operationId: 'default-op', prompt: 'work', target: { type: 'projectless' } }
+    expect(await tasks.create(request, metadata)).toMatchObject({ status: 'created' })
+    defaults = { providerId: 'missing', model: 'missing', fast: false }
+    const restored = new NativeAgentTasks({
+      ...f.authority,
+      creationDefaults: async () => defaults,
+      startup: { availability: () => ({ available: false, reason: 'offline' }), wait: async () => undefined },
+    })
+    expect(await restored.create(request, metadata)).toMatchObject({ status: 'created' })
+    expect(f.authority.invoke).toHaveBeenCalledOnce()
+  })
   it('records before native dispatch, returns the native registration receipt and replays without a second create', async () => {
     const f = await fixture()
     expect(await f.tasks.create(input, metadata)).toMatchObject({

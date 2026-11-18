@@ -35,12 +35,13 @@ const tools = [
   {
     name: 'create_thread_with_provider',
     description:
-      'Create a native user task whose first message uses an admitted CordisX provider/model, only when the user explicitly requests a new task and provider. Call list_model_providers first and require threadCreation available. Reuses native project/directory provisioning, permissions, sidebar registration and first send. Supports this app instance on the audited native build; remote/cloud targets are unavailable. Retain a unique operationId for the exact request. On timeout, pending, or reconciliation-required, reuse/read the same operationId; never repeat with a new ID automatically. Never supplies endpoints or secrets. Native create_thread remains unchanged.',
+      'Create a native user task whose first message uses an admitted CordisX provider/model, only when the user explicitly requests a new task and provider. Call list_model_providers first and require threadCreation available. Reuses native project/directory provisioning, permissions, sidebar registration and first send. Supports this app instance on the audited native build; remote/cloud targets are unavailable. Retain a unique operationId for the exact request. On timeout, pending, or reconciliation-required, reuse/read the same operationId; never repeat with a new ID automatically. Never supplies endpoints or secrets. Omitted provider/model/Fast use the profile creation defaults. Explicit choices win.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         operationId: { type: 'string', minLength: 1, maxLength: 128 },
+        fast: { type: 'boolean' },
         providerId: { type: 'string', minLength: 1, maxLength: 128 },
         model: { type: 'string', minLength: 1, maxLength: 512 },
         prompt: { type: 'string', minLength: 1, maxLength: 100000 },
@@ -61,7 +62,7 @@ const tools = [
           required: ['type'],
         },
       },
-      required: ['operationId', 'providerId', 'model', 'prompt', 'target'],
+      required: ['operationId', 'prompt', 'target'],
     },
   },
   {

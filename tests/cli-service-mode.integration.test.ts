@@ -68,6 +68,29 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
       settings: { effort: 'high' },
       revision: 1,
     })
+    expect(
+      JSON.parse(
+        await cmd(
+          'codex',
+          'defaults',
+          'model',
+          'set',
+          '--revision',
+          '0',
+          '--provider',
+          'later',
+          '--model',
+          'later-model',
+          '--fast',
+          'false',
+          '--profile',
+          profile,
+        ),
+      ),
+    )
+      .toMatchObject({ status: 'ok', revision: 1, validation: 'deferred-until-creation' })
+    expect(JSON.parse(await cmd('codex', 'defaults', 'model', 'get', '--profile', profile)))
+      .toMatchObject({ revision: 1, settings: { providerId: 'later', model: 'later-model', fast: false } })
     expect(JSON.parse(await cmd('models', 'services', 'list', '--profile', profile))).toMatchObject({
       status: 'ok',
       services: [],

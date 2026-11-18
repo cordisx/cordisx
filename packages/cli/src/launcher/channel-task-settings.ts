@@ -64,7 +64,7 @@ export class ChannelTaskSettings {
     const native = this.input.native()
     if (!native) throw new Error('NATIVE_BACKEND_UNAVAILABLE')
     const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
-    return resolveChannelTaskSelection(catalog, native.creationSelection(), patch).selection
+    return resolveChannelTaskSelection(catalog, await native.creationSelection(), patch).selection
   }
   isBound(threadId: string): boolean {
     return Object.values(this.input.store.snapshot().bindings).some(binding =>
@@ -353,8 +353,8 @@ export class ChannelTaskSettings {
         if (!native) throw new Error('NATIVE_BACKEND_UNAVAILABLE')
         const catalog = channelTaskCatalog(await native.modelOperation('list', {}))
         const base = Object.keys(config.defaults).length
-          ? resolveChannelTaskSelection(catalog, native.creationSelection(), config.defaults).selection
-          : native.creationSelection()
+          ? resolveChannelTaskSelection(catalog, await native.creationSelection(), config.defaults).selection
+          : await native.creationSelection()
         for (const rule of config.scopes) {
           if (Object.keys(rule.settings).length) resolveChannelTaskSelection(catalog, base, rule.settings)
         }

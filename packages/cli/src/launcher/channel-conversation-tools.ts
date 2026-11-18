@@ -78,7 +78,29 @@ export class ChannelConversationTools {
       meta['cordisx/channelContext'] !== undefined
       || caller && this.consumer?.taskSettings.isBound(caller)
       || this.consumer?.agentAccess.preparation(metadata)
-    ) return this.call(operation, args, metadata)
+    ) {
+      if (['fast', 'fast-set', 'project', 'project-set', 'model-defaults', 'model-defaults-set'].includes(operation)) {
+        const scoped = this.consumer?.agentAccess.caller(metadata)
+        const session = scoped?.threadId ?? caller
+        const source = scoped?.source
+          ?? (session ? this.consumer?.agentAccess.source(session, callerTurnId(metadata)) : undefined)
+        if (!source || !session) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        if (!operation.startsWith('model-defaults') && args.sessionId !== session) {
+          return { status: 'rejected', code: 'SESSION_SCOPE_MISMATCH' }
+        }
+        if (this.consumer?.agentAccess.preparation(metadata)) {
+          return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+        }
+        if (operation === 'model-defaults-set') {
+          return { status: 'rejected', code: 'PROFILE_SETTINGS_REQUIRE_LOCAL_USER' }
+        }
+        if (operation.endsWith('-set')) {
+          return { status: 'unavailable', code: 'CHANNEL_CONFIGURATION_COMMAND_UNAVAILABLE' }
+        }
+        return undefined
+      }
+      return this.call(operation, args, metadata)
+    }
     return undefined
   }
 

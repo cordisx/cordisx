@@ -38,6 +38,8 @@ export async function parseCodexCommand(args: readonly string[], models = false)
     '--effort',
     '--work-mode',
     '--network',
+    '--fast',
+    '--cwd',
     '--input-file',
   ]
   for (; index < args.length; index += 2) {
@@ -61,6 +63,57 @@ export async function parseCodexCommand(args: readonly string[], models = false)
   } else if (!models && route === 'providers list') {
     operation = 'list'
     accepted = []
+  } else if (
+    !models
+    && [
+      'defaults model get',
+      'defaults model set',
+      'chats fast get',
+      'chats fast set',
+      'chats project get',
+      'chats project set',
+    ].includes(route)
+  ) {
+    const defaults = route.startsWith('defaults'), write = route.endsWith('set'), project = route.includes('project')
+    operation = `configuration:${defaults ? 'model-defaults' : project ? 'project' : 'fast'}${write ? '-set' : ''}`
+    accepted = [
+      ...(defaults ? [] : ['--session']),
+      ...(write
+        ? [
+          '--revision',
+          ...(defaults
+            ? ['--provider', '--model', '--fast', '--input-file']
+            : project
+            ? ['--project', '--cwd']
+            : ['--fast']),
+        ]
+        : []),
+    ]
+    input = defaults ? {} : id()
+    if (write) {
+      if (!/^\d+$/u.test(options['--revision'] ?? '')) failure()
+      input.expectedRevision = Number(options['--revision'])
+      if (!Number.isSafeInteger(input.expectedRevision)) failure()
+      if (project) {
+        if (!options['--project']) failure()
+        input.projectId = options['--project']
+        if (options['--cwd']) input.cwd = options['--cwd']
+      } else {
+        if (options['--fast'] !== undefined && !['true', 'false'].includes(options['--fast'])) failure()
+        const selected = {
+          ...(options['--provider'] ? { providerId: options['--provider'] } : {}),
+          ...(options['--model'] ? { model: options['--model'] } : {}),
+          ...(options['--fast'] === undefined ? {} : { fast: options['--fast'] === 'true' }),
+        }
+        if (defaults) {
+          if (options['--input-file'] && Object.keys(selected).length) failure()
+          input.settings = options['--input-file'] ? await readInput(options['--input-file']) : selected
+        } else {
+          if (options['--fast'] === undefined) failure()
+          input.fast = selected.fast
+        }
+      }
+    }
   } else if (!models && route === 'chats provider set') {
     operation = 'select'
     accepted = ['--session', '--provider', '--model']
@@ -118,11 +171,13 @@ export async function parseCodexCommand(args: readonly string[], models = false)
     input = await readInput(options['--input-file']!)
   } else if (!models && route === 'chats create') {
     operation = 'create'
-    accepted = ['--provider', '--model', '--project', '--message', '--title', '--operation']
-    if (!options['--provider'] || !options['--model'] || !options['--message'] || !options['--operation']) failure()
+    accepted = ['--provider', '--model', '--fast', '--project', '--message', '--title', '--operation']
+    if (!options['--message'] || !options['--operation']) failure()
+    if (options['--fast'] !== undefined && !['true', 'false'].includes(options['--fast'])) failure()
     input = {
-      providerId: options['--provider'],
-      model: options['--model'],
+      ...(options['--provider'] ? { providerId: options['--provider'] } : {}),
+      ...(options['--model'] ? { model: options['--model'] } : {}),
+      ...(options['--fast'] === undefined ? {} : { fast: options['--fast'] === 'true' }),
       prompt: options['--message'],
       operationId: options['--operation'],
       ...(options['--title'] ? { title: options['--title'] } : {}),

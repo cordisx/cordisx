@@ -18,7 +18,7 @@ cordisx codex chats settings set [--session <id>] --revision <n> [--effort <valu
 cordisx codex chats settings reset [--session <id>] --revision <n>
 cordisx codex defaults get
 cordisx codex defaults set --revision <n> [settings flags or --input-file <JSON-file|->]
-cordisx codex chats create --provider <id> --model <id> --message <text> --operation <id> [--project <project-id>] [--title <text>]
+cordisx codex chats create [--provider <id>] [--model <id>] [--fast <true|false>] --message <text> --operation <id> [--project <project-id>] [--title <text>]
 cordisx models services list
 cordisx models services save --input-file <JSON-file|->
 All commands accept --profile <id>. Chat targets use --session or CODEX_THREAD_ID; no target never changes global defaults.
@@ -26,7 +26,13 @@ Settings set replaces the saved override; read its revision first. Defaults affe
 Provider-aware create uses the existing native create_thread path and requires an actual source session/turn (--source-session, --source-turn or CODEX_THREAD_ID, CODEX_TURN_ID). No fabricated source or fallback creation.
 Channel tasks pass their --context token and retain Channel permissions. Only --host local is supported.
 Model-service save replaces the declared services using the revision from list. Keep unrelated services. Keys/header values are write-only; use a private file or stdin. Saved services apply after restart.
-Project switching and Fast settings are not supplied by this candidate; capabilities reports this explicitly.`
+cordisx codex defaults model get
+cordisx codex defaults model set --revision <n> [--provider <id>] [--model <id>] [--fast <true|false>]
+cordisx codex chats fast get [--session <id>]
+cordisx codex chats fast set [--session <id>] --revision <n> --fast <true|false>
+cordisx codex chats project get [--session <id>]
+cordisx codex chats project set [--session <id>] --revision <n> --project <id> [--cwd <path>]
+Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Project switching is Desktop-only; headless has no native sidebar project authority.`
 
 export class CodexCommandRejected extends Error {
   readonly reported = true

@@ -7,7 +7,10 @@ and first-provider inference remain user acceptance gates.
 `cordisx_models.create_thread_with_provider` supplements native `create_thread`.
 The [supplemental CLI](codex-cli.md#provider-aware-creation) exposes this same
 operation without duplicating native creation or inventing a source turn.
-Use it only for an explicitly requested new task and configured provider/model.
+Use it only for an explicitly requested new task. Omitted provider/model/Fast
+values use the selected profile's `chatCreation` defaults; explicit fields win.
+Changing provider without a model uses that provider's own default. When neither
+the request nor defaults resolve a catalog pair, use native `create_thread`.
 First call `list_model_providers`; its `threadCreation.status` must be
 `available`. Pass an exact catalog pair, original prompt, native project/local
 or worktree target, or a projectless target. Cloud and remote execution are
@@ -17,7 +20,8 @@ endpoints, credentials or a native thread id.
 
 The tool requires executor thread and call metadata plus a retained unique
 `operationId`. Equal requests join or read their saved result. Reusing an id
-with different input is rejected. The Host writes a private intent before native
+with different input is rejected. A completed replay retains its original result
+even if creation defaults have changed. The Host writes a private intent before native
 dispatch; a timeout, restart, missing receipt or first-turn failure never
 automatically creates or sends again. A pending worktree result retains its
 native client task id. Pending/unknown operations require native inspection;

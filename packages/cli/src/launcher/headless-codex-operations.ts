@@ -10,6 +10,7 @@ export function createHeadlessCodexOperations(input: {
   readonly configPath: string
   readonly environment?: Readonly<Record<string, string | undefined>>
   readonly native?: ChatExecutionAuthority
+  readonly configuration?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly models?: (operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) => Promise<unknown>
   readonly channelTools?: () => ChannelConversationTools | undefined
   readonly preparing?: (metadata: unknown) => boolean
@@ -24,6 +25,7 @@ export function createHeadlessCodexOperations(input: {
     return tools?.executionGuard(operation, args, metadata)
   }
   const authority = {
+    ...(input.configuration ? { configuration: input.configuration } : {}),
     ...(input.native ? { execution: createCodexChatSettings({ native: input.native, guard }) } : {}),
     modelServices: createCodexModelServices({
       configPath: input.configPath,
@@ -46,7 +48,8 @@ export function createHeadlessCodexOperations(input: {
           executionSettings: input.native !== undefined,
           modelServices: true,
           projectSwitch: false,
-          fastSettings: false,
+          fastSettings: input.configuration !== undefined && input.models !== undefined,
+          modelCreationDefaults: input.configuration !== undefined,
         },
       }
     }

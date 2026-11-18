@@ -47,6 +47,7 @@ export interface NativeAgentModelsAuthority {
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
   execution?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
+  configuration?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
   modelServices?(operation: 'read' | 'save', input: unknown, metadata?: unknown): Promise<unknown>
   /** Channel operations use this launch's configured connection and conversation consumer. */
   channel?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
@@ -87,8 +88,9 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
           providerCreation: await authority.taskCreationAvailable?.() === true,
           executionSettings: authority.execution !== undefined,
           modelServices: authority.modelServices !== undefined,
-          projectSwitch: false,
-          fastSettings: false,
+          projectSwitch: authority.configuration !== undefined,
+          fastSettings: authority.configuration !== undefined,
+          modelCreationDefaults: authority.configuration !== undefined,
         },
       }
     }
@@ -148,6 +150,7 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
           models: provider.models.map(model => ({
             id: model.id,
             label: model.label,
+            ...(model.supportsFastMode === undefined ? {} : { supportsFastMode: model.supportsFastMode }),
             ...(() => {
               const reasoningCapabilities = parseModelReasoningCapabilities(model.reasoningCapabilities)
               return reasoningCapabilities === undefined ? {} : { reasoningCapabilities }

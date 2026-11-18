@@ -251,8 +251,13 @@ export class ChannelNativeSessions {
       ...(typeof effort === 'string' ? { effort } : {}),
     }
   }
-  creationSelection(): import('./channel-task-config.js').ChannelTaskPatch {
+  async creationSelection(): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
+    const defaults = (await this.input.execution?.creationDefaults())?.settings ?? {}
     return {
+      ...(defaults.providerId ? { providerId: defaults.providerId } : {}),
+      ...(defaults.model && (!this.input.providerId || this.input.providerId === defaults.providerId)
+        ? { model: defaults.model }
+        : {}),
       ...(this.input.providerId ? { providerId: this.input.providerId } : {}),
       ...(this.input.model ? { model: this.input.model } : {}),
     }
@@ -483,6 +488,17 @@ export class ChannelNativeSessions {
       message.content.filter(block => block.type === 'text').map(block => block.text).join('\n'),
     ].join('\n')
     try {
+      const baseSelection = await this.creationSelection()
+      const providerId = continuation?.configuration.providerId ?? settings?.providerId ?? baseSelection.providerId
+      let model = continuation?.configuration.model ?? settings?.model
+        ?? (settings?.providerId && settings.providerId !== baseSelection.providerId ? undefined : baseSelection.model)
+      if (providerId && !model) {
+        const catalog = object(await this.modelOperation('list', {})).providers
+        const provider = Array.isArray(catalog)
+          ? catalog.map(object).find(row => row.providerId === providerId)
+          : undefined
+        if (typeof provider?.defaultModelId === 'string') model = provider.defaultModelId
+      }
       const execution = sessionId === undefined && !continuation
         ? mergeChatExecutionSettings(
           mergeChatExecutionSettings((await this.input.execution?.defaults())?.settings ?? {}, creationOverrides ?? {}),
@@ -501,14 +517,14 @@ export class ChannelNativeSessions {
             ? {
               cwd: continuation?.configuration.cwd ?? this.input.cwd,
               title,
-              ...(continuation?.configuration.providerId ?? settings?.providerId ?? this.input.providerId
+              ...(providerId
                 ? {
-                  providerId: continuation?.configuration.providerId ?? settings?.providerId ?? this.input.providerId,
+                  providerId: providerId,
                 }
                 : {}),
 
-              ...(continuation?.configuration.model ?? settings?.model ?? this.input.model
-                ? { model: continuation?.configuration.model ?? settings?.model ?? this.input.model }
+              ...(model
+                ? { model: model }
                 : {}),
               ...(continuation
                 ? {

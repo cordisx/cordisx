@@ -27,6 +27,29 @@ const input: ChannelUserInput = {
 }
 
 describe('Channel native task delivery', () => {
+  it('merges Channel creation selection over common defaults without carrying another provider model', async () => {
+    const call = vi.fn(async () => ({ status: 'started', sessionId: 'chat', turnId: 'turn' }))
+    const sessions = new ChannelNativeSessions({
+      bridge: () => ({ call }) as unknown as AgentBridge,
+      nativeRequest: async () => ({}),
+      cwd: '/tmp',
+      execution: {
+        creationDefaults: async () => ({ settings: { providerId: 'base', model: 'base-model' } }),
+        defaults: async () => ({ settings: {} }),
+      } as never,
+      models: async () => ({
+        providers: [{ providerId: 'channel', defaultModelId: 'channel-model', models: [{ id: 'channel-model' }] }],
+      }),
+    })
+    expect(await sessions.creationSelection()).toEqual({ providerId: 'base', model: 'base-model' })
+    await sessions.start('selection', input, undefined, undefined, undefined, undefined, { providerId: 'channel' })
+    expect(call).toHaveBeenCalledWith(
+      'codex',
+      'start_session',
+      expect.objectContaining({ providerId: 'channel', model: 'channel-model' }),
+      undefined,
+    )
+  })
   it('expires only the global preparation fence while keeping the known target restricted', async () => {
     vi.useFakeTimers()
     try {

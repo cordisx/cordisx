@@ -1,3 +1,4 @@
+import { CodexChatConfiguration } from '../launcher/codex-chat-configuration.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -85,9 +86,30 @@ export async function startHeadlessService(input: {
         profileId: input.profileId,
       })
       cleanup.push(() => execution.close())
+      const configuration = await CodexChatConfiguration.open({
+        preferences: execution,
+        file: path.join(
+          input.homeDir,
+          'apps',
+          input.appId,
+          'profiles',
+          input.profileId,
+          'codex-chat-configuration.json',
+        ),
+        request: async () => {
+          throw new Error('CODEX_BACKEND_UNAVAILABLE')
+        },
+        guard: async (_operation, _args, metadata) =>
+          metadata && typeof metadata === 'object'
+            && (metadata as Record<string, unknown>)['cordisx/channelContext'] !== undefined
+            ? { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+            : undefined,
+      })
+      cleanup.push(() => configuration.close())
       return {
         channel: undefined,
         codex: createHeadlessCodexOperations({
+          configuration: (operation, args, metadata) => configuration.call(operation, args, metadata),
           configPath: input.configPath,
           environment: input.environment,
           native: { executionPreferences: () => execution, exists: async () => false },
@@ -176,6 +198,20 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
+    const chatConfiguration = await CodexChatConfiguration.open({
+      preferences: authority.execution!,
+      file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'codex-chat-configuration.json'),
+      catalog: async () => (await backend.models('list', {})).providers ?? [],
+      request: (method, params) => backend.nativeRequest(method, params),
+      guard: async (operation, args, metadata) => {
+        if (
+          !channelTools && metadata && typeof metadata === 'object'
+          && (metadata as Record<string, unknown>)['cordisx/channelContext'] !== undefined
+        ) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        return channelTools?.executionGuard(operation, args, metadata)
+      },
+    })
+    cleanup.push(() => chatConfiguration.close())
     native = new ChannelNativeSessions({
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
@@ -211,6 +247,7 @@ export async function startHeadlessService(input: {
     cleanup.push(() => channel.dispose())
     await service.start(state.config)
     const codex = createHeadlessCodexOperations({
+      configuration: (operation, value, metadata) => chatConfiguration.call(operation, value, metadata),
       configPath: input.configPath,
       environment: input.environment,
       models: backend.models,

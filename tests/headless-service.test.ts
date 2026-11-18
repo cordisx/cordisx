@@ -6,6 +6,13 @@ vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
     }
   },
 }))
+vi.mock('../packages/cli/src/launcher/codex-chat-configuration.js', () => ({
+  CodexChatConfiguration: class {
+    static async open() {
+      return { call: async () => ({}), close: async () => {} }
+    }
+  },
+}))
 
 const f = vi.hoisted(() => ({ events: [] as string[], failStart: false, enabled: true }))
 vi.mock(
