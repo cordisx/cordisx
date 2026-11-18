@@ -33,8 +33,10 @@ import { applyNativeFastMode } from './native-model-fast-mode.js'
 import { NativeSessionDisplayCache, nativeSessionDisplayPrefix } from './native-session-display-cache.js'
 import { NativeSettingsReconciliation } from './native-settings-reconciliation.js'
 import { logComposerTiming } from './native-composer-diagnostics.js'
+import { nativeComposerConfigCache, reconcileNativeComposerConfig } from './native-composer-config-cache.js'
 import {
   nativeComposerBaselineRouting,
+  nativeComposerConfirmedControl,
   nativeComposerControlPatch,
   nativeComposerCreationDisplay,
   nativeComposerCreationSelection,
@@ -76,6 +78,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private nativeModelCatalogIdentity: string | undefined
   private readonly nativeModelSource = new NativeModelSource()
   private readonly requestClient: NativeMcpRequestClient
+  private readonly configCache: ReturnType<typeof nativeComposerConfigCache>
   private providerNames = new Map<string, string>()
   private detachSubmission?: () => void
   private observer?: MutationObserver
@@ -88,6 +91,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
   private suppressedRefresh: number | undefined
   private readonly settingsReconciliation = new NativeSettingsReconciliation({
     invalidate: () => {
+      this.configCache.invalidate()
       if (this.suppressedRefresh === this.refreshGeneration) this.selectionClient.invalidateReadback()
       this.refreshGeneration++
     },
@@ -96,7 +100,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
       !this.disposed && !this.selecting && !this.selectionClient.selectionActive()
       && !this.selectionClient.submissionActive(),
     reconcile: () => {
-      if (currentThreadId(this.document, this.composer) === this.visibleThreadId) void this.refreshComposer(0, true)
+      if (currentThreadId(this.document, this.composer) === this.visibleThreadId) void this.refreshComposer()
     },
     matchesStorage: event =>
       event.key === null
@@ -146,6 +150,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     } catch { /* optional storage */ }
     this.displayCache = new NativeSessionDisplayCache(storage)
     this.requestClient = new NativeMcpRequestClient(bridge, hostId)
+    this.configCache = nativeComposerConfigCache(bridge, hostId)
     this.visibleThreadId = currentThreadId(document, this.composer)
     this.selectionClient = new NativeProviderSelectionClient(
       commandChannel,
@@ -686,7 +691,7 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     this.syncControl()
   }
 
-  private async refreshComposer(controlDiscoveryAttempt = 0, reconcile = false): Promise<void> {
+  private async refreshComposer(controlDiscoveryAttempt = 0, refreshedConfig?: Record<string, unknown>): Promise<void> {
     this.clearControlDiscoveryRetry()
     const generation = ++this.refreshGeneration
     const threadId = currentThreadId(this.document, this.composer)
@@ -697,7 +702,8 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     if (trigger && !nativeModelProviderInteractionAllowed(trigger)) this.suspendedAvailability = this.state.available
     this.visibleThreadId = threadId
     this.visibleTrigger = trigger
-    const background = reconcile && this.state.available && this.state.threadId === threadId
+    const background = nativeComposerConfirmedControl(this.state, threadId, control)
+      && !this.selecting && !this.selectionClient.configurationActive()
     if (!background) {
       this.turnBusy = threadId !== undefined
       this.replaceState({
@@ -737,11 +743,18 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
     // Keep their generation valid until they settle; a different thread/trigger
     // still starts a new generation through observeComposer's earlier branches.
     this.pendingComposerRefresh = { generation, control: JSON.stringify(control) }
+    const configRead = refreshedConfig
+      ? { config: Promise.resolve(refreshedConfig) }
+      : this.configCache.read(
+        () => this.requestClient.request('config/read', { includeLayers: false, cwd: null }),
+        background,
+      )
     try {
       const baseline = await readNativeComposerBaseline(
         (method, params) => this.requestClient.request(method, params),
         threadId,
         () => this.isRefreshCurrent(generation, threadId),
+        configRead.config,
       )
       if (!baseline) return
       const { config, thread } = baseline
@@ -802,6 +815,12 @@ export class CodexDesktopNativeModelProviderTransport implements ProviderSelecti
         }
       }
       refreshState = this.isRefreshCurrent(generation, threadId) ? 'ready' : 'stale'
+      reconcileNativeComposerConfig(
+        configRead.refreshed,
+        config,
+        () => this.isRefreshCurrent(generation, threadId),
+        config => this.refreshComposer(0, config),
+      )
     } catch {
       refreshState = 'failed'
       if (!background && this.isRefreshCurrent(generation, threadId)) {

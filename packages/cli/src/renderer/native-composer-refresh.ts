@@ -84,13 +84,29 @@ export async function readNativeComposerBaseline(
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   threadId: string | undefined,
   current: () => boolean,
+  configRead?: Promise<Record<string, unknown>>,
 ): Promise<{ thread: Record<string, unknown> | undefined; config: Record<string, unknown> } | undefined> {
   const [response, result] = await Promise.all([
     threadId === undefined ? undefined : request('thread/read', { threadId, includeTurns: false }),
-    request('config/read', { includeLayers: false, cwd: null }),
+    configRead
+      ?? request('config/read', { includeLayers: false, cwd: null }).then(result =>
+        record(record(result)?.config) ?? {}
+      ),
   ])
   if (!current()) return undefined
-  return { thread: record(record(response)?.thread), config: record(record(result)?.config) ?? {} }
+  return { thread: record(record(response)?.thread), config: result }
+}
+
+/** A live same-thread tuple can survive presentation recreation; a changed native control must revalidate. */
+export function nativeComposerConfirmedControl(
+  state: SelectionSnapshot,
+  threadId: string | undefined,
+  control: NativeModelSelectionControl | undefined,
+): boolean {
+  return threadId !== undefined && state.available && state.threadId === threadId
+    && state.modelProvider !== undefined && state.model === control?.model
+    && isModelReasoningEffort(state.reasoningEffort) && state.reasoningEffort === control?.reasoningEffort
+    && (control.serviceTierKnown ? state.serviceTier === control.serviceTier : state.serviceTier === undefined)
 }
 
 /** Directory enrichment runs independently of selection readiness. */
