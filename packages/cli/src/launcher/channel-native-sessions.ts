@@ -70,6 +70,7 @@ export class ChannelNativeSessions {
       readonly model?: string
       readonly cli?: ChannelNativeCliContext
       readonly execution?: ChatExecutionPreferences
+      readonly configuration?: import('./codex-chat-configuration.js').CodexChatConfiguration
       readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
       readonly confirmedWorkMode?: (threadId: string) => 'default' | 'plan' | undefined
       readonly models?: (operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) => Promise<unknown>
@@ -225,9 +226,33 @@ export class ChannelNativeSessions {
   contextObservations() {
     return this.input.contextObserver?.observations
   }
-  modelOperation(operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) {
-    return this.input.models?.(operation, input, beforeEffect)
-      ?? Promise.resolve({ status: 'unavailable', code: 'MODEL_CATALOG_UNAVAILABLE' })
+  async modelOperation(operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) {
+    const result = await this.input.models?.(operation, input, beforeEffect)
+      ?? { status: 'unavailable', code: 'MODEL_CATALOG_UNAVAILABLE' }
+    if (operation !== 'list' || !this.input.configuration) return result
+    const listed = object(result)
+    if (!Array.isArray(listed.providers)) return result
+    const native = await this.input.configuration.catalog()
+    return {
+      ...listed,
+      providers: listed.providers.map(object).map(provider => {
+        const metadata = native.find(row => row.providerId === provider.providerId)
+        if (!metadata || !Array.isArray(provider.models)) return provider
+        // Enrich admitted models only; the native Fast catalog does not grant another provider/model.
+        const models: Record<string, unknown>[] = provider.models.map(object).map(model => {
+          const capabilities = metadata.models.find(row => row.id === model.id)
+          return {
+            ...model,
+            ...(capabilities?.supportsFastMode === undefined
+              ? {}
+              : { supportsFastMode: capabilities.supportsFastMode }),
+          }
+        })
+        const defaultModelId = provider.defaultModelId
+          ?? (models.some(model => model.id === metadata.defaultModelId) ? metadata.defaultModelId : undefined)
+        return { ...provider, models, ...(defaultModelId === undefined ? {} : { defaultModelId }) }
+      }),
+    }
   }
   async idle(threadId: string) {
     return (await channelNativeIdle(this.input, threadId)) !== undefined
@@ -245,38 +270,134 @@ export class ChannelNativeSessions {
       && effective.model === model
     const effort = live?.reasoningEffort ?? metadata.reasoningEffort
       ?? (coherentEffective ? effective?.reasoningEffort : undefined)
+    const configuration = this.input.configuration
+      ? object(await this.input.configuration.call('project', { sessionId: threadId }))
+      : {}
+    if (this.input.configuration && configuration.status !== 'ok') {
+      throw new Error(String(configuration.code ?? 'CHAT_CONFIGURATION_UNAVAILABLE'))
+    }
+    const configured = object(configuration.effective)
+    const tier = live?.serviceTier !== undefined
+      ? live.serviceTier
+      : metadata.serviceTier !== undefined
+      ? metadata.serviceTier
+      : coherentEffective
+      ? effective?.serviceTier
+      : undefined
     return {
       ...(typeof provider === 'string' ? { providerId: provider } : {}),
       ...(typeof model === 'string' ? { model } : {}),
       ...(typeof effort === 'string' ? { effort } : {}),
+      ...(typeof configured.fast === 'boolean'
+        ? { fast: configured.fast }
+        : tier === 'priority'
+        ? { fast: true }
+        : tier === null || tier === 'default'
+        ? { fast: false }
+        : {}),
+      ...(typeof configured.projectId === 'string' ? { projectId: configured.projectId } : {}),
     }
   }
   async creationSelection(): Promise<import('./channel-task-config.js').ChannelTaskPatch> {
     const defaults = (await this.input.execution?.creationDefaults())?.settings ?? {}
-    return {
+    const selection = {
       ...(defaults.providerId ? { providerId: defaults.providerId } : {}),
       ...(defaults.model && (!this.input.providerId || this.input.providerId === defaults.providerId)
         ? { model: defaults.model }
         : {}),
       ...(this.input.providerId ? { providerId: this.input.providerId } : {}),
       ...(this.input.model ? { model: this.input.model } : {}),
+      ...(defaults.fast === undefined ? {} : { fast: defaults.fast }),
     }
+    if (!selection.providerId || !selection.model) {
+      const providers = object(await this.modelOperation('list', {})).providers
+      const rows = Array.isArray(providers) ? providers.map(object) : []
+      const provider = rows.find(row => row.providerId === (selection.providerId ?? 'openai'))
+      if (provider) {
+        selection.providerId ??= String(provider.providerId)
+        if (!selection.model && typeof provider.defaultModelId === 'string') selection.model = provider.defaultModelId
+      }
+    }
+    return selection
+  }
+  projects(caller?: string) {
+    return this.input.configuration?.projects(caller) ?? Promise.reject(new Error('PROJECT_AUTHORITY_UNAVAILABLE'))
+  }
+  async validateTaskConfiguration(settings: import('./channel-task-config.js').ChannelTaskPatch, caller?: string) {
+    if (settings.fast !== undefined && !this.input.configuration) throw new Error('CHAT_CONFIGURATION_UNAVAILABLE')
+    if (settings.projectId) {
+      if (!this.input.configuration) throw new Error('PROJECT_AUTHORITY_UNAVAILABLE')
+      await this.input.configuration.validateProject(settings.projectId, caller)
+    }
+  }
+  async configurationRevision(threadId: string) {
+    if (!this.input.configuration) throw new Error('CHAT_CONFIGURATION_UNAVAILABLE')
+    const current = object(await this.input.configuration.call('fast', { sessionId: threadId }))
+    if (current.status !== 'ok') throw new Error(String(current.code ?? 'CHAT_CONFIGURATION_UNAVAILABLE'))
+    return Number(current.revision)
   }
   async applyTaskSelection(
     threadId: string,
     settings: import('./channel-task-config.js').ChannelTaskPatch,
-    beforeEffect?: () => Promise<boolean>,
+    beforeEffect?: (applied?: import('./channel-task-config.js').ChannelTaskPatch) => Promise<boolean>,
   ) {
     if (!await this.idle(threadId)) return { status: 'rejected', reason: 'thread-not-idle' }
-    const result = object(
-      await this.modelOperation(
-        'select',
-        { threadId, providerId: settings.providerId, model: settings.model },
-        beforeEffect,
-      ),
-    )
-    if (result.status !== 'selected') return result
-    if (settings.effort !== undefined) {
+    const current = await this.taskSelection(threadId)
+    const applied: import('./channel-task-config.js').ChannelTaskPatch = {}
+    const revalidate = () => beforeEffect?.(applied) ?? Promise.resolve(true)
+    let effected = false
+    const configuration = this.input.configuration
+    const applyConfiguration = async (operation: 'fast-set' | 'project-set', patch: Record<string, unknown>) => {
+      if (!configuration) throw new Error('CHAT_CONFIGURATION_UNAVAILABLE')
+      const read = object(
+        await configuration.call(operation === 'fast-set' ? 'fast' : 'project', { sessionId: threadId }),
+      )
+      if (read.status !== 'ok') return read
+      const result = object(
+        await configuration.applyChannel(operation, {
+          sessionId: threadId,
+          expectedRevision: read.revision,
+          ...patch,
+        }, revalidate),
+      )
+      if (result.status !== 'applied') return result
+      Object.assign(applied, patch)
+      effected = true
+      return undefined
+    }
+    // Clear Fast before a provider change so its old persisted tier cannot reject the resume.
+    if (settings.fast === false && current.fast !== false) {
+      const rejected = await applyConfiguration('fast-set', { fast: false })
+      if (rejected) return rejected
+    }
+    if (settings.providerId !== current.providerId || settings.model !== current.model) {
+      const result = object(
+        await this.modelOperation('select', {
+          threadId,
+          providerId: settings.providerId,
+          model: settings.model,
+        }, revalidate),
+      )
+      if (result.status !== 'selected') return effected ? { status: 'reconciliation-required' } : result
+      Object.assign(applied, { providerId: settings.providerId, model: settings.model })
+      const selected = await this.taskSelection(threadId)
+      if (selected.providerId !== settings.providerId || selected.model !== settings.model) {
+        return { status: 'reconciliation-required' }
+      }
+      // Native provider selection can reset effort/tier. Fence later effects against that exact readback.
+      if (selected.effort !== (applied.effort ?? current.effort)) Object.assign(applied, { effort: selected.effort })
+      if (selected.fast !== (applied.fast ?? current.fast)) Object.assign(applied, { fast: selected.fast })
+      effected = true
+    }
+    for (const [field, operation] of [['fast', 'fast-set'], ['projectId', 'project-set']] as const) {
+      if (settings[field] === undefined || settings[field] === (applied[field] ?? current[field])) continue
+      const rejected = await applyConfiguration(operation, { [field]: settings[field] })
+      if (rejected) return effected ? { status: 'reconciliation-required' } : rejected
+    }
+    const observedEffort = Object.hasOwn(applied, 'effort') ? applied.effort : current.effort
+    const effortChanged = settings.effort !== undefined && settings.effort !== observedEffort
+    if (effortChanged) {
+      if (!await revalidate()) return { status: 'reconciliation-required' }
       const preferences = this.input.execution
       if (!preferences) throw new Error('EXECUTION_SETTINGS_UNAVAILABLE')
       const record = preferences.read('local', threadId)
@@ -286,8 +407,8 @@ export class ChannelNativeSessions {
       await preferences.set('local', threadId, override, record?.revision ?? 0)
     }
     return {
-      ...result,
-      application: settings.effort === undefined || settings.effort === 'inherit' ? 'applied' : 'saved',
+      status: 'selected',
+      application: !effortChanged || settings.effort === 'inherit' ? 'applied' : 'saved',
     }
   }
   approvalEvents(listener: (event: Record<string, unknown>) => void) {
@@ -505,6 +626,22 @@ export class ChannelNativeSessions {
           settings?.effort === undefined ? {} : { effort: settings.effort },
         )
         : undefined
+      let fast = settings?.fast ?? baseSelection.fast
+      if (sessionId === undefined && !continuation && fast === true) {
+        const providers = object(await this.modelOperation('list', {})).providers
+        const selected = Array.isArray(providers)
+          ? providers.map(object).find(row => row.providerId === providerId)
+          : undefined
+        const supported = Array.isArray(selected?.models)
+          && selected.models.map(object).some(row => row.id === model && row.supportsFastMode === true)
+        if (!supported) {
+          if (settings?.fast === true) throw new Error('FAST_NOT_SUPPORTED')
+          fast = false
+        }
+      }
+      if (sessionId === undefined && !continuation) {
+        await this.validateTaskConfiguration({ ...settings, ...(fast === undefined ? {} : { fast }) })
+      }
       if (signal?.aborted) {
         this.sources.delete(operationId)
         return { state: 'failed', code: 'CANCELLED' }
@@ -526,6 +663,8 @@ export class ChannelNativeSessions {
               ...(model
                 ? { model: model }
                 : {}),
+              ...(settings?.projectId && !continuation ? { projectId: settings.projectId } : {}),
+              ...(fast === undefined || continuation ? {} : { serviceTier: fast ? 'priority' : null }),
               ...(continuation
                 ? {
                   execution: continuation.configuration.execution,

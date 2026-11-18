@@ -813,6 +813,8 @@ export async function prepareNativeSubmissionBootstrap(
             cordisxHomeDir: completeOptions.managedCatalog.homeDir,
             codex: {
               catalog: () => chatConfiguration!.catalog(),
+              prepareProject: (projectId, readOnly) => chatConfiguration!.prepareProject(projectId, readOnly),
+              bindCreatedProject: (threadId, projectId) => chatConfiguration!.bindCreatedProject(threadId, projectId),
               observedDispatch: (operationId, threadId, turnId) =>
                 channelSession?.observedDispatch(operationId, threadId, turnId),
               nativeRequest: nativeApiProviderRequest({
@@ -958,6 +960,7 @@ export async function prepareNativeSubmissionBootstrap(
           bridge: () => agentBridge,
           control,
           execution: chatExecution,
+          configuration: chatConfiguration,
           models: modelHandler,
         })
         return {

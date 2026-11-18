@@ -81,12 +81,19 @@ export class ChannelConversationTools {
     ) {
       if (['fast', 'fast-set', 'project', 'project-set', 'model-defaults', 'model-defaults-set'].includes(operation)) {
         const scoped = this.consumer?.agentAccess.caller(metadata)
+        if (meta['cordisx/channelContext'] !== undefined && !scoped) {
+          return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        }
         const session = scoped?.threadId ?? caller
         const source = scoped?.source
           ?? (session ? this.consumer?.agentAccess.source(session, callerTurnId(metadata)) : undefined)
         if (!source || !session) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
-        if (!operation.startsWith('model-defaults') && args.sessionId !== session) {
-          return { status: 'rejected', code: 'SESSION_SCOPE_MISMATCH' }
+        const target = typeof args.sessionId === 'string' ? args.sessionId : session
+        if (
+          !operation.startsWith('model-defaults') && target !== session
+          && !this.consumer?.taskSettings.boundTo(source, target)
+        ) {
+          return { status: 'rejected', code: 'CHANNEL_TARGET_NOT_BOUND' }
         }
         if (this.consumer?.agentAccess.preparation(metadata)) {
           return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
@@ -95,7 +102,13 @@ export class ChannelConversationTools {
           return { status: 'rejected', code: 'PROFILE_SETTINGS_REQUIRE_LOCAL_USER' }
         }
         if (operation.endsWith('-set')) {
-          return { status: 'unavailable', code: 'CHANNEL_CONFIGURATION_COMMAND_UNAVAILABLE' }
+          const allowed = operation === 'fast-set'
+            ? ['sessionId', 'fast', 'expectedRevision']
+            : ['sessionId', 'projectId', 'expectedRevision']
+          if (Object.keys(args).some(key => !allowed.includes(key))) {
+            return { status: 'rejected', code: 'INVALID_REQUEST' }
+          }
+          return this.consumer!.taskSettings.configurationRequest(operation, source, target, args)
         }
         return undefined
       }

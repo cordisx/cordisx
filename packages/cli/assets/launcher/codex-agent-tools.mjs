@@ -36,7 +36,7 @@ export const codexAgentTools = [
   ),
   tool(
     'codex_chat_fast_set',
-    'Set Fast for the current or explicit idle chat. Read its revision first. Fast requires native catalog support; false clears the tier. pending is not confirmed applied.',
+    'Set Fast for the current or explicit idle chat. Read its revision first. Fast requires native catalog support; false clears the tier. pending is not confirmed applied. Channel callers retain the incoming user and exact Fast-value permissions; approval-required needs an eligible human and cannot be self-approved.',
     { sessionId, fast: { type: 'boolean' }, expectedRevision },
     ['fast', 'expectedRevision'],
   ),
@@ -47,7 +47,7 @@ export const codexAgentTools = [
   ),
   tool(
     'codex_chat_project_set',
-    'Switch an idle local chat to an existing native project on the user request. List native projects first. Aligns sidebar membership, cwd and repository writable roots; an old full-access chat becomes workspace-write. Optional cwd must be inside the project. Does not interrupt or send. Read the revision first; pending requires native confirmation.',
+    'Switch an idle local chat to an existing native project on the user request. List native projects first. Aligns sidebar membership, cwd and repository writable roots; an old full-access chat becomes workspace-write. Optional cwd must be inside the project. Does not interrupt or send. Read the revision first; pending requires native confirmation. Channel callers use the same exact field and project-value approval workflow; keep any requestId and wait for an eligible human.',
     {
       sessionId,
       projectId: { type: 'string', minLength: 1, maxLength: 512 },

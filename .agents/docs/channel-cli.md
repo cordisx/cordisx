@@ -329,17 +329,20 @@ The credential form and target validation stay Host-owned in both paths.
 Conversation policy is saved through the profile-bound Host form, separately
 from delegated transport and binding writes.
 
-## Provider, model and effort
+## Provider, model, effort, Fast and project
 
 The unified Channel settings entry adds a **Task models** tab on Manager v12.
 It configures creation defaults, per-conversation/per-user defaults and model
 permissions. Each binding also exposes its Host-owned current model form.
 Older Hosts omit the unsupported tab. Contract and downgrade semantics are in
 [task settings v1 / Manager v12](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/channel-runtime/task-settings-v1.md).
+This Host also accepts private Fast/project settings through the existing
+Host-owned form and CLI. These fields do not expand frozen public execution
+settings or older Manager contracts; older Hosts do not support them.
 
 Read `model-list` for the admitted catalog and `task-settings` for a chat's
 actual/pending selection. `task-settings-set` accepts
-`{sessionId, settings:{providerId?,model?,effort?}, expectedRevision?}`;
+`{sessionId, settings:{providerId?,model?,effort?,fast?,projectId?}, expectedRevision?}`;
 `task-config-set` accepts `{config:{defaults,scopes,permissions},expectedRevision}`.
 Both use the selected runtime; they do not add providers or accept credentials.
 Native tools expose corresponding `channel_*` operations. Source-scoped writes
@@ -349,6 +352,11 @@ use the actual received user's rights, even when requested through an Agent.
 /models
 /model <model> --provider <provider> --effort high
 /task-settings --provider <provider> --model <model> --target <chat-id>
+/fast on
+/fast off --all
+/project list
+/project <local-project-id> --target <chat-id>
+/task-settings --fast false --project <local-project-id> --target <chat-id>
 /task-requests
 /task-approve <request-id>
 /task-deny <request-id>
@@ -361,12 +369,30 @@ submission and observed application are distinct states; unknown effects are
 not replayed after restart.
 
 Model grants constrain platform/account/conversation, users/user groups, changed
-fields, Provider, qualified model and effort. Deny wins and applicable allow
+fields, Provider, qualified model, effort, Fast values (`fastModes`) and local
+projects (`projectIds`). Deny wins and applicable allow
 scopes intersect. Reads do not require a mutation grant. An eligible sender can
 change directly; otherwise a fixed, expiring request requires explicit approval
 by a currently eligible user from the source conversation. Agent tool calls
 cannot provide that user's approval. Rights and configuration are rechecked
 before the native change.
+
+Common profile creation settings are the base layer. Channel defaults, matching
+conversation/user rules and explicit selections override that layer; explicit
+Fast `false` remains meaningful. Enabling Fast requires catalog support. A
+provider/model change to an unsupported model includes Fast disable in the exact
+authorized patch. Changes are persisted before native effects and rechecked
+between combined operations. Uncertain partial changes require reconciliation.
+
+Project defaults resolve canonical working directories and writable roots before
+creating the chat. The new chat's project membership and native settings must be
+confirmed before its first turn. A failed confirmation retains the created chat
+and starts no turn. Project switching uses the common supplemental service and
+enforces the selected roots on later turns. Headless mode has no native project
+authority; `model-list` reports `projectAvailability: "unavailable"`, and project
+mutations fail explicitly. Fresh continuation retains its existing confirmed
+configuration/cwd flow; native sidebar project membership inheritance has not
+been established by this change.
 
 ## Fresh Channel continuation
 

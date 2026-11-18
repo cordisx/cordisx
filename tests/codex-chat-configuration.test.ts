@@ -50,6 +50,7 @@ async function fixture() {
   let service: CodexChatConfiguration
   const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
     if (method === 'thread/read') return { thread: native }
+    if (method === 'thread/list') return { data: [{ id: native.id }] }
     if (method === 'thread/settings/update') {
       native = { ...native, ...params, ...(params.serviceTier === null ? { serviceTier: 'default' } : {}) }
       await preferences.observe('chat', native)
@@ -65,7 +66,9 @@ async function fixture() {
       type: 'text',
       text: JSON.stringify(
         input.tool === 'list_projects'
-          ? { projects: [{ projectId: 'p', projectKind: 'local', hostId: 'local', path: directory }] }
+          ? {
+            projects: [{ projectId: 'p', label: 'Repository', projectKind: 'local', hostId: 'local', path: directory }],
+          }
           : input.tool === 'list_threads'
           ? { threads: [{ id: 'chat', hostId: 'local', projectId: 'p' }] }
           : { status: 'moved' },
@@ -94,6 +97,24 @@ async function fixture() {
     },
   }
 }
+
+test('project creation uses actual native context and confirms the same project before dispatch', async () => {
+  const f = await fixture()
+  expect(await f.service.projects()).toEqual([{ projectId: 'p', name: 'Repository' }])
+  expect(f.tool).toHaveBeenLastCalledWith({ tool: 'list_projects', sourceThreadId: 'chat', arguments: {} })
+  expect(await f.service.prepareProject('p', true)).toMatchObject({
+    cwd: f.directory,
+    sandbox: 'read-only',
+    permissions: null,
+  })
+  expect(await f.service.prepareProject('p')).toMatchObject({
+    cwd: f.directory,
+    sandbox: 'workspace-write',
+    runtimeWorkspaceRoots: [f.directory],
+  })
+  expect(await f.service.bindCreatedProject('chat', 'p')).toBe(true)
+  expect(await f.service.call('project', { sessionId: 'chat' })).toMatchObject({ effective: { projectId: 'p' } })
+})
 
 test('model defaults use the selected provider default and explicit false, without changing existing chats', async () => {
   const f = await fixture()
@@ -192,6 +213,20 @@ test('busy, missing native authority and Channel-denied changes never produce an
     code: 'CHANNEL_DENIED',
   })
   expect(f.request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
+})
+
+test('the Host Channel effect callback is revalidated after native reads and before persistence or mutation', async () => {
+  const f = await fixture()
+  const before = vi.fn(async () => false)
+  expect(await f.service.applyChannel('fast-set', { sessionId: 'chat', fast: true, expectedRevision: 0 }, before))
+    .toMatchObject({ status: 'rejected', code: 'CHANNEL_CHANGE_REVOKED' })
+  expect(before).toHaveBeenCalledTimes(1)
+  expect(f.request.mock.calls.some(([method]) => method === 'thread/settings/update')).toBe(false)
+  expect(await f.service.call('fast', { sessionId: 'chat' })).toMatchObject({ revision: 0 })
+  expect(
+    await f.service.applyChannel('fast-set', { sessionId: 'chat', fast: true, expectedRevision: 0 }, async () => true),
+  )
+    .toMatchObject({ status: 'applied', revision: 1 })
 })
 
 test('old loaded settings hydrate once through the real preference preparation chain', async () => {

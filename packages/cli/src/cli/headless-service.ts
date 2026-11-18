@@ -216,6 +216,7 @@ export async function startHeadlessService(input: {
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
       models: backend.models,
+      configuration: chatConfiguration,
       cwd: input.cwd,
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,

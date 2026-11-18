@@ -28,6 +28,47 @@ const catalog = [
 ]
 
 describe('Channel task configuration authority', () => {
+  it('preserves false Fast defaults and intersects field grants with exact Fast and project values', () => {
+    const config = parseChannelTaskConfig({
+      defaults: { fast: true, projectId: 'repo-a' },
+      scopes: [{ id: 'alice', userIds: ['alice'], settings: { fast: false } }],
+      permissions: [{
+        id: 'projects',
+        effect: 'allow',
+        userIds: ['alice'],
+        fields: ['fast', 'projectId'],
+        fastModes: [false],
+        projectIds: ['repo-a'],
+      }],
+    })
+    expect(channelTaskDefaults(config, policy, event)).toEqual({ fast: false, projectId: 'repo-a' })
+    expect(channelTaskChangeAllowed(config, policy, event, { fast: false, projectId: 'repo-a' }, {
+      fast: false,
+      projectId: 'repo-a',
+    })).toBe(true)
+    expect(channelTaskChangeAllowed(config, policy, event, { fast: true }, { fast: true, projectId: 'repo-a' })).toBe(
+      false,
+    )
+    expect(
+      channelTaskChangeAllowed(config, policy, event, { projectId: 'repo-b' }, { fast: false, projectId: 'repo-b' }),
+    ).toBe(false)
+    for (const fast of ['false', null, 0]) expect(() => parseChannelTaskConfig({ defaults: { fast } })).toThrow()
+  })
+  it('includes an implied Fast disable in provider-change approval and rejects unsupported explicit enable', () => {
+    const fastCatalog = [{ providerId: 'one', models: [{ id: 'shared', supportsFastMode: true }] }, catalog[1]!]
+    expect(
+      resolveChannelTaskSelection(fastCatalog, { providerId: 'one', model: 'shared', fast: true }, {
+        providerId: 'two',
+      }),
+    )
+      .toEqual({
+        selection: { providerId: 'two', model: 'new', fast: false },
+        patch: { providerId: 'two', model: 'new', fast: false },
+      })
+    expect(() => resolveChannelTaskSelection(fastCatalog, { providerId: 'two', model: 'new' }, { fast: true })).toThrow(
+      'FAST_NOT_SUPPORTED',
+    )
+  })
   it('merges user defaults over group and conversation defaults and rejects equal-specificity conflicts', () => {
     const config = parseChannelTaskConfig({
       defaults: { providerId: 'one', model: 'shared' },

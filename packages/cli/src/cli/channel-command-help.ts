@@ -49,7 +49,7 @@ const HELP: Readonly<Record<string, string>> = {
   'task-settings':
     'Read one Channel task model settings. Input: {sessionId?}. Incoming tasks retain --context from the prompt.',
   'task-settings-set':
-    'Request an exact task change. Input: {sessionId?,settings:{providerId?,model?,effort?},expectedRevision?}. Authorized users change directly; others receive an approval-required receipt. Idle application never interrupts the active turn.',
+    'Request an exact task change. Input: {sessionId?,settings:{providerId?,model?,effort?,fast?:boolean,projectId?},expectedRevision?}. Authorized users change directly; others receive an approval-required receipt. Idle application never interrupts the active turn. Native project IDs come from model-list.',
   'task-config': 'Read Channel-scoped creation defaults and field/provider/model permission rules. Input: {}.',
   'task-config-set':
     'Local-user CAS replacement of Channel task config. Input: {config:{defaults,scopes,permissions},expectedRevision}. Agent context cannot change global permission rules.',

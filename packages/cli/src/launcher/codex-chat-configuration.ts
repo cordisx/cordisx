@@ -53,6 +53,69 @@ export class CodexChatConfiguration {
   catalog() {
     return this.authority.catalog?.() ?? Promise.resolve([])
   }
+  private async projectCaller(caller?: string) {
+    if (caller) return caller
+    const page = object(
+      await this.authority.request('thread/list', { limit: 1, modelProviders: [], sortKey: 'updated_at' }),
+    )
+    const id = Array.isArray(page.data) ? object(page.data[0]).id : undefined
+    if (!identity(id)) throw new Error('PROJECT_CONTEXT_UNAVAILABLE')
+    return id
+  }
+  async projects(caller?: string) {
+    if (!this.authority.tool) throw new Error('PROJECT_AUTHORITY_UNAVAILABLE')
+    const result = toolResult(
+      await this.authority.tool({
+        tool: 'list_projects',
+        sourceThreadId: await this.projectCaller(caller),
+        arguments: {},
+      }),
+    )
+    if (!Array.isArray(result.projects)) throw new Error('PROJECT_CATALOG_UNAVAILABLE')
+    return result.projects.map(object)
+      .filter(row => row.projectKind === 'local' && row.hostId === 'local' && identity(row.projectId))
+      .map(row => ({
+        projectId: String(row.projectId),
+        name: String(row.label ?? row.name ?? row.title ?? row.projectId),
+      }))
+  }
+  async validateProject(projectId: string, caller?: string) {
+    await this.project(projectId, undefined, await this.projectCaller(caller))
+  }
+  async prepareProject(projectId: string, readOnly = false) {
+    const project = await this.project(projectId, undefined, await this.projectCaller())
+    return projectResume(
+      project,
+      projectSandbox(project, { type: readOnly ? 'readOnly' : 'workspaceWrite', networkAccess: false }),
+    )
+  }
+  async bindCreatedProject(threadId: string, projectId: string) {
+    const current = object(await this.call('project', { sessionId: threadId }))
+    if (current.status !== 'ok') return false
+    const result = object(
+      await this.applyChannel('project-set', {
+        sessionId: threadId,
+        projectId,
+        expectedRevision: current.revision,
+      }, async () => true),
+    )
+    return result.status === 'applied'
+  }
+  /** Host-only authorization seam for the exact approval pump and first-turn project binding. */
+  async applyChannel(
+    operation: 'fast-set' | 'project-set',
+    input: Record<string, unknown>,
+    beforeEffect: () => Promise<boolean>,
+  ) {
+    if (this.closed) return { status: 'unavailable', code: 'CHAT_CONFIGURATION_CLOSED' }
+    const pending = this.run(operation, input, { 'openai/threadId': input.sessionId }, beforeEffect)
+    this.pending.add(pending)
+    try {
+      return await pending
+    } finally {
+      this.pending.delete(pending)
+    }
+  }
   async close() {
     this.closed = true
     await Promise.allSettled([...this.pending])
@@ -273,7 +336,12 @@ export class CodexChatConfiguration {
       this.pending.delete(pending)
     }
   }
-  private async run(operation: string, input: unknown, metadata?: unknown): Promise<unknown> {
+  private async run(
+    operation: string,
+    input: unknown,
+    metadata?: unknown,
+    beforeEffect?: () => Promise<boolean>,
+  ): Promise<unknown> {
     let id: string | undefined, claimed = false
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INVALID_REQUEST')
@@ -297,7 +365,9 @@ export class CodexChatConfiguration {
         ? args.sessionId
         : undefined
       if (!defaults && !identity(id)) throw new Error('SESSION_REQUIRED')
-      const guard = await this.authority.guard?.(operation, { ...args, ...(id ? { sessionId: id } : {}) }, metadata)
+      const guard = beforeEffect
+        ? undefined
+        : await this.authority.guard?.(operation, { ...args, ...(id ? { sessionId: id } : {}) }, metadata)
       if (guard !== undefined) return guard
       if (
         operation.endsWith('-set')
@@ -325,7 +395,11 @@ export class CodexChatConfiguration {
           effective: {
             ...(native.serviceTier === undefined ? {} : { fast: native.serviceTier === 'priority' }),
             cwd: native.cwd,
-            ...(native.projectId === undefined ? {} : { projectId: native.projectId }),
+            ...(current.project && await this.membership(id!, current.project.projectId, metadata)
+              ? { projectId: current.project.projectId }
+              : native.projectId === undefined
+              ? {}
+              : { projectId: native.projectId }),
             sandbox: native.sandboxPolicy ?? native.sandbox,
           },
         }
@@ -362,6 +436,7 @@ export class CodexChatConfiguration {
       const latest = await this.nativeThread(id!)
       if (object(latest.status).type !== 'idle') throw new Error('THREAD_NOT_IDLE')
       if (operation === 'fast-set' && args.fast === true) await this.fastSupported(latest)
+      if (beforeEffect && !await beforeEffect()) throw new Error('CHANNEL_CHANGE_REVOKED')
       await this.save(id!, next)
       const before = this.observations.get(id!)?.revision ?? 0
       try {

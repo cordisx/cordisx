@@ -68,10 +68,14 @@ and sandbox payloads. A removed project or changed roots fail explicitly. Native
 settings observation confirms `applied`; `pending` and `reconciliation-required`
 require inspection. Sidebar membership alone is never reported as a write boundary.
 Project switching needs Desktop's native tool authority; headless has no sidebar
-project catalog. Channel callers may read their authenticated current chat's
-configuration, but Fast/project mutations remain unavailable until Channel's
-field-specific command and approval contract supports them. Generic commands
-cannot bypass those rules. Local user CLI can address a bound chat explicitly.
+project catalog. Channel callers may read their authenticated bound tasks and
+request Fast/project changes through the same field-specific permissions and
+approval workflow as Channel commands. Their existing `--context` identifies
+the incoming actor; switching CLI entry points cannot bypass those rules.
+Fast values and project IDs can be constrained independently. The common chat
+configuration revision and Channel task revision are separate: read the matching
+entry point's revision before requesting a change. Local user CLI can address
+a bound chat explicitly.
 
 ## Provider-aware creation
 
@@ -151,3 +155,10 @@ confirmation, and cwd plus workspace-write roots were read back after settings
 update. Native normalizes the cwd root out of `writableRoots` and reports a cleared
 tier as `default`. Resume alone did not apply directory overrides to a loaded chat;
 the project mutation uses settings update and confirms membership separately.
+Channel-specific checks also exercise compiled CLI requests through the source
+guard, persisted human approval and idle application of Fast/project settings.
+A fixture app-server behind the production authenticated intermediary confirms
+project resolution, native tool metadata, membership-before-turn ordering and
+strict turn roots. The isolated real CLI confirmed Channel Fast enable/disable
+and explicit headless project unavailability. The intermediary fixture does not
+establish real Desktop sidebar behavior.

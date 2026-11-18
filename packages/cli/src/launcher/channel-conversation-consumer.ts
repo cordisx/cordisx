@@ -8,6 +8,7 @@ import type { ChannelNativeSessions } from './channel-native-sessions.js'
 import { type ChannelCommandAddressing, ChannelCommandUsers } from './channel-command-users.js'
 import { ChannelSessionCommands } from './channel-session-commands.js'
 import { channelCommandHelp } from '../channel-command-registry.js'
+import { CHANNEL_MODEL_COMMANDS } from './channel-model-commands.js'
 import { ChannelNativeApprovals } from './channel-native-approvals.js'
 import { chatExecutionOperation } from './chat-execution-operation.js'
 import { ChannelCreationDefaults } from './channel-creation-defaults.js'
@@ -554,13 +555,7 @@ export class ChannelConversationConsumer {
         'choose',
         'permissions',
         'work-mode',
-        'models',
-        'model',
-        'provider',
-        'task-settings',
-        'task-requests',
-        'task-approve',
-        'task-deny',
+        ...CHANNEL_MODEL_COMMANDS,
       ].includes(command)
       && !channelPolicyAllows(this.store.snapshot().policy, 'command', event, command)
     ) {
