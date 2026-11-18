@@ -53,6 +53,25 @@ it('runs the production CLI and installed backend without Desktop, then reaps bo
     })
     expect(reused.pid).toBe(ready.pid)
     expect(await lifecycle('status')).toMatchObject({ pid: ready.pid, modelApiUrl: ready.modelApiUrl })
+    expect(JSON.parse(await cmd('codex', 'capabilities', '--profile', profile))).toMatchObject({
+      status: 'ok',
+      capabilities: { modelServices: true, providerCatalog: false, executionSettings: true },
+    })
+    expect(JSON.parse(await cmd('codex', 'defaults', 'get', '--profile', profile))).toMatchObject({
+      scope: 'creation-defaults',
+      revision: 0,
+    })
+    expect(
+      JSON.parse(await cmd('codex', 'defaults', 'set', '--revision', '0', '--effort', 'high', '--profile', profile)),
+    ).toMatchObject({ revision: 1 })
+    expect(JSON.parse(await cmd('codex', 'defaults', 'get', '--profile', profile))).toMatchObject({
+      settings: { effort: 'high' },
+      revision: 1,
+    })
+    expect(JSON.parse(await cmd('models', 'services', 'list', '--profile', profile))).toMatchObject({
+      status: 'ok',
+      services: [],
+    })
     await expect(cmd('start', 'codex', profile, '--json')).rejects.toThrow('owned by service mode')
     await expect(cmd('run', 'codex', profile)).rejects.toThrow('already has a runtime owner')
     const listing = JSON.parse(await cmd('plugin', 'list', '--profile', profile, '--json'))

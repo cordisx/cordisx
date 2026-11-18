@@ -27,6 +27,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown) => Promise<unknown>
+  readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -55,6 +56,7 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
       ...(input.channel === undefined ? {} : { channel: input.channel }),
+      ...(input.codex === undefined ? {} : { codex: input.codex }),
     })
   } catch (error) {
     service.close()
@@ -96,4 +98,11 @@ export function nativeTerminalProvider(current: () => NativeSubmissionCompositio
     if (!composition?.terminalProvider) throw new Error('Terminal provider unavailable in this runtime')
     return composition.terminalProvider(request)
   }
+}
+
+/** Late native bootstrap and replacement are resolved for every command, never cached as availability. */
+export function nativeCodexOperations(current: () => NativeSubmissionComposition | undefined) {
+  return async (operation: string, input: unknown, metadata?: unknown): Promise<unknown> =>
+    await current()?.codex?.(operation, input, metadata)
+      ?? { status: 'unavailable', code: 'CODEX_RUNTIME_UNAVAILABLE' }
 }

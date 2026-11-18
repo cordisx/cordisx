@@ -5,6 +5,8 @@ source composition are evidence for the adapter; real native task visibility
 and first-provider inference remain user acceptance gates.
 
 `cordisx_models.create_thread_with_provider` supplements native `create_thread`.
+The [supplemental CLI](codex-cli.md#provider-aware-creation) exposes this same
+operation without duplicating native creation or inventing a source turn.
 Use it only for an explicitly requested new task and configured provider/model.
 First call `list_model_providers`; its `threadCreation.status` must be
 `available`. Pass an exact catalog pair, original prompt, native project/local

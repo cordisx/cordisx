@@ -65,6 +65,7 @@ describe('Agent model-provider tools', () => {
   it('projects only model identifiers and labels from the same admitted provider catalog', async () => {
     const f = fixture()
     expect(await f.handler('list', {})).toEqual({
+      status: 'ok',
       threadCreation: { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
       providers: [{
         providerId: 'configured',
@@ -73,6 +74,15 @@ describe('Agent model-provider tools', () => {
       }],
     })
     expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
+  })
+  it('resolves the current session before applying the Channel provider guard', async () => {
+    const f = fixture(), guard = vi.fn(async () => ({ status: 'rejected', reason: 'channel-context-required' }))
+    const handler = createNativeAgentModelsHandler({ ...f.authority, channelModelSelection: guard })
+    const metadata = { 'openai/threadId': target.threadId }
+    expect(await handler('select', { providerId: target.providerId, model: target.model }, metadata))
+      .toMatchObject({ reason: 'channel-context-required' })
+    expect(guard).toHaveBeenCalledExactlyOnceWith(target, metadata)
+    expect(f.authority.reserve).not.toHaveBeenCalled()
   })
   it('discloses catalog reasoning choices without endpoint or credential metadata', async () => {
     const f = fixture()
@@ -244,6 +254,13 @@ describe('Agent model-provider tools', () => {
         'send_message',
         'check_operation',
         'integration_status',
+        'codex_capabilities',
+        'codex_chat_settings',
+        'codex_chat_settings_set',
+        'codex_chat_defaults',
+        'codex_chat_defaults_set',
+        'model_services_read',
+        'model_services_save',
         'channel_continuation_takeover_ready',
         'channel_continuation_history',
         'channel_continuation_checkpoint',
@@ -302,6 +319,28 @@ describe('Agent model-provider tools', () => {
       })
       expect(stderr).toBe('')
       const taskAuthority: NativeAgentModelsAuthority = f.authority
+      taskAuthority.execution = vi.fn(async (operation, input, metadata) => ({
+        status: 'ok',
+        operation,
+        input,
+        metadata,
+      }))
+      const generic = await request(60, 'tools/call', {
+        name: 'codex_chat_settings',
+        arguments: {},
+        _meta: { 'openai/threadId': 'ordinary' },
+      })
+      expect(JSON.parse(generic.content[0].text)).toMatchObject({
+        status: 'ok',
+        operation: 'execution-settings',
+        input: {},
+        metadata: { 'openai/threadId': 'ordinary' },
+      })
+      taskAuthority.modelServices = vi.fn(async (operation) => ({ status: 'ok', operation, services: [] }))
+      expect(
+        JSON.parse((await request(70, 'tools/call', { name: 'model_services_read', arguments: {} })).content[0].text),
+      )
+        .toMatchObject({ status: 'ok', operation: 'read', services: [] })
       taskAuthority.createTask = vi.fn(async (_input: unknown, metadata: unknown) => ({ status: 'pending', metadata }))
       const created = await request(5, 'tools/call', {
         name: 'create_thread_with_provider',

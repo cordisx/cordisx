@@ -115,7 +115,11 @@ export function configuredChannelToolHandler(
 ) {
   return tools === undefined
     ? {}
-    : { channel: (operation: string, input: unknown, metadata?: unknown) => tools.call(operation, input, metadata) }
+    : {
+      channel: (operation: string, input: unknown, metadata?: unknown) => tools.call(operation, input, metadata),
+      chatSettingsGuard: (operation: string, args: Record<string, unknown>, metadata?: unknown) =>
+        tools.executionGuard(operation, args, metadata),
+    }
 }
 
 /** Local management calls retain source context while allowing local-only inventory. */

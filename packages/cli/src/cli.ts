@@ -2,7 +2,15 @@
 
 const argv = process.argv.slice(2)
 
-if (argv[0] === 'channel') {
+if (argv[0] === 'codex' || argv[0] === 'models') {
+  void import('./cli/codex-command.js').then(({ runCodexCommand }) =>
+    runCodexCommand(argv.slice(1), argv[0] === 'models')
+  ).catch(async error => {
+    const { CodexCommandRejected, codexCommandError } = await import('./cli/codex-command.js')
+    if (!(error instanceof CodexCommandRejected)) console.error(JSON.stringify(codexCommandError(error)))
+    process.exitCode = 1
+  })
+} else if (argv[0] === 'channel') {
   void import('./cli/channel-command.js').then(({ runChannelCommand }) => runChannelCommand(argv.slice(1))).catch(
     async error => {
       const { channelCommandError } = await import('./cli/channel-command-error.js')

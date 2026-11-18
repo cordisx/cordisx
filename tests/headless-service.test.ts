@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../packages/cli/src/launcher/chat-execution-preferences.js', () => ({
+  ChatExecutionPreferences: class {
+    static async open() {
+      return { close: async () => {} }
+    }
+  },
+}))
 
 const f = vi.hoisted(() => ({ events: [] as string[], failStart: false, enabled: true }))
 vi.mock(
@@ -113,7 +120,13 @@ describe('headless service lifecycle', () => {
   })
   it('does not start a backend for a disabled Channel plugin', async () => {
     f.enabled = false
-    expect(await startHeadlessService(input)).toBeUndefined()
+    const service = await startHeadlessService(input)
+    expect(service.channel).toBeUndefined()
+    expect(await service.codex('capabilities', {})).toMatchObject({
+      capabilities: { modelServices: true, providerCatalog: false, executionSettings: true },
+    })
     expect(f.events).toEqual([])
+    await service.close()
+    expect(await service.codex('capabilities', {})).toMatchObject({ code: 'CODEX_RUNTIME_UNAVAILABLE' })
   })
 })

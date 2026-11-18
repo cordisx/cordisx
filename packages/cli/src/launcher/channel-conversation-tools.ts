@@ -70,6 +70,18 @@ export class ChannelConversationTools {
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
   ) {}
 
+  /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
+  async executionGuard(operation: string, args: Record<string, unknown>, metadata?: unknown) {
+    const caller = callerThreadId(metadata)
+    const meta = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+    if (
+      meta['cordisx/channelContext'] !== undefined
+      || caller && this.consumer?.taskSettings.isBound(caller)
+      || this.consumer?.agentAccess.preparation(metadata)
+    ) return this.call(operation, args, metadata)
+    return undefined
+  }
+
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
     if (

@@ -52,7 +52,9 @@ import { mergeDeclaredIntoCodexProjection } from './model-service-projection.js'
 import { type AgentBridge, startAgentBridge } from './agent-bridge.js'
 import { callerThreadId } from './agent-bridge-context.js'
 import { startModelApiServer } from './model-api-server.js'
-import { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
+import { nativeCodexSettings, openNativeCodexExecution } from './native-codex-settings-composition.js'
+import type { CodexChatSettingsGuard } from './codex-chat-settings.js'
 import { nativeProviderConfig } from './native-provider-config.js'
 import { createIntegrationStatus } from './integration-status.js'
 import { parseModelServicesSaveRequest, readModelServices, saveModelServices } from './model-service-store.js'
@@ -92,6 +94,7 @@ export interface NativeSubmissionInstallation {
   readonly accountCapability?: NativeAccountCapabilityDescriptor
 }
 export interface NativeSubmissionComposition {
+  readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly chatExecution?: ChatExecutionPreferences
   readonly channelSession?: import('./channel-native-sessions.js').ChannelNativeSessions
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
@@ -116,6 +119,7 @@ export class NativeSubmissionCompatibilityError extends Error {
   }
 }
 export interface NativeSubmissionCatalogOptions {
+  readonly chatSettingsGuard?: CodexChatSettingsGuard
   readonly contextObserver?: import('./native-context-observer.js').NativeContextObserver
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly channelName?: (event: import('@cordisx/channel-runtime').ChannelEventRef) => Promise<string | undefined>
@@ -775,19 +779,7 @@ export async function prepareNativeSubmissionBootstrap(
         terminalProviderDisplays = () => cdp.providerDisplays()
         if (completeOptions.managedCatalog !== undefined) {
           const managedHome = completeOptions.managedCatalog
-          chatExecution = await ChatExecutionPreferences.open({
-            file: path.join(
-              managedHome.homeDir,
-              'apps',
-              'codex',
-              'profiles',
-              managedHome.profileId,
-              'chat-execution.json',
-            ),
-            configPath: path.join(managedHome.homeDir, 'config.json'),
-            appId: 'codex',
-            profileId: managedHome.profileId,
-          })
+          chatExecution = await openNativeCodexExecution(managedHome)
           control.bindChatExecution(chatExecution)
           // The agent bridge lets Claude Code sessions read and start threads in this
           // app-server, and lets this app's agents reach Claude. Failing to start it
@@ -959,6 +951,12 @@ export async function prepareNativeSubmissionBootstrap(
               : await agentBridge.status(input),
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
+          ...nativeCodexSettings({
+            execution: chatExecution,
+            configPath: homeConfigPath,
+            options: completeOptions,
+            control,
+          }),
           ...cdp.agentSelection,
           switchThread: async input => {
             if (closePromise !== undefined) throw new Error('Native model tools were closed')
@@ -977,6 +975,7 @@ export async function prepareNativeSubmissionBootstrap(
           models: modelHandler,
         })
         return {
+          codex: (operation, input, metadata) => agentModels.call(operation, input, metadata),
           ...(chatExecution === undefined ? {} : { chatExecution }),
           terminalProvider: request => terminalProviders!.request(request),
           channelSession,

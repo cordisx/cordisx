@@ -13,13 +13,14 @@ import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { createConfiguredChannelConsumer } from './channel-consumer-composition.js'
 import { startHeadlessCodexBackend } from '../launcher/headless-codex-backend.js'
 import type { AgentBridge } from '../launcher/agent-bridge.js'
-import type { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
+import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
 import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../launcher/headless-static-catalog.js'
 import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
 import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
+import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -76,7 +77,26 @@ export async function startHeadlessService(input: {
     if (activated.some(plugin => configuredIds.has(plugin.id))) throw new Error('PLUGIN_ID_COLLISION')
     const plugins = [...configured.plugins, ...activated]
     const plugin = plugins.find(item => item.id === 'channel' && item.enabled)
-    if (!plugin) return undefined
+    if (!plugin) {
+      const execution = await ChatExecutionPreferences.open({
+        file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'chat-execution.json'),
+        configPath: input.configPath,
+        appId: input.appId,
+        profileId: input.profileId,
+      })
+      cleanup.push(() => execution.close())
+      return {
+        channel: undefined,
+        codex: createHeadlessCodexOperations({
+          configPath: input.configPath,
+          environment: input.environment,
+          native: { executionPreferences: () => execution, exists: async () => false },
+          closed: () => closing !== undefined,
+        }),
+        snapshot: () => undefined,
+        close,
+      }
+    }
     const state = await readServiceConfigState({
       profileId: input.profileId,
       pluginId: 'channel',
@@ -190,7 +210,18 @@ export async function startHeadlessService(input: {
     cleanup.splice(cleanup.indexOf(disposeService), 1)
     cleanup.push(() => channel.dispose())
     await service.start(state.config)
-    return { channel, snapshot: () => service.snapshot(), close }
+    const codex = createHeadlessCodexOperations({
+      configPath: input.configPath,
+      environment: input.environment,
+      models: backend.models,
+      ...(authority.execution
+        ? { native: { executionPreferences: () => authority.execution, exists: id => native!.exists(id) } }
+        : {}),
+      channelTools: () => channelTools,
+      preparing: metadata => channel.consumer?.agentAccess.preparation(metadata) === true,
+      closed: () => closing !== undefined,
+    })
+    return { channel, codex, snapshot: () => service.snapshot(), close }
   } catch (error) {
     try {
       await close()

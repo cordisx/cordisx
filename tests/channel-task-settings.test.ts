@@ -113,6 +113,27 @@ async function fixture() {
 }
 
 describe('exact Channel task changes', () => {
+  it('does not let stale context or an inactive bound caller fall through to generic provider selection', async () => {
+    const f = await fixture()
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'cordisx/channelContext': 'expired',
+        'openai/threadId': 'ordinary',
+      }),
+    ).toMatchObject({ status: 'rejected', reason: 'channel-context-required' })
+    f.native.sourceFor = () => undefined as never
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'openai/threadId': 'chat',
+        'openai/turnId': 'inactive',
+      }),
+    ).toMatchObject({ status: 'rejected', reason: 'channel-context-required' })
+    expect(
+      await f.tasks.externalSelection({ threadId: 'unbound', providerId: 'one', model: 'old' }, {
+        'openai/threadId': 'ordinary',
+      }),
+    ).toBeUndefined()
+  })
   it('persists intent before the native effect, waits for idle and applies an authorized user change once', async () => {
     const f = await fixture()
     f.setBusy(true)

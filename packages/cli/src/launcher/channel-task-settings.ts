@@ -400,10 +400,16 @@ export class ChannelTaskSettings {
   }
   async externalSelection(value: unknown, metadata: unknown): Promise<unknown | undefined> {
     const args = object(value), caller = this.caller(metadata)
+    if (object(metadata)['cordisx/channelContext'] !== undefined && !caller) {
+      return { status: 'rejected', reason: 'channel-context-required', tool: 'channel_task_settings_set' }
+    }
     if (caller) {
       return this.request(caller.source, channelText(args.threadId), { providerId: args.providerId, model: args.model })
     }
-    if (typeof args.threadId !== 'string' || !this.isBound(args.threadId)) return undefined
+    const callerId = callerThreadId(metadata)
+    if ((!callerId || !this.isBound(callerId)) && (typeof args.threadId !== 'string' || !this.isBound(args.threadId))) {
+      return undefined
+    }
     return { status: 'rejected', reason: 'channel-context-required', tool: 'channel_task_settings_set' }
   }
 }

@@ -316,6 +316,7 @@ try {
       'dist/assets/launcher/native-cli-invocation.mjs',
       'dist/assets/launcher/native-agent-models-mcp.mjs',
       'dist/assets/launcher/channel-agent-tools.mjs',
+      'dist/assets/launcher/codex-agent-tools.mjs',
       'dist/assets/launcher/native-request-tracker.mjs',
       'dist/assets/launcher/native-turn-diagnostics.mjs',
       'node_modules/@cordisx/schemastery-ui/package.json',

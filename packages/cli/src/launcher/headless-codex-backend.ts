@@ -5,6 +5,7 @@ import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { bindHeadlessCatalog } from './headless-catalog-binding.js'
 import { HeadlessContextCapture } from './headless-context-capture.js'
+import { HeadlessSettingsObserver } from './headless-settings-observer.js'
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
 export async function startHeadlessCodexBackend(input: {
@@ -61,6 +62,7 @@ export async function startHeadlessCodexBackend(input: {
       : undefined
     if (!server.subscribeRequests) throw new Error('App-server request handling is unavailable')
     const unsubscribeRequests = server.subscribeRequests(input.onRequest)
+    const settingsObserver = new HeadlessSettingsObserver(server)
     const unsubscribeNotifications = input.onNotification === undefined
       ? undefined
       : server.subscribeNotifications?.(input.onNotification)
@@ -172,10 +174,17 @@ export async function startHeadlessCodexBackend(input: {
       }
       try {
         if (status !== 'notLoaded') {
+          const revision = settingsObserver.revision(selection.threadId)
           await authority.nativeRequest('thread/settings/update', {
             threadId: selection.threadId,
             model: selection.model,
           })
+          const settings = await settingsObserver.wait(selection.threadId, revision)
+          if (status === 'idle' && settings) {
+            return settings.model === selection.model && settings.modelProvider === selection.providerId
+              ? { status: 'selected' }
+              : { status: 'reconciliation-required', reason: 'native-selection-unconfirmed' }
+          }
         }
         const resumed = await authority.nativeRequest('thread/resume', {
           threadId: selection.threadId,
@@ -202,7 +211,8 @@ export async function startHeadlessCodexBackend(input: {
         if (app !== 'codex') throw new Error('Unsupported backend')
         return handler(operation, args)
       },
-      close: () => closed ??= closeServer(server, unsubscribeRequests, unsubscribeNotifications),
+      close: () =>
+        closed ??= closeServer(server, unsubscribeRequests, unsubscribeNotifications, () => settingsObserver.close()),
     }
   } catch (error) {
     await server.close().catch(() => undefined)

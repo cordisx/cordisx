@@ -24,6 +24,9 @@ owns the selected scope, stop that instance explicitly before switching modes.
 
 Use `cordisx plugin list --profile work` and the usual plugin management
 commands. Existing permissions and plugin configuration still apply.
+The [supplemental Codex CLI](codex-cli.md) also exposes shared model services and
+creation defaults in service mode. Session operations require its existing
+headless Codex backend; unsupported capabilities remain explicitly unavailable.
 `--yes` does not approve new permissions. Browser-only plugins are shown as
 unavailable in service mode; there is no native Manager or Desktop session context.
 For Channel, use `cordisx channel connections --profile work` to inspect connection
