@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -65,15 +65,25 @@ describe('direct configured package provenance', () => {
   it('carries verified archive identity through the production renderer composition', async () => {
     const f = await fixture()
     const source = 'https://github.com/cordisx/demo'
-    await writeFile(path.join(f.root, 'cordisx-package.json'), JSON.stringify({ ...f.descriptor, canonicalSource: source }))
+    await writeFile(
+      path.join(f.root, 'cordisx-package.json'),
+      JSON.stringify({ ...f.descriptor, canonicalSource: source }),
+    )
     const archive = path.join(f.root, 'demo.tgz')
     await createTar({ cwd: f.root, file: archive, gzip: true }, [
-      'package.json', 'cordisx-package.json', 'runtime-manifest.json', 'dist',
+      'package.json',
+      'cordisx-package.json',
+      'runtime-manifest.json',
+      'dist',
     ])
     const integrity = `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}`
     await writeFile(f.config, JSON.stringify({ version: 1, plugins: [{ id: 'demo', entry: './demo.tgz' }] }))
     const config = await loadConfig(f.config), plugin = config.plugins[0]!
-    expect(plugin).toMatchObject({ source, manifest: f.runtime, package: { version: '1.0.0', artifactIntegrity: integrity } })
+    expect(plugin).toMatchObject({
+      source,
+      manifest: f.runtime,
+      package: { version: '1.0.0', artifactIntegrity: integrity },
+    })
     expect(plugin.entry).toContain('/packages/sha256/')
     expect(plugin.manifestFiles).toEqual([archive])
     const composition = await buildRendererCompositionSource(config, {}, { omitPluginModules: true })
@@ -82,7 +92,10 @@ describe('direct configured package provenance', () => {
     // Rebuilt archives must not inherit the previously certified distribution identity.
     await writeFile(path.join(f.root, 'dist', 'index.js'), 'export const name = "changed"')
     await createTar({ cwd: f.root, file: archive, gzip: true }, [
-      'package.json', 'cordisx-package.json', 'runtime-manifest.json', 'dist',
+      'package.json',
+      'cordisx-package.json',
+      'runtime-manifest.json',
+      'dist',
     ])
     expect((await loadConfig(f.config)).plugins[0]!.package!.artifactIntegrity).not.toEqual(integrity)
   })

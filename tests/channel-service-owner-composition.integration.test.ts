@@ -86,7 +86,9 @@ describe('actual direct Channel service ownership assembly', () => {
           runtimeGeneration: 'runtime-owner',
           serviceGeneration: activeOwner.serviceGeneration,
         })
-        expect(bundle.watchFiles).toContain(/\.(?:tgz|tar\.gz)$/u.test(entry) ? entry : path.resolve(path.dirname(entry), '../runtime-manifest.json'))
+        expect(bundle.watchFiles).toContain(
+          /\.(?:tgz|tar\.gz)$/u.test(entry) ? entry : path.resolve(path.dirname(entry), '../runtime-manifest.json'),
+        )
         const store = new MemoryPermissionPolicyStore(), prompt = vi.fn(async () => undefined)
         broker = new PermissionBroker(
           store,

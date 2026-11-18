@@ -6,7 +6,7 @@ import type { CordisXConfigPlugin } from './config.js'
 import { normalizeLatestRuntimeManifest } from './latest-runtime-manifest.js'
 import { PluginPackageSourceSnapshotter } from './packages/integrity.js'
 import { JsonPackageManifestV2Resolver } from './packages/manifest.js'
-import { stageResolvedPluginPackage, stagedPluginModulePath } from './plugin-package.js'
+import { stagedPluginModulePath, stageResolvedPluginPackage } from './plugin-package.js'
 
 /** A local archive binds the executed graph to its actual distribution bytes, never a self-claimed digest. */
 export async function configuredPluginArchive(
@@ -19,7 +19,9 @@ export async function configuredPluginArchive(
     await copyFile(plugin.entry, archive)
     const integrity = `sha256:${createHash('sha256').update(await readFile(archive)).digest('hex')}` as const
     const snapshot = await new PluginPackageSourceSnapshotter(temporary).snapshot({
-      kind: 'local-package', path: archive, distributionIntegrity: integrity,
+      kind: 'local-package',
+      path: archive,
+      distributionIntegrity: integrity,
     })
     const runtimeValidators = Object.fromEntries([12, 13, 14, 15, 16].map(version => [
       `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v${version}.schema.json`,
