@@ -149,7 +149,7 @@
     "fsevents": "~2.3.3"
   },
   "cordisxSources": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#9e911c63ee8dc43518435490f39cbf7333c9d688",
+    "@cordisx/channel": "github:cordisx/plugin-channel#b4bdd6429172cebaa9087aa574d52548f545f5d0",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#aa4fd159502704c2645fd5ce47aa135464578b8e"
   },
   "devDependencies": {
