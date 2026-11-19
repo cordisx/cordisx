@@ -14,6 +14,7 @@ import { createTerminalProviderAuthority } from '../packages/cli/src/launcher/te
 import type { NativeManagedGatewayConnectionSession } from '../packages/cli/src/launcher/managed-service-native-connection.js'
 
 const roots: string[] = [], closes: (() => void | Promise<void>)[] = []
+const checkClient = async (executable: string) => executable
 afterEach(async () => {
   for (const close of closes.splice(0).reverse()) await close()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
@@ -34,6 +35,7 @@ it('runs ordinary native Codex commands without a Host or CordisX config', async
   const missing = path.join(f.root, 'missing-home')
   const received: string[][] = []
   await runCordisXCli(['cli', '--', '--version'], {
+    internalCheckTerminalClient: checkClient,
     env: {
       ...f.env,
       CORDISX_HOME: missing,
@@ -79,6 +81,7 @@ it.each(['codex', 'claude-code'] as const)(
     const before = await readFile(f.configPath, 'utf8')
     let called = false
     await runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'model-one', '--', '--version'], {
+      internalCheckTerminalClient: checkClient,
       env: f.env,
       internalSpawnTerminal: ((executable: string, args: string[], options: any) => {
         called = true
@@ -99,7 +102,10 @@ it.each(['codex', 'claude-code'] as const)(
     })
     expect(called).toBe(true)
     expect(await readFile(f.configPath, 'utf8')).toBe(before)
-    await expect(runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'missing'], { env: f.env }))
+    await expect(runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'missing'], {
+      env: f.env,
+      internalCheckTerminalClient: checkClient,
+    }))
       .rejects.toThrow('catalog')
     await runCordisXCli(['start', '--mode', 'cli', client, '--list'], {
       env: f.env,
@@ -132,6 +138,7 @@ it('rejects unsupported Claude protocol before child spawn', async () => {
   )
   const spawnTerminal = vi.fn()
   await expect(runCordisXCli(['start', '--mode', 'cli', 'claude-code', '-s', 'responses', '-m', 'model'], {
+    internalCheckTerminalClient: checkClient,
     env: f.env,
     internalSpawnTerminal: spawnTerminal as unknown as typeof spawn,
   })).rejects.toThrow('anthropic-messages')
@@ -142,6 +149,7 @@ it('leaves foreground Ctrl-C semantics to the original Codex CLI', async () => {
   const f = await fixture()
   const child = Object.assign(new EventEmitter(), { exitCode: null, kill: vi.fn() })
   const run = runCordisXCli(['cli'], {
+    internalCheckTerminalClient: checkClient,
     env: f.env,
     internalSpawnTerminal: (() => {
       setImmediate(() => {
@@ -235,6 +243,7 @@ it('uses the production management socket, real credential helper and original t
     'hello',
   ], {
     ...runtime,
+    internalCheckTerminalClient: checkClient,
     internalSpawnTerminal: ((executable: string, args: string[], options: object): ChildProcess => {
       seen.push(args)
       expect(options).toMatchObject({ stdio: 'inherit', shell: false })
@@ -270,14 +279,17 @@ it('reports unavailable live owners without spawning or fabricating an inactive 
   const f = await fixture()
   const spawnTerminal = vi.fn()
   await expect(runCordisXCli(['cli', '--service', 'provider', '--model', 'model'], {
+    internalCheckTerminalClient: checkClient,
     env: f.env,
     internalSpawnTerminal: spawnTerminal as unknown as typeof spawn,
   })).rejects.toThrow('already-running')
   expect(spawnTerminal).not.toHaveBeenCalled()
 })
 
-it('releases a prepared lease after child spawn failure', async () => {
+it('releases a prepared lease if the checked executable disappears before terminal spawn', async () => {
   const f = await fixture()
+  const executable = path.join(f.root, 'codex')
+  await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
   const calls: string[] = []
   const server = await openProductionPluginManagementComposition({
     homeDir: f.root,
@@ -301,6 +313,7 @@ it('releases a prepared lease after child spawn failure', async () => {
     terminalProvider: async request => {
       calls.push(request.kind)
       if (request.kind === 'prepare') {
+        await rm(executable)
         return {
           kind: 'prepared',
           leaseId: 'lease',
@@ -314,7 +327,7 @@ it('releases a prepared lease after child spawn failure', async () => {
   })
   closes.push(() => server.close())
   await expect(
-    runCordisXCli(['cli', '--service', 'fixture', '--model', 'model', '--codex-executable', '/missing/codex'], {
+    runCordisXCli(['cli', '--service', 'fixture', '--model', 'model', '--codex-executable', executable], {
       env: f.env,
     }),
   )
@@ -349,7 +362,7 @@ it('binds the terminal callback through production Host assembly without opening
 it('passes the original child exit code through the compiled CLI process', async () => {
   const f = await fixture()
   const executable = path.join(f.root, 'codex-fixture')
-  await writeFile(executable, '#!/bin/sh\nexit 7\n', { mode: 0o700 })
+  await writeFile(executable, '#!/bin/sh\nif [ "$1" = "--version" ]; then exit 0; fi\nexit 7\n', { mode: 0o700 })
   const child = spawn(process.execPath, [
     path.resolve('packages/cli/dist/src/cli.js'),
     'cli',

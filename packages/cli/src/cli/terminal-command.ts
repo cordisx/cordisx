@@ -11,6 +11,7 @@ import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
 import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-layer.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
+import { checkTerminalClient, terminalClientName } from './terminal-client-check.js'
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
@@ -117,6 +118,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     }
   }
   let request: ((input: TerminalProviderRequest) => Promise<TerminalProviderResult>) | undefined
+  let host: { homeDir: string; profileId: string } | undefined
   let shared: ReturnType<typeof prepareSharedTerminalService>
   let declared: ReturnType<typeof sharedTerminalServices> = []
   if (invocation.service || invocation.list || invocation.profile) {
@@ -138,14 +140,21 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       environment.CODEX_HOME = path.join(path.dirname(configPath), 'apps', 'codex', 'profiles', profileId, 'codex-home')
     }
     if (!shared && (invocation.service || invocation.list)) {
-      try {
-        request = await connectExistingTerminalProvider({ homeDir: path.dirname(configPath), profileId })
-      } catch {
-        if (!invocation.list) {
-          throw new Error(
-            'CordisX plugin service selection requires an already-running compatible Host; no App was started',
-          )
-        }
+      host = { homeDir: path.dirname(configPath), profileId }
+    }
+  }
+  const executable = invocation.list ? undefined : await (runtime.internalCheckTerminalClient ?? checkTerminalClient)(
+    invocation.executable ?? (client === 'codex' ? 'codex' : 'claude'),
+    { cwd, env: environment, client, ...(runtime.internalSignal ? { signal: runtime.internalSignal } : {}) },
+  )
+  if (host) {
+    try {
+      request = await connectExistingTerminalProvider(host)
+    } catch {
+      if (!invocation.list) {
+        throw new Error(
+          'CordisX plugin service selection requires an already-running compatible Host; no App was started',
+        )
       }
     }
   }
@@ -245,7 +254,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
         ...(claudeSettings ? ['--settings', claudeSettings] : []),
       ]
     child = (runtime.internalSpawnTerminal ?? spawn)(
-      invocation.executable ?? (client === 'codex' ? 'codex' : 'claude'),
+      executable!,
       [...args],
       {
         cwd,
@@ -283,11 +292,18 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     if (runtime.internalSignal?.aborted) abort()
     try {
       const code = await new Promise<number>((resolve, reject) => {
-        child!.once('error', () => reject(new Error(`Could not start ${client} CLI; check --executable or PATH`)))
+        child!.once(
+          'error',
+          () => reject(new Error(`Could not start ${terminalClientName(client)} CLI; check --executable or PATH`)),
+        )
         child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
       })
       if (failure) throw failure
-      if (code !== 0) throw Object.assign(new Error(`Codex CLI exited with status ${code}`), { exitCode: code })
+      if (code !== 0) {
+        throw Object.assign(new Error(`${terminalClientName(client)} CLI exited with status ${code}`), {
+          exitCode: code,
+        })
+      }
     } finally {
       process.off('SIGINT', interrupt)
       for (const signal of signals) process.off(signal, abort)
