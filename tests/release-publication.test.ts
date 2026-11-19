@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { publishReleasePackages } from '../scripts/release-publication.mjs'
+import { isAlreadyPublishedError, publishReleasePackages } from '../scripts/release-publication.mjs'
 import { retryRegistryPropagation } from '../scripts/registry-release-propagation.mjs'
 
 const version = '0.1.0-beta.10'
@@ -115,14 +115,17 @@ describe('release publication convergence', () => {
     expect(publish).toHaveBeenCalledOnce()
   })
 
-  it('treats a publish conflict as pending readback, not proof of matching content', async () => {
+  it.each([
+    'npm error code EPUBLISHCONFLICT: You cannot publish over the previously published versions',
+    'npm error code E409: Cannot publish over previously staged version "0.1.0-beta.10".',
+  ])('treats %s as pending readback, not proof of matching content', async message => {
     const visible = new Set<string>()
     const viewVersion = vi.fn(async (name: string) => visible.has(name) ? fixture(name) : undefined)
     const publish = vi.fn(async pkg => {
       visible.add(pkg.name)
       if (pkg.name === 'cordisx') {
-        const error = new Error('You cannot publish over the previously published versions')
-        Object.assign(error, { commandOutput: 'npm error code EPUBLISHCONFLICT' })
+        const error = new Error(message)
+        Object.assign(error, { commandOutput: message })
         throw error
       }
     })
@@ -131,15 +134,18 @@ describe('release publication convergence', () => {
     expect(publish).toHaveBeenCalledTimes(2)
   })
 
-  it('does not checkpoint a publish conflict before immutable readback succeeds', async () => {
+  it.each([
+    'npm error code EPUBLISHCONFLICT: You cannot publish over the previously published versions',
+    'npm error code E409: Cannot publish over previously staged version "0.1.0-beta.10".',
+  ])('does not checkpoint %s before immutable readback succeeds', async message => {
     let reads = 0
     const viewVersion = vi.fn(async (name: string) => {
       reads += 1
       return reads <= packages.length ? undefined : fixture(name, { gitHead: 'different' })
     })
     const publish = vi.fn(async () => {
-      const error = new Error('You cannot publish over the previously published versions')
-      Object.assign(error, { commandOutput: 'npm error code EPUBLISHCONFLICT' })
+      const error = new Error(message)
+      Object.assign(error, { commandOutput: message })
       throw error
     })
     const completePhase = vi.fn(async () => undefined)
@@ -149,6 +155,10 @@ describe('release publication convergence', () => {
       completePhase,
     })).rejects.toThrow('registry gitHead mismatch')
     expect(completePhase).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an unrelated E409 as an accepted submission', () => {
+    expect(isAlreadyPublishedError(new Error('npm error code E409: conflicting repository metadata'))).toBe(false)
   })
 
   it('fails before publishing when an existing tarball digest differs', async () => {

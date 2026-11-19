@@ -33,13 +33,30 @@ record; retain the normal package and clean-registry gates for release evidence.
    skipped. Missing packages are all submitted in dependency order before remote
    convergence begins. A publish conflict caused by a prior submission is
    accepted only as a cue to continue readback; it is never treated as proof of
-   matching content.
+   matching content. `E409 Cannot publish over previously staged version` also
+   means a prior upload is still pending, not that its contents are verified.
 5. Wait for the unified readback. Registry 404/target misses, delayed
    attestations, and delayed selected dist-tags use exponential backoff from 5
-   seconds to a 60-second cap, within a 10-minute total window. Each retry logs
+   seconds to a 60-second cap. Publication readback has a 30-minute total window
+   for npm publish-time scanning; installation retries retain a 10-minute window. Each retry logs
    elapsed time, attempt number, next delay, and deadline.
 6. Treat the workflow as complete only after clean registry installation and
    generated-project verification pass for both packages.
+
+## npm publish-time scanning
+
+npm scans accepted uploads before making their metadata and tarballs public.
+A successful upload can therefore still return registry 404 for several minutes.
+The [npm scanning announcement](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/)
+notes that validation can take 15 minutes or more. Wait for immutable readback;
+do not repeatedly upload while validation is pending. A staged-version conflict
+never bypasses integrity, source commit, or provenance checks.
+
+If a version stays unavailable beyond the bounded window, inspect its maintainer
+version status. npm has a [known registry issue](https://github.com/npm/cli/issues/9889)
+where an accepted version remains staged but is absent from the staging list.
+Preserve its tag and candidate. A separately authorized successor release must
+use a new version and pass its own gates; it must not replace the old tag.
 
 ## Release manifest and state
 
@@ -117,7 +134,7 @@ An identity failure therefore stops before any remote mutation.
 
 Publication now submits all missing packages before waiting. Visibility and
 immutable verification share one exponential-backoff window: 5, 10, 20, 40,
-then at most 60 seconds per wait, with a hard 10-minute wall-clock deadline.
+then at most 60 seconds per wait, with a hard 30-minute publication deadline.
 In a deterministic two-package model where each package becomes visible after
 seven minutes, the configured backoff observes both at 7 minutes 15 seconds;
 the previous per-package serial flow would take about 14 minutes 30 seconds.
