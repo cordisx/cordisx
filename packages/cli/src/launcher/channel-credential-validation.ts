@@ -11,6 +11,30 @@ function discoveryFailure(error: unknown): Error {
   )
 }
 
+/** Authenticate even when the user supplies a tenant key and no directory lookup is needed. */
+export async function validateChannelCredentials(input: {
+  readonly adapterId: string
+  readonly accountId: string
+  readonly secret: string
+}): Promise<void> {
+  const silent = () => {}
+  const client = new Client({
+    appId: input.accountId,
+    appSecret: input.secret,
+    domain: input.adapterId === 'lark' ? Domain.Lark : Domain.Feishu,
+    loggerLevel: LoggerLevel.fatal,
+    logger: { error: silent, warn: silent, info: silent, debug: silent, trace: silent },
+    cache: { get: async () => undefined, set: async () => false },
+    source: 'cordisx-channel-credential-entry',
+  })
+  try {
+    const token: unknown = await client.tokenManager.getTenantAccessToken()
+    if (typeof token !== 'string' || !token.trim()) throw new Error('invalid token')
+  } catch {
+    throw new Error('CREDENTIAL_VALIDATION_FAILED')
+  }
+}
+
 /** An optional tenant lookup uses only the newly entered credentials and never opens another transport. */
 export async function discoverChannelTenant(input: {
   readonly adapterId: string

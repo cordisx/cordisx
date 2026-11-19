@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { discoverChannelTenant } from './channel-credential-validation.js'
+import { discoverChannelTenant, validateChannelCredentials } from './channel-credential-validation.js'
 import type { JsonValue } from '../config/home-config.js'
 import type { HostServiceConfigNarrowApi } from './service-config.js'
 import type { LauncherSecretStore } from './secret-store.js'
@@ -66,6 +66,7 @@ export class ChannelCredentialDraftBroker {
       readonly projection?: () => Promise<unknown>
       readonly now?: () => number
       readonly discoverTenant?: typeof discoverChannelTenant
+      readonly validateCredentials?: typeof validateChannelCredentials
     },
   ) {
     this.timer = setInterval(() => {
@@ -200,6 +201,12 @@ export class ChannelCredentialDraftBroker {
           secret,
         }),
       }
+    } else {
+      await (this.input.validateCredentials ?? validateChannelCredentials)({
+        adapterId: account.adapterId,
+        accountId: account.accountId,
+        secret,
+      })
     }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
     const configuration = await this.input.service.descriptor()

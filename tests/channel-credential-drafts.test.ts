@@ -31,17 +31,35 @@ function fixture() {
     descriptor: vi.fn(async () => descriptor),
     mutate: vi.fn(async () => ({ status: 'applied', revision: 1 })),
   }
+  const validateCredentials = vi.fn(async () => {})
   const broker = new ChannelCredentialDraftBroker({
     profileId: 'test',
     store,
     service: service as never,
     discoverTenant: vi.fn(async () => 'test'),
+    validateCredentials,
   })
   const capture = (owner = 'owner') =>
     broker.handle({ operation: 'capture', owner, purpose: 'create', account: ref, secret: 'test-only' }, 'document')
-  return { broker, service, backend, values, capture }
+  return { broker, service, backend, values, capture, validateCredentials }
 }
 describe('Host-owned credential draft transactions', () => {
+  it('rejects invalid credentials before storing them even when a tenant key was supplied', async () => {
+    const f = fixture()
+    f.validateCredentials.mockRejectedValueOnce(new Error('CREDENTIAL_VALIDATION_FAILED'))
+    try {
+      await expect(f.capture()).resolves.toMatchObject({ status: 'rejected', code: 'CREDENTIAL_VALIDATION_FAILED' })
+      expect(f.validateCredentials).toHaveBeenCalledWith({
+        adapterId: ref.adapterId,
+        accountId: ref.accountId,
+        secret: 'test-only',
+      })
+      expect(f.backend.upsert).not.toHaveBeenCalled()
+      expect(f.service.mutate).not.toHaveBeenCalled()
+    } finally {
+      await f.broker.dispose()
+    }
+  })
   it('rotates the key and connection settings in one CAS while preserving unrelated connection bytes', async () => {
     const f = fixture()
     const descriptor = await f.service.descriptor()
