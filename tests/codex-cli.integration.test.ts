@@ -23,6 +23,9 @@ import { configuredChannelToolHandler } from '../packages/cli/src/cli/channel-co
 test('compiled entry preserves bare Codex and named-profile App launch syntax', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'codex-cli-launch-'))
   try {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith('CORDISX_') && !key.startsWith('CODEX_')),
+    )
     for (const profile of [undefined, 'work']) {
       await promisify(execFile)(process.execPath, [
         path.resolve('packages/cli/dist/src/cli.js'),
@@ -31,7 +34,7 @@ test('compiled entry preserves bare Codex and named-profile App launch syntax', 
         '--dry-run',
         '--executable',
         process.execPath,
-      ], { env: { ...process.env, CORDISX_HOME: root }, timeout: 30_000 })
+      ], { env: { ...env, CORDISX_HOME: root }, timeout: 30_000 })
     }
     const config = JSON.parse(await readFile(path.join(root, 'config.json'), 'utf8'))
     expect(config.apps.codex.profiles.work.dataMode).toBe('shared')
