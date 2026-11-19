@@ -22,6 +22,8 @@ import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../laun
 import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
 import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
+import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
+import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
 
 const execFileAsync = promisify(execFile)
 
@@ -127,6 +129,10 @@ export async function startHeadlessService(input: {
         typeof readServiceConfigState
       >[0]['initialConfig'],
     }, input.configPath)
+    const backendEnvironment = withoutLauncherSecrets(
+      input.environment,
+      parseChannelServiceConfig(state.config).connections.map(connection => connection.secretRef),
+    )
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
@@ -135,13 +141,14 @@ export async function startHeadlessService(input: {
       dataDir: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-runtime'),
       source: plugin.source ?? pathToFileURL(plugin.entry).href,
       environment: input.environment,
+      homeDir: input.homeDir,
     })
     // Register cleanup before starting: an early failure must not strand the transport.
     const disposeService = () => service.dispose()
     cleanup.push(disposeService)
     // Only the validated app-server version has documented fresh-session default-mode evidence.
     const version = await execFileAsync(input.codexExecutable, ['--version'], {
-      env: input.environment,
+      env: backendEnvironment,
       timeout: 5_000,
     }).then(value => value.stdout.trim()).catch(() => '')
     const nativeAuthority = await createHeadlessNativeAuthority({
@@ -171,7 +178,7 @@ export async function startHeadlessService(input: {
       codexHome: input.codexHome,
       userHome: input.userHome,
       cwd: input.cwd,
-      environment: input.environment,
+      environment: backendEnvironment,
     })
     if (catalog) cleanup.push(catalog.close)
     let native: ChannelNativeSessions | undefined
@@ -180,7 +187,7 @@ export async function startHeadlessService(input: {
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
-      environment: input.environment,
+      environment: backendEnvironment,
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
       contextObserver,

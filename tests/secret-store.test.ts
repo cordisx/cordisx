@@ -97,8 +97,8 @@ describe('launcher Host-private channel secret store', () => {
       .rejects.toMatchObject({ code: 'SECRET_MISSING' })
   })
 
-  it('is honestly unavailable on non-macOS and rejects unknown capture authority', async () => {
-    const store = new LauncherSecretStore({ platform: 'linux' })
+  it('is honestly unavailable on unsupported platforms and rejects unknown capture authority', async () => {
+    const store = new LauncherSecretStore({ platform: 'win32' })
     const capture = store.beginCapture({ profileId: 'work', connectionId: 'feishu-prod' })
     await expect(store.capture({ captureId: capture.captureId, secret: 'test-secret' })).resolves.toMatchObject({
       state: 'unavailable',

@@ -83,6 +83,7 @@ export async function createRendererChannelComposition(input: {
     dataDir: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-runtime'),
     source: plugin.source ?? pathToFileURL(plugin.entry).href,
     environment: input.environment,
+    homeDir: input.homeDir,
   })
   await service.start(state.config)
   return {
@@ -148,7 +149,7 @@ export function createChannelLaunchBridges(input: {
     ? createChannelCredentialBridgeHandler({
       token: channel.credentialBridgeToken,
       profileId: input.profileId,
-      store: new LauncherSecretStore(),
+      store: new LauncherSecretStore({ homeDir: path.dirname(input.configPath) }),
       service: configApi,
       projection: channel.loadManagerProjection,
     })

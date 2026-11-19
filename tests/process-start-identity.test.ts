@@ -146,6 +146,20 @@ describe.skipIf(process.platform === 'win32')('identity collection through both 
     expect(await processIdentityStatus(process.pid, anotherStart)).toBe('dead')
   })
 
+  it.each(['EPERM', 'EACCES'])('checks the full start time when the signal probe is denied with %s', async code => {
+    const probe = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('sandbox signal probe denied'), { code })
+    })
+    try {
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('alive')
+      expect(await processIdentityStatus(process.pid, anotherStart)).toBe('dead')
+      fixture.failure = true
+      expect(await processIdentityStatus(process.pid, canonical)).toBe('unknown')
+    } finally {
+      probe.mockRestore()
+    }
+  })
+
   it('keeps an unsupported legacy record unknown rather than authorizing reclamation', async () => {
     expect(recordedProcessStatus(process.pid, 'unsupported old locale')).toBe('unknown')
     expect(await processIdentityStatus(process.pid, 'unsupported old locale')).toBe('unknown')

@@ -41,6 +41,68 @@ browser session. Plugin-owned data follows the plugin's existing storage rules:
 managed-service data directories are keyed by home and plugin/service identity.
 Use separate homes for separate backend accounts.
 
+## Linux deployment and Channel credentials
+
+Service mode does not require a desktop application or macOS Keychain. Install
+Node.js 22.19 or newer, `ps` (procps), `flock` (util-linux) and Codex CLI.
+Authenticate Codex under the service user,
+and keep the configured Channel plugin enabled in that user's CordisX profile.
+For unattended Feishu/Lark deployments, use an environment reference in the existing
+Host-owned service configuration:
+
+```json
+{ "secretRef": "host-secret:env/CORDISX_FEISHU_APP_SECRET" }
+```
+
+Supply that variable to the launcher from your deployment secret manager or a
+private systemd `EnvironmentFile` (mode `600`, outside the repository). The
+file contains `CORDISX_FEISHU_APP_SECRET=<existing app secret>`; do not put its
+value in CordisX JSON or command-line arguments. `keychain:` references copied
+from macOS cannot resolve on Linux: replace the reference and provision the
+same application's credential through the environment. The App ID and tenant
+remain the connection's non-secret configuration.
+
+For example, a systemd startup wrapper can use these service directives; adapt
+the user, paths and profile to the existing installation:
+
+```ini
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=cordisx
+Environment=CORDISX_HOME=/var/lib/cordisx
+Environment=CODEX_HOME=/home/cordisx/.codex
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/cordisx/channel.env
+ExecStart=/usr/local/bin/cordisx start --mode service codex work
+ExecStop=/usr/local/bin/cordisx stop --mode service codex work
+```
+
+This wrapper starts CordisX's detached supervisor; it is not a foreground
+process or a systemd automatic-restart policy. After changing the environment
+file, restart the wrapper or run `cordisx restart --mode service codex work`
+with the updated environment. Inspect `status` and `channel connections` for
+both supervisor and account readiness. The launcher resolves environment
+credentials for the Channel transport and removes their referenced variables
+from the managed Codex backend's environment.
+
+The Host credential-entry UI also saves, replaces and removes credentials on
+Linux. It stores an opaque `host-secret:channel/<profile>/<connection>` reference
+in configuration and AES-256-GCM encrypted credentials under
+`<CORDISX_HOME>/credentials/channel`. Directories use mode `700`; the encrypted
+records and `master-key` use mode `600` and belong to the service user. The same
+home must be used by the Manager and headless launcher. Restarted services read
+the persisted credential without another prompt. macOS keeps using Keychain.
+
+This file backend protects credentials at rest from other OS users; its master
+key resides with the ciphertext and is not an OS Keychain equivalent. Back up
+both together in private storage. Copying only `config.json` does not transfer
+the credential. Symlinked, shared-permission, damaged or missing-key storage is
+reported as unavailable rather than using an unsafe fallback. Environment
+provisioning remains suitable for servers with an external secret manager.
+
+## Local model API
+
 The unified model API listens on `127.0.0.1:8398` by default. Set
 `CORDISX_MODEL_API_PORT` before startup to change the port; `0` asks the OS for
 a free port. Use the actual endpoint and access key path from

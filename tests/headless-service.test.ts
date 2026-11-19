@@ -14,7 +14,13 @@ vi.mock('../packages/cli/src/launcher/codex-chat-configuration.js', () => ({
   },
 }))
 
-const f = vi.hoisted(() => ({ events: [] as string[], failStart: false, enabled: true }))
+const f = vi.hoisted(() => ({
+  events: [] as string[],
+  failStart: false,
+  enabled: true,
+  transportEnvironment: undefined as NodeJS.ProcessEnv | undefined,
+  backendEnvironment: undefined as NodeJS.ProcessEnv | undefined,
+}))
 vi.mock(
   '../packages/cli/src/launcher/config.js',
   () => ({
@@ -31,23 +37,41 @@ vi.mock('../packages/cli/src/launcher/plugin-activation.js', () => ({
 vi.mock('../packages/cli/src/launcher/plugin-composition.js', () => ({ loadPluginComposition: async () => [] }))
 vi.mock(
   '../packages/cli/src/config/service-config.js',
-  () => ({ readServiceConfigState: async () => ({ config: {} }) }),
+  () => ({
+    readServiceConfigState: async () => ({
+      config: {
+        contract: 'cordisx.channel-service-config/v2',
+        schemaVersion: 2,
+        connections: [{
+          ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant' },
+          adapterKind: 'feishu',
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: 'host-secret:env/CHANNEL_KEY',
+        }],
+      },
+    }),
+  }),
 )
 vi.mock('../packages/cli/src/launcher/channel-service.js', () => ({
   CHANNEL_SERVICE_CONFIG_INITIAL: {},
-  createLocalChannelService: () => ({
-    conversationAccess: () => undefined,
-    start: async () => {
-      f.events.push('service-start')
-      if (f.failStart) throw new Error('start failed')
-    },
-    dispose: async () => {
-      f.events.push('service-close')
-    },
-  }),
+  createLocalChannelService: (input: { environment: NodeJS.ProcessEnv }) => {
+    f.transportEnvironment = input.environment
+    return ({
+      conversationAccess: () => undefined,
+      start: async () => {
+        f.events.push('service-start')
+        if (f.failStart) throw new Error('start failed')
+      },
+      dispose: async () => {
+        f.events.push('service-close')
+      },
+    })
+  },
 }))
 vi.mock('../packages/cli/src/launcher/headless-codex-backend.js', () => ({
-  startHeadlessCodexBackend: async () => {
+  startHeadlessCodexBackend: async (input: { environment: NodeJS.ProcessEnv }) => {
+    f.backendEnvironment = input.environment
     f.events.push('backend-start')
     return {
       call: async () => ({}),
@@ -124,6 +148,17 @@ describe('headless service lifecycle', () => {
       'backend-close',
       'authority-close',
     ])
+  })
+  it('keeps environment credentials in the transport and out of the Codex backend', async () => {
+    const environment = { PATH: '/bin', CHANNEL_KEY: 'fixture-only' }
+    const service = await startHeadlessService({ ...input, environment })
+    try {
+      expect(f.transportEnvironment).toEqual(environment)
+      expect(f.backendEnvironment).toEqual({ PATH: '/bin' })
+      expect(environment.CHANNEL_KEY).toBe('fixture-only')
+    } finally {
+      await service.close()
+    }
   })
   it('does not start a backend for a disabled Channel plugin', async () => {
     f.enabled = false
