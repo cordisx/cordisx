@@ -30,9 +30,10 @@ export function assertImmutablePublishedMetadata({ pkg, manifest, packed, metada
 
 export function isAlreadyPublishedError(error) {
   const output = `${error?.npmOutput ?? ''}\n${error?.commandOutput ?? ''}\n${error?.message ?? ''}`
-  return /EPUBLISHCONFLICT|cannot publish over (?:the )?previously published|previously published versions/i.test(
-    output,
-  )
+  return /EPUBLISHCONFLICT|cannot publish over (?:the )?previously (?:published|staged)|previously published versions/i
+    .test(
+      output,
+    )
 }
 
 async function verifyOne(pkg, context) {
