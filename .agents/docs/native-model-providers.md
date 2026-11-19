@@ -87,8 +87,10 @@ implicit merge across profiles or discovery of native `*.config.toml` files.
 
 Paths are relative to the effective `CODEX_HOME` (or absolute local paths), not
 the CordisX config directory. URLs are rejected. Files are bounded to 32 MiB;
-the config is bounded to 4 MiB, and at most 128 mappings are accepted. Only model
-IDs, labels and aliases are projected. Empty, missing, malformed catalogs or
+the config is bounded to 4 MiB, and at most 128 mappings are accepted. The
+selector projection includes model IDs, labels, aliases, and validated
+reasoning metadata from `supported_reasoning_levels` and
+`default_reasoning_level` when available. Empty, missing, malformed catalogs or
 removed providers produce sanitized `configModelCatalogs` launcher diagnostics
 (`catalog-empty`, `catalog-unavailable`, `provider-missing`), with no file paths
 or configuration bodies. Check `cordisx logs codex <profile>` for these codes.
