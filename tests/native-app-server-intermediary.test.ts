@@ -117,6 +117,37 @@ describe('native app-server intermediary', () => {
     })
   })
 
+  it('forwards bounded native task dispatch diagnostics over the authenticated channel', async () => {
+    const events: DiagnosticEvent[] = []
+    await withDiagnostics({ emit: event => events.push(event) }, async () => {
+      const h = await harness()
+      try {
+        h.send({ id: 'ready-task-diagnostic', method: 'echo/bytes', params: {} })
+        await h.read()
+        await h.server.invokeTask({
+          callId: 'private-call-id',
+          sourceThreadId: 'private-source',
+          sourceTurnId: 'private-turn',
+          arguments: { prompt: 'PRIVATE_PROMPT', target: { type: 'projectless' } },
+        })
+        await vi.waitFor(() =>
+          expect(events).toContainEqual(expect.objectContaining({
+            event: 'model-native-task-dispatch',
+            phase: 'native-response',
+          }))
+        )
+        expect(events).toContainEqual(expect.objectContaining({
+          event: 'model-native-task-dispatch',
+          phase: 'native-request',
+          requestRef: expect.stringMatching(/^[a-f0-9]{20}$/u),
+        }))
+        expect(JSON.stringify(events)).not.toMatch(/private-call-id|private-source|private-turn|PRIVATE_PROMPT/u)
+      } finally {
+        await h.close()
+      }
+    })
+  })
+
   it('forwards native task creation with exact call metadata and routes its unmarked first send once', async () => {
     const h = await harness()
     try {
@@ -172,23 +203,35 @@ describe('native app-server intermediary', () => {
         method: 'turn/start',
         params: {
           threadId: 'created-thread',
-          input: [{ type: 'text', text: 'Original first message' }],
+          input: [],
+          toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Original first message' },
           approvalPolicy: 'on-request',
           model: 'old',
           config: { 'cordisx.operation_token': route.token },
         },
       })
-      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+      const firstTurn = JSON.parse(await h.read()).result.received
+      expect(firstTurn).toMatchObject({
         model: 'model-b',
         approvalPolicy: 'on-request',
-        input: [{ type: 'text', text: 'Original first message' }],
+        input: [{ type: 'text', text: 'Original first message', text_elements: [] }],
       })
+      expect(firstTurn).not.toHaveProperty('toolOutput')
       h.send({
         id: 'agent-next',
         method: 'turn/start',
-        params: { threadId: 'created-thread', input: [], model: 'native-next' },
+        params: {
+          threadId: 'created-thread',
+          input: [],
+          model: 'native-next',
+          toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Unrelated native output' },
+        },
       })
-      expect(JSON.parse(await h.read()).result.received.model).toBe('native-next')
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        model: 'native-next',
+        input: [],
+        toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Unrelated native output' },
+      })
     } finally {
       await h.close()
     }

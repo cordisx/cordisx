@@ -16,7 +16,7 @@ import { readNativeLines } from './native-json-lines.mjs'
 import { createNativeChatControl } from './native-chat-control.mjs'
 import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
 import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
-import { dispatchNativeTaskTool } from './native-task-dispatch.mjs'
+import { dispatchNativeTaskTool, normalizeNativeTaskFirstTurn } from './native-task-dispatch.mjs'
 
 const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
   process.env,
@@ -605,6 +605,9 @@ async function forward(line) {
     }
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
+    if (message.method === 'turn/start' && dispatch.agentTask && dispatch.providerId !== 'openai') {
+      normalizeNativeTaskFirstTurn(params)
+    }
     desktopCalls.set(message.id, { token, method: message.method, agentTask: dispatch.agentTask === true })
     if (message.method === 'turn/start') {
       firstTurns.delete(params.threadId)
