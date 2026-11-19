@@ -1,3 +1,4 @@
+import { installConfiguredSkills } from '../launcher/configured-skills.js'
 import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import { resolveDevelopmentConfigIdentity } from '../launcher/development-source-identity.js'
 import path from 'node:path'
@@ -453,6 +454,19 @@ export async function runDevelopment(
         ),
         stdout,
       )
+    }
+    if (!invocation.options.attach && homeConfig.skills?.length) {
+      await installConfiguredSkills({
+        sources: homeConfig.skills,
+        cacheDir: path.join(cordisxHomeDir, 'cache', 'skills'),
+        skillsDir: path.join(
+          runtime.internalSharedHomeDir ?? environment.HOME ?? runtime.homedir ?? os.homedir(),
+          '.agents',
+          'skills',
+        ),
+        env: environment,
+        report: stdout,
+      })
     }
     const debugPort = invocation.options.debugPort ?? (
       invocation.options.attach || invocation.options.system ? config.codex.debugPort : await findFreeLoopbackPort()

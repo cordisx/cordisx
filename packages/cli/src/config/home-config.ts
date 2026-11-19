@@ -1,3 +1,4 @@
+import { parseSkillSource } from '../launcher/configured-skills.js'
 import { type CodexCreationDefaults, parseCodexCreationDefaults } from '../codex-creation-settings.js'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, stat, unlink } from 'node:fs/promises'
@@ -161,6 +162,8 @@ export interface HomeConfig {
   readonly permissions: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly publisherGrantIssuers: readonly HomeConfigPublisherGrantIssuer[]
   readonly marketplaceSources: readonly HomeConfigMarketplaceSource[]
+  /** Git skill source references installed for launched clients. */
+  readonly skills?: readonly string[]
   readonly apps: Readonly<Record<string, HomeConfigApp>>
 }
 
@@ -507,6 +510,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     'permissions',
     'publisherGrantIssuers',
     'marketplaceSources',
+    'skills',
     'apps',
   ], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
@@ -551,6 +555,14 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     if (seenIssuerKeys.has(key)) throw new Error(`duplicate PublisherGrant issuer key: ${key}`)
     seenIssuerKeys.add(key)
   }
+  if (
+    config.skills !== undefined && (!Array.isArray(config.skills)
+      || config.skills.some((source: unknown) => typeof source !== 'string' || !source.trim()))
+  ) {
+    throw new Error('config.skills must be an array of nonempty Git source strings')
+  }
+  const skills = config.skills as string[] | undefined
+  for (const source of skills ?? []) parseSkillSource(source)
   const marketplaceSources = parseHomeConfigMarketplaceSources(config.marketplaceSources)
   const seenMarketplaceSources = new Set(marketplaceSources.map(source => source.url))
   const rawApps = record(config.apps, 'config.apps')
@@ -580,6 +592,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     permissions,
     publisherGrantIssuers,
     marketplaceSources,
+    ...(skills === undefined ? {} : { skills }),
     apps,
   }
 }
