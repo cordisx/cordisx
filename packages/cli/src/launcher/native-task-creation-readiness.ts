@@ -51,7 +51,7 @@ export function createNativeTaskCreationReadiness(
         if (owner.disposed || owner.session.isClosed() || ![...documents.values()].includes(owner)) continue
         const value = record(response?.result)?.value
         if (value === 'available') {
-          if (lastTaskStatus !== value) report({ event: 'native-task-creation-status', status: value })
+          if (lastTaskStatus !== value) report({ event: 'native-task-creation-status', outcome: value })
           lastTaskStatus = value
           return { available: true }
         }
@@ -67,7 +67,7 @@ export function createNativeTaskCreationReadiness(
         else reason = 'renderer-probe-failed'
       }
     }
-    if (lastTaskStatus !== reason) report({ event: 'native-task-creation-status', status: 'unavailable', reason })
+    if (lastTaskStatus !== reason) report({ event: 'native-task-creation-status', outcome: 'unavailable', reason })
     lastTaskStatus = reason
     return { available: false, reason }
   }

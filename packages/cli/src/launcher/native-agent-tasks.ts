@@ -1,3 +1,4 @@
+import { bindDiagnostic, diagnosticRef } from '../diagnostics/context.js'
 import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -23,6 +24,7 @@ type Intent = {
 
 /** Durable intent is written before native dispatch. Restart/timeout never repeats creation. */
 export class NativeAgentTasks {
+  private readonly report = bindDiagnostic()
   private readonly intents = new Map<string, Intent>()
   private readonly active = new Map<string, Promise<unknown>>()
   private readonly fingerprints = new Map<string, string>()
@@ -152,6 +154,7 @@ export class NativeAgentTasks {
     } catch {
       return { status: 'reconciliation-required', reason: 'intent-already-claimed' }
     }
+    this.report({ event: 'native-task-create', phase: 'intent-recorded', requestRef: diagnosticRef(callId) })
     this.intents.set(callId, {
       callId,
       sourceThreadId,
@@ -163,7 +166,13 @@ export class NativeAgentTasks {
     try {
       const response = object(await this.authority.invoke({ callId, sourceThreadId, sourceTurnId, arguments: args }))
       const item = response?.content?.find((item: any) => item.type === 'text')
-      const native = nativeReceipt(item ? JSON.parse(item.text) : undefined)
+      let native: ReturnType<typeof nativeReceipt> = undefined
+      let invalidResponse = false
+      try {
+        native = response?.isError === true ? undefined : nativeReceipt(item ? JSON.parse(item.text) : undefined)
+      } catch {
+        invalidResponse = true
+      }
       result = native && response?.isError !== true
         ? {
           status: valid(native.threadId) && this.authority.routing.confirmed(callId, native.threadId)
@@ -174,12 +183,36 @@ export class NativeAgentTasks {
           native,
         }
         : { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
-    } catch {
-      result = { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
+      this.report({
+        event: 'native-task-create',
+        phase: native ? 'native-receipt' : 'native-receipt-missing',
+        reason: response?.isError === true ? 'native-tool-error' : invalidResponse ? 'invalid-native-response' : 'none',
+        requestRef: diagnosticRef(callId),
+      })
+      if (native) {
+        this.report({
+          event: 'native-task-create',
+          phase: 'route-result',
+          outcome: String(object(result)?.status),
+          requestRef: diagnosticRef(callId),
+        })
+      }
+    } catch (error) {
+      const missingSource = error instanceof Error && 'code' in error
+        && error.code === 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED'
+      result = missingSource
+        ? { status: 'rejected', reason: 'native-source-thread-not-loaded' }
+        : { status: 'reconciliation-required', reason: 'native-creation-unconfirmed' }
+      this.report({
+        event: 'native-task-create',
+        phase: 'dispatch-failed',
+        reason: missingSource ? 'native-source-thread-not-loaded' : 'native-request-failed',
+        requestRef: diagnosticRef(callId),
+      })
     }
     try {
       await writeFile(file, JSON.stringify({ fingerprint, callId, result }), { mode: 0o600 })
-      if (object(result)?.status === 'created') {
+      if (object(result)?.status === 'created' || object(result)?.reason === 'native-source-thread-not-loaded') {
         this.authority.routing.retireCompleted(callId)
         this.intents.delete(callId)
       }
@@ -246,6 +279,7 @@ export class NativeAgentTasks {
     )
     if (startup !== undefined && !startup.available) throw new Error(`Native task unavailable: ${startup.reason}`)
     intent.claimed = true
+    this.report({ event: 'native-task-create', phase: 'claim-matched', requestRef: diagnosticRef(intent.callId) })
     if (!await this.authority.available()) throw new Error('Native task adapter retired')
     const catalog = await this.authority.catalog()
     if (
@@ -257,7 +291,7 @@ export class NativeAgentTasks {
       throw new Error('Native task selection unavailable')
     }
     const source = await this.authority.sourceConfiguration?.(intent.sourceThreadId)
-    return await this.authority.routing.prepare({
+    const handle = await this.authority.routing.prepare({
       callId: intent.callId,
       sourceThreadId: intent.sourceThreadId,
       providerId: String(intent.arguments.providerId),
@@ -269,6 +303,8 @@ export class NativeAgentTasks {
         ? {}
         : { serviceTier: source.serviceTier }),
     })
+    this.report({ event: 'native-task-create', phase: 'handle-prepared', requestRef: diagnosticRef(intent.callId) })
+    return handle
   }
 }
 

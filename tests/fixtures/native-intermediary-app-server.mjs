@@ -5,6 +5,15 @@ const restoredEndpoints = new Map()
 reader.on('line', async line => {
   const message = JSON.parse(line)
   const threadId = message.params?.threadId
+  if (message.method === 'mcpServer/tool/call' && String(threadId).startsWith('task-missing-')) {
+    const error = threadId === 'task-missing-wrong-id'
+      ? { code: -32600, message: 'thread not found: another-thread' }
+      : threadId === 'task-missing-wrong-code'
+      ? { code: -32001, message: `thread not found: ${threadId}` }
+      : { code: -32600, message: `thread not found: ${threadId}` }
+    process.stdout.write(JSON.stringify({ id: message.id, error }) + '\n')
+    return
+  }
   if (threadId === 'source-fork-pending' && message.method === 'thread/fork') return
   if (threadId === 'source-fork' && message.method === 'thread/fork') {
     process.stdout.write(

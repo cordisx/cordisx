@@ -193,6 +193,28 @@ describe('native app-server intermediary', () => {
       await h.close()
     }
   })
+  it('classifies only the exact pre-dispatch missing source error without leaking native errors', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'ready-task-error', method: 'echo/bytes', params: {} })
+      await h.read()
+      const invoke = (sourceThreadId: string) =>
+        h.server.invokeTask({
+          callId: 'cordisx-task-private-call',
+          sourceThreadId,
+          sourceTurnId: 'source-turn',
+          arguments: { prompt: 'PRIVATE_PROMPT', target: { type: 'projectless' } },
+        })
+      await expect(invoke('task-missing-source')).rejects.toMatchObject({
+        code: 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED',
+      })
+      for (const source of ['task-missing-wrong-id', 'task-missing-wrong-code']) {
+        await expect(invoke(source)).rejects.not.toHaveProperty('code', 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED')
+      }
+    } finally {
+      await h.close()
+    }
+  })
   it('allows Agent selection only for a loaded idle thread behind the native mutation fence', async () => {
     const h = await harness()
     try {
