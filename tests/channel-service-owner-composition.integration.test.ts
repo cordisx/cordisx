@@ -3,6 +3,7 @@ import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import * as lark from '@larksuiteoapi/node-sdk'
 import type { ChannelManagerV5 } from '@cordisx/protocol/channel-manager/v5'
 import type { ChannelManagerV10 } from '@cordisx/protocol/channel-manager/v10'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
@@ -27,6 +28,146 @@ import {
 } from '../packages/cli/src/renderer/ownership.js'
 
 describe('actual direct Channel service ownership assembly', () => {
+  it('assembles a pending connection and resolves its identity through the production credential bridge', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-pending-composition-'))
+    const configPath = path.join(root, 'config.json')
+    const entry = process.env.CORDISX_CHANNEL_ENTRY_FIXTURE ?? bundledPluginEntry('channel')
+    const account = { adapterId: 'feishu', accountId: 'cli_pending_fixture' }
+    const pending = {
+      account,
+      adapterKind: 'feishu',
+      secretRef: 'host-secret:env/MISSING_PENDING_FIXTURE',
+      displayName: 'Pending',
+      selectors: ['direct'],
+    }
+    let channel: Awaited<ReturnType<typeof createRendererChannelComposition>> | undefined
+    let bridges: ReturnType<typeof createChannelLaunchBridges> | undefined
+    let onMessage: ((message: lark.NormalizedMessage) => Promise<void>) | undefined
+    const createSdk = vi.spyOn(lark, 'createLarkChannel').mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      on: (event: string, listener: typeof onMessage) => {
+        if (event === 'message') onMessage = listener
+        return () => {}
+      },
+      send: async () => ({ messageId: 'fixture' }),
+    } as never)
+    try {
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          ...createDefaultHomeConfig(),
+          apps: { codex: { defaultProfile: 'test', profiles: { test: { displayName: 'Test', dataMode: 'shared' } } } },
+          plugins: [{
+            id: 'channel',
+            entry,
+            services: {
+              runtime: {
+                profiles: {
+                  test: {
+                    revision: 1,
+                    lastGoodRevision: 1,
+                    config: {
+                      contract: 'cordisx.channel-service-config/v3',
+                      schemaVersion: 3,
+                      connections: [],
+                      pendingConnections: [pending],
+                    },
+                  },
+                },
+              },
+            },
+          }],
+        }),
+      )
+      const config = await loadConfig(configPath)
+      channel = await createRendererChannelComposition({
+        composition: config,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        environment: { MISSING_PENDING_FIXTURE: 'fixture-secret' },
+      })
+      expect(channel.service!.snapshot()!.accounts).toEqual([])
+      const received: Array<{ tenantId: string; actorTenantId?: string; persisted: boolean }> = []
+      const stopObserving = channel.service!.observeInputs(async (_id, input, _mentioned, persisted) => {
+        received.push({
+          tenantId: input.source.event.tenantId,
+          actorTenantId: input.source.event.actor?.tenantId,
+          persisted,
+        })
+      })
+      expect(channel.manager!.accounts[0]).toMatchObject({ pendingTenant: true, ref: { ...account, tenantId: '' } })
+      bridges = createChannelLaunchBridges({
+        channel,
+        token: 'a'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-owner',
+        configPath,
+        consumer: undefined,
+      })
+      const mutation = vi.spyOn(bridges.configApi!, 'mutate')
+      const result = await bridges.credentials!.handle({
+        version: 2,
+        token: bridges.credentials!.token,
+        requestId: 'resolve-pending',
+        operation: 'resolve-tenant',
+        owner: 'test-owner',
+        account: { ...account, tenantId: '' },
+        tenantId: 'tenant-real',
+        expectedRevision: 1,
+      }, 'document')
+      const mutationResult = await mutation.mock.results[0]!.value
+      expect(
+        mutationResult.status === 'applied' || mutationResult.status === 'staged'
+          ? ''
+          : JSON.stringify(mutationResult.error),
+      ).toBe('')
+      expect(result).toMatchObject({ status: 'applied', code: 'APPLIED', ref: { ...account, tenantId: 'tenant-real' } })
+      expect(JSON.stringify(result)).not.toMatch(/host-secret|MISSING_PENDING_FIXTURE/)
+      const persisted = await readServiceConfigState({
+        profileId: 'test',
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: SIMULATOR_CHANNEL_SERVICE_CONFIG as never,
+      }, configPath)
+      expect(persisted.config).toMatchObject({
+        pendingConnections: [],
+        connections: [{
+          ref: { ...account, tenantId: 'tenant-real' },
+          secretRef: pending.secretRef,
+        }],
+      })
+      expect(channel.service!.snapshot()!.accounts).toContainEqual(expect.objectContaining({
+        ref: { ...account, tenantId: 'tenant-real' },
+        connectionState: 'ready',
+      }))
+      expect(onMessage).toBeDefined()
+      await onMessage!({
+        messageId: 'om_fixture',
+        chatId: 'oc_fixture',
+        chatType: 'p2p',
+        senderId: 'ou_fixture',
+        content: 'fixture',
+        rawContentType: 'text',
+        resources: [],
+        mentions: [],
+        mentionAll: false,
+        mentionedBot: false,
+        createTime: Date.now(),
+        raw: { sender: { tenant_key: 'external-tenant' } },
+      })
+      expect(received).toContainEqual({ tenantId: 'tenant-real', actorTenantId: 'tenant-real', persisted: true })
+      stopObserving()
+    } finally {
+      await bridges?.credentials?.dispose?.()
+      bridges?.configApi?.dispose()
+      await channel?.service?.dispose()
+      createSdk.mockRestore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it(
     'carries the started service through bundle metadata to the public management control with no user grant',
     async () => {

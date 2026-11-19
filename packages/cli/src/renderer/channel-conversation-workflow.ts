@@ -252,7 +252,7 @@ export class ChannelConversationWorkflow {
     }
     const ref = this.input.controller.target(request.connectionToken)
     if (
-      !ref || !await this.input.authorize('channel.accounts.read', { channelTenant: ref })
+      !ref || !ref.tenantId || !await this.input.authorize('channel.accounts.read', { channelTenant: ref })
       || !await this.input.authorize('channel.bindings.read', { channelTenant: ref })
     ) throw new Error('PERMISSION_DENIED')
     const limit = request.limit ?? 100,

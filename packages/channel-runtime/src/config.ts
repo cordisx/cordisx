@@ -1,8 +1,9 @@
 import type { ChannelAdapterKind, ChannelTenantRef } from './types.js'
 import Schema from '@deepseek-ai/schemastery'
 import { type ChannelServiceConfigV2, parseChannelConfigV2 } from './config-v2.js'
+import { type ChannelServiceConfigV3, parseChannelConfigV3 } from './config-v3.js'
 export type { ChannelServiceConfigV2 } from './config-v2.js'
-export type ChannelServiceConfig = ChannelServiceConfigV1 | ChannelServiceConfigV2
+export type ChannelServiceConfig = ChannelServiceConfigV1 | ChannelServiceConfigV2 | ChannelServiceConfigV3
 
 export const CHANNEL_SERVICE_CONFIG_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
@@ -309,6 +310,9 @@ function channelConnectionSchemasteryProjection(): {
 }
 
 export function parseChannelServiceConfig(value: unknown): ChannelServiceConfig {
+  if ((value as { schemaVersion?: unknown } | null)?.schemaVersion === 3) {
+    return parseChannelConfigV3(value, candidate => parseChannelConfigV2(candidate, parseChannelServiceConfigV1))
+  }
   if ((value as { schemaVersion?: unknown } | null)?.schemaVersion === 2) {
     return parseChannelConfigV2(value, parseChannelServiceConfigV1)
   }
@@ -467,7 +471,7 @@ function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServic
   const candidateConnections = array(
     candidate.connections,
     'Channel service configuration mutation.connections',
-    1,
+    candidate.schemaVersion === 3 ? 0 : 1,
     64,
   ).map((value, index) => {
     const connection = record(value, `Channel service configuration mutation.connections[${index}]`)
@@ -476,6 +480,20 @@ function mergeCurrentSecretRefs(value: unknown, current: unknown): ChannelServic
     const secretRef = storedByTenant.get(tenantKey(connectionRef))?.secretRef
     return secretRef === undefined ? connection : { ...connection, secretRef }
   })
+  if (candidate.schemaVersion === 3) {
+    const storedPending = stored.schemaVersion === 3 ? stored.pendingConnections : []
+    const pending = array(candidate.pendingConnections, 'pendingConnections', 0, 64).map((value, index) => {
+      const item = record(value, `pendingConnections[${index}]`)
+      if (item.secretRef !== undefined) return item
+      const account = record(item.account, `pendingConnections[${index}].account`)
+      const old = storedPending.find(entry =>
+        entry.account.adapterId === account.adapterId
+        && entry.account.accountId === account.accountId
+      )
+      return old === undefined ? item : { ...item, secretRef: old.secretRef }
+    })
+    return parseChannelServiceConfig({ ...candidate, connections: candidateConnections, pendingConnections: pending })
+  }
   return parseChannelServiceConfig({ ...candidate, connections: candidateConnections })
 }
 
@@ -505,15 +523,28 @@ export function createChannelHostServiceConfigContract(
         configuration: {
           ...configuration,
           connections: configuration.connections.map(({ secretRef: _secretRef, ...connection }) => connection),
+          ...(configuration.schemaVersion === 3
+            ? {
+              pendingConnections: configuration.pendingConnections.map(({ secretRef: _secretRef, ...entry }) => entry),
+            }
+            : {}),
         },
-        secrets: configuration.connections.flatMap((connection, index) => (
-          connection.adapterKind === 'simulator'
-            ? []
-            : [{
-              path: ['connections', String(index), 'secretRef'],
-              set: secretState(connection.secretRef) === 'ready',
-            }]
-        )),
+        secrets: [
+          ...configuration.connections.flatMap((connection, index) => (
+            connection.adapterKind === 'simulator'
+              ? []
+              : [{
+                path: ['connections', String(index), 'secretRef'],
+                set: secretState(connection.secretRef) === 'ready',
+              }]
+          )),
+          ...(configuration.schemaVersion === 3
+            ? configuration.pendingConnections.map((entry, index) => ({
+              path: ['pendingConnections', String(index), 'secretRef'],
+              set: secretState(entry.secretRef) === 'ready',
+            }))
+            : []),
+        ],
       })
     },
   })

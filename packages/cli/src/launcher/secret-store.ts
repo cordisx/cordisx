@@ -147,6 +147,24 @@ export class LauncherSecretStore {
       : channelKeychainReference(target)
   }
 
+  /** Resolve only a credential belonging to the supplied Channel profile. */
+  async readChannelReference(reference: string, profileId: string): Promise<string> {
+    if (!this.backend || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(profileId)) throw new Error('CREDENTIAL_UNAVAILABLE')
+    const prefix = this.platform === 'linux'
+      ? `host-secret:channel/${profileId}/`
+      : `keychain:cordisx/channel/${profileId}/`
+    if (!reference.startsWith(prefix)) throw new Error('CREDENTIAL_UNAVAILABLE')
+    const account = reference.slice(prefix.length)
+    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(account)) throw new Error('CREDENTIAL_UNAVAILABLE')
+    try {
+      const value = await this.backend.read(`cordisx/channel/${profileId}`, account)
+      if (!validSecret(value)) throw new Error('invalid')
+      return value
+    } catch {
+      throw new Error('CREDENTIAL_UNAVAILABLE')
+    }
+  }
+
   /** Retire in-memory authority after commit or cleanup; the persisted item is managed separately. */
   forget(captureId: string): void {
     this.captures.delete(captureId)

@@ -20,6 +20,30 @@ does not make a Provider Fleet, model, workspace, or notification policy a
 Channel configuration field. The Host consumes Protocol PR #46's formal merge
 `7f5e9a8ecd8cf6fc5f1d9fd0317a46f72a90283b`.
 
+## Feishu and Lark tenant identity
+
+The tenant ID field means the application's `tenant_key`, not the App ID or a
+display name. A developer with an existing trusted event for the same app can
+find it in `header.tenant_key`; the event's sender tenant can be different for
+external users. See the platform's [event structure](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/event-subscriptions).
+Do not share complete event payloads, access tokens, or application secrets to
+obtain this value.
+
+The current automatic lookup uses `tenant:tenant:readonly`. In the platform
+developer console, select the application, request the scope under permissions,
+publish the application version, and wait for any required administrator
+approval before retrying. The platform documents the
+[permission request and publication steps](https://open.feishu.cn/document/faq/trouble-shooting/how-to-fix-the-99991672-error).
+If application authentication succeeds but tenant lookup fails, the Host saves
+the connection as pending and keeps its credential in the private secret store.
+Open the connection's configuration to enter the tenant key or retry lookup
+after permission publication; no secret re-entry is needed. Pending connections
+do not receive or send messages, participate in tenant-scoped runtime indexes,
+or create bindings. Successful resolution activates the connection using the
+same credential and does not rewrite existing tenant bindings or history.
+The experimental v3 configuration contract defines the pending state and
+compatibility boundary; formal Host delivery requires its Protocol revision.
+
 ## Account identity display
 
 The launcher reuses the official Feishu/Lark SDK's existing authenticated

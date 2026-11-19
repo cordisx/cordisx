@@ -37,7 +37,7 @@ export function channelConnectionFormFields(input: {
         account: input.account,
         values: input.values,
         zh: input.zh,
-        busy: input.busy || !input.credentialWritable,
+        busy: input.busy || !(input.account.tenantId ? input.credentialWritable : input.writable),
         optionalSecret: true,
         change: input.change,
       })

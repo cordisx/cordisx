@@ -112,6 +112,7 @@ describe.skipIf(process.platform === 'win32')('Linux Host-private credential sto
       profileId: 'work',
       store: new LauncherSecretStore({ platform: 'linux', homeDir }),
       discoverTenant: async () => 'tenant',
+      validateCredentials: async () => {},
       service: {
         descriptor: async () => descriptor,
         mutate: async (mutation: { configuration: unknown }) => {

@@ -96,7 +96,7 @@ export function projectLocalChannelManager(input: {
     JSON.stringify([connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId]),
     connection.ref,
   ]))
-  const connections = configuration.connections.map(connection => {
+  const connections: ChannelManagerProjectionV1['connections'][number][] = configuration.connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
       connection.ref.adapterId,
       connection.ref.accountId,
@@ -114,6 +114,17 @@ export function projectLocalChannelManager(input: {
         ?? (connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const),
     }
   })
+  if (configuration.schemaVersion === 3) {
+    connections.push(...configuration.pendingConnections.map(connection => ({
+      ref: { ...connection.account, tenantId: '' },
+      pendingTenant: true as const,
+      displayName: connection.displayName,
+      adapterKind: connection.adapterKind,
+      enabled: false,
+      transportMode: 'websocket',
+      secretState: 'unavailable' as const,
+    })))
+  }
   const accounts = connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
       connection.ref.adapterId,
@@ -125,7 +136,11 @@ export function projectLocalChannelManager(input: {
       ...input.identity?.(connection.ref),
       implementationStatus: runtime?.implementationStatus
         ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
-      connectionState: runtime?.connectionState ?? (connection.enabled ? 'starting' as const : 'disabled' as const),
+      connectionState: runtime?.connectionState ?? (connection.pendingTenant
+        ? 'unavailable' as const
+        : connection.enabled
+        ? 'starting' as const
+        : 'disabled' as const),
       generation: runtime?.generation ?? 0,
       inbound: runtime?.inbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
       outbound: runtime?.outbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
