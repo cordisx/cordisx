@@ -7,6 +7,12 @@ const HELP: Readonly<Record<string, string>> = {
   'bind-status': 'Read bindings and jobs for a chat. Input: {sessionId}.',
   'local-bindings':
     'Local CLI only: list profile bindings, optionally filtered. Input: {account?:{adapterId,accountId,tenantId},conversationId?:string}.',
+  'admin-pair-begin':
+    'Local user only: issue a five-minute single-use pairing code. Input: {account:{adapterId,accountId,tenantId}}. Send /pair <code> privately to that bot; keep the code secret.',
+  'admin-pair-status': 'Local user only: inspect a pairing candidate before confirmation. Input: {pairingId}.',
+  'admin-pair-confirm':
+    'Local user only: confirm the displayed user and direct chat. Input: {pairingId}. This grants scoped management commands, not task dispatch.',
+  'admin-pair-cancel': 'Local user only: cancel a pending pairing. Input: {pairingId}.',
   'continuation-policy': 'Local user only: read continuation policy and checkpoint state. Input: {sessionId}.',
   'continuation-policy-set':
     'Local user only: configure best-effort idle-boundary continuation. Input: {sessionId,policy:{enabled:boolean,threshold:number,reserveTokens:integer,maxAgeMs:integer}}. Disabled by default; no guarantee against compaction.',

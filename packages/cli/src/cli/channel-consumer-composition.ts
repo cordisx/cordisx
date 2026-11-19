@@ -6,6 +6,10 @@ import type { LocalChannelService } from '../launcher/channel-service.js'
 import type { OwnerDocumentBridgeHandler } from '../launcher/owner-document-rpc.js'
 import type { ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
 import { chatExecutionOperation } from '../launcher/chat-execution-operation.js'
+import { ChannelAdminPairing } from '../launcher/channel-admin-pairing.js'
+import { receiveAdminPairing } from '../launcher/channel-admin-pairing-rpc.js'
+import { ChannelGroupGuidance } from '../launcher/channel-group-guidance.js'
+import { channelGroupGuidanceReply } from '../launcher/channel-group-guidance-reply.js'
 
 /** Finish every owned boundary even when an earlier cleanup reports a failure. */
 export function configuredLaunchCleanup(input: {
@@ -61,7 +65,20 @@ export async function createConfiguredChannelConsumer(input: {
     native: input.native,
     report: input.report,
   })
-  const tools = new ChannelConversationTools(() => service.conversationAccess(), consumer, input.documents, execution)
+  const pairing = new ChannelAdminPairing()
+  const guidance = new ChannelGroupGuidance(
+    path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-group-guidance'),
+  )
+  const tools = new ChannelConversationTools(
+    () => service.conversationAccess(),
+    consumer,
+    input.documents,
+    execution,
+    pairing,
+  )
+  service.setPairingHandler((ref, generation, message) =>
+    receiveAdminPairing(pairing, guidance, consumer, ref, generation, message)
+  )
   consumer.setNativeExtras(() => input.native())
   service.setConversationManager({
     bindings: () =>
@@ -80,9 +97,19 @@ export async function createConfiguredChannelConsumer(input: {
       })),
     binding: (action, id) => consumer.bindingAction(action, id),
   })
-  const disposeInputs = service.observeInputs((recordId, message, mentionedBot, persisted, addressing) =>
-    consumer.receive(recordId, message, mentionedBot, persisted, addressing)
-  )
+  const disposeInputs = service.observeInputs(async (recordId, message, mentionedBot, persisted, addressing) => {
+    await consumer.receive(recordId, message, mentionedBot, persisted, addressing)
+    if (persisted) {
+      await channelGroupGuidanceReply({
+        message,
+        recordId,
+        mentionedBot,
+        consumer,
+        access: () => service.conversationAccess(),
+        guidance,
+      }).catch(() => input.report('CHANNEL_GROUP_GUIDANCE_UNAVAILABLE'))
+    }
+  })
   const disposeCards = service.observeCardActions((ref, event) => consumer.cardAction(ref, event))
   let disposal: Promise<void> | undefined
   return {
@@ -92,6 +119,8 @@ export async function createConfiguredChannelConsumer(input: {
       disposal ??= (async () => {
         disposeInputs()
         disposeCards()
+        service.setPairingHandler(undefined)
+        pairing.dispose()
         tools.dispose()
         const failures: unknown[] = []
         try {

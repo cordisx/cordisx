@@ -74,6 +74,15 @@ export interface LocalChannelService {
   observeCardActions(
     listener: (ref: ChannelTenantRef, event: import('@larksuiteoapi/node-sdk').CardActionEvent) => Promise<void>,
   ): () => void
+  setPairingHandler(
+    handler:
+      | ((
+        ref: ChannelTenantRef,
+        generation: string,
+        message: import('@larksuiteoapi/node-sdk').NormalizedMessage,
+      ) => Promise<{ accepted: boolean; reply: boolean }>)
+      | undefined,
+  ): void
   dispose(): Promise<void>
 }
 
@@ -207,6 +216,7 @@ export function createLocalChannelService(input: {
   let mutationTail: Promise<unknown> = Promise.resolve()
   let pendingConfiguration: string | undefined
   let conversationManager: Parameters<LocalChannelService['setConversationManager']>[0] | undefined
+  let pairingHandler: Parameters<LocalChannelService['setPairingHandler']>[0] | undefined
   const listeners = new Set<
     (
       recordId: string,
@@ -227,6 +237,13 @@ export function createLocalChannelService(input: {
       configurationRevision: sequence,
       identities: current.identities,
       channelConnected: (ref, channel) => current.directory.connected(ref, channel),
+      onPairingInput: async (ref, message) => {
+        const generation = current.generation
+        const result = await pairingHandler?.(ref, generation, message)
+        return !disposed && active === current && current.generation === generation
+          ? result ?? { accepted: false, reply: false }
+          : { accepted: false, reply: false }
+      },
       onCardAction: async (ref, event) => {
         for (const listener of cardListeners) await listener(ref, event)
       },
@@ -558,6 +575,9 @@ export function createLocalChannelService(input: {
       return () => {
         listeners.delete(listener)
       }
+    },
+    setPairingHandler: handler => {
+      pairingHandler = handler
     },
     observeCardActions: listener => {
       cardListeners.add(listener)
