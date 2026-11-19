@@ -1,20 +1,10 @@
-import type { ChannelReceiveSelector, ChannelServiceConfigV2, ChannelServiceConnectionConfigV2 } from './config-v2.js'
-import type { ChannelAccountRef } from './types.js'
+import type { ChannelServiceConfigV3 } from '@cordisx/protocol/channel-service-config/v3'
+import type { ChannelReceiveSelector, ChannelServiceConfigV2 } from './config-v2.js'
 
-export interface ChannelPendingConnectionConfigV3 {
-  readonly account: ChannelAccountRef
-  readonly adapterKind: 'feishu' | 'lark'
-  readonly secretRef: string
-  readonly displayName: string
-  readonly selectors?: readonly ChannelReceiveSelector[]
-}
-
-export interface ChannelServiceConfigV3 {
-  readonly contract: 'cordisx.channel-service-config/v3'
-  readonly schemaVersion: 3
-  readonly connections: readonly ChannelServiceConnectionConfigV2[]
-  readonly pendingConnections: readonly ChannelPendingConnectionConfigV3[]
-}
+export type {
+  ChannelPendingConnectionConfigV3,
+  ChannelServiceConfigV3,
+} from '@cordisx/protocol/channel-service-config/v3'
 
 /** Pending accounts never enter the v1 runtime projection. */
 export function parseChannelConfigV3(
