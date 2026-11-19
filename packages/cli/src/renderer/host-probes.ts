@@ -77,17 +77,25 @@ export function resolveManagerRailSeat(document: Document): {
   const before = managerItem?.nextElementSibling ?? next
   const spaces = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination="builtin:space"]')
   const space = spaces[0]
+  const images = rail.querySelectorAll<HTMLButtonElement>('button[data-sidebar-destination="builtin:images"]')
+  const image = images[0]
   const wrappedAutomations = before?.tagName === 'DIV' && before.contains(automationButton)
-    && spaces.length === 0
-  const directAutomations = before === automationButton && spaces.length === 0
+    && spaces.length === 0 && images.length === 0
+  const directAutomations = before === automationButton && spaces.length === 0 && images.length === 0
   const spaceThenAutomations = spaces.length === 1 && space !== undefined && before === space && visible(space)
-    && space.nextElementSibling === automationButton
+    && space.nextElementSibling === automationButton && images.length === 0
+  // 26.1111 adds Images directly after Home, ahead of optional Spaces and Scheduled.
+  const imagesThenAutomations = images.length === 1 && image !== undefined && before === image && visible(image)
+    && (spaces.length === 0
+      ? image.nextElementSibling === automationButton
+      : spaces.length === 1 && space !== undefined && visible(space)
+        && image.nextElementSibling === space && space.nextElementSibling === automationButton)
   if (
     homeItem?.tagName !== 'DIV'
     || container?.tagName !== 'DIV'
     || container.parentElement !== rail
     || before === null || before === undefined
-    || (!wrappedAutomations && !directAutomations && !spaceThenAutomations)
+    || (!wrappedAutomations && !directAutomations && !spaceThenAutomations && !imagesThenAutomations)
   ) return undefined
 
   return { container, before: before as HTMLElement, homeButton }
@@ -234,7 +242,11 @@ export function resolveManagerTwoPaneSeat(document: Document): ManagerTwoPaneSea
         .filter((child): child is HTMLElement => child instanceof ElementClass)
         .filter(wrapper => {
           if (navigation.contains(wrapper) || rail.contains(wrapper)) return false
-          if (wrapper.querySelector(':scope > [role="separator"][aria-orientation="vertical"]') === null) {
+          const wrapped = wrapper.querySelector(':scope > [role="separator"][aria-orientation="vertical"]') !== null
+          // 26.1111 puts the separator semantics on the aside's direct resize strip.
+          const direct = wrapper.matches('[role="separator"][aria-orientation="vertical"]')
+            && wrapper.children.length === 1 && wrapper.firstElementChild?.getAttribute('aria-hidden') === 'true'
+          if (!wrapped && !direct) {
             return false
           }
           const rect = wrapper.getBoundingClientRect()

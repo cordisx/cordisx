@@ -49,7 +49,15 @@ export function resolveNativeViewportTitlebarOwner(header: HTMLElement): NativeV
     ) return undefined
     const ownerRect = owner.getBoundingClientRect()
     const rowRect = row.getBoundingClientRect()
-    const gutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' ? 4 : 0
+    // 26.1111 threads retain the 4px workspace gutter when their collapsed
+    // sidebar switches the outer frame's compact-page marker off.
+    const collapsedThreadGutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'false'
+      && frame.getAttribute('data-app-shell-sidebar-open') === 'false'
+      && frame.getAttribute('data-app-shell-page-sidebar') === 'false'
+      && surface.getAttribute('data-app-shell-compact-page-gutter') === 'false'
+      && surface.getAttribute('data-app-shell-unified-tab-strip') === 'false'
+      && header.getAttribute('data-app-shell-header-layout') === 'thread-edge-scroll'
+    const gutter = frame.getAttribute('data-app-shell-compact-page-gutter') === 'true' || collapsedThreadGutter ? 4 : 0
     if (
       !near(rowRect.left, ownerRect.left) || !near(rowRect.top, ownerRect.top)
       || !near(rowRect.right, ownerRect.right) || !near(rowRect.bottom, ownerRect.bottom)

@@ -106,6 +106,7 @@ describe('Manager installation beside native right tabs', () => {
         sidebarTrigger.setAttribute('aria-expanded', String(expanded))
         list.toggleAttribute('data-sidebar-collapsed', !expanded)
         const left = expanded ? 290 : 52
+        aside.style.width = `${left}px`
         const content = expanded ? 560 : 798
         setRect(aside, rect(0, 44, left, 800))
         setRect(navigation, rect(expanded ? 52 : 36, 44, 238, 800))
@@ -265,6 +266,7 @@ describe('Manager installation beside native right tabs', () => {
           expect(manager.parentElement).toBe(main)
           expect(embedded.contentDocument).toBe(embeddedDocument)
           expect(element('[data-cordisx-manager-sidebar-root]').hidden).toBe(!expanded)
+          if (!expanded) expect(aside.style.width).toBe('52px')
           expect(browser.getAttribute('src')).toBe(sourceBefore)
           expect(draft.value).toBe('unsent draft')
         }
