@@ -2,7 +2,11 @@
 
 const argv = process.argv.slice(2)
 
-if (argv[0] === 'codex' || argv[0] === 'models') {
+// Preserve bare App/profile launch syntax; only reserved tools enter the Codex API.
+const codexTool = argv[0] === 'codex'
+  && ['help', '--help', '-h', 'capabilities', 'providers', 'chats', 'defaults'].includes(argv[1] ?? '')
+
+if (codexTool || argv[0] === 'models') {
   void import('./cli/codex-command.js').then(({ runCodexCommand }) =>
     runCodexCommand(argv.slice(1), argv[0] === 'models')
   ).catch(async error => {

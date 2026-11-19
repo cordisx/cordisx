@@ -20,6 +20,26 @@ import { startNativeAgentModelsServer } from '../packages/cli/src/launcher/nativ
 import { nativeCodexOperations } from '../packages/cli/src/cli/production-plugin-management.js'
 import { configuredChannelToolHandler } from '../packages/cli/src/cli/channel-consumer-composition.js'
 
+test('compiled entry preserves bare Codex and named-profile App launch syntax', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codex-cli-launch-'))
+  try {
+    for (const profile of [undefined, 'work']) {
+      await promisify(execFile)(process.execPath, [
+        path.resolve('packages/cli/dist/src/cli.js'),
+        'codex',
+        ...(profile ? [profile] : []),
+        '--dry-run',
+        '--executable',
+        process.execPath,
+      ], { env: { ...process.env, CORDISX_HOME: root }, timeout: 30_000 })
+    }
+    const config = JSON.parse(await readFile(path.join(root, 'config.json'), 'utf8'))
+    expect(config.apps.codex.profiles.work.dataMode).toBe('shared')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test(
   'compiled CLI uses the guarded live owner, persists exact settings and keeps model credentials private',
   async () => {
