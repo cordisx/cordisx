@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -398,3 +399,46 @@ it('passes the original child exit code through the compiled CLI process', async
   const code = await new Promise(resolve => child.once('exit', resolve))
   expect(code).toBe(7)
 })
+
+it.each(['codex', 'claude-code'] as const)(
+  'installs configured Skills before starting %s and skips informational commands',
+  async client => {
+    const f = await fixture()
+    const { execFileSync } = await import('node:child_process')
+    const { mkdir } = await import('node:fs/promises')
+    const { pathToFileURL } = await import('node:url')
+    const repo = path.join(f.root, 'fixture.git')
+    await mkdir(path.join(repo, 'review'), { recursive: true })
+    await writeFile(path.join(repo, 'review', 'SKILL.md'), 'fixture')
+    for (
+      const args of [
+        ['init', '-q'],
+        ['config', 'user.email', 'test@example.invalid'],
+        ['config', 'user.name', 'Test'],
+        ['add', '.'],
+        ['commit', '-qm', 'fixture'],
+      ]
+    ) execFileSync('git', ['-C', repo, ...args])
+    const source = `${pathToFileURL(repo).href}@review`
+    await writeFile(f.configPath, JSON.stringify({ ...createDefaultHomeConfig(), skills: [source] }))
+    const target = path.join(f.root, client === 'codex' ? '.agents' : '.claude', 'skills', 'review', 'SKILL.md')
+    const runtime = {
+      homedir: f.root,
+      env: f.env,
+      stdout: () => {},
+      internalCheckTerminalClient: checkClient,
+      internalSpawnTerminal: (() => spawn(process.execPath, ['-e', 'process.exit(0)'])) as typeof spawn,
+    }
+    await runCordisXCli(['start', '--mode', 'cli', client, '--', '--help'], runtime)
+    await expect(readFile(target)).rejects.toThrow()
+    await runCordisXCli(['start', '--mode', 'cli', client, '--list'], runtime)
+    await expect(readFile(target)).rejects.toThrow()
+    await runCordisXCli(['start', '--mode', 'cli', client], {
+      ...runtime,
+      internalSpawnTerminal: (() => {
+        expect(readFileSync(target, 'utf8')).toBe('fixture')
+        return spawn(process.execPath, ['-e', 'process.exit(0)'])
+      }) as typeof spawn,
+    })
+  },
+)

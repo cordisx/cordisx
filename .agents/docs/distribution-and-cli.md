@@ -271,6 +271,53 @@ Resolution precedence is CLI option, named profile, app default, global
 default, then adapter default. Every resolved launch plan is inspectable through
 `cordisx doctor` without starting the host.
 
+## Configured Git Skills
+
+Add portable Git references to the top-level `skills` array in the CordisX home
+`config.json` (see `cordisx config` for its location). For example:
+
+```json
+{
+  "skills": [
+    "https://example.com/team/skills.git#main@review",
+    "https://example.com/team/other.git@skills/check"
+  ]
+}
+```
+
+These are excerpts to add to an existing version-1 configuration, not a complete
+config file. Each source is a Git URL, optionally followed by `#ref` and
+`@skill`. The selector matches a directory name or repository-relative path;
+without one, every discovered directory containing `SKILL.md` is installed.
+Ambiguous names require a path. SSH Git URLs are supported; authenticate through
+Git's normal credential or SSH mechanisms rather than embedding credentials in
+URLs. Non-Git registries and DYAI object declarations are not supported.
+
+A named Codex Desktop launch installs configured Skills into its effective
+`HOME/.agents/skills` before the Host starts, including isolated profiles.
+`cordisx start --mode cli codex` uses the user's `.agents/skills`; Claude Code
+uses `~/.claude/skills` (or `$CLAUDE_CONFIG_DIR/skills`). Claude Desktop is a
+separate application. Help, list, dry-run and attach do not install Skills.
+
+Run `cordisx skills install` for all configured sources or
+`cordisx skills install 'https://example.com/team/skills.git#main@review'`
+for a one-off source. Add `--client codex` or `--client claude-code` to target
+one client; the default is both. `cordisx skills update` fetches configured
+sources again, and accepts the same optional source and client options. One-off
+installs do not modify the configuration.
+
+The first install clones the source and caches a checked-out copy under the
+CordisX home. Starts and `install` reuse that snapshot, so they work offline;
+`update` refreshes it. If refresh fails, the previous snapshot remains usable,
+a warning is emitted and the explicit command exits unsuccessfully. Sources
+without a cache report an error and do not prevent the client from launching.
+The installed files are real copies, avoiding reliance on cross-client symlink
+discovery; source Skills containing symlinks are rejected. CordisX records an
+ownership marker and content digest, refuses to replace unmarked, differently
+owned or locally modified directories, and reports conflicts. Removing a source
+from configuration does not delete installed files. Only use repositories whose
+instructions and scripts you trust.
+
 ## Bundled Skills
 
 <a id="bundled-plugin-development-skill"></a>

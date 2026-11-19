@@ -1,3 +1,6 @@
+import path from 'node:path'
+import { installConfiguredSkills } from '../launcher/configured-skills.js'
+import { effectiveHomeForCordisXSkill } from '../launcher/builtin-skill.js'
 import { diagnostic } from '../diagnostics/context.js'
 import type { ChildProcess } from 'node:child_process'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -104,6 +107,15 @@ export async function prepareProductionHostBootstrap(
       : await acquireCodexProfileLaunchLease(profile.userDataDir, { stdout })
     await adapter.prepareLaunch(plan)
     const configured = await loadHomeConfig(configPath)
+    if (adapter.id === 'codex' && configured.skills?.length) {
+      await installConfiguredSkills({
+        sources: configured.skills,
+        cacheDir: path.join(rootFromConfigPath(configPath), 'cache', 'skills'),
+        skillsDir: path.join(effectiveHomeForCordisXSkill(plan, runtime.internalSharedHomeDir), '.agents', 'skills'),
+        report: stdout,
+        env: { ...environment, ...plan.environment },
+      })
+    }
     const configuredEnvironment = hostModelServiceEnvironment(
       environment,
       configured.environmentVariables,

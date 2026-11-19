@@ -3,6 +3,7 @@ export const HELP = `Usage:
   cordisx start|status|logs|stop|restart [app] [profile] [options]
   cordisx start --mode cli [codex|claude-code] [-s SERVICE -m MODEL] [-- client-arguments...]
   cordisx app [check|update]
+  cordisx skills <install|update> [source] [--client codex|claude-code|both]
   cordisx setup
   cordisx config
   cordisx doctor

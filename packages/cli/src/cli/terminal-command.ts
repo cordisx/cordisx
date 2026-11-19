@@ -1,3 +1,5 @@
+import os from 'node:os'
+import { installConfiguredSkills } from '../launcher/configured-skills.js'
 import { randomUUID } from 'node:crypto'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
@@ -173,6 +175,29 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       ),
     )
     return
+  }
+  const skillConfigPath = resolveHomeConfigPath({
+    env: environment,
+    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+  })
+  const skillConfig = await loadHomeConfig(skillConfigPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  const informationalClientCommand = invocation.codexArgs.some(arg => arg === '--help' || arg === '-h')
+    || ['help', 'list'].includes(invocation.codexArgs[0] ?? '')
+  if (skillConfig?.skills?.length && !informationalClientCommand) {
+    const home = runtime.homedir ?? environment.HOME ?? os.homedir()
+    const clientRoot = client === 'claude-code'
+      ? (environment.CLAUDE_CONFIG_DIR || path.join(home, '.claude'))
+      : path.join(home, '.agents')
+    await installConfiguredSkills({
+      sources: skillConfig.skills,
+      cacheDir: path.join(path.dirname(skillConfigPath), 'cache', 'skills'),
+      skillsDir: path.join(clientRoot, 'skills'),
+      report: stdout,
+      env: environment,
+    })
   }
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
   let child: ChildProcess | undefined
