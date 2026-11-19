@@ -32,6 +32,7 @@ import { nativeRouteIdentity, type NativeRouteSource } from './native-route-tran
 import { WorkspaceRailProjection } from './workspace-rail-projection.js'
 import { ManagerPaneRecapture } from './manager-pane-recapture.js'
 import { hasManagerSplitLayout } from '../adapter/manager-split-titlebar.js'
+import { ManagerSidebarSizeLease } from '../adapter/manager-sidebar-size-lease.js'
 
 const SIDEBAR_WIDTH_KEY = 'cordisx.manager.sidebar-width'
 
@@ -131,11 +132,9 @@ export function installReactCordisXManager(
     titlebarStyle: string
     mainPosition: string
     sidebarPosition: string
-    sidebarWidth: string
-    sidebarFlexBasis: string
+    sidebarSizeLease: ManagerSidebarSizeLease
     sidebarLayout: HTMLElement | undefined
-    sidebarLayoutWidth: string
-    sidebarLayoutFlexBasis: string
+    sidebarLayoutSizeLease: ManagerSidebarSizeLease | undefined
     width: number
     minimumWidth: number
     maximumWidth: number
@@ -189,12 +188,10 @@ export function installReactCordisXManager(
       navigationSeat.style.width = `${next}px`
       rootSeat.style.left = '0'
       rootSeat.style.width = '100%'
-      current.sidebarContainer.style.width = `${next}px`
-      current.sidebarContainer.style.flexBasis = `${next}px`
+      current.sidebarSizeLease.apply(next)
       if (current.sidebarLayout !== undefined) {
         const railWidth = current.sidebarContainer.getBoundingClientRect().left
-        current.sidebarLayout.style.width = `${railWidth + next}px`
-        current.sidebarLayout.style.flexBasis = `${railWidth + next}px`
+        current.sidebarLayoutSizeLease?.apply(railWidth + next)
         navigationSeat.style.left = `${railWidth}px`
         navigationSeat.style.right = 'auto'
       }
@@ -413,12 +410,8 @@ export function installReactCordisXManager(
     stopResize()
     pane = undefined
     if (current.titlebarLease !== undefined) releaseManagerTitlebarLease(current.titlebarLease)
-    current.sidebarContainer.style.width = current.sidebarWidth
-    current.sidebarContainer.style.flexBasis = current.sidebarFlexBasis
-    if (current.sidebarLayout !== undefined) {
-      current.sidebarLayout.style.width = current.sidebarLayoutWidth
-      current.sidebarLayout.style.flexBasis = current.sidebarLayoutFlexBasis
-    }
+    current.sidebarSizeLease.release()
+    current.sidebarLayoutSizeLease?.release()
     for (const state of current.native) restoreNativeState(state)
     for (const { node, ariaHidden, inert, visibility } of current.nativeTitle) {
       node.inert = inert
@@ -625,11 +618,9 @@ export function installReactCordisXManager(
       titlebarStyle: titlebarSeat.getAttribute('style') ?? '',
       mainPosition: seat.main.anchor.style.position,
       sidebarPosition: seat.sidebar.container.style.position,
-      sidebarWidth: seat.sidebar.container.style.width,
-      sidebarFlexBasis: seat.sidebar.container.style.flexBasis,
+      sidebarSizeLease: new ManagerSidebarSizeLease(seat.sidebar.container),
       sidebarLayout,
-      sidebarLayoutWidth: sidebarLayout?.style.width ?? '',
-      sidebarLayoutFlexBasis: sidebarLayout?.style.flexBasis ?? '',
+      sidebarLayoutSizeLease: sidebarLayout === undefined ? undefined : new ManagerSidebarSizeLease(sidebarLayout),
       width: initialWidth,
       minimumWidth,
       maximumWidth,
