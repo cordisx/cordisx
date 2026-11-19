@@ -41,8 +41,8 @@ after permission publication; no secret re-entry is needed. Pending connections
 do not receive or send messages, participate in tenant-scoped runtime indexes,
 or create bindings. Successful resolution activates the connection using the
 same credential and does not rewrite existing tenant bindings or history.
-The experimental v3 configuration contract defines the pending state and
-compatibility boundary; formal Host delivery requires its Protocol revision.
+The [v3 configuration contract](https://github.com/cordisx/cordisx-protocol/blob/53e16025c26ae20ff3e7ba5f9d4b2c7af469807b/.agents/docs/channel-runtime/config-v3.md)
+defines the pending state and compatibility boundary.
 
 ## Account identity display
 
