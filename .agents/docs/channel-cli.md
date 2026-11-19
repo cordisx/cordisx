@@ -16,6 +16,26 @@ cordisx channel history --input '{"sessionId":"<Codex chat UUID>","afterSequence
 
 `local-bindings` is a local management CLI read, not an Agent tool. It lists profile binding IDs, sessions, channel identities, states and modes at one revision and service generation, without messages or credentials. An empty input lists the profile; a conversation filter requires the complete account identity. Older running Hosts do not implement this operation; use a matching Host runtime.
 
+### Pair a direct-chat administrator
+
+On a running Host with a resolved, ready Feishu/Lark connection and enabled Channel policy, a local user can issue a five-minute, one-use code:
+
+```text
+cordisx channel admin-pair-begin --input '{"account":{"adapterId":"feishu","accountId":"<app-id>","tenantId":"<application-tenant-key>"}}'
+```
+
+Send `/pair <code>` to that bot in a private chat. Keep the code private and do not send it to a group. On the same local Host, inspect the candidate and explicitly confirm or cancel using the `pairingId` returned by `admin-pair-begin`:
+
+```text
+cordisx channel admin-pair-status --input '{"pairingId":"<pairing-id>"}'
+cordisx channel admin-pair-confirm --input '{"pairingId":"<pairing-id>"}'
+cordisx channel admin-pair-cancel --input '{"pairingId":"<pairing-id>"}'
+```
+
+Compare the displayed account, user ID, direct-chat ID and command list before confirming. Expiry, replacement, a changed service generation, a changed policy revision, or restart requires a new code. The sender must be a user in the application's own tenant; external users and group submissions cannot pair. The resulting rule authorizes management commands only for that exact account, tenant, user and private conversation. It does not change task-dispatch policy, and it cannot authorize `--global`. Existing policy denials and narrower restrictions still apply. Remove the generated pairing rule in Channel policy to revoke the grant. Pairing messages are consumed before the normal Channel inbox; no pairing code or raw event is stored in the transport or consumer ledger. A mentioned `/pair` request or a mentioned group message denied task dispatch can receive at most one guidance attempt in 24 hours per account and group across launches sharing the same profile directory. This rate limit stores only a digest of the account and group, and may conservatively suppress a hint for longer. Different machines without shared storage do not share the limit. Disabled policies, receive selectors and explicit send/help denials remain authoritative.
+
+Configure the bot and subscribe to `im.message.receive_v1` over the [authenticated long connection](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-). For direct messages grant `im:message.p2p_msg:readonly`; for group mentions grant `im:message.group_at_msg:readonly`; for replies grant `im:message:send_as_bot`. Publish the app version and complete any required approval. These message scopes do not grant `tenant:tenant:readonly`. Long connections for the same app compete for events, so do not start a separate discovery listener beside an existing server. This pairing flow uses the existing configured connection and does not discover an unresolved tenant.
+
 `--profile <id>` selects a profile. `--input <JSON>` supplies the same request
 shape as native `channel_*` tools where an equivalent tool exists; `ask` and `question-cancel` are CLI-only. `connections`, `conversations`, `bind`,
 `unbind`, `bind-status`, `reply-mode`, `history`, `remote-history`, `listen`, `send`, `send-many`, `ask`, `question-cancel`, `receipt`,

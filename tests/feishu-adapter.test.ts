@@ -43,6 +43,66 @@ describe('launcher private secret resolution', () => {
 })
 
 describe('official Feishu direct-message adapter', () => {
+  it('consumes pairing control text before durable ingress while preserving ordinary messages', async () => {
+    let listener: ((message: NormalizedMessage) => Promise<void>) | undefined
+    const receive = vi.fn(async () => ({ recordId: 'inbound', duplicate: false, status: 'queued' as const }))
+    const send = vi.fn(async () => ({ messageId: 'reply' }))
+    const pairing = vi.fn(async (_ref, message: NormalizedMessage) => ({
+      accepted: true,
+      reply: message.chatType === 'p2p',
+    }))
+    const definition = createFeishuAdapterDefinition({
+      connection,
+      configurationRevision: 1,
+      source: 'test',
+      resolveSecret: async () => 'fixture',
+      onPairingInput: pairing,
+      createChannel: () =>
+        ({
+          connect: async () => {},
+          disconnect: async () => {},
+          send,
+          on: (name: string, callback: typeof listener) => {
+            if (name === 'message') listener = callback
+            return () => {}
+          },
+        }) as never,
+    })
+    const active = await definition.start({
+      generation: 1,
+      ref: connection.ref,
+      receive,
+      drainInbound: async () => 0,
+      drainOutbound: async () => 0,
+    })
+    try {
+      const message = {
+        messageId: 'om_pair',
+        chatId: 'oc_direct',
+        chatType: 'p2p',
+        senderId: 'ou_user',
+        content: '/pair AAAAAAAAAAAAAAAAAAAAAA',
+        createTime: 1,
+        mentionedBot: false,
+      } as NormalizedMessage
+      await listener!(message)
+      expect(pairing).toHaveBeenCalledOnce()
+      expect(receive).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledOnce()
+      expect(JSON.stringify(send.mock.calls)).not.toContain('AAAAAAAAAAAAAAAAAAAAAA')
+      await listener!({ ...message, messageId: 'om_mixed', content: 'extra text\n/pair AAAAAAAAAAAAAAAAAAAAAA' })
+      expect(receive).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledTimes(2)
+      await listener!({ ...message, messageId: 'om_normal', content: 'normal request' })
+      expect(receive).toHaveBeenCalledOnce()
+      expect(receive.mock.calls[0]?.[0].input.content).toEqual([{ type: 'text', text: 'normal request' }])
+      await listener!({ ...message, chatType: 'group' })
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(receive).toHaveBeenCalledOnce()
+    } finally {
+      await active.stop('disposed')
+    }
+  })
   it.each([true, false])('preserves main, quoted and topic sends with raw SDK=%s', async raw => {
     const create = vi.fn(async () => ({ code: 0, data: { message_id: 'om_created' } }))
     const reply = vi.fn(async () => ({ code: 0, data: { message_id: 'om_replied' } }))

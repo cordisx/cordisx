@@ -12,6 +12,8 @@ import type { ChannelDirectoryReadback } from './channel-live-directory.js'
 import type { ChannelCommandUserReadback } from './channel-command-users.js'
 import { type ChannelReplyCapabilities, channelReplyMode, channelReplyTarget } from './channel-reply-routing.js'
 import { channelOperationDuringPreparation } from './channel-preparation-guard.js'
+import type { ChannelAdminPairing } from './channel-admin-pairing.js'
+import { channelAdminPairingOperation } from './channel-admin-pairing-rpc.js'
 
 export interface ChannelConversationAccess {
   readonly generation: string
@@ -68,6 +70,7 @@ export class ChannelConversationTools {
     private readonly consumer?: ChannelConversationConsumer,
     private readonly documents?: (input: unknown) => Promise<unknown>,
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
+    private readonly pairing?: ChannelAdminPairing,
   ) {}
 
   /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
@@ -124,6 +127,16 @@ export class ChannelConversationTools {
       && (!this.consumer.agentAccess.caller(metadata) || this.consumer.agentAccess.preparation(metadata))
     ) {
       return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+    }
+    if (['admin-pair-begin', 'admin-pair-status', 'admin-pair-confirm', 'admin-pair-cancel'].includes(operation)) {
+      return channelAdminPairingOperation({
+        operation,
+        value,
+        metadata,
+        access: this.access(),
+        consumer: this.consumer,
+        pairing: this.pairing,
+      })
     }
     if (['continuation-policy', 'continuation-policy-set', 'continuation-start'].includes(operation)) {
       try {

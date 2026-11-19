@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -14,6 +14,121 @@ vi.mock('@larksuiteoapi/node-sdk', async original => ({
 }))
 
 describe('production Channel command composition with SDK transport fixtures', () => {
+  it('keeps pairing codes out of the inbox and requires explicit local confirmation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-pair-composition-'))
+    const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
+    const handlers: Partial<EventMap> = {}
+    const send = vi.fn(async () => ({ messageId: 'om_reply' }))
+    sdkFactory.mockReturnValue({
+      connect: async () => {},
+      disconnect: async () => {},
+      send,
+      on: (name: keyof EventMap, handler: EventMap[keyof EventMap]) => {
+        Object.assign(handlers, { [name]: handler })
+        return () => {
+          delete handlers[name]
+        }
+      },
+    })
+    const service = createLocalChannelService({
+      artifactDirectory: path.dirname(bundledPluginEntry('channel')),
+      dataDir: path.join(root, 'transport'),
+      source: 'fixture:channel',
+      environment: { CHANNEL_PAIR_FIXTURE: 'fixture-only' },
+    })
+    let owner: Awaited<ReturnType<typeof createConfiguredChannelConsumer>> | undefined
+    try {
+      await service.start({
+        contract: 'cordisx.channel-service-config/v1',
+        schemaVersion: 1,
+        connections: [{
+          ref,
+          adapterKind: 'feishu',
+          enabled: true,
+          transport: { mode: 'websocket' },
+          secretRef: 'host-secret:env/CHANNEL_PAIR_FIXTURE',
+        }],
+      })
+      owner = await createConfiguredChannelConsumer({
+        service,
+        homeDir: root,
+        appId: 'codex',
+        profileId: 'fixture',
+        native: () => undefined,
+        report: vi.fn(),
+      })
+      await owner.consumer!.policySet({ enabled: true }, 0)
+      const start = await owner.tools.callLocal('admin-pair-begin', { account: ref }) as {
+        status: string
+        code: string
+        pairingId: string
+      }
+      expect(start.status).toBe('ok')
+      const message = await normalize({
+        sender: { sender_id: { open_id: 'ou_alice' }, sender_type: 'user', tenant_key: 'fixture' },
+        message: {
+          message_id: 'om_pair',
+          chat_id: 'oc_direct',
+          chat_type: 'p2p',
+          create_time: String(Date.now()),
+          message_type: 'text',
+          content: JSON.stringify({ text: `/pair ${start.code}` }),
+        },
+      } as never, { includeRaw: true })
+      await handlers.message!(message)
+      expect(send).toHaveBeenCalledOnce()
+      expect(await owner.tools.callLocal('admin-pair-status', { pairingId: start.pairingId })).toMatchObject({
+        state: 'confirmation-required',
+        candidate: { userId: 'ou_alice', conversationId: 'oc_direct' },
+      })
+      expect(owner.consumer!.policy().policy.rules).toEqual([])
+      expect(await owner.tools.callLocal('admin-pair-confirm', { pairingId: start.pairingId })).toMatchObject({
+        state: 'paired',
+      })
+      expect(owner.consumer!.policy().policy.rules).toEqual([expect.objectContaining({
+        action: 'command',
+        ...ref,
+        conversationId: 'oc_direct',
+        userIds: ['ou_alice'],
+      })])
+      const transport = await readFile(path.join(root, 'transport', 'transport.json'), 'utf8')
+      const consumer = await readFile(
+        path.join(root, 'apps', 'codex', 'profiles', 'fixture', 'channel-conversations.json'),
+        'utf8',
+      )
+      expect(transport).not.toContain(start.code)
+      expect(consumer).not.toContain(start.code)
+      const existing = owner.consumer!.policy()
+      await owner.consumer!.policySet({
+        ...existing.policy,
+        rules: [...existing.policy.rules, {
+          id: 'deny-group',
+          ...ref,
+          action: 'dispatch',
+          effect: 'deny',
+          kinds: ['group'],
+        }],
+      }, existing.revision)
+      const group = {
+        ...message,
+        messageId: 'om_group_1',
+        chatId: 'oc_group',
+        chatType: 'group' as const,
+        content: 'Please start a task',
+        mentionedBot: true,
+      }
+      await handlers.message!(group)
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(send.mock.calls[1]?.[1].text).toContain('没有任务投递权限')
+      await handlers.message!({ ...group, messageId: 'om_group_2' })
+      expect(send).toHaveBeenCalledTimes(2)
+    } finally {
+      await owner?.dispose()
+      await service.dispose()
+      await rm(root, { recursive: true, force: true })
+      sdkFactory.mockReset()
+    }
+  })
   it('routes a question card click through the SDK queue, configured service and consumer', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-question-composition-'))
     const ref = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'fixture' }
@@ -112,7 +227,10 @@ describe('production Channel command composition with SDK transport fixtures', (
         source: { event: { actor: { userId: 'ou_alice' } } },
       })
       expect(native.start.mock.calls[0]![5]).toMatchObject({ sender: { userId: 'ou_alice', name: 'Alice' } })
-      expect(sdkFactory.mock.calls[0]![0]).toMatchObject({ includeRawEvent: true })
+      expect(sdkFactory.mock.calls[0]![0]).toMatchObject({
+        includeRawEvent: true,
+        safety: { batch: { text: { delayMs: 0, longDelayMs: 0, maxMessages: 1 } } },
+      })
       const form = card.elements.find((element: { tag: string }) => element.tag === 'form')
       expect(form.elements[0]).toMatchObject({ tag: 'input', name: 'answer' })
       const submit = normalizeCardAction({
