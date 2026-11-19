@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { codexCommandError, codexRpcError } from '../packages/cli/src/cli/codex-command.js'
 import { parseCodexCommand } from '../packages/cli/src/cli/codex-command-parse.js'
 
 test('CLI distinguishes chat/current targets from explicit defaults and rejects unsupported scopes', async () => {
@@ -119,4 +120,15 @@ test('model defaults, Fast and project settings retain explicit scope and false 
       'yes',
     ], ['chats', 'project', 'set', '--revision', '0']]
   ) await expect(parseCodexCommand(args)).rejects.toThrow()
+})
+
+test('distinguishes an unsupported old Host for the read-only capability query', () => {
+  const rejection = new Error('plugin management operation is unsupported')
+  expect(codexRpcError('capabilities', rejection).message).toBe('CODEX_RUNTIME_INCOMPATIBLE')
+  expect(codexCommandError(codexRpcError('capabilities', rejection))).toMatchObject({
+    code: 'CODEX_RUNTIME_INCOMPATIBLE',
+    automaticRetry: false,
+  })
+  expect(codexRpcError('create', rejection).message).toBe('CODEX_RPC_RESULT_UNKNOWN')
+  expect(codexRpcError('capabilities', new Error('timeout')).message).toBe('CODEX_RPC_RESULT_UNKNOWN')
 })

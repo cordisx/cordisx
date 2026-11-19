@@ -2,6 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { type DiagnosticEvent, withDiagnostics } from '../packages/cli/src/diagnostics/context.js'
 import { NativeAgentTasks } from '../packages/cli/src/launcher/native-agent-tasks.js'
 import { NativeAgentTaskRouting } from '../packages/cli/src/launcher/native-agent-task-routing.js'
 import {
@@ -49,6 +50,32 @@ async function fixture() {
   return { controller, routing, authority, tasks: new NativeAgentTasks(authority) }
 }
 describe('provider-aware native task operation', () => {
+  it('records an exact pre-dispatch missing-source rejection without retrying the native operation', async () => {
+    const f = await fixture()
+    f.authority.invoke.mockRejectedValue(Object.assign(new Error('private native detail'), {
+      code: 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED',
+    }))
+    const expected = { status: 'rejected', reason: 'native-source-thread-not-loaded' }
+    expect(await f.tasks.create(input, metadata)).toEqual(expected)
+    expect(await f.tasks.create(input, metadata)).toEqual(expected)
+    expect(f.authority.invoke).toHaveBeenCalledTimes(1)
+  })
+  it('emits bounded correlated phases without prompt, source or raw native errors', async () => {
+    const f = await fixture()
+    const events: DiagnosticEvent[] = []
+    await withDiagnostics({ emit: event => events.push(event) }, async () => {
+      const tasks = new NativeAgentTasks(f.authority)
+      expect(await tasks.create(input, metadata)).toMatchObject({ status: 'created' })
+    })
+    expect(events).toContainEqual(expect.objectContaining({ event: 'native-task-create', phase: 'intent-recorded' }))
+    expect(events).toContainEqual(expect.objectContaining({ event: 'native-task-create', phase: 'native-receipt' }))
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'native-task-create', phase: 'route-result', outcome: 'created' }),
+    )
+    expect(new Set(events.map(event => event.requestRef)).size).toBe(1)
+    expect(JSON.stringify(events)).not.toMatch(/Real first message|source-turn|actual-call|credential-lease/u)
+  })
+
   it('uses captured model defaults and replays an operation after defaults change', async () => {
     const f = await fixture()
     let defaults = { providerId: 'configured', model: 'model', fast: false }

@@ -938,6 +938,7 @@ export async function prepareNativeSubmissionBootstrap(
               : await agentBridge.status(input),
           createTask: (input, metadata) => agentTasks!.create(input, metadata),
           taskCreationAvailable: () => cdp.taskCreationAvailable(),
+          taskCreationStatus: () => cdp.taskCreationStatus(),
           ...nativeCodexSettings({
             execution: chatExecution,
             configuration: chatConfiguration,

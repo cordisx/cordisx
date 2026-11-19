@@ -172,23 +172,57 @@ describe('native app-server intermediary', () => {
         method: 'turn/start',
         params: {
           threadId: 'created-thread',
-          input: [{ type: 'text', text: 'Original first message' }],
+          input: [],
+          toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Original first message' },
           approvalPolicy: 'on-request',
           model: 'old',
           config: { 'cordisx.operation_token': route.token },
         },
       })
-      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+      const firstTurn = JSON.parse(await h.read()).result.received
+      expect(firstTurn).toMatchObject({
         model: 'model-b',
         approvalPolicy: 'on-request',
-        input: [{ type: 'text', text: 'Original first message' }],
+        input: [{ type: 'text', text: 'Original first message', text_elements: [] }],
       })
+      expect(firstTurn).not.toHaveProperty('toolOutput')
       h.send({
         id: 'agent-next',
         method: 'turn/start',
-        params: { threadId: 'created-thread', input: [], model: 'native-next' },
+        params: {
+          threadId: 'created-thread',
+          input: [],
+          model: 'native-next',
+          toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Unrelated native output' },
+        },
       })
-      expect(JSON.parse(await h.read()).result.received.model).toBe('native-next')
+      expect(JSON.parse(await h.read()).result.received).toMatchObject({
+        model: 'native-next',
+        input: [],
+        toolOutput: { name: 'create_thread', namespace: 'codex_app', output: 'Unrelated native output' },
+      })
+    } finally {
+      await h.close()
+    }
+  })
+  it('classifies only the exact pre-dispatch missing source error without leaking native errors', async () => {
+    const h = await harness()
+    try {
+      h.send({ id: 'ready-task-error', method: 'echo/bytes', params: {} })
+      await h.read()
+      const invoke = (sourceThreadId: string) =>
+        h.server.invokeTask({
+          callId: 'cordisx-task-private-call',
+          sourceThreadId,
+          sourceTurnId: 'source-turn',
+          arguments: { prompt: 'PRIVATE_PROMPT', target: { type: 'projectless' } },
+        })
+      await expect(invoke('task-missing-source')).rejects.toMatchObject({
+        code: 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED',
+      })
+      for (const source of ['task-missing-wrong-id', 'task-missing-wrong-code']) {
+        await expect(invoke(source)).rejects.not.toHaveProperty('code', 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED')
+      }
     } finally {
       await h.close()
     }

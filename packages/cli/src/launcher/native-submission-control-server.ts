@@ -133,6 +133,7 @@ export async function startNativeSubmissionControlServer(
       reject(error: Error): void
       timer: NodeJS.Timeout
       restoration?: Readonly<{ threadId: string; revalidate?: () => Promise<boolean> }>
+      taskCreation?: boolean
     }
   >()
   const switchResumes = new Map<string, Readonly<{ switchId: string; threadId: string }>>()
@@ -196,7 +197,13 @@ export async function startNativeSubmissionControlServer(
         rememberExpired(id)
         fail(new Error('Native switch timed out'))
       }, options.requestTimeoutMs ?? TIMEOUT)
-      pending.set(id, { resolve, reject, timer, ...(restoration ? { restoration } : {}) })
+      pending.set(id, {
+        resolve,
+        reject,
+        timer,
+        ...(restoration ? { restoration } : {}),
+        ...(request.type === 'task-create' ? { taskCreation: true } : {}),
+      })
       void write(socket, { ...request, id }).catch(fail)
     })
   }
@@ -330,6 +337,10 @@ export async function startNativeSubmissionControlServer(
           : item.reject(
             value.reason === 'provider-switch-unsupported' || value.reason === 'provider-switch-reconciliation-required'
               ? new NativeThreadSwitchError(value.reason)
+              : item.taskCreation && value.reason === 'native-source-thread-not-loaded'
+              ? Object.assign(new Error('Native source thread not loaded'), {
+                code: 'NATIVE_TASK_SOURCE_THREAD_NOT_LOADED',
+              })
               : new Error('Native switch rejected'),
           )
         return

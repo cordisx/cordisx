@@ -75,6 +75,20 @@ describe('Agent model-provider tools', () => {
     })
     expect(f.authority.controller.prepareThreadResume).not.toHaveBeenCalled()
   })
+  it('reports a bounded native task readiness reason in the provider catalog', async () => {
+    const f = fixture()
+    const handler = createNativeAgentModelsHandler({
+      ...f.authority,
+      taskCreationStatus: async () => ({ available: false, reason: 'execution-import-failed' }),
+    })
+    expect(await handler('list', {})).toMatchObject({
+      threadCreation: {
+        status: 'unavailable',
+        reason: 'native-task-provider-creation-unavailable',
+        detail: 'execution-import-failed',
+      },
+    })
+  })
   it('resolves the current session before applying the Channel provider guard', async () => {
     const f = fixture(), guard = vi.fn(async () => ({ status: 'rejected', reason: 'channel-context-required' }))
     const handler = createNativeAgentModelsHandler({ ...f.authority, channelModelSelection: guard })

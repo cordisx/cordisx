@@ -16,6 +16,7 @@ import { readNativeLines } from './native-json-lines.mjs'
 import { createNativeChatControl } from './native-chat-control.mjs'
 import { createDesktopNativeContextCapture } from './desktop-native-context-capture.mjs'
 import { nativeLaunchConfiguration } from './native-launch-configuration.mjs'
+import { dispatchNativeTaskTool, normalizeNativeTaskFirstTurn } from './native-task-dispatch.mjs'
 
 const { socketPath, nonce, executable, nativeCliEntry, staticCatalog, nativeArgs } = nativeLaunchConfiguration(
   process.env,
@@ -604,6 +605,9 @@ async function forward(line) {
     }
     const authorized = await controlCall('authorize', { token, requestId: message.id })
     if (authorized !== true) throw new Error('Managed request authorization expired')
+    if (message.method === 'turn/start' && dispatch.agentTask && dispatch.providerId !== 'openai') {
+      normalizeNativeTaskFirstTurn(params)
+    }
     desktopCalls.set(message.id, { token, method: message.method, agentTask: dispatch.agentTask === true })
     if (message.method === 'turn/start') {
       firstTurns.delete(params.threadId)
@@ -918,23 +922,7 @@ readLines(control, line => {
     return
   }
   if (['task-create', 'codex-tool'].includes(message.type) && typeof message.id === 'string') {
-    const tool = message.type === 'task-create' ? 'create_thread' : message.tool
-    if (!['create_thread', 'list_projects', 'move_thread_to_project', 'list_threads'].includes(tool)) {
-      void write(control, { id: message.id, ok: false }).catch(stop)
-      return
-    }
-    void nativeCall('mcpServer/tool/call', {
-      server: 'codex_app',
-      threadId: message.sourceThreadId,
-      tool,
-      arguments: message.arguments,
-      _meta: {
-        'openai/toolCallId': message.callId,
-        'openai/threadId': message.sourceThreadId,
-        'openai/turnId': message.sourceTurnId,
-      },
-    }).then(value => write(control, { id: message.id, ok: true, value }))
-      .catch(() => write(control, { id: message.id, ok: false }).catch(stop))
+    dispatchNativeTaskTool({ message, nativeCall, write, control, stop, emitDiagnostic })
     return
   }
   // The CordisX agent bridge reads and starts threads in this same app-server, so
