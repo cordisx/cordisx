@@ -27,7 +27,9 @@ import {
 import {
   CHANNEL_COMMANDS,
   channelCommandDenied,
+  channelCommandScope,
   channelExact,
+  channelGlobalCommandAllowed,
   channelPolicyAllows,
   channelRecord,
   channelSameScope,
@@ -621,6 +623,10 @@ export class ChannelConversationConsumer {
     } else if (['messages-on', 'messages-off', 'allow-user', 'deny-user', 'reset-user', 'wake'].includes(command)) {
       const parts = argument.trim().split(/\s+/u).filter(Boolean)
       const global = parts.includes('--global')
+      if (global && !channelGlobalCommandAllowed(this.store.snapshot().policy, event, command)) {
+        await this.commandReply(record.recordId + ':command-denied', event, '当前用户没有修改全局策略的权限。')
+        return
+      }
       let userArgument = parts.filter(part => part !== '--global').join(' ')
       if (
         ['messages-on', 'messages-off'].includes(command) && userArgument
@@ -651,16 +657,14 @@ export class ChannelConversationConsumer {
         }
         userArgument = resolved.userId
       }
-      const scope = global ? {} : {
-        adapterId: event.adapterId,
-        accountId: event.accountId,
-        tenantId: event.tenantId,
-        conversationId: event.conversationId,
-      }
+      const scope = channelCommandScope(event, global)
       if (this.lifetime.signal.aborted) return
       const applied = await this.store.mutate(state => {
         // Name lookup is asynchronous. A policy change during lookup must still control this effect.
-        if (!state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)) return false
+        if (
+          !state.policy.enabled || !channelPolicyAllows(state.policy, 'command', event, command)
+          || global && !channelGlobalCommandAllowed(state.policy, event, command)
+        ) return false
         const id = `command:${identity([scope, command.includes('user') ? userArgument : 'messages'])}`
         const rules = state.policy.rules.filter(rule => rule.id !== id)
         if (command === 'messages-off' || command === 'allow-user' || command === 'deny-user') {
