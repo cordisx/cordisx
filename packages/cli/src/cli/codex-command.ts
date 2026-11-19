@@ -34,6 +34,16 @@ cordisx codex chats project get [--session <id>]
 cordisx codex chats project set [--session <id>] --revision <n> --project <id> [--cwd <path>]
 Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Project switching is Desktop-only; headless has no native sidebar project authority.`
 
+export function codexRpcError(operation: string, error: unknown): Error {
+  if (
+    operation === 'capabilities' && error instanceof Error
+    && error.message === 'plugin management operation is unsupported'
+  ) {
+    return new Error('CODEX_RUNTIME_INCOMPATIBLE')
+  }
+  return new Error('CODEX_RPC_RESULT_UNKNOWN')
+}
+
 export class CodexCommandRejected extends Error {
   readonly reported = true
 }
@@ -72,8 +82,8 @@ export async function runCodexCommand(
       ...(callerThreadId ? { callerThreadId } : {}),
       ...(callerTurnId ? { callerTurnId } : {}),
     })
-  } catch {
-    throw new Error('CODEX_RPC_RESULT_UNKNOWN')
+  } catch (error) {
+    throw codexRpcError(command.operation, error)
   }
   stdout(JSON.stringify(result))
   const status = (result as { status?: string })?.status
@@ -89,6 +99,8 @@ export function codexCommandError(error: unknown) {
     automaticRetry: false,
     message: code === 'CODEX_RPC_RESULT_UNKNOWN'
       ? 'The request may have reached the Host. Inspect the target/settings or reuse the exact creation operationId; do not retry blindly.'
+      : code === 'CODEX_RUNTIME_INCOMPATIBLE'
+      ? 'The running CordisX Host does not support this capability query; a compatible Host is required.'
       : code === 'CODEX_RUNTIME_NOT_RUNNING'
       ? 'Start the selected CordisX Codex profile. This command never starts another App or backend.'
       : 'Run cordisx codex help and inspect the selected profile. No automatic retry was attempted.',

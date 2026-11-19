@@ -1,3 +1,4 @@
+import type { NativeTaskCreationStatus } from './native-task-creation-readiness.js'
 import type { StartupProviderAdmission } from './startup-provider-admission.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { callerThreadId } from './agent-bridge-context.js'
@@ -46,6 +47,7 @@ export interface NativeAgentModelsAuthority {
   /** The read-only integration report. Reads files and probes; never launches or writes. */
   integrationStatus?(input: unknown): Promise<unknown>
   taskCreationAvailable?(): Promise<boolean>
+  taskCreationStatus?(): Promise<NativeTaskCreationStatus>
   execution?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
   configuration?(operation: string, input: unknown, metadata?: unknown): Promise<unknown>
   modelServices?(operation: 'read' | 'save', input: unknown, metadata?: unknown): Promise<unknown>
@@ -137,12 +139,18 @@ export function createNativeAgentModelsHandler(authority: NativeAgentModelsAutho
     const catalog = await authority.catalog()
     if (operation === 'create' && authority.createTask) return await authority.createTask(input, metadata)
     if (operation === 'list') {
+      const taskStatus = await authority.taskCreationStatus?.()
+      const taskAvailable = taskStatus?.available ?? await authority.taskCreationAvailable?.() ?? false
       return {
         status: 'ok',
         ...(authority.startup?.snapshot === undefined ? {} : { startup: await authority.startup.snapshot() }),
-        threadCreation: await authority.taskCreationAvailable?.()
+        threadCreation: taskAvailable
           ? { status: 'available', tool: 'create_thread_with_provider' }
-          : { status: 'unavailable', reason: 'native-task-provider-creation-unavailable' },
+          : {
+            status: 'unavailable',
+            reason: 'native-task-provider-creation-unavailable',
+            ...(taskStatus && !taskStatus.available ? { detail: taskStatus.reason } : {}),
+          },
         providers: catalog.map(provider => ({
           providerId: provider.providerId,
           title: provider.title ?? provider.providerId,

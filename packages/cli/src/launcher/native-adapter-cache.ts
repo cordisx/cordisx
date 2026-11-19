@@ -9,7 +9,7 @@ import { TransformMaterializationSession } from './codex-adapter/materialization
 import { checkPreparationSignal } from './codex-adapter/preparation-error.js'
 const NATIVE_SUBMISSION_CACHE_SCHEMA = 2
 /** Bump whenever structural discovery or its generated transform contract changes. */
-const NATIVE_SUBMISSION_ANALYZER_VERSION = 12
+const NATIVE_SUBMISSION_ANALYZER_VERSION = 13
 const SHA256 = /^[a-f0-9]{64}$/u
 
 export interface CachedNativeTransform {
