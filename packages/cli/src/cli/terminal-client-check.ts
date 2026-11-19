@@ -62,6 +62,23 @@ function diagnostic(
   ].join('\n'))
 }
 
+/** A version check cannot prevent executable removal or permission changes before spawn. */
+export function terminalClientStartupError(
+  client: TerminalInvocation['client'],
+  executable: string,
+  error: unknown,
+): Error {
+  const code = error !== null && typeof error === 'object' && 'code' in error ? error.code : undefined
+  const reason = code === 'ENOENT'
+    ? 'could not start: its executable or interpreter disappeared after the startup check.'
+    : code === 'EACCES' || code === 'EPERM'
+    ? 'could not start: permission to execute the selected entry was denied.'
+    : code === 'ENOEXEC'
+    ? 'could not start: the selected entry has an invalid executable format.'
+    : 'could not start the selected executable. Verify --executable and the runtime environment.'
+  return diagnostic(client, executable, executable, reason)
+}
+
 /** Probe the exact selected entry before acquiring a provider lease; never print client output. */
 export async function checkTerminalClient(
   executable: string,

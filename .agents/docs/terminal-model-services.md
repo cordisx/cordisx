@@ -145,6 +145,9 @@ history or instantly replace a running thread's instructions.
   permission failure or failed check reports installation/PATH guidance before
   preparing a model-service credential lease. Client output is not forwarded by
   this check. `--help` and `--list` do not require an installed client.
+  If the executable disappears or execution is denied after the check,
+  CordisX catches the launch error, gives repair guidance and releases any
+  prepared provider lease.
 - Missing Codex CLI: install it with `npm install -g @openai/codex@latest`, then
   run `codex --version` in the same terminal. See the
   [official installation guide](https://learn.chatgpt.com/docs/codex/cli) for

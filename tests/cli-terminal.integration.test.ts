@@ -286,54 +286,77 @@ it('reports unavailable live owners without spawning or fabricating an inactive 
   expect(spawnTerminal).not.toHaveBeenCalled()
 })
 
-it('releases a prepared lease if the checked executable disappears before terminal spawn', async () => {
-  const f = await fixture()
-  const executable = path.join(f.root, 'codex')
-  await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
-  const calls: string[] = []
-  const server = await openProductionPluginManagementComposition({
-    homeDir: f.root,
-    configPath: f.configPath,
-    appId: 'codex',
-    profileId: 'default',
-    runtimeGeneration: 'runtime-one',
-    token: 'a'.repeat(64),
-    coordinator: new PluginLifecycleCoordinator({
+it.each(['missing', 'permission', 'synchronous'])(
+  'releases a prepared lease and gives repair advice for a %s startup failure after the check',
+  async failure => {
+    const f = await fixture()
+    const executable = path.join(f.root, 'codex')
+    await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+    const calls: string[] = []
+    const server = await openProductionPluginManagementComposition({
       homeDir: f.root,
+      configPath: f.configPath,
+      appId: 'codex',
       profileId: 'default',
       runtimeGeneration: 'runtime-one',
-      permissionPolicies: [],
-      runtime: {
-        stage: async () => undefined,
-        commit: async () => undefined,
-        abort: async () => undefined,
-        reload: async () => undefined,
-      },
-    }),
-    terminalProvider: async request => {
-      calls.push(request.kind)
-      if (request.kind === 'prepare') {
-        await rm(executable)
-        return {
-          kind: 'prepared',
-          leaseId: 'lease',
-          providerId: 'fixture',
-          model: 'model',
-          provider: { name: 'Fixture' },
+      token: 'a'.repeat(64),
+      coordinator: new PluginLifecycleCoordinator({
+        homeDir: f.root,
+        profileId: 'default',
+        runtimeGeneration: 'runtime-one',
+        permissionPolicies: [],
+        runtime: {
+          stage: async () => undefined,
+          commit: async () => undefined,
+          abort: async () => undefined,
+          reload: async () => undefined,
+        },
+      }),
+      terminalProvider: async request => {
+        calls.push(request.kind)
+        if (request.kind === 'prepare') {
+          if (failure === 'missing') await rm(executable)
+          return {
+            kind: 'prepared',
+            leaseId: 'lease',
+            providerId: 'fixture',
+            model: 'model',
+            provider: { name: 'Fixture' },
+          }
         }
-      }
-      return { kind: 'released' }
-    },
-  })
-  closes.push(() => server.close())
-  await expect(
-    runCordisXCli(['cli', '--service', 'fixture', '--model', 'model', '--codex-executable', executable], {
+        return { kind: 'released' }
+      },
+    })
+    closes.push(() => server.close())
+    const error = await runCordisXCli([
+      'cli',
+      '--service',
+      'fixture',
+      '--model',
+      'model',
+      '--codex-executable',
+      executable,
+    ], {
       env: f.env,
-    }),
-  )
-    .rejects.toThrow('Could not start')
-  expect(calls).toEqual(['prepare', 'release'])
-})
+      ...(failure === 'missing' ? {} : {
+        internalSpawnTerminal: (() => {
+          const error = Object.assign(new Error('PRIVATE_TEST_DETAILS'), { code: 'EACCES' })
+          if (failure === 'synchronous') throw error
+          const child = new EventEmitter()
+          setImmediate(() => child.emit('error', error))
+          return child
+        }) as unknown as typeof spawn,
+      }),
+    }).catch(error => error as Error)
+    expect(error.message).toContain(
+      failure === 'missing' ? 'disappeared after the startup check' : 'permission to execute',
+    )
+    expect(error.message).toContain('npm install -g @openai/codex@latest')
+    expect(error.message).toContain('--executable')
+    expect(error.message).not.toContain('PRIVATE_TEST_DETAILS')
+    expect(calls).toEqual(['prepare', 'release'])
+  },
+)
 
 it('binds the terminal callback through production Host assembly without opening an App', async () => {
   const f = await fixture()

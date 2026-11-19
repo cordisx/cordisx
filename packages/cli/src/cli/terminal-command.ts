@@ -11,7 +11,7 @@ import { TERMINAL_HELP, type TerminalInvocation } from './terminal-parse.js'
 import type { CordisXCliRuntime } from './run-runtime.js'
 import { prepareTerminalCodexProviderLayer } from './terminal-codex-provider-layer.js'
 import { prepareSharedTerminalService, sharedTerminalServices } from './terminal-shared-service.js'
-import { checkTerminalClient, terminalClientName } from './terminal-client-check.js'
+import { checkTerminalClient, terminalClientName, terminalClientStartupError } from './terminal-client-check.js'
 
 /** TOML literals, not shell commands. No provider credential values are accepted here. */
 function toml(value: unknown): string {
@@ -253,16 +253,20 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
         ...terminalClaudeArguments(invocation, instructionsFile),
         ...(claudeSettings ? ['--settings', claudeSettings] : []),
       ]
-    child = (runtime.internalSpawnTerminal ?? spawn)(
-      executable!,
-      [...args],
-      {
-        cwd,
-        env: environment,
-        stdio: 'inherit',
-        shell: false,
-      },
-    )
+    try {
+      child = (runtime.internalSpawnTerminal ?? spawn)(
+        executable!,
+        [...args],
+        {
+          cwd,
+          env: environment,
+          stdio: 'inherit',
+          shell: false,
+        },
+      )
+    } catch (error) {
+      throw terminalClientStartupError(client, executable!, error)
+    }
     if (prepared) {
       const leaseId = prepared.leaseId
       timer = setInterval(() => {
@@ -294,7 +298,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
       const code = await new Promise<number>((resolve, reject) => {
         child!.once(
           'error',
-          () => reject(new Error(`Could not start ${terminalClientName(client)} CLI; check --executable or PATH`)),
+          error => reject(terminalClientStartupError(client, executable!, error)),
         )
         child!.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 143)))
       })
