@@ -21,11 +21,12 @@ import {
 import { releaseHostProfileLease, stopPrelaunchedHost } from './injected-host-cleanup.js'
 import { supportsOwnedMainInspector } from '../shortcuts/dock.js'
 import type { PreparedRunCommand } from './run-command-dispatch.js'
-import { captureMainInspectorUrl, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
+import { captureMainInspectorUrl, codexHome, type CordisXCliRuntime, rootFromConfigPath } from './run-support.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { loadHomeConfig } from '../config/home-config.js'
 import { hostModelServiceEnvironment } from './native-submission-catalog-options.js'
 import { codexHomeOfPlan, projectModelServicesBeforeLaunch } from '../launcher/model-service-projection.js'
+import { projectMcpToCodex } from '../launcher/mcp-projection.js'
 import { prepareDesktopStaticCatalog } from '../launcher/desktop-static-catalog.js'
 
 export interface ProductionHostBootstrap {
@@ -122,6 +123,9 @@ export async function prepareProductionHostBootstrap(
       plan.environment,
       configured.providers,
     )
+    if (adapter.id === 'codex') {
+      await projectMcpToCodex(configured.mcp, codexHome(configuredEnvironment), configuredEnvironment)
+    }
     if (
       input.prepareNativeSubmission
       && shouldEnableNativeSubmission({

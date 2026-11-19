@@ -20,12 +20,23 @@ import {
   parseHomeConfigMarketplaceSources,
 } from './home-config-marketplace.js'
 import type { ManagedProviderRecord } from '../launcher/model-catalog/managed-provider-schema.js'
-import { type JsonValue, jsonValue, parseManagedServiceStartupConfig, PLUGIN_ID, record } from './home-config-values.js'
+import {
+  type JsonValue,
+  jsonValue,
+  nonEmptyString,
+  parseManagedServiceStartupConfig,
+  PLUGIN_ID,
+  record,
+  rejectUnknownKeys,
+} from './home-config-values.js'
 import { parseIconThemePreference, parseManagedProviders } from './home-config-profile-private.js'
 import { type HomeConfigModelServiceProvider, parseModelServiceProvider } from './home-config-model-service.js'
+import { type HomeMcpConfig, parseHomeMcpConfig } from './home-config-mcp.js'
+import { type HomeConfigPublisherGrantIssuer, parsePublisherGrantIssuer } from './home-config-issuers.js'
 import { type ChatExecutionDefaults, parseChatExecutionDefaults } from '../chat-execution-settings.js'
 
 export type { JsonValue } from './home-config-values.js'
+export type { HomeConfigPublisherGrantIssuer } from './home-config-issuers.js'
 export type { HomeConfigModelServiceProvider, HomeConfigProviderProtocol } from './home-config-model-service.js'
 
 export { redactedHomeConfig } from './home-config-profile-private.js'
@@ -144,18 +155,10 @@ export interface HomeConfigApp {
   readonly profiles: Readonly<Record<string, HomeConfigProfile>>
 }
 
-/** Registered publisher verification keys are Host-local, never catalog metadata. */
-export interface HomeConfigPublisherGrantIssuer {
-  readonly id: string
-  readonly keyId: string
-  readonly environment: 'sandbox' | 'live'
-  /** Ed25519 SubjectPublicKeyInfo DER, base64url encoded. */
-  readonly publicKeySpki: string
-}
-
 export interface HomeConfig {
   readonly version: 1
   readonly defaultApp: string
+  readonly mcp?: HomeMcpConfig
   readonly environmentVariables: readonly HomeConfigEnvironmentVariable[]
   readonly providers: readonly HomeConfigProvider[]
   readonly plugins: readonly HomeConfigPlugin[]
@@ -186,19 +189,6 @@ const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
-function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  const allowedKeys = new Set(allowed)
-  const unknown = Object.keys(value).find((key) => !allowedKeys.has(key))
-  if (unknown !== undefined) throw new Error(`${label}.${unknown} is not supported`)
-}
-
-function nonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${label} must be a non-empty string`)
-  }
-  return value.trim()
-}
-
 function portableId(value: unknown, label: string): string {
   const id = nonEmptyString(value, label)
   if (!APP_OR_PROFILE_ID.test(id)) {
@@ -482,28 +472,13 @@ function parseApp(value: unknown, label: string): HomeConfigApp {
   return { defaultProfile, profiles }
 }
 
-function parsePublisherGrantIssuer(value: unknown, index: number): HomeConfigPublisherGrantIssuer {
-  const label = `config.publisherGrantIssuers[${index}]`
-  const issuer = record(value, label)
-  rejectUnknownKeys(issuer, ['id', 'keyId', 'environment', 'publicKeySpki'], label)
-  const id = nonEmptyString(issuer.id, `${label}.id`)
-  const keyId = nonEmptyString(issuer.keyId, `${label}.keyId`)
-  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)) throw new Error(`${label}.id is invalid`)
-  if (!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) throw new Error(`${label}.keyId is invalid`)
-  if (issuer.environment !== 'sandbox' && issuer.environment !== 'live') {
-    throw new Error(`${label}.environment is invalid`)
-  }
-  const publicKeySpki = nonEmptyString(issuer.publicKeySpki, `${label}.publicKeySpki`)
-  if (!/^[A-Za-z0-9_-]+$/.test(publicKeySpki)) throw new Error(`${label}.publicKeySpki must be base64url`)
-  return { id, keyId, environment: issuer.environment, publicKeySpki }
-}
-
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = migrateMarketplaceConfigDocument(record(value, 'config')).document
   rejectUnknownKeys(config, [
     'version',
     'defaultApp',
+    'mcp',
     'environmentVariables',
     'providers',
     'plugins',
@@ -586,6 +561,7 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   return {
     version: 1,
     defaultApp,
+    ...(config.mcp === undefined ? {} : { mcp: parseHomeMcpConfig(config.mcp)! }),
     environmentVariables,
     providers,
     plugins,

@@ -36,7 +36,7 @@ after --. A selected CordisX service/model cannot be overridden after --.
 Plugin and Manager-managed services reuse the existing Host and login; no App
 is started, stopped or restarted. Shared model-service declarations work without
 a running Host. Protocol and model compatibility are checked before startup.
-No global Codex config is rewritten. Instructions apply only to this invocation;
+Declared MCP servers are synchronized before startup. Instructions apply only to this invocation;
 changing an already-loaded thread remains dependent on the Codex CLI version.`
 
 export function parseTerminalCli(argv: readonly string[]): TerminalInvocation {
