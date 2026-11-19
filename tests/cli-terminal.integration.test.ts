@@ -442,3 +442,154 @@ it.each(['codex', 'claude-code'] as const)(
     })
   },
 )
+
+it.each(['codex', 'claude-code'] as const)(
+  'projects MCP before spawning %s alongside a provider overlay',
+  async client => {
+    const f = await fixture()
+    const home = path.join(f.root, 'native-home')
+    const codexHome = path.join(f.root, 'actual-codex-home')
+    const config = {
+      ...createDefaultHomeConfig(),
+      mcp: {
+        servers: {
+          example: { type: 'http', url: 'https://example.com/mcp', headers: { Authorization: { env: 'MCP_TOKEN' } } },
+        },
+      },
+      providers: [{
+        id: 'shared',
+        kind: 'model-service',
+        displayName: 'Shared',
+        baseUrl: 'https://example.com/v1',
+        apiKeyEnv: 'SHARED_KEY',
+        protocols: ['openai-responses', 'anthropic-messages'],
+        models: { codex: ['model-one'], claude: ['model-one'] },
+      }],
+      environmentVariables: [{ name: 'SHARED_KEY', value: 'private-provider', enabled: true }, {
+        name: 'MCP_TOKEN',
+        value: 'private-mcp',
+        enabled: true,
+      }],
+    }
+    await writeFile(f.configPath, JSON.stringify(config))
+    let adapterFile: string | undefined
+    const { readFileSync } = await import('node:fs')
+    await runCordisXCli(['start', '--mode', 'cli', client, '-s', 'shared', '-m', 'model-one'], {
+      internalCheckTerminalClient: checkClient,
+      env: { ...f.env, HOME: home, CODEX_HOME: codexHome },
+      internalSpawnTerminal: ((_exe: string, args: string[], options: any) => {
+        expect(options.env.MCP_TOKEN).toBe('private-mcp')
+        if (client === 'codex') {
+          const actual = parseToml(readFileSync(path.join(codexHome, 'config.toml'), 'utf8'))
+          expect(actual).toMatchObject({
+            mcp_servers: { example: { env_http_headers: { Authorization: 'MCP_TOKEN' } } },
+          })
+          expect(args).toContain('model_provider="shared"')
+        } else {
+          expect(args).toContain('--settings')
+          adapterFile = args[args.indexOf('--mcp-config') + 1]
+          expect(JSON.parse(readFileSync(adapterFile!, 'utf8'))).toMatchObject({
+            mcpServers: { cordisx_example: { type: 'http' } },
+          })
+        }
+        return spawn(process.execPath, ['-e', 'process.exit(0)'])
+      }) as typeof spawn,
+    })
+    if (adapterFile) await expect(readFile(adapterFile)).rejects.toMatchObject({ code: 'ENOENT' })
+  },
+)
+
+it('does not project MCP for terminal help, native inspection, or service listing', async () => {
+  const f = await fixture()
+  const codexHome = path.join(f.root, 'unused-codex-home')
+  await writeFile(
+    f.configPath,
+    JSON.stringify({
+      ...createDefaultHomeConfig(),
+      mcp: {
+        servers: {
+          needs_env: {
+            type: 'http',
+            url: 'https://example.com/mcp',
+            headers: { Authorization: { env: 'MISSING_MCP_TOKEN' } },
+          },
+        },
+      },
+    }),
+  )
+  const runtime = {
+    env: { ...f.env, HOME: f.root, CODEX_HOME: codexHome },
+    stdout: () => {},
+    internalCheckTerminalClient: checkClient,
+    internalSpawnTerminal: (() => spawn(process.execPath, ['-e', 'process.exit(0)'])) as typeof spawn,
+  }
+  await runCordisXCli(['cli', '--help'], runtime)
+  await runCordisXCli(['cli', '--', '--version'], runtime)
+  await runCordisXCli(['cli', '--list'], runtime)
+  await expect(readFile(path.join(codexHome, 'config.toml'))).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it.each(
+  [
+    ['codex', ['-c', 'mcp_servers.example.command="other"']],
+    ['claude-code', ['--strict-mcp-config']],
+    ['claude-code', ['--mcp-config', '/tmp/other.json']],
+  ] as const,
+)('rejects conflicting native MCP overlays for %s', async (client, args) => {
+  const f = await fixture()
+  await writeFile(
+    f.configPath,
+    JSON.stringify({ ...createDefaultHomeConfig(), mcp: { servers: { example: { type: 'stdio', command: 'true' } } } }),
+  )
+  const spawnTerminal = vi.fn()
+  await expect(runCordisXCli(['start', '--mode', 'cli', client, '--', ...args], {
+    env: { ...f.env, HOME: f.root, CODEX_HOME: path.join(f.root, 'codex') },
+    internalCheckTerminalClient: checkClient,
+    internalSpawnTerminal: spawnTerminal as unknown as typeof spawn,
+  })).rejects.toThrow(/MCP/)
+  expect(spawnTerminal).not.toHaveBeenCalled()
+})
+
+it.each(['codex', 'claude-code'] as const)('loads Skills and MCP from the same home config for %s', async client => {
+  const f = await fixture()
+  const { execFileSync } = await import('node:child_process')
+  const { mkdir } = await import('node:fs/promises')
+  const { pathToFileURL } = await import('node:url')
+  const repo = path.join(f.root, 'combined.git')
+  await mkdir(path.join(repo, 'review'), { recursive: true })
+  await writeFile(path.join(repo, 'review', 'SKILL.md'), 'fixture')
+  for (
+    const args of [['init', '-q'], ['config', 'user.email', 'test@example.invalid'], ['config', 'user.name', 'Test'], [
+      'add',
+      '.',
+    ], ['commit', '-qm', 'fixture']]
+  ) execFileSync('git', ['-C', repo, ...args])
+  await writeFile(
+    f.configPath,
+    JSON.stringify({
+      ...createDefaultHomeConfig(),
+      skills: [`${pathToFileURL(repo).href}@review`],
+      mcp: { servers: { example: { type: 'stdio', command: 'true' } } },
+      environmentVariables: [{ name: 'CORDISX_HOME', value: path.join(f.root, 'other-home'), enabled: true }],
+    }),
+  )
+  const target = path.join(f.root, client === 'codex' ? '.agents' : '.claude', 'skills', 'review', 'SKILL.md')
+  const codexHome = path.join(f.root, 'codex-home')
+  await runCordisXCli(['start', '--mode', 'cli', client], {
+    homedir: f.root,
+    env: { ...f.env, HOME: f.root, CODEX_HOME: codexHome },
+    stdout: () => {},
+    internalCheckTerminalClient: checkClient,
+    internalSpawnTerminal: ((_executable: string, args: string[]) => {
+      expect(readFileSync(target, 'utf8')).toBe('fixture')
+      if (client === 'codex') {
+        expect(parseToml(readFileSync(path.join(codexHome, 'config.toml'), 'utf8'))).toMatchObject({
+          mcp_servers: { example: { command: 'true' } },
+        })
+      } else {expect(JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1]!, 'utf8'))).toMatchObject({
+          mcpServers: { cordisx_example: { command: 'true' } },
+        })}
+      return spawn(process.execPath, ['-e', 'process.exit(0)'])
+    }) as typeof spawn,
+  })
+})

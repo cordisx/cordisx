@@ -6,6 +6,11 @@ import { lstat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
+import { mcpServersForApp } from '../config/home-config-mcp.js'
+import { mergeHomeEnvironment } from '../config/home-config-environment.js'
+import { prepareClaudeMcp, projectMcpToCodex } from '../launcher/mcp-projection.js'
+import { codexHome } from './run-support.js'
+import type { HomeConfig } from '../config/home-config.js'
 import { MODEL_SERVICE_HEADER_ENV_PREFIX } from '../config/model-service-runtime-options.js'
 import { connectExistingTerminalProvider } from '../launcher/existing-terminal-provider-rpc.js'
 import type { TerminalProviderRequest, TerminalProviderResult } from '../launcher/terminal-provider.js'
@@ -123,12 +128,22 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let host: { homeDir: string; profileId: string } | undefined
   let shared: ReturnType<typeof prepareSharedTerminalService>
   let declared: ReturnType<typeof sharedTerminalServices> = []
+  let homeConfig: HomeConfig | undefined
+  const configPath = resolveHomeConfigPath({
+    env: environment,
+    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+  })
+  try {
+    await lstat(configPath)
+    homeConfig = await loadHomeConfig(configPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (!invocation.list && homeConfig) {
+    Object.assign(environment, mergeHomeEnvironment(environment, homeConfig.environmentVariables))
+  }
   if (invocation.service || invocation.list || invocation.profile) {
-    const configPath = resolveHomeConfigPath({
-      env: environment,
-      ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-    })
-    const config = await loadHomeConfig(configPath)
+    const config = homeConfig ?? await loadHomeConfig(configPath)
     declared = sharedTerminalServices(config, client)
     if (invocation.service && invocation.model) {
       shared = prepareSharedTerminalService(config, client, invocation.service, invocation.model, environment)
@@ -176,24 +191,16 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     )
     return
   }
-  const skillConfigPath = resolveHomeConfigPath({
-    env: environment,
-    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-  })
-  const skillConfig = await loadHomeConfig(skillConfigPath).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined
-    throw error
-  })
-  const informationalClientCommand = invocation.codexArgs.some(arg => arg === '--help' || arg === '-h')
-    || ['help', 'list'].includes(invocation.codexArgs[0] ?? '')
-  if (skillConfig?.skills?.length && !informationalClientCommand) {
+  const nativeInspection = invocation.codexArgs.some(arg => ['--help', '-h', '--version', '-V'].includes(arg))
+    || ['mcp', 'help', 'list'].includes(invocation.codexArgs[0] ?? '')
+  if (homeConfig?.skills?.length && !nativeInspection) {
     const home = runtime.homedir ?? environment.HOME ?? os.homedir()
     const clientRoot = client === 'claude-code'
       ? (environment.CLAUDE_CONFIG_DIR || path.join(home, '.claude'))
       : path.join(home, '.agents')
     await installConfiguredSkills({
-      sources: skillConfig.skills,
-      cacheDir: path.join(path.dirname(skillConfigPath), 'cache', 'skills'),
+      sources: homeConfig.skills,
+      cacheDir: path.join(path.dirname(configPath), 'cache', 'skills'),
       skillsDir: path.join(clientRoot, 'skills'),
       report: stdout,
       env: environment,
@@ -202,6 +209,7 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
   let prepared: Extract<TerminalProviderResult, { kind: 'prepared' }> | undefined
   let child: ChildProcess | undefined
   let nativeLayer: Awaited<ReturnType<typeof prepareTerminalCodexProviderLayer>>
+  let claudeMcp: Awaited<ReturnType<typeof prepareClaudeMcp>> | undefined
   let timer: ReturnType<typeof setInterval> | undefined
   let renewing = false, failure: Error | undefined
   try {
@@ -272,11 +280,39 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     const effectiveShared = nativeLayer && sharedCodex
       ? { ...sharedCodex, provider: nativeLayer.provider }
       : sharedCodex
+    if (!nativeInspection) {
+      const managed = Object.keys(mcpServersForApp(homeConfig?.mcp, client)).length > 0
+      if (
+        managed && client === 'claude-code'
+        && invocation.codexArgs.some(arg =>
+          arg === '--strict-mcp-config' || arg === '--mcp-config' || arg.startsWith('--mcp-config=')
+        )
+      ) throw new Error('CordisX MCP cannot be combined with native --mcp-config or --strict-mcp-config')
+      if (managed && client === 'codex') {
+        for (let index = 0; index < invocation.codexArgs.length; index++) {
+          const arg = invocation.codexArgs[index]!
+          const raw = arg === '-c' || arg === '--config'
+            ? invocation.codexArgs[++index]
+            : arg.startsWith('--config=')
+            ? arg.slice(9)
+            : arg.startsWith('-c')
+            ? arg.slice(2)
+            : undefined
+          const key = raw?.split('=')[0]?.replace(/["'\s]/gu, '')
+          if (key === 'mcp_servers' || key?.startsWith('mcp_servers.')) {
+            throw new Error('Codex MCP overrides cannot replace CordisX-managed servers')
+          }
+        }
+      }
+      if (client === 'codex') await projectMcpToCodex(homeConfig?.mcp, codexHome(environment), environment)
+      else claudeMcp = await prepareClaudeMcp(homeConfig?.mcp, environment, cwd)
+    }
     const args = client === 'codex'
       ? terminalCodexArguments(invocation, prepared ?? effectiveShared, instructionsFile, nativeLayer?.name)
       : [
         ...terminalClaudeArguments(invocation, instructionsFile),
         ...(claudeSettings ? ['--settings', claudeSettings] : []),
+        ...(claudeMcp?.file ? ['--mcp-config', claudeMcp.file] : []),
       ]
     try {
       child = (runtime.internalSpawnTerminal ?? spawn)(
@@ -342,5 +378,6 @@ export async function runTerminalCommand(invocation: TerminalInvocation, runtime
     clearInterval(timer)
     if (prepared) await request!({ kind: 'release', leaseId: prepared.leaseId }).catch(() => undefined)
     await nativeLayer?.close()
+    await claudeMcp?.close()
   }
 }

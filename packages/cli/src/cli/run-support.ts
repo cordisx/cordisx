@@ -131,6 +131,7 @@ import {
 } from '../launcher/owner-document-rpc.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { hostModelServiceEnvironment, nativeSubmissionCatalogOptions } from './native-submission-catalog-options.js'
+import { projectMcpToCodex } from '../launcher/mcp-projection.js'
 import { modelServiceLaunchHook } from '../launcher/model-service-projection.js'
 import { runInjectedHost } from './run-injected-host.js'
 import { type CordisXCliRuntime, createDevelopmentManagedServiceActivation } from './run-runtime.js'
@@ -477,6 +478,15 @@ export async function runDevelopment(
     const executable = invocation.options.attach
       ? undefined
       : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
+    const developmentEnvironment = hostModelServiceEnvironment(
+      environment,
+      homeConfig.environmentVariables,
+      undefined,
+      homeConfig.providers,
+    )
+    if (executable !== undefined) {
+      await projectMcpToCodex(homeConfig.mcp, codexHome(developmentEnvironment), developmentEnvironment)
+    }
     if (
       executable !== undefined
       && shouldEnableNativeSubmission({
@@ -500,7 +510,7 @@ export async function runDevelopment(
         nativeSubmission = await createNativeSubmission(
           managedServiceActivation,
           executable,
-          codexHome(environment),
+          codexHome(developmentEnvironment),
           nativeSubmissionCatalogOptions(
             cordisxHomeDir,
             nativeProfileId,
@@ -666,30 +676,26 @@ export async function runDevelopment(
           providerBridgeToken: composition.providerBridgeToken,
         }),
         ...(executable === undefined ? {} : { executable }),
-        beforeHostLaunch: modelServiceLaunchHook(homeConfig, codexHome(environment), invocation.options, stdout),
+        beforeHostLaunch: modelServiceLaunchHook(
+          homeConfig,
+          codexHome(developmentEnvironment),
+          invocation.options,
+          stdout,
+        ),
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
         ...(profile === undefined ? {} : { profile }),
-        ...((entry === undefined && nativeSubmission === undefined)
-          ? {}
-          : {
-            environment: {
-              ...hostModelServiceEnvironment(
-                environment,
-                homeConfig.environmentVariables,
-                undefined,
-                homeConfig.providers,
-              ),
-              ...(entry === undefined
-                ? {}
-                : {
-                  CORDISX_DEV_ENTRY: entry,
-                  CORDISX_DEV_MODE: 'explicit-entry',
-                }),
-              ...nativeSubmission?.environment,
-            },
-          }),
+        environment: {
+          ...developmentEnvironment,
+          ...(entry === undefined
+            ? {}
+            : {
+              CORDISX_DEV_ENTRY: entry,
+              CORDISX_DEV_MODE: 'explicit-entry',
+            }),
+          ...nativeSubmission?.environment,
+        },
         publisherGrant,
         stdout,
       })
