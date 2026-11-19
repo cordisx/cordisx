@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChannelEventRef } from '@cordisx/channel-runtime'
 import {
+  channelGlobalCommandAllowed,
   channelPolicyAllows,
   channelWakePrefix,
   parseChannelConversationPolicy,
@@ -20,6 +21,30 @@ const event: ChannelEventRef = {
 }
 
 describe('Channel policy intersection and addressing', () => {
+  it('requires a global grant for global policy changes and rejects scoped group membership', () => {
+    const scoped = parseChannelConversationPolicy({
+      rules: [{ id: 'local', action: 'command', effect: 'allow', conversationId: 'oc_group', userIds: ['alice'] }],
+    })
+    expect(channelPolicyAllows(scoped, 'command', event, 'allow-user')).toBe(true)
+    expect(channelGlobalCommandAllowed(scoped, event, 'allow-user')).toBe(false)
+    const global = parseChannelConversationPolicy({
+      rules: [{ id: 'global', action: 'command', effect: 'allow', userIds: ['alice'] }],
+    })
+    expect(channelGlobalCommandAllowed(global, event, 'allow-user')).toBe(true)
+    const group = parseChannelConversationPolicy({
+      groups: [{ id: 'ops', name: 'Ops', members: [{ tenantId: 'test', userId: 'alice' }] }],
+      rules: [{ id: 'global', action: 'command', effect: 'allow', userGroupIds: ['ops'] }],
+    })
+    expect(channelPolicyAllows(group, 'command', event, 'allow-user')).toBe(true)
+    expect(channelGlobalCommandAllowed(group, event, 'allow-user')).toBe(false)
+    const denied = parseChannelConversationPolicy({
+      rules: [
+        { id: 'global', action: 'command', effect: 'allow', userIds: ['alice'] },
+        { id: 'deny', action: 'command', effect: 'deny', conversationId: 'oc_group', userIds: ['alice'] },
+      ],
+    })
+    expect(channelGlobalCommandAllowed(denied, event, 'allow-user')).toBe(false)
+  })
   it('defaults automatic final forwarding off and preserves an explicit opt-in', () => {
     expect(parseChannelConversationPolicy(undefined).autoReply).toBe(false)
     expect(parseChannelConversationPolicy({ enabled: true }).autoReply).toBe(false)
