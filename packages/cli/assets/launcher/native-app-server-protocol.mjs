@@ -880,6 +880,8 @@ const continuation = createNativeProviderContinuation({
   current: threadId => !closed && !cancelledRecovery.has(threadId) && !lifecyclePending(threadId),
 })
 const BRIDGE_NATIVE_METHODS = new Set([
+  'model/list',
+  'thread/settings/update',
   'thread/list',
   'thread/read',
   'thread/turns/list',
@@ -915,11 +917,16 @@ readLines(control, line => {
     uncertainSwitches.set(message.threadId, undefined)
     return
   }
-  if (message.type === 'task-create' && typeof message.id === 'string') {
+  if (['task-create', 'codex-tool'].includes(message.type) && typeof message.id === 'string') {
+    const tool = message.type === 'task-create' ? 'create_thread' : message.tool
+    if (!['create_thread', 'list_projects', 'move_thread_to_project', 'list_threads'].includes(tool)) {
+      void write(control, { id: message.id, ok: false }).catch(stop)
+      return
+    }
     void nativeCall('mcpServer/tool/call', {
       server: 'codex_app',
       threadId: message.sourceThreadId,
-      tool: 'create_thread',
+      tool,
       arguments: message.arguments,
       _meta: {
         'openai/toolCallId': message.callId,

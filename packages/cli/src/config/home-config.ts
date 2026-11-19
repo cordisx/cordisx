@@ -1,3 +1,4 @@
+import { type CodexCreationDefaults, parseCodexCreationDefaults } from '../codex-creation-settings.js'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, stat, unlink } from 'node:fs/promises'
 import os from 'node:os'
@@ -120,6 +121,7 @@ export interface HomeConfigProfile {
   readonly displayName: string
   /** Captured by all new chats in this profile; changing it never rewrites an existing chat. */
   readonly chatExecution?: ChatExecutionDefaults
+  readonly chatCreation?: CodexCreationDefaults
   readonly dataMode: HomeDataMode
   /** Launch-scoped default for new native conversation drafts. */
   readonly defaultModelProvider?: string
@@ -427,6 +429,7 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     'management',
     'managedServiceStartupConfig',
     'chatExecution',
+    'chatCreation',
   ], label)
   const displayName = nonEmptyString(profile.displayName, `${label}.displayName`)
   if (profile.dataMode !== 'shared' && profile.dataMode !== 'host-isolated' && profile.dataMode !== 'isolated') {
@@ -441,9 +444,11 @@ function parseProfile(value: unknown, label: string): HomeConfigProfile {
     ? undefined
     : parseHomeConfigProfileManagement(profile.management, `${label}.management`)
   const chatExecution = parseChatExecutionDefaults(profile.chatExecution)
+  const chatCreation = parseCodexCreationDefaults(profile.chatCreation)
   return {
     displayName,
     ...(chatExecution === undefined ? {} : { chatExecution }),
+    ...(chatCreation === undefined ? {} : { chatCreation }),
     dataMode: profile.dataMode === 'isolated' ? 'host-isolated' : profile.dataMode,
     ...modelOptions,
     ...(managedProviders.length === 0 ? {} : { managedProviders }),

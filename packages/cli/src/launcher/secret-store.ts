@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process'
 import { chmod, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { resolveHomeConfigPath } from '../config/home-config.js'
+import { createFileSecretBackend } from './secret-file-backend.js'
 
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const CONNECTION_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -43,6 +45,7 @@ export interface LauncherSecretStoreResult {
 export interface LauncherSecretStoreOptions {
   readonly platform?: NodeJS.Platform
   readonly backend?: LauncherKeychainBackend
+  readonly homeDir?: string
 }
 
 interface SecretIdentity {
@@ -78,12 +81,16 @@ export function channelKeychainReference(input: SecretIdentity): string {
 export class LauncherSecretStore {
   private readonly captures = new Map<string, SecretIdentity>()
   private readonly backend: LauncherKeychainBackend | undefined
+  private readonly platform: NodeJS.Platform
 
   // Public Manager workflows bind these private handles in ChannelCredentialDraftBroker.
 
   constructor(options: LauncherSecretStoreOptions = {}) {
-    this.backend = (options.platform ?? process.platform) === 'darwin'
+    this.platform = options.platform ?? process.platform
+    this.backend = this.platform === 'darwin'
       ? (options.backend ?? createMacOSKeychainBackend())
+      : this.platform === 'linux'
+      ? (options.backend ?? createFileSecretBackend(options.homeDir ?? path.dirname(resolveHomeConfigPath())))
       : undefined
   }
 
@@ -134,7 +141,10 @@ export class LauncherSecretStore {
   /** Launcher-only handoff to a service configuration; never project this value. */
   referenceFor(captureId: string): string | undefined {
     const target = this.lookupCapture(captureId)
-    return target === undefined ? undefined : channelKeychainReference(target)
+    if (target === undefined || this.backend === undefined) return undefined
+    return this.platform === 'linux'
+      ? `host-secret:channel/${target.profileId}/${target.connectionId}`
+      : channelKeychainReference(target)
   }
 
   /** Retire in-memory authority after commit or cleanup; the persisted item is managed separately. */

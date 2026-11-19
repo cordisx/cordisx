@@ -37,6 +37,7 @@ function rejectionReason(error: unknown): string {
 }
 
 export type NativeBridgeMethod =
+  | 'model/list'
   | 'thread/list'
   | 'thread/read'
   | 'thread/turns/list'
@@ -83,6 +84,14 @@ export interface NativeSubmissionControlServer {
   subscribeNativeApprovals(listener: (event: Record<string, unknown>) => void): () => void
   subscribeContinuationEvents(listener: (method: string, params: unknown) => void): () => void
   respondNativeApproval(input: Record<string, unknown>): Promise<unknown>
+  invokeCodexTool(
+    input: {
+      tool: string
+      sourceThreadId: string
+      sourceTurnId?: string | undefined
+      arguments: Record<string, unknown>
+    },
+  ): Promise<unknown>
   invokeTask(
     input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
   ): Promise<unknown>
@@ -722,6 +731,16 @@ export async function startNativeSubmissionControlServer(
     bindTaskRouting(value: NativeAgentTaskRouting) {
       if (taskRouting) throw new Error('Native task routing already bound')
       taskRouting = value
+    },
+    invokeCodexTool(
+      input: {
+        tool: string
+        sourceThreadId: string
+        sourceTurnId?: string | undefined
+        arguments: Record<string, unknown>
+      },
+    ) {
+      return callPeer({ type: 'codex-tool', ...input, callId: `cordisx-config-${randomUUID()}` })
     },
     async invokeTask(
       input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },

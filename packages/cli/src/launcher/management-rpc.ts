@@ -25,6 +25,14 @@ const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
   | { readonly kind: 'query' }
+  | {
+    readonly kind: 'codex'
+    readonly operation: string
+    readonly input: unknown
+    readonly context?: string
+    readonly callerThreadId?: string
+    readonly callerTurnId?: string
+  }
   | { readonly kind: 'model-export'; readonly request: ModelExportRequest }
   | { readonly kind: 'terminal-provider'; readonly request: TerminalProviderRequest }
   | {
@@ -122,6 +130,7 @@ export function parsePluginManagementRpcRequest(
       'model-export',
       'terminal-provider',
       'channel',
+      'codex',
       'refresh-catalog',
       'query-catalog',
       'plugin-info',
@@ -140,6 +149,15 @@ export function parsePluginManagementRpcRequest(
         && (typeof operation.callerThreadId !== 'string'
           || !/^[a-zA-Z0-9._:-]{1,512}$/u.test(operation.callerThreadId)))
   ) throw new Error('invalid Channel operation')
+  if (
+    operation.kind === 'codex' && (typeof operation.operation !== 'string'
+      || !/^[a-z][a-z:_-]{0,64}$/u.test(operation.operation)
+      || operation.context !== undefined
+        && (typeof operation.context !== 'string' || !/^[a-f0-9]{48}$/u.test(operation.context))
+      || [operation.callerThreadId, operation.callerTurnId].some(value =>
+        value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,512}$/u.test(value))
+      ))
+  ) throw new Error('invalid Codex operation')
   return request as unknown as PluginManagementRpcRequest
 }
 
@@ -150,6 +168,7 @@ export async function handlePluginManagementRpcRequest(
   const operation = request.operation
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
+  if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
   if (operation.kind === 'query') return await service.query()
   if (operation.kind === 'refresh-catalog') return await service.refreshCatalog(operation.sourceUrl)
@@ -213,6 +232,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly modelExport?: (request: ModelExportRequest) => Promise<CliModelExportResult>
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
   const token = randomBytes(32).toString('hex')
@@ -243,7 +263,14 @@ export async function startPluginManagementRpcServer(input: {
           respond(socket, {
             requestId,
             ok: true,
-            value: request.operation.kind === 'channel'
+            value: request.operation.kind === 'codex'
+              ? await (input.codex?.(request.operation.operation, request.operation.input, {
+                ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
+                ...(request.operation.callerThreadId ? { 'openai/threadId': request.operation.callerThreadId } : {}),
+                ...(request.operation.callerTurnId ? { 'openai/turnId': request.operation.callerTurnId } : {}),
+                'openai/toolCallId': request.requestId,
+              }) ?? Promise.resolve({ status: 'unavailable', code: 'CODEX_RUNTIME_UNAVAILABLE' }))
+              : request.operation.kind === 'channel'
               ? await (input.channel?.(
                 request.operation.operation,
                 request.operation.input,

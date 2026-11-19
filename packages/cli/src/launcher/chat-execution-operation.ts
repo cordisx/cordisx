@@ -1,8 +1,13 @@
-import type { ChannelNativeSessions } from './channel-native-sessions.js'
+import type { ChatExecutionPreferences } from './chat-execution-preferences.js'
+
+export interface ChatExecutionAuthority {
+  executionPreferences(): ChatExecutionPreferences | undefined
+  exists(sessionId: string): Promise<boolean>
+}
 
 /** Profile settings are a Host service, usable even when no Channel transport is installed. */
 export async function chatExecutionOperation(
-  native: ChannelNativeSessions | undefined,
+  native: ChatExecutionAuthority | undefined,
   operation: string,
   args: Record<string, unknown>,
 ) {

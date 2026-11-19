@@ -3,7 +3,11 @@ import { normalize, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
 import type { ChannelAdapterHost, ChannelInboundEnvelope, ChannelOutboundDelivery } from '@cordisx/channel-runtime'
 import { validateInput } from '../packages/channel-runtime/src/runtime-validation.js'
 import { createFeishuAdapterDefinition } from '../packages/cli/src/launcher/feishu-adapter.js'
-import { LauncherSecretResolutionError, resolveLauncherSecret } from '../packages/cli/src/launcher/secret-resolver.js'
+import {
+  LauncherSecretResolutionError,
+  resolveLauncherSecret,
+  withoutLauncherSecrets,
+} from '../packages/cli/src/launcher/secret-resolver.js'
 
 const connection = {
   ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
@@ -14,14 +18,27 @@ const connection = {
 }
 
 describe('launcher private secret resolution', () => {
-  it('accepts only the explicit environment reference without returning reference data', async () => {
-    await expect(resolveLauncherSecret('host-secret:env/CORDISX_FEISHU_TEST_SECRET', {
-      environment: { CORDISX_FEISHU_TEST_SECRET: 'not-a-real-secret' },
-    })).resolves.toBe('not-a-real-secret')
-    await expect(resolveLauncherSecret('host-secret:env/MISSING', { environment: {} }))
-      .rejects.toMatchObject({ code: 'SECRET_MISSING' } satisfies Partial<LauncherSecretResolutionError>)
-    await expect(resolveLauncherSecret('inline:secret', { environment: {} }))
-      .rejects.toMatchObject({ code: 'SECRET_REF_INVALID' } satisfies Partial<LauncherSecretResolutionError>)
+  it.each(['linux', 'darwin', 'win32'] as const)(
+    'resolves environment credentials on %s without Keychain',
+    async platform => {
+      const readKeychain = vi.fn()
+      await expect(resolveLauncherSecret('host-secret:env/CORDISX_FEISHU_TEST_SECRET', {
+        platform,
+        readKeychain,
+        environment: { CORDISX_FEISHU_TEST_SECRET: 'not-a-real-secret' },
+      })).resolves.toBe('not-a-real-secret')
+      expect(readKeychain).not.toHaveBeenCalled()
+      await expect(resolveLauncherSecret('host-secret:env/MISSING', { environment: {} }))
+        .rejects.toMatchObject({ code: 'SECRET_MISSING' } satisfies Partial<LauncherSecretResolutionError>)
+      await expect(resolveLauncherSecret('inline:secret', { environment: {} }))
+        .rejects.toMatchObject({ code: 'SECRET_REF_INVALID' } satisfies Partial<LauncherSecretResolutionError>)
+    },
+  )
+  it('removes referenced credentials from model subprocess environments without mutating the launcher', () => {
+    const environment = { PATH: '/bin', CODEX_HOME: '/codex', CHANNEL_KEY: 'fixture', OTHER: 'retained' }
+    expect(withoutLauncherSecrets(environment, ['host-secret:env/CHANNEL_KEY', undefined, 'keychain:service/key']))
+      .toEqual({ PATH: '/bin', CODEX_HOME: '/codex', OTHER: 'retained' })
+    expect(environment.CHANNEL_KEY).toBe('fixture')
   })
 })
 

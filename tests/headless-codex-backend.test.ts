@@ -1,8 +1,52 @@
 import { describe, expect, it, vi } from 'vitest'
 import { startHeadlessCodexBackend } from '../packages/cli/src/launcher/headless-codex-backend.js'
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
+import { createHeadlessCodexOperations } from '../packages/cli/src/launcher/headless-codex-operations.js'
 
 describe('headless Codex backend', () => {
+  it('confirms a fresh native settings event without resuming an empty idle thread', async () => {
+    let listener: ((method: string, params: unknown) => void) | undefined
+    let actual = 'new'
+    const request = vi.fn(async (method: string) => {
+      if (method === 'model/list') return { data: [{ id: 'new', model: 'new', hidden: false }] }
+      if (method === 'thread/read') {
+        return { thread: { id: 'empty', modelProvider: 'openai', status: { type: 'idle' } } }
+      }
+      if (method === 'thread/settings/update') {
+        listener?.('thread/settings/updated', {
+          threadId: 'empty',
+          threadSettings: { modelProvider: 'openai', model: actual },
+        })
+        return {}
+      }
+      throw new Error('No rollout exists for an empty session')
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      startServer: async () =>
+        ({
+          request,
+          subscribeRequests: () => () => {},
+          subscribeNotifications: value => {
+            listener = value
+            return () => {}
+          },
+          close: async () => {},
+        }) as never,
+    })
+    try {
+      const selection = { threadId: 'empty', providerId: 'openai', model: 'new' }
+      expect(await backend.models('select', selection)).toMatchObject({ status: 'selected' })
+      actual = 'other'
+      expect(await backend.models('select', selection)).toMatchObject({ status: 'reconciliation-required' })
+      expect(request.mock.calls.some(([method]) => method === 'thread/resume')).toBe(false)
+    } finally {
+      await backend.close()
+    }
+  })
   it('uses the existing bridge and forwards native requests and notifications', async () => {
     const calls: string[] = []
     let onRequest: ((method: string, params: unknown, requestId?: string | number) => unknown) | undefined
@@ -110,6 +154,26 @@ describe('headless Codex backend', () => {
       .toMatchObject({ status: 'selected' })
     expect(request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread-1', model: 'available' })
     expect(request).toHaveBeenCalledWith('thread/resume', { threadId: 'thread-1' })
+    let closed = false
+    const codex = createHeadlessCodexOperations({ configPath: '/unused', models: backend.models, closed: () => closed })
+    expect(await codex('list', {})).toMatchObject({ status: 'ok', providers: [{ providerId: 'openai' }] })
+    expect(await codex('select', { providerId: 'openai', model: 'available' }, { 'openai/threadId': 'thread-1' }))
+      .toMatchObject({ status: 'selected' })
+    expect(await codex('select', { providerId: 'openai', model: 'available' })).toMatchObject({
+      reason: 'invalid-selection',
+    })
+    expect(await codex('create', {})).toMatchObject({ code: 'CODEX_OPERATION_UNAVAILABLE' })
+    expect(
+      await codex('select', { providerId: 'openai', model: 'available' }, {
+        'cordisx/channelContext': 'expired',
+        'openai/threadId': 'thread-1',
+      }),
+    )
+      .toMatchObject({ code: 'CHANNEL_CONTEXT_UNAVAILABLE' })
+    expect(await codex('model-services:save', {}, { 'cordisx/channelContext': 'expired' }))
+      .toMatchObject({ code: 'CHANNEL_CONTEXT_UNAVAILABLE' })
+    closed = true
+    expect(await codex('list', {})).toMatchObject({ code: 'CODEX_RUNTIME_UNAVAILABLE' })
     await backend.close()
   })
   it('rejects busy targets and reports unconfirmed native selections', async () => {

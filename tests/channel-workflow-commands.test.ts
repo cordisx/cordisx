@@ -21,6 +21,40 @@ const event = {
 }
 const binding = (sessionId: string) => ({ id: sessionId, channel: event, sessionId, state: 'active' as const })
 describe('progressive Channel command experience', () => {
+  it('preserves Fast false and project selection through all/one choices and combined flags', async () => {
+    const request = vi.fn(async () => ({ application: 'saved' }))
+    const commands = new ChannelSessionCommands({
+      bindings: () => [binding('a'), binding('b')] as never,
+      native: () => ({ label: async (id: string) => `飞书 · ${id}` }) as never,
+      allowed: () => true,
+      unbind: async () => true,
+      tasks: {
+        boundTo: () => true,
+        read: async () => ({ revision: 2, settings: {} }),
+        request,
+        catalog: async () => ({ projects: [{ projectId: 'repo', name: '仓库' }] }),
+      } as never,
+    })
+    const offered = await commands.handle(event, 'fast', 'off')
+    const token = /\/choose ([a-f0-9]+) all/u.exec(offered!)![1]!
+    await commands.handle(event, 'choose', `${token} all`)
+    expect(request.mock.calls).toEqual([[event, 'a', { fast: false }, 2], [event, 'b', { fast: false }, 2]])
+    request.mockClear()
+    const project = await commands.handle(event, 'project', 'repo')
+    const projectToken = /\/choose ([a-f0-9]+) all/u.exec(project!)![1]!
+    await commands.handle(event, 'choose', `${projectToken} 2`)
+    expect(request).toHaveBeenCalledWith(event, 'b', { projectId: 'repo' }, 2)
+    expect(await commands.handle(event, 'project', 'list')).toContain('仓库（repo）')
+    await commands.handle(event, 'task-settings', '--fast false --project repo --provider openai --model m --target a')
+    expect(request).toHaveBeenLastCalledWith(event, 'a', {
+      fast: false,
+      projectId: 'repo',
+      providerId: 'openai',
+      model: 'm',
+    }, 2)
+    await expect(commands.handle(event, 'fast', 'maybe')).rejects.toThrow('INVALID_COMMAND_ARGUMENTS')
+    commands.dispose()
+  })
   it('continues all/one/multiple choices only for the original actor and current command permission', async () => {
     const unbind = vi.fn(async () => true), bindings = [binding('a'), binding('b')]
     let allowed = true

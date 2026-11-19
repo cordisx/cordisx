@@ -24,6 +24,8 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
           'threadId',
           'model',
           'modelProvider',
+          'serviceTier',
+          'runtimeWorkspaceRoots',
           'cwd',
           'approvalPolicy',
           'sandbox',
@@ -38,9 +40,14 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
       // Forward only execution configuration; provider credentials remain in the native transport.
       const executionConfig = object(params.config)
       const config = Object.fromEntries(
-        ['model_reasoning_effort', 'sandbox_workspace_write.network_access'].flatMap(field =>
-          executionConfig[field] === undefined ? [] : [[field, executionConfig[field]]]
-        ),
+        [
+          'model_reasoning_effort',
+          'sandbox_workspace_write.network_access',
+          'service_tier',
+          'sandbox_workspace_write.writable_roots',
+          'sandbox_workspace_write.exclude_tmpdir_env_var',
+          'sandbox_workspace_write.exclude_slash_tmp',
+        ].flatMap(field => executionConfig[field] === undefined ? [] : [[field, executionConfig[field]]]),
       )
       if (Object.keys(config).length) safe.config = config
       let prepared = object(await controlCall('execution-prepare', { method, params: safe }))
@@ -60,7 +67,7 @@ export function createNativeChatControl({ controlCall, readNative, writeNative, 
         params: {
           ...params,
           ...fields,
-          ...(fields.config ? { config: { ...object(fields.config), ...object(params.config) } } : {}),
+          ...(fields.config ? { config: { ...object(params.config), ...object(fields.config) } } : {}),
         },
         captureId: prepared.captureId,
       }

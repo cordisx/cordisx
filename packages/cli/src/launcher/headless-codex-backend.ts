@@ -5,6 +5,7 @@ import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { bindHeadlessCatalog } from './headless-catalog-binding.js'
 import { HeadlessContextCapture } from './headless-context-capture.js'
+import { HeadlessSettingsObserver } from './headless-settings-observer.js'
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
 export async function startHeadlessCodexBackend(input: {
@@ -61,6 +62,7 @@ export async function startHeadlessCodexBackend(input: {
       : undefined
     if (!server.subscribeRequests) throw new Error('App-server request handling is unavailable')
     const unsubscribeRequests = server.subscribeRequests(input.onRequest)
+    const settingsObserver = new HeadlessSettingsObserver(server)
     const unsubscribeNotifications = input.onNotification === undefined
       ? undefined
       : server.subscribeNotifications?.(input.onNotification)
@@ -68,29 +70,30 @@ export async function startHeadlessCodexBackend(input: {
       ...(input.onDispatch ? { observedDispatch: input.onDispatch } : {}),
       ...(input.preparationTools ? { preparationTools: input.preparationTools } : {}),
       nativeRequest: async (method: NativeBridgeMethod, params) => {
-        let selected = params
-        if (method === 'thread/start' && params.model == null && params.modelProvider == null) {
-          const config = await server.request<{ config?: Record<string, unknown> }>('config/read', {
-            includeLayers: false,
-            ...(typeof params.cwd === 'string' ? { cwd: params.cwd } : {}),
-          })
-          const native = config.config ?? {}
-          if (native.model_provider == null || native.model_provider === 'openai') {
-            const provider = (await models('list', {})).providers?.[0]
-            if (typeof native.model === 'string' && !provider?.models.some(row => row.id === native.model)) {
-              throw new Error('MODEL_NOT_IN_NATIVE_CATALOG')
-            }
-            if (native.model == null) {
-              if (!provider?.defaultModelId) throw new Error('NATIVE_DEFAULT_MODEL_UNAVAILABLE')
-              selected = { ...params, model: provider.defaultModelId }
+        const dispatch = async (value: Readonly<Record<string, unknown>>) => {
+          let selected = value
+          if (method === 'thread/start' && value.model == null && value.modelProvider == null) {
+            const config = await server.request<{ config?: Record<string, unknown> }>('config/read', {
+              includeLayers: false,
+              ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
+            })
+            const native = config.config ?? {}
+            if (native.model_provider == null || native.model_provider === 'openai') {
+              const provider = (await models('list', {})).providers?.[0]
+              if (typeof native.model === 'string' && !provider?.models.some(row => row.id === native.model)) {
+                throw new Error('MODEL_NOT_IN_NATIVE_CATALOG')
+              }
+              if (native.model == null) {
+                if (!provider?.defaultModelId) throw new Error('NATIVE_DEFAULT_MODEL_UNAVAILABLE')
+                selected = { ...value, model: provider.defaultModelId }
+              }
             }
           }
+          return contextCapture
+            ? contextCapture.dispatch(method, selected, params => server.request(method, params))
+            : server.request(method, selected)
         }
-        const dispatch = (value: Readonly<Record<string, unknown>>) =>
-          contextCapture
-            ? contextCapture.dispatch(method, value, params => server.request(method, params))
-            : server.request(method, value)
-        return input.nativeRequest ? input.nativeRequest(method, selected, dispatch) : dispatch(selected)
+        return input.nativeRequest ? input.nativeRequest(method, params, dispatch) : dispatch(params)
       },
       catalog: async () => (await models('list', {})).providers ?? [],
     }
@@ -137,6 +140,9 @@ export async function startHeadlessCodexBackend(input: {
           id: row.model as string,
           label: typeof row.displayName === 'string' ? row.displayName : row.model as string,
           aliases: [] as string[],
+          supportsFastMode: Array.isArray(row.additionalSpeedTiers) && row.additionalSpeedTiers.includes('fast')
+            || Array.isArray(row.serviceTiers)
+              && row.serviceTiers.some(tier => ['priority', 'fast'].includes(String((tier as { id?: string }).id))),
           ...(reasoningCapabilities ? { reasoningCapabilities } : {}),
         }
       })
@@ -172,10 +178,17 @@ export async function startHeadlessCodexBackend(input: {
       }
       try {
         if (status !== 'notLoaded') {
+          const revision = settingsObserver.revision(selection.threadId)
           await authority.nativeRequest('thread/settings/update', {
             threadId: selection.threadId,
             model: selection.model,
           })
+          const settings = await settingsObserver.wait(selection.threadId, revision)
+          if (status === 'idle' && settings) {
+            return settings.model === selection.model && settings.modelProvider === selection.providerId
+              ? { status: 'selected' }
+              : { status: 'reconciliation-required', reason: 'native-selection-unconfirmed' }
+          }
         }
         const resumed = await authority.nativeRequest('thread/resume', {
           threadId: selection.threadId,
@@ -202,7 +215,8 @@ export async function startHeadlessCodexBackend(input: {
         if (app !== 'codex') throw new Error('Unsupported backend')
         return handler(operation, args)
       },
-      close: () => closed ??= closeServer(server, unsubscribeRequests, unsubscribeNotifications),
+      close: () =>
+        closed ??= closeServer(server, unsubscribeRequests, unsubscribeNotifications, () => settingsObserver.close()),
     }
   } catch (error) {
     await server.close().catch(() => undefined)

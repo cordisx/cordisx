@@ -156,6 +156,7 @@ export function createNativeSubmissionCdpAuthority(options: {
   isThreadIdle(threadId: string): Promise<boolean>
   readonly defaultProviderId?: string
   readonly defaultModelId?: string
+  readonly defaults?: () => Promise<{ providerId?: string; model?: string }>
   readonly management?: {
     snapshot(): CatalogManagementSnapshot
     command(command: CatalogManagementCommand, authorized: () => boolean): Promise<CatalogManagementResult>

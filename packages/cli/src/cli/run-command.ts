@@ -152,6 +152,7 @@ import { createSupervisorRuntime } from './supervisor-runtime.js'
 import { prepareProductionHostBootstrap, type ProductionHostBootstrap } from './production-host-bootstrap.js'
 import {
   nativeCatalogExport,
+  nativeCodexOperations,
   openProductionPluginManagementComposition,
   type ProductionPluginManagementComposition,
 } from './production-plugin-management.js'
@@ -743,6 +744,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        codex: nativeCodexOperations(() => nativeSubmission),
         ...configuredChannelManagementToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })
@@ -894,6 +896,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         modelExport: nativeCatalogExport(() => nativeSubmission),
+        codex: nativeCodexOperations(() => nativeSubmission),
         ...configuredChannelManagementToolHandler(channelTools),
         terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
       })

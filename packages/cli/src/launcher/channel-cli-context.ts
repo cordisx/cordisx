@@ -57,5 +57,7 @@ export function channelCliSendInstructions(
     'For multiple destinations use send-many with targets. Choose one stable operationId per explicit send and read receipt after uncertainty; never blindly resend.',
     'Pass JSON through proper shell quoting or spawn argument arrays. The CLI reuses this runtime connection and credentials; do not start another service or ask for keys.',
     'Keep --context for all operations: it identifies this real incoming message. It does not grant additional account, destination or configuration permissions.',
+    `For task configuration read ${prefix} model-list ${scope} --input '{}' and task-settings with {sessionId}. Change through task-settings-set with {sessionId,settings:{providerId?,model?,effort?,fast?,projectId?},expectedRevision}.`,
+    "Task configuration reads are available for bound tasks. Writes use the incoming user's field and value permissions; an approval-required result means wait for an authorized human, not retry with another tool. Fast requires model support; project uses a returned local projectId and may be unavailable in headless service mode. Never guess IDs or widen the task filesystem boundary.",
   ]
 }

@@ -1,3 +1,4 @@
+import { CodexChatConfiguration } from '../launcher/codex-chat-configuration.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -13,13 +14,16 @@ import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { createConfiguredChannelConsumer } from './channel-consumer-composition.js'
 import { startHeadlessCodexBackend } from '../launcher/headless-codex-backend.js'
 import type { AgentBridge } from '../launcher/agent-bridge.js'
-import type { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
+import { ChatExecutionPreferences } from '../launcher/chat-execution-preferences.js'
 import { createHeadlessNativeAuthority } from '../launcher/headless-native-authority.js'
 import { ContextObservations } from '../launcher/context-observations.js'
 import { attachNativeContextObserver, NativeContextObserver } from '../launcher/native-context-observer.js'
 import { headlessLiveBudgetEnabled, prepareHeadlessStaticCatalog } from '../launcher/headless-static-catalog.js'
 import { CHANNEL_PREPARATION_TOOLS, handlePreparationToolCall } from '../launcher/channel-live-dynamic-tools.js'
 import type { ChannelConversationTools } from '../launcher/channel-conversation-tools.js'
+import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
+import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
+import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
 
 const execFileAsync = promisify(execFile)
 
@@ -76,7 +80,47 @@ export async function startHeadlessService(input: {
     if (activated.some(plugin => configuredIds.has(plugin.id))) throw new Error('PLUGIN_ID_COLLISION')
     const plugins = [...configured.plugins, ...activated]
     const plugin = plugins.find(item => item.id === 'channel' && item.enabled)
-    if (!plugin) return undefined
+    if (!plugin) {
+      const execution = await ChatExecutionPreferences.open({
+        file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'chat-execution.json'),
+        configPath: input.configPath,
+        appId: input.appId,
+        profileId: input.profileId,
+      })
+      cleanup.push(() => execution.close())
+      const configuration = await CodexChatConfiguration.open({
+        preferences: execution,
+        file: path.join(
+          input.homeDir,
+          'apps',
+          input.appId,
+          'profiles',
+          input.profileId,
+          'codex-chat-configuration.json',
+        ),
+        request: async () => {
+          throw new Error('CODEX_BACKEND_UNAVAILABLE')
+        },
+        guard: async (_operation, _args, metadata) =>
+          metadata && typeof metadata === 'object'
+            && (metadata as Record<string, unknown>)['cordisx/channelContext'] !== undefined
+            ? { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+            : undefined,
+      })
+      cleanup.push(() => configuration.close())
+      return {
+        channel: undefined,
+        codex: createHeadlessCodexOperations({
+          configuration: (operation, args, metadata) => configuration.call(operation, args, metadata),
+          configPath: input.configPath,
+          environment: input.environment,
+          native: { executionPreferences: () => execution, exists: async () => false },
+          closed: () => closing !== undefined,
+        }),
+        snapshot: () => undefined,
+        close,
+      }
+    }
     const state = await readServiceConfigState({
       profileId: input.profileId,
       pluginId: 'channel',
@@ -85,6 +129,10 @@ export async function startHeadlessService(input: {
         typeof readServiceConfigState
       >[0]['initialConfig'],
     }, input.configPath)
+    const backendEnvironment = withoutLauncherSecrets(
+      input.environment,
+      parseChannelServiceConfig(state.config).connections.map(connection => connection.secretRef),
+    )
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined
@@ -93,13 +141,14 @@ export async function startHeadlessService(input: {
       dataDir: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'channel-runtime'),
       source: plugin.source ?? pathToFileURL(plugin.entry).href,
       environment: input.environment,
+      homeDir: input.homeDir,
     })
     // Register cleanup before starting: an early failure must not strand the transport.
     const disposeService = () => service.dispose()
     cleanup.push(disposeService)
     // Only the validated app-server version has documented fresh-session default-mode evidence.
     const version = await execFileAsync(input.codexExecutable, ['--version'], {
-      env: input.environment,
+      env: backendEnvironment,
       timeout: 5_000,
     }).then(value => value.stdout.trim()).catch(() => '')
     const nativeAuthority = await createHeadlessNativeAuthority({
@@ -129,7 +178,7 @@ export async function startHeadlessService(input: {
       codexHome: input.codexHome,
       userHome: input.userHome,
       cwd: input.cwd,
-      environment: input.environment,
+      environment: backendEnvironment,
     })
     if (catalog) cleanup.push(catalog.close)
     let native: ChannelNativeSessions | undefined
@@ -138,7 +187,7 @@ export async function startHeadlessService(input: {
       codexExecutable: input.codexExecutable,
       codexHome: input.codexHome,
       home: input.userHome,
-      environment: input.environment,
+      environment: backendEnvironment,
       ...(catalog ? { modelCatalogPath: catalog.path } : {}),
       ...(catalog ? { staticCatalog: { ...catalog, nativeVersion: version.replace(/^codex-cli\s+/u, '') } } : {}),
       contextObserver,
@@ -156,10 +205,25 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
+    const chatConfiguration = await CodexChatConfiguration.open({
+      preferences: authority.execution!,
+      file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'codex-chat-configuration.json'),
+      catalog: async () => (await backend.models('list', {})).providers ?? [],
+      request: (method, params) => backend.nativeRequest(method, params),
+      guard: async (operation, args, metadata) => {
+        if (
+          !channelTools && metadata && typeof metadata === 'object'
+          && (metadata as Record<string, unknown>)['cordisx/channelContext'] !== undefined
+        ) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        return channelTools?.executionGuard(operation, args, metadata)
+      },
+    })
+    cleanup.push(() => chatConfiguration.close())
     native = new ChannelNativeSessions({
       bridge: () => backend as unknown as AgentBridge,
       nativeRequest: backend.nativeRequest,
       models: backend.models,
+      configuration: chatConfiguration,
       cwd: input.cwd,
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,
@@ -190,7 +254,19 @@ export async function startHeadlessService(input: {
     cleanup.splice(cleanup.indexOf(disposeService), 1)
     cleanup.push(() => channel.dispose())
     await service.start(state.config)
-    return { channel, snapshot: () => service.snapshot(), close }
+    const codex = createHeadlessCodexOperations({
+      configuration: (operation, value, metadata) => chatConfiguration.call(operation, value, metadata),
+      configPath: input.configPath,
+      environment: input.environment,
+      models: backend.models,
+      ...(authority.execution
+        ? { native: { executionPreferences: () => authority.execution, exists: id => native!.exists(id) } }
+        : {}),
+      channelTools: () => channelTools,
+      preparing: metadata => channel.consumer?.agentAccess.preparation(metadata) === true,
+      closed: () => closing !== undefined,
+    })
+    return { channel, codex, snapshot: () => service.snapshot(), close }
   } catch (error) {
     try {
       await close()

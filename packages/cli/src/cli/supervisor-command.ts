@@ -282,6 +282,13 @@ export async function waitForState(
       const identity = await processIdentityStatus(state.pid, state.processStartedAt)
       if (identity === 'unknown') throw new Error('unable to verify the CordisX supervisor process identity')
       if (identity === 'dead') {
+        // The child may publish its failure and exit while the identity probe
+        // is running. Read that final same-generation diagnosis before falling
+        // back to a generic exit message.
+        const latest = await readMutableSupervisorState(paths)
+        if (latest?.instanceToken === state.instanceToken && latest.phase === 'failed') {
+          throw new Error(latest.failure ?? 'CordisX background supervisor failed before readiness')
+        }
         throw new Error('CordisX background supervisor exited before renderer readiness')
       }
       const recovery = state.startupRecovery

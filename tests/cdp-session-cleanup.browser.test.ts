@@ -72,6 +72,7 @@ it.skipIf(!executable)('cleans a disconnected channel when Chromium already remo
     await stopChrome(chrome)
     server.close()
     await once(server, 'close')
-    await rm(profile, { recursive: true, force: true })
+    // Chromium children may finish profile writes just after the parent exits.
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   }
 })

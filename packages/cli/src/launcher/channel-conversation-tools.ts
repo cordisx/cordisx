@@ -70,6 +70,53 @@ export class ChannelConversationTools {
     private readonly execution?: (operation: string, args: Record<string, unknown>) => Promise<unknown>,
   ) {}
 
+  /** Ordinary Codex callers bypass Channel business policy; bound callers never bypass it. */
+  async executionGuard(operation: string, args: Record<string, unknown>, metadata?: unknown) {
+    const caller = callerThreadId(metadata)
+    const meta = metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {}
+    if (
+      meta['cordisx/channelContext'] !== undefined
+      || caller && this.consumer?.taskSettings.isBound(caller)
+      || this.consumer?.agentAccess.preparation(metadata)
+    ) {
+      if (['fast', 'fast-set', 'project', 'project-set', 'model-defaults', 'model-defaults-set'].includes(operation)) {
+        const scoped = this.consumer?.agentAccess.caller(metadata)
+        if (meta['cordisx/channelContext'] !== undefined && !scoped) {
+          return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        }
+        const session = scoped?.threadId ?? caller
+        const source = scoped?.source
+          ?? (session ? this.consumer?.agentAccess.source(session, callerTurnId(metadata)) : undefined)
+        if (!source || !session) return { status: 'rejected', code: 'CHANNEL_CONTEXT_UNAVAILABLE' }
+        const target = typeof args.sessionId === 'string' ? args.sessionId : session
+        if (
+          !operation.startsWith('model-defaults') && target !== session
+          && !this.consumer?.taskSettings.boundTo(source, target)
+        ) {
+          return { status: 'rejected', code: 'CHANNEL_TARGET_NOT_BOUND' }
+        }
+        if (this.consumer?.agentAccess.preparation(metadata)) {
+          return { status: 'rejected', code: 'PREPARATION_READ_ONLY' }
+        }
+        if (operation === 'model-defaults-set') {
+          return { status: 'rejected', code: 'PROFILE_SETTINGS_REQUIRE_LOCAL_USER' }
+        }
+        if (operation.endsWith('-set')) {
+          const allowed = operation === 'fast-set'
+            ? ['sessionId', 'fast', 'expectedRevision']
+            : ['sessionId', 'projectId', 'expectedRevision']
+          if (Object.keys(args).some(key => !allowed.includes(key))) {
+            return { status: 'rejected', code: 'INVALID_REQUEST' }
+          }
+          return this.consumer!.taskSettings.configurationRequest(operation, source, target, args)
+        }
+        return undefined
+      }
+      return this.call(operation, args, metadata)
+    }
+    return undefined
+  }
+
   /** Management RPC only. Agent/native dispatch never calls this local-only entry. */
   async callLocal(operation: string, value: unknown, metadata?: unknown): Promise<unknown> {
     if (

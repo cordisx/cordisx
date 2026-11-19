@@ -179,6 +179,7 @@ export function createLocalChannelService(input: {
   readonly source: string
   /** Effective launcher environment; never project it or any resolved secret. */
   readonly environment?: NodeJS.ProcessEnv
+  readonly homeDir?: string
 }): LocalChannelService {
   const artifactDirectory = input.artifactDirectory
   const runtimeEntry = input.runtimeEntry ?? './service.mjs'
@@ -221,7 +222,10 @@ export function createLocalChannelService(input: {
         )
       },
       readConnection: ref => activeConfiguration?.connections.find(connection => key(connection.ref) === key(ref)),
-      ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
+      secretResolver: {
+        ...(input.environment === undefined ? {} : { environment: input.environment }),
+        ...(input.homeDir === undefined ? {} : { homeDir: input.homeDir }),
+      },
     })
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const task = mutationTail.then(operation)

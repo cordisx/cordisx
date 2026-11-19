@@ -6,6 +6,8 @@ import type { NativeModelProviderCatalogEntry } from './native-model-provider-ca
 import { NativeAgentTaskRouting } from './native-agent-task-routing.js'
 import type { NativeSourceConfiguration } from './native-source-configuration.js'
 import { isModelReasoningEffort } from '../model-reasoning-capabilities.js'
+import type { CodexCreationSettings } from '../codex-creation-settings.js'
+import { codexCreationSelection } from './codex-creation-selection.js'
 
 const object = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : undefined
@@ -34,6 +36,7 @@ export class NativeAgentTasks {
         input: { callId: string; sourceThreadId: string; sourceTurnId: string; arguments: Record<string, unknown> },
       ): Promise<unknown>
       sourceConfiguration?(threadId: string): Promise<NativeSourceConfiguration | undefined>
+      creationDefaults?(): Promise<CodexCreationSettings>
       routing: NativeAgentTaskRouting
     },
   ) {}
@@ -57,12 +60,14 @@ export class NativeAgentTasks {
         : undefined)
     if (
       !value || !valid(sourceThreadId) || !valid(sourceTurnId) || !valid(sourceCallId) || !valid(value.operationId, 128)
-      || !valid(value.providerId, 128)
-      || !valid(value.model) || typeof value.prompt !== 'string' || value.prompt.length === 0
+      || value.providerId !== undefined && !valid(value.providerId, 128)
+      || value.model !== undefined && !valid(value.model)
+      || value.fast !== undefined && typeof value.fast !== 'boolean'
+      || typeof value.prompt !== 'string' || value.prompt.length === 0
       || value.prompt.length > 100_000 || value.prompt.includes('\0') || !object(value.target)
       || !validTarget(value.target) || (value.title !== undefined && !valid(value.title))
       || Object.keys(value).some(key =>
-        !['operationId', 'providerId', 'model', 'prompt', 'target', 'title'].includes(key)
+        !['operationId', 'providerId', 'model', 'fast', 'prompt', 'target', 'title'].includes(key)
       )
     ) return { status: 'rejected', reason: 'invalid-creation' }
     const fingerprint = createHash('sha256').update(JSON.stringify([sourceThreadId, value])).digest('hex')
@@ -91,14 +96,7 @@ export class NativeAgentTasks {
     sourceCallId: string,
     value: Record<string, any>,
   ) {
-    const startup = this.authority.startup?.availability(value.providerId, value.model)
-    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     const file = path.join(this.authority.directory, `${key}.json`)
-    await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
-    const directory = await lstat(this.authority.directory)
-    if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0) {
-      return { status: 'rejected', reason: 'intent-storage-unavailable' }
-    }
     try {
       const record = JSON.parse(await readFile(file, 'utf8'))
       return record.fingerprint === fingerprint
@@ -107,6 +105,27 @@ export class NativeAgentTasks {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return { status: 'reconciliation-required' }
     }
+    const earlyStartup = valid(value.providerId, 128) && valid(value.model)
+      ? this.authority.startup?.availability(value.providerId, value.model)
+      : undefined
+    if (earlyStartup !== undefined && !earlyStartup.available) {
+      return { status: 'unavailable', reason: earlyStartup.reason }
+    }
+    try {
+      const selection = codexCreationSelection(
+        await this.authority.creationDefaults?.() ?? {},
+        value,
+        await this.authority.catalog(),
+      )
+      if (!selection.providerId || !selection.model) {
+        return { status: 'rejected', reason: 'creation-selection-required' }
+      }
+      value = { ...value, ...selection }
+    } catch {
+      return { status: 'rejected', reason: 'selection-outside-catalog' }
+    }
+    const startup = this.authority.startup?.availability(value.providerId, value.model)
+    if (startup !== undefined && !startup.available) return { status: 'unavailable', reason: startup.reason }
     if (!await this.authority.available()) return { status: 'rejected', reason: 'native-task-adapter-unavailable' }
     if (this.intents.size >= 128) return { status: 'rejected', reason: 'native-task-pending-limit' }
     const catalog = await this.authority.catalog()
@@ -122,6 +141,11 @@ export class NativeAgentTasks {
       prompt: value.prompt,
       target: value.target,
       ...(value.title === undefined ? {} : { title: value.title }),
+    }
+    await mkdir(this.authority.directory, { recursive: true, mode: 0o700 })
+    const directory = await lstat(this.authority.directory)
+    if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0) {
+      return { status: 'rejected', reason: 'intent-storage-unavailable' }
     }
     try {
       await writeFile(file, JSON.stringify({ fingerprint, callId, phase: 'dispatching' }), { flag: 'wx', mode: 0o600 })
@@ -171,21 +195,41 @@ export class NativeAgentTasks {
     ) {
       const source = await this.authority.sourceConfiguration?.(request.sourceThreadId)
       if (!source) return undefined
-      const model = request.model === undefined || request.model === null ? source.model : request.model
+      const defaults = await this.authority.creationDefaults?.() ?? {}
+      const selected = Object.keys(defaults).length
+        ? codexCreationSelection(defaults, {
+          providerId: defaults.providerId ?? source.providerId,
+          ...(request.model != null
+            ? { model: request.model }
+            : defaults.model
+            ? { model: defaults.model }
+            : defaults.providerId === undefined || defaults.providerId === source.providerId
+            ? { model: source.model }
+            : {}),
+          ...(request.serviceTier === undefined ? {} : { fast: request.serviceTier === 'priority' }),
+        }, await this.authority.catalog())
+        : {
+          providerId: source.providerId,
+          model: request.model ?? source.model,
+          fast: request.serviceTier === undefined
+            ? source.serviceTier === 'priority'
+            : request.serviceTier === 'priority',
+        }
+      const model = selected.model ?? source.model
       const effort = request.thinking == null ? source.reasoningEffort : request.thinking
-      const tier = request.serviceTier === undefined ? source.serviceTier : request.serviceTier
+      const tier = selected.fast === undefined ? source.serviceTier : selected.fast ? 'priority' : null
       if (!isModelReasoningEffort(effort) || (tier !== null && tier !== 'priority')) return undefined
       if (
         !valid(model)
-        || source.providerId !== 'openai'
+        || selected.providerId !== 'openai'
           && !(await this.authority.catalog()).some(provider =>
-            provider.providerId === source.providerId && provider.models.some(item => item.id === model)
+            provider.providerId === selected.providerId && provider.models.some(item => item.id === model)
           )
       ) return undefined
       return await this.authority.routing.prepare({
         callId: request.callId,
         sourceThreadId: request.sourceThreadId,
-        providerId: source.providerId,
+        providerId: selected.providerId ?? source.providerId,
         model,
         reasoningEffort: effort,
         serviceTier: tier,
@@ -218,7 +262,12 @@ export class NativeAgentTasks {
       sourceThreadId: intent.sourceThreadId,
       providerId: String(intent.arguments.providerId),
       model: String(intent.arguments.model),
-      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort, serviceTier: source.serviceTier }),
+      ...(source === undefined ? {} : { reasoningEffort: source.reasoningEffort }),
+      ...(typeof intent.arguments.fast === 'boolean'
+        ? { serviceTier: intent.arguments.fast ? 'priority' : null }
+        : source === undefined
+        ? {}
+        : { serviceTier: source.serviceTier }),
     })
   }
 }
