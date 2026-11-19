@@ -6,6 +6,8 @@ export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' |
 
 export interface ChannelManagerConnectionProjection {
   readonly ref: { readonly adapterId: string; readonly accountId: string; readonly tenantId: string }
+  /** Host-private projection only; empty tenantId represents no tenant and never reaches the Channel runtime. */
+  readonly pendingTenant?: true
   /** Renderer-safe human label for this configured account. Never a credential or secret reference. */
   readonly displayName?: string
   readonly adapterKind: string
@@ -164,22 +166,34 @@ function oneOf<T extends string>(value: unknown, accepted: readonly T[], label: 
   return value as T
 }
 
-function ref(value: unknown, label: string): ChannelManagerConnectionProjection['ref'] {
+function ref(value: unknown, label: string, pending = false): ChannelManagerConnectionProjection['ref'] {
   const item = object(value, label)
   exactKeys(item, ['adapterId', 'accountId', 'tenantId'], label)
   return {
     adapterId: boundedText(item.adapterId, `${label}.adapterId`),
     accountId: boundedText(item.accountId, `${label}.accountId`),
-    tenantId: boundedText(item.tenantId, `${label}.tenantId`),
+    tenantId: pending && item.tenantId === '' ? '' : boundedText(item.tenantId, `${label}.tenantId`),
   }
 }
 
 function connection(value: unknown, label: string): ChannelManagerConnectionProjection {
   const item = object(value, label)
-  exactKeys(item, ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'], label)
+  exactKeys(
+    item,
+    ['ref', 'pendingTenant', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'],
+    label,
+  )
   if (typeof item.enabled !== 'boolean') throw new TypeError(`${label}.enabled is invalid`)
+  if (item.pendingTenant !== undefined && item.pendingTenant !== true) {
+    throw new TypeError(`${label}.pendingTenant is invalid`)
+  }
+  const identity = ref(item.ref, `${label}.ref`, item.pendingTenant === true)
+  if (item.pendingTenant === true && (identity.tenantId !== '' || item.enabled)) {
+    throw new TypeError(`${label} is invalid`)
+  }
   return {
-    ref: ref(item.ref, `${label}.ref`),
+    ref: identity,
+    ...(item.pendingTenant === true ? { pendingTenant: true as const } : {}),
     ...(item.displayName === undefined
       ? {}
       : { displayName: boundedText(item.displayName, `${label}.displayName`, 240) }),
@@ -257,6 +271,7 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       const label = `Channel Manager projection.accounts[${index}]`
       exactKeys(item, [
         'ref',
+        'pendingTenant',
         'displayName',
         'accountName',
         'accountAvatar',
@@ -272,7 +287,8 @@ export function normalizeProjection(value: unknown): ChannelManagerProjectionV1 
       ], label)
       const base = connection(
         Object.fromEntries(
-          ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'].map(key => [key, item[key]]),
+          ['ref', 'pendingTenant', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState']
+            .filter(key => item[key] !== undefined).map(key => [key, item[key]]),
         ),
         label,
       )

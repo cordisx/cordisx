@@ -25,6 +25,21 @@ interface Draft {
 const sameRef = (left: ChannelCredentialRef, right: ChannelCredentialRef) =>
   left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 const rejected = (code: string): ChannelCredentialDraftResult => ({ status: 'rejected', code })
+const TENANT_LOOKUP_TIMEOUT_MS = 5_000
+async function boundedTenantLookup(operation: Promise<string>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('TENANT_DISCOVERY_FAILED')), TENANT_LOOKUP_TIMEOUT_MS)
+        timer.unref()
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
 const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_REQUEST')
   return value as Record<string, unknown>
@@ -62,7 +77,7 @@ export class ChannelCredentialDraftBroker {
     private readonly input: {
       readonly profileId: string
       readonly store: LauncherSecretStore
-      readonly service: Pick<HostServiceConfigNarrowApi, 'descriptor' | 'mutate'>
+      readonly service: Pick<HostServiceConfigNarrowApi, 'descriptor' | 'mutate' | 'privateConfiguration'>
       readonly projection?: () => Promise<unknown>
       readonly now?: () => number
       readonly discoverTenant?: typeof discoverChannelTenant
@@ -98,6 +113,8 @@ export class ChannelCredentialDraftBroker {
       const owner = text(request.owner, 2048)
       const allowed = request.operation === 'capture'
         ? ['version', 'token', 'requestId', 'operation', 'owner', 'purpose', 'account', 'secret', 'expectedRevision']
+        : request.operation === 'resolve-tenant'
+        ? ['version', 'token', 'requestId', 'operation', 'owner', 'account', 'tenantId', 'expectedRevision']
         : [
           'version',
           'token',
@@ -110,6 +127,7 @@ export class ChannelCredentialDraftBroker {
       if (Object.keys(request).some(key => !allowed.includes(key))) return rejected('INVALID_REQUEST')
       if (!this.live(documentId)) return rejected('STALE_GENERATION')
       if (request.operation === 'capture') return await this.capture(request, owner, documentId)
+      if (request.operation === 'resolve-tenant') return await this.resolveTenant(request, documentId)
       const id = text(request.draftId, 128)
       const draft = this.drafts.get(id)
       if (!draft || draft.owner !== owner || draft.documentId !== documentId || draft.expiresAt <= this.now()) {
@@ -126,8 +144,21 @@ export class ChannelCredentialDraftBroker {
       }
       const current = record(configuration.configuration)
       const connections = (current.connections as Array<Record<string, unknown>>).map(item => ({ ...item }))
+      const pendingConnections = Array.isArray(current.pendingConnections)
+        ? (current.pendingConnections as Array<Record<string, unknown>>).map(item => ({ ...item }))
+        : []
       const index = connections.findIndex(item => sameRef(item.ref as ChannelCredentialRef, draft.ref))
-      if (draft.purpose === 'create' ? index >= 0 || connections.length >= 64 : index < 0) {
+      const pendingIndex = pendingConnections.findIndex(item => {
+        const account = item.account as ChannelCredentialRef
+        return account.adapterId === draft.ref.adapterId && account.accountId === draft.ref.accountId
+      })
+      if (
+        draft.purpose === 'create'
+          ? index >= 0 || pendingIndex >= 0 || connections.length + pendingConnections.length >= 64
+          : draft.ref.tenantId
+          ? index < 0
+          : pendingIndex < 0
+      ) {
         return rejected('TARGET_UNAVAILABLE')
       }
       const reference = this.input.store.referenceFor(draft.captureId)
@@ -142,7 +173,15 @@ export class ChannelCredentialDraftBroker {
           || patch.selectors.some(item => !['direct', 'group', 'mentions', 'replies'].includes(item))
           || new Set(patch.selectors).size !== patch.selectors.length)
       ) return rejected('UNSUPPORTED_SELECTOR')
-      if (draft.purpose === 'create') {
+      if (draft.purpose === 'create' && !draft.ref.tenantId) {
+        pendingConnections.push({
+          account: { adapterId: draft.ref.adapterId, accountId: draft.ref.accountId },
+          adapterKind: draft.ref.adapterId,
+          secretRef: reference,
+          displayName: text(patch.displayName, 240),
+          ...(patch.selectors === undefined ? {} : { selectors: patch.selectors }),
+        })
+      } else if (draft.purpose === 'create') {
         connections.push({
           ref: draft.ref,
           adapterKind: draft.ref.adapterId,
@@ -152,6 +191,8 @@ export class ChannelCredentialDraftBroker {
           displayName: text(patch.displayName, 240),
           ...(patch.selectors === undefined ? {} : { selectors: patch.selectors }),
         })
+      } else if (!draft.ref.tenantId) {
+        pendingConnections[pendingIndex] = { ...pendingConnections[pendingIndex]!, ...patch, secretRef: reference }
       } else connections[index] = { ...connections[index]!, ...patch, secretRef: reference }
       // Existing opaque references are restored by the narrow API's normal CAS normalization.
       if (!this.live(documentId) || draft.expiresAt <= this.now()) return rejected('STALE_GENERATION')
@@ -161,7 +202,9 @@ export class ChannelCredentialDraftBroker {
         identity: configuration.identity,
         scope: configuration.scope,
         expectedRevision: draft.revision,
-        configuration: { contract: 'cordisx.channel-service-config/v2', schemaVersion: 2, connections } as JsonValue,
+        configuration: (current.schemaVersion === 3 || pendingConnections.length > 0
+          ? { contract: 'cordisx.channel-service-config/v3', schemaVersion: 3, connections, pendingConnections }
+          : { contract: 'cordisx.channel-service-config/v2', schemaVersion: 2, connections }) as JsonValue,
       })
       if (result.status !== 'applied') {
         return {
@@ -183,6 +226,76 @@ export class ChannelCredentialDraftBroker {
       )
     }
   }
+  private async resolveTenant(
+    request: Record<string, unknown>,
+    documentId: string,
+  ): Promise<ChannelCredentialDraftResult & { projection?: unknown }> {
+    const account = ref(request.account)
+    if (
+      account.tenantId || !Number.isSafeInteger(request.expectedRevision) || (request.expectedRevision as number) < 0
+    ) {
+      return rejected('INVALID_REQUEST')
+    }
+    const descriptor = await this.input.service.descriptor()
+    if (!descriptor.writable) return rejected('PERMISSION_DENIED')
+    if (descriptor.revision !== request.expectedRevision) return { status: 'conflict', code: 'REVISION_CONFLICT' }
+    const stored = await this.input.service.privateConfiguration()
+    if (stored.revision !== descriptor.revision) return { status: 'conflict', code: 'REVISION_CONFLICT' }
+    const configuration = record(stored.configuration)
+    if (
+      configuration.schemaVersion !== 3 || !Array.isArray(configuration.pendingConnections)
+      || !Array.isArray(configuration.connections)
+    ) return rejected('TARGET_UNAVAILABLE')
+    const pending = configuration.pendingConnections as Array<Record<string, unknown>>
+    const index = pending.findIndex(item => {
+      const value = item.account as ChannelCredentialRef
+      return value.adapterId === account.adapterId && value.accountId === account.accountId
+    })
+    if (index < 0) return rejected('TARGET_UNAVAILABLE')
+    const entry = pending[index]!
+    const tenantId = request.tenantId === undefined || request.tenantId === ''
+      ? await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+        adapterId: account.adapterId,
+        accountId: account.accountId,
+        secret: await this.input.store.readChannelReference(text(entry.secretRef), this.input.profileId),
+      }))
+      : text(request.tenantId)
+    if (!this.live(documentId)) return rejected('STALE_GENERATION')
+    const resolved = {
+      ref: { ...account, tenantId },
+      adapterKind: entry.adapterKind,
+      enabled: true,
+      transport: { mode: 'websocket' },
+      secretRef: entry.secretRef,
+      displayName: entry.displayName,
+      ...(entry.selectors === undefined ? {} : { selectors: entry.selectors }),
+    }
+    const result = await this.input.service.mutate({
+      contract: 'cordisx.service-config-mutation/v1',
+      schemaVersion: 1,
+      identity: descriptor.identity,
+      scope: descriptor.scope,
+      expectedRevision: descriptor.revision,
+      configuration: {
+        ...configuration,
+        connections: [...configuration.connections, resolved],
+        pendingConnections: pending.filter((_, candidate) => candidate !== index),
+      } as JsonValue,
+    })
+    if (result.status !== 'applied') {
+      return {
+        status: result.status === 'conflict' ? 'conflict' : 'rejected',
+        code: result.status === 'conflict' ? 'REVISION_CONFLICT' : 'TENANT_RESOLUTION_FAILED',
+      }
+    }
+    const projection = await this.input.projection?.().catch(() => undefined)
+    return {
+      status: 'applied',
+      code: 'APPLIED',
+      ref: resolved.ref,
+      ...(projection === undefined ? {} : { projection }),
+    }
+  }
   private async capture(
     request: Record<string, unknown>,
     owner: string,
@@ -192,21 +305,22 @@ export class ChannelCredentialDraftBroker {
     let account = ref(request.account)
     const secret = text(request.secret, 16 * 1024)
     if (!['create', 'rotate'].includes(String(request.purpose))) return rejected('INVALID_REQUEST')
-    if (!account.tenantId) {
-      account = {
-        ...account,
-        tenantId: await (this.input.discoverTenant ?? discoverChannelTenant)({
-          adapterId: account.adapterId,
-          accountId: account.accountId,
-          secret,
-        }),
-      }
-    } else {
-      await (this.input.validateCredentials ?? validateChannelCredentials)({
-        adapterId: account.adapterId,
-        accountId: account.accountId,
-        secret,
-      })
+    await (this.input.validateCredentials ?? validateChannelCredentials)({
+      adapterId: account.adapterId,
+      accountId: account.accountId,
+      secret,
+    })
+    if (!account.tenantId && request.purpose === 'create') {
+      try {
+        account = {
+          ...account,
+          tenantId: await boundedTenantLookup((this.input.discoverTenant ?? discoverChannelTenant)({
+            adapterId: account.adapterId,
+            accountId: account.accountId,
+            secret,
+          })),
+        }
+      } catch { /* Authenticated credentials remain useful while tenant metadata is unavailable. */ }
     }
     if (!this.live(documentId)) return rejected('STALE_GENERATION')
     const configuration = await this.input.service.descriptor()
@@ -220,8 +334,17 @@ export class ChannelCredentialDraftBroker {
     // This is a redacted descriptor; validate its identities without ever retrieving previous keys.
     const current = record(configuration.configuration)
     const connections = current.connections as Array<Record<string, unknown>>
-    const exists = connections.some(item => sameRef(item.ref as ChannelCredentialRef, account))
-    const duplicate = connections.some(item => {
+    const pending = Array.isArray(current.pendingConnections)
+      ? current.pendingConnections as Array<Record<string, unknown>>
+      : []
+    const pendingExists = pending.some(item => {
+      const value = item.account as ChannelCredentialRef
+      return value.adapterId === account.adapterId && value.accountId === account.accountId
+    })
+    const exists = account.tenantId
+      ? connections.some(item => sameRef(item.ref as ChannelCredentialRef, account))
+      : pendingExists
+    const duplicate = pendingExists || connections.some(item => {
       const value = item.ref as ChannelCredentialRef
       return value.adapterId === account.adapterId && value.accountId === account.accountId
     })

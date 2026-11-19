@@ -172,7 +172,7 @@ export class PublicChannelManagerController {
       throw new Error('INVALID_REQUEST')
     }
     const target = this.connectionTargets.get(request.connectionToken)
-    if (!target || !this.connectionExists(target.ref)) throw new Error('TARGET_UNAVAILABLE')
+    if (!target || !target.ref.tenantId || !this.connectionExists(target.ref)) throw new Error('TARGET_UNAVAILABLE')
     const limit = request.limit ?? 50
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('INVALID_REQUEST')
     const cursor = request.afterCursor === undefined ? undefined : this.bindingCursors.get(request.afterCursor)
@@ -220,12 +220,12 @@ export class PublicChannelManagerController {
       const token = this.connectionTokens.get(key) ?? opaqueToken()
       this.connectionTokens.set(key, token)
       this.connectionTargets.set(token, { ref: connection.ref })
-      const actionOperations = this.input.actionsAvailable()
+      const actionOperations = this.input.actionsAvailable() && !connection.pendingTenant
         ? (runtime?.connectionState === 'disabled'
           ? ['connection.enable'] as const
           : ['connection.disable', 'connection.reconnect'] as const)
         : []
-      const credentialOperations = this.input.credentials !== undefined
+      const credentialOperations = this.input.credentials !== undefined && !connection.pendingTenant
           && ['feishu', 'lark'].includes(kind)
         ? ['target.credential.capture.rotate', 'connection.rotate-credential'] as const
         : []
@@ -233,7 +233,7 @@ export class PublicChannelManagerController {
         ...actionOperations,
         ...credentialOperations,
         ...(this.input.configurationAvailable?.() ? ['connection.update'] as const : []),
-        ...(projection.logs === undefined ? [] : ['logs.query'] as const),
+        ...(projection.logs === undefined || connection.pendingTenant ? [] : ['logs.query'] as const),
       ]
       return [{
         connectionToken: token,
@@ -241,7 +241,10 @@ export class PublicChannelManagerController {
         ...(connection.displayName === undefined ? {} : { displayName: connection.displayName }),
         implementationStatus: runtime?.implementationStatus ?? 'planned',
         connectionState: runtime?.connectionState ?? (connection.enabled ? 'unavailable' : 'disabled'),
-        configurationState: connection.secretState === 'missing' ? 'incomplete' as const : 'ready' as const,
+        configurationState: connection.pendingTenant || connection.secretState === 'missing'
+          ? 'incomplete' as const
+          : 'ready' as const,
+        ...(connection.pendingTenant ? { lastErrorCode: 'TENANT_IDENTIFICATION_PENDING' } : {}),
         generation: Math.max(1, runtime?.generation ?? 1),
         lastGoodRevision: projection.service.lastGoodRevision,
         inbound: runtime?.inbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
@@ -395,7 +398,7 @@ export class PublicChannelManagerController {
       || request.operation === 'connection.reconnect'
     ) {
       const target = this.connectionTargets.get(request.target.connectionToken)
-      if (target === undefined || !this.connectionExists(target.ref)) {
+      if (target === undefined || !target.ref.tenantId || !this.connectionExists(target.ref)) {
         return this.operationResult(request, 'rejected', 'TARGET_UNAVAILABLE')
       }
       const result = await (callerOperations?.runAction ?? this.input.runAction)(
@@ -567,6 +570,23 @@ export class PublicChannelManagerController {
     return token
   }
 
+  /** Keep the page target stable when an unscoped pending account gains its real tenant identity. */
+  resolvePendingToken(
+    pending: ChannelManagerConnectionProjection['ref'],
+    resolved: ChannelManagerConnectionProjection['ref'],
+  ): void {
+    if (
+      pending.tenantId !== '' || !resolved.tenantId || pending.adapterId !== resolved.adapterId
+      || pending.accountId !== resolved.accountId
+    ) return
+    const oldKey = connectionKey(pending), newKey = connectionKey(resolved)
+    const token = this.connectionTokens.get(oldKey)
+    if (!token || this.connectionTokens.has(newKey)) return
+    this.connectionTokens.delete(oldKey)
+    this.connectionTokens.set(newKey, token)
+    this.connectionTargets.set(token, { ref: resolved })
+  }
+
   currentRevision(): number {
     return this.revision
   }
@@ -609,7 +629,9 @@ export class PublicChannelManagerController {
       throw new Error('INVALID_FILTER')
     }
     const target = this.connectionTargets.get(request.target.connectionToken)
-    if (target === undefined || !this.connectionExists(target.ref)) throw new Error('TARGET_UNAVAILABLE')
+    if (target === undefined || !target.ref.tenantId || !this.connectionExists(target.ref)) {
+      throw new Error('TARGET_UNAVAILABLE')
+    }
     const projection = this.input.projection()
     if (projection.logs === undefined) throw new Error('OPERATION_UNAVAILABLE')
     const filterDigest = JSON.stringify({ levels: [...levels].sort(), events: [...events].sort() })

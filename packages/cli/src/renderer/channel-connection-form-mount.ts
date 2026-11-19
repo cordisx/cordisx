@@ -21,12 +21,20 @@ export function channelConnectionFormSnapshot(
   live: () => boolean,
 ): ChannelConnectionFormSnapshot {
   const account = controller.target(connectionToken)
-  const stored = (descriptor.configuration as {
+  const configuration = descriptor.configuration as {
     connections: Array<{ ref: ChannelCredentialRef; displayName?: string; selectors?: string[] }>
-  })
-    .connections.find(item =>
+    pendingConnections?: Array<
+      { account: { adapterId: string; accountId: string }; displayName?: string; selectors?: string[] }
+    >
+  }
+  const stored = account?.tenantId
+    ? configuration.connections.find(item =>
       account && item.ref.adapterId === account.adapterId && item.ref.accountId === account.accountId
       && item.ref.tenantId === account.tenantId
+    )
+    : configuration.pendingConnections?.find(item =>
+      account && item.account.adapterId === account.adapterId
+      && item.account.accountId === account.accountId
     )
   const current = controller.snapshot().accounts.find(item => item.connectionToken === connectionToken)
   if (!stored || !current || !live()) throw new Error('TARGET_UNAVAILABLE')
@@ -115,7 +123,35 @@ export async function mountChannelConnectionForm(input: {
         onResult: result => {
           if (input.live() && !signal.aborted) input.options.onResult?.(result)
         },
+        resolveTenant: async (tenantId, baseline) => {
+          if (!input.credentials || !input.live() || signal.aborted || !baseline.writable) {
+            return { status: 'unavailable', code: 'OPERATION_UNAVAILABLE' }
+          }
+          return input.credentials.resolveTenant({
+            owner: input.operationOwner,
+            account: input.account,
+            tenantId,
+            expectedServiceRevision: baseline.serviceRevision,
+            signal,
+            live: input.live,
+            authorize: input.authorize,
+          })
+        },
         apply: async (values, baseline) => {
+          if (!input.account.tenantId) {
+            if (!input.credentials || !baseline.writable) {
+              return { status: 'unavailable', code: 'OPERATION_UNAVAILABLE' }
+            }
+            return input.credentials.resolveTenant({
+              owner: input.operationOwner,
+              account: input.account,
+              tenantId: values.tenantId,
+              expectedServiceRevision: baseline.serviceRevision,
+              signal,
+              live: input.live,
+              authorize: input.authorize,
+            })
+          }
           const snapshot = input.controller.snapshot()
           const patch = { displayName: values.displayName.trim(), selectors: channelReceiveSelectors(values.groupMode) }
           if (!input.live() || signal.aborted) return { status: 'unavailable', code: 'STALE_GENERATION' }

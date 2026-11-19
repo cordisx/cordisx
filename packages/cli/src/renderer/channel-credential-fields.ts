@@ -35,7 +35,7 @@ export function channelCredentialFields(input: {
         ? '租户 ID（留空尝试自动查询）'
         : 'Tenant ID (leave blank to try automatic lookup)',
       required: id !== 'tenantId' && !(id === 'secret' && input.optionalSecret),
-      ...(id === 'tenantId' && input.account === undefined
+      ...(id === 'tenantId' && (input.account === undefined || !input.account.tenantId)
         ? {
           description: input.zh
             ? '填写应用所属企业的 tenant_key（例如该应用可信事件的 header.tenant_key），不是 App ID。留空时需要应用已开通并发布 tenant:tenant:readonly；在开放平台的应用「权限管理」中申请，发布并等待审核后重试。'
@@ -45,7 +45,8 @@ export function channelCredentialFields(input: {
       ...(id === 'secret' && input.optionalSecret
         ? { description: input.zh ? '留空保留当前密钥' : 'Leave blank to keep the current secret' }
         : {}),
-      disabled: input.busy === true || input.account !== undefined && id !== 'secret',
+      disabled: input.busy === true || input.account !== undefined && id !== 'secret'
+          && !(id === 'tenantId' && !input.account.tenantId),
     },
     onChange: value => input.change(id, typeof value === 'string' ? value : ''),
   }))

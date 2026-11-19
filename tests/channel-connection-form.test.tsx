@@ -4,6 +4,54 @@ import { ChannelConnectionForm } from '../packages/cli/src/renderer/channel-conn
 import { reactManagerFixture } from './helpers/react-manager.js'
 
 describe('unified Host Channel connection form', () => {
+  it('shows pending identity, allows retry and accepts a manual key without asking for the secret again', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    const snapshot = {
+      displayName: 'Pending',
+      selectors: ['direct'],
+      revision: 2,
+      serviceRevision: 7,
+      writable: true,
+      credentialWritable: false,
+    }
+    const retry = vi.fn(async () => ({ status: 'rejected' as const, code: 'TENANT_DISCOVERY_PERMISSION_DENIED' }))
+    const apply = vi.fn(async () => ({ status: 'applied' as const, code: 'APPLIED' }))
+    try {
+      await f.render(createElement(ChannelConnectionForm, {
+        account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: '' },
+        initial: snapshot,
+        credentialsAvailable: true,
+        locale: 'en',
+        signal: lifetime.signal,
+        subscribe: () => () => {},
+        read: async () => snapshot,
+        apply,
+        resolveTenant: retry,
+        onResult: vi.fn(),
+      }))
+      expect(f.document.body.textContent).toContain('Tenant identification is pending')
+      expect(f.document.querySelector('a')?.href).toContain('/app/cli_fixture/auth?')
+      expect(f.document.querySelector('#channel-credential-secret')).toBeNull()
+      await f.type('#channel-credential-tenantId input', 'tenant-real')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-real', secret: '' }), snapshot)
+      const retryButton = [...f.document.querySelectorAll('button')].find(button =>
+        button.textContent?.includes('Retry automatic')
+      )!
+      await act(async () => {
+        retryButton.click()
+      })
+      expect(retry).toHaveBeenCalledWith('', snapshot)
+      expect(f.document.body.textContent).toContain('tenant:tenant:readonly')
+    } finally {
+      lifetime.abort()
+      await f.dispose()
+    }
+  })
   it('saves settings without a new key and resets every editable field with one footer', async () => {
     const f = reactManagerFixture(), lifetime = new AbortController()
     const snapshot = {
@@ -24,6 +72,7 @@ describe('unified Host Channel connection form', () => {
       subscribe: () => () => {},
       read: async () => ({ ...snapshot, displayName: 'Updated' }),
       apply,
+      resolveTenant: vi.fn(),
       onResult,
     }
     try {
@@ -82,6 +131,7 @@ describe('unified Host Channel connection form', () => {
       },
       read: async () => snapshot,
       apply,
+      resolveTenant: vi.fn(),
       onResult: vi.fn(),
     }
     try {

@@ -129,10 +129,13 @@ export async function startHeadlessService(input: {
         typeof readServiceConfigState
       >[0]['initialConfig'],
     }, input.configPath)
-    const backendEnvironment = withoutLauncherSecrets(
-      input.environment,
-      parseChannelServiceConfig(state.config).connections.map(connection => connection.secretRef),
-    )
+    const channelConfiguration = parseChannelServiceConfig(state.config)
+    const backendEnvironment = withoutLauncherSecrets(input.environment, [
+      ...channelConfiguration.connections.map(connection => connection.secretRef),
+      ...(channelConfiguration.schemaVersion === 3
+        ? channelConfiguration.pendingConnections.map(connection => connection.secretRef)
+        : []),
+    ])
     const service = createLocalChannelService({
       artifactDirectory: path.dirname(plugin.entry),
       ...(plugin.configuredServiceEntry === undefined && plugin.package === undefined

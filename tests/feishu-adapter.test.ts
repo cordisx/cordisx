@@ -208,7 +208,7 @@ describe('official Feishu direct-message adapter', () => {
     })
     try {
       const message = await normalize({
-        sender: { sender_id: { open_id: 'ou_sender' }, sender_type: 'user', tenant_key: 'tenant-test' },
+        sender: { sender_id: { open_id: 'ou_sender' }, sender_type: 'user', tenant_key: 'external-tenant' },
         message: {
           message_id: 'om_test',
           chat_id: 'oc_test',
@@ -223,6 +223,10 @@ describe('official Feishu direct-message adapter', () => {
       expect(message.rootId).toBe('')
       expect(message.threadId).toBe('')
       await listener!(message)
+      expect(received[0]!.input.source.event).toMatchObject({
+        tenantId: 'tenant-test',
+        actor: { tenantId: 'tenant-test', userId: 'ou_sender' },
+      })
       await listener!({ ...message, rootId: '  ', threadId: '\t' })
       expect(received.map(value => value.input.source.event)).toEqual([
         expect.objectContaining({ threadId: 'oc_test', semantics: 'conversation' }),
