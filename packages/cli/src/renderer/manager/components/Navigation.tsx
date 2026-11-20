@@ -29,6 +29,9 @@ export interface NavigationProps {
   readonly snapshot: ManagerSnapshot
   readonly router: ManagerRouter
   readonly onSelect?: (route: ManagerRoute) => void
+  /** A surface may expose only the destinations its backing owner supports. */
+  readonly primaryPages?: readonly ManagerPrimaryPage[]
+  readonly showFooter?: boolean
 }
 
 function contributed(
@@ -47,6 +50,7 @@ function contributed(
       className="cxr-nav-destination"
       type="button"
       disabled={item.disabled}
+      aria-label={item.title}
       title={review === undefined ? item.disabledReason : `${managerCopy(locale, 'permission.review')} · ${item.title}`}
       data-settings-navigation-item={item.id}
       data-permission-review={review === undefined ? undefined : 'pending'}
@@ -77,7 +81,7 @@ function groupLabel(locale: string, group: ManagerNavigationVisualGroup): string
   return managerCopy(locale, `manager.nav.group.${group}`)
 }
 
-export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
+export function Navigation({ snapshot, router, onSelect, primaryPages, showFooter = true }: NavigationProps) {
   const navigation = useRef<HTMLElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -96,14 +100,17 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
     ? undefined
     : primaryFor(router.route)
   const groups = CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG.groups.flatMap(group => {
-    const coreItems = core.filter(item => item.group === group.id && matches(managerCopy(locale, item.copy)))
+    const coreItems = core.filter(item =>
+      item.group === group.id && (primaryPages === undefined || primaryPages.includes(item.page))
+      && matches(managerCopy(locale, item.copy))
+    )
     const contributedItems = contributions.filter(item =>
       (item.navigationGroup ?? 'other') === group.id && matches(item.title)
     )
     return coreItems.length === 0 && contributedItems.length === 0 ? [] : [{ group, coreItems, contributedItems }]
   })
-  const showNotifications = matches(locale.startsWith('zh') ? '通知规则' : 'Notification rules')
-  const showAbout = matches(managerCopy(locale, 'manager.nav.about'))
+  const showNotifications = showFooter && matches(locale.startsWith('zh') ? '通知规则' : 'Notification rules')
+  const showAbout = showFooter && matches(managerCopy(locale, 'manager.nav.about'))
   const hasResults = groups.length > 0 || showNotifications || showAbout
   return (
     <nav
@@ -194,6 +201,7 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
                 className="cxr-nav-destination"
                 type="button"
                 data-tab={item.page}
+                aria-label={managerCopy(locale, item.copy)}
                 {...(primary === item.page ? { 'aria-current': 'page' as const } : {})}
                 onClick={() => select({ kind: 'primary', page: item.page })}
               >
@@ -211,6 +219,7 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
           className="cxr-nav-destination"
           type="button"
           data-tab="notifications"
+          aria-label={locale.startsWith('zh') ? '通知规则' : 'Notification rules'}
           {...(router.route.kind === 'notification-rules' ? { 'aria-current': 'page' as const } : {})}
           onClick={() => select({ kind: 'notification-rules' })}
         >
@@ -223,6 +232,7 @@ export function Navigation({ snapshot, router, onSelect }: NavigationProps) {
           className="cxr-nav-destination"
           type="button"
           data-tab="about"
+          aria-label={managerCopy(locale, 'manager.nav.about')}
           {...(primary === 'about' ? { 'aria-current': 'page' as const } : {})}
           onClick={() => select({ kind: 'primary', page: 'about' })}
         >

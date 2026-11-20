@@ -345,7 +345,11 @@ function reviewPermissions(result) {
 function modelCard(model, isNew = false, editable = true) {
   const card = node('article', undefined, 'card')
   card.model = model
-  card.append(node('h3', isNew ? '新模型服务' : model.displayName))
+  const details = node('details', undefined, 'manager-model-details')
+  details.open = isNew
+  const summary = node('summary')
+  summary.append(node('h3', isNew ? '新模型服务' : model.displayName))
+  details.append(summary)
   const fields = node('div', undefined, 'fields')
   const id = input(model.id), name = input(model.displayName), url = input(model.baseUrl, 'url')
   const key = input('', 'password')
@@ -367,13 +371,14 @@ function modelCard(model, isNew = false, editable = true) {
     fields.append(item)
   }
   if (!editable) { for (const control of fields.querySelectorAll('input,textarea')) control.disabled = true }
-  card.append(
+  details.append(
     fields,
     button('从草稿移除', () => {
       card.remove()
       modelDirty = true
     }, !editable),
   )
+  card.append(details)
   card.readDraft = () => ({
     id: id.value.trim(),
     displayName: name.value.trim(),
@@ -669,7 +674,18 @@ function renderPlugins(management, runtime) {
     const card = node('article', undefined, 'card')
     const header = node('div', undefined, 'row')
     const info = node('div')
-    info.append(node('strong', plugin.name || plugin.id), node('div', `${plugin.id} · ${plugin.status}`, 'muted'))
+    const icon = node('span', undefined, 'manager-plugin-icon')
+    icon.dataset.pluginId = plugin.id
+    icon.dataset.pluginName = plugin.name || plugin.id
+    const identity = node('button', undefined, 'manager-plugin-identity')
+    identity.type = 'button'
+    identity.setAttribute('aria-label', `打开配置 · ${plugin.name || plugin.id}`)
+    identity.append(icon, info)
+    const status = { active: '已启用', disabled: '已停用', 'configured-disabled': '已停用', failed: '异常' }
+    info.append(
+      node('strong', plugin.name || plugin.id),
+      node('div', `${plugin.id} · ${status[plugin.status] ?? plugin.status}`, 'muted'),
+    )
     const actions = node('div', undefined, 'actions')
     const managed = installed.find(item => item.id === plugin.id)
     if (managed) {
@@ -688,8 +704,10 @@ function renderPlugins(management, runtime) {
       return openPluginConfig(plugin, detail)
     }, runtime?.status !== 'ok')
     configure.dataset.refreshConfiguration = 'true'
+    identity.disabled = configure.disabled
+    identity.addEventListener('click', () => configure.click())
     actions.append(configure)
-    header.append(info, actions)
+    header.append(identity, actions)
     card.append(header, detail)
     target.append(card)
   }

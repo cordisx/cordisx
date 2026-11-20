@@ -3,69 +3,76 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CordisX 管理台</title>
+  <title>CordisX</title>
+  <link rel="stylesheet" href="/shared/manager-navigation.css">
+  <link rel="stylesheet" href="/shared/manager-content.css">
+  <link rel="stylesheet" href="/shared/manager-browse.css">
+  <link rel="stylesheet" href="/shared/manager-catalog.css">
+  <link rel="stylesheet" href="/shared/manager-compact-shell.css">
+  <link rel="stylesheet" href="/shared/search.css">
+  <link rel="stylesheet" href="/shared/action-group.css">
   <link rel="stylesheet" href="/manager.css">
+  <script type="module" src="/manager-shell.js"></script>
   <script type="module" src="/manager.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div><strong>CordisX</strong><span class="product">管理台 · 预览</span></div>
-    <span id="owner">正在连接…</span>
-    <button id="refresh" type="button">刷新状态</button>
-  </header>
-  <main>
-    <h1>配置与服务</h1>
-    <p class="muted">连接现有 CordisX 后台，配置变更由原有 Host 验证并保存。</p>
-    <p id="message" class="message" role="status" aria-live="polite"></p>
-    <section aria-labelledby="clients-title">
-      <h2 id="clients-title">客户端连接</h2>
-      <div id="clients" class="stack"></div>
-    </section>
-    <section aria-labelledby="models-title">
-      <h2 id="models-title">模型服务</h2>
-      <p class="muted">这里编辑共享模型服务。密钥只写入，不会回显；留空保留原值。密钥变量可能由其他客户端或插件使用：修改会影响这些使用方，删除服务不会删除变量，需另行清理。部分插件服务可在下方登录；插件专用密钥尚未覆盖。</p>
-      <div id="models" class="stack"></div>
-      <div class="actions">
-        <button id="add-model" type="button" disabled>添加服务</button>
-        <button id="discard-models" type="button">放弃未保存修改</button>
-        <button id="save-models" type="button" class="primary" disabled>保存模型服务</button>
-      </div>
-    </section>
-    <section id="managed-service-auth" aria-labelledby="managed-service-auth-title">
-      <h2 id="managed-service-auth-title">插件服务登录</h2>
-      <p class="muted">显示当前后台中已激活的插件服务。登录由对应插件处理，不会在管理台回显凭据；需要在终端输入或查看验证码的交互式登录暂不支持。</p>
-      <button id="refresh-managed-services" type="button">刷新登录状态</button>
-      <div id="managed-services" class="stack"></div>
-    </section>
-    <section id="channel-credentials" aria-labelledby="channel-credentials-title">
-      <h2 id="channel-credentials-title">飞书/Lark 连接</h2>
-      <p class="muted">仅显示当前 Host 可验证并管理的飞书/Lark 连接。密钥只写入，验证后不会回显；连接删除和其他 Channel 操作尚不可在此完成。</p>
-      <button id="refresh-channel-credentials" type="button">刷新连接</button>
-      <div id="channel-credentials-list" class="stack"></div>
-    </section>
-    <section aria-labelledby="plugins-title">
-      <h2 id="plugins-title">插件</h2>
-      <div id="plugins" class="stack"></div>
-    </section>
-    <section aria-labelledby="market-title">
-      <h2 id="market-title">插件市场</h2>
-      <form id="market-search" class="inline-form">
-        <label>搜索插件 <input name="query" type="search"></label>
-        <button type="submit">搜索</button>
-        <button id="refresh-catalog" type="button">刷新来源目录</button>
-      </form>
-      <p class="muted">安装需要逐项审核所请求的权限；取消审核不会安装。</p>
-      <div id="market-results" class="stack"></div>
-    </section>
-    <section aria-labelledby="sources-title">
-      <h2 id="sources-title">来源</h2>
-      <div id="sources" class="stack"></div>
-      <form id="add-source" class="inline-form">
-        <label>来源地址 <input name="url" type="url" required placeholder="https://…"></label>
-        <label>名称 <input name="name" type="text"></label>
-        <button type="submit">添加来源</button>
-      </form>
-    </section>
-  </main>
+  <div id="manager-shell" class="cxr-root" data-manager-surface="standalone">
+    <div class="cxr-dialog manager-shell">
+      <aside class="cxr-sidebar" aria-label="CordisX 导航">
+        <div id="manager-navigation" class="manager-navigation"></div>
+        <div class="manager-connection"><span aria-hidden="true"></span><small id="owner">正在连接…</small></div>
+      </aside>
+      <main class="cxr-main">
+        <header class="cxr-header">
+          <span id="manager-leading" class="cxr-header-seat"></span>
+          <div id="manager-heading" class="cxr-heading"></div>
+          <button id="refresh" class="manager-icon-button" type="button" aria-label="刷新状态" title="刷新状态"><span id="refresh-icon"></span></button>
+        </header>
+        <div class="cxr-content manager-content">
+          <p id="message" class="message" role="status" aria-live="polite"></p>
+          <section class="cxr-page manager-view manager-browse" data-manager-view="plugins" aria-label="插件">
+            <div id="plugins-toolbar"></div>
+            <div id="plugins" class="stack manager-results"></div>
+            <p id="plugins-filter-empty" class="muted manager-empty" hidden>没有匹配的插件。</p>
+          </section>
+          <section class="cxr-page manager-view manager-browse" data-manager-view="model-services" aria-label="模型服务" hidden>
+            <div class="manager-toolbar"><div id="models-toolbar"></div><button id="add-model" type="button" disabled>添加服务</button></div>
+            <div id="models" class="stack manager-results"></div>
+            <p id="models-filter-empty" class="muted manager-empty" hidden>没有匹配的模型服务。</p>
+            <div class="manager-footer actions"><button id="discard-models" type="button">放弃修改</button><button id="save-models" type="button" class="primary" disabled>保存</button></div>
+          </section>
+          <section class="cxr-page manager-view manager-browse" data-manager-view="marketplace" aria-label="插件商店" hidden>
+            <form id="market-search" class="cxh-search-toolbar manager-market-toolbar">
+              <label class="cxh-search-field" data-embedded="true"><span id="market-search-icon" class="cxh-search-icon"></span><input name="query" type="search" aria-label="搜索插件" placeholder="搜索插件"></label>
+              <button type="submit">搜索</button><button id="refresh-catalog" type="button">刷新</button><button id="open-sources" type="button">来源</button>
+            </form>
+            <div id="market-results" class="stack manager-results"></div>
+          </section>
+          <section class="cxr-page manager-view" data-manager-view="sources" aria-label="插件来源" hidden>
+            <div id="sources" class="stack"></div>
+            <form id="add-source" class="manager-source-form">
+              <h3>添加来源</h3>
+              <label>来源地址<input name="url" type="url" required placeholder="https://…"></label>
+              <label>名称<input name="name" type="text"></label>
+              <button type="submit">添加来源</button>
+            </form>
+          </section>
+          <section class="cxr-page manager-view" data-manager-view="clients" aria-label="客户端连接" hidden>
+            <div id="clients" class="stack"></div>
+          </section>
+          <section id="managed-service-auth" class="cxr-page manager-view" data-manager-view="service-auth" aria-label="插件服务登录" hidden>
+            <p class="muted manager-description">登录由对应插件处理；需要终端输入或查看验证码的登录暂不支持。</p>
+            <div class="manager-section-actions"><button id="refresh-managed-services" type="button">刷新状态</button></div>
+            <div id="managed-services" class="stack"></div>
+          </section>
+          <section id="channel-credentials" class="cxr-page manager-view" data-manager-view="channel" aria-label="飞书和 Lark 连接" hidden>
+            <p class="muted manager-description">管理当前后台支持的飞书和 Lark 连接。密钥不会回显。</p>
+            <div class="manager-section-actions"><button id="refresh-channel-credentials" type="button">刷新连接</button></div>
+            <div id="channel-credentials-list" class="stack"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
 </body>
 </html>

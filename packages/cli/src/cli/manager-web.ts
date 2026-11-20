@@ -9,9 +9,20 @@ const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
   '/': 'index.html',
   '/manager.js': 'manager.js',
+  '/manager-shell.js': 'manager-shell.js',
   '/manager-schema.js': 'manager-schema.js',
   '/manager-channel-ui.js': 'manager-channel-ui.js',
   '/manager.css': 'manager.css',
+}
+// Serve the same Host-owned styles used by the embedded Manager, never a copy.
+const sharedStyles: Readonly<Record<string, URL>> = {
+  '/shared/manager-navigation.css': new URL('../renderer/manager/manager-navigation.css', import.meta.url),
+  '/shared/manager-content.css': new URL('../renderer/manager/manager-content.css', import.meta.url),
+  '/shared/manager-browse.css': new URL('../renderer/manager/manager-browse.css', import.meta.url),
+  '/shared/manager-catalog.css': new URL('../renderer/manager/manager-catalog.css', import.meta.url),
+  '/shared/manager-compact-shell.css': new URL('../renderer/manager/manager-compact-shell.css', import.meta.url),
+  '/shared/search.css': new URL('../renderer/host-ui/search.css', import.meta.url),
+  '/shared/action-group.css': new URL('../renderer/host-ui/action-group.css', import.meta.url),
 }
 const mime: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
@@ -131,7 +142,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
     response.setHeader('x-frame-options', 'DENY')
     response.setHeader(
       'content-security-policy',
-      "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     )
     if (request.headers.host !== authority) return json(response, 403, { error: 'INVALID_HOST' })
     const origin = request.headers.origin
@@ -150,10 +161,16 @@ export async function startManagerWeb(owner: ManagerOwner) {
       return json(response, 400, { error: 'INVALID_REQUEST' })
     }
     const file = files[url.pathname]
-    if (request.method === 'GET' && file !== undefined) {
+    const shared = sharedStyles[url.pathname]
+    if (request.method === 'GET' && (file !== undefined || shared !== undefined)) {
       try {
-        const contents = await readFile(new URL(file, assets))
-        const extension = file.slice(file.lastIndexOf('.'))
+        const contents = await readFile(shared ?? new URL(file!, assets)).catch(async error => {
+          // Source-mode development serves the shell built into dist; packaged
+          // execution resolves it directly from the normal assets directory.
+          if (file !== 'manager-shell.js') throw error
+          return await readFile(new URL('../../dist/assets/manager/manager-shell.js', import.meta.url))
+        })
+        const extension = url.pathname === '/' ? '.html' : url.pathname.slice(url.pathname.lastIndexOf('.'))
         response.writeHead(200, { 'content-type': mime[extension] ?? 'application/octet-stream' })
         response.end(contents)
       } catch {

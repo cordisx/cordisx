@@ -62,10 +62,40 @@ it('connects the independent manager to a real service owner without Channel or 
     expect(await usesNamespacedManagementRpc(endpoint!)).toBe(false)
     const line = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
     const url = new URL(line)
-    for (const file of ['index.html', 'manager.js', 'manager-schema.js', 'manager-channel-ui.js', 'manager.css']) {
+    for (
+      const file of [
+        'index.html',
+        'manager.js',
+        'manager-shell.js',
+        'manager-schema.js',
+        'manager-channel-ui.js',
+        'manager.css',
+      ]
+    ) {
       const packaged = await readFile(path.join(home, 'package', 'dist', 'assets', 'manager', file), 'utf8')
       expect(packaged.length).toBeGreaterThan(0)
       const response = await fetch(`${url.origin}/${file === 'index.html' ? '' : file}`)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(packaged)
+      const policy = response.headers.get('content-security-policy')!
+      expect(policy).toContain("script-src 'self'")
+      expect(policy).toContain("style-src 'self'")
+      expect(policy).toContain("img-src 'self' data:")
+      expect(policy).not.toContain('unsafe-inline')
+    }
+    for (
+      const [route, file] of [
+        ['manager-navigation.css', 'manager/manager-navigation.css'],
+        ['manager-content.css', 'manager/manager-content.css'],
+        ['manager-browse.css', 'manager/manager-browse.css'],
+        ['manager-catalog.css', 'manager/manager-catalog.css'],
+        ['manager-compact-shell.css', 'manager/manager-compact-shell.css'],
+        ['search.css', 'host-ui/search.css'],
+        ['action-group.css', 'host-ui/action-group.css'],
+      ]
+    ) {
+      const packaged = await readFile(path.join(home, 'package', 'dist', 'src', 'renderer', file!), 'utf8')
+      const response = await fetch(`${url.origin}/shared/${route}`)
       expect(response.status).toBe(200)
       expect(await response.text()).toBe(packaged)
     }
