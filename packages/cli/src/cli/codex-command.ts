@@ -34,6 +34,9 @@ cordisx codex chats fast get [--session <id>]
 cordisx codex chats fast set [--session <id>] --revision <n> --fast <true|false>
 cordisx codex chats project get [--session <id>]
 cordisx codex chats project set [--session <id>] --revision <n> --project <id> [--cwd <path>]
+cordisx codex chats reviewer get --session <id>
+cordisx codex chats reviewer set --session <id> --revision <n> --reviewer <user|auto_review>
+Reviewer changes are local management only and require an idle chat; they do not change sandbox or approval policy.
 Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Headless services can use operator-configured workspace projects; these do not create Desktop sidebar membership.`
 
 export function codexRpcError(operation: string, error: unknown): Error {

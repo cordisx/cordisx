@@ -38,6 +38,7 @@ export async function parseCodexCommand(args: readonly string[], models = false)
     '--effort',
     '--work-mode',
     '--network',
+    '--reviewer',
     '--fast',
     '--cwd',
     '--input-file',
@@ -72,10 +73,15 @@ export async function parseCodexCommand(args: readonly string[], models = false)
       'chats fast set',
       'chats project get',
       'chats project set',
+      'chats reviewer get',
+      'chats reviewer set',
     ].includes(route)
   ) {
     const defaults = route.startsWith('defaults'), write = route.endsWith('set'), project = route.includes('project')
-    operation = `configuration:${defaults ? 'model-defaults' : project ? 'project' : 'fast'}${write ? '-set' : ''}`
+    const reviewer = route.includes('reviewer')
+    operation = `configuration:${defaults ? 'model-defaults' : project ? 'project' : reviewer ? 'reviewer' : 'fast'}${
+      write ? '-set' : ''
+    }`
     accepted = [
       ...(defaults ? [] : ['--session']),
       ...(write
@@ -85,6 +91,8 @@ export async function parseCodexCommand(args: readonly string[], models = false)
             ? ['--provider', '--model', '--fast', '--input-file']
             : project
             ? ['--project', '--cwd']
+            : reviewer
+            ? ['--reviewer']
             : ['--fast']),
         ]
         : []),
@@ -94,7 +102,10 @@ export async function parseCodexCommand(args: readonly string[], models = false)
       if (!/^\d+$/u.test(options['--revision'] ?? '')) failure()
       input.expectedRevision = Number(options['--revision'])
       if (!Number.isSafeInteger(input.expectedRevision)) failure()
-      if (project) {
+      if (reviewer) {
+        if (!['user', 'auto_review'].includes(options['--reviewer'] ?? '')) failure()
+        input.reviewer = options['--reviewer']
+      } else if (project) {
         if (!options['--project']) failure()
         input.projectId = options['--project']
         if (options['--cwd']) input.cwd = options['--cwd']

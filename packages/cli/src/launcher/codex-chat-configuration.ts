@@ -22,8 +22,14 @@ interface ProjectSelection {
 interface Configuration {
   revision: number
   fast?: boolean
+  reviewer?: 'user' | 'auto_review'
   project?: ProjectSelection
   application: 'saved' | 'submitted' | 'applied' | 'unknown'
+}
+function visibleConfiguration(value: Configuration, operation: string) {
+  if (operation.startsWith('reviewer')) return value
+  const { reviewer: _reviewer, ...otherSettings } = value
+  return otherSettings
 }
 interface NativeToolInput {
   tool: string
@@ -144,6 +150,7 @@ export class CodexChatConfiguration {
         if (
           !identity(id) || !Number.isSafeInteger(row.revision) || Number(row.revision) < 0
           || row.fast !== undefined && typeof row.fast !== 'boolean'
+          || row.reviewer !== undefined && !['user', 'auto_review'].includes(String(row.reviewer))
           || row.project !== undefined && (!identity(project.projectId) || !path.isAbsolute(String(project.cwd))
               || !Array.isArray(project.roots) || !project.roots.length
               || project.roots.some(root => typeof root !== 'string' || !path.isAbsolute(root)))
@@ -364,15 +371,34 @@ export class CodexChatConfiguration {
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('INVALID_REQUEST')
       const args = object(input), defaults = operation.startsWith('model-defaults')
-      if (!['model-defaults', 'model-defaults-set', 'fast', 'fast-set', 'project', 'project-set'].includes(operation)) {
+      if (
+        ![
+          'model-defaults',
+          'model-defaults-set',
+          'fast',
+          'fast-set',
+          'project',
+          'project-set',
+          'reviewer',
+          'reviewer-set',
+        ].includes(operation)
+      ) {
         throw new Error('INVALID_REQUEST')
       }
+      // This operation is deliberately local-management-only; an agent or Channel
+      // caller cannot change who reviews its own requests.
+      if (
+        operation.startsWith('reviewer') && (callerThreadId(metadata)
+          || object(metadata)['cordisx/channelContext'] !== undefined)
+      ) throw new Error('LOCAL_USER_REQUIRED')
       const allowed = defaults
         ? operation.endsWith('-set') ? ['settings', 'expectedRevision'] : []
         : operation === 'project-set'
         ? ['sessionId', 'projectId', 'cwd', 'expectedRevision']
         : operation === 'fast-set'
         ? ['sessionId', 'fast', 'expectedRevision']
+        : operation === 'reviewer-set'
+        ? ['sessionId', 'reviewer', 'expectedRevision']
         : ['sessionId']
       if (Object.keys(args).some(key => !allowed.includes(key))) throw new Error('INVALID_REQUEST')
       id = defaults
@@ -391,6 +417,9 @@ export class CodexChatConfiguration {
         operation.endsWith('-set')
         && (!Number.isSafeInteger(args.expectedRevision) || Number(args.expectedRevision) < 0)
       ) throw new Error('INVALID_REVISION')
+      if (operation === 'reviewer-set' && !['user', 'auto_review'].includes(String(args.reviewer))) {
+        throw new Error('INVALID_REVIEWER')
+      }
       if (defaults) {
         if (operation === 'model-defaults') {
           return { status: 'ok', ...await this.authority.preferences.creationDefaults() }
@@ -403,15 +432,19 @@ export class CodexChatConfiguration {
           validation: this.authority.catalog ? 'catalog' : 'deferred-until-creation',
         }
       }
-      const native = await this.nativeThread(id!),
-        current = this.records[id!] ?? { revision: 0, application: 'unknown' as const }
+      let native = await this.nativeThread(id!)
+      const current = this.records[id!] ?? { revision: 0, application: 'unknown' as const }
       if (!operation.endsWith('-set')) {
         return {
           status: 'ok',
           sessionId: id,
-          ...current,
+          ...visibleConfiguration(current, operation),
           effective: {
             ...(native.serviceTier === undefined ? {} : { fast: native.serviceTier === 'priority' }),
+            ...(operation !== 'reviewer' || native.approvalsReviewer === undefined
+              ? {}
+              : { reviewer: native.approvalsReviewer }),
+            ...(operation === 'reviewer' ? { threadStatus: object(native.status).type } : {}),
             cwd: native.cwd,
             ...(current.project && await this.membership(id!, current.project.projectId, metadata)
               ? { projectId: current.project.projectId }
@@ -424,12 +457,22 @@ export class CodexChatConfiguration {
       }
       if (this.active.has(id!)) throw new Error('CHAT_SETTINGS_BUSY')
       if (current.revision !== args.expectedRevision) throw new Error('REVISION_CONFLICT')
-      if (object(native.status).type !== 'idle') throw new Error('THREAD_NOT_IDLE')
       this.active.add(id!)
       claimed = true
+      // An unloaded thread cannot have an active turn in this backend. Resume it
+      // through the existing configuration pipeline before changing its reviewer.
+      if (operation === 'reviewer-set' && object(native.status).type === 'notLoaded') {
+        const resumed = object(await this.authority.request('thread/resume', { threadId: id }))
+        if (object(resumed.thread).id !== id) throw new Error('SESSION_NOT_FOUND')
+        native = await this.nativeThread(id!)
+      }
+      if (object(native.status).type !== 'idle') throw new Error('THREAD_NOT_IDLE')
       let next: Configuration = { ...current, revision: current.revision + 1, application: 'saved' }
       const params: Record<string, unknown> = { threadId: id }
-      if (operation === 'fast-set') {
+      if (operation === 'reviewer-set') {
+        next.reviewer = args.reviewer as 'user' | 'auto_review'
+        params.approvalsReviewer = args.reviewer
+      } else if (operation === 'fast-set') {
         if (typeof args.fast !== 'boolean') throw new Error('INVALID_FAST')
         if (args.fast) await this.fastSupported(native)
         next.fast = args.fast
@@ -474,7 +517,9 @@ export class CodexChatConfiguration {
         }
         await this.authority.request('thread/settings/update', params)
         const effective = await this.observed(id!, before)
-        const confirmed = effective && (operation === 'fast-set'
+        const confirmed = effective && (operation === 'reviewer-set'
+          ? effective.approvalsReviewer === args.reviewer
+          : operation === 'fast-set'
           ? args.fast === true
             ? effective.serviceTier === 'priority'
             : effective.serviceTier === null || effective.serviceTier === 'default'
@@ -482,10 +527,19 @@ export class CodexChatConfiguration {
             && await this.membership(id!, next.project!.projectId, metadata))
         next = { ...next, application: confirmed ? 'applied' : 'submitted' }
         await this.save(id!, next)
-        return { status: next.application === 'applied' ? 'applied' : 'pending', sessionId: id, ...next }
+        return {
+          status: next.application === 'applied' ? 'applied' : 'pending',
+          sessionId: id,
+          ...visibleConfiguration(next, operation),
+        }
       } catch {
         await this.save(id!, { ...next, application: 'unknown' })
-        return { status: 'reconciliation-required', sessionId: id, ...next, application: 'unknown' }
+        return {
+          status: 'reconciliation-required',
+          sessionId: id,
+          ...visibleConfiguration(next, operation),
+          application: 'unknown',
+        }
       }
     } catch (error) {
       return {

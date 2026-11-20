@@ -44,6 +44,7 @@ async function fixture() {
     model: 'official',
     cwd: root,
     serviceTier: null,
+    approvalsReviewer: 'user',
     status: { type: 'idle' },
     sandbox: { type: 'workspaceWrite', writableRoots: [root], networkAccess: false },
   }
@@ -57,6 +58,7 @@ async function fixture() {
       return {}
     }
     if (method === 'thread/resume') {
+      if ((native.status as { type: string }).type === 'notLoaded') native = { ...native, status: { type: 'idle' } }
       return { thread: native, model: native.model, sandbox: native.sandbox, serviceTier: native.serviceTier }
     }
     throw new Error('unexpected method')
@@ -97,6 +99,80 @@ async function fixture() {
     },
   }
 }
+
+test('local reviewer changes are revision fenced, idle-only and preserve existing execution settings', async () => {
+  const f = await fixture()
+  await f.preferences.set('local', 'chat', { networkAccess: true }, 0)
+  expect(await f.service.call('reviewer', { sessionId: 'chat' })).toMatchObject({
+    revision: 0,
+    effective: { reviewer: 'user' },
+  })
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'auto_review',
+      expectedRevision: 0,
+    }, { 'openai/threadId': 'chat' }),
+  ).toMatchObject({ code: 'LOCAL_USER_REQUIRED' })
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'auto_review',
+      expectedRevision: 0,
+    }, { 'cordisx/channelContext': 'context' }),
+  ).toMatchObject({ code: 'LOCAL_USER_REQUIRED' })
+  f.setNative({ status: { type: 'active' } })
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'auto_review',
+      expectedRevision: 0,
+    }),
+  ).toMatchObject({ code: 'THREAD_NOT_IDLE' })
+  f.setNative({ status: { type: 'notLoaded' } })
+  const beforeInvalid = f.request.mock.calls.length
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'invalid',
+      expectedRevision: 0,
+    }),
+  ).toMatchObject({ code: 'INVALID_REVIEWER' })
+  expect(f.request.mock.calls.length).toBe(beforeInvalid)
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'auto_review',
+      expectedRevision: 0,
+    }),
+  ).toMatchObject({ status: 'applied', revision: 1 })
+  expect(f.request).toHaveBeenCalledWith('thread/settings/update', {
+    threadId: 'chat',
+    approvalsReviewer: 'auto_review',
+  })
+  expect(f.request).toHaveBeenCalledWith('thread/resume', { threadId: 'chat' })
+  expect(f.preferences.read('local', 'chat')?.override).toEqual({ networkAccess: true })
+  const fastReadback = await f.service.call('fast', { sessionId: 'chat' })
+  expect(fastReadback).not.toHaveProperty('reviewer')
+  expect(fastReadback).not.toHaveProperty('effective.reviewer')
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'user',
+      expectedRevision: 0,
+    }),
+  ).toMatchObject({ code: 'REVISION_CONFLICT' })
+  expect(
+    await f.service.call('reviewer-set', {
+      sessionId: 'chat',
+      reviewer: 'user',
+      expectedRevision: 1,
+    }),
+  ).toMatchObject({ status: 'applied', revision: 2 })
+  expect(f.native()).toMatchObject({ approvalsReviewer: 'user', sandbox: { networkAccess: false } })
+  await f.service.close()
+  await f.preferences.close()
+})
 
 test('project creation uses actual native context and confirms the same project before dispatch', async () => {
   const f = await fixture()
