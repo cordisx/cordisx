@@ -1,4 +1,5 @@
 import { channelRemoteHistory } from './channel-remote-history.js'
+import { channelMessageRead } from './channel-message-read.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -547,6 +548,13 @@ export function createLocalChannelService(input: {
           })),
         conversations: ref => current.directory.conversations(ref),
         remoteHistory: (ref, request) => channelRemoteHistory(ref, request, current.directory.channel(ref)),
+        readMessage: async (event, messageId) => {
+          const channel = current.directory.channel(event)
+          const result = await channelMessageRead(event, messageId, channel)
+          return current.directory.channel(event) === channel
+            ? result
+            : { status: 'unavailable', code: 'CHANNEL_MESSAGE_UNAVAILABLE' }
+        },
         displayConversations: ref => current.directory.displayConversations(ref),
         conversationDisplay: ref => current.directory.conversationDisplay(ref),
         users: event => current.directory.users(event),

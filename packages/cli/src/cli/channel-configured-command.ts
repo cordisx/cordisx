@@ -30,6 +30,7 @@ const OPERATIONS = [
   'reply-mode',
   'history',
   'remote-history',
+  'message-get',
   'listen',
   'send',
   'send-many',

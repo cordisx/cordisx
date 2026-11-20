@@ -110,7 +110,7 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
 const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
-if (protocolSpec !== 'github:cordisx/cordisx-protocol#53e16025c26ae20ff3e7ba5f9d4b2c7af469807b') {
+if (protocolSpec !== 'github:cordisx/cordisx-protocol#9c5e32d9c702934874417d89ff8c374d766a47d0') {
   throw new Error('Host SDK must pin the merged Channel tenant configuration v3 Protocol source')
 }
 const protocolSource = path.join(host, 'node_modules/@cordisx/protocol')

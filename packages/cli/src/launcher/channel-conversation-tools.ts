@@ -6,6 +6,7 @@ import type {
 } from '@cordisx/channel-runtime'
 import { createHash } from 'node:crypto'
 import type { ChannelRemoteHistoryRequest } from './channel-remote-history.js'
+import type { ChannelMessageReadResult } from './channel-message-read.js'
 import { callerThreadId, callerTurnId } from './agent-bridge-context.js'
 import type { ChannelConversationConsumer } from './channel-conversation-consumer.js'
 import type { ChannelDirectoryReadback } from './channel-live-directory.js'
@@ -21,6 +22,10 @@ export interface ChannelConversationAccess {
   accounts(): readonly { ref: ChannelTenantRef; name?: string; state: string }[]
   conversations(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   remoteHistory?(ref: ChannelTenantRef, request: ChannelRemoteHistoryRequest): Promise<unknown>
+  readMessage?(
+    event: import('@cordisx/channel-runtime').ChannelEventRef,
+    messageId: string,
+  ): Promise<ChannelMessageReadResult>
   /** Display-only cache-first directory. Never use for permissions or command target resolution. */
   displayConversations?(ref: ChannelTenantRef): Promise<ChannelDirectoryReadback>
   conversationDisplay?(
@@ -422,6 +427,45 @@ export class ChannelConversationTools {
         if (Object.keys(input).some(key => key !== 'account')) throw new Error('INVALID_REQUEST')
         const directory = await current.conversations(ref)
         return { status: directory.complete ? 'ok' : 'partial', generation: current.generation, ...directory }
+      }
+      if (operation === 'message-get') {
+        if (Object.keys(input).some(key => !['account', 'conversationId', 'kind', 'messageId'].includes(key))) {
+          throw new Error('INVALID_REQUEST')
+        }
+        const conversationId = text(input.conversationId), kind = input.kind, messageId = text(input.messageId)
+        if (
+          !/^oc_[A-Za-z0-9_]+$/u.test(conversationId) || !['direct', 'group'].includes(String(kind))
+          || !/^om_[A-Za-z0-9_]+$/u.test(messageId)
+        ) throw new Error('INVALID_TARGET')
+        if (nativeCaller && this.consumer?.taskSettings.isBound(nativeCaller) && !source) {
+          throw new Error('CHANNEL_CONTEXT_UNAVAILABLE')
+        }
+        if (source && (!sameAccount(source, ref) || source.conversationId !== conversationId || source.kind !== kind)) {
+          throw new Error('CHANNEL_SOURCE_SCOPE_MISMATCH')
+        }
+        if (!current.readMessage) return { status: 'unavailable', code: 'CHANNEL_MESSAGE_UNAVAILABLE' }
+        const event = source ?? {
+          ...ref,
+          conversationId,
+          kind: kind as 'direct' | 'group',
+          threadId: conversationId,
+          semantics: 'conversation' as const,
+          eventId: messageId,
+        }
+        // An incoming Channel agent can only walk its own source's parent chain.
+        let candidate = source ? source.messageId : messageId
+        const seen = new Set<string>()
+        for (let depth = 0; candidate && depth < 16 && !seen.has(candidate); depth++) {
+          seen.add(candidate)
+          const result = await current.readMessage(event, candidate)
+          if (this.lifetime.signal.aborted || this.access()?.generation !== current.generation) {
+            throw new Error('CHANNEL_GENERATION_CHANGED')
+          }
+          if (result.status !== 'ok') return result
+          if (candidate === messageId) return result
+          candidate = result.message.parentId
+        }
+        return { status: 'rejected', code: 'CHANNEL_MESSAGE_NOT_IN_REPLY_CHAIN' }
       }
       if (operation === 'remote-history') {
         if (
