@@ -49,7 +49,17 @@ cordisx codex chats fast get --session CHAT
 cordisx codex chats fast set --session CHAT --revision 0 --fast true
 cordisx codex chats project get --session CHAT
 cordisx codex chats project set --session CHAT --revision 0 --project NATIVE_PROJECT_ID
+cordisx codex chats reviewer get --session CHAT
+cordisx codex chats reviewer set --session CHAT --revision 0 --reviewer auto_review
 ```
+
+Reviewer changes are local-management-only, require an idle chat and the current
+configuration revision, and use native settings readback to distinguish applied
+from pending or uncertain effects. `user` restores manual review. The setting
+does not change the sandbox, network or approval policy, or answer pending
+requests. Existing execution overrides are preserved. Availability depends on
+native runtime support for reviewer settings; older runtimes may reject the
+operation. A Channel-originated agent cannot change its own reviewer.
 
 Model defaults are a separate profile-owned `chatCreation` layer in `config.json`.
 They apply to future ordinary native/API chats. Explicit native selections take

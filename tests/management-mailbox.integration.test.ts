@@ -91,6 +91,13 @@ describe('sandboxed management mailbox', () => {
       await expect(call({ kind: 'codex', operation: 'model-services:save', context, input: {} })).rejects.toThrow(
         'MAILBOX_REQUEST_REJECTED',
       )
+      await expect(call({
+        kind: 'codex',
+        operation: 'configuration:reviewer-set',
+        context,
+        callerThreadId: 'thread',
+        input: { sessionId: 'thread', reviewer: 'auto_review', expectedRevision: 0 },
+      })).rejects.toThrow('MAILBOX_REQUEST_REJECTED')
       expect(channel).toHaveBeenCalledOnce()
       expect(codex).toHaveBeenCalledOnce()
     } finally {

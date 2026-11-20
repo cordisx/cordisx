@@ -46,6 +46,7 @@ test(
       modelProvider: 'openai',
       model: 'm',
       serviceTier: null,
+      approvalsReviewer: 'user',
       cwd: root,
       status: { type: 'idle' },
       sandbox: { type: 'workspaceWrite', writableRoots: [root], networkAccess: false },
@@ -230,6 +231,28 @@ test(
       expect(membership).toBe('repo')
       expect(updates).toBe(2)
       expect(turns).toBe(0)
+      expect(await command(['reviewer', 'set', '--session', id, '--reviewer', 'auto_review', '--revision', '2']))
+        .toMatchObject({ code: 'LOCAL_USER_REQUIRED' })
+      expect(updates).toBe(2)
+      const env = { ...process.env, CORDISX_HOME: root }
+      delete env.CODEX_THREAD_ID
+      delete env.CODEX_TURN_ID
+      const local = await promisify(execFile)(process.execPath, [
+        path.resolve('packages/cli/dist/src/cli.js'),
+        'codex',
+        'chats',
+        'reviewer',
+        'set',
+        '--session',
+        id,
+        '--reviewer',
+        'auto_review',
+        '--revision',
+        '2',
+      ], { env, timeout: 10_000, maxBuffer: 131_072 })
+      expect(JSON.parse(local.stdout)).toMatchObject({ status: 'applied', revision: 3 })
+      expect(actual).toMatchObject({ approvalsReviewer: 'auto_review', cwd: project })
+      expect(updates).toBe(3)
     } finally {
       await server.close()
       await endpoint.close()

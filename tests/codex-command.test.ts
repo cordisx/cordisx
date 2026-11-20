@@ -67,6 +67,33 @@ test('provider-aware CLI creation preserves a stable operation and native projec
 test('model defaults, Fast and project settings retain explicit scope and false values', async () => {
   expect(
     await parseCodexCommand([
+      'chats',
+      'reviewer',
+      'set',
+      '--session',
+      'chat',
+      '--revision',
+      '3',
+      '--reviewer',
+      'auto_review',
+    ]),
+  ).toMatchObject({
+    operation: 'configuration:reviewer-set',
+    input: { sessionId: 'chat', expectedRevision: 3, reviewer: 'auto_review' },
+  })
+  await expect(parseCodexCommand([
+    'chats',
+    'reviewer',
+    'set',
+    '--session',
+    'chat',
+    '--revision',
+    '3',
+    '--reviewer',
+    'never',
+  ])).rejects.toThrow()
+  expect(
+    await parseCodexCommand([
       'defaults',
       'model',
       'set',
