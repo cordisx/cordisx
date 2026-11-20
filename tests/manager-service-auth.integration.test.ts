@@ -16,6 +16,7 @@ import type { PluginManagementService } from '../packages/cli/src/management/ser
 import type { PluginLifecycleRuntime } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/managed-service-node-host.js'
 import type { ManagedServiceRegistrationHandleV1 } from '@cordisx/protocol/managed-service-runtime/v1'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 
 const session = 'a'.repeat(64)
 const other = 'b'.repeat(64)
@@ -120,6 +121,57 @@ async function fixture(authenticationMode: 'cli' | 'host-secret' = 'cli') {
 }
 
 describe('local manager service authentication', () => {
+  it('connects browser HTTP to the real lifecycle and private socket without exposing session or credentials', async () => {
+    const f = await fixture()
+    const operations: Array<Record<string, unknown>> = []
+    const web = await startManagerWeb(
+      {
+        appId: 'codex',
+        profileId: 'work',
+        generation: 'runtime-1',
+        isCurrent: async () => true,
+        request: async (operation: Record<string, unknown>) => {
+          operations.push(operation)
+          return await f.request(operation as never)
+        },
+      } as unknown as Parameters<typeof startManagerWeb>[0],
+    )
+    const url = new URL(web.url), origin = url.origin
+    const post = async (route: string, data: unknown, token?: string) =>
+      await fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(data),
+      })
+    try {
+      const sessionResponse = await post('/api/session', { token: url.hash.slice(1) })
+      const { token } = await sessionResponse.json() as { token: string }
+      const list = await (await post('/api/managed-services', { action: 'list' }, token)).json()
+      const item = list.services[0]
+      expect(item).toMatchObject({ pluginId: 'aiden', serviceId: 'gateway', status: 'available', canLogin: true })
+      const prepared = await (await post('/api/managed-services', {
+        action: 'prepare-login',
+        pluginId: item.pluginId,
+        serviceId: item.serviceId,
+        pluginGeneration: item.pluginGeneration,
+        bindingId: item.bindingId,
+      }, token)).json()
+      expect(prepared.status).toBe('prepared')
+      const login = await (await post('/api/managed-services', { action: 'login', leaseId: prepared.leaseId }, token))
+        .json()
+      expect(login).toEqual({ status: 'accepted' })
+      expect(f.registration.authenticate).toHaveBeenCalledOnce()
+      const sessionId = operations[0]!.sessionId
+      expect(JSON.stringify([list, prepared, login])).not.toContain(sessionId)
+      expect(JSON.stringify([list, prepared, login])).not.toMatch(/msr_test|mss_test|secret/)
+      await web.close()
+      expect(operations).toContainEqual({ kind: 'manager-service-auth', action: 'retire', sessionId })
+    } finally {
+      await web.close().catch(() => undefined)
+      await f.close()
+    }
+  })
+
   it('uses the real lifecycle and private socket, scopes single-use leases, and rejects stale snapshots', async () => {
     const f = await fixture()
     try {

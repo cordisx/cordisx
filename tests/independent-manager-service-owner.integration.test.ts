@@ -60,6 +60,7 @@ it('connects the independent manager to a real service owner without Channel or 
         headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify(input),
       })).json()
+    expect(await post('/api/managed-services', { action: 'list' })).toEqual({ status: 'available', services: [] })
     const localPlugin = await localPackageV5(home)
     const planned = await post('/api/management', {
       kind: 'plan',

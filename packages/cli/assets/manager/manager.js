@@ -645,6 +645,7 @@ async function loginManagedService(item) {
   const serviceKey = `${item.pluginId}\u0000${item.serviceId}`
   if (uncertainManagedServices.has(serviceKey)) return
   managedServiceLoginBusy = true
+  message('正在联系插件服务，请稍候。')
   try {
     await whileControlsFrozen(element('managed-service-auth'), async () => {
       const target = { pluginId: item.pluginId, serviceId: item.serviceId }
