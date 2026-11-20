@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readServiceConfigState } from '../config/service-config.js'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { loadConfig } from '../launcher/config.js'
 import { CHANNEL_SERVICE_CONFIG_INITIAL, createLocalChannelService } from '../launcher/channel-service.js'
 import { ChannelNativeSessions } from '../launcher/channel-native-sessions.js'
@@ -123,7 +124,10 @@ export async function startHeadlessService(input: {
         close,
       }
     }
-    const state = await readServiceConfigState({
+    const readChannelConfig = plugin.package === undefined
+      ? readServiceConfigState
+      : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation).persistence.read
+    const state = await readChannelConfig({
       profileId: input.profileId,
       pluginId: 'channel',
       serviceId: 'runtime',
