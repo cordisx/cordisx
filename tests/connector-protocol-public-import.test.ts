@@ -16,11 +16,11 @@ import type {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolVersion = '0.1.0-beta.17'
-const protocolSpec = 'github:cordisx/cordisx-protocol#9c5e32d9c702934874417d89ff8c374d766a47d0'
+const protocolSpec = 'github:cordisx/cordisx-protocol#fbf9b8baa3af51aabd8b43640f56acfc0a31797f'
 const protocolResolvedSource =
-  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#9c5e32d9c702934874417d89ff8c374d766a47d0'
+  'git+ssh://git@github.com/cordisx/cordisx-protocol.git#fbf9b8baa3af51aabd8b43640f56acfc0a31797f'
 const protocolIntegrity =
-  'sha512-L4sxRG7+wqrGK+ojfJbm5vequFjG09xTLzDjrGpAqRFt/jjX3E1at0SGeOAsFxSAs15ZRtMy8fyliZ5IHzBoTg=='
+  'sha512-6TIj5FhzZ+pO9fHjrWvuxzGUCxhhqQQoc6tL8ZcGwl6FBSQYPVefivpk3OToQVLj4dYiT/mekYjBTqhIqidAow=='
 const staleProtocolVersion = '0.1.0-beta.2'
 
 interface PackageManifest {
