@@ -1,4 +1,5 @@
 import { ManagedConsoleBrowserLaunch } from './managed-console-browser-launch.js'
+import { ManagerServiceAuth, type ManagerServiceAuthOperation } from './manager-service-auth.js'
 import type { NativeManagedConsoleAdapter } from '../shortcuts/managed-console-agent.js'
 import { managedServiceLiveHandler } from './managed-service-live-handler.js'
 import { ManagedServiceStartupTombstones } from './managed-service-startup-tombstones.js'
@@ -122,8 +123,26 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   private readonly lifecycle = new AbortController()
   private readonly startupTombstones: ManagedServiceStartupTombstones
   private readonly endpointReservations = new ManagedServiceEndpointReservations()
+  private readonly managerServiceAuth: ManagerServiceAuth
 
   constructor(private readonly options: ManagedServicePluginLifecycleOptions) {
+    this.managerServiceAuth = new ManagerServiceAuth({
+      profileId: options.profileId,
+      generation: options.runtimeGeneration,
+      withRoute: async (pluginId, callback) =>
+        await this.enqueue(async () => {
+          // Do not start a login during a staged update or against a candidate route.
+          const routes = this.transactions.size === 0 ? this.active?.routes : undefined
+          const matching = [...(routes?.values() ?? [])].filter(route => route.owner.pluginId === pluginId)
+          return await callback(matching.length === 1 ? matching[0] : undefined)
+        }),
+      targets: async () =>
+        await this.enqueue(async () => {
+          if (this.transactions.size > 0 || !this.active) return undefined
+          if (!this.active.activation) return this.active.routes.size === 0 ? [] : undefined
+          return this.active.activation.sources.map(({ pluginId, serviceId }) => ({ pluginId, serviceId }))
+        }),
+    })
     this.startupTombstones = new ManagedServiceStartupTombstones(options.profileId, options.runtimeGeneration)
     this.runtime = options.runtime
     this.startup = new ManagedServiceStartupAuthority({
@@ -228,6 +247,11 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   readonly managedServiceUI = {
     handleBindingValue: async (value: string, documentSignal?: AbortSignal): Promise<Record<string, unknown>> =>
       await this.handleBindingValue(value, documentSignal),
+  }
+
+  /** The local manager owns its browser session; no plugin token crosses this boundary. */
+  async managerAuth(operation: ManagerServiceAuthOperation): Promise<unknown> {
+    return await this.managerServiceAuth.handle(operation)
   }
 
   nativeActivation(): ManagedServiceNativeActivation {
@@ -404,6 +428,7 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
   }
 
   async dispose(): Promise<void> {
+    this.managerServiceAuth.close()
     if (this.disposed) return await this.mutation.then(() => undefined)
     this.disposed = true
     this.lifecycle.abort(new Error('managed service lifecycle disposed'))

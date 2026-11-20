@@ -629,6 +629,8 @@ it('broadcasts an authenticated delta to every live subscription after login suc
 
   await new Promise(resolve => setTimeout(resolve, 30))
 
+  const current = await source.snapshot() as Extract<ManagedServiceSnapshotResultV1, { status: 'available' }>
+
   const loginResult = await source.authenticate({
     $schema: 'https://schema.test/login.v1.json',
     contract: 'cordisx.managed-service-login-request/v1',
@@ -636,7 +638,7 @@ it('broadcasts an authenticated delta to every live subscription after login suc
     requestId: 'req-bc',
     binding: source.binding,
     action: 'login',
-    expectedSequence: 0,
+    expectedSequence: current.projection.sequence,
     userGesture: { kind: 'explicit-click', at: new Date().toISOString() },
   })
   expect((loginResult as { status: string }).status).toBe('accepted')

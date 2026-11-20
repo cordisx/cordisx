@@ -732,6 +732,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         rendererConfiguration: operation => lifecycleRuntime.pluginConfiguration(operation),
+        managerServiceAuth: operation => managedServiceLifecycleRuntime!.managerAuth(operation),
         modelExport: nativeCatalogExport(() => nativeSubmission),
         codex: nativeCodexOperations(() => nativeSubmission),
         ...configuredChannelManagementToolHandler(channelTools),

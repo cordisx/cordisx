@@ -149,6 +149,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           mode: 'service',
+          managerServiceAuth: operation => services!.managerAuth(operation),
           terminalProvider: request => terminalProvider!.request(request),
           ...(channel?.channel === undefined
             ? {}
