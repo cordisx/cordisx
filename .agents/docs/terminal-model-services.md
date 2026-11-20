@@ -26,8 +26,8 @@ a running instance with different launch options is never restarted implicitly.
 CLI mode defaults to Codex; `claude-code` selects the original Claude Code
 terminal. The `cordisx cli` alias remains supported. `-s`/`-m` mean
 `--service`/`--model`. Both must be supplied together, and arguments after `--`
-belong to the selected client. `--profile` selects an existing CordisX Codex
-service profile, while client profile arguments belong after `--`.
+belong to the selected client. `--profile` selects an existing CordisX service
+profile, while client profile arguments belong after `--`.
 
 CLI processes have separate terminal sessions and reuse the same selected
 CordisX gateway. Starting two terminals never restarts two Host services.
@@ -70,6 +70,7 @@ enabled and logged in. List the exact provider and model IDs:
 ```sh
 cordisx cli --list
 cordisx cli --list --profile work
+cordisx cli --list --profile work --owner-app codex
 ```
 
 Use an exact provider ID and model ID from that output:
@@ -86,6 +87,17 @@ login or copy credentials into Codex configuration. It holds a launch-scoped
 command-backed credential lease and releases it when the child exits or startup
 fails. Owner/service replacement invalidates the lease; start a new CLI session.
 An orphaned launch expires. The existing App and unrelated services are retained.
+
+The CLI discovers the single live owner among configured App namespaces that
+contain the selected profile; `--owner-app ID` requires that exact namespace.
+Multiple claiming owners, an insecure or unverifiable endpoint, and an owner
+change are errors: the CLI never picks one by order. A standalone service owner
+can supply dynamic plugin services as well. This does not make Desktop and
+service mode concurrent owners: one profile still has one runtime owner. Codex
+CLI's host-isolated data root is resolved only from its own Codex profile.
+Shared model-service declarations do not use an owner lease, so `--owner-app`
+applies to listing or selecting a live plugin/Manager service, not to those
+independent declarations.
 
 `--list` merges the live catalog with compatible shared declarations; `managed: true` marks
 plugin/Manager gateways, and shared declarations carry `source: "model-service"`.

@@ -87,90 +87,142 @@ describe('headless service terminal provider authority', () => {
     }
   })
 
-  it.each(['app', 'service'] as const)('connects both CLI clients to one %s owner without replacing it', async mode => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cx-multi-client-'))
-    const configPath = path.join(root, 'config.json')
-    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
-    const f = activation()
-    const terminal = createServiceTerminalProvider({ activation: f.value })
-    const leaseIds: string[] = []
-    const manager = await openProductionPluginManagementComposition({
-      homeDir: root,
-      configPath,
-      appId: 'codex',
-      profileId: 'default',
-      runtimeGeneration: 'runtime-one',
-      token: 'a'.repeat(64),
-      ...(mode === 'service' ? { mode } : {}),
-      coordinator: new PluginLifecycleCoordinator({
+  it.each(['app', 'service', 'future-service', 'future-isolated'] as const)(
+    'connects both CLI clients to one %s owner without replacing it',
+    async mode => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cx-multi-client-'))
+      const configPath = path.join(root, 'config.json')
+      const defaults = createDefaultHomeConfig()
+      const ownerApp = mode.startsWith('future') ? 'future-adapter' : 'codex'
+      const codexApp = mode === 'future-isolated'
+        ? {
+          ...defaults.apps.codex!,
+          profiles: { default: { displayName: 'Default', dataMode: 'host-isolated' } },
+        }
+        : defaults.apps.codex
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          ...defaults,
+          apps: { ...defaults.apps, codex: codexApp, 'future-adapter': defaults.apps.codex },
+        }),
+        { mode: 0o600 },
+      )
+      const f = activation()
+      const terminal = createServiceTerminalProvider({ activation: f.value })
+      const leaseIds: string[] = []
+      const manager = await openProductionPluginManagementComposition({
         homeDir: root,
+        configPath,
+        appId: ownerApp,
         profileId: 'default',
         runtimeGeneration: 'runtime-one',
-        permissionPolicies: [],
-        runtime: {
-          stage: async () => undefined,
-          commit: async () => undefined,
-          abort: async () => undefined,
-          reload: async () => undefined,
+        token: 'a'.repeat(64),
+        ...(mode === 'app' ? {} : { mode: 'service' as const }),
+        coordinator: new PluginLifecycleCoordinator({
+          homeDir: root,
+          profileId: 'default',
+          runtimeGeneration: 'runtime-one',
+          permissionPolicies: [],
+          runtime: {
+            stage: async () => undefined,
+            commit: async () => undefined,
+            abort: async () => undefined,
+            reload: async () => undefined,
+          },
+        }),
+        terminalProvider: async request => {
+          const result = await terminal.request(request)
+          if (result.kind === 'prepared') leaseIds.push(result.leaseId)
+          return result
         },
-      }),
-      terminalProvider: async request => {
-        const result = await terminal.request(request)
-        if (result.kind === 'prepared') leaseIds.push(result.leaseId)
-        return result
-      },
-    })
-    const children: EventEmitter[] = []
-    const spawnTerminal = vi.fn((_executable: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
-      expect(JSON.stringify(options.env)).not.toContain('PRIVATE_FIXTURE_SECRET')
-      const child = Object.assign(new EventEmitter(), { exitCode: null, kill: vi.fn() })
-      children.push(child)
-      return child as unknown as ChildProcess
-    })
-    const runtime = {
-      env: { ...process.env, CORDISX_HOME: root },
-      internalCheckTerminalClient: async (executable: string) => executable,
-      internalSpawnTerminal: spawnTerminal as never,
-    }
-    try {
-      const first = runCordisXCli([
-        'start',
-        '--mode',
-        'cli',
-        'codex',
-        '-s',
-        'fixture-provider',
-        '-m',
-        'model-one',
-        '--',
-        '--version',
-      ], runtime)
-      const second = runCordisXCli([
-        'start',
-        '--mode',
-        'cli',
-        'claude-code',
-        '-s',
-        'fixture-provider',
-        '-m',
-        'model-one',
-        '--',
-        '--version',
-      ], runtime)
-      await vi.waitFor(() => expect(children).toHaveLength(2))
-      expect(new Set(leaseIds).size).toBe(2)
-      children[0]!.emit('exit', 0, null)
-      await vi.waitFor(async () => {
-        const results = await Promise.allSettled(leaseIds.map(leaseId => terminal.request({ kind: 'renew', leaseId })))
-        expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
       })
-      children[1]!.emit('exit', 0, null)
-      await Promise.all([first, second])
-    } finally {
-      for (const child of children) child.emit('exit', 0, null)
-      await manager.close()
-      await terminal.close()
-      await rm(root, { recursive: true, force: true })
-    }
-  })
+      const children: EventEmitter[] = []
+      const spawnTerminal = vi.fn((executable: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+        expect(JSON.stringify(options.env)).not.toContain('PRIVATE_FIXTURE_SECRET')
+        if (mode === 'future-isolated' && executable === 'codex') {
+          expect(options.env.CODEX_HOME).toBe(path.join(root, 'apps', 'codex', 'profiles', 'default', 'codex-home'))
+        }
+        const child = Object.assign(new EventEmitter(), { exitCode: null, kill: vi.fn() })
+        children.push(child)
+        return child as unknown as ChildProcess
+      })
+      const runtime = {
+        env: { ...process.env, CORDISX_HOME: root },
+        internalCheckTerminalClient: async (executable: string) => executable,
+        internalSpawnTerminal: spawnTerminal as never,
+      }
+      try {
+        const first = runCordisXCli([
+          'start',
+          '--mode',
+          'cli',
+          'codex',
+          '-s',
+          'fixture-provider',
+          '-m',
+          'model-one',
+          '--',
+          '--version',
+        ], runtime)
+        const second = runCordisXCli([
+          'start',
+          '--mode',
+          'cli',
+          'claude-code',
+          '--owner-app',
+          ownerApp,
+          '-s',
+          'fixture-provider',
+          '-m',
+          'model-one',
+          '--',
+          '--version',
+        ], runtime)
+        await vi.waitFor(() => expect(children).toHaveLength(2))
+        if (mode === 'future-service') {
+          await expect(runCordisXCli([
+            'start',
+            '--mode',
+            'cli',
+            'claude-code',
+            '--owner-app',
+            'codex',
+            '-s',
+            'fixture-provider',
+            '-m',
+            'model-one',
+          ], runtime)).rejects.toThrow('No verified CordisX owner matches')
+          await expect(runCordisXCli([
+            'start',
+            '--mode',
+            'cli',
+            'claude-code',
+            '--profile',
+            'other',
+            '-s',
+            'fixture-provider',
+            '-m',
+            'model-one',
+          ], runtime)).rejects.toThrow('Existing CordisX profile required')
+          expect(children).toHaveLength(2)
+        }
+        expect(new Set(leaseIds).size).toBe(2)
+        children[0]!.emit('exit', 0, null)
+        await vi.waitFor(async () => {
+          const results = await Promise.allSettled(
+            leaseIds.map(leaseId => terminal.request({ kind: 'renew', leaseId })),
+          )
+          expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+        })
+        children[1]!.emit('exit', 0, null)
+        await Promise.all([first, second])
+      } finally {
+        for (const child of children) child.emit('exit', 0, null)
+        await manager.close()
+        await terminal.close()
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
 })
