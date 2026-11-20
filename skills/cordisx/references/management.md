@@ -11,8 +11,8 @@ command opens the default browser and reuses or starts the profile's local
 management process. `cordisx manager start`, `cordisx manager status`, and
 `cordisx manager stop` control only that management process, accept
 `--profile <id>`, and do not stop the profile owner. The management process
-ends when its owner goes away. For a terminal
-without a browser, `cordisx manager open --print-url` explicitly prints a
+ends when its owner goes away. For a terminal without a browser,
+`cordisx manager open --print-url` explicitly prints a
 temporary local URL. Do not guess a port, disclose a one-time URL or token in
 chat, or make the management service reachable on the network. An open page is
 not proof that every plugin, operation, or client adapter is available.
@@ -23,11 +23,19 @@ The installed CLI also supports `cordisx start --mode service` and
 for profiles and limitations. The Manager command does not start a missing
 owner. Starting service mode is not required when the existing App already owns
 the selected profile, and the existing modes cannot simultaneously own that
-profile. Preserve the user's App, conversations,
-credentials, and profile; do not stop or restart an existing instance merely to
+profile. Preserve the user's App, conversations, credentials, and profile; do
+not stop or restart an existing instance merely to
 open the page. If the CLI reports an ownership conflict, explain the actual
 state instead of starting a second owner or claiming multiple clients are
 connected. Only launch a service or page as part of the user's requested work.
+
+An agent already running under CordisX can inherit `CORDISX_SUPERVISOR_*` and
+`CORDISX_DOCK_*` variables for its parent process. They are not credentials for a
+new launch; remove those internal variables from the child process environment
+before invoking launch or dry-run commands. Preserve the user's `HOME`,
+`CODEX_HOME`, and `CORDISX_HOME`. If a non-default CordisX home or profile is in
+use, identify it through the existing integration status and select it
+explicitly rather than guessing.
 
 Treat model services as shared only where the Host reports that capability.
 Codex, Claude Code, and other clients retain their own sessions, connection
