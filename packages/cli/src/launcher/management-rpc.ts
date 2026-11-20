@@ -25,6 +25,7 @@ import {
   type RendererConfigOperation,
   type RendererConfigResult,
 } from './renderer-config-management.js'
+import { parsePermissionReviewOperation, type PermissionReviewOperation } from './permission-review-management.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -32,6 +33,7 @@ export const MAX_MANAGEMENT_REQUEST_BYTES = 256 * 1024
 const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
+  | PermissionReviewOperation
   | RendererConfigOperation
   | { readonly kind: 'query' }
   | {
@@ -143,6 +145,7 @@ export function parsePluginManagementRpcRequest(
     ![
       'query',
       'plugin-configuration',
+      'permission-review-apply',
       'model-export',
       'terminal-provider',
       'channel',
@@ -156,6 +159,7 @@ export function parsePluginManagementRpcRequest(
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
   if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
+  if (operation.kind === 'permission-review-apply') parsePermissionReviewOperation(operation, scope.profileId)
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
     operation.kind === 'channel' && (typeof operation.operation !== 'string'
@@ -185,6 +189,7 @@ export async function handlePluginManagementRpcRequest(
   const operation = request.operation
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
+  if (operation.kind === 'permission-review-apply') throw new Error('Permission review requires the lifecycle owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
@@ -255,6 +260,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
+  readonly permissionReview?: (operation: PermissionReviewOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
@@ -273,7 +279,10 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'plugin-configuration'
+    return request.operation.kind === 'permission-review-apply'
+      ? await (input.permissionReview?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'lifecycle-unavailable' }))
+      : request.operation.kind === 'plugin-configuration'
       ? await (input.rendererConfiguration?.(request.operation)
         ?? Promise.resolve({ status: 'unavailable', reason: 'renderer-unavailable' }))
       : request.operation.kind === 'codex'

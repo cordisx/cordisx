@@ -4,6 +4,7 @@ import type { ModelExportRequest } from './model-export-parse.js'
 import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { RendererConfigOperation, RendererConfigResult } from '../launcher/renderer-config-management.js'
+import { applyManagementPermissionReview } from '../launcher/permission-review-management.js'
 import { openPluginManagementService } from '../management/service.js'
 import {
   type PluginManagementBridgeHandler,
@@ -56,6 +57,13 @@ export async function openProductionPluginManagementComposition(input: {
       processStartedAt,
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
+      permissionReview: async operation =>
+        await applyManagementPermissionReview({
+          coordinator: input.coordinator,
+          profileId: input.profileId,
+          generation: input.runtimeGeneration,
+          operation,
+        }),
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
       ...(input.channel === undefined ? {} : { channel: input.channel }),
