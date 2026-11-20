@@ -97,7 +97,10 @@ try {
       if (!prompt.querySelector('[data-permission-capability="models.read"]')) throw new Error('wrong runtime capability')
       click(await waitFor(() => prompt.querySelector('[data-permission-decision="deny-once"]'), 'deny once'))
       click(prompt.querySelector('[data-permission-action="confirm"]'))
-      await call
+      const denied = await call
+      if (denied?.ok !== false || denied.error?.code !== 'permission-denied') {
+        throw new Error('runtime denial did not block the capability')
+      }
       const after = runtime.snapshot().permissions.find(item => item.identity.id === 'defer-smoke-optional' && item.capability === 'models.read')
       if (after?.policy !== 'ask') throw new Error('deny-once changed persistent policy')
       await install(${JSON.stringify(values.required)}, 'defer-smoke-required', true)
