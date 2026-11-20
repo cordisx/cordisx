@@ -141,6 +141,7 @@ import {
 import type { PreparedRunCommand } from './run-command-dispatch.js'
 import { shouldEnableNativeSubmission } from './native-submission-launch-policy.js'
 import { createChannelLaunchBridges, createRendererChannelComposition } from './renderer-channel-composition.js'
+import { createManagerChannelCredentials, managerUserAuthorities } from './manager-channel-credentials-composition.js'
 import {
   configuredChannelManagementToolHandler,
   configuredChannelToolHandler,
@@ -708,6 +709,13 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         execution: (operation, args) => chatExecutionOperation(nativeSubmission?.channelSession, operation, args),
       })
     if (channelConfigApi) services.push({ pluginId: 'channel', serviceId: 'runtime', api: channelConfigApi })
+    const managerChannel = createManagerChannelCredentials({
+      ...channel,
+      lifecycle: managedServiceLifecycleRuntime,
+      configPath,
+      profileId: selection.profileId,
+      generation: lifecycleGeneration,
+    })
     const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
       ? undefined
       : createServiceConfigBridgeHandler({
@@ -719,6 +727,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
     const disposeConfiguredLaunch = configuredLaunchCleanup({
       documents: ownerDocuments,
       credentials: channelCredentialBridge,
+      ...(managerChannel === undefined ? {} : { managerCredentials: managerChannel }),
       channel: disposeChannel,
       providers: closeProviderFleet,
     })
@@ -732,7 +741,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         token: pluginManagementToken,
         coordinator: pluginLifecycleCoordinator,
         rendererConfiguration: operation => lifecycleRuntime.pluginConfiguration(operation),
-        managerServiceAuth: operation => managedServiceLifecycleRuntime!.managerAuth(operation),
+        ...managerUserAuthorities(managedServiceLifecycleRuntime!, managerChannel),
         modelExport: nativeCatalogExport(() => nativeSubmission),
         codex: nativeCodexOperations(() => nativeSubmission),
         ...configuredChannelManagementToolHandler(channelTools),

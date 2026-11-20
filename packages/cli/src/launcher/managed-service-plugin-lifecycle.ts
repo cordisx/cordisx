@@ -254,6 +254,28 @@ export class ManagedServicePluginLifecycleRuntime implements PluginLifecycleRunt
     return await this.managerServiceAuth.handle(operation)
   }
 
+  /** Fence a private Host action against plugin disable/replacement transactions. */
+  async withActivePlugin<T>(
+    identity: {
+      readonly id: string
+      readonly moduleGeneration: string
+      readonly digest: string
+      readonly version: string
+      readonly canonicalSource?: string
+    },
+    action: () => Promise<T>,
+  ): Promise<T | undefined> {
+    return await this.enqueue(async () => {
+      const plugin = this.active?.record?.plugins.find(item => item.id === identity.id)
+      if (
+        this.transactions.size > 0 || !plugin?.enabled || plugin.moduleGeneration !== identity.moduleGeneration
+        || plugin.digest !== identity.digest || plugin.version !== identity.version
+        || plugin.canonicalSource !== identity.canonicalSource
+      ) return undefined
+      return await action()
+    })
+  }
+
   nativeActivation(): ManagedServiceNativeActivation {
     const owner = this
     return Object.freeze({

@@ -5,6 +5,7 @@ import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
 import type { RendererConfigOperation, RendererConfigResult } from '../launcher/renderer-config-management.js'
 import type { ManagerServiceAuthOperation } from '../launcher/manager-service-auth.js'
+import type { ManagerChannelCredentialOperation } from '../launcher/manager-channel-credentials.js'
 import { applyManagementPermissionReview } from '../launcher/permission-review-management.js'
 import { openPluginManagementService } from '../management/service.js'
 import {
@@ -33,6 +34,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
+  readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -72,6 +74,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.codex === undefined ? {} : { codex: input.codex }),
       ...(input.rendererConfiguration === undefined ? {} : { rendererConfiguration: input.rendererConfiguration }),
       ...(input.managerServiceAuth === undefined ? {} : { managerServiceAuth: input.managerServiceAuth }),
+      ...(input.managerChannelCredentials === undefined
+        ? {}
+        : { managerChannelCredentials: input.managerChannelCredentials }),
     })
   } catch (error) {
     service.close()

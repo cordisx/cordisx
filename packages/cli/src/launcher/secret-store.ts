@@ -165,6 +165,25 @@ export class LauncherSecretStore {
     }
   }
 
+  /** Recovery may remove only an exact manager-generated, profile-scoped draft reference. */
+  async removeManagerDraftReference(reference: string, profileId: string): Promise<boolean> {
+    if (!this.backend || !PROFILE_ID.test(profileId)) return false
+    const prefix = this.platform === 'linux'
+      ? `host-secret:channel/${profileId}/`
+      : this.platform === 'darwin'
+      ? `keychain:cordisx/channel/${profileId}/`
+      : ''
+    if (!prefix || !reference.startsWith(prefix)) return false
+    const account = reference.slice(prefix.length)
+    if (!/^draft-[a-f0-9]{40}$/u.test(account)) return false
+    try {
+      await this.backend.remove(`cordisx/channel/${profileId}`, account)
+      return true
+    } catch (error) {
+      return error instanceof LauncherKeychainError && error.code === 'MISSING'
+    }
+  }
+
   /** Retire in-memory authority after commit or cleanup; the persisted item is managed separately. */
   forget(captureId: string): void {
     this.captures.delete(captureId)

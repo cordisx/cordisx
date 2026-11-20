@@ -19,6 +19,7 @@ interface Draft {
   readonly purpose: 'create' | 'rotate'
   readonly ref: ChannelCredentialRef
   readonly captureId: string
+  readonly journalReference?: string
   readonly revision: number
   readonly expiresAt: number
 }
@@ -82,6 +83,10 @@ export class ChannelCredentialDraftBroker {
       readonly now?: () => number
       readonly discoverTenant?: typeof discoverChannelTenant
       readonly validateCredentials?: typeof validateChannelCredentials
+      /** Optional Host-private crash recovery journal; never receives a secret value. */
+      readonly recordDraft?: (reference: string) => Promise<void>
+      readonly retireDraft?: (reference: string) => Promise<void>
+      readonly cleanupDraft?: (reference: string) => Promise<boolean>
     },
   ) {
     this.timer = setInterval(() => {
@@ -216,6 +221,9 @@ export class ChannelCredentialDraftBroker {
       }
       this.drafts.delete(id)
       this.input.store.forget(draft.captureId)
+      if (draft.journalReference !== undefined) {
+        await this.input.retireDraft?.(draft.journalReference).catch(() => undefined)
+      }
       const projection = await this.input.projection?.().catch(() => undefined)
       return { status: 'applied', code: 'APPLIED', ref: draft.ref, ...(projection === undefined ? {} : { projection }) }
     } catch (error) {
@@ -354,6 +362,21 @@ export class ChannelCredentialDraftBroker {
       profileId: this.input.profileId,
       connectionId: `draft-${randomBytes(20).toString('hex')}`,
     })
+    const journalReference = this.input.recordDraft === undefined
+      ? undefined
+      : this.input.store.referenceFor(capture.captureId)
+    if (this.input.recordDraft !== undefined) {
+      if (journalReference === undefined) {
+        this.input.store.forget(capture.captureId)
+        return { status: 'unavailable', code: 'CREDENTIAL_UNAVAILABLE' }
+      }
+      try {
+        await this.input.recordDraft(journalReference)
+      } catch {
+        this.input.store.forget(capture.captureId)
+        return { status: 'unavailable', code: 'DRAFT_JOURNAL_UNAVAILABLE' }
+      }
+    }
     const draft: Draft = {
       id,
       owner,
@@ -361,6 +384,7 @@ export class ChannelCredentialDraftBroker {
       purpose: request.purpose as 'create' | 'rotate',
       ref: account,
       captureId: capture.captureId,
+      ...(journalReference === undefined ? {} : { journalReference }),
       revision: configuration.revision,
       expiresAt: this.now() + 10 * 60_000,
     }
@@ -379,10 +403,17 @@ export class ChannelCredentialDraftBroker {
     }
   }
   private async remove(draft: Draft): Promise<boolean> {
-    const result = await this.input.store.remove(draft.captureId)
-    if (result.state !== 'unset') return false
+    if (draft.journalReference !== undefined && this.input.cleanupDraft !== undefined) {
+      if (!await this.input.cleanupDraft(draft.journalReference)) return false
+    } else {
+      const result = await this.input.store.remove(draft.captureId)
+      if (result.state !== 'unset') return false
+    }
     this.drafts.delete(draft.id)
     this.input.store.forget(draft.captureId)
+    if (draft.journalReference !== undefined) {
+      await this.input.retireDraft?.(draft.journalReference).catch(() => undefined)
+    }
     return true
   }
   private async expire() {

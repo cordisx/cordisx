@@ -20,6 +20,7 @@ import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-c
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
 import { openProductionPluginManagementComposition } from './production-plugin-management.js'
+import { createManagerChannelCredentials } from './manager-channel-credentials-composition.js'
 import { type CordisXCliRuntime, waitForAbort } from './run-support.js'
 import { createStartupLifetime } from './startup-lifetime.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
@@ -54,6 +55,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
       let terminalProvider: ReturnType<typeof createServiceTerminalProvider> | undefined
       let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
+      let managerChannel: ReturnType<typeof createManagerChannelCredentials> = undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
       let failure: unknown
@@ -140,6 +142,14 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           })
         }
         lifetime.signal.throwIfAborted()
+        managerChannel = createManagerChannelCredentials({
+          plugin: channel?.managerChannelOwner?.plugin,
+          service: channel?.managerChannelOwner?.service,
+          lifecycle: services,
+          configPath,
+          profileId,
+          generation,
+        })
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,
@@ -150,6 +160,9 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           coordinator,
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
+          ...(managerChannel === undefined
+            ? {}
+            : { managerChannelCredentials: operation => managerChannel!.handle(operation) }),
           terminalProvider: request => terminalProvider!.request(request),
           ...(channel?.channel === undefined
             ? {}
@@ -174,6 +187,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => management?.close(),
+            () => managerChannel?.close(),
             () => terminalProvider?.close(),
             () => channel?.close(),
             () => services?.dispose(),

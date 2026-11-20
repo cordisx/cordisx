@@ -971,3 +971,19 @@ export async function updateHomeConfigAtomic(
     await lock.release()
   }
 }
+
+/** Read the complete existing document while excluding normal CordisX config writers. */
+export async function withLockedExistingHomeConfig<T>(
+  configPath: string,
+  action: (raw: unknown) => Promise<T>,
+): Promise<T> {
+  const absolutePath = path.resolve(configPath)
+  const lock = await acquireLock(absolutePath, {}, 'home config')
+  try {
+    const raw = await readConfigDocument(absolutePath, 'home config')
+    validateConfigDocument(raw, absolutePath, 'home config', parseHomeConfig)
+    return await action(raw)
+  } finally {
+    await lock.release()
+  }
+}

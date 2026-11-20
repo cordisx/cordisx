@@ -27,6 +27,10 @@ import {
 } from './renderer-config-management.js'
 import { parsePermissionReviewOperation, type PermissionReviewOperation } from './permission-review-management.js'
 import { type ManagerServiceAuthOperation, parseManagerServiceAuthOperation } from './manager-service-auth.js'
+import {
+  type ManagerChannelCredentialOperation,
+  parseManagerChannelCredentialOperation,
+} from './manager-channel-credentials.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -35,6 +39,7 @@ const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
   | ManagerServiceAuthOperation
+  | ManagerChannelCredentialOperation
   | PermissionReviewOperation
   | RendererConfigOperation
   | { readonly kind: 'query' }
@@ -147,6 +152,7 @@ export function parsePluginManagementRpcRequest(
     ![
       'query',
       'manager-service-auth',
+      'manager-channel-credentials',
       'plugin-configuration',
       'permission-review-apply',
       'model-export',
@@ -163,6 +169,7 @@ export function parsePluginManagementRpcRequest(
   ) throw new Error('plugin management operation is unsupported')
   if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
   if (operation.kind === 'manager-service-auth') parseManagerServiceAuthOperation(operation)
+  if (operation.kind === 'manager-channel-credentials') parseManagerChannelCredentialOperation(operation)
   if (operation.kind === 'permission-review-apply') parsePermissionReviewOperation(operation, scope.profileId)
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
@@ -193,6 +200,9 @@ export async function handlePluginManagementRpcRequest(
   const operation = request.operation
   if (operation.kind === 'manager-service-auth') {
     throw new Error('Local manager authentication requires the lifecycle owner')
+  }
+  if (operation.kind === 'manager-channel-credentials') {
+    throw new Error('Local manager credentials require the service owner')
   }
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
   if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
@@ -269,6 +279,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly permissionReview?: (operation: PermissionReviewOperation) => Promise<unknown>
   readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
+  readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
@@ -287,7 +298,10 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'manager-service-auth'
+    return request.operation.kind === 'manager-channel-credentials'
+      ? await (input.managerChannelCredentials?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' }))
+      : request.operation.kind === 'manager-service-auth'
       ? await (input.managerServiceAuth?.(request.operation)
         ?? Promise.resolve({ status: 'unavailable', code: 'OWNER_UNAVAILABLE' }))
       : request.operation.kind === 'permission-review-apply'

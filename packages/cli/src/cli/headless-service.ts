@@ -112,6 +112,7 @@ export async function startHeadlessService(input: {
       cleanup.push(() => configuration.close())
       return {
         channel: undefined,
+        managerChannelOwner: undefined,
         codex: createHeadlessCodexOperations({
           configuration: (operation, args, metadata) => configuration.call(operation, args, metadata),
           configPath: input.configPath,
@@ -282,7 +283,7 @@ export async function startHeadlessService(input: {
       preparing: metadata => channel.consumer?.agentAccess.preparation(metadata) === true,
       closed: () => closing !== undefined,
     })
-    return { channel, codex, snapshot: () => service.snapshot(), close }
+    return { channel, codex, managerChannelOwner: { plugin, service }, snapshot: () => service.snapshot(), close }
   } catch (error) {
     try {
       await close()
