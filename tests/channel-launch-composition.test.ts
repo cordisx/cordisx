@@ -60,6 +60,7 @@ describe('Channel dry-run boundary', () => {
         configPath: path.join(homeDir, 'unopened-config.json'),
         appId: 'codex',
         profileId: 'work',
+        generation: 'runtime-owner',
         environment: {},
         dryRun: true,
       })

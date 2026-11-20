@@ -10,7 +10,11 @@ import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { managerCopy, productLocale } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
-import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
+import {
+  requestPluginAuthorizationV2,
+  requestPluginAuthorizationV4,
+  requestPluginAuthorizationV7,
+} from '../permission-review.js'
 
 export type UnifiedLocalInspection =
   | { readonly kind: 'bundle'; readonly result: CordisXPluginBundleLifecycleResultV1 }
@@ -112,10 +116,28 @@ export function LocalPluginInstallSection({ model, snapshot }: {
     setMessage(undefined)
     try {
       const target = { kind: 'candidate' as const, candidateId: inspection.candidateId }
-      const planV4 = await model.permissionLifecycleReviewPlanV4?.(target)
-      const planV2 = planV4 === undefined ? await model.permissionLifecycleReviewPlanV2?.(target) : undefined
+      const planV7 = await model.permissionLifecycleReviewPlanV7?.(target)
+      const planV4 = planV7 === undefined ? await model.permissionLifecycleReviewPlanV4?.(target) : undefined
+      const planV2 = planV7 === undefined && planV4 === undefined
+        ? await model.permissionLifecycleReviewPlanV2?.(target)
+        : undefined
       let result: CordisXPluginLifecycleResultV1 | undefined
-      if (planV4 !== undefined) {
+      if (planV7 !== undefined) {
+        if (model.applyPermissionLifecycleReviewV7 === undefined) {
+          throw new Error('Plugin permission review v7 is unavailable')
+        }
+        const decision = await requestPluginAuthorizationV7(
+          document,
+          {
+            id: inspection.package.id,
+            name: inspection.package.name ?? inspection.package.id,
+            source: planV7.identity.source,
+          },
+          planV7,
+          snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
+        )
+        if (decision !== undefined) result = await model.applyPermissionLifecycleReviewV7(decision)
+      } else if (planV4 !== undefined) {
         if (model.applyPermissionLifecycleReviewV4 === undefined) {
           throw new Error('Plugin permission review v4 is unavailable')
         }

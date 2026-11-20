@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -28,6 +28,82 @@ import {
 } from '../packages/cli/src/renderer/ownership.js'
 
 describe('actual direct Channel service ownership assembly', () => {
+  it('persists lifecycle-installed Channel configuration without a legacy configured plugin', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'channel-package-service-config-'))
+    const artifact = path.join(root, 'artifact')
+    const configPath = path.join(root, 'config.json')
+    const entry = path.join(artifact, 'module.js')
+    const composition = {
+      plugins: [{
+        id: 'channel',
+        enabled: true,
+        entry,
+        source: 'https://github.com/cordisx/plugin-channel',
+        package: { version: '0.1.7', digest: 'sha256:fixture', moduleGeneration: 'fixture', dependencies: [] },
+      }],
+    } as never
+    let channel: Awaited<ReturnType<typeof createRendererChannelComposition>> | undefined
+    let configApi: HostServiceConfigNarrowApi | undefined
+    try {
+      await mkdir(path.join(artifact, 'services'), { recursive: true })
+      await copyFile(
+        path.join(path.dirname(bundledPluginEntry('channel')), 'service.mjs'),
+        path.join(artifact, 'services/runtime.mjs'),
+      )
+      channel = await createRendererChannelComposition({
+        composition,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        generation: 'runtime-owner',
+        environment: {},
+      })
+      configApi = createChannelLaunchBridges({
+        channel,
+        token: 'a'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-owner',
+        configPath,
+        consumer: undefined,
+      }).configApi
+      const descriptor = await configApi!.descriptor()
+      expect(descriptor.revision).toBe(0)
+      const result = await configApi!.mutate({
+        contract: 'cordisx.service-config-mutation/v1',
+        schemaVersion: 1,
+        identity: descriptor.identity,
+        scope: descriptor.scope,
+        expectedRevision: 0,
+        configuration: SIMULATOR_CHANNEL_SERVICE_CONFIG,
+      })
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'applied', revision: 1 })
+      configApi!.dispose()
+      await channel.service!.dispose()
+      channel = await createRendererChannelComposition({
+        composition,
+        configPath,
+        profileId: 'test',
+        appId: 'codex',
+        homeDir: root,
+        generation: 'runtime-next',
+        environment: {},
+      })
+      configApi = createChannelLaunchBridges({
+        channel,
+        token: 'b'.repeat(64),
+        profileId: 'test',
+        generation: 'runtime-next',
+        configPath,
+        consumer: undefined,
+      }).configApi
+      expect(await configApi!.descriptor()).toMatchObject({ revision: 1, lastGoodRevision: 1 })
+    } finally {
+      configApi?.dispose()
+      await channel?.service?.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('assembles a pending connection and resolves its identity through the production credential bridge', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'channel-pending-composition-'))
     const configPath = path.join(root, 'config.json')
@@ -87,6 +163,7 @@ describe('actual direct Channel service ownership assembly', () => {
         profileId: 'test',
         appId: 'codex',
         homeDir: root,
+        generation: 'runtime-owner',
         environment: { MISSING_PENDING_FIXTURE: 'fixture-secret' },
       })
       expect(channel.service!.snapshot()!.accounts).toEqual([])
@@ -205,6 +282,7 @@ describe('actual direct Channel service ownership assembly', () => {
           profileId: 'test',
           appId: 'codex',
           homeDir: root,
+          generation: 'runtime-owner',
           environment: {},
         })
         expect(channel.serviceCapabilityOwners).toHaveLength(1)
