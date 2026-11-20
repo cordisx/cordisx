@@ -6,7 +6,11 @@ import { dialogCenterForDocument } from '../../dialogs/host.js'
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../../manager.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
 import { productLocale } from '../../ui-copy.js'
-import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
+import {
+  requestPluginAuthorizationV2,
+  requestPluginAuthorizationV4,
+  requestPluginAuthorizationV7,
+} from '../permission-review.js'
 
 export interface PluginLifecycleActions {
   readonly busyPluginId: string | undefined
@@ -83,9 +87,26 @@ export function usePluginLifecycleActions(
       }
       if (operation.kind === 'enable' && result.outcome === 'planned') {
         const target = { kind: 'enable' as const, pluginId: plugin.id }
-        const planV4 = await model.permissionLifecycleReviewPlanV4?.(target)
-        const planV2 = planV4 === undefined ? await model.permissionLifecycleReviewPlanV2?.(target) : undefined
-        if (planV4 !== undefined) {
+        const planV7 = await model.permissionLifecycleReviewPlanV7?.(target)
+        const planV4 = planV7 === undefined ? await model.permissionLifecycleReviewPlanV4?.(target) : undefined
+        const planV2 = planV7 === undefined && planV4 === undefined
+          ? await model.permissionLifecycleReviewPlanV2?.(target)
+          : undefined
+        if (planV7 !== undefined) {
+          if (model.applyPermissionLifecycleReviewV7 === undefined) {
+            throw new Error('Permission review v7 is unavailable')
+          }
+          const decision = await requestPluginAuthorizationV7(
+            document,
+            { id: planV7.identity.pluginId, name: plugin.name, source: planV7.identity.source },
+            planV7,
+            snapshot.permissions.filter(item =>
+              item.identity.id === planV7.identity.pluginId && item.identity.source === planV7.identity.source
+            ),
+          )
+          if (decision === undefined) return
+          result = await model.applyPermissionLifecycleReviewV7(decision)
+        } else if (planV4 !== undefined) {
           if (model.applyPermissionLifecycleReviewV4 === undefined) {
             throw new Error('Permission review v4 is unavailable')
           }

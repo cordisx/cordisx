@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v1.schema.json",
+  "schemaVersion": 1,
+  "id": "defer-smoke-required",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "compatibility": {
+    "runtimeAbi": 1,
+    "protocol": 1
+  },
+  "dependencies": [],
+  "runtimeManifest": {
+    "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json",
+    "schemaVersion": 1,
+    "id": "defer-smoke-required",
+    "name": "defer-smoke-required",
+    "capabilities": [
+      {
+        "name": "tasks.catalog.read",
+        "required": true,
+        "reason": {
+          "key": "required",
+          "fallback": "Required task listing for this isolated test"
+        },
+        "scope": {}
+      },
+      {
+        "name": "models.read",
+        "required": false,
+        "reason": {
+          "key": "optional",
+          "fallback": "Optional model listing for this isolated test"
+        },
+        "scope": {}
+      }
+    ]
+  }
+}

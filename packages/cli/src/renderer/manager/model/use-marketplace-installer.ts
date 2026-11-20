@@ -4,7 +4,11 @@ import type { MarketplaceCatalogPlugin } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { notificationCenterForDocument } from '../../notifications/host.js'
 import type { NotificationsV1 } from '@cordisx/protocol/notifications/v1'
-import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
+import {
+  requestPluginAuthorizationV2,
+  requestPluginAuthorizationV4,
+  requestPluginAuthorizationV7,
+} from '../permission-review.js'
 
 export interface MarketplaceInstallCopy {
   readonly failed: string
@@ -98,10 +102,27 @@ export function useMarketplaceInstaller(
           )
         }
         const target = { kind: 'candidate' as const, candidateId: inspection.candidateId }
-        const planV4 = await manager.permissionLifecycleReviewPlanV4?.(target)
-        const planV2 = planV4 === undefined ? await manager.permissionLifecycleReviewPlanV2?.(target) : undefined
+        const planV7 = await manager.permissionLifecycleReviewPlanV7?.(target)
+        const planV4 = planV7 === undefined ? await manager.permissionLifecycleReviewPlanV4?.(target) : undefined
+        const planV2 = planV7 === undefined && planV4 === undefined
+          ? await manager.permissionLifecycleReviewPlanV2?.(target)
+          : undefined
         let result: CordisXPluginLifecycleResultV1 | undefined
-        if (planV4 !== undefined) {
+        if (planV7 !== undefined) {
+          if (manager.applyPermissionLifecycleReviewV7 === undefined) {
+            throw new Error('Permission review v7 is unavailable')
+          }
+          const decision = await requestPluginAuthorizationV7(
+            ownerDocument,
+            { id: plugin.id, name, source: planV7.identity.source },
+            planV7,
+            snapshot.permissions.filter(item =>
+              item.identity.id === plugin.id && item.identity.source === planV7.identity.source
+            ),
+          )
+          if (decision === undefined) return
+          result = await manager.applyPermissionLifecycleReviewV7(decision)
+        } else if (planV4 !== undefined) {
           if (manager.applyPermissionLifecycleReviewV4 === undefined) {
             throw new Error('Permission review v4 is unavailable')
           }

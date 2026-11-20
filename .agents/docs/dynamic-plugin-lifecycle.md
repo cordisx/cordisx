@@ -402,10 +402,23 @@ Permission Broker owns that decision and audit. Denying an optional capability
 does not fail readiness. Denying a required capability leaves the artifact
 staged but inactive and leaves last-good active state unchanged.
 
+The v7 lifecycle review retains the complete validated static declaration set
+but defers every undecided optional capability without creating a grant or
+denial. Required undecided entries still require a user decision. The v1
+ledger and its plugin-provided reason remain intact for legacy manifests; v2
+keys and policies remain intact for manifest-v4 and later. Runtime Broker
+requests enforce the declaration and current policy and fail closed if no
+decision mechanism is available. A reviewed bundle can carry an exact explicit
+bundle policy into its candidate-bound review, while its unresolved `ask`
+entries remain deferred. A conflicting existing plugin policy blocks that
+bundle activation until it is reconciled; it is never silently overwritten.
+
 The permission plan is built from the complete separate runtime manifest.
-Manifest-v4 produces a permission-v2 plan from the Host's exhaustive catalog;
-batch-eligible low/general declarations and explicit sensitive/high-risk
-declarations remain in one atomic review. Persistent allow/deny uses the exact
+Manifest-v4 is projected using the Host's v2 policy reconciliation and
+exhaustive catalog before v7 deferral. Required batch-eligible low/general
+declarations and explicit sensitive/high-risk declarations remain in one
+atomic review. Older v2 and v4 plan contracts remain supported for compatible
+peers. Persistent allow/deny uses the exact
 profile/source/plugin/capability/scope/security-fingerprint key in the same
 Home ledger as runtime authorization. `allow-once` is non-durable, bound by the
 Host-private plan to candidate id plus package/module/runtime generation, and
