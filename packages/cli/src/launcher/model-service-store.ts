@@ -84,6 +84,7 @@ export async function readModelServices(
 }
 
 class ModelServiceConflict extends Error {}
+class ModelServiceInvalid extends Error {}
 
 function declaration(
   input: ModelServiceInput,
@@ -219,52 +220,56 @@ export async function saveModelServices(
   try {
     saved = await updateHomeConfigAtomic(current => {
       if (revisionOf(current) !== request.expectedRevision) throw new ModelServiceConflict()
-      const previous = new Map(modelServicesOf(current.providers).map(provider => [provider.id, provider]))
-      const gateways = current.providers.filter(provider => provider.kind !== 'model-service')
-      if (gateways.some(provider => ids.has(provider.id))) {
-        throw new Error('an id is already used by a gateway provider')
-      }
-      const declarations = request.services.map(service => declaration(service, previous.get(service.id)))
-      for (const [index, service] of request.services.entries()) {
-        const name = declarations[index]!.apiKeyEnv as string
-        const others = current.providers.some(provider => provider.id !== service.id && provider.apiKeyEnv === name)
-          || declarations.some((provider, other) => other !== index && provider.apiKeyEnv === name)
-        if (others && service.apiKey !== undefined) {
-          throw new Error('credential variable is already used by another provider')
+      try {
+        const previous = new Map(modelServicesOf(current.providers).map(provider => [provider.id, provider]))
+        const gateways = current.providers.filter(provider => provider.kind !== 'model-service')
+        if (gateways.some(provider => ids.has(provider.id))) {
+          throw new Error('an id is already used by a gateway provider')
         }
-        if (!previous.has(service.id) && (others || current.environmentVariables.some(entry => entry.name === name))) {
-          throw new Error('credential variable is already used; choose another service id')
+        const declarations = request.services.map(service => declaration(service, previous.get(service.id)))
+        for (const [index, service] of request.services.entries()) {
+          const name = declarations[index]!.apiKeyEnv as string
+          const others = current.providers.some(provider => provider.id !== service.id && provider.apiKeyEnv === name)
+            || declarations.some((provider, other) => other !== index && provider.apiKeyEnv === name)
+          if (others && service.apiKey !== undefined) {
+            throw new Error('credential variable is already used by another provider')
+          }
+          if (
+            !previous.has(service.id) && (others || current.environmentVariables.some(entry => entry.name === name))
+          ) {
+            throw new Error('credential variable is already used; choose another service id')
+          }
         }
-      }
-      let environmentVariables = [...current.environmentVariables]
-      for (const [index, service] of request.services.entries()) {
-        if (service.apiKey === undefined) continue
-        const name = declarations[index]!.apiKeyEnv as string
-        const entry = {
-          name,
-          value: service.apiKey,
-          enabled: true,
-          description: `${service.displayName} API key (CordisX model service)`,
+        let environmentVariables = [...current.environmentVariables]
+        for (const [index, service] of request.services.entries()) {
+          if (service.apiKey === undefined) continue
+          const name = declarations[index]!.apiKeyEnv as string
+          const entry = {
+            name,
+            value: service.apiKey,
+            enabled: true,
+            description: `${service.displayName} API key (CordisX model service)`,
+          }
+          environmentVariables = environmentVariables.some(item => item.name === name)
+            ? environmentVariables.map(item => item.name === name ? entry : item)
+            : [...environmentVariables, entry]
         }
-        environmentVariables = environmentVariables.some(item => item.name === name)
-          ? environmentVariables.map(item => item.name === name ? entry : item)
-          : [...environmentVariables, entry]
+        // Plugins and clients may read environment variables dynamically. There is no
+        // authoritative reference inventory, so removing a service never removes a key.
+        // Full validation of the edited document before it is written.
+        return parseHomeConfig({
+          ...current,
+          environmentVariables,
+          providers: [...gateways, ...declarations],
+        })
+      } catch (error) {
+        throw new ModelServiceInvalid(error instanceof Error ? error.message : 'invalid model service')
       }
-      // Plugins and clients may read environment variables dynamically. There is no
-      // authoritative reference inventory, so removing a service never removes a key.
-      // Full validation of the edited document before it is written.
-      return parseHomeConfig({
-        ...current,
-        environmentVariables,
-        providers: [...gateways, ...declarations],
-      })
     }, configPath)
   } catch (error) {
     if (error instanceof ModelServiceConflict) return { status: 'rejected', code: 'conflict' }
-    const message = error instanceof Error ? error.message : String(error)
-    return /must|invalid|not supported|duplicate|already used/u.test(message)
-      ? { status: 'rejected', code: 'invalid', message }
-      : { status: 'rejected', code: 'persist-failed' }
+    if (error instanceof ModelServiceInvalid) return { status: 'rejected', code: 'invalid', message: error.message }
+    return { status: 'rejected', code: 'persist-failed' }
   }
   return { status: 'applied', applies: 'app-restart', revision: revisionOf(saved) }
 }

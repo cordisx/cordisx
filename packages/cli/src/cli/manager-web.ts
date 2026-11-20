@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import type { ManagerOwner } from './manager-owner.js'
+import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
 const files: Readonly<Record<string, string>> = {
@@ -344,6 +345,10 @@ export async function startManagerWeb(owner: ManagerOwner) {
         return json(response, 200, await owner.request(operation as unknown as PluginManagementRpcOperation))
       }
       if (url.pathname === '/api/model-services') {
+        const capability = object(await owner.request({ kind: 'codex', operation: 'model-services:read', input: {} }))
+        if (capability?.status !== 'ok' || capability.managerSafeWrite !== MODEL_SERVICE_SAFE_WRITE_CONTRACT) {
+          return json(response, 409, { error: 'MODEL_SERVICE_SAFE_WRITE_UNAVAILABLE' })
+        }
         const result = await owner.request({ kind: 'codex', operation: 'model-services:save', input })
         return json(response, 200, result)
       }

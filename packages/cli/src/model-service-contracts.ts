@@ -60,6 +60,9 @@ export type ModelServicesReadResult =
   | { readonly status: 'ok'; readonly revision: string; readonly services: readonly ModelServiceView[] }
   | { readonly status: 'rejected'; readonly code: 'unavailable' }
 
+/** Signals the actual read/write authority implements credential-safe manager CAS. */
+export const MODEL_SERVICE_SAFE_WRITE_CONTRACT = 'cordisx.model-service-safe-write/v1'
+
 export type ModelServicesSaveResult =
   | { readonly status: 'applied'; readonly applies: 'app-restart'; readonly revision: string }
   | {

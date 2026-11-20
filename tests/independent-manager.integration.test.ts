@@ -28,7 +28,69 @@ import { openPluginManagementService } from '../packages/cli/src/management/serv
 const exec = promisify(execFile)
 
 describe('independent manager production boundaries', () => {
-  it('does not expose Channel writes before package storage and credential recovery are reconciled', () => {
+  it('never forwards model-service saves to an older owner without the safe-write handshake', async () => {
+    let writes = 0
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-old-owner-'))
+    const configPath = path.join(home, 'config.json')
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    const service = await openPluginManagementService({
+      configPath,
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+    })
+    const processStartedAt = (await processStartIdentity(process.pid))!
+    const start = async (generation: string) =>
+      await startPluginManagementRpcServer({
+        homeDir: home,
+        appId: 'codex',
+        profileId: 'default',
+        configPath,
+        generation,
+        processStartedAt,
+        service,
+        codex: async operation => {
+          if (operation === 'model-services:read') return { status: 'ok', revision: 'old', services: [] }
+          if (operation === 'model-services:save') {
+            writes++
+            return { status: 'applied' }
+          }
+          return { status: 'unavailable' }
+        },
+      })
+    let rpc = await start('old')
+    const owner = await openManagerOwner('default', { CORDISX_HOME: home })
+    const web = await startManagerWeb(owner)
+    try {
+      const url = new URL(web.url)
+      const session = await fetch(`${url.origin}/api/session`, {
+        method: 'POST',
+        headers: { origin: url.origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ token: url.hash.slice(1) }),
+      })
+      const { token } = await session.json() as { token: string }
+      const response = await fetch(`${url.origin}/api/model-services`, {
+        method: 'POST',
+        headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ expectedRevision: 'old', services: [] }),
+      })
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ error: 'MODEL_SERVICE_SAFE_WRITE_UNAVAILABLE' })
+      expect(writes).toBe(0)
+      await rpc.close()
+      rpc = await start('replacement')
+      await expect(owner.request({ kind: 'codex', operation: 'model-services:save', input: {} }))
+        .rejects.toThrow('MANAGER_OWNER_CHANGED')
+      expect(writes).toBe(0)
+    } finally {
+      await web.close()
+      await rpc.close()
+      service.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('does not expose Channel writes without a verified profile owner', () => {
     const input = {
       plugin: { id: 'channel', enabled: true, package: { version: '1', moduleGeneration: 'g', digest: 'sha256:test' } },
       service: {},

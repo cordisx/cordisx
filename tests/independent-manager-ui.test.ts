@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom'
 import { expect, it, vi } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { readModelServices, saveModelServices } from '../packages/cli/src/launcher/model-service-store.js'
+import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../packages/cli/src/model-service-contracts.js'
 import { safeServiceConfigEdit } from '../packages/cli/assets/manager/manager-schema.js'
 import { createChannelCredentialsUI } from '../packages/cli/assets/manager/manager-channel-ui.js'
 
@@ -46,8 +47,39 @@ const base = () => ({
     sources: [],
     plugins: [{ id: 'sample', name: 'Sample', status: 'disabled', enabled: false }],
   },
-  services: { status: 'ok', revision: 'r1', services: [] },
+  services: { status: 'ok', revision: 'r1', services: [], managerSafeWrite: MODEL_SERVICE_SAFE_WRITE_CONTRACT },
   rendererPlugins: { status: 'ok', plugins: [{ id: 'sample', name: 'Sample', status: 'disabled', writable: true }] },
+})
+
+it('shows an old owner model service as read-only when safe-write support is absent', async () => {
+  const legacy = {
+    ...base(),
+    services: {
+      status: 'ok',
+      revision: 'old',
+      services: [{
+        id: 'sample',
+        displayName: 'Sample',
+        baseUrl: 'https://example.test',
+        protocols: ['openai-responses'],
+        codexModels: ['model'],
+        claudeModels: [],
+        enabled: true,
+        keyConfigured: true,
+      }],
+    },
+  }
+  const { window, dom } = await mountManager((route) => route === '/api/session' ? { token: 'session' } : legacy)
+  try {
+    expect(window.document.getElementById('models')!.textContent).toContain('仅供查看')
+    expect((window.document.getElementById('add-model') as HTMLButtonElement).disabled).toBe(true)
+    expect((window.document.getElementById('save-models') as HTMLButtonElement).disabled).toBe(true)
+    expect([...window.document.querySelectorAll<HTMLInputElement>('#models input')].every(input => input.disabled))
+      .toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
 })
 
 it('retains an unsaved model credential draft across a status refresh', async () => {
@@ -146,35 +178,39 @@ it('does not let an older refresh re-enable a stale model draft', async () => {
   }
 })
 
-it('does not permit a blind retry after an unknown model save result', async () => {
-  let saves = 0
-  const { window, dom } = await mountManager((route) => {
-    if (route === '/api/session') return { token: 'session' }
-    if (route === '/api/state') return base()
-    if (route === '/api/model-services') {
-      saves++
-      return { status: 'unknown' }
+it.each(['unknown', 'persist-failed', 'transport'])(
+  'does not blindly retry a model save with %s result',
+  async status => {
+    let saves = 0
+    const { window, dom } = await mountManager((route) => {
+      if (route === '/api/session') return { token: 'session' }
+      if (route === '/api/state') return base()
+      if (route === '/api/model-services') {
+        saves++
+        if (status === 'transport') throw new Error('connection lost')
+        return status === 'unknown' ? { status: 'unknown' } : { status: 'rejected', code: 'persist-failed' }
+      }
+      return { status: 'unavailable' }
+    })
+    try {
+      window.document.getElementById('add-model')!.click()
+      const fields = window.document.querySelectorAll<HTMLInputElement>('#models input')
+      fields[0]!.value = 'sample'
+      fields[1]!.value = 'Sample'
+      fields[2]!.value = 'https://example.test'
+      fields[0]!.dispatchEvent(new window.Event('input', { bubbles: true }))
+      const save = window.document.getElementById('save-models') as HTMLButtonElement
+      save.click()
+      await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+      await vi.waitFor(() => expect(save.disabled).toBe(true))
+      save.click()
+      expect(saves).toBe(1)
+      await new Promise(resolve => setTimeout(resolve, 10))
+    } finally {
+      dom.window.close()
     }
-    return { status: 'unavailable' }
-  })
-  try {
-    window.document.getElementById('add-model')!.click()
-    const fields = window.document.querySelectorAll<HTMLInputElement>('#models input')
-    fields[0]!.value = 'sample'
-    fields[1]!.value = 'Sample'
-    fields[2]!.value = 'https://example.test'
-    fields[0]!.dispatchEvent(new window.Event('input', { bubbles: true }))
-    const save = window.document.getElementById('save-models') as HTMLButtonElement
-    save.click()
-    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
-    await vi.waitFor(() => expect(save.disabled).toBe(true))
-    save.click()
-    expect(saves).toBe(1)
-    await new Promise(resolve => setTimeout(resolve, 10))
-  } finally {
-    dom.window.close()
-  }
-})
+  },
+)
 
 it('requires an explicit choice and confirmation for every permission and preserves its scope', async () => {
   const calls: any[] = []
@@ -742,7 +778,13 @@ it('never submits an unavailable read as an empty service list and freezes pendi
     if (route === '/api/session') return { token: 'session' }
     if (route === '/api/state') {
       reads++
-      return { ...base(), services: reads === 2 ? { status: 'unavailable' } : await readModelServices(configPath, {}) }
+      const services = await readModelServices(configPath, {})
+      return {
+        ...base(),
+        services: reads === 2
+          ? { status: 'unavailable' }
+          : { ...services, managerSafeWrite: MODEL_SERVICE_SAFE_WRITE_CONTRACT },
+      }
     }
     if (route === '/api/model-services') {
       saves++
@@ -883,6 +925,59 @@ it.each(['rejected', 'conflict'])('locks plugin service editing on %s after an u
     expect(editor.value).toContain('after')
     save.click()
     expect(writes).toBe(1)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it.each(['unknown', 'transport'])('locks plugin writes on an uncertain %s update until reread', async reason => {
+  let writes = 0
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/plugin-configuration' && input.action === 'read') {
+      return {
+        status: 'ok',
+        configuration: {
+          writable: true,
+          applies: 'live',
+          revision: 1,
+          fields: [{ path: ['name'], label: '名称', value: 'before' }],
+          secrets: [],
+        },
+      }
+    }
+    if (route === '/api/plugin-configuration' && input.action === 'services') return { status: 'ok', services: [] }
+    if (route === '/api/plugin-configuration' && input.action === 'update') {
+      writes++
+      if (reason === 'transport') throw new Error('connection lost')
+      return { status: 'unknown', reason: 'renderer-disconnected' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    const configure = [...window.document.querySelectorAll<HTMLButtonElement>('#plugins button')]
+      .find(button => button.textContent === '配置')!
+    configure.click()
+    await vi.waitFor(() => expect(window.document.querySelector('#plugins input')).not.toBeNull())
+    const field = window.document.querySelector<HTMLInputElement>('#plugins input')!
+    field.value = 'draft'
+    field.dispatchEvent(new window.Event('input', { bubbles: true }))
+    const save = [...window.document.querySelectorAll<HTMLButtonElement>('#plugins button')]
+      .find(button => button.textContent === '保存插件配置')!
+    save.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    const enable = [...window.document.querySelectorAll<HTMLButtonElement>('#plugins button')]
+      .find(button => button.textContent === '启用')!
+    expect(save.disabled).toBe(true)
+    expect(enable.disabled).toBe(true)
+    expect(configure.disabled).toBe(false)
+    expect(field.value).toBe('draft')
+    save.click()
+    expect(writes).toBe(1)
+    configure.click()
+    await vi.waitFor(() => expect(enable.disabled).toBe(false))
     await new Promise(resolve => setTimeout(resolve, 10))
   } finally {
     dom.window.close()

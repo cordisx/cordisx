@@ -47,6 +47,21 @@ function mayDiscardPluginDrafts(target, except) {
 function clearPluginDrafts(target) {
   for (const draft of pluginDrafts) if (target.contains(draft)) pluginDrafts.delete(draft)
 }
+function lockUncertainPluginWrites(target, control) {
+  control.dataset.locked = 'true'
+  for (const item of target.parentElement.querySelectorAll('button')) {
+    if (item.dataset.refreshConfiguration === 'true') continue
+    if (item.dataset.uncertainDisabled === undefined) item.dataset.uncertainDisabled = String(item.disabled)
+    item.disabled = true
+  }
+  message('插件配置结果不确定，请重新读取并核对；不能直接重试。')
+}
+function unlockPluginWrites(target) {
+  for (const item of target.parentElement.querySelectorAll('button[data-uncertain-disabled]')) {
+    item.disabled = item.dataset.uncertainDisabled === 'true'
+    delete item.dataset.uncertainDisabled
+  }
+}
 async function whileControlsFrozen(container, operation) {
   const controls = [...container.querySelectorAll('input, textarea, select, button')]
   const disabled = controls.map(control => control.disabled)
@@ -77,6 +92,7 @@ function failure(error) {
     MANAGER_OWNER_UNAVAILABLE: '后台当前不可用，请检查对应 Host。',
     OWNER_UNAVAILABLE: '后台当前不可用，请检查对应 Host。',
     OPERATION_RESULT_UNKNOWN: '操作结果不确定，请先刷新并核对，不能直接重试。',
+    MODEL_SERVICE_SAFE_WRITE_UNAVAILABLE: '当前 Host 未确认安全保存能力；模型服务仅供查看。',
     UNAUTHORIZED: '管理会话已过期，请重新打开管理台。',
   }
   message(categories[error?.message] ?? '操作暂不可用；请检查后台状态。')
@@ -122,20 +138,43 @@ function input(value = '', type = 'text') {
 }
 async function api(path, value) {
   if (!token) throw new Error('NO_SESSION')
-  const response = await fetch(path, {
-    method: value === undefined ? 'GET' : 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(value === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    ...(value === undefined ? {} : { body: JSON.stringify(value) }),
-    cache: 'no-store',
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      method: value === undefined ? 'GET' : 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(value === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(value === undefined ? {} : { body: JSON.stringify(value) }),
+      cache: 'no-store',
+    })
+  } catch {
+    throw new Error(value === undefined ? 'OWNER_UNAVAILABLE' : 'OPERATION_RESULT_UNKNOWN')
+  }
   if (!response.ok) {
     const details = await response.json().catch(() => ({}))
-    throw new Error(typeof details.error === 'string' ? details.error : 'REQUEST_FAILED')
+    const code = typeof details.error === 'string' ? details.error : 'REQUEST_FAILED'
+    if (
+      value !== undefined
+      && ![
+        'INVALID_REQUEST',
+        'INVALID_ORIGIN',
+        'INVALID_HOST',
+        'UNAUTHORIZED',
+        'METHOD_NOT_ALLOWED',
+        'MODEL_SERVICE_SAFE_WRITE_UNAVAILABLE',
+      ].includes(code)
+    ) {
+      throw new Error('OPERATION_RESULT_UNKNOWN')
+    }
+    throw new Error(code)
   }
-  return response.json()
+  try {
+    return await response.json()
+  } catch {
+    throw new Error(value === undefined ? 'OWNER_UNAVAILABLE' : 'OPERATION_RESULT_UNKNOWN')
+  }
 }
 function showResult(result) {
   const categories = {
@@ -303,7 +342,7 @@ function reviewPermissions(result) {
   dialog.showModal()
 }
 
-function modelCard(model, isNew = false) {
+function modelCard(model, isNew = false, editable = true) {
   const card = node('article', undefined, 'card')
   card.model = model
   card.append(node('h3', isNew ? '新模型服务' : model.displayName))
@@ -327,12 +366,13 @@ function modelCard(model, isNew = false) {
     item.className = 'check'
     fields.append(item)
   }
+  if (!editable) { for (const control of fields.querySelectorAll('input,textarea')) control.disabled = true }
   card.append(
     fields,
     button('从草稿移除', () => {
       card.remove()
       modelDirty = true
-    }),
+    }, !editable),
   )
   card.readDraft = () => ({
     id: id.value.trim(),
@@ -350,15 +390,22 @@ function renderModels(result) {
   const target = element('models')
   target.replaceChildren()
   const available = result?.status === 'ok'
+  const editable = available && result.managerSafeWrite === 'cordisx.model-service-safe-write/v1'
   modelRevision = available ? result.revision : undefined
-  element('add-model').disabled = !available
+  element('add-model').disabled = !editable
   syncModelSaveAvailability()
   if (!available) return target.append(node('p', '此 Host 未提供模型服务配置。', 'muted'))
+  if (!editable) {
+    target.append(
+      node('p', '当前 Host 尚未确认安全保存能力，模型服务仅供查看；请升级 Host 后重新打开管理台。', 'muted'),
+    )
+  }
   if (!result.services.length) target.append(node('p', '尚未配置共享模型服务。', 'muted'))
-  for (const model of result.services) target.append(modelCard(model))
+  for (const model of result.services) target.append(modelCard(model, false, editable))
 }
 function canSaveModels() {
   return !modelsLoading && snapshot?.services?.status === 'ok' && typeof modelRevision === 'string'
+    && snapshot.services.managerSafeWrite === 'cordisx.model-service-safe-write/v1'
     && snapshot.services.revision === modelRevision && !modelResultUnknown
 }
 function syncModelSaveAvailability() {
@@ -372,8 +419,11 @@ async function saveModels() {
   }
   await whileControlsFrozen(element('models').closest('section'), async () => {
     const result = await api('/api/model-services', { expectedRevision: modelRevision, services })
-    showResult(result)
-    if (!['applied', 'rejected', 'conflict', 'unavailable'].includes(result?.status)) modelResultUnknown = true
+    const rejectedBeforeWrite = result?.status === 'rejected' && ['invalid', 'conflict'].includes(result.code)
+    if (result?.status !== 'applied' && !rejectedBeforeWrite && result?.status !== 'unavailable') {
+      modelResultUnknown = true
+      message('模型服务保存结果不确定，请刷新并核对；不能直接重试。')
+    } else showResult(result)
     if (result.status === 'applied') {
       modelDirty = false
       try {
@@ -485,7 +535,7 @@ async function openPluginConfig(plugin, target) {
   target.replaceChildren(fields)
   if (!editors.length) target.append(node('p', '此插件没有可编辑的普通配置字段。', 'muted'))
   if (config.secrets?.length) target.append(node('p', '敏感字段由原有凭据通道管理，不会在此显示。', 'muted'))
-  target.append(button('保存插件配置', async () => {
+  const savePlugin = button('保存插件配置', async () => {
     let changes
     try {
       changes = editors.flatMap(editor => {
@@ -500,25 +550,38 @@ async function openPluginConfig(plugin, target) {
     }
     if (!changes.length) return message('没有配置变更。')
     if (!mayDiscardPluginDrafts(target, fields)) return
-    await whileControlsFrozen(target.parentElement, async () => {
-      const result = await api('/api/plugin-configuration', {
-        action: 'update',
-        pluginId: plugin.id,
-        expectedRevision: config.revision,
-        operations: changes,
+    let uncertain = false
+    try {
+      await whileControlsFrozen(target.parentElement, async () => {
+        const result = await api('/api/plugin-configuration', {
+          action: 'update',
+          pluginId: plugin.id,
+          expectedRevision: config.revision,
+          operations: changes,
+        })
+        if (!['ok', 'rejected', 'unavailable'].includes(result?.status)) {
+          uncertain = true
+          return
+        }
+        showResult(result)
+        if (result.status === 'ok') {
+          clearPluginDrafts(target)
+          await openPluginConfig(plugin, target)
+          message(config.applies === 'app-restart' ? '已保存；完整重启对应 Host 后生效。' : '插件配置已保存并应用。')
+        }
       })
-      showResult(result)
-      if (result.status === 'ok') {
-        clearPluginDrafts(target)
-        await openPluginConfig(plugin, target)
-        message(config.applies === 'app-restart' ? '已保存；完整重启对应 Host 后生效。' : '插件配置已保存并应用。')
-      }
-    })
-  }, !config.writable))
+    } catch (error) {
+      if (error?.message !== 'OPERATION_RESULT_UNKNOWN') throw error
+      uncertain = true
+    }
+    if (uncertain) lockUncertainPluginWrites(target, savePlugin)
+  }, !config.writable)
+  target.append(savePlugin)
   const services = await api('/api/plugin-configuration', { action: 'services', pluginId: plugin.id })
   if (target.requestRevision !== revision) return
   if (services.status === 'ok') {
     for (const service of services.services ?? []) appendServiceConfig(plugin, service, target)
+    unlockPluginWrites(target)
   }
 }
 function appendServiceConfig(plugin, service, target) {
@@ -589,9 +652,7 @@ function appendServiceConfig(plugin, service, target) {
       uncertain = true
     }
     if (uncertain) {
-      saveService.dataset.locked = 'true'
-      for (const control of target.querySelectorAll('button')) control.disabled = true
-      message('服务配置结果不确定，请重新读取并核对；不能直接重试。')
+      lockUncertainPluginWrites(target, saveService)
     }
   }, !service.writable)
   section.append(saveService)
@@ -621,11 +682,13 @@ function renderPlugins(management, runtime) {
     }
     if (managed) actions.append(button('卸载', () => manage({ kind: 'plugin-uninstall', pluginId: plugin.id })))
     const detail = node('div', undefined, 'detail')
-    actions.append(button('配置', () => {
+    const configure = button('配置', () => {
       if (!mayDiscardPluginDrafts(detail)) return
       clearPluginDrafts(detail)
       return openPluginConfig(plugin, detail)
-    }, runtime?.status !== 'ok'))
+    }, runtime?.status !== 'ok')
+    configure.dataset.refreshConfiguration = 'true'
+    actions.append(configure)
     header.append(info, actions)
     card.append(header, detail)
     target.append(card)
@@ -816,6 +879,13 @@ async function refresh(clearMessage = true) {
   if (!modelDirty) renderModels(snapshot.services)
   else {
     element('add-model').disabled = snapshot.services?.status !== 'ok'
+      || snapshot.services.managerSafeWrite !== 'cordisx.model-service-safe-write/v1'
+    if (
+      snapshot.services?.status === 'ok'
+      && snapshot.services.managerSafeWrite !== 'cordisx.model-service-safe-write/v1'
+    ) {
+      message('当前 Host 尚未确认安全保存能力；草稿已保留，模型服务只读。')
+    }
     syncModelSaveAvailability()
   }
   if (!pluginDrafts.size) renderPlugins(snapshot.management, snapshot.rendererPlugins)
