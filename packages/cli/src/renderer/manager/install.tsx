@@ -45,6 +45,8 @@ export interface ReactManagerInstallOptions {
   readonly nativeAppVersion?: string
   /** Opt-in Host workspace presentation; Codex still owns its native tabs and routes. */
   readonly presentationMode?: 'overlay' | 'workspace' | 'standalone'
+  /** Used by the standalone service when inline styles are restricted. */
+  readonly standaloneStyleHref?: '/manager-host.css'
   /** Explicit compatibility for legacy Host fixtures; 26.924 production uses native two-pane seats. */
   readonly legacyModal?: boolean
 }

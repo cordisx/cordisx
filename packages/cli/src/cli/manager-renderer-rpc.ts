@@ -103,7 +103,7 @@ export async function dispatchManagerRendererOperation(
   const operation = parseManagerRendererOperation(input)
   if (operation.action === 'open') {
     const result = await authority.open(operation.gateway, operation.browserSessionId)
-    return result ? { status: 'ok', handle: result } : { status: 'unavailable' }
+    return result ? { status: 'ok', handle: result, channels: authority.channelNames() } : { status: 'unavailable' }
   }
   if (operation.action === 'revoke') {
     return await authority.revoke(operation.gateway, operation.browserSessionId)

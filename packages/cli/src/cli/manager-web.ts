@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { PluginManagementRpcOperation } from '../launcher/management-rpc.js'
 import type { ManagerOwner } from './manager-owner.js'
+import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
+import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
 import { MODEL_SERVICE_SAFE_WRITE_CONTRACT } from '../model-service-contracts.js'
 
 const assets = new URL('../../assets/manager/', import.meta.url)
@@ -10,6 +12,7 @@ const files: Readonly<Record<string, string>> = {
   '/': 'index.html',
   '/manager.js': 'manager.js',
   '/manager-shell.js': 'manager-shell.js',
+  '/manager-host.css': 'manager-host.css',
   '/manager-schema.js': 'manager-schema.js',
   '/manager-channel-ui.js': 'manager-channel-ui.js',
   '/manager.css': 'manager.css',
@@ -68,7 +71,10 @@ function object(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
-export async function startManagerWeb(owner: ManagerOwner) {
+export async function startManagerWeb(owner: ManagerOwner, options: {
+  /** Private supervisor identity; it must never be supplied by the browser. */
+  readonly rendererGateway?: ManagerRendererGatewayProof
+} = {}) {
   const bootstraps = new Map<string, { deadline: number; timer: NodeJS.Timeout; retire?: () => Promise<void> }>()
   type BrowserSession = {
     id: string
@@ -77,6 +83,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
     controller: AbortController
     managedServicesUsed: boolean
     channelCredentialsUsed: boolean
+    rendererOpen?: Promise<ManagerRendererHandle | undefined>
   }
   const sessions = new Map<string, BrowserSession>()
   let authority = ''
@@ -110,10 +117,21 @@ export async function startManagerWeb(owner: ManagerOwner) {
       ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
       ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
     ]
-    await Promise.allSettled(retireKinds.map(kind => {
+    const retireOperations = retireKinds.map(kind => {
       const operation = { kind, action: 'retire', sessionId: session.id }
       return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 })
-    }))
+    })
+    // Revoke even if opening is still in flight: the owner tombstones the
+    // browser session before admitting a late result.
+    if (session.rendererOpen !== undefined && options.rendererGateway !== undefined) {
+      retireOperations.push(owner.request({
+        kind: 'manager-renderer',
+        action: 'revoke',
+        gateway: options.rendererGateway,
+        browserSessionId: session.id,
+      }, { timeoutMs: 1_000 }))
+    }
+    await Promise.allSettled(retireOperations)
   }
   const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
     const previous = sessions.get(token)
@@ -165,10 +183,10 @@ export async function startManagerWeb(owner: ManagerOwner) {
     if (request.method === 'GET' && (file !== undefined || shared !== undefined)) {
       try {
         const contents = await readFile(shared ?? new URL(file!, assets)).catch(async error => {
-          // Source-mode development serves the shell built into dist; packaged
-          // execution resolves it directly from the normal assets directory.
-          if (file !== 'manager-shell.js') throw error
-          return await readFile(new URL('../../dist/assets/manager/manager-shell.js', import.meta.url))
+          // Generated assets live in dist during source-mode development;
+          // packaged execution resolves them from the normal assets directory.
+          if (file !== 'manager-shell.js' && file !== 'manager-host.css') throw error
+          return await readFile(new URL(`../../dist/assets/manager/${file}`, import.meta.url))
         })
         const extension = url.pathname === '/' ? '.html' : url.pathname.slice(url.pathname.lastIndexOf('.'))
         response.writeHead(200, { 'content-type': mime[extension] ?? 'application/octet-stream' })
@@ -251,6 +269,83 @@ export async function startManagerWeb(owner: ManagerOwner) {
       const input = object(await body(request))
       if (!activeSession()) return json(response, 401, { error: 'UNAUTHORIZED' })
       if (!input) return json(response, 400, { error: 'INVALID_REQUEST' })
+      if (url.pathname === '/api/renderer/open') {
+        if (Object.keys(input).length !== 0 || options.rendererGateway === undefined) {
+          return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        }
+        const gateway = options.rendererGateway
+        session.rendererOpen ??= (async () => {
+          try {
+            const result = object(
+              await owner.request({
+                kind: 'manager-renderer',
+                action: 'open',
+                gateway,
+                browserSessionId: session.id,
+              }, { signal: session.controller.signal }),
+            )
+            const handle = object(result?.handle)
+            if (
+              result?.status !== 'ok' || !handle
+              || !Array.isArray(result.channels) || result.channels.length !== 1
+              || result.channels[0] !== 'plugin-management'
+              || typeof handle.rendererId !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.rendererId)
+              || typeof handle.grant !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.grant)
+              || handle.ownerGeneration !== owner.generation
+            ) return undefined
+            const privateHandle = {
+              rendererId: handle.rendererId,
+              grant: handle.grant,
+              ownerGeneration: handle.ownerGeneration,
+            }
+            if (!activeSession()) {
+              // The normal revocation is already in flight. If a transport
+              // still delivers a late handle, retire that exact handle too.
+              void owner.request({
+                kind: 'manager-renderer',
+                action: 'close',
+                gateway,
+                browserSessionId: session.id,
+                handle: privateHandle,
+              }, { timeoutMs: 1_000 }).catch(() => undefined)
+              return undefined
+            }
+            return privateHandle
+          } catch {
+            return undefined
+          }
+        })()
+        const handle = await session.rendererOpen
+        if (!activeSession()) return revoked()
+        return handle === undefined
+          ? json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+          : json(response, 200, { status: 'ok', profileId: owner.profileId, channels: ['plugin-management'] })
+      }
+      if (url.pathname === '/api/renderer/binding') {
+        if (
+          Object.keys(input).length !== 2 || input.channel !== 'plugin-management' || typeof input.payload !== 'string'
+          || Buffer.byteLength(JSON.stringify(input)) > 200 * 1024
+          || session.rendererOpen === undefined || options.rendererGateway === undefined
+        ) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+        const handle = await session.rendererOpen
+        if (!activeSession()) return revoked()
+        if (handle === undefined) return json(response, 503, { error: 'RENDERER_UNAVAILABLE' })
+        // The owner applies its own strict channel parser and capability
+        // checks. A browser cannot choose a handle, gateway, or session ID.
+        const result = object(
+          await scopedRequest({
+            kind: 'manager-renderer',
+            action: 'call',
+            gateway: options.rendererGateway,
+            browserSessionId: session.id,
+            handle,
+            channel: input.channel,
+            payload: input.payload,
+          }),
+        )
+        if (result?.status !== 'ok') return json(response, 503, { error: 'RENDERER_BINDING_UNAVAILABLE' })
+        return scopedReply(result.value)
+      }
       if (url.pathname === '/api/channel-credentials') {
         const bounded = (value: unknown, limit: number): value is string =>
           typeof value === 'string'

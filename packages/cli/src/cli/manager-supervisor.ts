@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { pluginManagementRpcPaths } from '../launcher/management-rpc.js'
+import { managerRendererGatewayPaths } from './manager-renderer-gateway.js'
 import { createManagerEntry, recoverManagerEntries, validateManagerEntry } from './manager-entry.js'
 import { openManagerOwner, resolveManagerProfile } from './manager-owner.js'
 import { startManagerWeb } from './manager-web.js'
@@ -82,19 +82,9 @@ async function lock(paths: SupervisorPaths): Promise<() => Promise<void>> {
 
 async function managerPaths(profile?: string): Promise<{ paths: SupervisorPaths; profileId: string }> {
   const { homeDir, profileId } = await resolveManagerProfile(profile)
-  const rpc = pluginManagementRpcPaths(homeDir, 'manager', profileId)
   // The owner namespace is run/<app>/<profile>. Keep this sidecar outside it,
   // even if an existing or future adapter itself is named "manager".
-  const directory = path.join(homeDir, 'independent-manager', 'profiles', profileId)
-  const paths: SupervisorPaths = {
-    directory,
-    state: path.join(directory, 'state.json'),
-    lock: path.join(directory, 'start.lock'),
-    mutex: path.join(directory, 'startup.mutex'),
-    socket: path.join(rpc.socketDirectory, path.basename(rpc.socket).replace('management-', 'manager-')),
-    log: path.join(directory, 'manager.log'),
-    bootstrapToken: path.join(directory, 'bootstrap.token'),
-  }
+  const paths = managerRendererGatewayPaths(homeDir, profileId)
   return {
     paths,
     profileId,
@@ -179,13 +169,14 @@ export async function serveManager(profile: string): Promise<void> {
   const owner = await openManagerOwner(profileId)
   const entryDirectory = path.join(paths.directory, 'entries')
   await recoverManagerEntries(entryDirectory)
-  const web = await startManagerWeb(owner)
   const startedAt = await processStartIdentity(process.pid)
-  if (!startedAt) {
-    await web.close()
-    throw new Error('MANAGER_PROCESS_UNVERIFIABLE')
-  }
+  if (!startedAt) throw new Error('MANAGER_PROCESS_UNVERIFIABLE')
   const instanceToken = randomBytes(32).toString('hex')
+  // The proof is only used after the supervisor's ready state and control
+  // socket are published; it never crosses the browser HTTP boundary.
+  const web = await startManagerWeb(owner, {
+    rendererGateway: { pid: process.pid, processStartedAt: startedAt, instanceToken },
+  })
   let finish!: () => void
   const stopped = new Promise<void>(resolve => {
     finish = resolve

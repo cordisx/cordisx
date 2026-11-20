@@ -69,6 +69,7 @@ try {
     'renderer/manager/manager-about.css',
     'renderer/manager/manager-collection.css',
     'renderer/manager/manager-compact-shell.css',
+    'renderer/manager/manager-standalone.css',
     'renderer/manager/pages/model-services.css',
     'renderer/manager/pages/model-catalog/model-catalog.css',
   ]
@@ -293,6 +294,7 @@ try {
       'dist/skills/cordisx-feedback/agents/openai.yaml',
       'dist/skills/cordisx-feedback/version.json',
       'dist/assets/manager/manager-shell.js',
+      'dist/assets/manager/manager-host.css',
       'dist/assets/illustrations/model-services.svg',
       'dist/assets/illustrations/model-services.css',
       'dist/assets/feedback/feedback-manifest.schema.json',

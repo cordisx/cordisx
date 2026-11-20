@@ -11,7 +11,7 @@ The existing authenticated profile management RPC accepts
 `operation.kind = 'manager-renderer'` with four actions. The manager sidecar
 must construct these messages itself after it has authenticated an HTTP session:
 
-- `open`: `{ gateway, browserSessionId }` returns `{ status: 'ok', handle }`.
+- `open`: `{ gateway, browserSessionId }` returns `{ status: 'ok', handle, channels }`.
 - `call`: `{ gateway, browserSessionId, handle, channel, payload }` returns
   `{ status: 'ok', value }`, `{ status: 'unavailable' }`, or `{ status: 'unknown' }`.
 - `close`: `{ gateway, browserSessionId, handle }` closes an opened renderer.
@@ -28,6 +28,12 @@ log them. The sidecar must associate the handle with its authenticated session
 and send binding requests using that association. `open` results are private
 to the owner-to-sidecar RPC and are not browser responses. The sandbox mailbox
 must continue to reject the `manager-renderer` operation.
+
+The sidecar now connects authenticated HTTP sessions to this owner RPC. It
+derives the gateway, session ID and handle internally, accepts only the channel
+explicitly advertised by the owner, and revokes on session retirement. The
+browser binding transport and a full production renderer composition are still
+separate work; this HTTP route alone does not mount the Manager or its plugins.
 
 For the one read-only channel, `payload` is the original JSON string from
 `__cordisxPluginManagementRequestV1`. The owner checks its profile and existing

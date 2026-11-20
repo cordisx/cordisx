@@ -13,15 +13,25 @@ import standaloneStyle from './manager-standalone.css?inline'
 export function installStandaloneManager(document: Document, model: ManagerModel, options: {
   readonly navigationController?: HostManagerNavigationController
   readonly pluginManagement?: PluginManagementBinding
+  /** The fixed same-origin stylesheet published by the standalone service. */
+  readonly standaloneStyleHref?: '/manager-host.css'
 } = {}): () => void {
+  if (options.standaloneStyleHref !== undefined && options.standaloneStyleHref !== '/manager-host.css') {
+    throw new Error('Standalone Manager stylesheet must be the fixed same-origin asset')
+  }
   const rootSeat = document.createElement('div')
   rootSeat.className = 'cxr-root'
   rootSeat.dataset.cordisxReactManager = 'true'
   rootSeat.dataset.managerSurface = 'standalone'
   const triggerSeat = document.createElement('span')
-  const style = document.createElement('style')
+  const style = options.standaloneStyleHref === undefined
+    ? document.createElement('style')
+    : document.createElement('link')
   style.id = 'cordisx-react-manager-style'
-  style.textContent = `${REACT_MANAGER_STYLES}\n${standaloneStyle}`
+  if (options.standaloneStyleHref !== undefined) {
+    ;(style as HTMLLinkElement).rel = 'stylesheet'
+    ;(style as HTMLLinkElement).href = options.standaloneStyleHref
+  } else style.textContent = `${REACT_MANAGER_STYLES}\n${standaloneStyle}`
   ;(document.head ?? document.documentElement).append(style)
   ;(document.body ?? document.documentElement).append(rootSeat)
   const theme = new HostThemeProjection(document)

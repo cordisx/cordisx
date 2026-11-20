@@ -40,6 +40,16 @@ it('mounts the existing Manager and an actual registered plugin page without a n
     const root = doc.querySelector<HTMLElement>('[data-manager-surface="standalone"]')!
     expect(root.querySelector('[data-unified-plugins-page="true"]')).not.toBeNull()
     expect(root.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
+    const runtime = (dom.window as unknown as {
+      __cordisxRuntime: {
+        snapshot(): { navigation: { outlets: readonly { id: string; available: boolean }[] } }
+        dispose(): Promise<void>
+      }
+    }).__cordisxRuntime
+    const outlets = runtime.snapshot().navigation.outlets
+    for (const id of ['app', 'main', 'session.content']) {
+      expect(outlets.find(outlet => outlet.id === id)).toMatchObject({ id, available: false })
+    }
     const navigation = root.querySelector<HTMLButtonElement>(
       '[data-settings-navigation-item="settings-tab-demo:navigation"]',
     )!
@@ -54,7 +64,6 @@ it('mounts the existing Manager and an actual registered plugin page without a n
     )
     dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
     expect(root.querySelector('[data-settings-navigation-demo-content="mounted"]')).not.toBeNull()
-    const runtime = (dom.window as unknown as { __cordisxRuntime: { dispose(): Promise<void> } }).__cordisxRuntime
     await runtime.dispose()
     expect(doc.querySelector('[data-manager-surface="standalone"]')).toBeNull()
     expect(doc.getElementById('cordisx-react-manager-style')).toBeNull()

@@ -5,6 +5,8 @@ import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { managerChildEnvironment } from '../packages/cli/src/cli/manager-supervisor.js'
+import { installIndependentHostBindings } from '../packages/cli/src/independent-manager/host-bindings.js'
+import { BrowserPluginManagementBinding } from '../packages/cli/src/renderer/management-binding.js'
 import { CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
 import { localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
 import {
@@ -67,6 +69,7 @@ it('connects the independent manager to a real service owner without Channel or 
         'index.html',
         'manager.js',
         'manager-shell.js',
+        'manager-host.css',
         'manager-schema.js',
         'manager-channel-ui.js',
         'manager.css',
@@ -119,6 +122,54 @@ it('connects the independent manager to a real service owner without Channel or 
         headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify(input),
       })).json()
+    const renderer = await post('/api/renderer/open', {})
+    expect(renderer).toEqual({ status: 'ok', profileId: 'default', channels: ['plugin-management'] })
+    const query = JSON.stringify({
+      version: 1,
+      requestId: 'test-real-owner-query',
+      token: 'renderer-binding-placeholder',
+      profileId: 'default',
+      operation: { kind: 'query' },
+    })
+    expect(await post('/api/renderer/binding', { channel: 'plugin-management', payload: query }))
+      .toMatchObject({ requestId: 'test-real-owner-query', ok: true, value: { runtime: { mode: 'service' } } })
+    // Exercise the same Manager binding against the packaged sidecar and real
+    // service owner. The fake Window supplies browser Origin; this is a
+    // transport integration test, not a visual browser acceptance.
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    const browser = {
+      fetch: (target: string, options: RequestInit) =>
+        fetch(new URL(target, url.origin), {
+          ...options,
+          headers: { ...Object.fromEntries(new Headers(options.headers)), origin: url.origin },
+        }),
+    } as unknown as Window
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: browser })
+    let disposeBindings: (() => void) | undefined
+    let management: BrowserPluginManagementBinding | undefined
+    try {
+      disposeBindings = installIndependentHostBindings({
+        window: browser,
+        sessionToken: token,
+        channels: ['plugin-management'],
+      })
+      management = new BrowserPluginManagementBinding('renderer-binding-placeholder', 'default')
+      expect(await management.query()).toMatchObject({ runtime: { mode: 'service' } })
+    } finally {
+      management?.dispose()
+      disposeBindings?.()
+      if (originalWindow === undefined) delete (globalThis as { window?: Window }).window
+      else Object.defineProperty(globalThis, 'window', originalWindow)
+    }
+    expect(
+      await post('/api/renderer/binding', {
+        channel: 'plugin-management',
+        payload: query,
+        gateway: { pid: 1 },
+      }),
+    ).toEqual({ error: 'RENDERER_BINDING_UNAVAILABLE' })
+    expect(await post('/api/renderer/binding', { channel: 'config', payload: query }))
+      .toEqual({ error: 'RENDERER_BINDING_UNAVAILABLE' })
     expect(await post('/api/managed-services', { action: 'list' })).toEqual({ status: 'available', services: [] })
     expect(await post('/api/channel-credentials', { action: 'view' })).toMatchObject({
       status: 'unavailable',

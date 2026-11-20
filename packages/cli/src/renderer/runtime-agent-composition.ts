@@ -120,6 +120,7 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
+import { installStandaloneManagerAdapter } from './standalone-manager-adapter.js'
 import { CodexNativeRouteObserver } from './adapter/native-route-observer.js'
 import {
   createHostManagerSelfConfigurationNavigationOptions,
@@ -765,7 +766,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
       runtimeScope.slotService.subscribeInternal(runtimeScope.notifyFrom()!('surfaces')),
       runtimeScope.iconThemeRegistry()!.subscribe(runtimeScope.notifyFrom()!('icon-themes')),
     )
-    runtimeScope.adapterHandle = runtimeScope.metadata()!.hostKind === 'playground'
+    runtimeScope.adapterHandle = runtimeScope.metadata()!.managerPresentationMode === 'standalone'
+      ? installStandaloneManagerAdapter(runtimeScope.routeService, runtimeScope.extensionPointDescriptors()!)
+      : runtimeScope.metadata()!.hostKind === 'playground'
       ? installPlaygroundAdapter(
         document,
         runtimeScope.slotService,

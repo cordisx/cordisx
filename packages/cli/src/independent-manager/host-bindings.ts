@@ -1,0 +1,164 @@
+/** Host-private channels. The owner must explicitly grant each one per renderer. */
+export const INDEPENDENT_HOST_CHANNELS = {
+  config: ['__cordisxConfigRequestV1', '__cordisxConfigReceiveV1'],
+  'plugin-management': ['__cordisxPluginManagementRequestV1', '__cordisxPluginManagementReceiveV1'],
+  'plugin-lifecycle': ['__cordisxPluginLifecycleRequestV1', '__cordisxPluginLifecycleReceiveV1'],
+  'permission-policy': ['__cordisxPermissionPolicyRequestV1', '__cordisxPermissionPolicyReceiveV1'],
+  'service-config': ['__cordisxServiceConfigRequestV1', '__cordisxServiceConfigReceiveV1'],
+  'managed-service-ui': ['__cordisxManagedServiceUIRequestV1', '__cordisxManagedServiceUIReceiveV1'],
+  'owner-document': ['__cordisxOwnerDocumentRequestV1', '__cordisxOwnerDocumentReceiveV1'],
+  provider: ['__cordisxProviderRequestV1', '__cordisxProviderReceiveV1'],
+} as const
+
+export type IndependentHostChannel = keyof typeof INDEPENDENT_HOST_CHANNELS
+type Binding = (payload: string) => void
+type BindingWindow = Window & Record<string, unknown>
+interface Pending {
+  readonly requestId: string
+  readonly receiverName: string
+  readonly receiver: Binding
+  readonly controller: AbortController
+  dispatched: boolean
+}
+const MAX_IN_FLIGHT = 64
+const MAX_PAYLOAD_CHARS = 8 * 1024 * 1024
+// The manager web server enforces this limit on the complete JSON envelope,
+// in bytes, before dispatching to the owner.
+const MAX_WIRE_BYTES = 1_048_576
+
+function requestId(payload: string): string {
+  if (payload.length > MAX_PAYLOAD_CHARS) throw new Error('independent-host-request-too-large')
+  let value: unknown
+  try {
+    value = JSON.parse(payload)
+  } catch {
+    throw new Error('independent-host-request-invalid')
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('independent-host-request-invalid')
+  }
+  const envelope = value as Record<string, unknown>
+  const nested = envelope.request ?? envelope.privateRequest
+  const nestedId = nested !== null && typeof nested === 'object' && !Array.isArray(nested)
+    ? (nested as Record<string, unknown>).requestId
+    : undefined
+  if (envelope.requestId !== undefined && nestedId !== undefined && envelope.requestId !== nestedId) {
+    throw new Error('independent-host-request-invalid')
+  }
+  const id = envelope.requestId ?? nestedId
+  if (typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(id)) {
+    throw new Error('independent-host-request-invalid')
+  }
+  return id
+}
+
+/**
+ * Transport only: the authenticated sidecar and owner still validate every
+ * operation, capability, plugin identity, generation and renderer session.
+ * This does not create or widen any Host service authority.
+ */
+export function installIndependentHostBindings(input: {
+  readonly window: Window
+  readonly sessionToken: string
+  readonly channels: readonly IndependentHostChannel[]
+  readonly onSessionLost?: () => void
+}): () => void {
+  if (!/^[a-f0-9]{64}$/u.test(input.sessionToken)) throw new Error('independent-host-session-invalid')
+  const host = input.window as BindingWindow
+  const granted = new Set(input.channels)
+  if (granted.size !== input.channels.length) throw new Error('independent-host-channels-invalid')
+  for (const channel of granted) {
+    if (!Object.hasOwn(INDEPENDENT_HOST_CHANNELS, channel)) throw new Error('independent-host-channels-invalid')
+    const [name] = INDEPENDENT_HOST_CHANNELS[channel]
+    if (host[name] !== undefined) throw new Error('independent-host-binding-already-installed')
+  }
+  const pending = new Map<string, Pending>()
+  const installed = new Map<string, Binding>()
+  let closed = false
+  const deliver = (key: string, payload: string) => {
+    const request = pending.get(key)
+    if (request === undefined) return
+    pending.delete(key)
+    if (host[request.receiverName] === request.receiver) {
+      try {
+        request.receiver(payload)
+      } catch {
+        // One renderer callback must not prevent retiring its other requests.
+      }
+    }
+  }
+  const failure = (key: string, reason: 'INDEPENDENT_HOST_RESULT_UNKNOWN' | 'INDEPENDENT_HOST_SESSION_REVOKED') => {
+    const request = pending.get(key)
+    if (request !== undefined) {
+      deliver(key, JSON.stringify({ requestId: request.requestId, ok: false, error: reason, code: reason }))
+    }
+  }
+  const dispose = () => {
+    if (closed) return
+    closed = true
+    for (const [name, binding] of installed) if (host[name] === binding) delete host[name]
+    for (const [key, request] of pending) {
+      request.controller.abort()
+      // A dispatched operation may have committed even if the session vanished
+      // before its response arrived. Never report a definite cancellation.
+      failure(key, request.dispatched ? 'INDEPENDENT_HOST_RESULT_UNKNOWN' : 'INDEPENDENT_HOST_SESSION_REVOKED')
+    }
+  }
+  for (const channel of granted) {
+    const [name, receiverName] = INDEPENDENT_HOST_CHANNELS[channel]
+    const binding: Binding = payload => {
+      if (closed) throw new Error('independent-host-session-revoked')
+      const id = requestId(payload)
+      const body = JSON.stringify({ channel, payload })
+      if (new TextEncoder().encode(body).byteLength > MAX_WIRE_BYTES) {
+        throw new Error('independent-host-request-too-large')
+      }
+      const key = `${channel}\u0000${id}`
+      if (pending.has(key) || pending.size >= MAX_IN_FLIGHT) throw new Error('independent-host-request-limit')
+      const receiver = host[receiverName]
+      if (typeof receiver !== 'function') throw new Error('independent-host-receiver-unavailable')
+      const controller = new AbortController()
+      const request: Pending = {
+        requestId: id,
+        receiverName,
+        receiver: receiver as Binding,
+        controller,
+        dispatched: false,
+      }
+      pending.set(key, request)
+      void Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw new Error('independent-host-session-revoked')
+        request.dispatched = true
+        return input.window.fetch('/api/renderer/binding', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
+          body,
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'error',
+          referrerPolicy: 'no-referrer',
+          signal: controller.signal,
+        })
+      }).then(async response => {
+        if (response.status === 401 && !closed) {
+          dispose()
+          input.onSessionLost?.()
+          return
+        }
+        if (!response.ok) return failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN')
+        const text = await response.text()
+        if (text.length > MAX_PAYLOAD_CHARS) return failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN')
+        try {
+          const result = JSON.parse(text) as { requestId?: unknown; ok?: unknown }
+          if (result?.requestId !== id || typeof result.ok !== 'boolean') throw new Error('invalid response')
+        } catch {
+          return failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN')
+        }
+        deliver(key, text)
+      }).catch(() => failure(key, 'INDEPENDENT_HOST_RESULT_UNKNOWN'))
+    }
+    host[name] = binding
+    installed.set(name, binding)
+  }
+  return dispose
+}

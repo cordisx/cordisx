@@ -94,6 +94,11 @@ export class ManagerRendererSessions {
     }
   }
 
+  /** Only names are projected; owner-side dispatch remains the authority. */
+  channelNames(): readonly string[] {
+    return [...this.channels.keys()]
+  }
+
   private retire(session: Session): void {
     if (this.sessions.get(session.handle.rendererId) !== session) return
     this.sessions.delete(session.handle.rendererId)

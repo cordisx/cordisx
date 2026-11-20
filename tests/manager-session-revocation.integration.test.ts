@@ -179,6 +179,54 @@ it('reports unknown when a dispatched write may finish after its session is evic
   }
 }, 30_000)
 
+it('revokes a renderer session even if its owner open call returns after browser eviction', async () => {
+  let release!: (value: unknown) => void
+  const opening = new Promise<unknown>(resolve => release = resolve)
+  const operations: Array<Record<string, unknown>> = []
+  const request = vi.fn(async (operation: Record<string, unknown>) => {
+    operations.push(operation)
+    if (operation.kind === 'manager-renderer' && operation.action === 'open') return await opening
+    return { status: 'ok' }
+  })
+  const gateway = { pid: 123, processStartedAt: 'fixture', instanceToken: 'a'.repeat(64) }
+  const web = await startManagerWeb(
+    {
+      appId: 'codex',
+      profileId: 'fixture',
+      generation: 'g',
+      isCurrent: async () => true,
+      request,
+    } as unknown as Parameters<typeof startManagerWeb>[0],
+    { rendererGateway: gateway },
+  )
+  try {
+    const origin = new URL(web.url).origin
+    const token = await exchange(web, web.url)
+    const response = fetch(`${origin}/api/renderer/open`, {
+      method: 'POST',
+      headers: { origin, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}',
+    })
+    await vi.waitFor(() => expect(operations.some(operation => operation.action === 'open')).toBe(true))
+    await evict(web)
+    const open = operations.find(operation => operation.action === 'open')!
+    const revoke = operations.find(operation => operation.action === 'revoke')!
+    expect(revoke.browserSessionId).toBe(open.browserSessionId)
+    expect(revoke.gateway).toEqual(gateway)
+    release({
+      status: 'ok',
+      handle: { rendererId: 'b'.repeat(64), ownerGeneration: 'g', grant: 'c'.repeat(64) },
+      channels: ['plugin-management'],
+    })
+    const result = await response
+    expect(result.status).toBe(401)
+    expect(await result.json()).toEqual({ error: 'UNAUTHORIZED' })
+  } finally {
+    release(undefined)
+    await web.close()
+  }
+}, 30_000)
+
 it('aborts the private socket on revocation without claiming a sent operation was cancelled', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-abort-'))
   const socketPath = path.join(directory, 'owner.sock')
