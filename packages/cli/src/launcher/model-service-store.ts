@@ -90,7 +90,9 @@ function declaration(
   input: ModelServiceInput,
   previous: HomeConfigModelServiceProvider | undefined,
 ): Record<string, unknown> {
-  const models: Record<string, readonly string[]> = {}
+  const models: Record<string, readonly string[]> = { ...previous?.models }
+  delete models.codex
+  delete models.claude
   if (input.codexModels.length > 0) models.codex = [...input.codexModels]
   if (input.claudeModels.length > 0) models.claude = [...input.claudeModels]
   let runtimeOptions: ModelServiceRuntimeOptions | null | undefined = input.runtimeOptions === undefined

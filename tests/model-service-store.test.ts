@@ -37,6 +37,29 @@ const input = {
 }
 
 describe('model service store', () => {
+  it('preserves other adapter model lists when Codex and Claude fields are edited', async () => {
+    const configPath = await home({
+      providers: [{
+        id: 'shared',
+        kind: 'model-service',
+        displayName: 'Shared',
+        baseUrl: 'https://example.test',
+        apiKeyEnv: 'SHARED_API_KEY',
+        protocols: ['openai-responses'],
+        models: { codex: ['old-codex'], claude: ['old-claude'], gemini: ['gemini-model'] },
+      }],
+    })
+    const before = await readModelServices(configPath, {})
+    if (before.status !== 'ok') throw new Error('fixture read failed')
+    const result = await saveModelServices(configPath, {
+      expectedRevision: before.revision,
+      services: [{ ...input, id: 'shared', displayName: 'Renamed', codexModels: ['new-codex'], claudeModels: [] }],
+    })
+    expect(result.status).toBe('applied')
+    const written = JSON.parse(await readFile(configPath, 'utf8')) as { providers: Array<{ models: unknown }> }
+    expect(written.providers[0]!.models).toEqual({ codex: ['new-codex'], gemini: ['gemini-model'] })
+  })
+
   it('adds a service, stores its key write-only, and keeps gateway providers', async () => {
     const configPath = await home({ providers: [gateway] })
     const empty = await readModelServices(configPath, {})
