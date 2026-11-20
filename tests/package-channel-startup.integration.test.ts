@@ -56,6 +56,7 @@ import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/sr
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { ManagedServicePluginLifecycleRuntime } from '../packages/cli/src/launcher/managed-service-plugin-lifecycle.js'
 import { createManagerChannelCredentials } from '../packages/cli/src/cli/manager-channel-credentials-composition.js'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
@@ -188,6 +189,38 @@ describe('package Channel startup routing', () => {
           sessionId: 'a'.repeat(64),
         })
         expect(view).toMatchObject({ status: 'available', revision: 1, writable: true, connections: [] })
+        const web = await startManagerWeb(
+          {
+            appId: 'codex',
+            profileId: 'default',
+            generation: 'runtime-1',
+            isCurrent: async () => true,
+            request: async (operation: Parameters<typeof requestPluginManagementRpc>[2]) =>
+              await requestPluginManagementRpc(paths, endpoint, operation),
+          } as unknown as Parameters<typeof startManagerWeb>[0],
+        )
+        try {
+          const url = new URL(web.url)
+          const exchange = await fetch(`${url.origin}/api/session`, {
+            method: 'POST',
+            headers: { origin: url.origin, 'content-type': 'application/json' },
+            body: JSON.stringify({ token: url.hash.slice(1) }),
+          })
+          const { token } = await exchange.json() as { token: string }
+          const response = await fetch(`${url.origin}/api/channel-credentials`, {
+            method: 'POST',
+            headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify({ action: 'view' }),
+          })
+          expect(await response.json()).toMatchObject({
+            status: 'available',
+            revision: 1,
+            writable: true,
+            connections: [],
+          })
+        } finally {
+          await web.close()
+        }
       } finally {
         await rpc.close()
         await manager.close()

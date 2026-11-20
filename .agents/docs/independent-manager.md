@@ -62,15 +62,22 @@ login methods needing terminal input or a displayed terminal code are not
 supported here. A synthetic service verifies the bridge; a real Aiden login is
 not yet verified.
 
-The Feishu/Lark controls are currently **unavailable in real installations**:
-the active packaged Channel and the current configuration store have a known
-composition mismatch. Isolated fixtures exercise credential creation and
-rotation, tenant resolution, and connection enablement, but do not establish a
-working production route. Other adapters, connection deletion, and the remaining
-Channel management features are also unavailable. Real Feishu/Lark credentials
-have not been used in validation.
+For a running Channel service with a verified active package and profile owner,
+the candidate offers Feishu/Lark credential creation and rotation, tenant
+resolution, and connection enablement. The user enters and confirms credentials;
+the Host validates and stores them without reading them back into the page. A
+staged Channel package and simulator exercise the startup and HTTP/socket path;
+separate synthetic credentials exercise the write and recovery transactions.
+Real Feishu/Lark credentials have not been used in validation. Legacy Channel
+configurations without verified package ownership, other adapters, connection
+deletion, and remaining Channel management features are unavailable.
 
 Model-service changes retain the current Host's app-restart apply semantics.
+The manager permits saving only when the active model-service authority reports
+the explicit safe-write contract; an older owner without that capability remains
+read-only even if its package version looks current. Every save rechecks the
+capability against the same owner generation. A persistence result that may
+have occurred after publication remains uncertain until the user reads back.
 Environment variables may be read dynamically by other clients or plugins, so
 removing a service retains its key variable for separate, deliberate cleanup.
 Individual removal of a key while retaining its service is also not exposed by
