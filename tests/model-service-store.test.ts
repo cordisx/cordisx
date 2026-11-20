@@ -94,18 +94,92 @@ describe('model service store', () => {
     expect(stored.environmentVariables).toEqual([])
   })
 
-  it('removes a key it stored when its service is deleted, and keeps keys it does not own', async () => {
+  it('keeps credentials and unrelated variables when a service is renamed or deleted', async () => {
     const configPath = await home({
-      environmentVariables: [{ name: 'MY_OWN_KEY', value: 'mine', enabled: true }],
+      providers: [{ ...gateway, apiKeyEnv: 'CORDISX_MODEL_SERVICE_SUB2TOK_KEY' }],
+      environmentVariables: [
+        { name: 'MY_OWN_KEY', value: 'mine', enabled: true },
+        { name: 'CORDISX_MODEL_SERVICE_OTHER_KEY', value: 'other-consumer', enabled: false, description: 'keep' },
+      ],
     })
     const first = await readModelServices(configPath, {}) as { revision: string }
+    // Add the service with an independent key, then introduce a second reader as a
+    // separate configuration edit, matching a plugin/client configured later.
+    const initial = JSON.parse(await readFile(configPath, 'utf8'))
+    initial.providers[0].apiKeyEnv = 'CLIPROXY_A_API_KEY'
+    await writeFile(configPath, JSON.stringify(initial))
     const added = await saveModelServices(configPath, {
       expectedRevision: first.revision,
       services: [{ ...input, apiKey: 'sk-secret' }],
     }) as { revision: string }
-    await saveModelServices(configPath, { expectedRevision: added.revision, services: [] })
-    const stored = JSON.parse(await readFile(configPath, 'utf8')) as { environmentVariables: Array<{ name: string }> }
-    expect(stored.environmentVariables.map(entry => entry.name)).toEqual(['MY_OWN_KEY'])
+    const shared = JSON.parse(await readFile(configPath, 'utf8'))
+    shared.providers[0].apiKeyEnv = modelServiceKeyEnv(input.id)
+    await writeFile(configPath, JSON.stringify(shared))
+    const renamed = await saveModelServices(configPath, {
+      expectedRevision: added.revision,
+      services: [{ ...input, displayName: 'Renamed' }],
+    }) as { revision: string }
+    await saveModelServices(configPath, { expectedRevision: renamed.revision, services: [] })
+    const stored = JSON.parse(await readFile(configPath, 'utf8')) as {
+      providers: Array<{ id: string; apiKeyEnv: string }>
+      environmentVariables: Array<{ name: string; value: string; enabled: boolean; description?: string }>
+    }
+    expect(stored.providers).toEqual([
+      expect.objectContaining({ id: gateway.id, apiKeyEnv: modelServiceKeyEnv(input.id) }),
+    ])
+    expect(stored.environmentVariables).toEqual([
+      { name: 'MY_OWN_KEY', value: 'mine', enabled: true },
+      { name: 'CORDISX_MODEL_SERVICE_OTHER_KEY', value: 'other-consumer', enabled: false, description: 'keep' },
+      expect.objectContaining({ name: modelServiceKeyEnv(input.id), value: 'sk-secret', enabled: true }),
+    ])
+  })
+
+  it('fences stale key edits but does not conflict on unrelated environment changes', async () => {
+    const configPath = await home()
+    const empty = await readModelServices(configPath, {}) as { revision: string }
+    const created = await saveModelServices(configPath, {
+      expectedRevision: empty.revision,
+      services: [{ ...input, apiKey: 'first' }],
+    }) as { revision: string }
+    const stale = created.revision
+    const second = await saveModelServices(configPath, {
+      expectedRevision: stale,
+      services: [{ ...input, apiKey: 'second' }],
+    }) as { revision: string }
+    expect(second.revision).not.toBe(stale)
+    expect(
+      await saveModelServices(configPath, {
+        expectedRevision: stale,
+        services: [{ ...input, apiKey: 'stale-overwrite' }],
+      }),
+    ).toEqual({ status: 'rejected', code: 'conflict' })
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.environmentVariables.push({ name: 'OTHER_PLUGIN_KEY', value: 'unrelated', enabled: true })
+    await writeFile(configPath, JSON.stringify(config))
+    expect(
+      await saveModelServices(configPath, {
+        expectedRevision: second.revision,
+        services: [{ ...input, displayName: 'Safe rename' }],
+      }),
+    ).toMatchObject({ status: 'applied' })
+    const stored = JSON.parse(await readFile(configPath, 'utf8'))
+    expect(stored.environmentVariables).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: modelServiceKeyEnv(input.id), value: 'second' }),
+      expect.objectContaining({ name: 'OTHER_PLUGIN_KEY', value: 'unrelated' }),
+    ]))
+  })
+
+  it('refuses to overwrite a pre-existing or shared credential when creating or rotating a service', async () => {
+    const key = modelServiceKeyEnv(input.id)
+    const configPath = await home({ environmentVariables: [{ name: key, value: 'other-consumer', enabled: true }] })
+    const empty = await readModelServices(configPath, {}) as { revision: string }
+    expect(
+      await saveModelServices(configPath, {
+        expectedRevision: empty.revision,
+        services: [{ ...input, apiKey: 'new' }],
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'invalid' })
+    expect(JSON.parse(await readFile(configPath, 'utf8')).environmentVariables[0].value).toBe('other-consumer')
   })
 
   it('refuses a stale revision and an invalid service without writing', async () => {

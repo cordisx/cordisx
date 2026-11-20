@@ -29,10 +29,13 @@ import { modelServicesOf } from './model-service-projection.js'
  * and are never read back.
  */
 
-// The revision protects CAS without publishing an offline verifier for write-only headers.
+// The process-local HMAC protects CAS without publishing an offline verifier for write-only values.
 const revisionKey = randomBytes(32)
 function revisionOf(config: HomeConfig): string {
-  return createHmac('sha256', revisionKey).update(JSON.stringify(modelServicesOf(config.providers))).digest('hex')
+  const providers = modelServicesOf(config.providers)
+  const names = new Set(providers.map(provider => provider.apiKeyEnv))
+  const credentials = config.environmentVariables.filter(entry => names.has(entry.name))
+  return createHmac('sha256', revisionKey).update(JSON.stringify({ providers, credentials })).digest('hex')
 }
 
 function keyConfigured(
@@ -127,8 +130,6 @@ function declaration(
   }
 }
 
-/** Names `modelServiceKeyEnv` gives; only these are removed with their service. */
-const OWNED_KEY_ENV = /^CORDISX_MODEL_SERVICE_[A-Z0-9_]+_KEY$/u
 const PROTOCOLS = new Set(['anthropic-messages', 'openai-responses'])
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -224,6 +225,17 @@ export async function saveModelServices(
         throw new Error('an id is already used by a gateway provider')
       }
       const declarations = request.services.map(service => declaration(service, previous.get(service.id)))
+      for (const [index, service] of request.services.entries()) {
+        const name = declarations[index]!.apiKeyEnv as string
+        const others = current.providers.some(provider => provider.id !== service.id && provider.apiKeyEnv === name)
+          || declarations.some((provider, other) => other !== index && provider.apiKeyEnv === name)
+        if (others && service.apiKey !== undefined) {
+          throw new Error('credential variable is already used by another provider')
+        }
+        if (!previous.has(service.id) && (others || current.environmentVariables.some(entry => entry.name === name))) {
+          throw new Error('credential variable is already used; choose another service id')
+        }
+      }
       let environmentVariables = [...current.environmentVariables]
       for (const [index, service] of request.services.entries()) {
         if (service.apiKey === undefined) continue
@@ -238,11 +250,8 @@ export async function saveModelServices(
           ? environmentVariables.map(item => item.name === name ? entry : item)
           : [...environmentVariables, entry]
       }
-      // A key this page stored for a service that is now gone has no reader left.
-      const referenced = new Set(declarations.map(item => item.apiKeyEnv as string))
-      environmentVariables = environmentVariables.filter(item =>
-        !OWNED_KEY_ENV.test(item.name) || referenced.has(item.name)
-      )
+      // Plugins and clients may read environment variables dynamically. There is no
+      // authoritative reference inventory, so removing a service never removes a key.
       // Full validation of the edited document before it is written.
       return parseHomeConfig({
         ...current,
