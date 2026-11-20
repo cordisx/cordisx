@@ -12,6 +12,7 @@ import { ChannelConversationDirectory } from './channel-conversation-directory.j
 import { ChannelConversationDisplayStore, conversationDisplayName } from './channel-conversation-display-store.js'
 import { ChannelSenderDirectory } from './channel-sender-directory.js'
 import { channelMessageContext } from './channel-message-context.js'
+import { channelDirectReply } from './channel-message-read.js'
 import {
   feishuDirectoryFailureCode,
   type FeishuFailureDiagnostic,
@@ -157,15 +158,33 @@ export class ChannelLiveDirectory {
   }
   async messageContext(message: ChannelUserInput, addressing?: ChannelCommandAddressing) {
     const event = message.source.event
+    const channel = this.channels.get(key(event)), version = this.channelVersions.get(key(event))
     if (addressing?.senderName) this.senders.observe(event, addressing.senderName)
-    const [sender, conversation] = await Promise.all([
-      this.senders.name(event, this.channels.get(key(event))),
+    const [sender, conversation, referencedMessage] = await Promise.all([
+      this.senders.name(event, channel),
       boundedIdentityName(this.name(event)),
+      channelDirectReply(event, channel),
     ])
-    return channelMessageContext(message, addressing, {
+    const context = channelMessageContext(message, addressing, {
       ...(sender ? { sender } : {}),
       ...(conversation ? { conversation } : {}),
     })
+    let reference = referencedMessage
+    if (
+      reference?.status === 'ok' && reference.message.sender?.idType === 'open_id'
+      && reference.message.sender.type === 'user' && reference.message.sender.id && !reference.message.sender.name
+    ) {
+      const sender = reference.message.sender
+      const name = await this.senders.name({
+        ...event,
+        messageId: reference.message.messageId,
+        actor: { adapterId: event.adapterId, accountId: event.accountId, tenantId: event.tenantId, userId: sender.id! },
+      }, channel)
+      if (name) reference = { ...reference, message: { ...reference.message, sender: { ...sender, name } } }
+    }
+    const live = !this.disposed && this.channels.get(key(event)) === channel
+      && this.channelVersions.get(key(event)) === version
+    return { ...context, ...(live && reference ? { referencedMessage: reference } : {}) }
   }
   conversationIdentity(event: ChannelEventRef) {
     return this.identities.identity(

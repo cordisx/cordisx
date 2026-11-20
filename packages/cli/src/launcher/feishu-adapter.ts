@@ -83,7 +83,7 @@ function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
 // The official SDK preserves empty root_id/thread_id fields for ordinary messages.
 // Only a nonblank identifier establishes a reply chain, including receive selectors.
 const replyThreadId = (message: NormalizedMessage): string | undefined =>
-  message.rootId?.trim() || message.threadId?.trim() || undefined
+  message.rootId?.trim() || message.threadId?.trim() || message.replyToMessageId?.trim() || undefined
 
 function inboundEnvelope(
   message: NormalizedMessage,

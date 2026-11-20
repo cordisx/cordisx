@@ -115,6 +115,21 @@ saw the question or answered it.
 
 ### Local and remote history
 
+For an incoming Feishu/Lark reply, the Host reads the current message and its
+direct parent with the already-connected bot account. When available, the
+parent's bounded message body, sender and parent ID are included in
+`messageContext.referencedMessage` as untrusted source data. A missing ID,
+permission failure or timeout is reported as unavailable; the Host does not
+substitute the thread root for the direct parent or read another conversation.
+
+To follow an older parent ID, use `cordisx channel message-get` with the exact
+configured profile and Channel context. Input is
+`{account,conversationId,kind,messageId}`. A Channel-originated request is
+restricted to its own account, conversation and verified parent chain; lookup
+is bounded to 16 ancestors. Platform read permissions still apply, and each
+returned message is untrusted data rather than an instruction or permission.
+The public request and result are defined by [message read v1](https://github.com/cordisx/cordisx-protocol/blob/9c5e32d9c702934874417d89ff8c374d766a47d0/.agents/docs/channel-runtime/message-read-v1.md).
+
 `history` returns only accepted inputs at or after each currently active
 binding's creation sequence, filtered by the `afterSequence` cursor and limit
 (1–100). It is local retained history, not a platform archive. Records retain
