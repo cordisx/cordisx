@@ -6,14 +6,17 @@ import { expect, it, vi } from 'vitest'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { readModelServices, saveModelServices } from '../packages/cli/src/launcher/model-service-store.js'
 import { safeServiceConfigEdit } from '../packages/cli/assets/manager/manager-schema.js'
+import { createChannelCredentialsUI } from '../packages/cli/assets/manager/manager-channel-ui.js'
 
 async function mountManager(respond: (path: string, input: any) => unknown) {
   const html = await readFile('packages/cli/assets/manager/index.html', 'utf8')
   const source = (await readFile('packages/cli/assets/manager/manager.js', 'utf8'))
     .replace(/^import .*manager-schema\.js'\s*/u, '')
+    .replace(/^import .*manager-channel-ui\.js'\s*/u, '')
   const dom = new JSDOM(html, { url: `http://127.0.0.1:9312/#${'a'.repeat(64)}`, runScripts: 'outside-only' })
   const window = dom.window as unknown as Window & typeof globalThis & Record<string, any>
   window.__schemaCheck = safeServiceConfigEdit
+  window.__channelUI = createChannelCredentialsUI
   window.confirm = vi.fn(() => true)
   window.HTMLDialogElement.prototype.showModal = function() {
     this.setAttribute('open', '')
@@ -27,7 +30,9 @@ async function mountManager(respond: (path: string, input: any) => unknown) {
     const value = await respond(String(url), input)
     return { ok: true, json: async () => value } as Response
   }) as typeof fetch
-  await window.eval(`(async()=>{const safeServiceConfigEdit=window.__schemaCheck;${source}\n})()`)
+  await window.eval(
+    `(async()=>{const safeServiceConfigEdit=window.__schemaCheck;const createChannelCredentialsUI=window.__channelUI;${source}\n})()`,
+  )
   await vi.waitFor(() => expect(window.document.getElementById('owner')!.textContent).toContain('fixture'))
   return { window, dom }
 }
@@ -60,6 +65,111 @@ it('retains an unsaved model credential draft across a status refresh', async ()
     expect(window.document.querySelector<HTMLInputElement>('#models input[type=password]')?.value).toBe(
       'fixture-not-a-real-secret',
     )
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('disables model saving after a failed refresh while retaining the unsaved draft', async () => {
+  let reads = 0, saves = 0
+  const { window, dom } = await mountManager((route) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') {
+      reads++
+      if (reads === 2) throw new Error('temporary outage')
+      return base()
+    }
+    if (route === '/api/model-services') {
+      saves++
+      return { status: 'applied' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    window.document.getElementById('add-model')!.click()
+    const secret = window.document.querySelector<HTMLInputElement>('#models input[type=password]')!
+    secret.value = 'unsaved-fixture-secret'
+    secret.dispatchEvent(new window.Event('input', { bubbles: true }))
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('连接失败'))
+    const save = window.document.getElementById('save-models') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    save.click()
+    expect(saves).toBe(0)
+    expect(secret.value).toBe('unsaved-fixture-secret')
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() => expect(save.disabled).toBe(false))
+    expect(secret.value).toBe('unsaved-fixture-secret')
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('does not let an older refresh re-enable a stale model draft', async () => {
+  let reads = 0
+  let release: (() => void) | undefined
+  const { window, dom } = await mountManager(async (route) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') {
+      reads++
+      if (reads === 2) {
+        await new Promise<void>(resolve => {
+          release = resolve
+        })
+        return base()
+      }
+      const value = base()
+      if (reads === 3) value.services.revision = 'r2'
+      return value
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    window.document.getElementById('add-model')!.click()
+    const secret = window.document.querySelector<HTMLInputElement>('#models input[type=password]')!
+    secret.value = 'draft-secret'
+    secret.dispatchEvent(new window.Event('input', { bubbles: true }))
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() => expect(reads).toBe(3))
+    const save = window.document.getElementById('save-models') as HTMLButtonElement
+    await vi.waitFor(() => expect(save.disabled).toBe(true))
+    release!()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(save.disabled).toBe(true)
+    expect(secret.value).toBe('draft-secret')
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('does not permit a blind retry after an unknown model save result', async () => {
+  let saves = 0
+  const { window, dom } = await mountManager((route) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/model-services') {
+      saves++
+      return { status: 'unknown' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    window.document.getElementById('add-model')!.click()
+    const fields = window.document.querySelectorAll<HTMLInputElement>('#models input')
+    fields[0]!.value = 'sample'
+    fields[1]!.value = 'Sample'
+    fields[2]!.value = 'https://example.test'
+    fields[0]!.dispatchEvent(new window.Event('input', { bubbles: true }))
+    const save = window.document.getElementById('save-models') as HTMLButtonElement
+    save.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    await vi.waitFor(() => expect(save.disabled).toBe(true))
+    save.click()
+    expect(saves).toBe(1)
     await new Promise(resolve => setTimeout(resolve, 10))
   } finally {
     dom.window.close()
@@ -229,6 +339,261 @@ it('starts a plugin login only after a user action and fences an uncertain resul
     expect(login.disabled).toBe(true)
     login.click()
     expect(requests.filter(request => request.action === 'login')).toHaveLength(1)
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('verifies a write-only Feishu credential and requires confirmation before saving it', async () => {
+  const requests: Array<Record<string, any>> = []
+  const view = {
+    status: 'available',
+    revision: 4,
+    serviceGeneration: 'service-generation',
+    writable: true,
+    connections: [],
+    pendingConnections: [],
+  }
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/channel-credentials') {
+      requests.push(input)
+      if (input.action === 'view') return view
+      if (input.action === 'capture') {
+        return {
+          status: 'applied',
+          code: 'CAPTURED',
+          draftId: 'draft',
+          ref: { adapterId: 'feishu', accountId: 'cli_example', tenantId: 'tenant' },
+        }
+      }
+      if (input.action === 'commit') return { status: 'applied', code: 'APPLIED' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('添加飞书')
+    )
+    ;[...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '添加飞书/Lark 连接')!.click()
+    const fields = window.document.querySelectorAll<HTMLInputElement>('#channel-credentials-list input')
+    fields[0]!.value = 'cli_example'
+    fields[2]!.value = 'Work'
+    fields[3]!.value = 'temporary-test-secret'
+    ;[...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '验证并暂存')!.click()
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('已验证')
+    )
+    expect(fields[3]!.value).toBe('')
+    expect(requests.find(request => request.action === 'capture')).toMatchObject({
+      purpose: 'create',
+      expectedRevision: 4,
+      serviceGeneration: 'service-generation',
+      secret: 'temporary-test-secret',
+      account: { adapterId: 'feishu', accountId: 'cli_example', tenantId: '' },
+    })
+    const commit = [...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '确认保存')!
+    ;(window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)
+    commit.click()
+    await vi.waitFor(() => expect(window.confirm).toHaveBeenCalled())
+    expect(requests.filter(request => request.action === 'commit')).toHaveLength(0)
+    await vi.waitFor(() => expect((commit as HTMLButtonElement).disabled).toBe(false))
+    commit.click()
+    await vi.waitFor(() => expect(requests.filter(request => request.action === 'commit')).toHaveLength(1))
+    expect(requests.find(request => request.action === 'commit')).toEqual({
+      action: 'commit',
+      draftId: 'draft',
+      draft: { displayName: 'Work' },
+    })
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('凭据已保存'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('locks an uncertain Channel capture until the user refreshes and checks status', async () => {
+  let captures = 0
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/channel-credentials' && input.action === 'view') {
+      return {
+        status: 'available',
+        revision: 1,
+        serviceGeneration: 'generation',
+        writable: true,
+        connections: [],
+        pendingConnections: [],
+      }
+    }
+    if (route === '/api/channel-credentials' && input.action === 'capture') {
+      captures++
+      throw new Error('connection lost')
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('添加飞书')
+    )
+    ;[...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '添加飞书/Lark 连接')!.click()
+    const fields = window.document.querySelectorAll<HTMLInputElement>('#channel-credentials-list input')
+    fields[0]!.value = 'cli_example'
+    fields[2]!.value = 'Work'
+    fields[3]!.value = 'temporary-test-secret'
+    const verify = [...window.document.querySelectorAll<HTMLButtonElement>('#channel-credentials button')]
+      .find(button => button.textContent === '验证并暂存')!
+    verify.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    expect(fields[3]!.value).toBe('')
+    expect(verify.disabled).toBe(true)
+    verify.click()
+    expect(captures).toBe(1)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('keeps a Channel credential draft when an earlier refresh completes late', async () => {
+  let reads = 0
+  let release: (() => void) | undefined
+  const { window, dom } = await mountManager(async (route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/channel-credentials' && input.action === 'view') {
+      reads++
+      if (reads === 2) {
+        await new Promise<void>(resolve => {
+          release = resolve
+        })
+      }
+      return {
+        status: 'available',
+        revision: 1,
+        serviceGeneration: 'generation',
+        writable: true,
+        connections: [],
+        pendingConnections: [],
+      }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('添加飞书')
+    )
+    window.document.getElementById('refresh-channel-credentials')!.click()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    ;[...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '添加飞书/Lark 连接')!.click()
+    const secret = window.document.querySelector<HTMLInputElement>('#channel-credentials-list input[type=password]')!
+    secret.value = 'unsaved-fixture-secret'
+    release!()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(window.document.querySelector<HTMLInputElement>('#channel-credentials-list input[type=password]')?.value)
+      .toBe('unsaved-fixture-secret')
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('lets the user resolve a pending Channel tenant against the observed revision', async () => {
+  const requests: Array<Record<string, any>> = []
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/channel-credentials') {
+      requests.push(input)
+      if (input.action === 'view') {
+        return {
+          status: 'available',
+          revision: 9,
+          serviceGeneration: 'generation',
+          writable: true,
+          connections: [],
+          pendingConnections: [{ account: { adapterId: 'lark', accountId: 'cli_fixture' }, displayName: 'Work' }],
+        }
+      }
+      if (input.action === 'resolve-tenant') return { status: 'applied', code: 'APPLIED' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('租户待确认')
+    )
+    ;[...window.document.querySelectorAll('#channel-credentials button')]
+      .find(button => button.textContent === '确认租户')!.click()
+    window.document.querySelector<HTMLInputElement>('#channel-credentials-list input')!.value = 'tenant-1'
+    const confirm = [...window.document.querySelectorAll<HTMLButtonElement>('#channel-credentials button')]
+      .filter(button => button.textContent === '确认租户').at(-1)!
+    ;(window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)
+    confirm.click()
+    await vi.waitFor(() => expect(confirm.disabled).toBe(false))
+    expect(requests.filter(request => request.action === 'resolve-tenant')).toHaveLength(0)
+    confirm.click()
+    await vi.waitFor(() => expect(requests.filter(request => request.action === 'resolve-tenant')).toHaveLength(1))
+    expect(requests.find(request => request.action === 'resolve-tenant')).toMatchObject({
+      expectedRevision: 9,
+      serviceGeneration: 'generation',
+      tenantId: 'tenant-1',
+      account: { adapterId: 'lark', accountId: 'cli_fixture', tenantId: '' },
+    })
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('租户已确认'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('fences a Channel enablement change to the displayed generation and does not retry unknown results', async () => {
+  const requests: Array<Record<string, any>> = []
+  const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'tenant' }
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/channel-credentials') {
+      requests.push(input)
+      if (input.action === 'view') {
+        return {
+          status: 'available',
+          revision: 7,
+          serviceGeneration: 'generation',
+          writable: true,
+          connections: [{ ref: account, enabled: true, connectionState: 'retrying' }],
+          pendingConnections: [],
+        }
+      }
+      if (input.action === 'set-enabled') return { status: 'unknown' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('channel-credentials-list')!.textContent).toContain('重试中')
+    )
+    const toggle = [...window.document.querySelectorAll<HTMLButtonElement>('#channel-credentials button')]
+      .find(button => button.textContent === '停用连接')!
+    toggle.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    expect(requests.filter(request => request.action === 'set-enabled')).toEqual([{
+      action: 'set-enabled',
+      account,
+      enabled: false,
+      expectedRevision: 7,
+      serviceGeneration: 'generation',
+    }])
+    await vi.waitFor(() => expect(toggle.disabled).toBe(true))
+    toggle.click()
+    expect(requests.filter(request => request.action === 'set-enabled')).toHaveLength(1)
+    await new Promise(resolve => setTimeout(resolve, 10))
   } finally {
     dom.window.close()
   }
@@ -458,6 +823,66 @@ it('reports staged service settings as pending restart rather than applied', asy
     editor.dispatchEvent(new window.Event('input', { bubbles: true }))
     ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '保存服务配置')!.click()
     await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('重启'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it.each(['rejected', 'conflict'])('locks plugin service editing on %s after an uncertain commit', async status => {
+  let writes = 0
+  const descriptor = {
+    identity: { source: 'https://example.test', pluginId: 'sample', serviceId: 'runtime' },
+    scope: { profileId: 'fixture', generation: 'generation' },
+    revision: 1,
+    writable: true,
+    configuration: { label: 'before' },
+    secrets: [],
+    schema: {
+      projection: {
+        kind: 'schemastery',
+        envelope: {
+          uid: 1,
+          refs: {
+            1: { type: 'object', dict: { label: 2 } },
+            2: { type: 'string' },
+          },
+        },
+      },
+    },
+  }
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/plugin-configuration' && input.action === 'read') {
+      return {
+        status: 'ok',
+        configuration: { writable: true, applies: 'live', revision: 1, fields: [], secrets: [] },
+      }
+    }
+    if (route === '/api/plugin-configuration' && input.action === 'services') {
+      return { status: 'ok', services: [descriptor] }
+    }
+    if (route === '/api/plugin-configuration' && input.action === 'update-service') {
+      writes++
+      return { status: 'ok', result: { status, error: { code: 'validation-failed' } } }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '配置')!.click()
+    await vi.waitFor(() => expect(window.document.querySelector('#plugins textarea')).not.toBeNull())
+    const editor = window.document.querySelector<HTMLTextAreaElement>('#plugins textarea')!
+    editor.value = JSON.stringify({ label: 'after' })
+    editor.dispatchEvent(new window.Event('input', { bubbles: true }))
+    const save = [...window.document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.textContent === '保存服务配置')!
+    save.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    await vi.waitFor(() => expect(save.disabled).toBe(true))
+    expect(editor.value).toContain('after')
+    save.click()
+    expect(writes).toBe(1)
     await new Promise(resolve => setTimeout(resolve, 10))
   } finally {
     dom.window.close()

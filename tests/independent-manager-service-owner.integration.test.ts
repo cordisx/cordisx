@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
@@ -18,7 +18,6 @@ const exec = promisify(execFile)
 it('connects the independent manager to a real service owner without Channel or Desktop', async () => {
   const home = await mkdtemp('/tmp/cx-manager-service-owner-')
   await writeFile(path.join(home, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
-  const cli = path.resolve('packages/cli/dist/src/cli.js')
   const env = managerChildEnvironment(process.env, 'unused')
   delete env.CORDISX_MANAGER_CHILD_KEY
   env.CORDISX_HOME = home
@@ -30,9 +29,32 @@ it('connects the independent manager to a real service owner without Channel or 
   env.CORDISX_SUPERVISOR_DATA_MODE = 'shared'
   env.CORDISX_SUPERVISOR_FINGERPRINT = 'stale'
   env.CORDISX_SUPERVISOR_TOKEN_FILE = path.join(home, 'already-consumed')
+  let cli: string | undefined
   const run = async (...args: string[]) =>
-    await exec(process.execPath, [cli, ...args], { env, cwd: home, timeout: 30_000 })
+    await exec(process.execPath, [cli!, ...args], { env, cwd: home, timeout: 30_000 })
   try {
+    const packed = await exec('npm', [
+      'pack',
+      '--workspace',
+      'cordisx',
+      '--ignore-scripts',
+      '--json',
+      '--pack-destination',
+      home,
+      '--cache',
+      path.join(home, 'npm-cache'),
+    ], { env, cwd: process.cwd(), timeout: 30_000 })
+    const filename = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename
+    if (filename !== path.basename(filename)) throw new Error('invalid package filename')
+    await exec('tar', ['-xzf', path.join(home, filename), '-C', home], { env, timeout: 30_000 })
+    // Resolve lockfile-installed dependencies without installing or changing the user's system.
+    await symlink(path.resolve('node_modules'), path.join(home, 'node_modules'), 'dir')
+    const packageModules = path.join(home, 'package', 'node_modules')
+    await mkdir(packageModules, { recursive: true })
+    for (const name of ['@vitejs', 'vite']) {
+      await symlink(path.resolve('packages/cli/node_modules', name), path.join(packageModules, name), 'dir')
+    }
+    cli = path.join(home, 'package', 'dist', 'src', 'cli.js')
     expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
       .toMatchObject({ status: 'ready', mode: 'service' })
     const endpoint = await readPluginManagementRpcEndpoint(pluginManagementRpcPaths(home, 'codex', 'default'))
@@ -40,6 +62,13 @@ it('connects the independent manager to a real service owner without Channel or 
     expect(await usesNamespacedManagementRpc(endpoint!)).toBe(false)
     const line = (await run('manager', 'open', '--print-url')).stdout.trim().split(' ').at(-1)!
     const url = new URL(line)
+    for (const file of ['index.html', 'manager.js', 'manager-schema.js', 'manager-channel-ui.js', 'manager.css']) {
+      const packaged = await readFile(path.join(home, 'package', 'dist', 'assets', 'manager', file), 'utf8')
+      expect(packaged.length).toBeGreaterThan(0)
+      const response = await fetch(`${url.origin}/${file === 'index.html' ? '' : file}`)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(packaged)
+    }
     const exchange = await fetch(`${url.origin}/api/session`, {
       method: 'POST',
       headers: { origin: url.origin, 'content-type': 'application/json' },
@@ -61,6 +90,10 @@ it('connects the independent manager to a real service owner without Channel or 
         body: JSON.stringify(input),
       })).json()
     expect(await post('/api/managed-services', { action: 'list' })).toEqual({ status: 'available', services: [] })
+    expect(await post('/api/channel-credentials', { action: 'view' })).toMatchObject({
+      status: 'unavailable',
+      code: 'CHANNEL_OWNER_UNAVAILABLE',
+    })
     const localPlugin = await localPackageV5(home)
     const planned = await post('/api/management', {
       kind: 'plan',
@@ -116,8 +149,10 @@ it('connects the independent manager to a real service owner without Channel or 
     expect(JSON.parse((await run('status', '--mode', 'service', 'codex', 'default', '--json')).stdout))
       .toMatchObject({ status: 'ready', mode: 'service' })
   } finally {
-    await run('manager', 'stop').catch(() => undefined)
-    await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(() => undefined)
+    if (cli) {
+      await run('manager', 'stop').catch(() => undefined)
+      await run('stop', '--mode', 'service', 'codex', 'default', '--json').catch(() => undefined)
+    }
     const makeOwnedFixtureRemovable = async (directory: string): Promise<void> => {
       await chmod(directory, 0o700)
       for (const item of await readdir(directory, { withFileTypes: true })) {

@@ -45,3 +45,8 @@ status, native capabilities, and model selections. Report pending or
 unavailable operations without presenting them as applied. Removing a model
 service retains its environment variable because plugins and clients may still
 use it; avoid promising that the credential has been removed.
+
+The preview's Feishu/Lark Channel controls are not currently available in real
+installations because packaged Channel and configuration storage do not compose
+correctly. Do not claim Channel editing or connection deletion is available from
+the independent manager until the matching Host version verifies that path.

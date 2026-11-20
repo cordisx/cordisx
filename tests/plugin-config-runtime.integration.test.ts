@@ -16,6 +16,7 @@ import {
 } from '../packages/cli/src/launcher/service-config-rpc.js'
 import { CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT } from '../packages/cli/src/providers/cli-proxy-service-config.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 
 interface RuntimeHandle {
   snapshot(): {
@@ -376,6 +377,7 @@ describe('plugin config runtime', () => {
       plugins: [{ id: 'restart-config', entry: 'file:///fixture', config: {} }],
     }), target)
     const fleet = await ProviderFleet.create([])
+    let failFinalize = false
     const token = 'c'.repeat(64)
     const generation = 'external-config-service'
     const contract = {
@@ -390,7 +392,16 @@ describe('plugin config runtime', () => {
       configPath: target,
       writable: true,
       authorize: () => true,
-      restartService: async () => await fleet.reconfigure([]),
+      restartService: async () => {
+        const result = await fleet.reconfigure([])
+        return {
+          ...result,
+          finalize: async () => {
+            await result.finalize()
+            if (failFinalize) throw new Error('validation-failed')
+          },
+        }
+      },
     })
     const serviceHandler = createServiceConfigBridgeHandler({
       token,
@@ -432,6 +443,52 @@ describe('plugin config runtime', () => {
         result: { status: 'applied', revision: 1, configApplies: 'service-restart' },
       })
       expect(await api.descriptor()).toMatchObject({ revision: 1, lastGoodRevision: 1 })
+      failFinalize = true
+      const web = await startManagerWeb(
+        {
+          appId: 'codex',
+          profileId: 'work',
+          generation,
+          isCurrent: async () => true,
+          request: async (operation: Parameters<typeof lifecycle.pluginConfiguration>[0]) =>
+            await lifecycle.pluginConfiguration(operation),
+        } as unknown as Parameters<typeof startManagerWeb>[0],
+      )
+      try {
+        const url = new URL(web.url)
+        const session = await fetch(`${url.origin}/api/session`, {
+          method: 'POST',
+          headers: { origin: url.origin, 'content-type': 'application/json' },
+          body: JSON.stringify({ token: url.hash.slice(1) }),
+        })
+        const { token: browserToken } = await session.json() as { token: string }
+        const current = await api.descriptor()
+        const failed = await fetch(`${url.origin}/api/plugin-configuration`, {
+          method: 'POST',
+          headers: { origin: url.origin, 'content-type': 'application/json', authorization: `Bearer ${browserToken}` },
+          body: JSON.stringify({
+            action: 'update-service',
+            pluginId: 'restart-config',
+            mutation: {
+              contract: 'cordisx.service-config-mutation/v1',
+              schemaVersion: 1,
+              identity: current.identity,
+              scope: current.scope,
+              expectedRevision: current.revision,
+              configuration: {
+                contract: 'cordisx.cli-proxy-provider-runtime-config/v1',
+                schemaVersion: 1,
+                providers: [],
+              },
+            },
+          }),
+        })
+        expect(await failed.json()).toMatchObject({ status: 'ok', result: { status: 'rejected' } })
+        // The error was raised after commit; the stored revision has advanced despite "rejected".
+        expect(await api.descriptor()).toMatchObject({ revision: 2, lastGoodRevision: 2 })
+      } finally {
+        await web.close()
+      }
     } finally {
       remove()
       await runtime.dispose()

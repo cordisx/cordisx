@@ -9,6 +9,7 @@ const files: Readonly<Record<string, string>> = {
   '/': 'index.html',
   '/manager.js': 'manager.js',
   '/manager-schema.js': 'manager-schema.js',
+  '/manager-channel-ui.js': 'manager-channel-ui.js',
   '/manager.css': 'manager.css',
 }
 const mime: Readonly<Record<string, string>> = {
@@ -57,7 +58,13 @@ function object(value: unknown): Record<string, unknown> | undefined {
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
 export async function startManagerWeb(owner: ManagerOwner) {
   const bootstraps = new Map<string, { deadline: number; timer: NodeJS.Timeout; retire?: () => Promise<void> }>()
-  type BrowserSession = { id: string; deadline: number; timer: NodeJS.Timeout; managedServicesUsed: boolean }
+  type BrowserSession = {
+    id: string
+    deadline: number
+    timer: NodeJS.Timeout
+    managedServicesUsed: boolean
+    channelCredentialsUsed: boolean
+  }
   const sessions = new Map<string, BrowserSession>()
   let authority = ''
   const retire = async (key: string) => {
@@ -85,12 +92,14 @@ export async function startManagerWeb(owner: ManagerOwner) {
     if (!session) return
     sessions.delete(token)
     clearTimeout(session.timer)
-    if (session.managedServicesUsed) {
-      const operation = { kind: 'manager-service-auth', action: 'retire', sessionId: session.id }
-      await owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 }).catch(() =>
-        undefined
-      )
-    }
+    const retireKinds = [
+      ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
+      ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
+    ]
+    await Promise.allSettled(retireKinds.map(kind => {
+      const operation = { kind, action: 'retire', sessionId: session.id }
+      return owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 })
+    }))
   }
   const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
     const previous = sessions.get(token)
@@ -99,7 +108,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
       void retireSession(token)
     }, 8 * 60 * 60_000)
     timer.unref()
-    const session = previous ?? { id, deadline: 0, timer, managedServicesUsed }
+    const session = previous ?? { id, deadline: 0, timer, managedServicesUsed, channelCredentialsUsed: false }
     session.deadline = Date.now() + 8 * 60 * 60_000
     session.timer = timer
     sessions.set(token, session)
@@ -197,6 +206,106 @@ export async function startManagerWeb(owner: ManagerOwner) {
       }
       const input = object(await body(request))
       if (!input) return json(response, 400, { error: 'INVALID_REQUEST' })
+      if (url.pathname === '/api/channel-credentials') {
+        const bounded = (value: unknown, limit: number): value is string =>
+          typeof value === 'string'
+          && value.length > 0 && value.length <= limit && !/[\u0000-\u001f\u007f]/u.test(value)
+        const action = input.action
+        let operation: Record<string, unknown> | undefined
+        if (action === 'view' && Object.keys(input).every(key => key === 'action')) {
+          operation = { kind: 'manager-channel-credentials', action, sessionId: session.id }
+        } else if (action === 'capture') {
+          const account = object(input.account)
+          if (
+            Object.keys(input).every(key =>
+              ['action', 'purpose', 'expectedRevision', 'serviceGeneration', 'account', 'secret'].includes(key)
+            )
+            && (input.purpose === 'create' || input.purpose === 'rotate')
+            && Number.isSafeInteger(input.expectedRevision) && (input.expectedRevision as number) >= 0
+            && bounded(input.serviceGeneration, 512) && bounded(input.secret, 16_384) && account
+            && Object.keys(account).every(key => ['adapterId', 'accountId', 'tenantId'].includes(key))
+            && (account.adapterId === 'feishu' || account.adapterId === 'lark')
+            && bounded(account.accountId, 512) && typeof account.tenantId === 'string'
+            && (account.tenantId === '' || bounded(account.tenantId, 512))
+          ) {
+            operation = {
+              kind: 'manager-channel-credentials',
+              action,
+              sessionId: session.id,
+              purpose: input.purpose,
+              expectedRevision: input.expectedRevision,
+              serviceGeneration: input.serviceGeneration,
+              account: { adapterId: account.adapterId, accountId: account.accountId, tenantId: account.tenantId },
+              secret: input.secret,
+            }
+          }
+        } else if (action === 'set-enabled') {
+          const account = object(input.account)
+          if (
+            Object.keys(input).every(key =>
+              ['action', 'expectedRevision', 'serviceGeneration', 'account', 'enabled'].includes(key)
+            )
+            && Number.isSafeInteger(input.expectedRevision) && (input.expectedRevision as number) >= 0
+            && bounded(input.serviceGeneration, 512) && typeof input.enabled === 'boolean' && account
+            && Object.keys(account).every(key => ['adapterId', 'accountId', 'tenantId'].includes(key))
+            && (account.adapterId === 'feishu' || account.adapterId === 'lark')
+            && bounded(account.accountId, 512) && bounded(account.tenantId, 512)
+          ) {
+            operation = {
+              kind: 'manager-channel-credentials',
+              action,
+              sessionId: session.id,
+              expectedRevision: input.expectedRevision,
+              serviceGeneration: input.serviceGeneration,
+              enabled: input.enabled,
+              account: { adapterId: account.adapterId, accountId: account.accountId, tenantId: account.tenantId },
+            }
+          }
+        } else if (action === 'resolve-tenant') {
+          const account = object(input.account)
+          if (
+            Object.keys(input).every(key =>
+              ['action', 'expectedRevision', 'serviceGeneration', 'account', 'tenantId'].includes(key)
+            )
+            && Number.isSafeInteger(input.expectedRevision) && (input.expectedRevision as number) >= 0
+            && bounded(input.serviceGeneration, 512) && account
+            && Object.keys(account).every(key => ['adapterId', 'accountId', 'tenantId'].includes(key))
+            && (account.adapterId === 'feishu' || account.adapterId === 'lark')
+            && bounded(account.accountId, 512) && account.tenantId === ''
+            && (input.tenantId === undefined || bounded(input.tenantId, 512))
+          ) {
+            operation = {
+              kind: 'manager-channel-credentials',
+              action,
+              sessionId: session.id,
+              expectedRevision: input.expectedRevision,
+              serviceGeneration: input.serviceGeneration,
+              account: { adapterId: account.adapterId, accountId: account.accountId, tenantId: '' },
+              ...(input.tenantId === undefined ? {} : { tenantId: input.tenantId }),
+            }
+          }
+        } else if ((action === 'commit' || action === 'discard') && bounded(input.draftId, 128)) {
+          const draft = input.draft === undefined ? undefined : object(input.draft)
+          if (
+            Object.keys(input).every(key =>
+              (action === 'commit' ? ['action', 'draftId', 'draft'] : ['action', 'draftId']).includes(key)
+            )
+            && (input.draft === undefined
+              || draft && Object.keys(draft).every(key => ['displayName', 'selectors'].includes(key)))
+          ) {
+            operation = {
+              kind: 'manager-channel-credentials',
+              action,
+              sessionId: session.id,
+              draftId: input.draftId,
+              ...(draft === undefined ? {} : { draft }),
+            }
+          }
+        }
+        if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
+        session.channelCredentialsUsed = true
+        return json(response, 200, await owner.request(operation as unknown as PluginManagementRpcOperation))
+      }
       if (url.pathname === '/api/managed-services') {
         const bounded = (value: unknown): value is string =>
           typeof value === 'string'

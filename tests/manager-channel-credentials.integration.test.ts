@@ -23,6 +23,7 @@ import type { PluginManagementService } from '../packages/cli/src/management/ser
 import type { ManagedServiceNodeActivation } from '../packages/cli/src/launcher/managed-service-node-host.js'
 import type { PluginLifecycleRuntime } from '../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import type { LocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
 
 const sessionId = 'a'.repeat(64)
 const account = { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'tenant-one' }
@@ -179,6 +180,72 @@ async function fixture() {
 }
 
 describe('local manager Channel credential transactions', () => {
+  it('runs user-entered credential capture, commit and enablement through HTTP and the real Host socket', async () => {
+    const f = await fixture()
+    const operations: Array<Record<string, unknown>> = []
+    const web = await startManagerWeb(
+      {
+        appId: 'codex',
+        profileId: 'work',
+        generation: 'host-1',
+        isCurrent: async () => true,
+        request: async (operation: Record<string, unknown>) => {
+          operations.push(operation)
+          return await f.request(operation as never)
+        },
+      } as unknown as Parameters<typeof startManagerWeb>[0],
+    )
+    const url = new URL(web.url), origin = url.origin
+    const post = async (route: string, data: unknown, token?: string) =>
+      await fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(data),
+      })
+    try {
+      const { token } = await (await post('/api/session', { token: url.hash.slice(1) })).json() as { token: string }
+      const view = await (await post('/api/channel-credentials', { action: 'view' }, token)).json()
+      expect(view).toMatchObject({ status: 'available', revision: 0, writable: true })
+      const captured = await (await post('/api/channel-credentials', {
+        action: 'capture',
+        purpose: 'create',
+        account,
+        secret: 'synthetic-secret',
+        expectedRevision: view.revision,
+        serviceGeneration: view.serviceGeneration,
+      }, token)).json()
+      expect(captured).toMatchObject({ status: 'applied', code: 'CAPTURED', ref: account })
+      const committed = await (await post('/api/channel-credentials', {
+        action: 'commit',
+        draftId: captured.draftId,
+        draft: { displayName: 'Fixture' },
+      }, token)).json()
+      expect(committed).toMatchObject({ status: 'applied', code: 'APPLIED' })
+      const updated = await (await post('/api/channel-credentials', { action: 'view' }, token)).json()
+      expect(updated).toMatchObject({ connections: [{ ref: account, enabled: true }] })
+      const disabled = await (await post('/api/channel-credentials', {
+        action: 'set-enabled',
+        account,
+        enabled: false,
+        expectedRevision: updated.revision,
+        serviceGeneration: updated.serviceGeneration,
+      }, token)).json()
+      expect(disabled).toMatchObject({ status: 'applied' })
+      const finalView = await (await post('/api/channel-credentials', { action: 'view' }, token)).json()
+      expect(finalView).toMatchObject({ connections: [{ ref: account, enabled: false }] })
+      const sessionId = operations[0]!.sessionId
+      expect(JSON.stringify([view, captured, committed, updated, disabled, finalView]))
+        .not.toMatch(/synthetic-secret|secretRef|keychain:/)
+      expect(JSON.stringify([view, captured, committed, updated, disabled, finalView])).not.toContain(sessionId)
+      expect([...f.values.values()]).toEqual(['synthetic-secret'])
+      await web.close()
+      expect(operations).toContainEqual({ kind: 'manager-channel-credentials', action: 'retire', sessionId })
+    } finally {
+      await web.close().catch(() => undefined)
+      await f.close()
+    }
+  })
+
   it('does not expose credential actions to the renderer or sandbox mailbox', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cx-channel-mailbox-'))
     const service = {} as PluginManagementService

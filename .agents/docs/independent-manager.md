@@ -62,6 +62,14 @@ login methods needing terminal input or a displayed terminal code are not
 supported here. A synthetic service verifies the bridge; a real Aiden login is
 not yet verified.
 
+The Feishu/Lark controls are currently **unavailable in real installations**:
+the active packaged Channel and the current configuration store have a known
+composition mismatch. Isolated fixtures exercise credential creation and
+rotation, tenant resolution, and connection enablement, but do not establish a
+working production route. Other adapters, connection deletion, and the remaining
+Channel management features are also unavailable. Real Feishu/Lark credentials
+have not been used in validation.
+
 Model-service changes retain the current Host's app-restart apply semantics.
 Environment variables may be read dynamically by other clients or plugins, so
 removing a service retains its key variable for separate, deliberate cleanup.

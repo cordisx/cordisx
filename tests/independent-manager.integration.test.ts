@@ -18,6 +18,7 @@ import { openManagerBrowser } from '../packages/cli/src/cli/manager-command.js'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import { createCodexModelServices } from '../packages/cli/src/launcher/codex-model-services.js'
+import { createManagerChannelCredentials } from '../packages/cli/src/cli/manager-channel-credentials-composition.js'
 import {
   requestPluginManagementRpc,
   startPluginManagementRpcServer,
@@ -27,6 +28,18 @@ import { openPluginManagementService } from '../packages/cli/src/management/serv
 const exec = promisify(execFile)
 
 describe('independent manager production boundaries', () => {
+  it('does not expose Channel writes before package storage and credential recovery are reconciled', () => {
+    const input = {
+      plugin: { id: 'channel', enabled: true, package: { version: '1', moduleGeneration: 'g', digest: 'sha256:test' } },
+      service: {},
+      lifecycle: {},
+      configPath: '/fixture/config.json',
+      profileId: 'default',
+      generation: 'g',
+    } as unknown as Parameters<typeof createManagerChannelCredentials>[0]
+    expect(createManagerChannelCredentials(input)).toBeUndefined()
+  })
+
   it('bounds cleanup calls when an owner accepts a connection but never responds', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-timeout-'))
     const socketPath = path.join(directory, 'owner.sock')
@@ -83,9 +96,31 @@ describe('independent manager production boundaries', () => {
       const sessionId = operations[0]!.sessionId
       expect(sessionId).toMatch(/^[a-f0-9]{64}$/u)
       expect(sessionId).not.toBe(first)
+      expect((await post('/api/channel-credentials', { action: 'view', sessionId: 'forged' }, first)).status).toBe(400)
+      const captured = await post('/api/channel-credentials', {
+        action: 'capture',
+        purpose: 'create',
+        expectedRevision: 1,
+        serviceGeneration: 'generation',
+        account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: '' },
+        secret: 'test-only-secret',
+      }, first)
+      expect(captured.status).toBe(200)
+      expect(await captured.text()).not.toContain('test-only-secret')
+      expect(operations.at(-1)).toMatchObject({ kind: 'manager-channel-credentials', action: 'capture', sessionId })
+      const toggled = await post('/api/channel-credentials', {
+        action: 'set-enabled',
+        enabled: false,
+        expectedRevision: 1,
+        serviceGeneration: 'generation',
+        account: { adapterId: 'feishu', accountId: 'cli_fixture', tenantId: 'tenant' },
+      }, first)
+      expect(toggled.status).toBe(200)
+      expect(operations.at(-1)).toMatchObject({ kind: 'manager-channel-credentials', action: 'set-enabled', sessionId })
       let last = ''
       for (let index = 0; index < 16; index++) last = await exchange(web.issueUrl())
       expect(operations).toContainEqual({ kind: 'manager-service-auth', action: 'retire', sessionId })
+      expect(operations).toContainEqual({ kind: 'manager-channel-credentials', action: 'retire', sessionId })
       expect((await post('/api/managed-services', { action: 'list' }, first)).status).toBe(401)
       expect((await post('/api/managed-services', { action: 'list' }, last)).status).toBe(200)
       const lastId = operations.at(-1)!.sessionId
@@ -190,6 +225,7 @@ describe('independent manager production boundaries', () => {
       expect(malformed).not.toContain('http://[')
       expect((await fetch(origin)).status).toBe(200)
       expect((await fetch(`${origin}/manager.js`)).status).toBe(200)
+      expect((await fetch(`${origin}/manager-channel-ui.js`)).status).toBe(200)
       expect((await fetch(`${origin}/api/state`)).status).toBe(401)
       const entries = path.join(home, '目录 # %', 'entries')
       const entry = await createManagerEntry(entries, web)

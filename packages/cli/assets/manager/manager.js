@@ -1,4 +1,5 @@
 import { safeServiceConfigEdit } from './manager-schema.js'
+import { createChannelCredentialsUI } from './manager-channel-ui.js'
 
 const tokenFromLink = location.hash.slice(1)
 let token = sessionStorage.getItem('cordisx-manager-session')
@@ -23,8 +24,11 @@ let snapshot
 let modelDirty = false
 let modelRevision
 let modelsSaving = false
+let modelsLoading = true
+let refreshVersion = 0
 let modelResultUnknown = false
 let managedServiceLoginBusy = false
+let managedServiceRefreshVersion = 0
 const uncertainManagedServices = new Set()
 // Keep unrelated editors mounted while any of them has an unsaved draft.
 const pluginDrafts = new Set()
@@ -99,6 +103,17 @@ function label(text, control) {
   result.append(control)
   return result
 }
+const channelCredentials = createChannelCredentialsUI({
+  api,
+  element,
+  node,
+  button,
+  input,
+  label,
+  message,
+  freeze: whileControlsFrozen,
+  confirmAction: text => confirm(text),
+})
 function input(value = '', type = 'text') {
   const result = node('input')
   result.type = type
@@ -343,7 +358,7 @@ function renderModels(result) {
   for (const model of result.services) target.append(modelCard(model))
 }
 function canSaveModels() {
-  return snapshot?.services?.status === 'ok' && typeof modelRevision === 'string'
+  return !modelsLoading && snapshot?.services?.status === 'ok' && typeof modelRevision === 'string'
     && snapshot.services.revision === modelRevision && !modelResultUnknown
 }
 function syncModelSaveAvailability() {
@@ -358,6 +373,7 @@ async function saveModels() {
   await whileControlsFrozen(element('models').closest('section'), async () => {
     const result = await api('/api/model-services', { expectedRevision: modelRevision, services })
     showResult(result)
+    if (!['applied', 'rejected', 'conflict', 'unavailable'].includes(result?.status)) modelResultUnknown = true
     if (result.status === 'applied') {
       modelDirty = false
       try {
@@ -527,7 +543,7 @@ function appendServiceConfig(plugin, service, target) {
   editor.disabled = !service.writable
   section.append(editor)
   if (service.secrets?.length) section.append(node('p', '服务密钥由凭据通道管理，不在此回显。', 'muted'))
-  section.append(button('保存服务配置', async () => {
+  const saveService = button('保存服务配置', async () => {
     let configuration
     try {
       configuration = JSON.parse(editor.value)
@@ -538,27 +554,47 @@ function appendServiceConfig(plugin, service, target) {
       return message('无法保存：修改涉及未知字段、敏感字段或不受支持的数组变更。')
     }
     if (!mayDiscardPluginDrafts(target, section)) return
-    await whileControlsFrozen(target.parentElement, async () => {
-      const response = await api('/api/plugin-configuration', {
-        action: 'update-service',
-        pluginId: plugin.id,
-        mutation: {
-          contract: 'cordisx.service-config-mutation/v1',
-          schemaVersion: 1,
-          identity: service.identity,
-          scope: service.scope,
-          expectedRevision: service.revision,
-          configuration,
-        },
+    let uncertain = false
+    try {
+      await whileControlsFrozen(target.parentElement, async () => {
+        const response = await api('/api/plugin-configuration', {
+          action: 'update-service',
+          pluginId: plugin.id,
+          mutation: {
+            contract: 'cordisx.service-config-mutation/v1',
+            schemaVersion: 1,
+            identity: service.identity,
+            scope: service.scope,
+            expectedRevision: service.revision,
+            configuration,
+          },
+        })
+        if (response.status === 'unknown') {
+          uncertain = true
+          return
+        }
+        if (response.status !== 'ok') return showResult(response)
+        if (!['applied', 'staged'].includes(response.result?.status)) {
+          uncertain = true
+          return
+        }
+        showResult(response.result)
+        if (['applied', 'staged'].includes(response.result.status)) {
+          clearPluginDrafts(target)
+          await openPluginConfig(plugin, target)
+        }
       })
-      if (response.status !== 'ok') return showResult(response)
-      showResult(response.result)
-      if (['applied', 'staged'].includes(response.result.status)) {
-        clearPluginDrafts(target)
-        await openPluginConfig(plugin, target)
-      }
-    })
-  }, !service.writable))
+    } catch (error) {
+      if (error?.message !== 'OPERATION_RESULT_UNKNOWN') throw error
+      uncertain = true
+    }
+    if (uncertain) {
+      saveService.dataset.locked = 'true'
+      for (const control of target.querySelectorAll('button')) control.disabled = true
+      message('服务配置结果不确定，请重新读取并核对；不能直接重试。')
+    }
+  }, !service.writable)
+  section.append(saveService)
   target.append(section)
 }
 function renderPlugins(management, runtime) {
@@ -681,8 +717,16 @@ async function loginManagedService(item) {
 
 async function refreshManagedServices() {
   if (managedServiceLoginBusy) return
+  const version = ++managedServiceRefreshVersion
   const target = element('managed-services')
-  const result = await api('/api/managed-services', { action: 'list' })
+  let result
+  try {
+    result = await api('/api/managed-services', { action: 'list' })
+  } catch (error) {
+    if (version !== managedServiceRefreshVersion || managedServiceLoginBusy) return
+    throw error
+  }
+  if (version !== managedServiceRefreshVersion || managedServiceLoginBusy) return
   target.replaceChildren()
   if (result.status !== 'available' || !Array.isArray(result.services)) {
     target.append(node('p', '插件服务状态暂不可用。', 'muted'))
@@ -739,7 +783,23 @@ async function refreshManagedServices() {
 
 async function refresh(clearMessage = true) {
   if (clearMessage) message('')
-  snapshot = await api('/api/state')
+  const revision = ++refreshVersion
+  modelsLoading = true
+  syncModelSaveAvailability()
+  let fresh
+  try {
+    fresh = await api('/api/state')
+  } catch (error) {
+    if (revision !== refreshVersion) return
+    snapshot = undefined
+    modelsLoading = false
+    element('add-model').disabled = true
+    syncModelSaveAvailability()
+    throw error
+  }
+  if (revision !== refreshVersion) return
+  snapshot = fresh
+  modelsLoading = false
   const mode = snapshot.management?.runtime?.kind !== 'active'
     ? '状态不可用'
     : snapshot.management.runtime.mode === 'service'
@@ -762,6 +822,9 @@ async function refresh(clearMessage = true) {
   renderSources(snapshot.management)
   await refreshManagedServices().catch(() => {
     element('managed-services').replaceChildren(node('p', '插件服务状态暂不可用。', 'muted'))
+  })
+  await channelCredentials.refresh().catch(() => {
+    element('channel-credentials-list').replaceChildren(node('p', 'Channel 连接状态暂不可用。', 'muted'))
   })
 }
 element('refresh').addEventListener('click', () => refresh().catch(() => message('连接失败，请重新打开管理台。')))
@@ -829,5 +892,8 @@ element('refresh-catalog').addEventListener('click', () => {
 })
 element('refresh-managed-services').addEventListener('click', () => {
   void refreshManagedServices().catch(() => message('插件服务状态暂不可用。'))
+})
+element('refresh-channel-credentials').addEventListener('click', () => {
+  void channelCredentials.userRefresh().catch(() => message('Channel 连接状态暂不可用。'))
 })
 refresh().catch(() => message('无法连接管理后台。请确认入口来自当前的 CordisX 进程。'))

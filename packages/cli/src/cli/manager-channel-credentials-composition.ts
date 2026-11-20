@@ -11,6 +11,10 @@ import { channelConfigurationApi } from './renderer-channel-composition.js'
 import type { ManagerServiceAuthOperation } from '../launcher/manager-service-auth.js'
 import type { ManagerChannelCredentialOperation } from '../launcher/manager-channel-credentials.js'
 
+// Package-backed Channel and its credential recovery journal must use the same
+// authoritative store before this bridge can be made available to real owners.
+const PACKAGE_CHANNEL_STORAGE_RECONCILED: boolean = false
+
 /** Only a running service with a verifiable active package may own credential writes. */
 export function createManagerChannelCredentials(input: {
   readonly plugin?: CordisXConfigPlugin | undefined
@@ -20,6 +24,7 @@ export function createManagerChannelCredentials(input: {
   readonly profileId: string
   readonly generation: string
 }): ManagerChannelCredentials | undefined {
+  if (!PACKAGE_CHANNEL_STORAGE_RECONCILED) return undefined
   const { plugin, service } = input
   if (!plugin?.package || !service || plugin.id !== 'channel' || !plugin.enabled) return undefined
   const identity = {
