@@ -3,7 +3,9 @@ import { loadHomeConfig, resolveHomeConfigPath } from '../config/home-config.js'
 import {
   pluginManagementRpcPaths,
   readPluginManagementRpcEndpoint,
+  requestNamespacedManagementRpc,
   requestPluginManagementRpc,
+  usesNamespacedManagementRpc,
 } from '../launcher/management-rpc.js'
 import { processIdentityStatus } from './supervisor-state.js'
 import { parseCodexCommand } from './codex-command-parse.js'
@@ -32,7 +34,7 @@ cordisx codex chats fast get [--session <id>]
 cordisx codex chats fast set [--session <id>] --revision <n> --fast <true|false>
 cordisx codex chats project get [--session <id>]
 cordisx codex chats project set [--session <id>] --revision <n> --project <id> [--cwd <path>]
-Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Project switching is Desktop-only; headless has no native sidebar project authority.`
+Project/Fast writes require an idle loaded chat. Project selection aligns membership, cwd and writable roots; a full-access chat is narrowed to workspace-write. Read revisions before writes. Headless services can use operator-configured workspace projects; these do not create Desktop sidebar membership.`
 
 export function codexRpcError(operation: string, error: unknown): Error {
   if (
@@ -67,14 +69,15 @@ export async function runCodexCommand(
   ) {
     throw new Error('CODEX_RUNTIME_SCOPE_MISMATCH')
   }
-  if (await processIdentityStatus(endpoint.pid, endpoint.processStartedAt) !== 'alive') {
+  const namespaced = await usesNamespacedManagementRpc(endpoint)
+  if (!namespaced && await processIdentityStatus(endpoint.pid, endpoint.processStartedAt) !== 'alive') {
     throw new Error('CODEX_RUNTIME_OWNER_UNVERIFIABLE')
   }
   let result: unknown
   try {
     const callerThreadId = command.sourceSession ?? process.env.CODEX_THREAD_ID
     const callerTurnId = command.sourceTurn ?? process.env.CODEX_TURN_ID
-    result = await requestPluginManagementRpc(paths, endpoint, {
+    result = await (namespaced ? requestNamespacedManagementRpc : requestPluginManagementRpc)(paths, endpoint, {
       kind: 'codex',
       operation: command.operation,
       input: command.input,

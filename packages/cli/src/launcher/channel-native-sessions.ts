@@ -1,3 +1,4 @@
+import { readChannelCompletion } from './channel-legacy-completion.js'
 import type { ChannelEventRef, ChannelUserInput } from '@cordisx/channel-runtime'
 import { randomBytes } from 'node:crypto'
 import type { AgentBridge } from './agent-bridge.js'
@@ -761,36 +762,6 @@ export class ChannelNativeSessions {
     }
     if (turn.status !== 'completed') return { state: 'failed', code: 'NATIVE_TURN_FAILED' }
     if (!includeFinal) return { state: 'completed' }
-    // Fetch items only for this exact completed turn; never load another chat's transcript.
-    let cursor: string | undefined
-    const messages: string[] = []
-    for (let page = 0; page < 16; page += 1) {
-      const result = object(
-        await this.input.nativeRequest('thread/items/list', {
-          threadId: sessionId,
-          limit: 32,
-          sortDirection: 'desc',
-          ...(cursor === undefined ? {} : { cursor }),
-        }),
-      )
-      if (!Array.isArray(result.data)) return { state: 'failed', code: 'NATIVE_ITEMS_UNAVAILABLE' }
-      let olderTurn = false
-      for (const raw of result.data) {
-        const row = object(raw)
-        if (row.turnId !== turnId) {
-          if (messages.length) olderTurn = true
-          continue
-        }
-        const item = object(row.item)
-        if (item.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.text === 'string') {
-          messages.unshift(item.text)
-        }
-      }
-      if (olderTurn || typeof result.nextCursor !== 'string' || result.nextCursor === cursor) break
-      cursor = result.nextCursor
-    }
-    return messages.length
-      ? { state: 'completed', text: messages.join('\n') }
-      : { state: 'failed', code: 'NATIVE_FINAL_MESSAGE_UNAVAILABLE' }
+    return readChannelCompletion(this.input.nativeRequest, sessionId, turnId)
   }
 }

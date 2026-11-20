@@ -52,6 +52,7 @@ export async function openProductionPluginManagementComposition(input: {
       configPath: input.configPath,
       generation: input.runtimeGeneration,
       processStartedAt,
+      ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),

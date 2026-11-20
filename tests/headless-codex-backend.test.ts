@@ -47,6 +47,51 @@ describe('headless Codex backend', () => {
       await backend.close()
     }
   })
+  it('preserves the explicitly configured headless provider catalog and fences loaded provider switches', async () => {
+    let currentProvider = 'aiden'
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'model/list') return { data: [{ id: 'first', model: 'first', hidden: false }] }
+      if (method === 'thread/read') {
+        return { thread: { id: 'thread-1', modelProvider: currentProvider, status: { type: 'idle' } } }
+      }
+      if (method === 'thread/settings/update') return {}
+      if (method === 'thread/resume') {
+        return { thread: { id: 'thread-1' }, modelProvider: currentProvider, model: 'first' }
+      }
+      throw new Error(`unexpected ${method} ${JSON.stringify(params)}`)
+    })
+    const backend = await startHeadlessCodexBackend({
+      codexExecutable: '/codex',
+      codexHome: '/login',
+      home: '/user',
+      onRequest: () => ({}),
+      environment: {
+        CORDISX_HEADLESS_PROVIDER_ID: 'aiden',
+        CORDISX_HEADLESS_MODEL_ID: 'first',
+        CORDISX_HEADLESS_EXTRA_PROVIDER: 'ark',
+        CORDISX_HEADLESS_EXTRA_MODELS: 'second,third',
+      },
+      startServer: async () =>
+        ({ generation: 'test', request, subscribeRequests: () => () => {}, close: async () => {} }) as never,
+    })
+    try {
+      expect(await backend.models('list', {})).toMatchObject({
+        providers: [
+          { providerId: 'aiden', models: [{ id: 'first' }] },
+          { providerId: 'ark', models: [{ id: 'second' }, { id: 'third' }] },
+        ],
+      })
+      expect(await backend.models('select', { threadId: 'thread-1', providerId: 'aiden', model: 'first' }))
+        .toMatchObject({ status: 'selected' })
+      expect(await backend.models('select', { threadId: 'thread-1', providerId: 'ark', model: 'second' }))
+        .toEqual({ status: 'rejected', reason: 'provider-switch-unavailable' })
+      expect(await backend.models('select', { threadId: 'thread-1', providerId: 'aiden', model: 'unknown' }))
+        .toMatchObject({ status: 'rejected', reason: 'selection-outside-catalog' })
+      currentProvider = 'ark'
+    } finally {
+      await backend.close()
+    }
+  })
   it('uses the existing bridge and forwards native requests and notifications', async () => {
     const calls: string[] = []
     let onRequest: ((method: string, params: unknown, requestId?: string | number) => unknown) | undefined

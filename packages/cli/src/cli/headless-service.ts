@@ -1,3 +1,5 @@
+import { managementMailboxRoot, pluginManagementRpcPaths } from '../launcher/management-rpc.js'
+import { HeadlessProjectCatalog } from '../launcher/headless-project-catalog.js'
 import { CodexChatConfiguration } from '../launcher/codex-chat-configuration.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -208,8 +210,18 @@ export async function startHeadlessService(input: {
     })
     cleanup.push(() => backend.close())
     nativeAuthority.setReader(backend.nativeRequest)
+    const workspace = input.environment.CORDISX_CHANNEL_WORKSPACE
+    const headlessProjects = workspace ? await HeadlessProjectCatalog.open(workspace) : undefined
     const chatConfiguration = await CodexChatConfiguration.open({
       preferences: authority.execution!,
+      ...(headlessProjects
+        ? {
+          headlessProjects,
+          sandboxAuxiliaryRoot: managementMailboxRoot(
+            pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId),
+          ),
+        }
+        : {}),
       file: path.join(input.homeDir, 'apps', input.appId, 'profiles', input.profileId, 'codex-chat-configuration.json'),
       catalog: async () => (await backend.models('list', {})).providers ?? [],
       request: (method, params) => backend.nativeRequest(method, params),
@@ -227,7 +239,7 @@ export async function startHeadlessService(input: {
       nativeRequest: backend.nativeRequest,
       models: backend.models,
       configuration: chatConfiguration,
-      cwd: input.cwd,
+      cwd: workspace || input.cwd,
       cli: configuredChannelCliContext(input.homeDir, input.profileId),
       sectionName: () => undefined,
       name: event => service.conversationAccess()?.name?.(event) ?? Promise.resolve(undefined),
@@ -259,6 +271,7 @@ export async function startHeadlessService(input: {
     await service.start(state.config)
     const codex = createHeadlessCodexOperations({
       configuration: (operation, value, metadata) => chatConfiguration.call(operation, value, metadata),
+      projectsAvailable: headlessProjects !== undefined,
       configPath: input.configPath,
       environment: input.environment,
       models: backend.models,
