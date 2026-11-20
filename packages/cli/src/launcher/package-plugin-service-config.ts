@@ -173,6 +173,16 @@ export class PackagePluginServiceConfigStore {
   }): Promise<HomeConfigPluginServiceProfile> {
     this.assertProfile(input.profileId)
     const filePath = this.file(input.pluginId, input.serviceId)
+    return await this.serial(filePath, async () => await this.readUnlocked(input))
+  }
+
+  private async readUnlocked(input: {
+    readonly profileId: string
+    readonly pluginId: string
+    readonly serviceId: string
+    readonly initialConfig: JsonValue
+  }): Promise<HomeConfigPluginServiceProfile> {
+    const filePath = this.file(input.pluginId, input.serviceId)
     let raw: unknown
     try {
       raw = JSON.parse(await readFile(filePath, 'utf8')) as unknown
@@ -329,6 +339,53 @@ export class PackagePluginServiceConfigStore {
     ) => { readonly state: HomeConfigPluginServiceProfile; readonly result: T },
   ): Promise<T> {
     const filePath = this.file(input.pluginId, input.serviceId)
+    return await this.serial(filePath, async () => {
+      const state = await this.readUnlocked(input)
+      const next = operation(state)
+      await publishAtomic(filePath, {
+        version: 1,
+        pluginId: input.pluginId,
+        serviceId: input.serviceId,
+        state: next.state,
+      })
+      return next.result
+    })
+  }
+
+  /** Exclude normal service config writers while a recovery checks the unmodified file. */
+  async withLockedRawState<T>(pluginId: string, serviceId: string, action: (raw: unknown) => Promise<T>): Promise<T> {
+    const filePath = this.file(pluginId, serviceId)
+    return await this.serial(filePath, async () => {
+      let handle: Awaited<ReturnType<typeof open>>
+      try {
+        handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return await action(undefined)
+        throw error
+      }
+      try {
+        const info = await handle.stat()
+        if (
+          !info.isFile() || info.nlink !== 1 || info.size > 8 * 1024 * 1024
+          || process.geteuid !== undefined && info.uid !== process.geteuid()
+          || process.platform !== 'win32' && (info.mode & 0o077) !== 0
+        ) throw new Error('package state unavailable')
+        const raw = JSON.parse(await handle.readFile('utf8')) as unknown
+        if (
+          !raw || typeof raw !== 'object' || Array.isArray(raw)
+          || (raw as Record<string, unknown>).version !== 1
+          || (raw as Record<string, unknown>).pluginId !== pluginId
+          || (raw as Record<string, unknown>).serviceId !== serviceId
+        ) throw new Error('package state unavailable')
+        serviceState((raw as Record<string, unknown>).state, 'package plugin service configuration')
+        return await action(raw)
+      } finally {
+        await handle.close()
+      }
+    })
+  }
+
+  private async serial<T>(filePath: string, action: () => Promise<T>): Promise<T> {
     const previous = queues.get(filePath) ?? Promise.resolve()
     let release!: () => void
     const current = new Promise<void>(resolve => {
@@ -338,15 +395,7 @@ export class PackagePluginServiceConfigStore {
     queues.set(filePath, tail)
     await previous.catch(() => undefined)
     try {
-      const state = await this.read(input)
-      const next = operation(state)
-      await publishAtomic(filePath, {
-        version: 1,
-        pluginId: input.pluginId,
-        serviceId: input.serviceId,
-        state: next.state,
-      })
-      return next.result
+      return await action()
     } finally {
       release()
       if (queues.get(filePath) === tail) queues.delete(filePath)

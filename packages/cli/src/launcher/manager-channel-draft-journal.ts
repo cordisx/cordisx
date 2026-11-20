@@ -3,6 +3,8 @@ import { lstat, mkdir, open, readdir, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { withLockedExistingHomeConfig } from '../config/home-config.js'
 import type { LauncherSecretStore } from './secret-store.js'
+import type { PackagePluginServiceConfigStore } from './package-plugin-service-config.js'
+import { normalizePluginActivation } from './plugin-activation.js'
 
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const DRAFT = /^draft-[a-f0-9]{40}$/u
@@ -26,6 +28,8 @@ export class ManagerChannelDraftJournal {
       readonly configPath: string
       readonly profileId: string
       readonly store: LauncherSecretStore
+      readonly packageStore?: PackagePluginServiceConfigStore
+      readonly packageOwnerVerified?: boolean
     },
   ) {
     if (!path.isAbsolute(input.homeDir) || !path.isAbsolute(input.configPath) || !PROFILE.test(input.profileId)) {
@@ -112,12 +116,80 @@ export class ManagerChannelDraftJournal {
     this.id(reference)
     return await withLockedExistingHomeConfig(this.input.configPath, async config => {
       if (contains(config, reference)) return true
-      return await this.input.store.removeManagerDraftReference(reference, this.input.profileId)
+      if (!this.input.packageStore) {
+        return await this.input.store.removeManagerDraftReference(reference, this.input.profileId)
+      }
+      if (!this.input.packageOwnerVerified) return true
+      return await this.input.packageStore.withLockedRawState('channel', 'runtime', async raw => {
+        if (contains(raw, reference) || await this.otherPackageStateExists(reference)) return true
+        return await this.input.store.removeManagerDraftReference(reference, this.input.profileId)
+      })
     })
+  }
+
+  /** Other package state cannot be locked as one transaction, so preserve on any uncertainty. */
+  private async otherPackageStateExists(reference: string): Promise<boolean> {
+    const root = path.join(this.input.homeDir, 'state', 'profiles')
+    const target = path.join(root, this.input.profileId, 'plugins', 'services', 'channel', 'runtime.json')
+    const plugins = path.join(root, this.input.profileId, 'plugins')
+    const activationDirectories = [path.join(plugins, 'history'), path.join(plugins, 'candidates')]
+    const allowedDirectories = new Set<string>()
+    for (let directory = path.dirname(target); directory !== path.dirname(root); directory = path.dirname(directory)) {
+      allowedDirectories.add(directory)
+    }
+    for (const directory of activationDirectories) allowedDirectories.add(directory)
+    let visited = 0
+    const walk = async (entry: string): Promise<boolean> => {
+      if (++visited > 1_024) return true
+      let info: Stats
+      try {
+        info = await lstat(entry)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' && entry === root) return false
+        return true
+      }
+      if (info.isSymbolicLink()) return true
+      if (info.isFile()) {
+        if (entry === target) return false
+        const parent = path.dirname(entry)
+        const name = path.basename(entry)
+        const activation = entry === path.join(plugins, 'active.json')
+          || parent === activationDirectories[0] && /^\d+\.json$/u.test(name)
+          || parent === activationDirectories[1] && /^[A-Za-z0-9._:-]+\.json$/u.test(name)
+        if (!activation || info.nlink !== 1 || info.size > 8 * 1024 * 1024) return true
+        try {
+          const handle = await open(entry, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+          try {
+            const raw = JSON.parse(await handle.readFile('utf8')) as unknown
+            const parsed = normalizePluginActivation(raw)
+            return parsed.profileId !== this.input.profileId || contains(raw, reference)
+          } finally {
+            await handle.close()
+          }
+        } catch {
+          return true
+        }
+      }
+      if (!info.isDirectory()) return true
+      if (!allowedDirectories.has(entry)) return true
+      try {
+        for (const name of await readdir(entry)) if (await walk(path.join(entry, name))) return true
+        return false
+      } catch {
+        return true
+      }
+    }
+    return await walk(root)
   }
 
   /** Preserve unknown records and every active, last-good or candidate reference. */
   async recover(): Promise<void> {
+    try {
+      await lstat(this.directory)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
     await this.prepare()
     const names = await readdir(this.directory)
     if (names.length > MAX_RECORDS) throw new Error('DRAFT_RECOVERY_UNAVAILABLE')

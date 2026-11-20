@@ -8,6 +8,7 @@ import { configuredChannelManager } from '../packages/cli/src/launcher/channel-c
 import { ManagedServicePluginLifecycleRuntime } from '../packages/cli/src/launcher/managed-service-plugin-lifecycle.js'
 import { ManagerChannelCredentials } from '../packages/cli/src/launcher/manager-channel-credentials.js'
 import { ManagerChannelDraftJournal } from '../packages/cli/src/launcher/manager-channel-draft-journal.js'
+import { PackagePluginServiceConfigStore } from '../packages/cli/src/launcher/package-plugin-service-config.js'
 import { LauncherSecretStore } from '../packages/cli/src/launcher/secret-store.js'
 import {
   handlePluginManagementRpcRequest,
@@ -135,7 +136,14 @@ async function fixture() {
     setEnabled: async ({ enabled, ...request }) =>
       await (enabled ? configured.connections.enable : configured.connections.disable)(request),
     store,
-    journal: new ManagerChannelDraftJournal({ homeDir, configPath, profileId: 'work', store }),
+    journal: new ManagerChannelDraftJournal({
+      homeDir,
+      configPath,
+      profileId: 'work',
+      store,
+      packageStore: new PackagePluginServiceConfigStore(homeDir, 'work', 'host-1'),
+      packageOwnerVerified: true,
+    }),
     withOwner: async action =>
       await lifecycle.withActivePlugin({ id: 'channel', version: '1.0.0', ...packageIdentity }, action),
     openService,

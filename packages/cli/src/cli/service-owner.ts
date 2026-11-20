@@ -133,6 +133,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
             appId,
             profileId,
             generation,
+            profileOwnerVerified: releaseRuntimeOwner !== undefined,
             userHome,
             codexHome: environment.CODEX_HOME || path.join(userHome, '.codex'),
             codexExecutable: 'codex',
@@ -149,7 +150,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           configPath,
           profileId,
           generation,
-        })
+        }, releaseRuntimeOwner !== undefined)
         management = await openProductionPluginManagementComposition({
           homeDir,
           profileId,

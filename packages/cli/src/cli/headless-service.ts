@@ -26,6 +26,9 @@ import type { ChannelConversationTools } from '../launcher/channel-conversation-
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 import { withoutLauncherSecrets } from '../launcher/secret-resolver.js'
 import { parseChannelServiceConfig } from '@cordisx/channel-runtime'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
+import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
+import { LauncherSecretStore } from '../launcher/secret-store.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -58,6 +61,7 @@ export async function startHeadlessService(input: {
   readonly cwd: string
   readonly environment: NodeJS.ProcessEnv
   readonly generation: string
+  readonly profileOwnerVerified?: boolean
   readonly report: (code: string) => void
 }) {
   const cleanup: (() => Promise<void>)[] = []
@@ -124,7 +128,21 @@ export async function startHeadlessService(input: {
         close,
       }
     }
-    const state = await readServiceConfigState({
+    const packageStore = plugin.package === undefined
+      ? undefined
+      : new PackagePluginServiceConfigStore(input.homeDir, input.profileId, input.generation)
+    if (packageStore) {
+      const credentials = new LauncherSecretStore({ homeDir: input.homeDir })
+      await new ManagerChannelDraftJournal({
+        homeDir: input.homeDir,
+        configPath: input.configPath,
+        profileId: input.profileId,
+        store: credentials,
+        packageStore,
+        packageOwnerVerified: input.profileOwnerVerified === true,
+      }).recover()
+    }
+    const state = await (packageStore?.persistence.read ?? readServiceConfigState)({
       profileId: input.profileId,
       pluginId: 'channel',
       serviceId: 'runtime',

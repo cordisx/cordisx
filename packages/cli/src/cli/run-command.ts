@@ -343,7 +343,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       configPath,
       homeDir: rootFromConfigPath(configPath),
       environment: runtime.env ?? process.env,
-    })
+    }, { runtimeGeneration: lifecycleGeneration, profileOwnerVerified: releaseRuntimeOwner !== undefined })
     const channelService = channel.service
     const { consumer: channelConsumer, tools: channelTools, dispose: disposeChannel } =
       await createConfiguredChannelConsumer({
@@ -715,7 +715,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       configPath,
       profileId: selection.profileId,
       generation: lifecycleGeneration,
-    })
+    }, releaseRuntimeOwner !== undefined)
     const serviceConfigBridge = serviceConfigToken === undefined || services.length === 0
       ? undefined
       : createServiceConfigBridgeHandler({

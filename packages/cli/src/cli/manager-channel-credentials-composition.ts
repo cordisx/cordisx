@@ -6,6 +6,7 @@ import type { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-s
 import { ManagerChannelCredentials } from '../launcher/manager-channel-credentials.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
 import { ManagerChannelDraftJournal } from '../launcher/manager-channel-draft-journal.js'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { configuredChannelManager } from '../launcher/channel-connection-configuration.js'
 import { channelConfigurationApi } from './renderer-channel-composition.js'
 import type { ManagerServiceAuthOperation } from '../launcher/manager-service-auth.js'
@@ -23,10 +24,12 @@ export function createManagerChannelCredentials(input: {
   readonly configPath: string
   readonly profileId: string
   readonly generation: string
-}): ManagerChannelCredentials | undefined {
+}, profileOwnerVerified = false): ManagerChannelCredentials | undefined {
   if (!PACKAGE_CHANNEL_STORAGE_RECONCILED) return undefined
   const { plugin, service } = input
-  if (!plugin?.package || !service || plugin.id !== 'channel' || !plugin.enabled) return undefined
+  if (!profileOwnerVerified || !plugin?.package || !service || plugin.id !== 'channel' || !plugin.enabled) {
+    return undefined
+  }
   const identity = {
     id: plugin.id,
     moduleGeneration: plugin.package.moduleGeneration,
@@ -37,6 +40,7 @@ export function createManagerChannelCredentials(input: {
   const token = randomBytes(32).toString('hex')
   const homeDir = path.dirname(input.configPath)
   const store = new LauncherSecretStore({ homeDir })
+  const packageStore = new PackagePluginServiceConfigStore(homeDir, input.profileId, input.generation)
   const openService = (serviceGeneration: string) =>
     channelConfigurationApi({
       token,
@@ -63,6 +67,8 @@ export function createManagerChannelCredentials(input: {
       configPath: input.configPath,
       profileId: input.profileId,
       store,
+      packageStore,
+      packageOwnerVerified: profileOwnerVerified,
     }),
   })
 }
