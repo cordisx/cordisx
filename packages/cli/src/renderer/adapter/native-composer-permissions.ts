@@ -22,6 +22,7 @@ export function nativeComposerPermissions(document: Document) {
       threadId,
       label: label && label.length <= 128 && !/[\0\r\n]/u.test(label) ? label : undefined,
       loading: trigger.getAttribute('aria-busy') === 'true',
+      disabled: trigger.disabled || trigger.getAttribute('aria-disabled') === 'true',
     }]
   })
 }
