@@ -7,6 +7,7 @@ import {
 } from '../permission-contracts.js'
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
 import { LifecycleFailure } from './plugin-lifecycle-model.js'
+import { PermissionReviewBusyError } from './permission-review-gate.js'
 
 /** Host-private envelope; the reviewer must explicitly submit every required decision. */
 export interface PermissionReviewOperation {
@@ -77,6 +78,7 @@ export async function applyManagementPermissionReview(input: {
       : await input.coordinator.applyPermissionReviewV2({ ...request, decision })
     return { status: 'ok' as const, result }
   } catch (error) {
+    if (error instanceof PermissionReviewBusyError) return { status: 'rejected' as const, reason: 'review-busy' }
     // These explicit lifecycle rejections are raised before activation, or after aborting it.
     if (
       error instanceof LifecycleFailure && (error.code === 'permission-denied'

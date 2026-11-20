@@ -142,8 +142,15 @@ it('applies explicit scoped V4 and V2 reviews through the real service owner and
     ).toEqual({ status: 'rejected', reason: 'permission-denied' })
     expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
 
-    const applied = await request(operation)
-    expect(applied).toMatchObject({ status: 'ok', result: { outcome: 'applied', operation: 'install', revision: 1 } })
+    const applied = await Promise.all([request(operation), request(operation)])
+    expect(applied).toContainEqual(expect.objectContaining({
+      status: 'ok',
+      result: expect.objectContaining({ outcome: 'applied', operation: 'install', revision: 1 }),
+    }))
+    expect(applied).toContainEqual({
+      status: 'rejected',
+      reason: expect.stringMatching(/^(review-busy|stale-revision)$/),
+    })
     expect(await request({ kind: 'query' })).toMatchObject({
       activationRevision: 1,
       plugins: [{ id: 'permission-v5', status: 'unavailable-in-service-mode' }],
