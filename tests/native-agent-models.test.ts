@@ -256,7 +256,10 @@ describe('Agent model-provider tools', () => {
       return responses.get(id).result
     }
     try {
-      expect((await request(1, 'initialize', { protocolVersion: '2024-11-05' })).capabilities).toEqual({ tools: {} })
+      const initialized = await request(1, 'initialize', { protocolVersion: '2024-11-05' })
+      expect(initialized.capabilities).toEqual({ tools: {} })
+      expect(initialized.instructions).toContain('cordisx manager')
+      expect(initialized.instructions).toContain('bundled cordisx Skill')
       const advertised = (await request(2, 'tools/list', {})).tools
       expect(advertised.map((tool: any) => tool.name)).toEqual([
         'list_model_providers',
