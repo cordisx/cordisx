@@ -14,6 +14,7 @@ export function createHeadlessCodexOperations(input: {
   readonly models?: (operation: string, input: unknown, beforeEffect?: () => Promise<boolean>) => Promise<unknown>
   readonly channelTools?: () => ChannelConversationTools | undefined
   readonly preparing?: (metadata: unknown) => boolean
+  readonly projectsAvailable?: boolean
   readonly closed: () => boolean
 }) {
   const hasChannelContext = (metadata: unknown) =>
@@ -47,7 +48,7 @@ export function createHeadlessCodexOperations(input: {
           providerCreation: false,
           executionSettings: input.native !== undefined,
           modelServices: true,
-          projectSwitch: false,
+          projectSwitch: input.projectsAvailable === true,
           fastSettings: input.configuration !== undefined && input.models !== undefined,
           modelCreationDefaults: input.configuration !== undefined,
         },

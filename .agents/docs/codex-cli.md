@@ -60,15 +60,16 @@ Fast `false` remains an intentional selection. Defaults never rewrite old chats.
 Fast and project share each chat's configuration revision in the private profile
 `codex-chat-configuration.json`. Writes require an idle loaded chat and never
 interrupt one. Fast validates native model-catalog support. Project switching
-uses the existing native project tools, canonicalizes the target directories,
-and updates cwd plus sandbox writable roots. It narrows an old full-access chat
-to workspace-write (read-only remains read-only) and excludes temporary-directory
-write grants. On subsequent turns the saved project binding wins over old cwd
-and sandbox payloads. A removed project or changed roots fail explicitly. Native
-settings observation confirms `applied`; `pending` and `reconciliation-required`
-require inspection. Sidebar membership alone is never reported as a write boundary.
-Project switching needs Desktop's native tool authority; headless has no sidebar
-project catalog. Channel callers may read their authenticated bound tasks and
+uses native project tools on Desktop; an opt-in headless service uses the
+operator-controlled workspace catalog described in the [Channel guide](channel-cli.md#provider-model-effort-fast-and-project).
+Both canonicalize target directories and update cwd plus sandbox writable roots.
+An old full-access chat narrows to workspace-write; read-only remains read-only.
+Headless workspace-write also permits its private Channel transport directory,
+without granting the rest of the temporary directory. On subsequent turns the
+saved project binding wins over old cwd and sandbox payloads. A removed project
+or changed roots fail explicitly. Native settings observation confirms `applied`;
+`pending` and `reconciliation-required` require inspection. Headless projects
+do not create Desktop sidebar membership. Channel callers may read their authenticated bound tasks and
 request Fast/project changes through the same field-specific permissions and
 approval workflow as Channel commands. Their existing `--context` identifies
 the incoming actor; switching CLI entry points cannot bypass those rules.
@@ -160,5 +161,5 @@ guard, persisted human approval and idle application of Fast/project settings.
 A fixture app-server behind the production authenticated intermediary confirms
 project resolution, native tool metadata, membership-before-turn ordering and
 strict turn roots. The isolated real CLI confirmed Channel Fast enable/disable
-and explicit headless project unavailability. The intermediary fixture does not
+and headless project unavailability without a configured workspace. The intermediary fixture does not
 establish real Desktop sidebar behavior.

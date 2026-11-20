@@ -373,6 +373,47 @@ describe('Channel native task delivery', () => {
       true,
     )
   })
+  it('falls back on old app-servers only for a missing item method and the exact completed turn', async () => {
+    const nativeRequest = vi.fn(async (method: string) => {
+      if (method === 'thread/turns/list') return { data: [{ id: 'turn', status: 'completed' }] }
+      if (method === 'thread/items/list') throw Object.assign(new Error('missing'), { rpcCode: -32601 })
+      if (method === 'thread/read') {
+        return {
+          thread: {
+            id: 'chat',
+            turns: [
+              {
+                id: 'other',
+                status: 'completed',
+                items: [{ type: 'agentMessage', phase: 'final_answer', text: 'wrong' }],
+              },
+              {
+                id: 'turn',
+                status: 'completed',
+                items: [
+                  { type: 'agentMessage', phase: 'commentary', text: 'hidden' },
+                  { type: 'agentMessage', phase: 'final_answer', text: 'correct' },
+                ],
+              },
+            ],
+          },
+        }
+      }
+      throw new Error('unexpected')
+    })
+    const sessions = new ChannelNativeSessions({
+      bridge: () => undefined,
+      nativeRequest: nativeRequest as never,
+      cwd: '/tmp',
+    })
+    await expect(sessions.completion('chat', 'turn', true)).resolves.toEqual({ state: 'completed', text: 'correct' })
+    expect(nativeRequest).toHaveBeenCalledWith('thread/read', { threadId: 'chat', includeTurns: true })
+    nativeRequest.mockImplementationOnce(async () => ({ data: [{ id: 'turn', status: 'completed' }] }))
+    nativeRequest.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('denied'), { rpcCode: -32000 })
+    })
+    await expect(sessions.completion('chat', 'turn', true)).rejects.toThrow('denied')
+  })
   it('checks cancellation after async credential preparation and before creating a native thread', async () => {
     const lifetime = new AbortController()
     const nativeRequest = vi.fn(async () => ({}))

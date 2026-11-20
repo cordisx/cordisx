@@ -1,3 +1,4 @@
+import { headlessConfiguredProviders } from './headless-configured-providers.js'
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from './agent-bridge.js'
 import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/codex-app-server.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
@@ -146,6 +147,8 @@ export async function startHeadlessCodexBackend(input: {
           ...(reasoningCapabilities ? { reasoningCapabilities } : {}),
         }
       })
+      const configuredProviders = headlessConfiguredProviders(input.environment ?? process.env, catalog)
+      if (operation === 'list' && configuredProviders) return { providers: configuredProviders }
       if (operation === 'list') {
         const defaults = visible.filter(row => row.isDefault === true)
         return {
@@ -161,9 +164,11 @@ export async function startHeadlessCodexBackend(input: {
         ? value as Record<string, unknown>
         : {}
       if (
-        operation !== 'select' || selection.providerId !== 'openai'
+        operation !== 'select'
         || typeof selection.threadId !== 'string' || typeof selection.model !== 'string'
-        || !catalog.some(model => model.id === selection.model)
+        || !(configuredProviders ?? [{ providerId: 'openai', models: catalog }]).some(provider =>
+          provider.providerId === selection.providerId && provider.models.some(model => model.id === selection.model)
+        )
       ) {
         return { status: 'rejected', reason: 'selection-outside-catalog' }
       }
@@ -192,7 +197,7 @@ export async function startHeadlessCodexBackend(input: {
         }
         const resumed = await authority.nativeRequest('thread/resume', {
           threadId: selection.threadId,
-          ...(status === 'notLoaded' ? { modelProvider: 'openai', model: selection.model } : {}),
+          ...(status === 'notLoaded' ? { modelProvider: selection.providerId, model: selection.model } : {}),
         }) as { thread?: { id?: string }; model?: string; modelProvider?: string }
         if (
           resumed.thread?.id !== selection.threadId || resumed.model !== selection.model

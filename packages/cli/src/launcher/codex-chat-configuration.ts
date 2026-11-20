@@ -38,6 +38,8 @@ export interface CodexConfigurationAuthority {
   request(method: NativeBridgeMethod, params: Record<string, unknown>): Promise<unknown>
   tool?(input: NativeToolInput): Promise<unknown>
   guard?: CodexChatSettingsGuard | undefined
+  headlessProjects?: import('./headless-project-catalog.js').HeadlessProjectCatalog | undefined
+  sandboxAuxiliaryRoot?: string | undefined
 }
 
 /** Supplemental settings share the production app-server; paths and secrets never become plugin contracts. */
@@ -63,6 +65,9 @@ export class CodexChatConfiguration {
     return id
   }
   async projects(caller?: string) {
+    if (this.authority.headlessProjects) {
+      return (await this.authority.headlessProjects.projects()).map(({ projectId, name }) => ({ projectId, name }))
+    }
     if (!this.authority.tool) throw new Error('PROJECT_AUTHORITY_UNAVAILABLE')
     const result = toolResult(
       await this.authority.tool({
@@ -80,13 +85,21 @@ export class CodexChatConfiguration {
       }))
   }
   async validateProject(projectId: string, caller?: string) {
-    await this.project(projectId, undefined, await this.projectCaller(caller))
+    await this.project(projectId, undefined, this.authority.headlessProjects ? '' : await this.projectCaller(caller))
   }
   async prepareProject(projectId: string, readOnly = false) {
-    const project = await this.project(projectId, undefined, await this.projectCaller())
+    const project = await this.project(
+      projectId,
+      undefined,
+      this.authority.headlessProjects ? '' : await this.projectCaller(),
+    )
     return projectResume(
       project,
-      projectSandbox(project, { type: readOnly ? 'readOnly' : 'workspaceWrite', networkAccess: false }),
+      projectSandbox(
+        project,
+        { type: readOnly ? 'readOnly' : 'workspaceWrite', networkAccess: false },
+        this.authority.sandboxAuxiliaryRoot,
+      ),
     )
   }
   async bindCreatedProject(threadId: string, projectId: string) {
@@ -268,7 +281,11 @@ export class CodexChatConfiguration {
     const project = this.records[params.threadId]?.project
     if (!project) return params
     const native = await this.nativeThread(params.threadId)
-    const sandbox = projectSandbox(project, params.sandboxPolicy ?? native.sandboxPolicy ?? native.sandbox)
+    const sandbox = projectSandbox(
+      project,
+      params.sandboxPolicy ?? native.sandboxPolicy ?? native.sandbox,
+      this.authority.sandboxAuxiliaryRoot,
+    )
     const selected: Record<string, unknown> = method === 'thread/resume'
       ? {
         ...params,
@@ -296,6 +313,7 @@ export class CodexChatConfiguration {
     caller: string,
     turn?: string,
   ): Promise<ProjectSelection> {
+    if (this.authority.headlessProjects) return this.authority.headlessProjects.project(projectId, cwd)
     if (!this.authority.tool) throw new Error('PROJECT_AUTHORITY_UNAVAILABLE')
     const result = toolResult(
       await this.authority.tool({
@@ -428,7 +446,11 @@ export class CodexChatConfiguration {
           callerTurnId(metadata),
         )
         params.cwd = project.cwd
-        params.sandboxPolicy = projectSandbox(project, native.sandboxPolicy ?? native.sandbox)
+        params.sandboxPolicy = projectSandbox(
+          project,
+          native.sandboxPolicy ?? native.sandbox,
+          this.authority.sandboxAuxiliaryRoot,
+        )
         params.permissions = null
         next.project = project
       }
@@ -440,7 +462,7 @@ export class CodexChatConfiguration {
       await this.save(id!, next)
       const before = this.observations.get(id!)?.revision ?? 0
       try {
-        if (operation === 'project-set') {
+        if (operation === 'project-set' && !this.authority.headlessProjects) {
           toolResult(
             await this.authority.tool!({
               tool: 'move_thread_to_project',
@@ -456,7 +478,8 @@ export class CodexChatConfiguration {
           ? args.fast === true
             ? effective.serviceTier === 'priority'
             : effective.serviceTier === null || effective.serviceTier === 'default'
-          : projectMatches(next.project!, effective) && await this.membership(id!, next.project!.projectId, metadata))
+          : projectMatches(next.project!, effective, this.authority.sandboxAuxiliaryRoot)
+            && await this.membership(id!, next.project!.projectId, metadata))
         next = { ...next, application: confirmed ? 'applied' : 'submitted' }
         await this.save(id!, next)
         return { status: next.application === 'applied' ? 'applied' : 'pending', sessionId: id, ...next }
@@ -476,6 +499,19 @@ export class CodexChatConfiguration {
     }
   }
   private async membership(id: string, projectId: string, metadata?: unknown) {
+    if (this.authority.headlessProjects) {
+      const saved = this.records[id]?.project
+      if (!saved || saved.projectId !== projectId) return false
+      try {
+        const current = await this.authority.headlessProjects.project(projectId, saved.cwd)
+        const native = object(await this.authority.request('thread/read', { threadId: id, includeTurns: false }))
+        const thread = object(native.thread)
+        return thread.id === id && thread.cwd === saved.cwd
+          && JSON.stringify(current.roots) === JSON.stringify(saved.roots)
+      } catch {
+        return false
+      }
+    }
     if (!this.authority.tool) return false
     let cursor: string | undefined
     const cursors = new Set<string>()
@@ -516,7 +552,7 @@ function toolResult(value: unknown): Record<string, unknown> {
   }
   throw new Error('NATIVE_TOOL_UNCONFIRMED')
 }
-function projectSandbox(project: ProjectSelection, value: unknown) {
+function projectSandbox(project: ProjectSelection, value: unknown, auxiliaryRoot?: string) {
   const sandbox = object(value)
   if (sandbox.type === 'readOnly') return { ...sandbox, type: 'readOnly' }
   // Selecting a repository establishes a write boundary even for an old full-access chat.
@@ -525,7 +561,7 @@ function projectSandbox(project: ProjectSelection, value: unknown) {
   }
   return {
     type: 'workspaceWrite',
-    writableRoots: project.roots,
+    writableRoots: [...project.roots, ...(auxiliaryRoot ? [auxiliaryRoot] : [])],
     networkAccess: sandbox.networkAccess === true,
     excludeTmpdirEnvVar: true,
     excludeSlashTmp: true,
@@ -538,19 +574,19 @@ function projectResume(project: ProjectSelection, sandbox: Record<string, unknow
     permissions: null,
     sandbox: sandbox.type === 'readOnly' ? 'read-only' : 'workspace-write',
     config: {
-      'sandbox_workspace_write.writable_roots': project.roots,
+      'sandbox_workspace_write.writable_roots': sandbox.writableRoots ?? project.roots,
       'sandbox_workspace_write.network_access': sandbox.networkAccess === true,
       'sandbox_workspace_write.exclude_tmpdir_env_var': true,
       'sandbox_workspace_write.exclude_slash_tmp': true,
     },
   }
 }
-function projectMatches(project: ProjectSelection, effective: Record<string, unknown>) {
+function projectMatches(project: ProjectSelection, effective: Record<string, unknown>, auxiliaryRoot?: string) {
   const sandbox = object(effective.sandboxPolicy ?? effective.sandbox)
   const actual = Array.isArray(sandbox.writableRoots)
     ? [...new Set([effective.cwd, ...sandbox.writableRoots])].sort()
     : []
-  const expected = [...new Set([project.cwd, ...project.roots])].sort()
+  const expected = [...new Set([project.cwd, ...project.roots, ...(auxiliaryRoot ? [auxiliaryRoot] : [])])].sort()
   return effective.cwd === project.cwd && (sandbox.type === 'readOnly' || sandbox.type === 'workspaceWrite'
       && JSON.stringify(actual) === JSON.stringify(expected)
       && sandbox.excludeTmpdirEnvVar === true && sandbox.excludeSlashTmp === true)

@@ -408,11 +408,42 @@ Project defaults resolve canonical working directories and writable roots before
 creating the chat. The new chat's project membership and native settings must be
 confirmed before its first turn. A failed confirmation retains the created chat
 and starts no turn. Project switching uses the common supplemental service and
-enforces the selected roots on later turns. Headless mode has no native project
-authority; `model-list` reports `projectAvailability: "unavailable"`, and project
-mutations fail explicitly. Fresh continuation retains its existing confirmed
-configuration/cwd flow; native sidebar project membership inheritance has not
-been established by this change.
+enforces the selected roots on later turns. A headless service may opt into
+workspace projects by setting `CORDISX_CHANNEL_WORKSPACE` to an absolute,
+operator-controlled directory before service startup. The service lists Git
+repositories at that directory and its immediate child directories, rejects
+paths outside it, and applies the selected repository as the chat's cwd and
+writable root. This service-owned selection is not Desktop sidebar membership.
+Without that setting, the project catalog remains unavailable. Project selection
+retains the Channel sender's existing field/value permissions and applies when
+the chat is idle. It also grants a private profile-specific mailbox directory
+for the sandboxed Channel CLI; it does not grant all of `/tmp`.
+
+Linux service-mode Channel and supplemental Codex CLI calls from a different
+PID namespace use an authenticated, encrypted, profile-scoped file mailbox
+when the Host advertises that capability. The sandbox must be allowed to write
+the mailbox directory. A read-only sandbox cannot use this writable transport;
+its Channel CLI remains unavailable unless an explicitly permitted transport is
+provided. A missing mailbox or old Host fails closed; an uncertain result must
+be reconciled rather than resent. Direct Host socket access remains the normal
+path outside that sandbox. Fresh continuation retains its existing
+confirmed configuration/cwd flow; native sidebar project membership inheritance
+has not been established by this change.
+
+For headless deployments with provider configuration external to the native
+model catalog, an operator can supply `CORDISX_HEADLESS_PROVIDER_ID` and
+`CORDISX_HEADLESS_MODEL_ID`, plus the optional pair
+`CORDISX_HEADLESS_EXTRA_PROVIDER` and comma-separated
+`CORDISX_HEADLESS_EXTRA_MODELS`. These variables declare the admitted IDs; they
+do not configure provider authentication or prove model capabilities. Only
+native catalog metadata establishes supported reasoning efforts. A loaded chat
+cannot switch providers through this path unless the underlying app-server
+supports and confirms that change; an unsupported switch is rejected.
+
+Codex 0.149.1 lacks paginated item readback. For that version's method-not-found
+response, final-message delivery reads the exact completed turn with
+`thread/read`. This compatibility path loads the complete thread and can hit
+transport limits for very long histories; other read errors do not trigger it.
 
 ## Fresh Channel continuation
 
