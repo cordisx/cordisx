@@ -42,11 +42,13 @@ it('mounts the existing Manager and an actual registered plugin page without a n
     expect(root.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
     const runtime = (dom.window as unknown as {
       __cordisxRuntime: {
+        pluginRegistryEpoch(): number
         snapshot(): { navigation: { outlets: readonly { id: string; available: boolean }[] } }
         dispose(): Promise<void>
       }
     }).__cordisxRuntime
     const outlets = runtime.snapshot().navigation.outlets
+    expect(runtime.pluginRegistryEpoch()).toBe(0)
     for (const id of ['app', 'main', 'session.content']) {
       expect(outlets.find(outlet => outlet.id === id)).toMatchObject({ id, available: false })
     }

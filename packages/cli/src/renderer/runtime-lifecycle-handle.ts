@@ -762,6 +762,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  pluginRegistryEpoch: () => runtimeScope.generationVisibility()!.registryEpoch(),
   releaseCertifiedPermissionChannel: () => {
     const channel = runtimeScope.certifiedPermissionChannel
     runtimeScope.certifiedPermissionChannel = undefined

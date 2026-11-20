@@ -544,6 +544,8 @@ export interface CordisXRuntimeHandle extends ManagerModel {
   authorizePluginV4(id: string, decision: CordisXPermissionAuthorizationDecisionV4): Promise<void>
   /** Host-private readback of the registry authority; never used as renderer lifecycle input. */
   activePluginGeneration(): CordisXPluginActivationRecordV1
+  /** Host-private registry readback for confirming an attached renderer's snapshot. */
+  pluginRegistryEpoch(): number
   /** Vite-only transfer of the document-scoped Certified channel across a same-document Host restart. */
   releaseCertifiedPermissionChannel():
     | import('./certified-permission-channel.js').CertifiedPermissionDocumentChannel
