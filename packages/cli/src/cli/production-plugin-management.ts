@@ -3,6 +3,7 @@ import type { TerminalProviderRequest, TerminalProviderResult } from '../launche
 import type { ModelExportRequest } from './model-export-parse.js'
 import type { CliModelExportResult } from '../launcher/model-catalog/cli-export.js'
 import type { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
+import type { RendererConfigOperation, RendererConfigResult } from '../launcher/renderer-config-management.js'
 import { openPluginManagementService } from '../management/service.js'
 import {
   type PluginManagementBridgeHandler,
@@ -28,6 +29,7 @@ export async function openProductionPluginManagementComposition(input: {
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -58,6 +60,7 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.terminalProvider === undefined ? {} : { terminalProvider: input.terminalProvider }),
       ...(input.channel === undefined ? {} : { channel: input.channel }),
       ...(input.codex === undefined ? {} : { codex: input.codex }),
+      ...(input.rendererConfiguration === undefined ? {} : { rendererConfiguration: input.rendererConfiguration }),
     })
   } catch (error) {
     service.close()

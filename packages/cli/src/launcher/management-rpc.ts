@@ -20,6 +20,11 @@ import type {
   PluginManagementSnapshot,
 } from '../management/contracts.js'
 import type { PluginManagementService } from '../management/service.js'
+import {
+  parseRendererConfigOperation,
+  type RendererConfigOperation,
+  type RendererConfigResult,
+} from './renderer-config-management.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -27,6 +32,7 @@ export const MAX_MANAGEMENT_REQUEST_BYTES = 256 * 1024
 const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
+  | RendererConfigOperation
   | { readonly kind: 'query' }
   | {
     readonly kind: 'codex'
@@ -136,6 +142,7 @@ export function parsePluginManagementRpcRequest(
   if (
     ![
       'query',
+      'plugin-configuration',
       'model-export',
       'terminal-provider',
       'channel',
@@ -148,6 +155,7 @@ export function parsePluginManagementRpcRequest(
       'migrate-legacy-sources',
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
+  if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
   if (operation.kind === 'terminal-provider') parseTerminalProviderRequest(operation.request)
   if (
     operation.kind === 'channel' && (typeof operation.operation !== 'string'
@@ -176,6 +184,7 @@ export async function handlePluginManagementRpcRequest(
 ): Promise<unknown> {
   const operation = request.operation
   if (operation.kind === 'terminal-provider') throw new Error('Terminal providers require the native catalog owner')
+  if (operation.kind === 'plugin-configuration') throw new Error('Plugin configuration requires the renderer owner')
   if (operation.kind === 'channel') throw new Error('Channel requires the configured runtime owner')
   if (operation.kind === 'codex') throw new Error('Codex requires the native runtime owner')
   if (operation.kind === 'model-export') throw new Error('Model export requires the native catalog owner')
@@ -245,6 +254,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly terminalProvider?: (request: TerminalProviderRequest) => Promise<TerminalProviderResult>
   readonly channel?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
   readonly codex?: (operation: string, input: unknown, metadata?: unknown) => Promise<unknown>
+  readonly rendererConfiguration?: (operation: RendererConfigOperation) => Promise<RendererConfigResult>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
@@ -263,7 +273,10 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'codex'
+    return request.operation.kind === 'plugin-configuration'
+      ? await (input.rendererConfiguration?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable', reason: 'renderer-unavailable' }))
+      : request.operation.kind === 'codex'
       ? await (input.codex?.(request.operation.operation, request.operation.input, {
         ...(request.operation.context ? { 'cordisx/channelContext': request.operation.context } : {}),
         ...(request.operation.callerThreadId ? { 'openai/threadId': request.operation.callerThreadId } : {}),

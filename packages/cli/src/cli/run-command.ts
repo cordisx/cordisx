@@ -722,6 +722,21 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
       channel: disposeChannel,
       providers: closeProviderFleet,
     })
+    const openManagement = () =>
+      openProductionPluginManagementComposition({
+        configPath,
+        homeDir: rootFromConfigPath(configPath),
+        appId,
+        profileId: selection.profileId,
+        runtimeGeneration: lifecycleGeneration,
+        token: pluginManagementToken,
+        coordinator: pluginLifecycleCoordinator,
+        rendererConfiguration: operation => lifecycleRuntime.pluginConfiguration(operation),
+        modelExport: nativeCatalogExport(() => nativeSubmission),
+        codex: nativeCodexOperations(() => nativeSubmission),
+        ...configuredChannelManagementToolHandler(channelTools),
+        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
+      })
     if (invocation.options.attach) {
       try {
         assertProductionGraphLaunchOwnership(true, rendererComposition.hasLoopbackGraph)
@@ -735,19 +750,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
         await disposeConfiguredLaunch()
         return
       }
-      productionPluginManagement = await openProductionPluginManagementComposition({
-        configPath,
-        homeDir: rootFromConfigPath(configPath),
-        appId,
-        profileId: selection.profileId,
-        runtimeGeneration: lifecycleGeneration,
-        token: pluginManagementToken,
-        coordinator: pluginLifecycleCoordinator,
-        modelExport: nativeCatalogExport(() => nativeSubmission),
-        codex: nativeCodexOperations(() => nativeSubmission),
-        ...configuredChannelManagementToolHandler(channelTools),
-        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
-      })
+      productionPluginManagement = await openManagement()
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
         await runHost({
@@ -887,19 +890,7 @@ async function runPreparedCordisXCli(prepared: PreparedRunCommand, runtime: Cord
           stdout,
         )
       }
-      productionPluginManagement = await openProductionPluginManagementComposition({
-        configPath,
-        homeDir: rootFromConfigPath(configPath),
-        appId,
-        profileId: selection.profileId,
-        runtimeGeneration: lifecycleGeneration,
-        token: pluginManagementToken,
-        coordinator: pluginLifecycleCoordinator,
-        modelExport: nativeCatalogExport(() => nativeSubmission),
-        codex: nativeCodexOperations(() => nativeSubmission),
-        ...configuredChannelManagementToolHandler(channelTools),
-        terminalProvider: startupTerminalRequests(startupSession.authority, () => nativeSubmission),
-      })
+      productionPluginManagement = await openManagement()
       stdout(`[cordisx] loopback CDP port: ${resolvedDebugPort}`)
       const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
       const runHostInput: Parameters<typeof runHost>[0] = {

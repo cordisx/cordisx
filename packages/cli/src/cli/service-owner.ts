@@ -14,6 +14,8 @@ import { ManagedCatalogComposition } from '../launcher/model-catalog/managed-cat
 import { resolveOwningPackageVersion } from '../launcher/package-version.js'
 import { createServicePluginRuntime } from '../launcher/service-plugin-runtime.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
+import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
+import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../launcher/marketplace-certified-authority.js'
 import type { CordisXCertifiedPermissionProjectionV1 } from '../permission-contracts.js'
 import { createProductionManagedServiceLifecycle } from './production-managed-services.js'
@@ -50,6 +52,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let managed: ManagedCatalogComposition | undefined
       let api: Awaited<ReturnType<typeof startServiceModelApi>> | undefined
       let management: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
+      let terminalProvider: ReturnType<typeof createServiceTerminalProvider> | undefined
       let channel: Awaited<ReturnType<typeof startHeadlessService>> | undefined
       let releaseRuntimeOwner: (() => Promise<void>) | undefined
       let certified: LauncherMarketplaceCertifiedAuthority | undefined
@@ -114,6 +117,10 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
         })
         const startup = await services.initialize(await store.bindRuntimeGeneration())
         await startup.coreReady
+        terminalProvider = createServiceTerminalProvider({
+          activation: services.nativeActivation(),
+          ...(managed === undefined ? {} : { managed }),
+        })
         lifetime.signal.removeEventListener('abort', stopServices)
         lifetime.signal.throwIfAborted()
         if (appId === 'codex') {
@@ -142,13 +149,18 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           mode: 'service',
+          terminalProvider: request => terminalProvider!.request(request),
           ...(channel?.channel === undefined
             ? {}
             : {
               channel: (operation: string, value: unknown, metadata?: unknown) =>
                 channel!.channel!.tools.callLocal(operation, value, metadata),
             }),
-          ...(channel === undefined ? {} : { codex: channel.codex }),
+          codex: channel?.codex ?? createHeadlessCodexOperations({
+            configPath,
+            environment,
+            closed: () => lifetime.signal.aborted,
+          }),
         })
         await supervisor.markServiceReady(api.baseUrl, lifetime.signal)
         diagnostic({ event: 'service-ready' })
@@ -161,6 +173,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           const close of [
             () => api?.close(),
             () => management?.close(),
+            () => terminalProvider?.close(),
             () => channel?.close(),
             () => services?.dispose(),
             () => managed?.close(),

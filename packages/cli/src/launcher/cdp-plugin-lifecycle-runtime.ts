@@ -28,6 +28,11 @@ import {
   refreshProductionGraphBootstraps,
 } from './production-graph-admission.js'
 import { CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
+import {
+  evaluateRendererConfig,
+  type RendererConfigOperation,
+  type RendererConfigResult,
+} from './renderer-config-management.js'
 
 function activationRecord(tuple: PackageActivationTuple): CordisXPluginActivationRecordV1 {
   return {
@@ -49,6 +54,7 @@ function mutationArtifactLeases(mutation: PluginRuntimeMutation): readonly Plugi
 
 type GenerationOwner =
   | { readonly kind: 'join'; readonly token: symbol; readonly session: CdpSession }
+  | { readonly kind: 'configuration'; readonly token: symbol }
   | {
     readonly kind: 'browser-graph-admission'
     readonly token: symbol
@@ -168,6 +174,33 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   currentRegistryEpoch(): number {
     return this.registryEpoch
+  }
+
+  /** A single admitted renderer owns schema validation and the configuration transaction. */
+  async pluginConfiguration(operation: RendererConfigOperation): Promise<RendererConfigResult> {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      return { status: 'unavailable', reason: 'renderer-busy' }
+    }
+    if (this.sessions.size !== 1) {
+      return { status: 'unavailable', reason: this.sessions.size === 0 ? 'renderer-unavailable' : 'renderer-ambiguous' }
+    }
+    const session = [...this.sessions][0]!
+    const token = Symbol('plugin-configuration')
+    this.generationOwner = { kind: 'configuration', token }
+    const mutation = operation.action === 'update' || operation.action === 'update-service'
+    try {
+      const result = await evaluateRendererConfig(session, operation)
+      if (!this.sessions.has(session)) {
+        return { status: mutation ? 'unknown' : 'unavailable', reason: 'renderer-disconnected' }
+      }
+      return result
+    } catch {
+      return { status: mutation ? 'unknown' : 'unavailable', reason: 'renderer-operation-failed' }
+    } finally {
+      if (this.generationOwner?.kind === 'configuration' && this.generationOwner.token === token) {
+        this.generationOwner = undefined
+      }
+    }
   }
 
   setBrowserGraphAdmission(admission: BrowserGraphAdmission | undefined): void {
