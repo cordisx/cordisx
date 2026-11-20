@@ -55,7 +55,12 @@ pages, specialized credential entry, and service configuration without an
 active renderer are not yet equivalent to the existing Manager; their absence is
 not reported as a successful edit. Service configuration is an advanced JSON
 editor limited to known fields in projected schemas; it does not support unknown
-fields, secret values, or array insertions/deletions.
+fields, secret values, or array insertions/deletions. For active managed plugin
+services that expose explicit login, the user may initiate the existing Host
+background login flow. That process does not expose its standard streams, so
+login methods needing terminal input or a displayed terminal code are not
+supported here. A synthetic service verifies the bridge; a real Aiden login is
+not yet verified.
 
 Model-service changes retain the current Host's app-restart apply semantics.
 Environment variables may be read dynamically by other clients or plugins, so

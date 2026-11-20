@@ -634,6 +634,7 @@ function managedServiceMessage(result) {
     LOGIN_UNAVAILABLE: '此服务当前不能登录。',
     LEASE_UNAVAILABLE: '登录准备已过期，请重新查看服务状态。',
     LEASE_LIMIT: '登录准备数量已达上限，请稍后重新查看状态。',
+    SESSION_CAPACITY: '登录会话安全容量已满；请稍后重新查看状态。',
     LOGIN_NOT_ACCEPTED: '插件未接受登录请求，请查看服务状态。',
   }
   return codes[result?.code] ?? '插件服务登录暂不可用，请查看服务状态。'
@@ -664,7 +665,7 @@ async function loginManagedService(item) {
       }
       message(
         result.status === 'accepted'
-          ? '插件已接受登录请求，请按插件提示完成并刷新状态核对。'
+          ? '插件已接受登录请求，请刷新状态核对。'
           : managedServiceMessage(result),
       )
     })
@@ -687,8 +688,22 @@ async function refreshManagedServices() {
     return
   }
   if (!result.services.length) target.append(node('p', '当前后台没有已激活的插件服务。', 'muted'))
-  const authStates = { authenticated: '已登录', missing: '未登录', 'logged-out': '已退出' }
-  const readiness = { starting: '启动中', ready: '服务就绪', stopped: '已停止', failed: '服务异常' }
+  const authStates = {
+    authenticated: '已登录',
+    authenticating: '登录中',
+    missing: '未登录',
+    expired: '登录已过期',
+    failed: '登录失败',
+    'logged-out': '已退出',
+  }
+  const readiness = {
+    starting: '启动中',
+    ready: '服务就绪',
+    degraded: '服务异常',
+    stopping: '停止中',
+    stopped: '已停止',
+    failed: '服务异常',
+  }
   for (const item of result.services) {
     const serviceKey = `${item.pluginId}\u0000${item.serviceId}`
     const card = node('article', undefined, 'card row')
