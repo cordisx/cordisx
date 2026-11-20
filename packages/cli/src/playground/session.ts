@@ -117,6 +117,8 @@ export interface PlaygroundSession {
 export interface PlaygroundSessionOptions {
   /** Explicit external isolated home. The caller, not the session, owns its lifecycle. */
   readonly homeDir?: string
+  /** Isolated Manager-only presentation; it does not attach a real profile. */
+  readonly managerPresentationMode?: 'standalone'
   /** Host-private signal used to invalidate a cached Playground composition after a durable config commit. */
   readonly onEffectiveConfigCommitted?: (commit: PlaygroundEffectiveConfigCommit) => void
 }
@@ -591,6 +593,9 @@ export async function createPlaygroundSession(
   }
   const rendererOptions = (generation: PlaygroundGeneration) => ({
     playground: true as const,
+    ...(options.managerPresentationMode === undefined
+      ? {}
+      : { managerPresentationMode: options.managerPresentationMode }),
     generation: generation.generation,
     configBridgeToken: generation.token,
     playgroundAgentSessionStoreToken: generation.agentSessionStoreToken,

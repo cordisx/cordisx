@@ -1,0 +1,62 @@
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
+import type { ManagerModel } from '../manager.js'
+import type { PluginManagementBinding } from '../management-binding.js'
+import { HostThemeProjection } from '../host-theme.js'
+import { ManagerApp } from './ManagerApp.js'
+import { createManagerMarketplaceStore } from './model/marketplace-store.js'
+import type { HostManagerNavigationController } from './navigation-controller.js'
+import { REACT_MANAGER_STYLES } from './styles.js'
+import standaloneStyle from './manager-standalone.css?inline'
+
+/** Mount the same Manager and plugin-owned page seats without a native application anchor. */
+export function installStandaloneManager(document: Document, model: ManagerModel, options: {
+  readonly navigationController?: HostManagerNavigationController
+  readonly pluginManagement?: PluginManagementBinding
+} = {}): () => void {
+  const rootSeat = document.createElement('div')
+  rootSeat.className = 'cxr-root'
+  rootSeat.dataset.cordisxReactManager = 'true'
+  rootSeat.dataset.managerSurface = 'standalone'
+  const triggerSeat = document.createElement('span')
+  const style = document.createElement('style')
+  style.id = 'cordisx-react-manager-style'
+  style.textContent = `${REACT_MANAGER_STYLES}\n${standaloneStyle}`
+  ;(document.head ?? document.documentElement).append(style)
+  ;(document.body ?? document.documentElement).append(rootSeat)
+  const theme = new HostThemeProjection(document)
+  const detachTheme = theme.attach(rootSeat)
+  const marketplace = createManagerMarketplaceStore(document, options.pluginManagement)
+  const root = createRoot(rootSeat)
+  let disposed = false
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    root.unmount()
+    marketplace.dispose()
+    detachTheme()
+    theme.dispose()
+    rootSeat.remove()
+    style.remove()
+  }
+  try {
+    flushSync(() =>
+      root.render(
+        <ManagerApp
+          model={model}
+          marketplace={marketplace.model}
+          triggerSeat={triggerSeat}
+          presentationMode="standalone"
+          {...(options.navigationController === undefined
+            ? {}
+            : { navigationController: options.navigationController })}
+          {...(options.pluginManagement === undefined ? {} : { pluginManagement: options.pluginManagement })}
+        />,
+      )
+    )
+  } catch (error) {
+    dispose()
+    throw error
+  }
+  return dispose
+}

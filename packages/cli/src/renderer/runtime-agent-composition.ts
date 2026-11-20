@@ -871,7 +871,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
     runtimeScope.disposeManager = installReactCordisXManager(document, runtimeScope.managerModel()!, {
       navigationController: runtimeScope.managerNavigationController()!,
       nativeRouteHistory: new CodexNativeRouteObserver(document, runtimeScope.routeHistory()!),
-      presentationMode: runtimeScope.metadata()!.managerPresentationMode === 'workspace' ? 'workspace' : 'overlay',
+      presentationMode: runtimeScope.metadata()!.managerPresentationMode ?? 'overlay',
       ...(runtimeScope.metadata()!.nativeAppVersion === undefined
         ? {}
         : { nativeAppVersion: runtimeScope.metadata()!.nativeAppVersion! }),

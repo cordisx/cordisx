@@ -445,7 +445,7 @@ export interface ManagerAppProps {
   readonly registerPaneLoss?: (handler: () => void) => void
   readonly nativeRouteHistory?: NativeRouteSource
   /** Host-owned presentation; workspace keeps its mounted route and draft while native navigation is active. */
-  readonly presentationMode?: 'overlay' | 'workspace'
+  readonly presentationMode?: 'overlay' | 'workspace' | 'standalone'
   readonly setWorkspaceVisible?: (visible: boolean) => void
 }
 
@@ -505,6 +505,7 @@ export function ManagerApp(
     setWorkspaceVisible,
   }: ManagerAppProps,
 ) {
+  const standaloneMode = presentationMode === 'standalone'
   const snapshot = useManagerSnapshot(model)
   const management = usePluginManagementSnapshot(pluginManagement)
   const notificationCenter = notificationCenterForDocument(triggerSeat.ownerDocument)
@@ -518,15 +519,17 @@ export function ManagerApp(
   useEffect(() => () => unavailableFeedback?.dispose(), [unavailableFeedback])
   const playgroundStorage = useMemo(
     () =>
-      triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null
+      standaloneMode || triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null
         ? undefined
         : triggerSeat.ownerDocument.defaultView?.sessionStorage,
-    [triggerSeat],
+    [standaloneMode, triggerSeat],
   )
   const router = useManagerRouter(playgroundStorage)
   const workspaceMode = presentationMode === 'workspace' && playgroundStorage === undefined
     && activatePane !== undefined
-  const [open, setOpen] = useState(() => playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true')
+  const [open, setOpen] = useState(() =>
+    standaloneMode || playgroundStorage?.getItem('cordisx.playground.manager.open.v1') === 'true'
+  )
   const [workspaceVisited, setWorkspaceVisited] = useState(false)
   const [surface, setSurface] = useState<'pane' | 'modal'>('modal')
   const [seatUnavailable, setSeatUnavailable] = useState(false)
@@ -587,6 +590,7 @@ export function ManagerApp(
     }
   }
   const closeManager = (restoreFocus = true) => {
+    if (standaloneMode) return
     workspaceActivation.cancel()
     restoreTriggerFocus.current = restoreFocus
     setOpen(false)
@@ -636,7 +640,7 @@ export function ManagerApp(
   useLayoutEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (!workspaceMode && event.key === 'Escape' && !event.defaultPrevented) closeManager()
+      if (!standaloneMode && !workspaceMode && event.key === 'Escape' && !event.defaultPrevented) closeManager()
     }
     const disposeRouteObserver = surface === 'pane' && !workspaceMode && nativeRouteHistory !== undefined
       ? observeNativeRouteTransition(nativeRouteHistory, () => flushSync(() => closeManager(false)))
@@ -651,7 +655,7 @@ export function ManagerApp(
       disposeRouteObserver()
       disposeRailObserver()
     }
-  }, [nativeRouteHistory, open, surface, triggerSeat, workspaceMode])
+  }, [nativeRouteHistory, open, standaloneMode, surface, triggerSeat, workspaceMode])
   useLayoutEffect(() => {
     if (!workspaceMode) return
     return observeNativeRailActivation(triggerSeat.ownerDocument, () => {
@@ -769,7 +773,7 @@ export function ManagerApp(
             && modelServicesSecondaryPage === undefined
           ? <ChatCreationDefaultsAction router={router} locale={snapshot.localization.locale} />
           : null}
-        {!workspaceMode && surface === 'modal'
+        {!standaloneMode && !workspaceMode && surface === 'modal'
           ? (
             <Button
               className="cxr-titlebar-action"
@@ -786,7 +790,7 @@ export function ManagerApp(
   )
   return (
     <ConfigProvider globalConfig={{ attach }}>
-      {playgroundStorage === undefined
+      {standaloneMode ? null : playgroundStorage === undefined
         ? createPortal(
           <Button
             className="cxr-trigger"
@@ -833,21 +837,21 @@ export function ManagerApp(
       {open || (workspaceMode && workspaceVisited)
         ? (
           <div
-            className={surface === 'pane' ? 'cxr-pane-layer' : 'cxr-backdrop'}
+            className={standaloneMode ? 'cxr-standalone-layer' : surface === 'pane' ? 'cxr-pane-layer' : 'cxr-backdrop'}
             data-cordisx-manager-pane={open && surface === 'pane' ? 'true' : undefined}
-            data-cordisx-manager-modal={open && surface === 'modal' ? 'true' : undefined}
+            data-cordisx-manager-modal={open && surface === 'modal' && !standaloneMode ? 'true' : undefined}
             data-cordisx-manager-workspace={workspaceMode ? 'true' : undefined}
             aria-hidden={open ? undefined : true}
             inert={!open}
             style={open ? undefined : { display: 'none' }}
             onMouseDown={event => {
-              if (surface === 'modal' && event.target === event.currentTarget) closeManager()
+              if (!standaloneMode && surface === 'modal' && event.target === event.currentTarget) closeManager()
             }}
           >
             <section
               className={surface === 'pane' ? 'cxr-pane-shell' : 'cxr-dialog'}
-              role={surface === 'modal' ? 'dialog' : undefined}
-              aria-modal={surface === 'modal' ? 'true' : undefined}
+              role={surface === 'modal' && !standaloneMode ? 'dialog' : undefined}
+              aria-modal={surface === 'modal' && !standaloneMode ? 'true' : undefined}
               aria-label={managerCopy(snapshot.localization.locale, 'manager.dialog')}
             >
               {surface === 'modal'

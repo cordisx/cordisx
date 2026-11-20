@@ -23,7 +23,7 @@ export interface BuildRendererBundleOptions {
   /** Use only explicit CordisX Playground seats; never inspect Codex DOM. */
   readonly playground?: boolean
   /** Host-private preview mode; normal launches retain the overlay presentation. */
-  readonly managerPresentationMode?: 'workspace'
+  readonly managerPresentationMode?: 'workspace' | 'standalone'
   readonly nativeAppVersion?: string
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
@@ -382,6 +382,9 @@ export async function buildRendererCompositionSource(
   if (options.playgroundSessionScenarios !== undefined && options.playground !== true) {
     throw new Error('Playground Session scenarios are available only in the explicit UI Playground')
   }
+  if (options.managerPresentationMode === 'standalone' && options.playground !== true) {
+    throw new Error('Standalone Manager runtime is not yet available outside the isolated UI Playground')
+  }
   const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${
     JSON.stringify(config.rootDir)
   }, executionPlatform: ${
@@ -389,7 +392,9 @@ export async function buildRendererCompositionSource(
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${
     JSON.stringify(permission.policies)
   }${options.playground === true ? ', hostKind: "playground"' : ''}${
-    options.managerPresentationMode === 'workspace' ? ', managerPresentationMode: "workspace"' : ''
+    options.managerPresentationMode === undefined
+      ? ''
+      : `, managerPresentationMode: ${JSON.stringify(options.managerPresentationMode)}`
   }${options.nativeAppVersion === undefined ? '' : `, nativeAppVersion: ${JSON.stringify(options.nativeAppVersion)}`}${
     config.codex.agentLoopBackend === 'mock' ? `, agentLoopBackend: "mock"` : ''
   }${options.appId === undefined ? '' : `, appId: ${JSON.stringify(options.appId)}`}${

@@ -301,7 +301,7 @@ export interface CordisXRuntimeMetadata {
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
   /** Host-only presentation preview; never exposed through plugin Contexts. */
-  readonly managerPresentationMode?: 'workspace'
+  readonly managerPresentationMode?: 'workspace' | 'standalone'
   /** Trusted launcher readback of the selected App Info.plist; never plugin supplied. */
   readonly nativeAppVersion?: string
   readonly executionPlatform: 'posix' | 'win32'
