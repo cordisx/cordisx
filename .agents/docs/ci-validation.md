@@ -10,14 +10,16 @@ paths and both sides of renames, using NUL-delimited paths. Empty diffs or a
 failed scope job retain the full gate. `scripts/test-ci-scope.mjs` exercises real
 Git diffs and guards the complete command sequence without installing dependencies.
 
-- Host guides under `.agents/docs` use changed-file quality checks. Maintenance
-  rules and root contributor instructions still trigger the full gate.
-- Plugin-development Skill Markdown, `version.json`, and `agents/openai.yaml`
-  use changed-file quality checks plus `skill-package`: build the CLI dependency
-  closure and run the existing tarball contents/deployment check. This verifies
-  required files, source/bundle/tarball equality, provenance, and deployed content.
-  Added executable Skill assets retain the full gate. Mixed code/Skill changes
-  retain the code gate as well as the Skill package check unless full already covers it.
+- Host guides, maintenance rules and root contributor Markdown use changed-file
+  quality checks.
+- Bundled Skill Markdown, `version.json`, and `agents/openai.yaml` use changed-file
+  quality checks plus the existing package/installed checks. Preparation builds
+  every distributable workspace because package validation covers both Host and
+  Creator; a CLI-only artifact would omit Creator's `dist/cli.js`. The Host
+  tarball contents/deployment check verifies required files, source/bundle/tarball
+  equality, provenance and deployed content. Added executable Skill assets retain
+  the full gate. Mixed code/Skill changes retain the code gate as well as Skill
+  package checks.
 - Ordinary code uses affected typecheck, build, and dependency-related tests.
   Permission, data, lifecycle, native/launcher, dependencies, packaging, CI,
   and shared compiler/test/quality configuration retain the full owner gate.

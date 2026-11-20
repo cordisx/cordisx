@@ -24,8 +24,10 @@ Normalize TDesign events at the adapter boundary. Do not store a `CustomEvent` o
 
 ## Actions
 
-- Keep unsaved status and form actions in a lightweight sticky bar above the scrolling fields.
+- Durable Manager create/edit workflows use a child page with the shared schema renderer. The owning Host page keeps Save/Cancel at the bottom of the entire content seat while fields scroll independently; only the current page footer is visible.
+- Embedded public `SchemaForm` does not own an outer footer or scroll seat. Use the declared public surface for actions; do not import internal `HostSchemaFormPage` or patch Host DOM.
+- Short confirmations use public Host dialogs. Choose the surface using [Manager form composition](https://github.com/cordisx/cordisx/blob/main/.agents/docs/manager-form-composition.md).
 - Do not wrap the action bar in a second card or duplicate form gap, margin, and padding.
-- Use same-size icon-only undo and save actions with tooltip and accessible names when their meanings are familiar.
+- In compact toolbars, use same-size icon-only undo/save actions with tooltip and accessible names when familiar. Page Save/Cancel footers follow the owning Host surface action descriptors.
 - Put field-specific reset, rollback, copy-path, and similar actions behind a compact More button in the field header.
 - Defaults are a schema authoring contract; do not add per-field reset buttons merely to make a gallery screenshot look busy.
