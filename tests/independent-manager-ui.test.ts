@@ -134,6 +134,106 @@ it('requires an explicit choice and confirmation for every permission and preser
   }
 })
 
+it('does not retry or report approval when a permission review is busy', async () => {
+  let submissions = 0
+  const plan = {
+    schemaVersion: 4,
+    planId: 'plan',
+    operation: 'enable',
+    profileId: 'fixture',
+    identity: { source: 'https://example.test/plugin', pluginId: 'sample' },
+    binding: {},
+    declarations: [{
+      capability: 'network.http',
+      required: true,
+      decisionRequired: true,
+      scope: { origins: ['https://example.test'] },
+      securityFingerprint: `sha256:${'a'.repeat(64)}`,
+      allowedDecisions: ['allow-once'],
+    }],
+  }
+  const { window, dom } = await mountManager((route) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/management') {
+      return {
+        status: 'permission-review-required',
+        permissionPlan: plan,
+        snapshot: { activationRevision: 3 },
+      }
+    }
+    if (route === '/api/permission-review') {
+      submissions++
+      return { status: 'rejected', reason: 'review-busy' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '启用')!.click()
+    await vi.waitFor(() => expect(window.document.querySelector('dialog[open]')).not.toBeNull())
+    const dialog = window.document.querySelector('dialog')!
+    dialog.querySelector('select')!.value = 'allow-once'
+    ;[...dialog.querySelectorAll('button')].find(button => button.textContent === '提交审核')!.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('正在进行'))
+    expect(submissions).toBe(1)
+    expect(window.document.getElementById('message')!.textContent).not.toContain('已保存')
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('starts a plugin login only after a user action and fences an uncertain result', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const service = {
+    status: 'available',
+    pluginId: 'aiden',
+    serviceId: 'gateway',
+    pluginGeneration: 'generation',
+    bindingId: 'binding',
+    sequence: 4,
+    authState: 'missing',
+    readiness: 'stopped',
+    explicitLogin: true,
+    canLogin: true,
+  }
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/managed-services') {
+      requests.push(input)
+      if (input.action === 'list') return { status: 'available', services: [service] }
+      if (input.action === 'view') return service
+      if (input.action === 'prepare-login') return { status: 'prepared', leaseId: 'lease', expiresAt: 'later' }
+      if (input.action === 'login') return { status: 'unknown', code: 'LOGIN_RESULT_UNKNOWN' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    await vi.waitFor(() => expect(window.document.getElementById('managed-services')!.textContent).toContain('aiden'))
+    expect(requests.map(request => request.action)).toEqual(['list'])
+    ;[...window.document.querySelectorAll('#managed-services button')].find(button => button.textContent === '登录')!
+      .click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('结果不确定'))
+    await vi.waitFor(() =>
+      expect(window.document.getElementById('managed-services')!.textContent).toContain('上次登录结果未知')
+    )
+    expect(requests.filter(request => request.action === 'login')).toEqual([{ action: 'login', leaseId: 'lease' }])
+    expect(requests.find(request => request.action === 'prepare-login')).toMatchObject({
+      pluginId: 'aiden',
+      serviceId: 'gateway',
+      pluginGeneration: 'generation',
+      bindingId: 'binding',
+    })
+    const login = [...window.document.querySelectorAll<HTMLButtonElement>('#managed-services button')]
+      .find(button => button.textContent === '登录')!
+    expect(login.disabled).toBe(true)
+    login.click()
+    expect(requests.filter(request => request.action === 'login')).toHaveLength(1)
+  } finally {
+    dom.window.close()
+  }
+})
+
 it('confirms before one plugin editor discards another unsaved editor', async () => {
   const calls: string[] = []
   const descriptor = {
@@ -205,7 +305,8 @@ it('keeps another plugin draft while saving and refreshing the first one', async
   const both = base()
   both.management.plugins.push({ id: 'second', name: 'Second', status: 'disabled', enabled: false })
   both.rendererPlugins.plugins.push({ id: 'second', name: 'Second', status: 'disabled', writable: true })
-  const { window, dom } = await mountManager((route, input) => {
+  let release: (() => void) | undefined
+  const { window, dom } = await mountManager(async (route, input) => {
     if (route === '/api/session') return { token: 'session' }
     if (route === '/api/state') return both
     if (route === '/api/plugin-configuration' && input.action === 'read') {
@@ -221,7 +322,12 @@ it('keeps another plugin draft while saving and refreshing the first one', async
       }
     }
     if (route === '/api/plugin-configuration' && input.action === 'services') return { status: 'ok', services: [] }
-    if (route === '/api/plugin-configuration' && input.action === 'update') return { status: 'ok' }
+    if (route === '/api/plugin-configuration' && input.action === 'update') {
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+      return { status: 'ok' }
+    }
     return { status: 'unavailable' }
   })
   try {
@@ -236,6 +342,10 @@ it('keeps another plugin draft while saving and refreshing the first one', async
       field.dispatchEvent(new window.Event('input', { bubbles: true }))
     })
     ;[...cards[0]!.querySelectorAll('button')].find(button => button.textContent === '保存插件配置')!.click()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    expect(fields[0]!.disabled).toBe(true)
+    expect(fields[1]!.disabled).toBe(false)
+    release!()
     await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('已保存'))
     window.document.getElementById('refresh')!.click()
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -279,8 +389,6 @@ it('never submits an unavailable read as an empty service list and freezes pendi
     return { status: 'unavailable' }
   })
   try {
-    const name = window.document.querySelector<HTMLInputElement>('#models input[value]')!
-    // JSDOM's value property is set by the application; select the name by label.
     const inputs = window.document.querySelectorAll<HTMLInputElement>('#models input')
     inputs[1]!.value = 'Renamed'
     inputs[1]!.dispatchEvent(new window.Event('input', { bubbles: true }))
@@ -298,7 +406,6 @@ it('never submits an unavailable read as an empty service list and freezes pendi
     await vi.waitFor(() => expect(window.document.getElementById('models')!.textContent).toContain('Renamed'))
     expect((await readModelServices(configPath, {}) as { services: Array<{ displayName: string }> }).services)
       .toEqual([expect.objectContaining({ displayName: 'Renamed' })])
-    expect(name).toBeDefined()
   } finally {
     dom.window.close()
     await rm(directory, { recursive: true, force: true })

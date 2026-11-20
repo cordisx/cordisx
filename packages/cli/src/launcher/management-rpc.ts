@@ -446,6 +446,7 @@ export async function requestPluginManagementRpc(
   paths: PluginManagementRpcPaths,
   endpoint: PluginManagementRpcEndpoint,
   operation: PluginManagementRpcOperation,
+  options: { readonly timeoutMs?: number } = {},
 ): Promise<unknown> {
   const requestId = `management-${randomBytes(12).toString('hex')}`
   return await new Promise((resolve, reject) => {
@@ -459,7 +460,10 @@ export async function requestPluginManagementRpc(
       operation()
     }
     // Executing an install/update can download and stage a large package.
-    const deadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const normalDeadline = operation.kind === 'execute' ? 180_000 : 60_000
+    const deadline = options.timeoutMs === undefined || !Number.isFinite(options.timeoutMs)
+      ? normalDeadline
+      : Math.max(1, Math.min(normalDeadline, options.timeoutMs))
     const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), deadline)
     socket.setEncoding('utf8')
     socket.once('error', error => settle(() => reject(error)))

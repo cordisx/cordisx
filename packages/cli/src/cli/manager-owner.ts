@@ -63,7 +63,10 @@ export async function openManagerOwner(profile?: string, env: NodeJS.ProcessEnv 
       return current?.generation === endpoint.generation && current.token === endpoint.token
         && await processIdentityStatus(endpoint.pid, endpoint.processStartedAt) === 'alive'
     },
-    async request(operation: PluginManagementRpcOperation): Promise<unknown> {
+    async request(
+      operation: PluginManagementRpcOperation,
+      options?: { readonly timeoutMs?: number },
+    ): Promise<unknown> {
       const current = await readPluginManagementRpcEndpoint(paths)
       if (!current || current.generation !== endpoint.generation || current.token !== endpoint.token) {
         throw new Error('MANAGER_OWNER_CHANGED')
@@ -71,7 +74,7 @@ export async function openManagerOwner(profile?: string, env: NodeJS.ProcessEnv 
       if (await processIdentityStatus(endpoint.pid, endpoint.processStartedAt) !== 'alive') {
         throw new Error('MANAGER_OWNER_UNAVAILABLE')
       }
-      return await requestPluginManagementRpc(paths, endpoint, operation)
+      return await requestPluginManagementRpc(paths, endpoint, operation, options)
     },
   }
 }

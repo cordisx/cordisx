@@ -24,6 +24,8 @@ let modelDirty = false
 let modelRevision
 let modelsSaving = false
 let modelResultUnknown = false
+let managedServiceLoginBusy = false
+const uncertainManagedServices = new Set()
 // Keep unrelated editors mounted while any of them has an unsaved draft.
 const pluginDrafts = new Set()
 
@@ -619,6 +621,106 @@ async function searchCatalog(query = '') {
   }
 }
 
+function managedServiceMessage(result) {
+  if (result?.status === 'unknown' || result?.code === 'LOGIN_RESULT_UNKNOWN') {
+    return '登录结果不确定，请刷新状态核对；不要直接重试。'
+  }
+  const codes = {
+    OWNER_UNAVAILABLE: '后台不可用，请检查对应 Host。',
+    SESSION_RETIRED: '管理会话已失效，请重新打开管理台。',
+    STALE_GENERATION: '服务实例已变化，请刷新状态后重新选择。',
+    STALE_REVISION: '服务状态已变化，请刷新后重新确认。',
+    SERVICE_UNAVAILABLE: '插件服务当前不可用。',
+    LOGIN_UNAVAILABLE: '此服务当前不能登录。',
+    LEASE_UNAVAILABLE: '登录准备已过期，请重新查看服务状态。',
+    LEASE_LIMIT: '登录准备数量已达上限，请稍后重新查看状态。',
+    LOGIN_NOT_ACCEPTED: '插件未接受登录请求，请查看服务状态。',
+  }
+  return codes[result?.code] ?? '插件服务登录暂不可用，请查看服务状态。'
+}
+
+async function loginManagedService(item) {
+  if (managedServiceLoginBusy) return
+  const serviceKey = `${item.pluginId}\u0000${item.serviceId}`
+  if (uncertainManagedServices.has(serviceKey)) return
+  managedServiceLoginBusy = true
+  try {
+    await whileControlsFrozen(element('managed-service-auth'), async () => {
+      const target = { pluginId: item.pluginId, serviceId: item.serviceId }
+      const view = await api('/api/managed-services', { action: 'view', ...target })
+      if (view.status !== 'available' || view.explicitLogin !== true || view.canLogin !== true) {
+        return message(managedServiceMessage(view))
+      }
+      const prepared = await api('/api/managed-services', {
+        action: 'prepare-login',
+        ...target,
+        pluginGeneration: view.pluginGeneration,
+        bindingId: view.bindingId,
+      })
+      if (prepared.status !== 'prepared') return message(managedServiceMessage(prepared))
+      const result = await api('/api/managed-services', { action: 'login', leaseId: prepared.leaseId })
+      if (result.status === 'unknown' || result.code === 'LOGIN_RESULT_UNKNOWN') {
+        uncertainManagedServices.add(serviceKey)
+      }
+      message(
+        result.status === 'accepted'
+          ? '插件已接受登录请求，请按插件提示完成并刷新状态核对。'
+          : managedServiceMessage(result),
+      )
+    })
+  } catch {
+    uncertainManagedServices.add(serviceKey)
+    message('登录结果不确定，请刷新状态核对；不要直接重试。')
+  } finally {
+    managedServiceLoginBusy = false
+    await refreshManagedServices().catch(() => undefined)
+  }
+}
+
+async function refreshManagedServices() {
+  if (managedServiceLoginBusy) return
+  const target = element('managed-services')
+  const result = await api('/api/managed-services', { action: 'list' })
+  target.replaceChildren()
+  if (result.status !== 'available' || !Array.isArray(result.services)) {
+    target.append(node('p', '插件服务状态暂不可用。', 'muted'))
+    return
+  }
+  if (!result.services.length) target.append(node('p', '当前后台没有已激活的插件服务。', 'muted'))
+  const authStates = { authenticated: '已登录', missing: '未登录', 'logged-out': '已退出' }
+  const readiness = { starting: '启动中', ready: '服务就绪', stopped: '已停止', failed: '服务异常' }
+  for (const item of result.services) {
+    const serviceKey = `${item.pluginId}\u0000${item.serviceId}`
+    const card = node('article', undefined, 'card row')
+    const details = node('div')
+    details.append(node('strong', `${item.pluginId} / ${item.serviceId}`))
+    details.append(node(
+      'p',
+      item.status === 'available'
+        ? `${authStates[item.authState] ?? '登录状态未知'} · ${readiness[item.readiness] ?? '服务状态未知'}`
+        : '服务状态不可用',
+      'muted',
+    ))
+    const actions = node('div', undefined, 'actions')
+    if (uncertainManagedServices.has(serviceKey)) {
+      details.append(node('p', '上次登录结果未知，请先核对服务状态。', 'muted'))
+      actions.append(button('已核对状态', async () => {
+        if (!confirm('确认已检查插件服务状态，并决定允许再次发起登录？')) return
+        uncertainManagedServices.delete(serviceKey)
+        await refreshManagedServices()
+      }))
+    }
+    actions.append(button(
+      '登录',
+      () => loginManagedService(item),
+      uncertainManagedServices.has(serviceKey)
+        || item.status !== 'available' || item.explicitLogin !== true || item.canLogin !== true,
+    ))
+    card.append(details, actions)
+    target.append(card)
+  }
+}
+
 async function refresh(clearMessage = true) {
   if (clearMessage) message('')
   snapshot = await api('/api/state')
@@ -642,6 +744,9 @@ async function refresh(clearMessage = true) {
   }
   if (!pluginDrafts.size) renderPlugins(snapshot.management, snapshot.rendererPlugins)
   renderSources(snapshot.management)
+  await refreshManagedServices().catch(() => {
+    element('managed-services').replaceChildren(node('p', '插件服务状态暂不可用。', 'muted'))
+  })
 }
 element('refresh').addEventListener('click', () => refresh().catch(() => message('连接失败，请重新打开管理台。')))
 element('models').addEventListener('input', () => {
@@ -705,5 +810,8 @@ element('market-search').addEventListener('submit', event => {
 })
 element('refresh-catalog').addEventListener('click', () => {
   void api('/api/catalog', { action: 'refresh' }).then(() => searchCatalog()).catch(() => message('无法刷新插件目录。'))
+})
+element('refresh-managed-services').addEventListener('click', () => {
+  void refreshManagedServices().catch(() => message('插件服务状态暂不可用。'))
 })
 refresh().catch(() => message('无法连接管理后台。请确认入口来自当前的 CordisX 进程。'))

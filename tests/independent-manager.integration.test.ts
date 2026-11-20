@@ -1,6 +1,6 @@
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
-import { connect } from 'node:net'
+import { connect, createServer as createSocketServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -18,12 +18,84 @@ import { openManagerBrowser } from '../packages/cli/src/cli/manager-command.js'
 import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
 import { createCodexModelServices } from '../packages/cli/src/launcher/codex-model-services.js'
-import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
+import {
+  requestPluginManagementRpc,
+  startPluginManagementRpcServer,
+} from '../packages/cli/src/launcher/management-rpc.js'
 import { openPluginManagementService } from '../packages/cli/src/management/service.js'
 
 const exec = promisify(execFile)
 
 describe('independent manager production boundaries', () => {
+  it('bounds cleanup calls when an owner accepts a connection but never responds', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-timeout-'))
+    const socketPath = path.join(directory, 'owner.sock')
+    const server = createSocketServer(socket => {
+      socket.on('data', () => undefined)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(socketPath, resolve)
+    })
+    try {
+      await expect(requestPluginManagementRpc(
+        { socket: socketPath } as Parameters<typeof requestPluginManagementRpc>[0],
+        { token: 'test', profileId: 'fixture' } as Parameters<typeof requestPluginManagementRpc>[1],
+        { kind: 'query' },
+        { timeoutMs: 25 },
+      )).rejects.toThrow('timed out')
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()))
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('scopes managed-service authentication to server-generated browser sessions and retires evictions', async () => {
+    const operations: Array<Record<string, unknown>> = []
+    const web = await startManagerWeb(
+      {
+        appId: 'codex',
+        profileId: 'fixture',
+        generation: 'generation',
+        isCurrent: async () => true,
+        request: async (operation: Record<string, unknown>) => {
+          operations.push(operation)
+          return operation.action === 'retire' ? { status: 'retired' } : { status: 'available', services: [] }
+        },
+      } as unknown as Parameters<typeof startManagerWeb>[0],
+    )
+    const origin = new URL(web.url).origin
+    const post = async (route: string, value: unknown, token?: string) =>
+      await fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: { origin, 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(value),
+      })
+    const exchange = async (url: string) => {
+      const response = await post('/api/session', { token: new URL(url).hash.slice(1) })
+      return (await response.json() as { token: string }).token
+    }
+    try {
+      const first = await exchange(web.url)
+      expect((await post('/api/managed-services', { action: 'list', sessionId: 'forged' }, first)).status).toBe(400)
+      expect(await (await post('/api/managed-services', { action: 'list' }, first)).json())
+        .toEqual({ status: 'available', services: [] })
+      const sessionId = operations[0]!.sessionId
+      expect(sessionId).toMatch(/^[a-f0-9]{64}$/u)
+      expect(sessionId).not.toBe(first)
+      let last = ''
+      for (let index = 0; index < 16; index++) last = await exchange(web.issueUrl())
+      expect(operations).toContainEqual({ kind: 'manager-service-auth', action: 'retire', sessionId })
+      expect((await post('/api/managed-services', { action: 'list' }, first)).status).toBe(401)
+      expect((await post('/api/managed-services', { action: 'list' }, last)).status).toBe(200)
+      const lastId = operations.at(-1)!.sessionId
+      await web.close()
+      expect(operations).toContainEqual({ kind: 'manager-service-auth', action: 'retire', sessionId: lastId })
+    } finally {
+      await web.close().catch(() => undefined)
+    }
+  })
+
   it('keeps credentials out of the child and fences PID reuse', async () => {
     const environment = managerChildEnvironment({
       HOME: '/user',

@@ -57,7 +57,8 @@ function object(value: unknown): Record<string, unknown> | undefined {
 /** A browser-only adapter over the existing local owner; it has no profile authority of its own. */
 export async function startManagerWeb(owner: ManagerOwner) {
   const bootstraps = new Map<string, { deadline: number; timer: NodeJS.Timeout; retire?: () => Promise<void> }>()
-  const sessions = new Map<string, number>()
+  type BrowserSession = { id: string; deadline: number; timer: NodeJS.Timeout; managedServicesUsed: boolean }
+  const sessions = new Map<string, BrowserSession>()
   let authority = ''
   const retire = async (key: string) => {
     const entry = bootstraps.get(key)
@@ -78,6 +79,31 @@ export async function startManagerWeb(owner: ManagerOwner) {
   }
   const revokeUrl = async (url: string) => {
     await retire(new URL(url).hash.slice(1))
+  }
+  const retireSession = async (token: string) => {
+    const session = sessions.get(token)
+    if (!session) return
+    sessions.delete(token)
+    clearTimeout(session.timer)
+    if (session.managedServicesUsed) {
+      const operation = { kind: 'manager-service-auth', action: 'retire', sessionId: session.id }
+      await owner.request(operation as unknown as PluginManagementRpcOperation, { timeoutMs: 1_000 }).catch(() =>
+        undefined
+      )
+    }
+  }
+  const touchSession = (token: string, id: string, managedServicesUsed: boolean): BrowserSession => {
+    const previous = sessions.get(token)
+    if (previous) clearTimeout(previous.timer)
+    const timer = setTimeout(() => {
+      void retireSession(token)
+    }, 8 * 60 * 60_000)
+    timer.unref()
+    const session = previous ?? { id, deadline: 0, timer, managedServicesUsed }
+    session.deadline = Date.now() + 8 * 60 * 60_000
+    session.timer = timer
+    sessions.set(token, session)
+    return session
   }
   const server = createServer(async (request, response) => {
     response.setHeader('cache-control', 'no-store')
@@ -132,9 +158,9 @@ export async function startManagerWeb(owner: ManagerOwner) {
           return json(response, 401, { error: 'UNAUTHORIZED' })
         }
         const token = randomBytes(32).toString('hex')
-        for (const [key, expires] of sessions) if (expires <= Date.now()) sessions.delete(key)
-        while (sessions.size >= 16) sessions.delete(sessions.keys().next().value!)
-        sessions.set(token, Date.now() + 8 * 60 * 60_000)
+        for (const [key, session] of sessions) if (session.deadline <= Date.now()) await retireSession(key)
+        while (sessions.size >= 16) await retireSession(sessions.keys().next().value!)
+        touchSession(token, randomBytes(32).toString('hex'), false)
         return json(response, 200, { token })
       } catch {
         return json(response, 400, { error: 'INVALID_REQUEST' })
@@ -143,12 +169,12 @@ export async function startManagerWeb(owner: ManagerOwner) {
     const token = request.headers.authorization?.startsWith('Bearer ')
       ? request.headers.authorization.slice(7)
       : ''
-    const sessionDeadline = sessions.get(token)
-    if (sessionDeadline === undefined || sessionDeadline <= Date.now()) {
-      sessions.delete(token)
+    const previousSession = sessions.get(token)
+    if (previousSession === undefined || previousSession.deadline <= Date.now()) {
+      await retireSession(token)
       return json(response, 401, { error: 'UNAUTHORIZED' })
     }
-    sessions.set(token, Date.now() + 8 * 60 * 60_000)
+    const session = touchSession(token, previousSession.id, previousSession.managedServicesUsed)
     if (request.method === 'POST' && origin !== `http://${authority}`) {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
@@ -171,6 +197,43 @@ export async function startManagerWeb(owner: ManagerOwner) {
       }
       const input = object(await body(request))
       if (!input) return json(response, 400, { error: 'INVALID_REQUEST' })
+      if (url.pathname === '/api/managed-services') {
+        const bounded = (value: unknown): value is string =>
+          typeof value === 'string'
+          && value.length > 0 && value.length <= 512 && !/[\u0000-\u001f\u007f]/u.test(value)
+        const action = input.action
+        let operation: Record<string, unknown> | undefined
+        if (action === 'list' && Object.keys(input).every(key => key === 'action')) {
+          operation = { kind: 'manager-service-auth', action, sessionId: session.id }
+        } else if (
+          (action === 'view' || action === 'prepare-login') && bounded(input.pluginId) && bounded(input.serviceId)
+          && Object.keys(input).every(key =>
+            (action === 'view'
+              ? ['action', 'pluginId', 'serviceId']
+              : ['action', 'pluginId', 'serviceId', 'pluginGeneration', 'bindingId']).includes(key)
+          )
+          && (action === 'view' || bounded(input.pluginGeneration) && bounded(input.bindingId))
+        ) {
+          operation = {
+            kind: 'manager-service-auth',
+            action,
+            sessionId: session.id,
+            pluginId: input.pluginId,
+            serviceId: input.serviceId,
+            ...(action === 'prepare-login'
+              ? { pluginGeneration: input.pluginGeneration, bindingId: input.bindingId }
+              : {}),
+          }
+        } else if (
+          action === 'login' && bounded(input.leaseId)
+          && Object.keys(input).every(key => ['action', 'leaseId'].includes(key))
+        ) {
+          operation = { kind: 'manager-service-auth', action, sessionId: session.id, leaseId: input.leaseId }
+        }
+        if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
+        session.managedServicesUsed = true
+        return json(response, 200, await owner.request(operation as unknown as PluginManagementRpcOperation))
+      }
       if (url.pathname === '/api/model-services') {
         const result = await owner.request({ kind: 'codex', operation: 'model-services:save', input })
         return json(response, 200, result)
@@ -236,6 +299,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
     revokeUrl,
     async close() {
       await Promise.allSettled([...bootstraps.keys()].map(retire))
+      await Promise.allSettled([...sessions.keys()].map(retireSession))
       server.closeAllConnections()
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
     },

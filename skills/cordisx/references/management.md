@@ -7,8 +7,10 @@ and the matching release's guides when a command or capability is absent.
 
 To open the independent management page when the selected profile has a running
 owner, use `cordisx manager` or `cordisx manager open --profile <id>`. The
-command opens the default browser and reuses or starts the profile's local
-management process. `cordisx manager start`, `cordisx manager status`, and
+command requests the default browser and reuses or starts the profile's local
+management process; a successful request does not prove the page opened. The
+independent Manager is currently unavailable on Windows. The commands
+`cordisx manager start`, `cordisx manager status`, and
 `cordisx manager stop` control only that management process, accept
 `--profile <id>`, and do not stop the profile owner. The management process
 ends when its owner goes away. For a terminal without a browser,
@@ -40,4 +42,6 @@ explicitly rather than guessing.
 Treat model services as shared only where the Host reports that capability.
 Codex, Claude Code, and other clients retain their own sessions, connection
 status, native capabilities, and model selections. Report pending or
-unavailable operations without presenting them as applied.
+unavailable operations without presenting them as applied. Removing a model
+service retains its environment variable because plugins and clients may still
+use it; avoid promising that the credential has been removed.
