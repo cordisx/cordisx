@@ -23,9 +23,16 @@ it('journals only allowlisted timing fields even when launcher stdout is discard
     state: 'timeout',
     elapsedMs: 30000,
   })
+  send({ phase: 'permissions/menu', state: 'timeout', elapsedMs: 2000, label: 'private', threadId: 'private' })
+  expect(emit).toHaveBeenLastCalledWith({
+    event: 'composer-readiness',
+    phase: 'permissions/menu',
+    state: 'timeout',
+    elapsedMs: 2000,
+  })
   send({ phase: 'secret', state: 'ready', elapsedMs: 5 })
   send({ phase: 'refresh', state: 'ready', elapsedMs: -1 })
-  expect(emit).toHaveBeenCalledOnce()
+  expect(emit).toHaveBeenCalledTimes(2)
   dispose()
   expect(close).toHaveBeenCalledOnce()
 })

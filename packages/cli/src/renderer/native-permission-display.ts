@@ -12,6 +12,8 @@ interface PermissionDisplayEntry {
   startedAt?: number | undefined
   element?: HTMLElement | undefined
   restore?: (() => void) | undefined
+  menuStartedAt?: number | undefined
+  menuDeadline?: ReturnType<typeof setTimeout> | undefined
 }
 
 /** Cached permission names are read-only labels; native readiness still gates every action. */
@@ -35,6 +37,29 @@ export function installNativePermissionDisplay(document: Document): () => void {
     entry.element = undefined
     entry.restore = undefined
   }
+  const finishMenu = (entry: PermissionDisplayEntry, state: 'ready' | 'timeout' | 'disposed') => {
+    if (entry.menuStartedAt === undefined) return
+    clearTimeout(entry.menuDeadline)
+    logComposerTiming('permissions/menu', state, entry.menuStartedAt)
+    entry.menuStartedAt = undefined
+    entry.menuDeadline = undefined
+  }
+  // Observe the native menu without changing focus, dispatch, or permission decisions.
+  const observeClick = (event: Event) => {
+    const target = event.target instanceof Element ? event.target : undefined
+    const trigger = target?.closest<HTMLButtonElement>('button[data-composer-navigation-target="permissions"]')
+    const entry = trigger && entries.get(trigger)
+    if (!trigger || !entry) {
+      if (target?.closest('[data-cordisx-permission-display]')) logComposerTiming('permissions/menu', 'cached')
+      return
+    }
+    if (trigger.getAttribute('aria-expanded') === 'true' || entry.menuStartedAt !== undefined) return
+    entry.menuStartedAt = performance.now()
+    logComposerTiming('permissions/menu', 'pending', entry.menuStartedAt)
+    entry.menuDeadline = setTimeout(() => {
+      finishMenu(entry, trigger.getAttribute('aria-expanded') === 'true' ? 'ready' : 'timeout')
+    }, 2_000)
+  }
   let scheduled = false
   let disposed = false
   const reconcile = () => {
@@ -50,11 +75,16 @@ export function installNativePermissionDisplay(document: Document): () => void {
       ])
       let entry = entries.get(seat.trigger)
       if (entry?.key !== key) {
-        if (entry) clear(entry)
+        if (entry) {
+          finishMenu(entry, 'disposed')
+          clear(entry)
+        }
         entry = { key, label: read(key) }
         entries.set(seat.trigger, entry)
       }
-      if (!seat.loading) {
+      if (seat.trigger.getAttribute('aria-expanded') === 'true') finishMenu(entry!, 'ready')
+      // Loading presentation can lag native interaction readiness. Never cover an enabled trigger.
+      if (!seat.loading || !seat.disabled) {
         clear(entry!)
         if (entry!.startedAt !== undefined) logComposerTiming('permissions', 'ready', entry!.startedAt)
         entry!.startedAt = undefined
@@ -89,6 +119,7 @@ export function installNativePermissionDisplay(document: Document): () => void {
     }
     for (const [trigger, entry] of entries) {
       if (active.has(trigger)) continue
+      finishMenu(entry, 'disposed')
       clear(entry)
       entries.delete(trigger)
     }
@@ -108,13 +139,26 @@ export function installNativePermissionDisplay(document: Document): () => void {
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['aria-busy', 'aria-describedby', 'data-above-composer-conversation-id', 'lang'],
+    attributeFilter: [
+      'aria-busy',
+      'disabled',
+      'aria-disabled',
+      'aria-expanded',
+      'aria-describedby',
+      'data-above-composer-conversation-id',
+      'lang',
+    ],
   })
+  document.addEventListener('click', observeClick, true)
   reconcile()
   return () => {
     disposed = true
     observer.disconnect()
-    for (const entry of entries.values()) clear(entry)
+    document.removeEventListener('click', observeClick, true)
+    for (const entry of entries.values()) {
+      finishMenu(entry, 'disposed')
+      clear(entry)
+    }
     entries.clear()
   }
 }

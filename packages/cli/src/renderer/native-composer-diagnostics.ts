@@ -8,6 +8,7 @@ export const composerDiagnosticPhases = [
   'refresh',
   'control',
   'permissions',
+  'permissions/menu',
 ] as const
 export const composerDiagnosticStates = [
   'ready',
