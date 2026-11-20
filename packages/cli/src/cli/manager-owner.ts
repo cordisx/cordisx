@@ -65,15 +65,18 @@ export async function openManagerOwner(profile?: string, env: NodeJS.ProcessEnv 
     },
     async request(
       operation: PluginManagementRpcOperation,
-      options?: { readonly timeoutMs?: number },
+      options?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
     ): Promise<unknown> {
+      if (options?.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
       const current = await readPluginManagementRpcEndpoint(paths)
+      if (options?.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
       if (!current || current.generation !== endpoint.generation || current.token !== endpoint.token) {
         throw new Error('MANAGER_OWNER_CHANGED')
       }
       if (await processIdentityStatus(endpoint.pid, endpoint.processStartedAt) !== 'alive') {
         throw new Error('MANAGER_OWNER_UNAVAILABLE')
       }
+      if (options?.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
       return await requestPluginManagementRpc(paths, endpoint, operation, options)
     },
   }

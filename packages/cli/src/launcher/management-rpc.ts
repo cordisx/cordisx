@@ -471,8 +471,9 @@ export async function requestPluginManagementRpc(
   paths: PluginManagementRpcPaths,
   endpoint: PluginManagementRpcEndpoint,
   operation: PluginManagementRpcOperation,
-  options: { readonly timeoutMs?: number } = {},
+  options: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
 ): Promise<unknown> {
+  if (options.signal?.aborted) throw new Error('MANAGER_SESSION_REVOKED')
   const requestId = `management-${randomBytes(12).toString('hex')}`
   return await new Promise((resolve, reject) => {
     const socket = connect(paths.socket)
@@ -482,6 +483,7 @@ export async function requestPluginManagementRpc(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
       operation()
     }
     // Executing an install/update can download and stage a large package.
@@ -490,6 +492,9 @@ export async function requestPluginManagementRpc(
       ? normalDeadline
       : Math.max(1, Math.min(normalDeadline, options.timeoutMs))
     const timer = setTimeout(() => socket.destroy(new Error('plugin management request timed out')), deadline)
+    const abort = () => socket.destroy(new Error('MANAGER_SESSION_REVOKED'))
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
     socket.setEncoding('utf8')
     socket.once('error', error => settle(() => reject(error)))
     socket.on('data', chunk => {
@@ -513,7 +518,8 @@ export async function requestPluginManagementRpc(
         settle(() => reject(error))
       }
     })
-    socket.once('connect', () =>
+    socket.once('connect', () => {
+      if (options.signal?.aborted) return abort()
       socket.write(`${
         JSON.stringify({
           version: 1,
@@ -522,7 +528,8 @@ export async function requestPluginManagementRpc(
           profileId: endpoint.profileId,
           operation,
         })
-      }\n`))
+      }\n`)
+    })
   })
 }
 

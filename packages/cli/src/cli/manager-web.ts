@@ -63,6 +63,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
     id: string
     deadline: number
     timer: NodeJS.Timeout
+    controller: AbortController
     managedServicesUsed: boolean
     channelCredentialsUsed: boolean
   }
@@ -93,6 +94,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
     if (!session) return
     sessions.delete(token)
     clearTimeout(session.timer)
+    session.controller.abort()
     const retireKinds = [
       ...(session.managedServicesUsed ? ['manager-service-auth'] : []),
       ...(session.channelCredentialsUsed ? ['manager-channel-credentials'] : []),
@@ -109,7 +111,14 @@ export async function startManagerWeb(owner: ManagerOwner) {
       void retireSession(token)
     }, 8 * 60 * 60_000)
     timer.unref()
-    const session = previous ?? { id, deadline: 0, timer, managedServicesUsed, channelCredentialsUsed: false }
+    const session = previous ?? {
+      id,
+      deadline: 0,
+      timer,
+      controller: new AbortController(),
+      managedServicesUsed,
+      channelCredentialsUsed: false,
+    }
     session.deadline = Date.now() + 8 * 60 * 60_000
     session.timer = timer
     sessions.set(token, session)
@@ -188,13 +197,30 @@ export async function startManagerWeb(owner: ManagerOwner) {
     if (request.method === 'POST' && origin !== `http://${authority}`) {
       return json(response, 403, { error: 'INVALID_ORIGIN' })
     }
+    const activeSession = () =>
+      sessions.get(token) === session && session.deadline > Date.now()
+      && !session.controller.signal.aborted
+    let mutationDispatched = false
+    const scopedRequest = async (operation: PluginManagementRpcOperation, mutation = false) => {
+      if (!activeSession()) throw new Error('MANAGER_SESSION_REVOKED')
+      if (mutation) mutationDispatched = true
+      const result = await owner.request(operation, { signal: session.controller.signal })
+      if (!activeSession()) throw new Error('MANAGER_SESSION_REVOKED')
+      return result
+    }
+    const revoked = () =>
+      json(response, mutationDispatched ? 503 : 401, {
+        error: mutationDispatched ? 'OPERATION_RESULT_UNKNOWN' : 'UNAUTHORIZED',
+      })
+    const scopedReply = (value: unknown) => activeSession() ? json(response, 200, value) : revoked()
     try {
       if (request.method === 'GET' && url.pathname === '/api/state') {
         const [management, services, rendererPlugins] = await Promise.allSettled([
-          owner.request({ kind: 'query' }),
-          owner.request({ kind: 'codex', operation: 'model-services:read', input: {} }),
-          owner.request({ kind: 'plugin-configuration', action: 'list' } as unknown as PluginManagementRpcOperation),
+          scopedRequest({ kind: 'query' }),
+          scopedRequest({ kind: 'codex', operation: 'model-services:read', input: {} }),
+          scopedRequest({ kind: 'plugin-configuration', action: 'list' } as unknown as PluginManagementRpcOperation),
         ])
+        if (!activeSession()) return json(response, 401, { error: 'UNAUTHORIZED' })
         return json(response, 200, {
           owner: { appId: owner.appId, profileId: owner.profileId },
           management: management.status === 'fulfilled' ? management.value : { status: 'unavailable' },
@@ -206,6 +232,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
         return json(response, 405, { error: 'METHOD_NOT_ALLOWED' })
       }
       const input = object(await body(request))
+      if (!activeSession()) return json(response, 401, { error: 'UNAUTHORIZED' })
       if (!input) return json(response, 400, { error: 'INVALID_REQUEST' })
       if (url.pathname === '/api/channel-credentials') {
         const bounded = (value: unknown, limit: number): value is string =>
@@ -305,7 +332,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
         }
         if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
         session.channelCredentialsUsed = true
-        return json(response, 200, await owner.request(operation as unknown as PluginManagementRpcOperation))
+        return scopedReply(await scopedRequest(operation as unknown as PluginManagementRpcOperation, action !== 'view'))
       }
       if (url.pathname === '/api/managed-services') {
         const bounded = (value: unknown): value is string =>
@@ -342,15 +369,21 @@ export async function startManagerWeb(owner: ManagerOwner) {
         }
         if (!operation) return json(response, 400, { error: 'INVALID_REQUEST' })
         session.managedServicesUsed = true
-        return json(response, 200, await owner.request(operation as unknown as PluginManagementRpcOperation))
+        return scopedReply(
+          await scopedRequest(
+            operation as unknown as PluginManagementRpcOperation,
+            action !== 'list' && action !== 'view',
+          ),
+        )
       }
       if (url.pathname === '/api/model-services') {
-        const capability = object(await owner.request({ kind: 'codex', operation: 'model-services:read', input: {} }))
+        const capability = object(await scopedRequest({ kind: 'codex', operation: 'model-services:read', input: {} }))
+        if (!activeSession()) return revoked()
         if (capability?.status !== 'ok' || capability.managerSafeWrite !== MODEL_SERVICE_SAFE_WRITE_CONTRACT) {
           return json(response, 409, { error: 'MODEL_SERVICE_SAFE_WRITE_UNAVAILABLE' })
         }
-        const result = await owner.request({ kind: 'codex', operation: 'model-services:save', input })
-        return json(response, 200, result)
+        const result = await scopedRequest({ kind: 'codex', operation: 'model-services:save', input }, true)
+        return scopedReply(result)
       }
       if (url.pathname === '/api/plugin-configuration') {
         if (
@@ -358,12 +391,16 @@ export async function startManagerWeb(owner: ManagerOwner) {
           || typeof input.pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(input.pluginId)
         ) return json(response, 400, { error: 'INVALID_REQUEST' })
         const operation = { ...input, kind: 'plugin-configuration' } as unknown as PluginManagementRpcOperation
-        return json(response, 200, await owner.request(operation))
+        return scopedReply(
+          await scopedRequest(operation, input.action === 'update' || input.action === 'update-service'),
+        )
       }
       if (url.pathname === '/api/catalog') {
-        if (input.action === 'refresh') return json(response, 200, await owner.request({ kind: 'refresh-catalog' }))
+        if (input.action === 'refresh') {
+          return scopedReply(await scopedRequest({ kind: 'refresh-catalog' }, true))
+        }
         if (input.action === 'search' && typeof input.query === 'string' && input.query.length <= 512) {
-          return json(response, 200, await owner.request({ kind: 'query-catalog', query: { query: input.query } }))
+          return scopedReply(await scopedRequest({ kind: 'query-catalog', query: { query: input.query } }))
         }
         return json(response, 400, { error: 'INVALID_REQUEST' })
       }
@@ -372,7 +409,7 @@ export async function startManagerWeb(owner: ManagerOwner) {
           return json(response, 400, { error: 'INVALID_REQUEST' })
         }
         const operation = { ...input, kind: 'permission-review-apply' } as unknown as PluginManagementRpcOperation
-        return json(response, 200, await owner.request(operation))
+        return scopedReply(await scopedRequest(operation, true))
       }
       if (url.pathname === '/api/management') {
         const item = object(input.request)
@@ -383,12 +420,15 @@ export async function startManagerWeb(owner: ManagerOwner) {
             && (!Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0)
         ) return json(response, 400, { error: 'INVALID_REQUEST' })
         const operation = input as unknown as PluginManagementRpcOperation
-        return json(response, 200, await owner.request(operation))
+        return scopedReply(await scopedRequest(operation, true))
       }
       return json(response, 404, { error: 'NOT_FOUND' })
     } catch (error) {
       // Reflect only closed categories, never backend exception text or request data.
       const code = error instanceof Error ? error.message : ''
+      if (code === 'MANAGER_SESSION_REVOKED' || !activeSession()) {
+        return revoked()
+      }
       const category = ['MANAGER_OWNER_CHANGED', 'MANAGER_OWNER_UNAVAILABLE'].includes(code)
         ? code
         : request.method === 'POST'
