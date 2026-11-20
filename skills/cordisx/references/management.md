@@ -6,10 +6,13 @@ first: older releases may not have the independent Manager command. Consult the
 and the matching release's guides when a command or capability is absent.
 
 To open the independent management page when the selected profile has a running
-owner, use `cordisx manager` or `cordisx manager --profile <id>`. The command
-opens the default browser and remains in the foreground; stopping that command
-closes the management server, not the profile owner. Keep it alive while the page
-is in use. For a terminal without a browser, `--print-url` explicitly prints a
+owner, use `cordisx manager` or `cordisx manager open --profile <id>`. The
+command opens the default browser and reuses or starts the profile's local
+management process. `cordisx manager start`, `cordisx manager status`, and
+`cordisx manager stop` control only that management process, accept
+`--profile <id>`, and do not stop the profile owner. The management process
+ends when its owner goes away. For a terminal
+without a browser, `cordisx manager open --print-url` explicitly prints a
 temporary local URL. Do not guess a port, disclose a one-time URL or token in
 chat, or make the management service reachable on the network. An open page is
 not proof that every plugin, operation, or client adapter is available.
