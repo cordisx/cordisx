@@ -6,7 +6,24 @@ const argv = process.argv.slice(2)
 const codexTool = argv[0] === 'codex'
   && ['help', '--help', '-h', 'capabilities', 'providers', 'chats', 'defaults'].includes(argv[1] ?? '')
 
-if (codexTool || argv[0] === 'models') {
+if (argv[0] === 'manager') {
+  void import('./cli/manager-command.js').then(({ runManagerCommand }) => runManagerCommand(argv.slice(1))).catch(
+    error => {
+      const code = error instanceof Error && /^[A-Z][A-Z_]+$/u.test(error.message) ? error.message : 'MANAGER_FAILED'
+      const hint = code === 'MANAGER_OWNER_NOT_RUNNING'
+        ? ' Start the selected CordisX profile first; this command does not replace an existing owner.'
+        : code === 'BROWSER_OPEN_UNAVAILABLE'
+        ? ' To open locally without a graphical launcher, run manager open --print-url in a trusted terminal.'
+        : code === 'MANAGER_OWNER_CHANGED'
+        ? ' The profile owner changed. Wait for the old manager to stop, then reopen it.'
+        : code === 'MANAGER_PRIVATE_ENTRY_UNSUPPORTED'
+        ? ' The independent manager is not available on Windows until private entry ACLs are supported.'
+        : ''
+      console.error(`[cordisx] ${code}.${hint}`)
+      process.exitCode = 1
+    },
+  )
+} else if (codexTool || argv[0] === 'models') {
   void import('./cli/codex-command.js').then(({ runCodexCommand }) =>
     runCodexCommand(argv.slice(1), argv[0] === 'models')
   ).catch(async error => {

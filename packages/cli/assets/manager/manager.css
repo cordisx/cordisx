@@ -1,0 +1,168 @@
+:root {
+  color-scheme: light dark;
+  font: 15px/1.5 system-ui, sans-serif;
+  --cx-surface: light-dark(#f8fafc, #17191d);
+  --cx-surface-raised: light-dark(#fff, #20242b);
+  --cx-text: light-dark(#18212f, #eef0f3);
+  --cx-muted: light-dark(#526071, #aeb5c3);
+  --cx-border: light-dark(rgb(24 33 47 / 18%), rgb(255 255 255 / 12%));
+  --cx-primary: light-dark(#3d4755, #c7ccd4);
+  --cx-primary-text: light-dark(#fff, #17191c);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: var(--cx-text);
+  background: var(--cx-surface);
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--cx-border);
+}
+.topbar > :first-child {
+  margin-right: auto;
+}
+.product {
+  margin-left: 0.7rem;
+  color: var(--cx-muted);
+}
+main {
+  min-width: 0;
+  padding: 2rem;
+}
+h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+h2 {
+  margin: 0 0 0.7rem;
+  font-size: 1.25rem;
+}
+section {
+  margin-top: 2.2rem;
+}
+.stack {
+  display: grid;
+  gap: 0.7rem;
+}
+.card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+  background: var(--cx-surface-raised);
+}
+.card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+}
+.muted {
+  color: var(--cx-muted);
+  overflow-wrap: anywhere;
+}
+.message:empty {
+  display: none;
+}
+.message {
+  padding: 0.65rem 1rem;
+  border-left: 3px solid var(--cx-primary);
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+}
+label {
+  display: grid;
+  gap: 0.3rem;
+}
+input, textarea, select, button {
+  font: inherit;
+}
+input:not([type="checkbox"]), textarea, select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--cx-border);
+  border-radius: 6px;
+  background: var(--cx-surface);
+  color: inherit;
+}
+textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+button {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--cx-border);
+  border-radius: 6px;
+  background: var(--cx-surface);
+  color: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.primary {
+  background: var(--cx-primary);
+  color: var(--cx-primary-text);
+  border-color: var(--cx-primary);
+}
+.actions, .inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+  margin-top: 0.8rem;
+}
+.inline-form label {
+  flex: 1 1 220px;
+}
+.row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.detail {
+  margin-top: 1rem;
+}
+dialog {
+  max-width: min(720px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+  padding: 1.2rem;
+  background: var(--cx-surface-raised);
+  color: var(--cx-text);
+}
+.permission-item {
+  min-width: 0;
+  margin: 0.8rem 0;
+  border: 1px solid var(--cx-border);
+  border-radius: 6px;
+}
+.permission-item pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  main {
+    padding: 1rem;
+  }
+  .topbar {
+    padding: 0.8rem 1rem;
+    flex-wrap: wrap;
+  }
+}

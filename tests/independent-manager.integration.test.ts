@@ -1,0 +1,268 @@
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { connect } from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
+import { promisify } from 'node:util'
+import { describe, expect, it, vi } from 'vitest'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { managerOwnerIsLocal, openManagerOwner } from '../packages/cli/src/cli/manager-owner.js'
+import { startManagerWeb } from '../packages/cli/src/cli/manager-web.js'
+import {
+  createManagerEntry,
+  recoverManagerEntries,
+  validateManagerEntry,
+} from '../packages/cli/src/cli/manager-entry.js'
+import { managerChildEnvironment, terminateCreatedManagerChild } from '../packages/cli/src/cli/manager-supervisor.js'
+import { openManagerBrowser } from '../packages/cli/src/cli/manager-command.js'
+import { parseCordisXCli } from '../packages/cli/src/cli/parse.js'
+import { processStartIdentity } from '../packages/cli/src/cli/supervisor-state.js'
+import { createCodexModelServices } from '../packages/cli/src/launcher/codex-model-services.js'
+import { startPluginManagementRpcServer } from '../packages/cli/src/launcher/management-rpc.js'
+import { openPluginManagementService } from '../packages/cli/src/management/service.js'
+
+const exec = promisify(execFile)
+
+describe('independent manager production boundaries', () => {
+  it('keeps credentials out of the child and fences PID reuse', async () => {
+    const environment = managerChildEnvironment({
+      HOME: '/user',
+      PATH: '/bin',
+      CORDISX_HOME: '/user/.cordisx',
+      MODEL_API_KEY: 'fixture-secret',
+      CODEX_THREAD_ID: 'fixture-thread',
+      NODE_OPTIONS: 'untrusted',
+    }, 'bootstrap')
+    expect(environment).toEqual({
+      HOME: '/user',
+      PATH: '/bin',
+      CORDISX_HOME: '/user/.cordisx',
+      CORDISX_MANAGER_CHILD_KEY: 'bootstrap',
+    })
+    const kill = vi.fn(() => true)
+    const child = { pid: 42, exitCode: null, signalCode: null, kill }
+    expect(await terminateCreatedManagerChild(child, undefined, async () => 'alive')).toBe(false)
+    expect(await terminateCreatedManagerChild(child, 'old-start', async () => 'dead')).toBe(false)
+    expect(await terminateCreatedManagerChild(child, 'old-start', async () => 'unknown')).toBe(false)
+    expect(kill).not.toHaveBeenCalled()
+    expect(await terminateCreatedManagerChild(child, 'actual-start', async () => 'alive')).toBe(true)
+    expect(kill).toHaveBeenCalledOnce()
+    expect(parseCordisXCli(['start', 'manager'])).toMatchObject({ action: 'start', app: 'manager' })
+    const identify = vi.fn(async () => 'alive' as const)
+    const endpoint = { pid: 42, processStartedAt: 'fixture' } as Parameters<typeof managerOwnerIsLocal>[0]
+    expect(await managerOwnerIsLocal(endpoint, async () => true, identify)).toBe(false)
+    expect(identify).not.toHaveBeenCalled()
+    expect(await managerOwnerIsLocal(endpoint, async () => false, identify)).toBe(true)
+    const launch = vi.fn(async () => undefined)
+    await openManagerBrowser('/private/目录 # %/entry.html', 'darwin', launch)
+    expect(launch).toHaveBeenCalledWith('open', ['/private/目录 # %/entry.html'])
+    expect(JSON.stringify(launch.mock.calls)).not.toContain('127.0.0.1')
+    await expect(openManagerBrowser('/private/entry.html', 'win32', launch)).rejects.toThrow('BROWSER_OPEN_UNAVAILABLE')
+  })
+
+  it('uses one owner, protects bootstrap and mutations, and saves model keys write-only', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-integration-'))
+    const configPath = path.join(home, 'config.json')
+    await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+    const service = await openPluginManagementService({
+      configPath,
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+    })
+    const modelServices = createCodexModelServices({ configPath, environment: {} })
+    const started = await processStartIdentity(process.pid)
+    expect(started).toBeDefined()
+    const rpc = await startPluginManagementRpcServer({
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+      configPath,
+      generation: 'test-generation',
+      processStartedAt: started!,
+      service,
+      codex: async (operation, value) =>
+        operation === 'model-services:read'
+          ? await modelServices('read', value)
+          : operation === 'model-services:save'
+          ? await modelServices('save', value)
+          : { status: 'unavailable' },
+    })
+    const owner = await openManagerOwner('default', { CORDISX_HOME: home })
+    const web = await startManagerWeb(owner)
+    const url = new URL(web.url), origin = url.origin, bootstrap = url.hash.slice(1)
+    const post = (route: string, value: unknown, session?: string, source = origin) =>
+      fetch(`${origin}${route}`, {
+        method: 'POST',
+        headers: {
+          origin: source,
+          'content-type': 'application/json',
+          ...(session ? { authorization: `Bearer ${session}` } : {}),
+        },
+        body: JSON.stringify(value),
+      })
+    try {
+      expect((await fetch(origin)).status).toBe(200)
+      const malformed = await new Promise<string>((resolve, reject) => {
+        const socket = connect(Number(url.port), '127.0.0.1', () => {
+          socket.write(`GET http://[ HTTP/1.1\r\nHost: ${url.host}\r\nConnection: close\r\n\r\n`)
+        })
+        let data = ''
+        socket.on('data', chunk => {
+          data += chunk.toString()
+        })
+        socket.on('end', () => resolve(data))
+        socket.on('error', reject)
+      })
+      expect(malformed).toContain('400 Bad Request')
+      expect(malformed).not.toContain('http://[')
+      expect((await fetch(origin)).status).toBe(200)
+      expect((await fetch(`${origin}/manager.js`)).status).toBe(200)
+      expect((await fetch(`${origin}/api/state`)).status).toBe(401)
+      const entries = path.join(home, '目录 # %', 'entries')
+      const entry = await createManagerEntry(entries, web)
+      expect((await lstat(entries)).mode & 0o777).toBe(0o700)
+      expect((await lstat(entry)).mode & 0o777).toBe(0o600)
+      expect(await validateManagerEntry(entry, entries)).toBe(true)
+      const html = await readFile(entry, 'utf8')
+      const redirect = /location\.replace\("(http:\/\/127\.0\.0\.1:\d+\/#\w+)"\)/u.exec(html)?.[1]
+      expect(redirect).toBeDefined()
+      const privateUrl = new URL(redirect!)
+      const entryExchange = await post('/api/session', { token: privateUrl.hash.slice(1) })
+      expect(entryExchange.status).toBe(200)
+      expect(await lstat(entry).then(() => true, () => false)).toBe(false)
+      const secondEntry = await createManagerEntry(entries, web)
+      expect(await lstat(secondEntry).then(() => true, () => false)).toBe(true)
+      const secondHtml = await readFile(secondEntry, 'utf8')
+      const secondLink = /location\.replace\("(http:\/\/127\.0\.0\.1:\d+\/#\w+)"\)/u.exec(secondHtml)?.[1]
+      await web.revokeUrl(secondLink!)
+      expect(await lstat(secondEntry).then(() => true, () => false)).toBe(false)
+      const staleEntry = path.join(entries, `${'b'.repeat(32)}.html`)
+      await writeFile(staleEntry, 'stale fixture', { mode: 0o600 })
+      await recoverManagerEntries(entries)
+      expect(await lstat(staleEntry).then(() => true, () => false)).toBe(false)
+      expect((await post('/api/session', { token: bootstrap }, undefined, 'https://attacker.example')).status).toBe(403)
+      const exchange = await post('/api/session', { token: bootstrap })
+      expect(exchange.status).toBe(200)
+      const { token } = await exchange.json() as { token: string }
+      expect(token).not.toEqual(bootstrap)
+      expect((await post('/api/session', { token: bootstrap })).status).toBe(401)
+      expect((await post('/api/model-services', {}, token, 'https://attacker.example')).status).toBe(403)
+      const read = async () =>
+        await (await fetch(`${origin}/api/state`, {
+          headers: { authorization: `Bearer ${token}` },
+        })).json() as { services: { revision: string; services: Array<Record<string, unknown>> } }
+      const model = {
+        id: 'sample',
+        displayName: 'Sample',
+        baseUrl: 'https://example.com/v1',
+        protocols: ['openai-responses'],
+        codexModels: ['model-a'],
+        claudeModels: ['model-b'],
+        enabled: true,
+      }
+      const first = await read()
+      const saved = await post('/api/model-services', {
+        expectedRevision: first.services.revision,
+        services: [{ ...model, apiKey: 'fixture-only-secret' }],
+      }, token)
+      expect(await saved.json()).toMatchObject({ status: 'applied', applies: 'app-restart' })
+      const added = await read()
+      expect(added.services.services).toEqual([expect.objectContaining({
+        id: 'sample',
+        keyConfigured: true,
+        codexModels: ['model-a'],
+        claudeModels: ['model-b'],
+      })])
+      expect(JSON.stringify(added)).not.toContain('fixture-only-secret')
+      const edited = await post('/api/model-services', {
+        expectedRevision: added.services.revision,
+        services: [{ ...model, displayName: 'Renamed' }],
+      }, token)
+      expect(await edited.json()).toMatchObject({ status: 'applied' })
+      const updated = await read()
+      expect(updated.services.services[0]).toMatchObject({ displayName: 'Renamed', keyConfigured: true })
+      const deleted = await post(
+        '/api/model-services',
+        { expectedRevision: updated.services.revision, services: [] },
+        token,
+      )
+      expect(await deleted.json()).toMatchObject({ status: 'applied' })
+      expect((await read()).services.services).toEqual([])
+      // A plugin may still use the shared environment variable after deletion.
+      expect(await readFile(configPath, 'utf8')).toContain('fixture-only-secret')
+      const sourcePlan = await post('/api/management', {
+        kind: 'plan',
+        request: { kind: 'source-add', source: { url: 'https://example.com/catalog.json', enabled: true } },
+      }, token)
+      const planned = await sourcePlan.json() as { status: string; request: unknown; snapshot: { revision: number } }
+      expect(planned.status).toBe('planned')
+      const sourceSave = await post('/api/management', {
+        kind: 'execute',
+        request: planned.request,
+        expectedRevision: planned.snapshot.revision,
+      }, token)
+      expect(await sourceSave.json()).toMatchObject({ status: 'applied' })
+    } finally {
+      await web.close()
+      await rpc.close()
+      service.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('coalesces concurrent CLI starts and stops only the manager sidecar', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-sidecar-'))
+    const configPath = path.join(home, 'config.json')
+    const config = createDefaultHomeConfig()
+    await writeFile(configPath, JSON.stringify({ ...config, apps: { ...config.apps, manager: config.apps.codex } }), {
+      mode: 0o600,
+    })
+    const futureAdapterDir = path.join(home, 'run', 'manager', 'default')
+    await mkdir(futureAdapterDir, { recursive: true })
+    await writeFile(path.join(futureAdapterDir, 'state.json'), 'future-adapter-state')
+    const service = await openPluginManagementService({
+      configPath,
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+    })
+    const started = await processStartIdentity(process.pid)
+    expect(started).toBeDefined()
+    const rpc = await startPluginManagementRpcServer({
+      homeDir: home,
+      appId: 'codex',
+      profileId: 'default',
+      configPath,
+      generation: 'test-generation',
+      processStartedAt: started!,
+      service,
+    })
+    const entry = path.resolve('packages/cli/src/cli.ts')
+    const run = async (...args: string[]) =>
+      await exec(process.execPath, ['--import', 'tsx', entry, 'manager', ...args], {
+        cwd: process.cwd(),
+        env: { ...process.env, CORDISX_HOME: home },
+        timeout: 20_000,
+      })
+    try {
+      const starts = await Promise.all([run('start'), run('start')])
+      expect(starts.map(result => JSON.parse(result.stdout).status)).toEqual(['running', 'running'])
+      expect(JSON.parse((await run('status')).stdout)).toEqual({ status: 'running', profile: 'default' })
+      const first = (await run('open', '--print-url')).stdout.trim().split(' ').at(-1)!
+      const second = (await run('open', '--print-url')).stdout.trim().split(' ').at(-1)!
+      expect(new URL(first).origin).toEqual(new URL(second).origin)
+      expect(new URL(first).hash).not.toEqual(new URL(second).hash)
+      expect(JSON.parse((await run('stop')).stdout)).toEqual({ status: 'stopped' })
+      expect(JSON.parse((await run('status')).stdout)).toEqual({ status: 'stopped', profile: 'default' })
+      expect(await readFile(path.join(futureAdapterDir, 'state.json'), 'utf8')).toBe('future-adapter-state')
+      expect((await service.query()).profileId).toEqual('default')
+      expect((await openManagerOwner('default', { CORDISX_HOME: home })).appId).toEqual('codex')
+    } finally {
+      await run('stop').catch(() => undefined)
+      await rpc.close()
+      service.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  }, 45_000)
+})

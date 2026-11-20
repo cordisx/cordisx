@@ -6,6 +6,7 @@ export const HELP = `Usage:
   cordisx skills <install|update> [source] [--client codex|claude-code|both]
   cordisx setup
   cordisx config
+  cordisx manager [open|start|status|stop] [--profile <id>] [--print-url]
   cordisx doctor
   cordisx feedback <collect|inspect|export> [options]
   cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]

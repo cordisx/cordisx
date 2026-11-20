@@ -1,0 +1,358 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { JSDOM } from 'jsdom'
+import { expect, it, vi } from 'vitest'
+import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { readModelServices, saveModelServices } from '../packages/cli/src/launcher/model-service-store.js'
+import { safeServiceConfigEdit } from '../packages/cli/assets/manager/manager-schema.js'
+
+async function mountManager(respond: (path: string, input: any) => unknown) {
+  const html = await readFile('packages/cli/assets/manager/index.html', 'utf8')
+  const source = (await readFile('packages/cli/assets/manager/manager.js', 'utf8'))
+    .replace(/^import .*manager-schema\.js'\s*/u, '')
+  const dom = new JSDOM(html, { url: `http://127.0.0.1:9312/#${'a'.repeat(64)}`, runScripts: 'outside-only' })
+  const window = dom.window as unknown as Window & typeof globalThis & Record<string, any>
+  window.__schemaCheck = safeServiceConfigEdit
+  window.confirm = vi.fn(() => true)
+  window.HTMLDialogElement.prototype.showModal = function() {
+    this.setAttribute('open', '')
+  }
+  window.HTMLDialogElement.prototype.close = function() {
+    this.removeAttribute('open')
+    this.dispatchEvent(new window.Event('close'))
+  }
+  window.fetch = vi.fn(async (url: string | URL, options?: RequestInit) => {
+    const input = typeof options?.body === 'string' ? JSON.parse(options.body) : undefined
+    const value = await respond(String(url), input)
+    return { ok: true, json: async () => value } as Response
+  }) as typeof fetch
+  await window.eval(`(async()=>{const safeServiceConfigEdit=window.__schemaCheck;${source}\n})()`)
+  await vi.waitFor(() => expect(window.document.getElementById('owner')!.textContent).toContain('fixture'))
+  return { window, dom }
+}
+
+const base = () => ({
+  owner: { appId: 'codex', profileId: 'fixture' },
+  management: {
+    runtime: { kind: 'active' },
+    revision: 2,
+    activationRevision: 3,
+    sources: [],
+    plugins: [{ id: 'sample', name: 'Sample', status: 'disabled', enabled: false }],
+  },
+  services: { status: 'ok', revision: 'r1', services: [] },
+  rendererPlugins: { status: 'ok', plugins: [{ id: 'sample', name: 'Sample', status: 'disabled', writable: true }] },
+})
+
+it('retains an unsaved model credential draft across a status refresh', async () => {
+  const { window, dom } = await mountManager((path) => path === '/api/session' ? { token: 'session' } : base())
+  try {
+    window.document.getElementById('add-model')!.click()
+    const key = window.document.querySelector<HTMLInputElement>('#models input[type=password]')!
+    key.value = 'fixture-not-a-real-secret'
+    key.dispatchEvent(new window.Event('input', { bubbles: true }))
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() =>
+      expect((window.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(call => call[0] === '/api/state').length)
+        .toBeGreaterThan(1)
+    )
+    expect(window.document.querySelector<HTMLInputElement>('#models input[type=password]')?.value).toBe(
+      'fixture-not-a-real-secret',
+    )
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('requires an explicit choice and confirmation for every permission and preserves its scope', async () => {
+  const calls: any[] = []
+  const plan = {
+    schemaVersion: 4,
+    planId: 'plan',
+    operation: 'enable',
+    profileId: 'fixture',
+    identity: { source: 'https://example.test/plugin', pluginId: 'sample' },
+    binding: { operationId: 'operation', runtimeGeneration: 'generation' },
+    declarations: [{
+      capability: 'network.http',
+      required: true,
+      decisionRequired: true,
+      scope: { origins: ['https://example.test'] },
+      securityFingerprint: `sha256:${'a'.repeat(64)}`,
+      allowedDecisions: ['allow-once'],
+      presentation: { name: { fallback: '网络访问' } },
+      rationale: { feature: { fallback: '同步数据' }, deniedBehavior: { fallback: '同步不可用' } },
+      security: { dataUse: 'external-service', retention: 'none', externalTransfer: true },
+    }],
+  }
+  const { window, dom } = await mountManager((path, input) => {
+    calls.push({ path, input })
+    if (path === '/api/session') return { token: 'session' }
+    if (path === '/api/state') return base()
+    if (path === '/api/management') {
+      return { status: 'permission-review-required', permissionPlan: plan, snapshot: { activationRevision: 3 } }
+    }
+    if (path === '/api/permission-review') return { status: 'ok', result: { outcome: 'applied' } }
+    return { status: 'unavailable' }
+  })
+  try {
+    const enable = [...window.document.querySelectorAll('button')].find(button => button.textContent === '启用')!
+    enable.click()
+    await vi.waitFor(() => expect(window.document.querySelector('dialog[open]')).not.toBeNull())
+    const dialog = window.document.querySelector('dialog')!
+    expect(dialog.textContent).toContain('sample')
+    expect(dialog.textContent).toContain('https://example.test')
+    expect(dialog.textContent).toContain('同步不可用')
+    expect(dialog.textContent).toContain('externalTransfer')
+    const submit = [...dialog.querySelectorAll('button')].find(button => button.textContent === '提交审核')!
+    submit.click()
+    await vi.waitFor(() => expect(dialog.textContent).toContain('请逐项选择'))
+    expect(calls.filter(call => call.path === '/api/permission-review')).toHaveLength(0)
+    const select = dialog.querySelector('select')!
+    select.value = 'allow-once'
+    ;(window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)
+    submit.click()
+    await vi.waitFor(() => expect(window.confirm).toHaveBeenCalled())
+    expect(calls.filter(call => call.path === '/api/permission-review')).toHaveLength(0)
+    submit.click()
+    await vi.waitFor(() => expect(calls.filter(call => call.path === '/api/permission-review')).toHaveLength(1))
+    expect(calls.find(call => call.path === '/api/permission-review').input).toMatchObject({
+      userConfirmed: true,
+      expectedRevision: 3,
+      decision: {
+        identity: plan.identity,
+        binding: plan.binding,
+        decisions: [{ scope: plan.declarations[0]!.scope, decision: 'allow-once' }],
+      },
+    })
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('权限决定已保存'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('confirms before one plugin editor discards another unsaved editor', async () => {
+  const calls: string[] = []
+  const descriptor = {
+    identity: { source: 'https://example.test', pluginId: 'sample', serviceId: 'runtime' },
+    scope: { profileId: 'fixture', generation: 'generation' },
+    revision: 1,
+    writable: true,
+    configuration: { label: 'before' },
+    secrets: [],
+    schema: {
+      projection: {
+        kind: 'schemastery',
+        envelope: {
+          uid: 1,
+          refs: {
+            1: { type: 'object', dict: { label: 2 } },
+            2: { type: 'string' },
+          },
+        },
+      },
+    },
+  }
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return base()
+    if (route === '/api/plugin-configuration') {
+      calls.push(input.action)
+      if (input.action === 'read') {
+        return {
+          status: 'ok',
+          configuration: {
+            writable: true,
+            applies: 'live',
+            revision: 1,
+            fields: [{ path: ['name'], label: '名称', value: 'before' }],
+            secrets: [],
+          },
+        }
+      }
+      if (input.action === 'services') return { status: 'ok', services: [descriptor] }
+      if (input.action === 'update') return { status: 'ok' }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '配置')!.click()
+    await vi.waitFor(() => expect(window.document.querySelector('#plugins textarea')).not.toBeNull())
+    const field = window.document.querySelector<HTMLInputElement>('#plugins input')!
+    const service = window.document.querySelector<HTMLTextAreaElement>('#plugins textarea')!
+    field.value = 'edited plugin'
+    field.dispatchEvent(new window.Event('input', { bubbles: true }))
+    service.value = JSON.stringify({ label: 'unsaved service' })
+    service.dispatchEvent(new window.Event('input', { bubbles: true }))
+    ;(window.confirm as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)
+    const save = [...window.document.querySelectorAll('button')].find(button => button.textContent === '保存插件配置')!
+    save.click()
+    await vi.waitFor(() => expect(window.confirm).toHaveBeenCalled())
+    expect(calls).not.toContain('update')
+    expect(service.value).toContain('unsaved service')
+    save.click()
+    await vi.waitFor(() => expect(calls).toContain('update'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('keeps another plugin draft while saving and refreshing the first one', async () => {
+  const both = base()
+  both.management.plugins.push({ id: 'second', name: 'Second', status: 'disabled', enabled: false })
+  both.rendererPlugins.plugins.push({ id: 'second', name: 'Second', status: 'disabled', writable: true })
+  const { window, dom } = await mountManager((route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') return both
+    if (route === '/api/plugin-configuration' && input.action === 'read') {
+      return {
+        status: 'ok',
+        configuration: {
+          writable: true,
+          applies: 'live',
+          revision: 1,
+          fields: [{ path: ['name'], label: '名称', value: 'before' }],
+          secrets: [],
+        },
+      }
+    }
+    if (route === '/api/plugin-configuration' && input.action === 'services') return { status: 'ok', services: [] }
+    if (route === '/api/plugin-configuration' && input.action === 'update') return { status: 'ok' }
+    return { status: 'unavailable' }
+  })
+  try {
+    const cards = [...window.document.querySelectorAll('#plugins .card')]
+    for (const card of cards) {
+      ;[...card.querySelectorAll('button')].find(button => button.textContent === '配置')!.click()
+    }
+    await vi.waitFor(() => expect(window.document.querySelectorAll('#plugins input')).toHaveLength(2))
+    const fields = [...window.document.querySelectorAll<HTMLInputElement>('#plugins input')]
+    fields.forEach((field, index) => {
+      field.value = `draft-${index}`
+      field.dispatchEvent(new window.Event('input', { bubbles: true }))
+    })
+    ;[...cards[0]!.querySelectorAll('button')].find(button => button.textContent === '保存插件配置')!.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('已保存'))
+    window.document.getElementById('refresh')!.click()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(window.document.querySelectorAll<HTMLInputElement>('#plugins input')[1]!.value).toBe('draft-1')
+  } finally {
+    dom.window.close()
+  }
+})
+
+it('never submits an unavailable read as an empty service list and freezes pending edits', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cx-manager-ui-store-'))
+  const configPath = path.join(directory, 'config.json')
+  await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
+  const service = {
+    id: 'sample',
+    displayName: 'Sample',
+    baseUrl: 'https://example.test',
+    protocols: ['openai-responses'] as const,
+    codexModels: ['model'],
+    claudeModels: [],
+    enabled: true,
+  }
+  const empty = await readModelServices(configPath, {})
+  if (empty.status !== 'ok') throw new Error('fixture read failed')
+  await saveModelServices(configPath, { expectedRevision: empty.revision, services: [service] })
+  let reads = 0, saves = 0
+  let release: (() => void) | undefined
+  const { window, dom } = await mountManager(async (route, input) => {
+    if (route === '/api/session') return { token: 'session' }
+    if (route === '/api/state') {
+      reads++
+      return { ...base(), services: reads === 2 ? { status: 'unavailable' } : await readModelServices(configPath, {}) }
+    }
+    if (route === '/api/model-services') {
+      saves++
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+      return await saveModelServices(configPath, input)
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    const name = window.document.querySelector<HTMLInputElement>('#models input[value]')!
+    // JSDOM's value property is set by the application; select the name by label.
+    const inputs = window.document.querySelectorAll<HTMLInputElement>('#models input')
+    inputs[1]!.value = 'Renamed'
+    inputs[1]!.dispatchEvent(new window.Event('input', { bubbles: true }))
+    window.document.getElementById('save-models')!.click()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    expect(inputs[1]!.disabled).toBe(true)
+    expect((window.document.getElementById('add-model') as HTMLButtonElement).disabled).toBe(true)
+    release!()
+    await vi.waitFor(() => expect(window.document.getElementById('models')!.textContent).toContain('未提供'))
+    const save = window.document.getElementById('save-models') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    save.click()
+    expect(saves).toBe(1)
+    window.document.getElementById('refresh')!.click()
+    await vi.waitFor(() => expect(window.document.getElementById('models')!.textContent).toContain('Renamed'))
+    expect((await readModelServices(configPath, {}) as { services: Array<{ displayName: string }> }).services)
+      .toEqual([expect.objectContaining({ displayName: 'Renamed' })])
+    expect(name).toBeDefined()
+  } finally {
+    dom.window.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('reports staged service settings as pending restart rather than applied', async () => {
+  const descriptor = {
+    identity: { source: 'https://example.test', pluginId: 'sample', serviceId: 'runtime' },
+    scope: { profileId: 'fixture', generation: 'generation' },
+    revision: 1,
+    writable: true,
+    configApplies: 'app-restart',
+    restartRequired: true,
+    configuration: { label: 'before' },
+    secrets: [],
+    schema: {
+      projection: {
+        kind: 'schemastery',
+        envelope: {
+          uid: 1,
+          refs: {
+            1: { type: 'object', dict: { label: 2 } },
+            2: { type: 'string' },
+          },
+        },
+      },
+    },
+  }
+  const { window, dom } = await mountManager((path, input) => {
+    if (path === '/api/session') return { token: 'session' }
+    if (path === '/api/state') return base()
+    if (path === '/api/plugin-configuration' && input.action === 'read') {
+      return { status: 'ok', configuration: { writable: true, applies: 'live', revision: 1, fields: [], secrets: [] } }
+    }
+    if (path === '/api/plugin-configuration' && input.action === 'services') {
+      return { status: 'ok', services: [descriptor] }
+    }
+    if (path === '/api/plugin-configuration' && input.action === 'update-service') {
+      return { status: 'ok', result: { status: 'staged' } }
+    }
+    return { status: 'unavailable' }
+  })
+  try {
+    ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '配置')!.click()
+    await vi.waitFor(() => expect(window.document.querySelector('#plugins textarea')).not.toBeNull())
+    expect(window.document.getElementById('plugins')!.textContent).toContain('等待重启')
+    const editor = window.document.querySelector<HTMLTextAreaElement>('#plugins textarea')!
+    editor.value = JSON.stringify({ label: 'after' })
+    editor.dispatchEvent(new window.Event('input', { bubbles: true }))
+    ;[...window.document.querySelectorAll('button')].find(button => button.textContent === '保存服务配置')!.click()
+    await vi.waitFor(() => expect(window.document.getElementById('message')!.textContent).toContain('重启'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+  } finally {
+    dom.window.close()
+  }
+})

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CordisX 管理台</title>
+  <link rel="stylesheet" href="/manager.css">
+  <script type="module" src="/manager.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div><strong>CordisX</strong><span class="product">管理台 · 预览</span></div>
+    <span id="owner">正在连接…</span>
+    <button id="refresh" type="button">刷新状态</button>
+  </header>
+  <main>
+    <h1>配置与服务</h1>
+    <p class="muted">连接现有 CordisX 后台，配置变更由原有 Host 验证并保存。</p>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+    <section aria-labelledby="clients-title">
+      <h2 id="clients-title">客户端连接</h2>
+      <div id="clients" class="stack"></div>
+    </section>
+    <section aria-labelledby="models-title">
+      <h2 id="models-title">模型服务</h2>
+      <p class="muted">这里编辑共享模型服务。密钥只写入，不会回显；留空保留原值。密钥变量可能由其他客户端或插件使用：修改会影响这些使用方，删除服务不会删除变量，需另行清理。插件专用登录与密钥目前不可在此管理。</p>
+      <div id="models" class="stack"></div>
+      <div class="actions">
+        <button id="add-model" type="button">添加服务</button>
+        <button id="discard-models" type="button">放弃未保存修改</button>
+        <button id="save-models" type="button" class="primary">保存模型服务</button>
+      </div>
+    </section>
+    <section aria-labelledby="plugins-title">
+      <h2 id="plugins-title">插件</h2>
+      <div id="plugins" class="stack"></div>
+    </section>
+    <section aria-labelledby="market-title">
+      <h2 id="market-title">插件市场</h2>
+      <form id="market-search" class="inline-form">
+        <label>搜索插件 <input name="query" type="search"></label>
+        <button type="submit">搜索</button>
+        <button id="refresh-catalog" type="button">刷新来源目录</button>
+      </form>
+      <p class="muted">安装需要逐项审核所请求的权限；取消审核不会安装。</p>
+      <div id="market-results" class="stack"></div>
+    </section>
+    <section aria-labelledby="sources-title">
+      <h2 id="sources-title">来源</h2>
+      <div id="sources" class="stack"></div>
+      <form id="add-source" class="inline-form">
+        <label>来源地址 <input name="url" type="url" required placeholder="https://…"></label>
+        <label>名称 <input name="name" type="text"></label>
+        <button type="submit">添加来源</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
