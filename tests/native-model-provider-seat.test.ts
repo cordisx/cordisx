@@ -202,6 +202,33 @@ describe('native model provider seat', () => {
     dom.window.close()
   })
 
+  it.each([['simple', 2], ['advanced', 1], ['advanced', 0]] as const)(
+    'recognizes the 26.1117 unified picker in %s mode with %i power choices',
+    async (menuView, powerChoiceCount) => {
+      const dom = new JSDOM('<!doctype html><body></body>')
+      const { trigger, selectModel } = composer(dom.window.document)
+      delete trigger.dataset.codexIntelligenceTrigger
+      trigger.dataset.composerNavigationTarget = 'reasoning'
+      trigger.dataset.selectedReasoningEffort = 'high'
+      const fiber = (trigger as unknown as Record<string, unknown>)['__reactFiber$test'] as {
+        return: { memoizedProps: Record<string, unknown> }
+      }
+      fiber.return.memoizedProps.menuView = menuView
+      // The installed 26.1117 composer automatically picks advanced when
+      // there are too few power selections and no alternate service tier.
+      fiber.return.memoizedProps.powerSelections = [
+        { model: 'model-a', reasoningEffort: 'high' },
+        { model: 'model-a', reasoningEffort: 'low' },
+      ].slice(0, powerChoiceCount)
+      expect(locateNativeModelProviderSeat(dom.window.document)?.trigger).toBe(trigger)
+      await locateNativeModelSelectionControl(trigger)!.selectModel('model-b', 'high')
+      expect(selectModel).toHaveBeenCalledWith('model-b', 'high')
+      fiber.return.memoizedProps.menuView = 'unrecognized'
+      expect(locateNativeModelProviderSeat(dom.window.document)).toBeUndefined()
+      dom.window.close()
+    },
+  )
+
   it.each([true, false])(
     'awaits unified selection with default action %s and preserves native rejection',
     async hasDefault => {
