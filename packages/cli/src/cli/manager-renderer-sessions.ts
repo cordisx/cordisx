@@ -1,0 +1,265 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto'
+import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
+
+/** Private to the owner RPC and sidecar memory. Never serialize to the browser. */
+export interface ManagerRendererHandle {
+  readonly rendererId: string
+  readonly ownerGeneration: string
+  readonly grant: string
+}
+
+export interface ManagerRendererInvocation {
+  readonly gateway: ManagerRendererGatewayProof
+  /** This is generated and maintained by the sidecar, not browser input. */
+  readonly browserSessionId: string
+  readonly handle: ManagerRendererHandle
+}
+
+export interface ManagerRendererChannelContext {
+  readonly profileId: string
+  readonly rendererId: string
+  readonly ownerGeneration: string
+  readonly signal: AbortSignal
+}
+
+/**
+ * `prepare` must validate every untrusted field and capability without doing
+ * I/O or changing state. A channel is opt-in and owns its complete projection.
+ * No default channels are installed by this module.
+ */
+export interface ManagerRendererChannel {
+  prepare(payload: unknown, context: ManagerRendererChannelContext): {
+    readonly mode: 'read' | 'write'
+    dispatch(): Promise<unknown>
+  }
+}
+
+export type ManagerRendererCallResult =
+  | { readonly status: 'ok'; readonly value: unknown }
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'unknown' }
+
+interface Session {
+  readonly gateway: ManagerRendererGatewayProof
+  readonly browserSessionId: string
+  readonly handle: ManagerRendererHandle
+  readonly controller: AbortController
+  readonly timer: ReturnType<typeof setTimeout>
+  inFlight: number
+}
+
+function secretEqual(left: unknown, right: string): boolean {
+  if (typeof left !== 'string' || !/^[a-f0-9]{64}$/u.test(left)) return false
+  return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'))
+}
+
+function gatewayMatches(left: ManagerRendererGatewayProof, right: ManagerRendererGatewayProof): boolean {
+  return left !== null && typeof left === 'object' && left.pid === right.pid
+    && left.processStartedAt === right.processStartedAt && secretEqual(left.instanceToken, right.instanceToken)
+}
+
+/**
+ * Per-owner-generation session authority. The sidecar is the only RPC caller;
+ * HTTP handlers must derive browserSessionId and handle from their own session.
+ */
+export class ManagerRendererSessions {
+  private readonly sessions = new Map<string, Session>()
+  private readonly usedBrowserSessions = new Set<string>()
+  private readonly channels: ReadonlyMap<string, ManagerRendererChannel>
+  private disposed = false
+  private monitor: ReturnType<typeof setInterval> | undefined
+  private monitoring = false
+
+  constructor(
+    private readonly input: {
+      readonly profileId: string
+      readonly ownerGeneration: string
+      readonly ownerCurrent: () => boolean
+      readonly authenticateGateway: (proof: ManagerRendererGatewayProof) => Promise<boolean>
+      readonly channels?: ReadonlyMap<string, ManagerRendererChannel>
+      readonly maxSessions?: number
+      readonly sessionLifetimeMs?: number
+      readonly monitorIntervalMs?: number
+    },
+  ) {
+    // Copy the allowlist: a later mutation cannot silently add authority.
+    this.channels = new Map(input.channels)
+  }
+
+  private alive(): boolean {
+    try {
+      return !this.disposed && this.input.ownerCurrent()
+    } catch {
+      return false
+    }
+  }
+
+  private retire(session: Session): void {
+    if (this.sessions.get(session.handle.rendererId) !== session) return
+    this.sessions.delete(session.handle.rendererId)
+    clearTimeout(session.timer)
+    session.controller.abort()
+    if (this.sessions.size === 0 && this.monitor !== undefined) {
+      clearInterval(this.monitor)
+      this.monitor = undefined
+    }
+  }
+
+  private retireGateway(gateway: ManagerRendererGatewayProof): void {
+    for (const session of this.sessions.values()) {
+      if (gatewayMatches(gateway, session.gateway)) this.retire(session)
+    }
+  }
+
+  private startMonitor(): void {
+    if (this.monitor !== undefined) return
+    this.monitor = setInterval(() => {
+      if (this.monitoring) return
+      this.monitoring = true
+      void (async () => {
+        if (!this.alive()) {
+          for (const session of this.sessions.values()) this.retire(session)
+          return
+        }
+        const gateways = new Map<string, ManagerRendererGatewayProof>()
+        for (const session of this.sessions.values()) gateways.set(session.gateway.instanceToken, session.gateway)
+        for (const gateway of gateways.values()) {
+          if (!await this.authenticated(gateway)) this.retireGateway(gateway)
+        }
+      })().finally(() => {
+        this.monitoring = false
+      })
+    }, Math.max(100, this.input.monitorIntervalMs ?? 10_000))
+    this.monitor.unref()
+  }
+
+  private async authenticated(proof: ManagerRendererGatewayProof): Promise<boolean> {
+    try {
+      return this.alive() && await this.input.authenticateGateway(proof) && this.alive()
+    } catch {
+      return false
+    }
+  }
+
+  async open(
+    gateway: ManagerRendererGatewayProof,
+    browserSessionId: string,
+  ): Promise<ManagerRendererHandle | undefined> {
+    if (typeof browserSessionId !== 'string' || !/^[a-f0-9]{64}$/u.test(browserSessionId)) return undefined
+    if (!await this.authenticated(gateway)) return undefined
+    // All admission checks are synchronous after authentication, so concurrent
+    // opens cannot create two renderer identities for one browser session.
+    if (
+      this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
+      || this.sessions.size >= (this.input.maxSessions ?? 16)
+    ) return undefined
+    const handle: ManagerRendererHandle = {
+      rendererId: randomBytes(32).toString('hex'),
+      ownerGeneration: this.input.ownerGeneration,
+      grant: randomBytes(32).toString('hex'),
+    }
+    const controller = new AbortController()
+    const lifetime = Math.max(1, Math.min(this.input.sessionLifetimeMs ?? 8 * 60 * 60 * 1000, 8 * 60 * 60 * 1000))
+    let session: Session
+    const timer = setTimeout(() => this.retire(session), lifetime)
+    timer.unref()
+    session = { gateway: { ...gateway }, browserSessionId, handle, controller, timer, inFlight: 0 }
+    this.usedBrowserSessions.add(browserSessionId)
+    this.sessions.set(handle.rendererId, session)
+    this.startMonitor()
+    return { ...handle }
+  }
+
+  private lookup(invocation: ManagerRendererInvocation): Session | undefined {
+    const handle = invocation?.handle
+    if (!handle || typeof handle.rendererId !== 'string') return undefined
+    const session = this.sessions.get(handle.rendererId)
+    if (
+      !session || invocation.browserSessionId !== session.browserSessionId
+      || handle.ownerGeneration !== session.handle.ownerGeneration || !secretEqual(handle.grant, session.handle.grant)
+      || !gatewayMatches(invocation.gateway, session.gateway)
+    ) return undefined
+    return session
+  }
+
+  private current(session: Session): boolean {
+    return this.alive() && !session.controller.signal.aborted
+      && this.sessions.get(session.handle.rendererId) === session
+  }
+
+  async call(
+    invocation: ManagerRendererInvocation,
+    channel: string,
+    payload: unknown,
+  ): Promise<ManagerRendererCallResult> {
+    const unavailable: ManagerRendererCallResult = { status: 'unavailable' }
+    const session = this.lookup(invocation)
+    if (!session || !this.current(session) || session.inFlight >= 8) return unavailable
+    const target = typeof channel === 'string' ? this.channels.get(channel) : undefined
+    if (!target) return unavailable
+    session.inFlight++
+    let dispatched: 'read' | 'write' | undefined
+    try {
+      if (!await this.authenticated(session.gateway)) {
+        this.retireGateway(session.gateway)
+        return unavailable
+      }
+      if (!this.current(session)) return unavailable
+      const encoded = JSON.stringify(payload)
+      if (encoded === undefined || Buffer.byteLength(encoded) > 256 * 1024) return unavailable
+      const prepared = target.prepare(payload, {
+        profileId: this.input.profileId,
+        rendererId: session.handle.rendererId,
+        ownerGeneration: this.input.ownerGeneration,
+        signal: session.controller.signal,
+      })
+      if (prepared.mode !== 'read' && prepared.mode !== 'write') return unavailable
+      dispatched = prepared.mode
+      const value = await prepared.dispatch()
+      if (!this.current(session)) return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      if (!await this.authenticated(session.gateway)) {
+        this.retireGateway(session.gateway)
+        return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      }
+      if (!this.current(session)) return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      return { status: 'ok', value }
+    } catch {
+      // An in-flight write can have committed even if its result was lost.
+      return dispatched === 'write' ? { status: 'unknown' } : unavailable
+    } finally {
+      session.inFlight--
+    }
+  }
+
+  async close(invocation: ManagerRendererInvocation): Promise<boolean> {
+    const session = this.lookup(invocation)
+    if (!session) return false
+    // Retire before the asynchronous gateway check so in-flight work is fenced
+    // immediately; an invalid caller cannot pass lookup without the private grant.
+    this.retire(session)
+    return await this.authenticated(session.gateway)
+  }
+
+  /** Retire a browser session even when its open request is still in flight. */
+  async revoke(gateway: ManagerRendererGatewayProof, browserSessionId: string): Promise<boolean> {
+    if (
+      typeof browserSessionId !== 'string' || !/^[a-f0-9]{64}$/u.test(browserSessionId)
+      || !await this.authenticated(gateway)
+    ) return false
+    // Tombstone before walking live sessions, so an overlapping open cannot
+    // create a renderer after this revocation. The finite cap fails closed.
+    if (!this.usedBrowserSessions.has(browserSessionId) && this.usedBrowserSessions.size >= 4096) return false
+    this.usedBrowserSessions.add(browserSessionId)
+    for (const session of this.sessions.values()) {
+      if (session.browserSessionId === browserSessionId && gatewayMatches(gateway, session.gateway)) {
+        this.retire(session)
+      }
+    }
+    return true
+  }
+
+  dispose(): void {
+    this.disposed = true
+    for (const session of this.sessions.values()) this.retire(session)
+  }
+}

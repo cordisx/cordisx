@@ -14,6 +14,10 @@ import {
   startPluginManagementRpcServer,
 } from '../launcher/management-rpc.js'
 import { processStartIdentity } from './supervisor-state.js'
+import { createManagerRendererGatewayAuthenticator } from './manager-renderer-gateway.js'
+import { createManagerRendererManagementChannel } from './manager-renderer-management.js'
+import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
+import { ManagerRendererSessions } from './manager-renderer-sessions.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
@@ -48,6 +52,19 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.mode === undefined ? {} : { mode: input.mode }),
     },
   })
+  let closed = false
+  const rendererSessions = new ManagerRendererSessions({
+    profileId: input.profileId,
+    ownerGeneration: input.runtimeGeneration,
+    ownerCurrent: () => !closed,
+    authenticateGateway: createManagerRendererGatewayAuthenticator({
+      homeDir: input.homeDir,
+      profileId: input.profileId,
+      ownerAppId: input.appId,
+      ownerGeneration: input.runtimeGeneration,
+    }),
+    channels: new Map([['plugin-management', createManagerRendererManagementChannel(service)]]),
+  })
   let server: PluginManagementRpcServer
   try {
     const processStartedAt = input.processStartedAt ?? await processStartIdentity(process.pid)
@@ -61,6 +78,7 @@ export async function openProductionPluginManagementComposition(input: {
       processStartedAt,
       ...(input.mode === 'service' ? { sandboxMailbox: true } : {}),
       service,
+      managerRenderer: async operation => await dispatchManagerRendererOperation(rendererSessions, operation),
       permissionReview: async operation =>
         await applyManagementPermissionReview({
           coordinator: input.coordinator,
@@ -79,10 +97,10 @@ export async function openProductionPluginManagementComposition(input: {
         : { managerChannelCredentials: input.managerChannelCredentials }),
     })
   } catch (error) {
+    rendererSessions.dispose()
     service.close()
     throw error
   }
-  let closed = false
   return {
     handler: {
       token: input.token,
@@ -94,6 +112,7 @@ export async function openProductionPluginManagementComposition(input: {
     async close(): Promise<void> {
       if (closed) return
       closed = true
+      rendererSessions.dispose()
       try {
         await server.close()
       } finally {

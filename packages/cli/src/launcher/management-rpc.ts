@@ -31,6 +31,7 @@ import {
   type ManagerChannelCredentialOperation,
   parseManagerChannelCredentialOperation,
 } from './manager-channel-credentials.js'
+import { type ManagerRendererOperation, parseManagerRendererOperation } from '../cli/manager-renderer-rpc.js'
 
 export const MANAGEMENT_BINDING = '__cordisxPluginManagementRequestV1'
 export const MANAGEMENT_RECEIVER = '__cordisxPluginManagementReceiveV1'
@@ -38,6 +39,7 @@ export const MAX_MANAGEMENT_REQUEST_BYTES = 256 * 1024
 const MAX_MANAGEMENT_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export type PluginManagementRpcOperation =
+  | ManagerRendererOperation
   | ManagerServiceAuthOperation
   | ManagerChannelCredentialOperation
   | PermissionReviewOperation
@@ -151,6 +153,7 @@ export function parsePluginManagementRpcRequest(
   if (
     ![
       'query',
+      'manager-renderer',
       'manager-service-auth',
       'manager-channel-credentials',
       'plugin-configuration',
@@ -167,6 +170,7 @@ export function parsePluginManagementRpcRequest(
       'migrate-legacy-sources',
     ].includes(String(operation.kind))
   ) throw new Error('plugin management operation is unsupported')
+  if (operation.kind === 'manager-renderer') parseManagerRendererOperation(operation)
   if (operation.kind === 'plugin-configuration') parseRendererConfigOperation(operation, scope.profileId)
   if (operation.kind === 'manager-service-auth') parseManagerServiceAuthOperation(operation)
   if (operation.kind === 'manager-channel-credentials') parseManagerChannelCredentialOperation(operation)
@@ -198,6 +202,7 @@ export async function handlePluginManagementRpcRequest(
   request: PluginManagementRpcRequest,
 ): Promise<unknown> {
   const operation = request.operation
+  if (operation.kind === 'manager-renderer') throw new Error('Manager renderer requires the local owner')
   if (operation.kind === 'manager-service-auth') {
     throw new Error('Local manager authentication requires the lifecycle owner')
   }
@@ -280,6 +285,7 @@ export async function startPluginManagementRpcServer(input: {
   readonly permissionReview?: (operation: PermissionReviewOperation) => Promise<unknown>
   readonly managerServiceAuth?: (operation: ManagerServiceAuthOperation) => Promise<unknown>
   readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
+  readonly managerRenderer?: (operation: ManagerRendererOperation) => Promise<unknown>
   readonly sandboxMailbox?: boolean
 }): Promise<PluginManagementRpcServer> {
   const paths = pluginManagementRpcPaths(input.homeDir, input.appId, input.profileId)
@@ -298,7 +304,10 @@ export async function startPluginManagementRpcServer(input: {
   await rm(paths.socket, { force: true })
   const dispatch = async (parsed: unknown): Promise<unknown> => {
     const request = parsePluginManagementRpcRequest(parsed, { token, profileId: input.profileId })
-    return request.operation.kind === 'manager-channel-credentials'
+    return request.operation.kind === 'manager-renderer'
+      ? await (input.managerRenderer?.(request.operation)
+        ?? Promise.resolve({ status: 'unavailable' }))
+      : request.operation.kind === 'manager-channel-credentials'
       ? await (input.managerChannelCredentials?.(request.operation)
         ?? Promise.resolve({ status: 'unavailable', code: 'CHANNEL_OWNER_UNAVAILABLE' }))
       : request.operation.kind === 'manager-service-auth'
