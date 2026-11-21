@@ -455,7 +455,7 @@ export function authorizationPlanV2(
     throw new LifecycleFailure('permission-denied', 'Permission V2 review requires manifest-v4.')
   }
   const catalog = new CapabilityRiskCatalog()
-  return buildPermissionAuthorizationPlanV2({
+  const plan = buildPermissionAuthorizationPlanV2({
     planId: `${generation}:${staged.manifest.id}`,
     operation,
     profileId,
@@ -478,6 +478,13 @@ export function authorizationPlanV2(
       }
     },
   }, catalog)
+  const operationId = permissionReviewOperationId(plan)
+  return Object.freeze({ ...plan, planId: operationId, binding: Object.freeze({ ...plan.binding, operationId }) })
+}
+
+/** Bind a lifecycle review to the exact owner-projected plan without exposing its policies. */
+export function permissionReviewOperationId(plan: unknown): string {
+  return `review:${createHash('sha256').update(JSON.stringify(plan)).digest('hex')}`
 }
 
 export function authorizationPlanV4(
@@ -498,7 +505,7 @@ export function authorizationPlanV4(
     )
   }
   const catalog = new CapabilityRiskCatalog()
-  return buildPermissionAuthorizationPlanV4({
+  const plan = buildPermissionAuthorizationPlanV4({
     planId: `${generation}:${staged.manifest.id}`,
     operation,
     profileId,
@@ -518,6 +525,8 @@ export function authorizationPlanV4(
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
   }, catalog)
+  const operationId = permissionReviewOperationId(plan)
+  return Object.freeze({ ...plan, binding: Object.freeze({ ...plan.binding, operationId }) })
 }
 
 export function isPermissionReviewV4ManifestVersion(schemaVersion: number): boolean {

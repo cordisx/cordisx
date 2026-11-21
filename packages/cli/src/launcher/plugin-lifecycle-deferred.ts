@@ -15,6 +15,7 @@ import {
   authorizationPlanV2,
   authorizationPlanV4,
   type HostPermissionLifecycleReviewV4Request,
+  permissionReviewOperationId,
 } from './plugin-lifecycle-model.js'
 import type { PluginLifecycleCoordinator } from './plugin-lifecycle.js'
 import type { StagedPluginPackage } from './plugin-package.js'
@@ -34,12 +35,14 @@ export function lifecycleDeferredPermissionPlan(
 ): DeferredPermissionPlan {
   if (staged.manifest.runtimeManifest.schemaVersion === 1) {
     const legacy = authorizationPlan(staged, operation, profileId, generation, policiesV1)
-    return deferValidatedV1PermissionPlan(legacy, {
+    const binding = {
       operationId: legacy.planId,
       runtimeGeneration: generation,
       moduleGeneration,
       requestId,
-    })
+    }
+    const projected = deferValidatedV1PermissionPlan(legacy, binding)
+    return deferValidatedV1PermissionPlan(legacy, { ...binding, operationId: permissionReviewOperationId(projected) })
   }
   if (staged.manifest.runtimeManifest.schemaVersion === 4) {
     return deferValidatedV2PermissionPlan(authorizationPlanV2(
