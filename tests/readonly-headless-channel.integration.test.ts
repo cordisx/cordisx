@@ -140,6 +140,13 @@ describe('read-only independent manager for an existing configured Channel', () 
       expect(initial.runtime.bindings).toEqual([])
       expect(JSON.stringify(initial)).not.toContain('host-secret')
       expect(JSON.stringify(initial)).not.toContain('fixture-private-reference')
+      const withDocuments = await openReadonlyHeadlessChannel({
+        ...f.input,
+        plugin: { ...f.input.plugin, documents: [{ content: 'fixture-private-document' }] as never },
+      })
+      expect(withDocuments).toBeDefined()
+      expect(JSON.stringify(withDocuments!.initial)).not.toContain('fixture-private-document')
+      withDocuments!.close()
       await expect(view!.snapshot()).resolves.toMatchObject({
         status: 'applied',
         projection: { accounts: [expect.objectContaining({ connectionState: 'ready' })] },

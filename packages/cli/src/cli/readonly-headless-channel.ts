@@ -20,7 +20,6 @@ function supportedPlugin(plugin: CordisXConfigPlugin): boolean {
   const manifest = plugin.manifest
   if (
     plugin.id !== 'channel' || !plugin.enabled || plugin.package !== undefined || plugin.development !== undefined
-    || (plugin.documents?.length ?? 0) !== 0
     || config === null || typeof config !== 'object' || Array.isArray(config)
     || (Object.getPrototypeOf(config) !== Object.prototype && Object.getPrototypeOf(config) !== null)
     || Object.keys(config).length !== 0 || manifest?.schemaVersion !== 16 || manifest.startup !== undefined
@@ -39,7 +38,8 @@ function supportedPlugin(plugin: CordisXConfigPlugin): boolean {
  * and permission snapshot. A file poll or a browser claim is not such a fence.
  * The caller must separately ensure the renderer cannot obtain any of the
  * plugin's ordinary permissions; this class grants only the service's own
- * account-read capability and exposes no writes or event subscriptions.
+ * account-read capability and exposes no writes or event subscriptions. It
+ * does not project plugin documents; the caller must omit them from the bundle.
  *
  * This helper does not install a renderer channel or start another service.
  * Its caller must retire the complete renderer when `retire` is invoked.

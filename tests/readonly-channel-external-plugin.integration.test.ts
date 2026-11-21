@@ -12,6 +12,7 @@ import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/contrac
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
+import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import { exactDomPermissionPolicies } from './helpers/dom-permission.js'
 
 // The coordinated plugin candidate is a separate repository and is deliberately
@@ -29,6 +30,7 @@ candidateTest.each(['no-ui-grant', 'fixture-ui-grant'] as const)(
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     let service: ReturnType<typeof createLocalChannelService> | undefined
     let dom: JSDOM | undefined
+    let digest: `sha256:${string}` | undefined
     try {
       await writeFile(
         configPath,
@@ -54,8 +56,10 @@ candidateTest.each(['no-ui-grant', 'fixture-ui-grant'] as const)(
       )
       const config = await loadConfig(configPath, { profileId: 'test', projectRoot: root })
       const plugin = config.plugins.find(item => item.id === 'channel')!
+      digest = plugin.configuredArchiveDigest
       service = createLocalChannelService({
         artifactDirectory: path.dirname(plugin.entry),
+        ...(plugin.configuredServiceEntry === undefined ? {} : { runtimeEntry: plugin.configuredServiceEntry }),
         dataDir: path.join(root, 'runtime'),
         source: plugin.source ?? pathToFileURL(plugin.entry).href,
         environment: {},
@@ -103,7 +107,13 @@ candidateTest.each(['no-ui-grant', 'fixture-ui-grant'] as const)(
               id: plugin.id,
               entry: plugin.entry,
               pointIds: ['manager.settings.navigation-items', 'manager.content'],
-            }])
+            }]).map(policy => ({
+              ...policy,
+              key: {
+                ...policy.key,
+                identity: { ...policy.key.identity, source: plugin.source ?? policy.key.identity.source },
+              },
+            }))
             : [],
         },
         channelManager: view.initial.projection,
@@ -188,6 +198,7 @@ candidateTest.each(['no-ui-grant', 'fixture-ui-grant'] as const)(
       dom?.window.close()
       errorSpy.mockRestore()
       await service?.dispose()
+      if (digest) await removeStagedPluginPackage(root, digest)
       await rm(root, { recursive: true, force: true })
     }
   },
