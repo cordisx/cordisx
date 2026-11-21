@@ -5,17 +5,19 @@ import { type CordisXConfig, type CordisXConfigPlugin, loadConfig } from '../lau
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadPluginComposition } from '../launcher/plugin-composition.js'
 import { stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { type ManagerRendererGraph, parseManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
-import type { ManagerRendererChannel } from './manager-renderer-sessions.js'
+import type { ManagerRendererChannel, ManagerRendererChannelContext } from './manager-renderer-sessions.js'
+import type { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
-import { loadServiceRendererPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
+import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
 type Snapshot = ReturnType<ServiceRendererLifecycle['snapshot']>
 type Entry = {
@@ -26,6 +28,8 @@ type Entry = {
   config?: CordisXConfig
   plugins?: readonly CordisXConfigPlugin[]
   policies?: readonly CordisXPersistedPermissionPolicyRecord[]
+  managedOwners?: ReadonlyMap<string, string>
+  managedContext?: ManagerRendererChannelContext
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
 }
@@ -55,6 +59,7 @@ export class ServiceRendererBootstrap {
       readonly lifecycle: ServiceRendererLifecycle
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
+      readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
     },
   ) {
     this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active => {
@@ -87,12 +92,14 @@ export class ServiceRendererBootstrap {
       if (!this.current(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins || !entry.policies) {
         return false
       }
+      if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
       if (!attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)) return false
       const [config, plugins, policies] = await Promise.all([
         loadConfig(this.input.configPath, { profileId: this.input.profileId, projectRoot: this.input.homeDir }),
         loadPluginComposition(this.input.store, entry.snapshot.active),
         this.policies(),
       ])
+      if (entry.managedContext) this.input.managedServiceUI?.projectInitial(entry.managedContext)
       return this.current(rendererId, entry) && attachmentEqual(this.input.lifecycle.snapshot(), entry.snapshot)
         && attachmentEqual(config, entry.config) && attachmentEqual(plugins, entry.plugins)
         && attachmentEqual(policies, entry.policies)
@@ -106,6 +113,7 @@ export class ServiceRendererBootstrap {
     // Drain this entry even if it has already been removed from the map.
     if (this.entries.get(rendererId) === entry) this.entries.delete(rendererId)
     entry.unsubscribe()
+    if (entry.managedContext) this.input.managedServiceUI?.retire(entry.managedContext)
     for (const lease of entry.leases) lease.retire()
     entry.leases.length = 0
   }
@@ -146,13 +154,22 @@ export class ServiceRendererBootstrap {
           throw new Error('renderer-bootstrap-plugin-unsupported')
         }
         // Disabled packages are also serialized as Manager metadata.
-        for (const item of snapshot.active.plugins) await loadServiceRendererPackage(this.input.homeDir, item)
+        const packages = new Map<string, Awaited<ReturnType<typeof loadServiceRendererInitialPackage>>>()
+        const managedOwners = new Map<string, string>()
+        for (const item of snapshot.active.plugins) {
+          const staged = await loadServiceRendererInitialPackage(this.input.homeDir, item)
+          packages.set(item.id, staged)
+          if (staged.manifest.runtimeManifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14) {
+            if (!this.input.managedServiceUI) throw new Error('renderer-bootstrap-plugin-unsupported')
+            if (item.enabled) managedOwners.set(item.id, item.moduleGeneration)
+          }
+        }
         const active = snapshot.active.plugins.filter(plugin => plugin.enabled)
         if (active.length > MAX_INITIAL_GRAPHS) throw new Error('renderer-bootstrap-limit')
         if (active.length > 0) {
           const server = await this.input.lifecycle.artifactServer()
           for (const item of active) {
-            const staged = await loadServiceRendererPackage(this.input.homeDir, item)
+            const staged = packages.get(item.id)!
             if (!staged.browserArtifact) throw new Error('renderer-bootstrap-plugin-unsupported')
             const lease = await server.lease(
               {
@@ -171,6 +188,7 @@ export class ServiceRendererBootstrap {
         entry.config = config
         entry.plugins = plugins
         entry.policies = policies
+        entry.managedOwners = managedOwners
         if (!await this.unchanged(rendererId, entry)) throw new Error('renderer-bootstrap-stale')
         return {
           status: 'ok',
@@ -186,7 +204,12 @@ export class ServiceRendererBootstrap {
     return await entry.preparing
   }
 
-  async complete(rendererId: string, managerOrigin: string, rawGraphs: unknown): Promise<unknown> {
+  async complete(
+    context: ManagerRendererChannelContext,
+    managerOrigin: string,
+    rawGraphs: unknown,
+  ): Promise<unknown> {
+    const rendererId = context.rendererId
     const entry = this.entries.get(rendererId)
     if (!entry || !entry.preparing) throw new Error('renderer-bootstrap-unavailable')
     await entry.preparing
@@ -199,7 +222,7 @@ export class ServiceRendererBootstrap {
       try {
         if (
           !await this.unchanged(rendererId, entry) || !entry.snapshot || !entry.config || !entry.plugins
-          || !entry.policies
+          || !entry.policies || !entry.managedOwners
         ) {
           throw new Error('renderer-bootstrap-stale')
         }
@@ -236,6 +259,18 @@ export class ServiceRendererBootstrap {
           }),
         }
         const snapshot = entry.snapshot
+        const managedServiceUICapabilities = entry.managedOwners.size === 0
+          ? undefined
+          : this.input.managedServiceUI?.projectInitial(context)
+        if (entry.managedOwners.size > 0 && managedServiceUICapabilities === undefined) {
+          throw new Error('renderer-bootstrap-plugin-unsupported')
+        }
+        if (managedServiceUICapabilities !== undefined) entry.managedContext = context
+        if (
+          managedServiceUICapabilities?.some(capability =>
+            entry.managedOwners!.get(capability.pluginId) !== capability.pluginGeneration
+          )
+        ) throw new Error('renderer-bootstrap-plugin-unsupported')
         const bundle = await buildRendererBundle(config, {
           managerPresentationMode: 'standalone',
           standaloneOwner: {
@@ -252,7 +287,9 @@ export class ServiceRendererBootstrap {
           pluginActivation: snapshot.active,
           initialRegistryEpoch: snapshot.registryEpoch,
           pluginManagement: { profileId: this.input.profileId, token: 'renderer-binding-placeholder' },
+          ...(managedServiceUICapabilities === undefined ? {} : { managedServiceUICapabilities }),
         })
+        if (entry.managedContext) this.input.managedServiceUI?.assertBundleSafe(context, bundle)
         if (entry.leases.some(lease => bundle.includes(lease.baseUrl)) || !await this.unchanged(rendererId, entry)) {
           throw new Error('renderer-bootstrap-unavailable')
         }
@@ -263,6 +300,7 @@ export class ServiceRendererBootstrap {
         } finally {
           bytes.fill(0)
         }
+        if (entry.managedContext) this.input.managedServiceUI?.assertBundleSafe(context, bundle)
         // Include the largest allowed request ID, the session envelope and the
         // terminating newline. The actual management RPC caps the whole frame.
         const result = { status: 'ok', bundle: encoded, initialGraphs: graphs }
@@ -299,6 +337,14 @@ export class ServiceRendererBootstrap {
             dispatch: async () => {
               const peer = this.input.participants.peer(context.rendererId)
               if (!peer) throw new Error('renderer-bootstrap-unavailable')
+              const entry = this.entries.get(context.rendererId)
+              if (entry?.managedContext) {
+                try {
+                  this.input.managedServiceUI?.projectInitial(context)
+                } catch {
+                  return { status: 'ok', current: false }
+                }
+              }
               return { status: 'ok', current: true }
             },
           }
@@ -310,7 +356,7 @@ export class ServiceRendererBootstrap {
         ) {
           return {
             mode: 'read',
-            dispatch: async () => await this.complete(context.rendererId, item.managerOrigin as string, item.graphs),
+            dispatch: async () => await this.complete(context, item.managerOrigin as string, item.graphs),
           }
         }
         throw new Error('renderer-bootstrap-unavailable')

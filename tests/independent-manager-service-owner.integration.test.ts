@@ -130,7 +130,7 @@ it('connects the independent manager to a real service owner without Channel or 
     expect(renderer).toEqual({
       status: 'ok',
       profileId: 'default',
-      channels: ['plugin-management'],
+      channels: ['plugin-management', 'managed-service-ui'],
       commands: true,
       generation: expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u),
       rendererId: expect.stringMatching(/^[a-f0-9]{64}$/u),

@@ -79,6 +79,20 @@ function fixture() {
 }
 
 describe('manager managed-service UI bridge', () => {
+  it('rejects an owner token in a bundle and retires only the requested session', () => {
+    const { bridge } = fixture()
+    const a = context('1', new AbortController().signal)
+    const b = context('2', new AbortController().signal)
+    const aToken = bridge.projectInitial(a)[0]!.token
+    const bToken = bridge.projectInitial(b)[0]!.token
+    expect(() => bridge.assertBundleSafe(a, `fixture:${aToken}`)).not.toThrow()
+    expect(() => bridge.assertBundleSafe(a, `fixture:${ownerToken}`)).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    bridge.retire(a)
+    expect(() => bridge.assertBundleSafe(a, 'fixture')).toThrow('MANAGED_SERVICE_UI_UNAVAILABLE')
+    expect(() => bridge.assertBundleSafe(b, `fixture:${bToken}`)).not.toThrow()
+    bridge.dispose()
+  })
+
   it('projects isolated aliases, forwards the native request, and removes unsupported capabilities', async () => {
     const { bridge, handle } = fixture()
     const a = context('1', new AbortController().signal)

@@ -50,6 +50,7 @@ const managementKinds = new Set([
   'plugin-uninstall',
   'plugin-execute-plan',
 ])
+const rendererChannelAllowlist = new Set(['plugin-management', 'managed-service-ui'])
 
 function json(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
@@ -89,6 +90,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
     channelCredentialsUsed: boolean
     rendererOpen?: Promise<ManagerRendererHandle | undefined>
     rendererCommands: boolean
+    rendererChannels: readonly string[]
     graphs?: ReturnType<typeof createManagerRendererGraphSession>
     rendererBootstrap?: ReturnType<typeof createManagerRendererBootstrap>
     rendererBundle?: Promise<Awaited<ReturnType<ReturnType<typeof createManagerRendererBootstrap>['prepare']>>>
@@ -163,6 +165,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       managedServicesUsed,
       channelCredentialsUsed: false,
       rendererCommands: false,
+      rendererChannels: [],
     }
     session.deadline = Date.now() + 8 * 60 * 60_000
     session.timer = timer
@@ -367,8 +370,10 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
             const handle = object(result?.handle)
             if (
               result?.status !== 'ok' || !handle
-              || !Array.isArray(result.channels) || result.channels.length !== 1
-              || result.channels[0] !== 'plugin-management'
+              || !Array.isArray(result.channels) || !result.channels.includes('plugin-management')
+              || result.channels.length > rendererChannelAllowlist.size
+              || new Set(result.channels).size !== result.channels.length
+              || result.channels.some(channel => typeof channel !== 'string' || !rendererChannelAllowlist.has(channel))
               || result.commands !== undefined && typeof result.commands !== 'boolean'
               || typeof handle.rendererId !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.rendererId)
               || typeof handle.grant !== 'string' || !/^[a-f0-9]{64}$/u.test(handle.grant)
@@ -392,6 +397,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
               return undefined
             }
             session.rendererCommands = result.commands === true
+            session.rendererChannels = [...result.channels] as string[]
             if (session.rendererCommands) {
               session.graphs = createManagerRendererGraphSession({
                 managerOrigin: `http://${authority}`,
@@ -423,7 +429,7 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
           : json(response, 200, {
             status: 'ok',
             profileId: owner.profileId,
-            channels: ['plugin-management'],
+            channels: session.rendererChannels,
             // Public opaque identity is distinct from the private owner grant.
             ...(session.rendererCommands
               ? { commands: true, rendererId: handle.rendererId, generation: handle.ownerGeneration }
@@ -522,7 +528,8 @@ export async function startManagerWeb(owner: ManagerOwner, options: {
       }
       if (url.pathname === '/api/renderer/binding') {
         if (
-          Object.keys(input).length !== 2 || input.channel !== 'plugin-management' || typeof input.payload !== 'string'
+          Object.keys(input).length !== 2 || typeof input.channel !== 'string'
+          || !session.rendererChannels.includes(input.channel) || typeof input.payload !== 'string'
           || Buffer.byteLength(JSON.stringify(input)) > 200 * 1024
           || session.rendererOpen === undefined || options.rendererGateway === undefined
         ) return json(response, 400, { error: 'RENDERER_BINDING_UNAVAILABLE' })

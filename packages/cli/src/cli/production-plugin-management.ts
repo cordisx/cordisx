@@ -43,6 +43,8 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
+  /** Owner-issued, per-renderer read-only managed-service UI bridge. */
+  readonly rendererManagedServiceUI?: ManagerRendererChannel
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
   const service = await openPluginManagementService({
@@ -72,6 +74,9 @@ export async function openProductionPluginManagementComposition(input: {
       ...(input.rendererBootstrap === undefined
         ? []
         : [['manager-bootstrap', input.rendererBootstrap] as const]),
+      ...(input.rendererManagedServiceUI === undefined
+        ? []
+        : [['managed-service-ui', input.rendererManagedServiceUI] as const]),
     ]),
     ...(input.rendererParticipant === undefined ? {} : { participant: input.rendererParticipant }),
   })

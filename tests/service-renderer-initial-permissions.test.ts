@@ -1,0 +1,98 @@
+import { beforeEach, expect, it, vi } from 'vitest'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
+import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import {
+  loadServiceRendererInitialPackage,
+  loadServiceRendererPackage,
+} from '../packages/cli/src/cli/service-renderer-projection.js'
+
+vi.mock('../packages/cli/src/launcher/plugin-package.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../packages/cli/src/launcher/plugin-package.js')>(),
+  loadStagedPluginPackage: vi.fn(),
+}))
+
+const item = {
+  id: 'fixture-plugin',
+  version: '1.0.0',
+  digest: `sha256:${'1'.repeat(64)}` as `sha256:${string}`,
+  moduleGeneration: 'fixture-generation',
+  enabled: true,
+  dependencies: [],
+}
+
+function staged() {
+  const service = { id: 'fixture-service', kind: 'managed-backend', owner: 'host' }
+  return {
+    manifest: {
+      id: item.id,
+      version: item.version,
+      dependencies: [],
+      runtimeManifest: {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+        schemaVersion: 14,
+        capabilities: [] as unknown[],
+        services: [service],
+      },
+    },
+    serviceModules: [{ declaration: service }],
+    managedServiceResources: [{ path: './fixture.mjs' }],
+    entityTemplates: [] as unknown[],
+    documents: [] as unknown[],
+    browserArtifact: {},
+  }
+}
+
+beforeEach(() => vi.mocked(loadStagedPluginPackage).mockReset())
+
+it('admits the narrow initial managed slice while retaining the dynamic lifecycle gate', async () => {
+  const value = staged()
+  vi.mocked(loadStagedPluginPackage).mockResolvedValue(value as never)
+  expect(await loadServiceRendererInitialPackage('/fixture', item)).toBe(value)
+  await expect(loadServiceRendererPackage('/fixture', item)).rejects.toThrow('renderer-projection-plugin-unsupported')
+})
+
+it('rejects declared permissions, unrelated services, documents and mismatched owner metadata', async () => {
+  const cases = [
+    () => {
+      const value = staged()
+      value.manifest.runtimeManifest.capabilities.push({ id: 'fixture-permission' })
+      return value
+    },
+    () => {
+      const value = staged()
+      value.manifest.runtimeManifest.services[0]!.kind = 'platform-provider'
+      return value
+    },
+    () => {
+      const value = staged()
+      value.manifest.runtimeManifest.services[0]!.owner = 'foreign'
+      return value
+    },
+    () => {
+      const value = staged()
+      value.serviceModules = []
+      return value
+    },
+    () => {
+      const value = staged()
+      value.entityTemplates.push({})
+      return value
+    },
+    () => {
+      const value = staged()
+      value.documents.push({})
+      return value
+    },
+    () => {
+      const value = staged()
+      value.manifest.id = 'other-plugin'
+      return value
+    },
+  ]
+  for (const create of cases) {
+    vi.mocked(loadStagedPluginPackage).mockResolvedValueOnce(create() as never)
+    await expect(loadServiceRendererInitialPackage('/fixture', item)).rejects.toThrow(
+      'renderer-projection-plugin-unsupported',
+    )
+  }
+})

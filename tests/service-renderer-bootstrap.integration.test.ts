@@ -8,11 +8,13 @@ import { ServiceRendererBootstrap } from '../packages/cli/src/cli/service-render
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
 import {
   createServiceRendererProjector,
+  loadServiceRendererPackage,
   type ServiceRendererPrivateGraph,
 } from '../packages/cli/src/cli/service-renderer-projection.js'
 import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-renderer-bundle-codec.js'
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
+import { createManagerManagedServiceUIBridge } from '../packages/cli/src/cli/manager-managed-service-ui.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
@@ -28,6 +30,7 @@ import {
 } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererLifecycle } from '../packages/cli/src/launcher/service-renderer-lifecycle.js'
 import { decision, localPackage, request } from './suites/plugin-lifecycle.fixtures.js'
+import { backend as fixtureBackendSource, stageServiceModePlugin } from './fixtures/service-mode-plugin.js'
 
 const secret = () => randomBytes(32).toString('hex')
 const origin = 'http://127.0.0.1:43123'
@@ -37,7 +40,7 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-async function fixture(options: { delayLease?: boolean } = {}) {
+async function fixture(options: { delayLease?: boolean; managedBackend?: boolean } = {}) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
   const homeDir = path.join(root, 'home')
   const configPath = path.join(homeDir, 'config.json')
@@ -45,6 +48,21 @@ async function fixture(options: { delayLease?: boolean } = {}) {
   await writeFile(configPath, JSON.stringify(createDefaultHomeConfig()))
   const profileId = 'default'
   const generation = 'fixture-owner'
+  if (options.managedBackend) {
+    await stageServiceModePlugin(
+      root,
+      homeDir,
+      profileId,
+      true,
+      'https://example.test/fixtures',
+      `export const inject = ['managedServices'];
+       export async function apply(ctx) {
+         const result = await ctx.managedServices.get({ serviceId: 'gateway' });
+         globalThis.__fixtureManagedStatus = result.status;
+         if (result.status === 'available') globalThis.__fixtureManagedSnapshot = (await result.service.snapshot()).status;
+       }`,
+    )
+  }
   const scope = { homeDigest: attachmentHomeDigest(homeDir), ownerAppId: 'codex', profileId, generation }
   const participants = new ServiceRendererParticipants(scope)
   const leaseReady = defer<PluginGenerationGraphLease>()
@@ -96,7 +114,17 @@ async function fixture(options: { delayLease?: boolean } = {}) {
   })
   await coordinator.recover()
   lifecycle.initialize(await store.bindRuntimeGeneration())
-  await (await managed.initialize(await store.loadActive())).coreReady
+  const startup = await managed.initialize(await store.loadActive())
+  await Promise.all([startup.coreReady, startup.adopted])
+  await vi.waitFor(() => expect(managed.readManagedServiceUIFence()).toEqual(expect.any(Number)))
+  const managedUI = createManagerManagedServiceUIBridge({
+    profileId,
+    runtimeGeneration: generation,
+    ownerGeneration: generation,
+    ownerCurrent: () => true,
+    readLifecycleFence: () => managed.readManagedServiceUIFence(),
+    runtime: managed,
+  })
   const bootstrap = new ServiceRendererBootstrap({
     homeDir,
     configPath,
@@ -106,6 +134,7 @@ async function fixture(options: { delayLease?: boolean } = {}) {
     lifecycle,
     participants,
     store,
+    managedServiceUI: managedUI,
   })
   const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
   const sessions = new ManagerRendererSessions({
@@ -114,7 +143,10 @@ async function fixture(options: { delayLease?: boolean } = {}) {
     ownerCurrent: () => true,
     authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
     participant: participants.participant,
-    channels: new Map([['manager-bootstrap', bootstrap.channel()]]),
+    channels: new Map([
+      ['manager-bootstrap', bootstrap.channel()],
+      ['managed-service-ui', managedUI.channel],
+    ]),
   })
   const browserSessionId = secret()
   const handle = (await sessions.open(gateway, browserSessionId))!
@@ -151,6 +183,9 @@ async function fixture(options: { delayLease?: boolean } = {}) {
     profileId,
     generation,
     lifecycle,
+    managed,
+    managedUI,
+    gateway,
     participants,
     sessions,
     invocation,
@@ -163,6 +198,7 @@ async function fixture(options: { delayLease?: boolean } = {}) {
       releaseLease.resolve()
       sessions.dispose()
       bootstrap.close()
+      managedUI.dispose()
       participants.close()
       await lifecycle.close()
       await managed.dispose()
@@ -184,6 +220,107 @@ function project(graph: ServiceRendererPrivateGraph) {
     initialStyleUrls: graph.initialStyleUrls.map(url => baseUrl + url.slice(graph.baseUrl.length)),
   }
 }
+
+it('projects an already-running managed backend into two isolated read-only renderer sessions', async () => {
+  const f = await fixture({ managedBackend: true })
+  const active = f.lifecycle.snapshot().active.plugins.find(item => item.id === 'fixture-service')!
+  const projections = vi.spyOn(f.managedUI, 'projectInitial')
+  const secondId = secret()
+  let second: typeof f.invocation | undefined
+  const boot = async (invocation: typeof f.invocation) => {
+    const prepared = await f.sessions.call(invocation, 'manager-bootstrap', { action: 'prepare' }) as any
+    expect(prepared.status).toBe('ok')
+    expect((await fetch(`${prepared.value.privateGraphs[0].baseUrl}server.mjs`)).status).toBe(404)
+    const graph = project(prepared.value.privateGraphs[0])
+    const completed = await f.sessions.call(invocation, 'manager-bootstrap', {
+      action: 'complete',
+      managerOrigin: origin,
+      graphs: [graph],
+    }) as any
+    expect(completed.status).toBe('ok')
+    const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+    try {
+      const source = bytes.toString('utf8')
+      const capability = projections.mock.results.at(-1)?.value?.[0]
+      if (!capability) throw new Error('manager managed-service capability is missing')
+      expect(source.includes(capability.token)).toBe(true)
+      expect(source.includes(f.managed.capabilities()[0]!.token)).toBe(false)
+      expect(source.includes(prepared.value.privateGraphs[0].baseUrl)).toBe(false)
+      expect(source.includes(invocation.handle.grant)).toBe(false)
+      expect(source.includes(fixtureBackendSource)).toBe(false)
+      return capability
+    } finally {
+      bytes.fill(0)
+    }
+  }
+  try {
+    await expect(loadServiceRendererPackage(f.homeDir, active)).rejects.toThrow(
+      'renderer-projection-plugin-unsupported',
+    )
+    const secondHandle = await f.sessions.open(f.gateway, secondId)
+    if (!secondHandle) throw new Error('second renderer unavailable')
+    second = { gateway: f.gateway, browserSessionId: secondId, handle: secondHandle }
+    const first = await boot(f.invocation)
+    const other = await boot(second)
+    expect(first.pluginId).toBe('fixture-service')
+    expect(first.token !== other.token && first.token !== f.managed.capabilities()[0]!.token).toBe(true)
+    const request = (token: string, operation: string, binding?: unknown) =>
+      JSON.stringify({
+        version: 1,
+        token,
+        requestId: `fixture-${operation}`,
+        operation,
+        scope: { profileId: f.profileId, runtimeGeneration: f.generation, pluginGeneration: first.pluginGeneration },
+        serviceId: 'gateway',
+        ...(binding === undefined ? {} : { binding }),
+      })
+    const get = await f.sessions.call(f.invocation, 'managed-service-ui', request(first.token, 'get')) as any
+    expect(get).toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+    expect(await f.sessions.call(second, 'managed-service-ui', request(first.token, 'get')))
+      .toEqual({ status: 'unavailable' })
+    expect(
+      await f.sessions.call(
+        second,
+        'managed-service-ui',
+        request(other.token, 'snapshot', get.value.value.service.binding),
+      ),
+    )
+      .toMatchObject({ status: 'ok', value: { ok: true, value: { status: 'available' } } })
+    expect(await f.sessions.call(second, 'managed-service-ui', request(other.token, 'subscribe')))
+      .toEqual({ status: 'ok', value: { requestId: 'fixture-subscribe', ok: false, code: 'unsupported' } })
+    expect(await f.sessions.close(f.invocation)).toBe(true)
+    expect(await f.sessions.call(f.invocation, 'managed-service-ui', request(first.token, 'get')))
+      .toEqual({ status: 'unavailable' })
+    expect(await f.sessions.call(second, 'managed-service-ui', request(other.token, 'get')))
+      .toMatchObject({ status: 'ok', value: { ok: true } })
+    const entered = defer<void>()
+    const release = defer<void>()
+    const original = f.managed.managedServiceUI.handleBindingValue
+    const handler = vi.spyOn(f.managed.managedServiceUI, 'handleBindingValue').mockImplementationOnce(
+      async (payload, signal) => {
+        const value = await original(payload, signal)
+        entered.resolve()
+        await release.promise
+        return value
+      },
+    )
+    try {
+      const pending = f.sessions.call(second, 'managed-service-ui', request(other.token, 'get'))
+      await entered.promise
+      await f.managed.dispose()
+      expect(await f.sessions.call(second, 'manager-bootstrap', { action: 'status' }))
+        .toEqual({ status: 'ok', value: { status: 'ok', current: false } })
+      release.resolve()
+      expect(await pending).toEqual({ status: 'unavailable' })
+    } finally {
+      release.resolve()
+      handler.mockRestore()
+    }
+  } finally {
+    if (second) await f.sessions.close(second).catch(() => undefined)
+    await f.close()
+  }
+}, 90_000)
 
 it('builds the real empty manager from the owner and admits its runtime through session synchronization', async () => {
   const f = await fixture()
@@ -307,6 +444,27 @@ it('refuses a stale composition and retires its initial graph after the authorit
     // Rebinding still authenticates the live session; a fresh bootstrap is
     // required before that session can be admitted to the new composition.
     expect(await f.call({ action: 'status' })).toEqual({ status: 'ok', value: { status: 'ok', current: true } })
+  } finally {
+    await f.close()
+  }
+}, 30_000)
+
+it('keeps configured plugins and their private configuration outside the bootstrap', async () => {
+  const f = await fixture()
+  try {
+    const entry = path.join(f.root, 'configured-fixture.mjs')
+    const privateValue = `fixture-private-${secret()}`
+    await writeFile(entry, 'export function apply() {}')
+    await writeFile(
+      f.configPath,
+      JSON.stringify({
+        ...createDefaultHomeConfig(),
+        plugins: [{ id: 'configured-fixture', entry, enabled: true, config: { token: privateValue } }],
+      }),
+    )
+    const result = await f.call({ action: 'prepare' })
+    expect(result).toEqual({ status: 'unavailable' })
+    expect(JSON.stringify(result)).not.toContain(privateValue)
   } finally {
     await f.close()
   }

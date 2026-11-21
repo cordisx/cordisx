@@ -17,6 +17,7 @@ import { attachmentHomeDigest } from '../launcher/renderer-lifecycle-peer.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
 import { createServiceRendererProjector } from './service-renderer-projection.js'
 import { ServiceRendererBootstrap } from './service-renderer-bootstrap.js'
+import { createManagerManagedServiceUIBridge } from './manager-managed-service-ui.js'
 import { startServiceModelApi } from '../launcher/service-model-api.js'
 import { createServiceTerminalProvider } from '../launcher/service-terminal-provider.js'
 import { createHeadlessCodexOperations } from '../launcher/headless-codex-operations.js'
@@ -65,6 +66,8 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       let rendererLifecycle: ServiceRendererLifecycle | undefined
       let rendererParticipants: ServiceRendererParticipants | undefined
       let rendererBootstrap: ServiceRendererBootstrap | undefined
+      let rendererManagedServiceUI: ReturnType<typeof createManagerManagedServiceUIBridge> | undefined
+      let ownerOpen = true
       let failure: unknown
       const stopServices = () => {
         void services?.dispose().catch(() => undefined)
@@ -90,16 +93,6 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           }),
         })
         rendererParticipants.bind(rendererLifecycle)
-        rendererBootstrap = new ServiceRendererBootstrap({
-          homeDir,
-          configPath,
-          appId,
-          profileId,
-          generation,
-          lifecycle: rendererLifecycle,
-          participants: rendererParticipants,
-          store,
-        })
         services = createProductionManagedServiceLifecycle({
           runtime: rendererLifecycle,
           homeDir,
@@ -110,6 +103,25 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           startupConfig: config.apps[appId]?.profiles[profileId]?.managedServiceStartupConfig,
           dryRun: false,
           requireOwnedProcess: true,
+        })
+        rendererManagedServiceUI = createManagerManagedServiceUIBridge({
+          profileId,
+          runtimeGeneration: generation,
+          ownerGeneration: generation,
+          ownerCurrent: () => ownerOpen && !lifetime.signal.aborted,
+          readLifecycleFence: () => services!.readManagedServiceUIFence(),
+          runtime: services,
+        })
+        rendererBootstrap = new ServiceRendererBootstrap({
+          homeDir,
+          configPath,
+          appId,
+          profileId,
+          generation,
+          lifecycle: rendererLifecycle,
+          participants: rendererParticipants,
+          store,
+          managedServiceUI: rendererManagedServiceUI,
         })
         certified = await LauncherMarketplaceCertifiedAuthority.open({ homeDir, configPath, profileId })
           .catch(() => undefined)
@@ -192,6 +204,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           coordinator,
           rendererParticipant: rendererParticipants.participant,
           rendererBootstrap: rendererBootstrap.channel(),
+          rendererManagedServiceUI: rendererManagedServiceUI.channel,
           mode: 'service',
           managerServiceAuth: operation => services!.managerAuth(operation),
           ...(managerChannel === undefined
@@ -216,11 +229,13 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
       } catch (error) {
         if (!lifetime.signal.aborted) failure = error
       } finally {
+        ownerOpen = false
         lifetime.signal.removeEventListener('abort', stopServices)
         for (
           const close of [
             () => api?.close(),
             () => rendererBootstrap?.close(),
+            () => rendererManagedServiceUI?.dispose(),
             () => rendererParticipants?.close(),
             () => rendererLifecycle?.close(),
             () => management?.close(),

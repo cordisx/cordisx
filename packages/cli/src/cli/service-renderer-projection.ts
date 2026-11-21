@@ -2,6 +2,7 @@ import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
 import { attachmentEqual, type RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
 import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
 
@@ -33,14 +34,38 @@ export async function loadServiceRendererPackage(
   homeDir: string,
   item: CordisXPluginActivationItemV1,
 ): Promise<Awaited<ReturnType<typeof loadStagedPluginPackage>>> {
+  return await loadAllowedRendererPackage(homeDir, item, false)
+}
+
+/** Initial read-only owner projection; dynamic lifecycle retains the stricter v1 gate. */
+export async function loadServiceRendererInitialPackage(
+  homeDir: string,
+  item: CordisXPluginActivationItemV1,
+): Promise<Awaited<ReturnType<typeof loadStagedPluginPackage>>> {
+  return await loadAllowedRendererPackage(homeDir, item, true)
+}
+
+async function loadAllowedRendererPackage(
+  homeDir: string,
+  item: CordisXPluginActivationItemV1,
+  allowReadOnlyManaged: boolean,
+): Promise<Awaited<ReturnType<typeof loadStagedPluginPackage>>> {
   const staged = await loadStagedPluginPackage(homeDir, item.digest)
   const manifest = staged.manifest.runtimeManifest
+  const legacy = manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && manifest.schemaVersion === 1
+    && staged.serviceModules.length === 0 && staged.managedServiceResources.length === 0
+  const managed = allowReadOnlyManaged
+    && manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 && manifest.schemaVersion === 14
+    && manifest.services.length > 0
+    && manifest.services.every(service => service.kind === 'managed-backend' && service.owner === 'host')
+    && staged.serviceModules.length === manifest.services.length
+    && manifest.services.every(service =>
+      staged.serviceModules.filter(module => attachmentEqual(module.declaration, service)).length === 1
+    )
   if (
     staged.manifest.id !== item.id || staged.manifest.version !== item.version
     || !attachmentEqual(staged.manifest.dependencies, item.dependencies)
-    || manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 || manifest.schemaVersion !== 1
-    || manifest.capabilities.length !== 0 || staged.serviceModules.length !== 0
-    || staged.managedServiceResources.length !== 0 || staged.entityTemplates.length !== 0
+    || (!legacy && !managed) || manifest.capabilities.length !== 0 || staged.entityTemplates.length !== 0
     || (staged.documents?.length ?? 0) !== 0 || staged.browserArtifact === undefined
   ) throw new Error('renderer-projection-plugin-unsupported')
   return staged

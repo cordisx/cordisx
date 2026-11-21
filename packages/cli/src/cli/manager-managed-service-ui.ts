@@ -346,6 +346,19 @@ export function createManagerManagedServiceUIBridge(input: {
 
   return {
     projectInitial,
+    /** Abort one owner-issued projection if its bootstrap cannot complete. */
+    retire(context: ManagerRendererChannelContext): void {
+      const session = sessions.get(context.rendererId)
+      if (session?.context.signal === context.signal) retire(context.rendererId)
+    },
+    /** Check the owner-built renderer source before any bytes reach a browser. */
+    assertBundleSafe(context: ManagerRendererChannelContext, source: string): void {
+      const session = sessions.get(context.rendererId)
+      if (!session || typeof source !== 'string') throw unavailable()
+      assertCurrent(session, context)
+      if (session.capabilities.some(owner => source.includes(owner.token))) throw unavailable()
+      assertCurrent(session, context)
+    },
     channel,
     dispose(): void {
       disposed = true
