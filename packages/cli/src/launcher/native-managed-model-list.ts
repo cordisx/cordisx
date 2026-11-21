@@ -47,9 +47,9 @@ export function nativeManagedModelList(options: {
           reasoningEffort,
           description: '',
         })),
-        // Managed catalogs do not yet carry audited image/audio capability.
-        // Do not widen the native attachment controls based on a schema default.
-        inputModalities: ['text'],
+        // The native protocol has no unknown value. Let the selected service
+        // decide whether an attachment is supported instead of blocking it here.
+        inputModalities: ['text', 'image', 'audio'],
         serviceTiers: model.supportsFastMode === true ? [{ id: 'priority', name: 'Fast', description: '' }] : [],
       })
     }

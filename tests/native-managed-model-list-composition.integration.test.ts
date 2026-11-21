@@ -71,7 +71,11 @@ it.skipIf(process.platform !== 'darwin')(
       const response = JSON.parse(buffer.split('\n')[0]!)
       expect(response).toMatchObject({
         id: 'list',
-        result: { data: [{ id: 'model-a', defaultReasoningEffort: 'high', inputModalities: ['text'] }] },
+        result: {
+          data: [
+            { id: 'model-a', defaultReasoningEffort: 'high', inputModalities: ['text', 'image', 'audio'] },
+          ],
+        },
       })
     } finally {
       child.stdin.end()
