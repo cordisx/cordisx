@@ -43,6 +43,7 @@ export async function configuredPluginArchive(
       manifest: staged.manifest.runtimeManifest,
       manifestFiles: [plugin.entry],
       distributionArtifact: { version: staged.manifest.version, integrity },
+      configuredArchiveDigest: staged.digest,
       configuredServiceEntry: './services/runtime.mjs',
       ...(staged.readme === undefined ? {} : { readme: staged.readme }),
       ...(staged.documents === undefined ? {} : { documents: staged.documents }),

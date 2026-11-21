@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { c as createTar } from 'tar'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
+import { loadStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+import { loadServiceConfiguredArchive } from '../packages/cli/src/cli/service-renderer-projection.js'
 
 const temporary: string[] = []
 const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v16.schema.json'
@@ -85,11 +87,27 @@ describe('direct configured package provenance', () => {
       distributionArtifact: { version: '1.0.0', integrity },
     })
     expect(plugin.entry).toContain('/packages/sha256/')
+    expect(plugin.configuredArchiveDigest).toMatch(/^sha256:[a-f0-9]{64}$/)
+    const staged = await loadStagedPluginPackage(f.root, plugin.configuredArchiveDigest!)
+    expect(staged).toMatchObject({ digest: plugin.configuredArchiveDigest, artifactIntegrity: integrity })
+    expect((await loadServiceConfiguredArchive(f.root, plugin)).digest).toBe(staged.digest)
+    for (
+      const changed of [
+        { ...plugin, source: 'https://example.test/other' },
+        { ...plugin, entry: path.join(f.root, 'other.js') },
+        { ...plugin, distributionArtifact: { version: '1.0.0', integrity: `sha256:${'a'.repeat(64)}` as const } },
+      ]
+    ) {
+      await expect(loadServiceConfiguredArchive(f.root, changed)).rejects.toThrow(
+        'renderer-configured-archive-unavailable',
+      )
+    }
     expect(plugin.manifestFiles).toEqual([archive])
     const composition = await buildRendererCompositionSource(config, {}, { omitPluginModules: true })
     expect(composition.source).toContain(`source: ${JSON.stringify(source)}`)
     expect(plugin.package).toBeUndefined()
     expect(composition.source).toContain(`distributionArtifact: ${JSON.stringify(plugin.distributionArtifact)}`)
+    expect(composition.source).not.toContain(plugin.configuredArchiveDigest)
     // Rebuilt archives must not inherit the previously certified distribution identity.
     await writeFile(path.join(f.root, 'dist', 'index.js'), 'export const name = "changed"')
     await createTar({ cwd: f.root, file: archive, gzip: true }, [
@@ -98,7 +116,9 @@ describe('direct configured package provenance', () => {
       'runtime-manifest.json',
       'dist',
     ])
-    expect((await loadConfig(f.config)).plugins[0]!.distributionArtifact!.integrity).not.toEqual(integrity)
+    const rebuilt = (await loadConfig(f.config)).plugins[0]!
+    expect(rebuilt.distributionArtifact!.integrity).not.toEqual(integrity)
+    expect(rebuilt.configuredArchiveDigest).not.toEqual(plugin.configuredArchiveDigest)
   })
   it('loads service metadata only from the digest-validated descriptor for the exact entry', async () => {
     const f = await fixture(), plugin = (await loadConfig(f.config)).plugins[0]!

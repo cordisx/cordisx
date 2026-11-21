@@ -1,7 +1,8 @@
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../platform-contracts.js'
 import type { PluginRuntimeMutation } from '../launcher/plugin-lifecycle-model.js'
 import { attachmentEqual, type RendererAttachmentIdentity } from '../launcher/renderer-lifecycle-peer.js'
-import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import { loadStagedPluginPackage, stagedPluginModulePath } from '../launcher/plugin-package.js'
+import type { CordisXConfigPlugin } from '../launcher/config.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../launcher/latest-runtime-manifest.js'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import type { CordisXPluginActivationItemV1 } from '../plugin-lifecycle-contracts.js'
@@ -27,6 +28,24 @@ export function serviceRendererPrivateGraph(lease: PluginGenerationGraphLease): 
     entryUrl: lease.entryUrl,
     initialStyleUrls: [...lease.initialStyleUrls],
   }
+}
+
+/** Verify the owner-selected archive and staged graph; this does not grant admission or capabilities. */
+export async function loadServiceConfiguredArchive(homeDir: string, plugin: CordisXConfigPlugin) {
+  const digest = plugin.configuredArchiveDigest
+  const distribution = plugin.distributionArtifact
+  if (
+    !plugin.enabled || !digest || !distribution || plugin.package !== undefined || plugin.development !== undefined
+    || plugin.entry !== stagedPluginModulePath(homeDir, digest) || !plugin.source || !plugin.manifest
+  ) throw new Error('renderer-configured-archive-unavailable')
+  const staged = await loadStagedPluginPackage(homeDir, digest)
+  if (
+    staged.digest !== digest || staged.artifactIntegrity !== distribution.integrity
+    || staged.manifest.id !== plugin.id || staged.manifest.version !== distribution.version
+    || staged.identitySource !== plugin.source || !attachmentEqual(staged.manifest.runtimeManifest, plugin.manifest)
+    || staged.browserArtifact === undefined
+  ) throw new Error('renderer-configured-archive-unavailable')
+  return staged
 }
 
 /** Reread the owner-selected immutable package and reject capabilities not yet projected. */
