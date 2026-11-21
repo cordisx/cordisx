@@ -57,6 +57,7 @@ import { generationVisibilityFromContext } from './generation-visibility.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
 import { restrictChannelManagerActions } from './channel-manager-actions.js'
+import { markChannelSnapshotUnavailable, readChannelSnapshot } from './channel-manager-unavailable.js'
 import {
   type ChannelManagerConnectionProjection,
   type ChannelManagerProjectionV1,
@@ -208,6 +209,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       logsAvailable: () => !snapshotOnly,
       runAction: async (action, value) => await this.runAction(action, value),
     })
+    if (snapshotOnly && actions === undefined) markChannelSnapshotUnavailable(state)
     if (actions && !snapshotOnly) {
       state.conversations = new ChannelConversationWorkflow({
         profileId: wrapped.profileId ?? 'default',
@@ -657,18 +659,13 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     signal.throwIfAborted()
     this.assertOwnedRead()
     const state = stateFor(this)
-    if (state.actions === undefined || state.disposed || !state.isCurrent()) return
-    const sequence = ++state.refreshSequence
-    const result = await state.actions.run('snapshot', {})
-    if (
-      signal.aborted || state.disposed || !state.isCurrent() || state.refreshSequence !== sequence
-      || result.projection === undefined
-    ) return
+    const result = await readChannelSnapshot(state, signal, () => this.notifyListeners())
+    if (result === undefined) return
     this.assertOwnedRead()
     const before = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
     // Normalize the entire readback before it can replace any last-good account data.
-    withRuntimeProjection(state.projection, result.projection)
-    state.runtimeProjection = result.projection
+    withRuntimeProjection(state.projection, result)
+    state.runtimeProjection = result
     const after = JSON.stringify({ accounts: projectionFor(this).accounts, bindings: projectionFor(this).bindings })
     if (before === after) return
     state.cachedProjection = undefined

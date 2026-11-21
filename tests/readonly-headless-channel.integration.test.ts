@@ -82,8 +82,45 @@ async function fixture() {
 
 describe('read-only independent manager for an existing configured Channel', () => {
   it('keeps the read-only descriptor even when its snapshot bridge is unavailable', () => {
-    const manager = new CordisXChannelManagerPresentationService(new Context(), { presentationMode: 'snapshot-only' })
+    const ref = { adapterId: 'simulator', accountId: 'local', tenantId: 'test' }
+    const connection = {
+      ref,
+      adapterKind: 'simulator',
+      enabled: true,
+      transportMode: 'simulator',
+      secretState: 'ready',
+    }
+    const manager = new CordisXChannelManagerPresentationService(new Context(), {
+      presentationMode: 'snapshot-only',
+      projection: {
+        contract: 'cordisx.channel-manager-projection/v1',
+        schemaVersion: 1,
+        status: 'verified',
+        observedAt: '2025-01-01T00:00:00.000Z',
+        service: {
+          configurationKind: 'host',
+          configApplies: 'service-restart',
+          revision: 1,
+          lastGoodRevision: 1,
+          writable: false,
+        },
+        connections: [connection],
+        routes: [],
+        bindings: [],
+        diagnostics: [],
+        accounts: [{
+          ...connection,
+          implementationStatus: 'verified',
+          connectionState: 'ready',
+          generation: 1,
+          inbound: { pending: 0, retrying: 0, deadLetter: 0 },
+          outbound: { pending: 0, retrying: 0, deadLetter: 0 },
+        }],
+      },
+    })
     expect(manager.presentationCapabilities().mode).toBe('snapshot-only')
+    expect(manager.snapshot().accounts[0]?.connectionState).toBe('unavailable')
+    expect(manager.snapshot().observedAt).toBe('2025-01-01T00:00:00.000Z')
   })
 
   it('reads real account state through the existing service and exposes no secret or write authority', async () => {
@@ -182,6 +219,27 @@ describe('read-only independent manager for an existing configured Channel', () 
       available = false
       await own.refreshIdentity(new AbortController().signal)
       expect(own.snapshot().observedAt).toBe(refreshedObservedAt)
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('unavailable')
+      available = true
+      await own.refreshIdentity(new AbortController().signal)
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('ready')
+      let rejectOlder!: (error: Error) => void
+      run.mockImplementationOnce(async () =>
+        await new Promise((_resolve, reject) => {
+          rejectOlder = reject
+        })
+      )
+      const older = own.refreshIdentity(new AbortController().signal)
+      const olderRejected = expect(older).rejects.toThrow('older-read-failed')
+      await own.refreshIdentity(new AbortController().signal)
+      rejectOlder(new Error('older-read-failed'))
+      await olderRejected
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('ready')
+      run.mockRejectedValueOnce(new Error('fixture-transport-failed'))
+      await expect(own.refreshIdentity(new AbortController().signal)).rejects.toThrow('fixture-transport-failed')
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('unavailable')
+      await own.refreshIdentity(new AbortController().signal)
+      expect(own.snapshot().accounts[0]?.connectionState).toBe('ready')
       const account = own.snapshot().accounts[0]!
       const outcome = await own.execute({
         contract: 'cordisx.channel-manager-request/v2',
@@ -194,7 +252,7 @@ describe('read-only independent manager for an existing configured Channel', () 
         target: { kind: 'connection', connectionToken: account.connectionToken },
       })
       expect(outcome.status).toBe('rejected')
-      expect(run).toHaveBeenCalledTimes(2)
+      expect(run).toHaveBeenCalledTimes(7)
       retire()
       expect(() => presentationManager.presentationCapabilities()).toThrow('PERMISSION_DENIED')
       view!.close()
