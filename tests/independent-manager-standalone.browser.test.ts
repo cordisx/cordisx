@@ -218,7 +218,7 @@ it.skipIf(chrome === undefined)(
       if (browser) await stopChrome(browser)
       server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
-      await rm(profile, { recursive: true, force: true })
+      await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   },
   45_000,
