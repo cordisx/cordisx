@@ -675,6 +675,22 @@ candidate provider table. The candidate lease replaces the thread binding only
 after native resume succeeds; other native errors and failed retries leave the
 existing binding unchanged. When the Host cannot vouch for the provider, the
 native failure stands.
+
+The Desktop may also request `model/list` for a thread's saved provider, while
+managed providers are attached to threads rather than registered in the native
+server's startup configuration. For the exact structured
+`modelProviderNotConfigured` error matching that request, the intermediary may
+return the current, locally owned Host catalog using the native response shape.
+Pagination is bounded and cursors are fenced to the exact catalog snapshot.
+Native successes, other errors, configured or remote providers, and unscoped
+requests remain native. If the complete provider catalog or its reasoning
+defaults are unavailable, the original error is preserved. The recovery emits
+only fixed diagnostic categories, without request contents or credentials.
+Managed catalogs do not yet provide authoritative input modalities, so recovered
+rows conservatively advertise text only; image or audio attachment controls may
+be unavailable until that metadata is supported. Fixture and schema checks do
+not establish acceptance in a running Desktop.
+
 Recovery restores the persisted provider without preparing a new Send or a
 provider change. It must not add a new-thread first-turn association fence:
 unchanged-provider sends and retries intentionally pass through without an

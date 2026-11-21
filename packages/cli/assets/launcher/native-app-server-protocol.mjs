@@ -3,6 +3,7 @@ import net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { NativeTurnDiagnostics } from './native-turn-diagnostics.mjs'
 import { NativeRequestTracker } from './native-request-tracker.mjs'
+import { createNativeManagedModelListRecovery } from './native-managed-model-list-recovery.mjs'
 import { prepareManagedResume } from './native-managed-resume.mjs'
 import { configuredOverrides, optionsAuthority } from './native-configured-overrides.mjs'
 import { withStableComputerUseCli } from './native-computer-use-config.mjs'
@@ -36,6 +37,12 @@ const controlCalls = new Map()
 const privateCalls = new Map()
 const desktopCalls = new Map()
 const resumeCalls = new NativeRequestTracker()
+const managedModelLists = createNativeManagedModelListRecovery({
+  controlCall,
+  writeDesktop: value => write(process.stdout, value),
+  emitDiagnostic: event => emitDiagnostic(event),
+  stop,
+})
 const preparedResumes = new Map()
 const unmarkedTurns = new NativeRequestTracker()
 // An unacknowledged lifecycle mutation stays uncertain; retain its fence, not its payload.
@@ -189,6 +196,7 @@ function stop(reason = 'transport-closed') {
   rejectAll(privateCalls)
   desktopCalls.clear()
   resumeCalls.clear()
+  managedModelLists.clear()
   preparedResumes.clear()
   unmarkedTurns.clear()
   recoveringTurns.clear()
@@ -485,6 +493,7 @@ async function forward(line) {
       message?.method === 'turn/start' && typeof params?.threadId === 'string'
       && ['string', 'number'].includes(typeof message.id)
     ) unmarkedTurns.track(message.id, params)
+    managedModelLists.issued(message)
     if (
       ['thread/resume', 'thread/unsubscribe'].includes(message?.method)
       && typeof params?.threadId === 'string' && ['string', 'number'].includes(typeof message.id)
@@ -815,6 +824,7 @@ readLines(nativeTransport.stdout, line => {
   if (settle(privateCalls, message, false)) return
   // Late private responses must never escape into the Desktop's request table.
   if (typeof message?.id === 'string' && message.id.startsWith(privatePrefix)) return
+  if (managedModelLists.received(message, line)) return
   if (message.method === undefined) lifecycleCalls.delete(message.id)
   const reconciliation = message.method === undefined ? switchReconciliations.take(message.id) : undefined
   const turnParams = message.method === undefined ? unmarkedTurns.take(message.id) : undefined

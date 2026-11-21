@@ -48,6 +48,117 @@ afterEach(() => {
 })
 
 describe('native model provider selector installation', () => {
+  it('preserves the native retry control until a successful model-list response restores the unified menu', async () => {
+    const dom = new JSDOM(
+      `<!doctype html><body><main data-codex-composer-root data-composer-placement="thread">
+        <i data-above-composer-conversation-id="thread-1"></i>
+        <footer data-composer-footer-responsive><button data-composer-navigation-target="reasoning">Retry loading models</button></footer>
+      </main></body>`,
+      { url: 'app://-/index.html' },
+    )
+    for (
+      const [name, value] of Object.entries({
+        window: dom.window,
+        document: dom.window.document,
+        location: dom.window.location,
+        HTMLElement: dom.window.HTMLElement,
+        Element: dom.window.Element,
+        Node: dom.window.Node,
+        MutationObserver: dom.window.MutationObserver,
+        IS_REACT_ACT_ENVIRONMENT: true,
+        codexWindowType: 'electron',
+      })
+    ) install(name, value)
+    Object.assign(dom.window.HTMLElement.prototype, {
+      getBoundingClientRect: () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 20,
+        bottom: 20,
+        width: 20,
+        height: 20,
+        toJSON: () => ({}),
+      }),
+    })
+    const select = vi.fn(async () => 'accepted' as const)
+    const snapshot = Object.freeze({ available: true, busy: false, modelProvider: 'provider-a', model: 'model-a' })
+    const connect = vi.spyOn(CodexDesktopNativeModelProviderTransport, 'connect').mockResolvedValue({
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      select,
+      hasActiveSubmission: () => false,
+      dispose: vi.fn(),
+    } as never)
+    const registry = new ModelProviderRegistry(async () => [{
+      providerId: 'provider-a',
+      pluginId: 'provider-plugin',
+      models: [{ id: 'model-a', label: 'Model A' }, { id: 'model-b', label: 'Model B' }],
+    }])
+    let dispose = () => {}
+    try {
+      await act(async () => {
+        dispose = await installModelProviderSelector(
+          dom.window.document,
+          registry,
+          () => 'en',
+          true,
+          rendererOwner,
+          nativeProviderChannel(),
+        )
+      })
+      expect(connect).not.toHaveBeenCalled()
+      expect(dom.window.document.querySelector<HTMLButtonElement>('button')!.hidden).toBe(false)
+      expect(dom.window.document.querySelector('[data-cordisx-model-provider-selector]')).toBeNull()
+
+      const retry = dom.window.document.querySelector<HTMLButtonElement>('button')!
+      const trigger = dom.window.document.createElement('button')
+      trigger.dataset.composerNavigationTarget = 'reasoning'
+      trigger.dataset.selectedReasoningEffort = 'high'
+      trigger.setAttribute('aria-haspopup', 'menu')
+      Object.defineProperty(trigger, '__reactFiber$test', {
+        value: {
+          return: {
+            memoizedProps: {
+              model: 'model-a',
+              reasoningEffort: 'high',
+              models: [],
+              modelOptions: [],
+              powerSelections: [],
+              menuView: 'simple',
+              open: false,
+              showReasoningEffortControls: true,
+              onSelectModelOption() {},
+              onToggleMenuView() {},
+              onSelectModel() {},
+              onSelectReasoningEffort() {},
+            },
+          },
+        },
+      })
+      await act(async () => {
+        retry.replaceWith(trigger)
+        await Promise.resolve()
+      })
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(trigger.hidden).toBe(true)
+      const selector = dom.window.document.querySelector<HTMLElement>('[data-cordisx-model-provider-selector]')!
+      expect(selector).not.toBeNull()
+      await act(async () => selector.querySelector<HTMLButtonElement>('.cxmp-model-trigger')!.click())
+      await act(async () => dom.window.document.querySelector<HTMLButtonElement>('.cxmp-model-disclosure')!.click())
+      const choice = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxmp-model-choice')]
+        .find(button => button.textContent?.includes('Model B'))!
+      expect(choice.disabled).toBe(false)
+      await act(async () => choice.click())
+      expect(select).toHaveBeenCalledWith({ providerId: 'provider-a', model: 'model-b' })
+    } finally {
+      await act(async () => dispose())
+      registry.dispose()
+      dom.window.close()
+    }
+  })
+
   it.each([false, true])('projects cached labels into a loading seat only when a cache exists: %s', async cached => {
     const dom = new JSDOM(
       `<!doctype html><body><main data-codex-composer-root data-composer-placement="home">

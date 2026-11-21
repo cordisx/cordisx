@@ -324,6 +324,7 @@ try {
       'dist/assets/launcher/channel-agent-tools.mjs',
       'dist/assets/launcher/codex-agent-tools.mjs',
       'dist/assets/launcher/native-request-tracker.mjs',
+      'dist/assets/launcher/native-managed-model-list-recovery.mjs',
       'dist/assets/launcher/native-turn-diagnostics.mjs',
       'node_modules/@cordisx/schemastery-ui/package.json',
       'node_modules/@cordisx/schemastery-ui/LICENSE',

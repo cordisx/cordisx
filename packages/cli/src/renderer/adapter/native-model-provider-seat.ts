@@ -192,7 +192,10 @@ export function locateNativeModelSelectionControl(trigger: HTMLElement): NativeM
     const selectModel = props?.onSelectModel
     if (
       props?.showReasoningEffortControls === true
-      && props.menuView === 'simple'
+      // Codex 26.1117 uses the same unified picker in advanced mode when the
+      // selected model has fewer than two power choices. The owner callbacks
+      // and model data remain identical in both modes.
+      && (props.menuView === 'simple' || props.menuView === 'advanced')
       && typeof props.open === 'boolean'
       && typeof model === 'string' && model !== ''
       && typeof reasoningEffort === 'string' && reasoningEffort !== ''

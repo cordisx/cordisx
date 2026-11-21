@@ -133,7 +133,13 @@ export class ChannelModelCommands {
             current.settings.model ?? '未知'
           }，强度 ${current.settings.effort ?? '继承'}，Fast ${
             current.settings.fast === undefined ? '未知' : current.settings.fast ? '开启' : '关闭'
-          }，项目 ${current.settings.projectId ?? '未绑定'}${current.pending ? '；有待应用配置' : ''}。`,
+          }，项目 ${current.settings.projectId ?? '未绑定'}${current.pending ? '；有待应用配置' : ''}。${
+            current.code === 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE'
+              ? '当前对话不能切换服务商；可保留此对话，新建对话并选择目标服务商。'
+              : current.application === 'unknown'
+              ? '上次更改的结果尚未确认；请先核对实际状态，不要重复提交。'
+              : ''
+          }`,
         )
       } else {
         const result = object(await this.input.tasks.request(event, target.id, action.patch, current.revision))
