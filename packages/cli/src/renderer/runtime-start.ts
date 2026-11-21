@@ -949,13 +949,26 @@ export async function start(
     ): Readonly<{ revision: number; pluginRevision: number }> =>
       runtimeClosures5.createRuntimeAdoptPluginBundleSnapshot(closureScope, snapshot)
 
-    const dispose = async (): Promise<void> => {
-      try {
-        await runtimeClosures5.createRuntimeDispose(closureScope)
-      } finally {
-        disposeDialogs()
-        disposeNotifications()
-      }
+    let disposal: Promise<void> | undefined
+    const dispose = (): Promise<void> => {
+      if (disposal !== undefined) return disposal
+      let resolve!: () => void
+      let reject!: (error: unknown) => void
+      // Publish the shared completion before starting cleanup: a second
+      // caller must not mistake an in-progress disposal for a completed one.
+      disposal = new Promise<void>((done, failed) => {
+        resolve = done
+        reject = failed
+      })
+      void (async () => {
+        try {
+          await runtimeClosures5.createRuntimeDispose(closureScope)
+        } finally {
+          disposeDialogs()
+          disposeNotifications()
+        }
+      })().then(resolve, reject)
+      return disposal
     }
 
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)

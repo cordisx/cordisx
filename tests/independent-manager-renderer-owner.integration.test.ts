@@ -15,6 +15,8 @@ import {
 } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { startSupervisorControlServer } from '../packages/cli/src/cli/supervisor-control.js'
 import { openProductionPluginManagementComposition } from '../packages/cli/src/cli/production-plugin-management.js'
+import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
+import { attachmentHomeDigest } from '../packages/cli/src/launcher/renderer-lifecycle-peer.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import {
   pluginManagementRpcPaths,
@@ -322,6 +324,16 @@ it('routes an authenticated session over the real production owner RPC to its re
       reload: async () => undefined,
     },
   })
+  const participants = new ServiceRendererParticipants({
+    homeDigest: attachmentHomeDigest(homeDir),
+    ownerAppId: appId,
+    profileId,
+    generation,
+  })
+  participants.bind({
+    snapshot: () => ({ active: { plugins: [] }, registryEpoch: 0 }) as never,
+    attach: async () => {},
+  })
   let composition: Awaited<ReturnType<typeof openProductionPluginManagementComposition>> | undefined
   try {
     composition = await openProductionPluginManagementComposition({
@@ -332,6 +344,8 @@ it('routes an authenticated session over the real production owner RPC to its re
       runtimeGeneration: generation,
       token: secret(),
       coordinator,
+      rendererParticipant: participants.participant,
+      rendererParticipants: participants,
       processStartedAt: processStartedAt!,
     })
     const rpcPaths = pluginManagementRpcPaths(homeDir, appId, profileId)
@@ -394,6 +408,44 @@ it('routes an authenticated session over the real production owner RPC to its re
     }
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...call, channel: 'plugin-configuration' }))
       .toEqual({ status: 'unavailable' })
+    const fencing = composition.fenceManagers!()
+    void fencing.catch(() => {})
+    const common = { kind: 'manager-renderer' as const, gateway, browserSessionId, handle: opened.handle }
+    const polled = await requestPluginManagementRpc(rpcPaths, endpoint, {
+      ...common,
+      action: 'poll',
+      timeoutMs: 5_000,
+    }) as {
+      status: string
+      value: { command: { id: string; sequence: number; method: string; payload: { fenceId: string } } }
+    }
+    expect(polled.value.command.method).toBe('quiesce')
+    expect(
+      await requestPluginManagementRpc(rpcPaths, endpoint, {
+        ...common,
+        action: 'acknowledge',
+        receipt: {
+          id: polled.value.command.id,
+          sequence: polled.value.command.sequence,
+          ok: true,
+          value: {
+            fenceId: polled.value.command.payload.fenceId,
+            rendererId: opened.handle.rendererId,
+            ownerGeneration: generation,
+            quiesced: true,
+          },
+        },
+      }),
+    ).toEqual({ status: 'ok', value: { accepted: true } })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...common, action: 'close' }))
+      .toEqual({ status: 'ok' })
+    const fence = await fencing
+    const other = { ...open, browserSessionId: secret() }
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toEqual({ status: 'unavailable' })
+    expect(fence.release()).toBe(true)
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, other)).toMatchObject({ status: 'ok' })
+    expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...other, action: 'revoke' }))
+      .toEqual({ status: 'ok' })
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, { ...open, action: 'revoke' }))
       .toEqual({ status: 'ok' })
     expect(await requestPluginManagementRpc(rpcPaths, endpoint, call)).toEqual({ status: 'unavailable' })
@@ -402,6 +454,7 @@ it('routes an authenticated session over the real production owner RPC to its re
     await expect(requestPluginManagementRpc(rpcPaths, endpoint, call)).rejects.toThrow()
   } finally {
     await composition?.close()
+    participants.close()
     await supervisor.close()
     await rm(homeDir, { recursive: true, force: true })
   }

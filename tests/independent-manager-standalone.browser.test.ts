@@ -69,7 +69,7 @@ it.skipIf(chrome === undefined)(
     const entries = new Map([['a'.repeat(64), 'c'.repeat(64)], ['b'.repeat(64), 'd'.repeat(64)]])
     const sessions = new Map<
       string,
-      { rendererId: string; polled: boolean; closed: boolean; admission?: ServerResponse }
+      { rendererId: string; polled: boolean; closed: boolean; quiesce?: boolean; admission?: ServerResponse }
     >()
     const events: Array<{ path: string; label: string; body: string }> = []
     let origin = ''
@@ -144,6 +144,12 @@ it.skipIf(chrome === undefined)(
           return response.end(bundle)
         }
         if (url.pathname === '/api/renderer/poll') {
+          if (session.quiesce) {
+            session.quiesce = false
+            return json({
+              command: { id: '2'.repeat(64), sequence: 2, method: 'quiesce', payload: { fenceId: '9'.repeat(64) } },
+            })
+          }
           if (session.polled) {
             setTimeout(() => json({ command: null }), 1_000)
             return
@@ -158,7 +164,12 @@ it.skipIf(chrome === undefined)(
           return
         }
         if (url.pathname === '/api/renderer/acknowledge') {
-          const receipt = JSON.parse(data) as { receipt?: { ok?: boolean; value?: { registryEpoch?: number } } }
+          const receipt = JSON.parse(data) as {
+            receipt?: { ok?: boolean; sequence?: number; value?: { registryEpoch?: number; quiesced?: boolean } }
+          }
+          if (receipt.receipt?.ok && receipt.receipt.sequence === 2 && receipt.receipt.value?.quiesced === true) {
+            return json({ accepted: true })
+          }
           if (!receipt.receipt?.ok || receipt.receipt.value?.registryEpoch !== 3 || !session.admission) {
             response.statusCode = 409
             return response.end()
@@ -222,6 +233,13 @@ it.skipIf(chrome === undefined)(
       expect(await second.evaluate('globalThis.__fixtureDisposed === true')).toBe(false)
       expect(await second.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)")).toBe(200)
       expect(await first.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)")).toBe(403)
+      sessions.get('d'.repeat(64))!.quiesce = true
+      await expect.poll(() => sessions.get('d'.repeat(64))?.closed === true, { timeout: 10_000 }).toBe(true)
+      expect(await second.evaluate('globalThis.__fixtureDisposed === true')).toBe(true)
+      expect(await second.evaluate('globalThis.__fixtureRegistryDisposed === true')).toBe(true)
+      expect(await second.evaluate("fetch('/api/renderer/bundle.js').then(response => response.status)")).toBe(403)
+      const quiescence = events.filter(event => event.label === 'second' && event.path === '/api/renderer/acknowledge')
+      expect(quiescence.some(event => JSON.parse(event.body).receipt?.value?.quiesced === true)).toBe(true)
       expect(events.every(event => !event.path.includes('c'.repeat(64)) && !event.path.includes('d'.repeat(64)))).toBe(
         true,
       )

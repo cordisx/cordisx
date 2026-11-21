@@ -203,6 +203,7 @@ export async function runServiceOwner(runtime: CordisXCliRuntime): Promise<void>
           token: randomUUID(),
           coordinator,
           rendererParticipant: rendererParticipants.participant,
+          rendererParticipants,
           rendererBootstrap: rendererBootstrap.channel(),
           rendererManagedServiceUI: rendererManagedServiceUI.channel,
           mode: 'service',

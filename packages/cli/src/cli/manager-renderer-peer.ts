@@ -9,6 +9,7 @@ export type ManagerRendererCommandMethod =
   | 'complete'
   | 'finalize'
   | 'rollback'
+  | 'quiesce'
 
 export interface ManagerRendererPeerScope {
   readonly homeDigest: string
@@ -40,6 +41,7 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'complete',
   'finalize',
   'rollback',
+  'quiesce',
 ])
 const MAX_COMMAND_BYTES = 256 * 1024
 const MAX_RESULT_BYTES = 8 * 1024 * 1024

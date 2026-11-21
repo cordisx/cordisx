@@ -289,6 +289,14 @@ it('applies a fixture-projected install through the real standalone renderer lif
     url: 'http://127.0.0.1/',
   })
   let dispose!: () => Promise<void>
+  let releaseCleanup!: () => void
+  let cleanupStarted!: () => void
+  const cleanupGate = new Promise<void>(resolve => {
+    releaseCleanup = resolve
+  })
+  const cleanupEntered = new Promise<void>(resolve => {
+    cleanupStarted = resolve
+  })
   try {
     Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
     Object.assign(dom.window, { TextEncoder, TextDecoder })
@@ -297,7 +305,10 @@ it('applies a fixture-projected install through the real standalone renderer lif
       timeout: 10_000,
     })
     const runtime = (dom.window as unknown as {
-      __cordisxRuntime: { snapshot(): { plugins: readonly { id: string; status: string }[] } }
+      __cordisxRuntime: {
+        snapshot(): { plugins: readonly { id: string; status: string }[] }
+        dispose(): Promise<void>
+      }
     }).__cordisxRuntime
     const digest = `sha256:${'a'.repeat(64)}` as const
     const manifest = {
@@ -344,9 +355,11 @@ it('applies a fixture-projected install through the real standalone renderer lif
     }
     const effects = { mounted: 0, disposed: 0 }
     const module = {
-      apply(ctx: { effect(callback: () => () => void, label: string): void }) {
+      apply(ctx: { effect(callback: () => () => Promise<void>, label: string): void }) {
         effects.mounted++
-        ctx.effect(() => () => {
+        ctx.effect(() => async () => {
+          cleanupStarted()
+          await cleanupGate
           effects.disposed++
         }, 'fixture cleanup')
       },
@@ -382,9 +395,21 @@ it('applies a fixture-projected install through the real standalone renderer lif
     expect(await send(6, 'finalize', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
     expect(runtime.snapshot().plugins.find(plugin => plugin.id === 'renderer-demo')).toMatchObject({ status: 'active' })
     expect(effects).toEqual({ mounted: 1, disposed: 0 })
+    const firstDisposal = runtime.dispose()
+    await cleanupEntered
+    let secondSettled = false
+    const secondDisposal = runtime.dispose().then(() => {
+      secondSettled = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(secondSettled).toBe(false)
+    releaseCleanup()
+    await Promise.all([firstDisposal, secondDisposal])
     await dispose()
     expect(effects).toEqual({ mounted: 1, disposed: 1 })
   } finally {
+    releaseCleanup()
     await dispose?.()
     dom.window.close()
   }

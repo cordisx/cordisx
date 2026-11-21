@@ -269,7 +269,7 @@ export function createManagerRendererGraphSession(input: {
           || typeof command.id !== 'string' || !secret.test(command.id)
           || !Number.isSafeInteger(command.sequence) || (command.sequence as number) < 1
           || typeof command.method !== 'string'
-          || !['synchronize', 'prepare', 'stage', 'publish', 'complete', 'finalize', 'rollback'].includes(
+          || !['synchronize', 'prepare', 'stage', 'publish', 'complete', 'finalize', 'rollback', 'quiesce'].includes(
             command.method,
           )
           || pending !== undefined
@@ -340,6 +340,11 @@ export function createManagerRendererGraphSession(input: {
             ...Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'privateGraphs')),
             graphs: staged.map(entry => entry.publicGraph),
           }
+        } else if (command.method === 'quiesce') {
+          if (
+            transaction !== undefined || Object.keys(payload).length !== 1 || typeof payload.fenceId !== 'string'
+            || !secret.test(payload.fenceId)
+          ) throw invalid()
         } else if (['publish', 'complete', 'finalize', 'rollback'].includes(command.method)) {
           if (!transaction || payload.transactionId !== transaction.id) throw invalid()
           transactionId = transaction.id

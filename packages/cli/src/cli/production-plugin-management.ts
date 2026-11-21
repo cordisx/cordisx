@@ -18,9 +18,13 @@ import { createManagerRendererGatewayAuthenticator } from './manager-renderer-ga
 import { createManagerRendererManagementChannel } from './manager-renderer-management.js'
 import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
 import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
+import type { ServiceRendererParticipants } from './service-renderer-participant.js'
+import { fenceManagerConsumers } from './manager-consumer-fence.js'
 
 export interface ProductionPluginManagementComposition {
   readonly handler: PluginManagementBridgeHandler
+  /** Owner-only Manager portion of a wider profile mutation barrier. */
+  readonly fenceManagers?: () => Promise<{ release(): boolean; fence(): void }>
   close(): Promise<void>
 }
 export async function openProductionPluginManagementComposition(input: {
@@ -41,12 +45,17 @@ export async function openProductionPluginManagementComposition(input: {
   readonly managerChannelCredentials?: (operation: ManagerChannelCredentialOperation) => Promise<unknown>
   /** Owner-created participant; never supplied by the browser or plugin. */
   readonly rendererParticipant?: ConstructorParameters<typeof ManagerRendererSessions>[0]['participant']
+  /** Must be the registry that issued rendererParticipant, never page supplied. */
+  readonly rendererParticipants?: ServiceRendererParticipants
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
   /** Owner-issued, per-renderer read-only managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
   readonly processStartedAt?: string
 }): Promise<ProductionPluginManagementComposition> {
+  if (input.rendererParticipants && input.rendererParticipant !== input.rendererParticipants.participant) {
+    throw new Error('manager-consumer-fence-scope-invalid')
+  }
   const service = await openPluginManagementService({
     configPath: input.configPath,
     homeDir: input.homeDir,
@@ -124,6 +133,12 @@ export async function openProductionPluginManagementComposition(input: {
       service,
       ...(input.modelExport === undefined ? {} : { modelExport: input.modelExport }),
     },
+    ...(input.rendererParticipants === undefined ? {} : {
+      fenceManagers: async () => {
+        if (closed) throw new Error('manager-consumer-fence-unavailable')
+        return await fenceManagerConsumers({ sessions: rendererSessions, participants: input.rendererParticipants! })
+      },
+    }),
     async close(): Promise<void> {
       if (closed) return
       closed = true

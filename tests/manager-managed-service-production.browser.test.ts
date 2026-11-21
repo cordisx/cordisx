@@ -85,7 +85,6 @@ it.skipIf(chrome === undefined)(
         return url.href
       }
       const firstLink = await link()
-      const secondLink = await link()
       const profile = await mkdtemp(path.join(root, 'chrome-'))
       const launched = launchChrome(chrome!, profile)
       browser = launched.browser
@@ -94,16 +93,35 @@ it.skipIf(chrome === undefined)(
       clients.push(first)
       await first.send('Page.enable')
       await first.send('Page.navigate', { url: firstLink })
-      await expect.poll(() => first.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 45_000 })
-        .toBe('available')
+      const waitForSnapshot = async (client: CdpClient, label: string) => {
+        try {
+          await expect.poll(() => client.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 45_000 })
+            .toBe('available')
+        } catch (cause) {
+          const state = await client.evaluate(`({
+            path: location.pathname + location.search,
+            ready: document.documentElement.dataset.cordisxReady ?? null,
+            status: document.querySelector('p[role=status]')?.textContent ?? null,
+            statusHidden: document.querySelector('p[role=status]')?.hidden ?? null,
+            managed: globalThis.__fixtureManagedStatus ?? null,
+            hasRuntime: !!globalThis.__cordisxRuntime,
+            workerControlled: !!navigator.serviceWorker?.controller,
+            plugins: globalThis.__cordisxRuntime?.snapshot?.().plugins?.map(({ id, status }) => ({ id, status })) ?? []
+          })`).catch(() => ({ unavailable: true }))
+          throw new Error(`${label} managed-service page did not become ready: ${JSON.stringify(state)}`, { cause })
+        }
+      }
+      await waitForSnapshot(first, 'first')
       expect(await first.evaluate('globalThis.__fixtureManagedStatus')).toBe('available')
       const debugOrigin = `http://${new URL(socket).host}`
+      // Each entry is valid for only one minute; issue the second immediately
+      // before navigation instead of spending its lifetime booting the first.
+      const secondLink = await link()
       const tabResponse = await fetch(`${debugOrigin}/json/new?${encodeURIComponent(secondLink)}`, { method: 'PUT' })
       const tab = await tabResponse.json() as { webSocketDebuggerUrl: string }
       const second = await CdpClient.connect(tab.webSocketDebuggerUrl)
       clients.push(second)
-      await expect.poll(() => second.evaluate('globalThis.__fixtureManagedSnapshot'), { timeout: 45_000 })
-        .toBe('available')
+      await waitForSnapshot(second, 'second')
       const firstAlias = await first.evaluate<string>('globalThis.__fixtureManagedAlias')
       const secondAlias = await second.evaluate<string>('globalThis.__fixtureManagedAlias')
       expect(typeof firstAlias === 'string' && typeof secondAlias === 'string' && firstAlias !== secondAlias).toBe(true)

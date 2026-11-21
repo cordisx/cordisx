@@ -425,6 +425,16 @@ export function startStandaloneManager(input: {
         scope,
         loader: graphLoader,
         signal: lifetime.signal,
+        onQuiesce: async () => {
+          // Do not acknowledge a fence while an operation may have written or
+          // while resource recovery has an unresolved result.
+          if (!removeBindings?.canResume() || !resourceAuth || heartbeatRunning) return false
+          removeBindings()
+          if (heartbeat !== undefined) clearInterval(heartbeat)
+          heartbeat = undefined
+          watchWorker = false
+          return await resourceAuth.revokeLocal()
+        },
       })
       pump = startManagerRendererLifecyclePump({
         window: browser,
@@ -434,6 +444,7 @@ export function startStandaloneManager(input: {
           if (navigating && canPreserveResume()) void close(true)
           else fail()
         },
+        onQuiesced: fail,
       })
       if (!await pump.admitted || closed) throw new Error('manager-admission-unavailable')
       return true

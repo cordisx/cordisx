@@ -44,6 +44,21 @@ function stage(previousGeneration: string, nextGeneration: string, graph: unknow
   }
 }
 
+it('forwards only a bounded owner quiescence fence', () => {
+  const session = createManagerRendererGraphSession(baseInput)
+  session.projectInitial([])
+  const value = command('quiesce', 1, { fenceId: 'c'.repeat(64) })
+  expect(session.projectCommand(value)).toEqual(value)
+  session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+  session.close()
+
+  const invalid = createManagerRendererGraphSession(baseInput)
+  invalid.projectInitial([])
+  expect(() => invalid.projectCommand(command('quiesce', 1, { fenceId: 'invalid' })))
+    .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+  expect(invalid.closed).toBe(true)
+})
+
 it('keeps initial graphs active through staging and rollback, without exposing owner secrets', async () => {
   const fixture = await managerRendererGraphFixture()
   const session = createManagerRendererGraphSession(baseInput)

@@ -1,7 +1,7 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 
-type Method = 'synchronize' | 'prepare' | 'stage' | 'publish' | 'complete' | 'finalize' | 'rollback'
+type Method = 'synchronize' | 'prepare' | 'stage' | 'publish' | 'complete' | 'finalize' | 'rollback' | 'quiesce'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
 
 export interface ManagerRendererLifecycleCommand {
@@ -72,6 +72,7 @@ const methods = new Set<Method>([
   'complete',
   'finalize',
   'rollback',
+  'quiesce',
 ])
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const epochPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -145,8 +146,11 @@ export function createManagerRendererLifecycleClient(input: {
   readonly loader?: ManagerRendererStageLoader
   readonly signal?: AbortSignal
   readonly onDisconnected?: () => void | Promise<void>
+  /** Disable owner bindings and confirm local resource revocation before disposal. */
+  readonly onQuiesce?: () => boolean | Promise<boolean>
 }): {
   readonly closed: boolean
+  readonly quiesced: boolean
   handle(command: unknown): Promise<ManagerRendererLifecycleReceipt>
   canResume(): boolean
   /** Rebind resources only while no lifecycle operation or recovery is in flight. */
@@ -164,6 +168,7 @@ export function createManagerRendererLifecycleClient(input: {
   let busy = false
   let sequence = 0
   let synchronized = false
+  let quiesced = false
   let transaction: Transaction | undefined
   let awaitingAdoption: { previous: Record<string, unknown>; candidateRevision: number } | undefined
   let closing: Promise<void> | undefined
@@ -176,11 +181,13 @@ export function createManagerRendererLifecycleClient(input: {
     closing = (async () => {
       // Retiring this renderer does not prove whether the owner committed.
       await Promise.allSettled([
-        Promise.resolve().then(() => runtime.dispose()),
+        ...(quiesced ? [] : [Promise.resolve().then(() => runtime.dispose())]),
         Promise.resolve().then(() => input.onDisconnected?.()),
       ])
-      await Promise.resolve().then(() => staged?.retire()).catch(() => undefined)
-      await Promise.resolve().then(() => loader?.dispose()).catch(() => undefined)
+      if (!quiesced) {
+        await Promise.resolve().then(() => staged?.retire()).catch(() => undefined)
+        await Promise.resolve().then(() => loader?.dispose()).catch(() => undefined)
+      }
     })()
     return closing
   }
@@ -206,6 +213,23 @@ export function createManagerRendererLifecycleClient(input: {
   }
   const execute = async (method: Method, payload: unknown): Promise<unknown> => {
     assertLive()
+    if (method === 'quiesce') {
+      const item = record(payload)
+      exact(item, ['fenceId'])
+      if (
+        typeof item.fenceId !== 'string' || !/^[a-f0-9]{64}$/u.test(item.fenceId)
+        || !synchronized || transaction !== undefined || awaitingAdoption !== undefined || !input.onQuiesce
+      ) throw new Error('renderer-quiescence-unavailable')
+      if (!await input.onQuiesce()) throw new Error('renderer-quiescence-unavailable')
+      assertLive()
+      await runtime.dispose()
+      assertLive()
+      await loader?.dispose()
+      assertLive()
+      quiesced = true
+      synchronized = false
+      return { fenceId: item.fenceId, rendererId: scope.rendererId, ownerGeneration: scope.generation, quiesced: true }
+    }
     if (method === 'synchronize') {
       const item = record(payload)
       exact(item, ['active', 'registryEpoch'])
@@ -404,9 +428,15 @@ export function createManagerRendererLifecycleClient(input: {
     get closed() {
       return closed
     },
-    canResume: () => !closed && !busy && synchronized && transaction === undefined && awaitingAdoption === undefined,
+    get quiesced() {
+      return quiesced
+    },
+    canResume: () =>
+      !closed && !quiesced && !busy && synchronized && transaction === undefined && awaitingAdoption === undefined,
     async recoverResources(recover) {
-      if (closed || busy || !synchronized || transaction !== undefined || awaitingAdoption !== undefined) return false
+      if (closed || quiesced || busy || !synchronized || transaction !== undefined || awaitingAdoption !== undefined) {
+        return false
+      }
       busy = true
       try {
         return await recover() && !closed && !lifetime.signal.aborted
@@ -433,7 +463,7 @@ export function createManagerRendererLifecycleClient(input: {
         throw new Error('renderer-lifecycle-command-invalid')
       }
       const receipt = { id: item.id, sequence: item.sequence as number }
-      if (closed || busy || item.sequence !== sequence + 1 || !methods.has(item.method as Method)) {
+      if (closed || quiesced || busy || item.sequence !== sequence + 1 || !methods.has(item.method as Method)) {
         void close()
         return { ...receipt, ok: false }
       }

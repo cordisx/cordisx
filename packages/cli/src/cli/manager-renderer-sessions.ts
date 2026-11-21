@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 
@@ -75,6 +76,12 @@ export class ManagerRendererSessions {
   private disposed = false
   private monitor: ReturnType<typeof setInterval> | undefined
   private monitoring = false
+  private mutationFence: symbol | undefined
+  private mutationsFenced = false
+  private mutationUncertain = false
+  private writesInFlight = 0
+  private readonly writeWaiters = new Set<() => void>()
+  private readonly writeContext = new AsyncLocalStorage<symbol>()
 
   constructor(
     private readonly input: {
@@ -177,6 +184,7 @@ export class ManagerRendererSessions {
     if (
       this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
       || this.sessions.size >= (this.input.maxSessions ?? 16)
+      || this.mutationsFenced || this.mutationFence !== undefined
     ) return undefined
     const handle: ManagerRendererHandle = {
       rendererId: randomBytes(32).toString('hex'),
@@ -323,6 +331,11 @@ export class ManagerRendererSessions {
     if (!target) return unavailable
     session.inFlight++
     let dispatched: 'read' | 'write' | undefined
+    let trackedWrite = false
+    const unknown = (): ManagerRendererCallResult => {
+      this.mutationUncertain = true
+      return { status: 'unknown' }
+    }
     try {
       if (!await this.authenticated(session.gateway)) {
         this.retireGateway(session.gateway)
@@ -339,21 +352,97 @@ export class ManagerRendererSessions {
         admitted: session.admitted === true && session.peer !== undefined && !session.peer.closed,
       })
       if (prepared.mode !== 'read' && prepared.mode !== 'write') return unavailable
+      if (prepared.mode === 'write') {
+        if (this.mutationsFenced || this.mutationFence !== undefined) return unavailable
+        this.writesInFlight++
+        trackedWrite = true
+      }
       dispatched = prepared.mode
-      const value = await prepared.dispatch()
-      if (!this.current(session)) return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      const value = trackedWrite
+        ? await this.writeContext.run(Symbol('manager-write'), async () => await prepared.dispatch())
+        : await prepared.dispatch()
+      if (!this.current(session)) return dispatched === 'write' ? unknown() : unavailable
       if (!await this.authenticated(session.gateway)) {
         this.retireGateway(session.gateway)
-        return dispatched === 'write' ? { status: 'unknown' } : unavailable
+        return dispatched === 'write' ? unknown() : unavailable
       }
-      if (!this.current(session)) return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      if (!this.current(session)) return dispatched === 'write' ? unknown() : unavailable
       return { status: 'ok', value }
     } catch {
       // An in-flight write can have committed even if its result was lost.
-      return dispatched === 'write' ? { status: 'unknown' } : unavailable
+      return dispatched === 'write' ? unknown() : unavailable
     } finally {
+      if (trackedWrite) {
+        this.writesInFlight--
+        if (this.writesInFlight === 0) { for (const notify of this.writeWaiters) notify() }
+      }
       session.inFlight--
     }
+  }
+
+  /**
+   * Freeze new Manager writes and admissions before a profile owner drains its
+   * other writers and consumers. This does not itself cover non-Manager paths.
+   */
+  async suspendMutations(timeoutMs = 15_000): Promise<{ release(): boolean; fence(): void }> {
+    if (
+      !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
+      || this.writeContext.getStore() !== undefined
+      || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000
+    ) throw new Error('renderer-mutation-fence-unavailable')
+    const reservation = Symbol('manager-mutation-fence')
+    this.mutationFence = reservation
+    const drained = await this.waitForWrites(timeoutMs)
+    if (
+      !drained || !this.alive() || this.mutationUncertain || this.mutationFence !== reservation
+    ) {
+      this.fenceMutations()
+      throw new Error('renderer-mutation-fence-unavailable')
+    }
+    let ended = false
+    return {
+      release: () => {
+        if (ended) return false
+        ended = true
+        if (
+          !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== reservation
+          || this.writesInFlight !== 0
+        ) {
+          this.fenceMutations()
+          return false
+        }
+        this.mutationFence = undefined
+        return true
+      },
+      fence: () => {
+        if (ended) return
+        ended = true
+        this.fenceMutations()
+      },
+    }
+  }
+
+  private async waitForWrites(timeoutMs: number): Promise<boolean> {
+    if (this.writesInFlight === 0) return true
+    return await new Promise(resolve => {
+      const finish = (value: boolean) => {
+        clearTimeout(timer)
+        this.writeWaiters.delete(check)
+        resolve(value)
+      }
+      const check = () => {
+        if (this.disposed || this.writesInFlight === 0) finish(!this.disposed && this.writesInFlight === 0)
+      }
+      const timer = setTimeout(() => finish(false), timeoutMs)
+      timer.unref()
+      this.writeWaiters.add(check)
+      check()
+    })
+  }
+
+  private fenceMutations(): void {
+    this.mutationsFenced = true
+    for (const session of this.sessions.values()) this.retire(session)
   }
 
   async close(invocation: ManagerRendererInvocation): Promise<boolean> {
@@ -386,5 +475,6 @@ export class ManagerRendererSessions {
   dispose(): void {
     this.disposed = true
     for (const session of this.sessions.values()) this.retire(session)
+    for (const notify of this.writeWaiters) notify()
   }
 }

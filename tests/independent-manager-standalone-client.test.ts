@@ -82,6 +82,7 @@ function fixture(input: {
   let polls = 0
   let resumes = 0
   let rejectPoll: ((error: Error) => void) | undefined
+  let resolvePoll: ((response: Response) => void) | undefined
   let sessionCurrent = true
   const fetch = vi.fn((path: string, options: RequestInit): Promise<Response> => {
     if (path === '/api/session') {
@@ -132,7 +133,8 @@ function fixture(input: {
         }))
       }
       if (!input.controlledPoll) return abortResponse(options.signal!)
-      return new Promise((_resolve, reject) => {
+      return new Promise((resolve, reject) => {
+        resolvePoll = resolve
         rejectPoll = reject
         options.signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true })
       })
@@ -192,6 +194,7 @@ function fixture(input: {
     registry,
     beforeUnload: () => beforeUnload?.({ isTrusted: true } as BeforeUnloadEvent),
     failPoll: () => rejectPoll?.(new Error('navigation interrupted the poll')),
+    deliverPoll: (value: unknown) => resolvePoll?.(response({ command: value })),
     pollStarted: () => rejectPoll !== undefined,
     revokeSession: () => {
       sessionCurrent = false
@@ -254,6 +257,52 @@ it('does not preserve refresh authority while a possible write is in flight', as
     expect(JSON.parse(String(close[1].body))).toEqual({})
     expect(test.win.sessionStorage.getItem('cordisx-manager-resume-id')).toBeNull()
     expect(test.unavailable).toHaveBeenCalledOnce()
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('revokes bindings and resources before acknowledging an owner quiescence command', async () => {
+  const test = fixture({ controlledPoll: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    test.deliverPoll({ id: 'e'.repeat(64), sequence: 2, method: 'quiesce', payload: { fenceId: 'f'.repeat(64) } })
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledOnce())
+    const acknowledgements = test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')
+    expect(acknowledgements).toHaveLength(2)
+    expect(JSON.parse(String(acknowledgements[1]![1].body))).toMatchObject({
+      receipt: {
+        ok: true,
+        value: { fenceId: 'f'.repeat(64), rendererId, ownerGeneration: 'owner-1', quiesced: true },
+      },
+    })
+    expect(test.auth.revokeLocal).toHaveBeenCalled()
+    expect(test.runtime.dispose).toHaveBeenCalledOnce()
+    expect(test.registry.dispose).toHaveBeenCalledOnce()
+    expect((test.win as unknown as Record<string, unknown>).__cordisxConfigRequestV1).toBeUndefined()
+    expect(test.fetch.mock.calls.some(call => call[0] === '/api/renderer/close')).toBe(true)
+  } finally {
+    await test.manager.close()
+    test.dom.window.close()
+  }
+})
+
+it('refuses a positive quiescence receipt while a possible write is in flight', async () => {
+  const test = fixture({ controlledPoll: true, holdBindings: true })
+  try {
+    expect(await test.manager.ready).toBe(true)
+    await vi.waitFor(() => expect(test.pollStarted()).toBe(true))
+    Object.assign(test.win, { __cordisxConfigReceiveV1: vi.fn() })
+    ;(test.win as unknown as { __cordisxConfigRequestV1(value: string): void }).__cordisxConfigRequestV1(
+      JSON.stringify({ requestId: 'pending-write' }),
+    )
+    test.deliverPoll({ id: 'e'.repeat(64), sequence: 2, method: 'quiesce', payload: { fenceId: 'f'.repeat(64) } })
+    await vi.waitFor(() => expect(test.unavailable).toHaveBeenCalledOnce())
+    const acknowledgements = test.fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')
+    expect(acknowledgements).toHaveLength(2)
+    expect(JSON.parse(String(acknowledgements[1]![1].body))).toMatchObject({ receipt: { ok: false } })
   } finally {
     await test.manager.close()
     test.dom.window.close()

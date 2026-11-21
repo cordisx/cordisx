@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererHandle } from './manager-renderer-sessions.js'
@@ -20,6 +21,8 @@ export class ServiceRendererParticipants {
   private readonly entries = new Map<string, Entry>()
   private lifecycle: Pick<OwnerRendererLifecycle, 'snapshot' | 'attach'> | undefined
   private closed = false
+  private fenced = false
+  private quiescence: symbol | undefined
 
   constructor(private readonly scope: RendererAttachmentScope) {}
 
@@ -36,7 +39,8 @@ export class ServiceRendererParticipants {
     }): ManagerRendererCommandPeer => {
       const { gateway, browserSessionId, handle } = input
       if (
-        this.closed || !this.lifecycle || handle.ownerGeneration !== this.scope.generation
+        this.closed || this.fenced || this.quiescence !== undefined || !this.lifecycle
+        || handle.ownerGeneration !== this.scope.generation
         || this.entries.has(handle.rendererId)
       ) throw new Error('renderer-participants-unavailable')
       const peer = new ManagerRendererCommandPeer({
@@ -59,13 +63,18 @@ export class ServiceRendererParticipants {
     attach: async (peer: ManagerRendererCommandPeer): Promise<void> => {
       const entry = this.entries.get(peer.identity.rendererId)
       if (
-        this.closed || !this.lifecycle || !entry || entry.peer !== peer || !entry.bootstrap || peer.closed
+        this.closed || this.fenced || this.quiescence !== undefined || !this.lifecycle
+        || !entry || entry.peer !== peer || !entry.bootstrap || peer.closed
         || !attachmentEqual(this.lifecycle.snapshot(), entry.bootstrap)
       ) {
         peer.close()
         throw new Error('renderer-bootstrap-unavailable')
       }
       await this.lifecycle.attach(peer)
+      if (this.closed || this.fenced || this.quiescence !== undefined || peer.closed) {
+        peer.close()
+        throw new Error('renderer-bootstrap-unavailable')
+      }
     },
   }
 
@@ -73,7 +82,7 @@ export class ServiceRendererParticipants {
   confirmBootstrap(rendererId: string, snapshot: Snapshot): void {
     const entry = this.entries.get(rendererId)
     if (
-      this.closed || !entry || entry.peer.closed || !this.lifecycle
+      this.closed || this.fenced || this.quiescence !== undefined || !entry || entry.peer.closed || !this.lifecycle
       || !attachmentEqual(this.lifecycle.snapshot(), snapshot)
     ) throw new Error('renderer-bootstrap-stale')
     entry.bootstrap = structuredClone(snapshot)
@@ -89,6 +98,81 @@ export class ServiceRendererParticipants {
   peer(rendererId: string): ManagerRendererCommandPeer | undefined {
     const entry = this.entries.get(rendererId)
     return !this.closed && entry !== undefined && !entry.peer.closed ? entry.peer : undefined
+  }
+
+  /**
+   * Stop Manager peers and block new admissions until the owner releases the
+   * lease. This is only one part of a profile barrier: the caller must also
+   * fence other consumers and writers and drain their in-flight operations.
+   */
+  async quiesceManagers(): Promise<{ release(): boolean; fence(): void }> {
+    if (this.closed || this.fenced || this.quiescence !== undefined || !this.lifecycle) {
+      throw new Error('renderer-quiescence-unavailable')
+    }
+    const reservation = Symbol('manager-quiescence')
+    this.quiescence = reservation
+    const peers = [...this.entries.values()].map(entry => entry.peer)
+    try {
+      await Promise.all(peers.map(async peer => await this.quiescePeer(peer)))
+      if (this.closed || this.quiescence !== reservation || this.entries.size !== 0) {
+        throw new Error('renderer-quiescence-unavailable')
+      }
+      let ended = false
+      return {
+        release: () => {
+          if (ended) return false
+          if (this.closed || this.fenced || this.quiescence !== reservation || this.entries.size !== 0) {
+            ended = true
+            this.fenced = true
+            this.disconnectAll()
+            return false
+          }
+          ended = true
+          this.quiescence = undefined
+          return true
+        },
+        fence: () => {
+          if (ended) return
+          ended = true
+          this.fenced = true
+          this.disconnectAll()
+        },
+      }
+    } catch {
+      this.fenced = true
+      this.disconnectAll()
+      throw new Error('renderer-quiescence-unavailable')
+    }
+  }
+
+  private async quiescePeer(peer: ManagerRendererCommandPeer): Promise<void> {
+    const fenceId = randomBytes(32).toString('hex')
+    let unsubscribe = () => {}
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const disconnected = new Promise<void>(resolve => {
+      unsubscribe = peer.onDisconnect(resolve)
+    })
+    try {
+      const receipt = await peer.request('quiesce', { fenceId })
+      if (
+        !attachmentEqual(receipt, {
+          fenceId,
+          rendererId: peer.identity.rendererId,
+          ownerGeneration: this.scope.generation,
+          quiesced: true,
+        })
+      ) throw new Error('renderer-quiescence-unavailable')
+      const timeout = new Promise<boolean>(resolve => {
+        timer = setTimeout(() => resolve(false), 5_000)
+        timer.unref()
+      })
+      if (!await Promise.race([disconnected.then(() => true), timeout])) {
+        throw new Error('renderer-quiescence-unavailable')
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      unsubscribe()
+    }
   }
 
   /** Revoke current peers without preventing a later, freshly admitted session. */

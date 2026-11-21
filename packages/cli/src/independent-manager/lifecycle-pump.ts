@@ -2,6 +2,7 @@ import type { ManagerRendererLifecycleReceipt } from './lifecycle-client.js'
 
 interface Client {
   readonly closed: boolean
+  readonly quiesced?: boolean
   handle(command: unknown): Promise<ManagerRendererLifecycleReceipt>
   close(): Promise<void>
 }
@@ -12,6 +13,8 @@ export function startManagerRendererLifecyclePump(input: {
   readonly sessionToken: string
   readonly client: Client
   readonly onFailure?: () => void
+  /** Called only after the owner has accepted a successful quiescence receipt. */
+  readonly onQuiesced?: () => void
 }): {
   readonly admitted: Promise<boolean>
   readonly stopped: Promise<void>
@@ -96,6 +99,10 @@ export function startManagerRendererLifecyclePump(input: {
           const acknowledged = await post('/api/renderer/acknowledge', { receipt })
           if (Object.keys(acknowledged).length !== 1 || acknowledged.accepted !== true || !receipt.ok) {
             throw new Error('renderer-pump-receipt-unavailable')
+          }
+          if (input.client.quiesced === true) {
+            input.onQuiesced?.()
+            return
           }
         }
         if (!closed) polling = post('/api/renderer/poll', { timeoutMs: 15_000 })

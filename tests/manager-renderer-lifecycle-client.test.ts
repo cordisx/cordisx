@@ -84,6 +84,66 @@ it('fences a resource recovery if a lifecycle command arrives before it finishes
   }
 })
 
+it('acknowledges a quiescence fence only after the runtime and resources are disposed', async () => {
+  const { runtime, loader } = fixture()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  runtime.dispose.mockImplementation(async () => {
+    await gate
+    return 0
+  })
+  const revoke = vi.fn(async () => true)
+  const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader, onQuiesce: revoke })
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    let settled = false
+    const pending = client.handle(command(2, 'quiesce', { fenceId: 'f'.repeat(64) })).then(value => {
+      settled = true
+      return value
+    })
+    await vi.waitFor(() => expect(runtime.dispose).toHaveBeenCalledOnce())
+    expect(revoke).toHaveBeenCalledOnce()
+    expect(settled).toBe(false)
+    expect(loader.dispose).not.toHaveBeenCalled()
+    release()
+    expect(await pending).toEqual({
+      id: '2'.padStart(64, '0'),
+      sequence: 2,
+      ok: true,
+      value: { fenceId: 'f'.repeat(64), rendererId, ownerGeneration: scope.generation, quiesced: true },
+    })
+    expect(loader.dispose).toHaveBeenCalledOnce()
+    expect(client.quiesced).toBe(true)
+    expect(client.canResume()).toBe(false)
+    expect(await client.handle(command(3, 'synchronize', { active: base, registryEpoch: 0 })))
+      .toMatchObject({ ok: false })
+  } finally {
+    release()
+    await client.close()
+  }
+})
+
+it('never acknowledges quiescence during a transaction or after failed cleanup', async () => {
+  const first = fixture()
+  const revoke = vi.fn(async () => true)
+  const client = createManagerRendererLifecycleClient({ runtime: first.runtime as never, scope, onQuiesce: revoke })
+  await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+  await client.handle(command(2, 'prepare', prepare))
+  expect(await client.handle(command(3, 'quiesce', { fenceId: 'f'.repeat(64) }))).toMatchObject({ ok: false })
+  expect(revoke).not.toHaveBeenCalled()
+  await client.close()
+
+  const second = fixture()
+  second.runtime.dispose.mockRejectedValue(new Error('cleanup failed'))
+  const failed = createManagerRendererLifecycleClient({ runtime: second.runtime as never, scope, onQuiesce: revoke })
+  await failed.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+  expect(await failed.handle(command(2, 'quiesce', { fenceId: 'f'.repeat(64) }))).toMatchObject({ ok: false })
+  expect(failed.quiesced).toBe(false)
+  await failed.close()
+})
+
 function fixture() {
   let current: typeof base | typeof candidate = structuredClone(base)
   let epoch = 0

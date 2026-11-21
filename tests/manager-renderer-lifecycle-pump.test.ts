@@ -144,3 +144,46 @@ it('does not report an intentional close as a failure', async () => {
   expect(failed).not.toHaveBeenCalled()
   expect(client.close).toHaveBeenCalledOnce()
 })
+
+it('closes a quiesced renderer only after the owner accepts its receipt', async () => {
+  let accept!: (value: Response) => void
+  const acknowledgement = new Promise<Response>(resolve => {
+    accept = resolve
+  })
+  const quiesce = { ...command, method: 'quiesce', payload: { fenceId: 'c'.repeat(64) } }
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/acknowledge') return acknowledgement
+    if (path === '/api/renderer/poll') return Promise.resolve(response({ command: quiesce }))
+    return waitForAbort(options.signal!)
+  })
+  const client = {
+    closed: false,
+    quiesced: false,
+    handle: vi.fn(async () => {
+      client.quiesced = true
+      return receipt
+    }),
+    close: vi.fn(async () => {}),
+  }
+  const onQuiesced = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    onQuiesced,
+  })
+  try {
+    expect(await pump.admitted).toBe(true)
+    await vi.waitFor(() => expect(client.handle).toHaveBeenCalledOnce())
+    expect(onQuiesced).not.toHaveBeenCalled()
+    accept(response({ accepted: true }))
+    await pump.stopped
+    expect(onQuiesced).toHaveBeenCalledOnce()
+    expect(client.close).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(1)
+  } finally {
+    accept(response({ accepted: true }))
+    await pump.close()
+  }
+})

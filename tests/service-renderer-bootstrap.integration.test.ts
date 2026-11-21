@@ -6,6 +6,7 @@ import { transform } from 'esbuild'
 import { expect, it, vi } from 'vitest'
 import { ServiceRendererBootstrap } from '../packages/cli/src/cli/service-renderer-bootstrap.js'
 import { ServiceRendererParticipants } from '../packages/cli/src/cli/service-renderer-participant.js'
+import { fenceManagerConsumers } from '../packages/cli/src/cli/manager-consumer-fence.js'
 import {
   createServiceRendererProjector,
   loadServiceRendererPackage,
@@ -385,6 +386,76 @@ it('builds the real empty manager from the owner and admits its runtime through 
       dom.window.close()
     }
   } finally {
+    await f.close()
+  }
+}, 90_000)
+
+it('waits for the actual Manager runtime to quiesce before releasing owner admission', async () => {
+  const f = await fixture()
+  const gate = defer<void>()
+  const entered = defer<void>()
+  let dom: JSDOM | undefined
+  let client: ReturnType<typeof createManagerRendererLifecycleClient> | undefined
+  try {
+    expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+    const completed = await f.call({ action: 'complete', managerOrigin: origin, graphs: [] }) as any
+    expect(completed.status).toBe('ok')
+    const bytes = await decodeManagerRendererBundle(completed.value.bundle)
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      runScripts: 'dangerously',
+      url: origin,
+    })
+    Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+    Object.assign(dom.window, { TextEncoder, TextDecoder })
+    const module = await transform(bytes.toString('utf8'), { format: 'iife', globalName: '__testOwnerModule' })
+    bytes.fill(0)
+    dom.window.eval(module.code)
+    await (dom.window as any).__testOwnerModule.startStandaloneManagerComposition(new AbortController().signal)
+    await vi.waitFor(() => expect(dom!.window.document.documentElement.dataset.cordisxReady).toBe('true'))
+    client = createManagerRendererLifecycleClient({
+      runtime: (dom.window as any).__cordisxRuntime,
+      scope: { profileId: f.profileId, generation: f.generation, rendererId: f.handle.rendererId },
+      onQuiesce: async () => {
+        entered.resolve()
+        await gate.promise
+        return true
+      },
+    })
+    const polling = f.sessions.poll(f.invocation, 3000)
+    const admitting = f.sessions.admit(f.invocation)
+    const synchronize = await polling as any
+    expect(synchronize.value.command.method).toBe('synchronize')
+    expect((await f.sessions.acknowledge(f.invocation, await client.handle(synchronize.value.command))).status).toBe(
+      'ok',
+    )
+    expect((await admitting).status).toBe('ok')
+
+    const quiescence = fenceManagerConsumers({ sessions: f.sessions, participants: f.participants })
+    void quiescence.catch(() => {})
+    const polled = await f.sessions.poll(f.invocation, 3000) as any
+    expect(polled.value.command.method).toBe('quiesce')
+    let settled = false
+    const handling = client.handle(polled.value.command).then(value => {
+      settled = true
+      return value
+    })
+    await entered.promise
+    expect(settled).toBe(false)
+    expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+    gate.resolve()
+    const receipt = await handling
+    expect(receipt.ok).toBe(true)
+    expect(dom.window.document.querySelector('[data-manager-surface="standalone"]')).toBeNull()
+    expect((await f.sessions.acknowledge(f.invocation, receipt)).status).toBe('ok')
+    expect(await f.sessions.close(f.invocation)).toBe(true)
+    const lease = await quiescence
+    expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+    expect(lease.release()).toBe(true)
+    expect(await f.sessions.open(f.gateway, secret())).toBeDefined()
+  } finally {
+    gate.resolve()
+    await client?.close()
+    dom?.window.close()
     await f.close()
   }
 }, 90_000)
