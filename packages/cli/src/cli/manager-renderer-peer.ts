@@ -10,6 +10,7 @@ export type ManagerRendererCommandMethod =
   | 'finalize'
   | 'rollback'
   | 'quiesce'
+  | 'channel-configuration'
 
 export interface ManagerRendererPeerScope {
   readonly homeDigest: string
@@ -42,8 +43,12 @@ const methods = new Set<ManagerRendererCommandMethod>([
   'finalize',
   'rollback',
   'quiesce',
+  'channel-configuration',
 ])
 const MAX_COMMAND_BYTES = 256 * 1024
+// Channel views omit images but can still describe many configured accounts.
+// Keep the whole poll response below the browser pump's one-megabyte limit.
+const MAX_CHANNEL_COMMAND_BYTES = 900 * 1024
 const MAX_RESULT_BYTES = 8 * 1024 * 1024
 
 function cloneBounded(value: unknown, maxBytes: number): unknown {
@@ -120,7 +125,7 @@ export class ManagerRendererCommandPeer {
     }
     let cloned: unknown
     try {
-      cloned = cloneBounded(payload, MAX_COMMAND_BYTES)
+      cloned = cloneBounded(payload, method === 'channel-configuration' ? MAX_CHANNEL_COMMAND_BYTES : MAX_COMMAND_BYTES)
     } catch {
       return Promise.reject(new Error('renderer-command-invalid'))
     }

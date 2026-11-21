@@ -207,6 +207,7 @@ import {
   type PluginGenerationView,
 } from './generation-visibility.js'
 import { type ChannelManagerProjectionV1, CordisXChannelManagerService } from './channel-manager.js'
+import { adoptStandaloneChannelProjection } from './channel-manager-owner-update.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -763,6 +764,14 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   },
   authorizePluginV4: runtimeScope.authorizePluginV4()!,
   activePluginGeneration: () => structuredClone(runtimeScope.currentActivation),
+  adoptStandaloneChannelProjection: (projection, revision) => {
+    if (runtimeScope.disposed || runtimeScope.metadata()!.hostKind !== 'standalone') return false
+    return adoptStandaloneChannelProjection(
+      runtimeScope.ctx.channelManager as unknown as CordisXChannelManagerService,
+      projection,
+      revision,
+    )
+  },
   configuredPluginGraphGenerations: () =>
     runtimeScope.metadata()!.hostKind === 'standalone'
       ? runtimeScope.controllers()!.flatMap(controller => (

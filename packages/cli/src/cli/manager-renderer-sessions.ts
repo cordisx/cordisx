@@ -159,6 +159,13 @@ export class ManagerRendererSessions {
       || [...this.sessions.values()].some(session => this.current(session))
   }
 
+  /** Owner-only check: a bootstrapped peer is not necessarily admitted. */
+  hasAdmittedPeer(peer: ManagerRendererCommandPeer): boolean {
+    const session = this.sessions.get(peer.identity.rendererId)
+    return session !== undefined && session.peer === peer && session.admitted === true
+      && !peer.closed && this.current(session)
+  }
+
   mutationAvailability(): 'available' | 'busy' | 'unavailable' {
     if (!this.alive() || this.mutationsFenced || this.mutationUncertain || this.retirementUncertain) {
       return 'unavailable'

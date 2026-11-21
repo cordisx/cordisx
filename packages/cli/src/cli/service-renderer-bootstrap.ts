@@ -288,8 +288,6 @@ export class ServiceRendererBootstrap {
     action: () => Promise<HostServiceConfigMutationResult>,
   ): Promise<HostServiceConfigMutationResult> {
     const rendererId = origin.rendererId
-    const entry = this.entries.get(rendererId)
-    const configured = entry?.configuredChannel
     const channel = this.configuredChannel
     const pluginFence = this.pluginConfigFence
     const ownerLive = () => {
@@ -299,45 +297,90 @@ export class ServiceRendererBootstrap {
         return false
       }
     }
-    if (
-      !entry || !configured || !channel || !pluginFence || entry.channelTransition
-      || !this.current(rendererId, entry) || !configured.isCurrent() || !ownerLive()
-    ) throw new Error('renderer-configured-channel-unavailable')
-    entry.channelTransition = { isCurrent: ownerLive }
-    let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>> | undefined
+    if (!channel || !pluginFence || !ownerLive()) throw new Error('renderer-configured-channel-unavailable')
+    const cohort = this.input.participants.ownerPeers().map(peer => {
+      const id = peer.identity.rendererId
+      const entry = this.entries.get(id)
+      const configured = entry?.configuredChannel
+      if (
+        !entry || entry.peer !== peer || !configured || entry.channelTransition
+        || !this.current(id, entry) || !configured.isCurrent()
+      ) throw new Error('renderer-configured-channel-unavailable')
+      return { id, entry, configured, peer }
+    })
+    if (!cohort.some(item => item.id === rendererId) || !ownerLive()) {
+      throw new Error('renderer-configured-channel-unavailable')
+    }
+    for (const { entry } of cohort) entry.channelTransition = { isCurrent: ownerLive }
+    let reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspendAll']>> | undefined
     try {
-      await Promise.allSettled(entry.checks)
-      if (!this.current(rendererId, entry) || !configured.isCurrent() || !ownerLive()) {
+      await Promise.allSettled(cohort.flatMap(({ entry }) => [...entry.checks]))
+      if (
+        !ownerLive() || cohort.some(({ id, entry, configured }) => !this.current(id, entry) || !configured.isCurrent())
+      ) {
         throw new Error('renderer-configured-channel-unavailable')
       }
-      reservation = await channel.bridge.suspend(rendererId)
-      if (!await this.readLifetimes.drainCurrent(rendererId) || !reservation.isCurrent() || !ownerLive()) {
+      reservation = await channel.bridge.suspendAll(cohort.map(item => item.id))
+      const drained = await Promise.all(cohort.map(async item => await this.readLifetimes.drainCurrent(item.id)))
+      if (drained.some(value => !value) || !reservation.isCurrent() || !ownerLive()) {
         throw new Error('renderer-configured-channel-unavailable')
       }
       const result = await pluginFence.runServiceMutation({
         pluginId: 'channel',
         serviceId: 'runtime',
-        isCurrent: () => this.current(rendererId, entry) && ownerLive() && reservation!.isCurrent(),
+        isCurrent: () =>
+          ownerLive() && reservation!.isCurrent()
+          && cohort.every(({ id, entry }) => this.current(id, entry)),
       }, async () => {
         const value = await action()
         if (value.status === 'applied') {
-          await configured.handoff(reservation!, { generation: value.serviceGeneration, revision: value.revision })
+          for (const { id, configured } of cohort) {
+            await configured.handoff(reservation!.forRenderer(id), {
+              generation: value.serviceGeneration,
+              revision: value.revision,
+            })
+          }
         } else if (value.status === 'conflict' || value.status === 'rejected') {
-          await configured.handoff(reservation!)
+          for (const { id, configured } of cohort) await configured.handoff(reservation!.forRenderer(id))
         } else {
           throw new Error('renderer-configured-channel-result-uncertain')
         }
         return value
       })
-      if (!this.current(rendererId, entry) || !ownerLive() || !reservation.release()) {
+      if (!ownerLive() || !reservation.release()) {
         throw new Error('renderer-configured-channel-result-uncertain')
       }
-      delete entry.channelTransition
+      for (const { entry } of cohort) delete entry.channelTransition
+      if (result.status === 'applied') {
+        // The writer adopts its own receipt; other pages confirm the new view
+        // before the write fence is released, without unmounting their drafts.
+        await Promise.all(
+          cohort.filter(item => item.id !== rendererId).map(async item => {
+            const receipt = await item.peer.request('channel-configuration', {
+              rendererId: item.id,
+              ownerGeneration: this.input.generation,
+              revision: result.revision,
+              projection: item.configured.handoffProjection(),
+            })
+            if (
+              !attachmentEqual(receipt, {
+                rendererId: item.id,
+                ownerGeneration: this.input.generation,
+                revision: result.revision,
+                adopted: true,
+              })
+            ) throw new Error('renderer-configured-channel-result-uncertain')
+          }),
+        )
+      }
+      if (!ownerLive()) throw new Error('renderer-configured-channel-result-uncertain')
       return result
     } catch (error) {
       reservation?.fence()
-      delete entry.channelTransition
-      entry.peer.close()
+      for (const { entry } of cohort) {
+        delete entry.channelTransition
+        entry.peer.close()
+      }
       throw error
     }
   }
@@ -345,6 +388,7 @@ export class ServiceRendererBootstrap {
   async prepare(rendererId: string): Promise<unknown> {
     if (this.closed || this.retirements.has(rendererId)) throw new Error('renderer-bootstrap-unavailable')
     const existing = this.entries.get(rendererId)
+    if (existing?.channelTransition) throw new Error('renderer-bootstrap-unavailable')
     if (existing?.preparing) {
       const result = await existing.preparing
       if (!await this.unchanged(rendererId, existing)) throw new Error('renderer-bootstrap-stale')
@@ -484,7 +528,7 @@ export class ServiceRendererBootstrap {
   ): Promise<unknown> {
     const rendererId = context.rendererId
     const entry = this.entries.get(rendererId)
-    if (!entry || !entry.preparing) throw new Error('renderer-bootstrap-unavailable')
+    if (!entry || !entry.preparing || entry.channelTransition) throw new Error('renderer-bootstrap-unavailable')
     await entry.preparing
     if (entry.completing) {
       const result = await entry.completing

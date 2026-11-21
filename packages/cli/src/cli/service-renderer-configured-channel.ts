@@ -11,6 +11,7 @@ import { isLegacyChannelRelease } from '../launcher/legacy-channel-styles.js'
 import { attachmentEqual } from '../launcher/renderer-lifecycle-peer.js'
 import { createStandaloneRuntimeGraph } from '../launcher/standalone-runtime-graph.js'
 import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager-projection.js'
 import type { ManagerRendererChannelContext } from './manager-renderer-sessions.js'
 import { ReadonlyChannelRendererBridge } from './readonly-channel-renderer-bridge.js'
 import { openReadonlyHeadlessChannel } from './readonly-headless-channel.js'
@@ -18,6 +19,18 @@ import { ServiceRendererIdentityProjection } from './service-renderer-identity.j
 import { loadServiceConfiguredChannelArchive } from './service-renderer-projection.js'
 
 type View = NonNullable<Awaited<ReturnType<typeof openReadonlyHeadlessChannel>>>
+
+/** Artwork can be large and is already scoped to each renderer's current view. */
+export function compactChannelHandoff(projection: ChannelManagerProjectionV1): ChannelManagerProjectionV1 {
+  return {
+    ...projection,
+    accounts: projection.accounts.map(account => {
+      const { accountAvatar: _avatar, ...rest } = account
+      void _avatar
+      return rest
+    }),
+  }
+}
 
 /** Owner-selected Channel only; construction is never available to a browser. */
 export class ServiceRendererConfiguredChannel {
@@ -230,9 +243,17 @@ export class ServiceRendererConfiguredChannel {
     return writable ? { ...projection, service: { ...projection.service, writable: true } } : projection
   }
 
+  /** Obtain a view after the owner has independently verified this session's admission. */
+  handoffProjection() {
+    if (!this.bound) throw new Error('renderer-configured-channel-unavailable')
+    // Binding happens before admission, so its captured context is deliberately
+    // not an admission proof. The fleet reservation supplies that proof.
+    return compactChannelHandoff(this.projection({ ...this.bound, admitted: true }))
+  }
+
   /** Verify an unchanged view or replace it only after the exact committed service generation is readable. */
   async handoff(
-    reservation: Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>>,
+    reservation: Pick<Awaited<ReturnType<ReadonlyChannelRendererBridge['suspend']>>, 'isCurrent' | 'replace'>,
     expected?: { readonly generation: string; readonly revision: number },
   ): Promise<void> {
     const context = this.bound

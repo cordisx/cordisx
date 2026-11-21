@@ -146,12 +146,15 @@ unavailable until a compatible Channel version is installed. Other archives
 without an initial Channel stylesheet are unavailable, and permissions from
 another source are not reused.
 
-The originating Manager reserves its own session and the owner lifecycle before
-a connection settings or credential write. It drains old reads and waits for the new service
-generation and configuration readback before reporting success. A second
-Manager or unaccounted adapter makes the write unavailable without closing that
-session; the form retains its draft. Changed revisions require the user to
-review the new version before saving. This is not cross-client synchronization.
+The originating Manager reserves the owner lifecycle and all admitted Manager
+sessions before a connection settings or credential write. The owner drains
+their old reads, verifies the new service generation and sends a redacted view
+to the other Managers. It reports success only after they confirm adoption.
+Those pages retain unsaved form values and require review when their underlying
+revision changes. An unadmitted Manager or an unaccounted adapter still makes
+the write unavailable; a lost receipt after dispatch requires reconciliation.
+This handoff covers the restricted Channel page, not other clients or general
+permission and configuration synchronization.
 
 When the owner-selected Channel has no matching UI allow, its Manager entry can
 lead to a Host permission review. The user may allow the navigation entry and

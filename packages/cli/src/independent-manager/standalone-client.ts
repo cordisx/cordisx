@@ -455,6 +455,8 @@ export function startStandaloneManager(input: {
         scope,
         loader: graphLoader,
         signal: lifetime.signal,
+        onChannelConfiguration: (projection, revision) =>
+          startedRuntime.adoptStandaloneChannelProjection?.(projection, revision) === true,
         onQuiesce: async () => {
           // Do not acknowledge a fence while an operation may have written or
           // while resource recovery has an unresolved result.

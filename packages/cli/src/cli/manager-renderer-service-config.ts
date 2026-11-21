@@ -98,6 +98,7 @@ export function createManagerRendererServiceConfigChannel(input: {
               sessions: input.sessions(),
               participants: input.participants,
               lifecycle: input.lifecycle,
+              allowAdditionalManagers: true,
             })
           } catch {
             return { requestId: request.requestId, ok: true, value: unavailable(request.mutation) }

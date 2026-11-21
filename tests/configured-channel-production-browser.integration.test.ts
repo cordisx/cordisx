@@ -246,6 +246,24 @@ it.skipIf(
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
       await showChannel(second)
+      await expect.poll(() => second.evaluate(openRow(['Simulator', '模拟器']))).toBe(true)
+      await expect.poll(
+        () => second.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
+        { timeout: 15_000 },
+      ).toBe(true)
+      await second.evaluate(`(() => {
+        const input = document.querySelector('#channel-connection-displayName input')
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Second page draft')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      })()`)
+      await expect.poll(() =>
+        second.evaluate(`(() => {
+        const event = new Event('beforeunload', { cancelable: true })
+        window.dispatchEvent(event)
+        return event.defaultPrevented
+      })()`)
+      ).toBe(true)
       expect(await first.evaluate('typeof globalThis.__cordisxChannelCredentialRequestV1')).toBe('function')
       await expect.poll(() => first.evaluate(openRow(['Feishu', '飞书', 'cli_fixture']))).toBe(true)
       await expect.poll(() =>
@@ -311,27 +329,13 @@ it.skipIf(
         button.click()
         return true
       })()`
-      await expect.poll(() => first.evaluate(save)).toBe(true)
-      await expect.poll(() =>
-        first.evaluate(
-          'document.body.textContent.includes("Your draft was kept") || document.body.textContent.includes("草稿已保留")',
-        ), { timeout: 15_000 }).toBe(true)
-      expect(await first.evaluate('document.querySelector("#channel-connection-displayName input").value'))
-        .toBe('Configured Simulator')
       const serviceRevision = async () => {
         const current = JSON.parse(await readFile(configPath, 'utf8'))
         return current.plugins[0].services.runtime.profiles.default.revision as number
       }
-      expect(await serviceRevision()).toBe(1)
-      await second.send('Page.enable')
-      await second.send('Page.navigate', { url: 'about:blank' })
-      await expect.poll(() => second.evaluate('location.href')).toBe('about:blank')
+      await expect.poll(() => first.evaluate(save)).toBe(true)
       try {
-        await expect.poll(async () => {
-          if (await serviceRevision() === 2) return true
-          await first.evaluate(save).catch(() => false)
-          return false
-        }, { timeout: 30_000, interval: 500 }).toBe(true)
+        await expect.poll(serviceRevision, { timeout: 30_000, interval: 500 }).toBe(2)
       } catch {
         const state = await first.evaluate(`({
           text: document.body.innerText.slice(0, 600),
@@ -341,10 +345,51 @@ it.skipIf(
           })),
         })`)
         throw new Error(
-          'Connection form did not save after retirement: '
+          'Connection form did not save with another Manager: '
             + JSON.stringify({ state, revision: await serviceRevision() }),
         )
       }
+      try {
+        await expect.poll(() =>
+          second.evaluate(
+            'document.body.textContent.includes("Your draft was kept") || document.body.textContent.includes("草稿已保留")',
+          ), { timeout: 15_000 }).toBe(true)
+      } catch {
+        const state = await second.evaluate(`({
+          text: document.body.innerText.slice(0, 600),
+          value: document.querySelector('#channel-connection-displayName input')?.value,
+          ready: document.documentElement.dataset.cordisxReady,
+          buttons: [...document.querySelectorAll('[data-channel-connection-form] button')].map(item => ({
+            label: item.textContent.trim(), disabled: item.disabled,
+          })),
+        })`)
+        const firstState = await first.evaluate(`({
+          text: document.body.innerText.slice(0, 400),
+          ready: document.documentElement.dataset.cordisxReady,
+        })`)
+        throw new Error('Other Manager did not reconcile its draft: ' + JSON.stringify({ state, firstState }))
+      }
+      expect(await second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Second page draft')
+      await second.evaluate(`(() => {
+        const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>
+          ['Use latest version', '使用最新版本'].includes(item.textContent.trim()))
+        button.click()
+      })()`)
+      await expect.poll(() =>
+        second.evaluate(
+          'document.body.textContent.includes("Your draft was kept") || document.body.textContent.includes("草稿已保留")',
+        )
+      ).toBe(false)
+      expect(await second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Second page draft')
+      await second.evaluate(`(() => {
+        const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>
+          ['Undo changes', '撤销修改'].includes(item.textContent.trim()))
+        button.click()
+      })()`)
+      await expect.poll(() => second.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Configured Simulator')
       const savedConfig = JSON.parse(await readFile(configPath, 'utf8'))
         .plugins[0].services.runtime.profiles.default.config
       expect(savedConfig).toMatchObject({
@@ -364,8 +409,6 @@ it.skipIf(
           'document.querySelector("#channel-connection-displayName input")?.value',
         )
       ).toBe('Configured Simulator')
-      const replacementUrl = await open()
-      await second.send('Page.navigate', { url: replacementUrl })
       await showChannel(second)
       await showChannel(first)
       await first.evaluate('globalThis.__productionBeforeReload = true')
@@ -403,6 +446,17 @@ it.skipIf(
       await expect.poll(
         () => first.evaluate('getComputedStyle(document.querySelector(".cxms-shared-header")).display'),
       ).toBe('flex')
+      try {
+        await expect.poll(
+          () => second.evaluate('Boolean(document.querySelector("[data-tab=model-services]"))'),
+          { timeout: 15_000 },
+        ).toBe(true)
+      } catch {
+        const state = await second.evaluate(
+          `({ text: document.body.innerText.slice(0, 400), path: location.pathname })`,
+        )
+        throw new Error('Other Manager was unavailable after refresh: ' + JSON.stringify(state))
+      }
       await second.evaluate('document.querySelector("[data-tab=model-services]").click()')
       await expect.poll(
         () => second.evaluate('Boolean(document.querySelector("[data-shared-model-service=fixture-service]"))'),
@@ -565,6 +619,14 @@ it.skipIf(
           timeout: 30_000,
         }).toBe(true)
       }
+      // A page losing its owner precedes the sidecar's own shutdown receipt.
+      await expect.poll(async () => {
+        try {
+          return JSON.parse((await run('manager', 'status', '--profile', 'default')).stdout).status
+        } catch {
+          return 'stopping'
+        }
+      }, { timeout: 20_000, interval: 250 }).toBe('stopped')
       expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
         .toMatchObject({ status: 'ready', mode: 'service' })
       const recoveredUrl = await open()

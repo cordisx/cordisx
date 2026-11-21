@@ -101,3 +101,20 @@ it('rejects unbounded commands and concurrent owner operations before dispatch',
     channel.close()
   }
 })
+
+it('allows a bounded multi-account Channel view without raising other command limits', async () => {
+  const channel = peer()
+  try {
+    const result = channel.request('channel-configuration', { accounts: 'a'.repeat(300 * 1024) })
+    const command = (await channel.next())!
+    expect(command.method).toBe('channel-configuration')
+    expect(channel.acknowledge({ id: command.id, sequence: command.sequence, ok: true, value: {} })).toBe(true)
+    expect(await result).toEqual({})
+    await expect(channel.request('channel-configuration', { accounts: 'a'.repeat(900 * 1024) }))
+      .rejects.toThrow('renderer-command-invalid')
+    await expect(channel.request('stage', { accounts: 'a'.repeat(300 * 1024) }))
+      .rejects.toThrow('renderer-command-invalid')
+  } finally {
+    channel.close()
+  }
+})

@@ -191,4 +191,61 @@ describe('readonly Channel renderer bridge', () => {
     await rejected
     f.bridge.close()
   })
+
+  it('drains every accounted renderer before replacing their views', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const waiting = new Promise<void>(resolve => {
+      finish = resolve
+    })
+    const otherClose = vi.fn()
+    f.bridge.bind(f.one, f.view)
+    f.bridge.bind(f.two, {
+      ...f.view,
+      close: otherClose,
+      snapshot: async () => {
+        await waiting
+        return { status: 'unavailable' as const }
+      },
+    })
+    const pending = f.bridge.channel.prepare(f.request('pending'), f.two).dispatch()
+    let ready = false
+    const handoff = f.bridge.suspendAll(['one', 'two']).then(value => {
+      ready = true
+      return value
+    })
+    expect(() => f.bridge.channel.prepare(f.request('blocked-one'), f.one)).toThrow()
+    expect(() => f.bridge.channel.prepare(f.request('blocked-two'), f.two)).toThrow()
+    await Promise.resolve()
+    expect(ready).toBe(false)
+    finish()
+    await pending
+    const reservation = await handoff
+    const firstNext = { ...f.view, close: vi.fn() }
+    const secondNext = { ...f.view, close: vi.fn() }
+    expect(reservation.forRenderer('one').replace(firstNext)).toBe(true)
+    expect(reservation.forRenderer('two').replace(secondNext)).toBe(true)
+    expect(reservation.release()).toBe(true)
+    expect(f.close).toHaveBeenCalledOnce()
+    expect(otherClose).toHaveBeenCalledOnce()
+    await expect(f.bridge.channel.prepare(f.request('new-one'), f.one).dispatch()).resolves.toMatchObject({ ok: true })
+    await expect(f.bridge.channel.prepare(f.request('new-two'), f.two).dispatch()).resolves.toMatchObject({ ok: true })
+    f.bridge.close()
+  })
+
+  it('fences the entire handoff when an accounted renderer disconnects', async () => {
+    const f = fixture()
+    const otherClose = vi.fn()
+    f.bridge.bind(f.one, f.view)
+    f.bridge.bind(f.two, { ...f.view, close: otherClose })
+    await expect(f.bridge.suspendAll(['one'])).rejects.toThrow('CHANNEL_RENDERER_UNAVAILABLE')
+    const reservation = await f.bridge.suspendAll(['one', 'two'])
+    f.second.abort()
+    expect(reservation.isCurrent()).toBe(false)
+    expect(reservation.release()).toBe(false)
+    expect(f.close).toHaveBeenCalledOnce()
+    expect(otherClose).toHaveBeenCalledOnce()
+    expect(() => f.bridge.channel.prepare(f.request('closed'), f.one)).toThrow()
+    f.bridge.close()
+  })
 })

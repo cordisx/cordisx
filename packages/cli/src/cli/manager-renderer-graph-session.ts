@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { PluginGenerationGraphLease } from '../launcher/plugin-generation-artifact-server.js'
 import { normalizePluginActivation } from '../launcher/plugin-activation.js'
 import type { ManagerRendererGraph } from '../independent-manager/graph-stage-loader.js'
+import { normalizeProjection as normalizeChannelProjection } from '../renderer/channel-manager-projection.js'
 import {
   createSessionPluginGraphProjection,
   type ProjectedGraphResponse,
@@ -269,7 +270,17 @@ export function createManagerRendererGraphSession(input: {
           || typeof command.id !== 'string' || !secret.test(command.id)
           || !Number.isSafeInteger(command.sequence) || (command.sequence as number) < 1
           || typeof command.method !== 'string'
-          || !['synchronize', 'prepare', 'stage', 'publish', 'complete', 'finalize', 'rollback', 'quiesce'].includes(
+          || ![
+            'synchronize',
+            'prepare',
+            'stage',
+            'publish',
+            'complete',
+            'finalize',
+            'rollback',
+            'quiesce',
+            'channel-configuration',
+          ].includes(
             command.method,
           )
           || pending !== undefined
@@ -340,6 +351,21 @@ export function createManagerRendererGraphSession(input: {
             ...Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'privateGraphs')),
             graphs: staged.map(entry => entry.publicGraph),
           }
+        } else if (command.method === 'channel-configuration') {
+          if (
+            transaction !== undefined || Object.keys(payload).length !== 4
+            || Object.keys(payload).some(key =>
+              !['rendererId', 'ownerGeneration', 'revision', 'projection'].includes(key)
+            )
+            || payload.rendererId !== input.rendererId || payload.ownerGeneration !== input.generation
+            || !Number.isSafeInteger(payload.revision) || Number(payload.revision) < 0
+          ) throw invalid()
+          const projection = normalizeChannelProjection(payload.projection)
+          if (
+            projection.service.revision !== payload.revision || projection.service.lastGoodRevision !== payload.revision
+            || !projection.service.writable
+          ) throw invalid()
+          payload = { ...payload, projection }
         } else if (command.method === 'quiesce') {
           if (
             transaction !== undefined || Object.keys(payload).length !== 1 || typeof payload.fenceId !== 'string'

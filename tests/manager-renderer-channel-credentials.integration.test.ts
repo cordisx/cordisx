@@ -48,17 +48,23 @@ it.skipIf(!archive || process.platform !== 'darwin' && process.platform !== 'lin
       expect(await f.sessions.call(second, 'channel-credentials', envelope('other-session', 'discard', { draftId })))
         .toMatchObject({ status: 'ok', value: { value: { status: 'unavailable', code: 'DRAFT_UNAVAILABLE' } } })
       expect(f.credentialValues.size).toBe(1)
-      expect(await call('busy', 'commit', { draftId, draft: { displayName: 'Updated', selectors: ['direct'] } }))
-        .toMatchObject({
-          status: 'ok',
-          value: { value: { status: 'unavailable', code: 'PROFILE_COORDINATION_UNAVAILABLE' } },
-        })
-      expect(f.credentialValues.size).toBe(1)
-      expect(await f.sessions.close(second)).toBe(true)
-      const committed = await call('commit', 'commit', {
+      const polling = f.sessions.poll(second, 10_000)
+      const pending = call('commit', 'commit', {
         draftId,
         draft: { displayName: 'Updated', selectors: ['direct'] },
-      }) as any
+      })
+      const command = (await polling as any).value.command
+      expect(command).toMatchObject({ method: 'channel-configuration', payload: { revision: 2 } })
+      expect(JSON.stringify(command)).not.toMatch(/synthetic-fixture-value|secretRef|fixture-private-reference/)
+      expect(
+        await f.sessions.acknowledge(second, {
+          id: command.id,
+          sequence: command.sequence,
+          ok: true,
+          value: { rendererId: second.handle.rendererId, ownerGeneration: f.generation, revision: 2, adopted: true },
+        }),
+      ).toEqual({ status: 'ok', value: { accepted: true } })
+      const committed = await pending as any
       expect(committed).toMatchObject({
         status: 'ok',
         value: { ok: true, value: { status: 'applied', code: 'APPLIED' } },

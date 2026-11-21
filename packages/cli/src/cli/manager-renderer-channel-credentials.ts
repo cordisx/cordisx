@@ -201,6 +201,7 @@ export function createManagerRendererChannelCredentials(input: {
               sessions: input.sessions(),
               participants: input.participants,
               lifecycle: input.lifecycle,
+              allowAdditionalManagers: true,
             })
           } catch {
             return {

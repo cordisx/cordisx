@@ -27,34 +27,41 @@ export function isCurrentManagerOriginFence(
 }
 
 /**
- * Keep one admitted Manager alive for a write receipt while reserving its
- * owner's lifecycle. Refuse other Manager peers rather than discard drafts.
- * The caller must separately fence readers, profile writers and service state.
+ * Keep the originating Manager alive for its write receipt. Other admitted
+ * Managers are accepted only when the caller can hand off all of their views;
+ * unadmitted and non-Manager peers remain outside that authority. The caller
+ * must separately fence readers, profile writers and service state.
  */
 export async function fenceManagerOrigin(input: {
   readonly sessions: ManagerRendererSessions
   readonly participants: ServiceRendererParticipants
   readonly lifecycle: ServiceRendererLifecycle
+  readonly allowAdditionalManagers?: boolean
   readonly timeoutMs?: number
 }): Promise<ManagerOriginFence> {
   if (!input.participants.isBoundTo(input.lifecycle)) throw new Error('manager-origin-fence-scope-invalid')
   const writes = await input.sessions.suspendMutationsForCurrentWrite(input.timeoutMs)
   let lifecycle: ReturnType<ServiceRendererLifecycle['reserveExternalMutation']>
-  let peer: NonNullable<ReturnType<ServiceRendererParticipants['peer']>>
+  let peers: readonly NonNullable<ReturnType<ServiceRendererParticipants['peer']>>[]
   try {
-    const peers = input.participants.ownerPeers()
+    peers = input.participants.ownerPeers()
     const origin = input.participants.peer(writes.rendererId)
-    if (peers.length !== 1 || !origin || peers[0] !== origin || !input.participants.isLive(origin.identity)) {
+    if (
+      !origin || !peers.includes(origin) || (!input.allowAdditionalManagers && peers.length !== 1)
+      || peers.some(peer => !input.participants.isLive(peer.identity) || !input.sessions.hasAdmittedPeer(peer))
+    ) {
       throw new Error('manager-origin-fence-unavailable')
     }
-    peer = origin
     lifecycle = input.lifecycle.reserveExternalMutation(peers)
   } catch {
     if (!writes.release()) writes.fence()
     throw new Error('manager-origin-fence-unavailable')
   }
   let ended = false
-  let unsubscribe = () => {}
+  const subscriptions: Array<() => void> = []
+  const unsubscribe = () => {
+    for (const dispose of subscriptions.splice(0)) dispose()
+  }
   const fence = () => {
     if (ended) return
     ended = true
@@ -65,12 +72,23 @@ export async function fenceManagerOrigin(input: {
       writes.fence()
     }
   }
-  unsubscribe = peer.onDisconnect(fence)
+  for (const peer of peers) {
+    const dispose = peer.onDisconnect(fence)
+    if (ended) {
+      dispose()
+      unsubscribe()
+      throw new Error('manager-origin-fence-unavailable')
+    }
+    subscriptions.push(dispose)
+  }
   const current = () => {
     try {
-      const peers = input.participants.ownerPeers()
-      return !ended && writes.isCurrent() && lifecycle.isCurrent() && peers.length === 1 && peers[0] === peer
-        && input.participants.peer(writes.rendererId) === peer && input.participants.isLive(peer.identity)
+      const live = input.participants.ownerPeers()
+      return !ended && writes.isCurrent() && lifecycle.isCurrent() && live.length === peers.length
+        && peers.every(peer =>
+          live.includes(peer) && input.participants.peer(peer.identity.rendererId) === peer
+          && input.participants.isLive(peer.identity) && input.sessions.hasAdmittedPeer(peer)
+        )
     } catch {
       return false
     }

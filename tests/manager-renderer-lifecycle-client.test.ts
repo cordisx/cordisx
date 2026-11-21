@@ -47,6 +47,55 @@ const rollback = {
   disposedAfter: candidate,
 }
 
+it('acknowledges only the owner-scoped Channel view that the renderer adopted', async () => {
+  const { runtime } = fixture()
+  const adopt = vi.fn(async () => true)
+  const client = createManagerRendererLifecycleClient({
+    runtime: runtime as never,
+    scope,
+    onChannelConfiguration: adopt,
+  })
+  const view = { service: { revision: 2 } }
+  try {
+    await client.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+    expect(
+      await client.handle(command(2, 'channel-configuration', {
+        rendererId,
+        ownerGeneration: scope.generation,
+        revision: 2,
+        projection: view,
+      })),
+    ).toEqual({
+      id: '2'.padStart(64, '0'),
+      sequence: 2,
+      ok: true,
+      value: { rendererId, ownerGeneration: scope.generation, revision: 2, adopted: true },
+    })
+    expect(adopt).toHaveBeenCalledExactlyOnceWith(view, 2)
+  } finally {
+    await client.close()
+  }
+  const other = fixture()
+  const rejected = vi.fn(async () => true)
+  const stale = createManagerRendererLifecycleClient({
+    runtime: other.runtime as never,
+    scope,
+    onChannelConfiguration: rejected,
+  })
+  await stale.handle(command(1, 'synchronize', { active: base, registryEpoch: 0 }))
+  expect(
+    await stale.handle(command(2, 'channel-configuration', {
+      rendererId: 'b'.repeat(64),
+      ownerGeneration: scope.generation,
+      revision: 2,
+      projection: view,
+    })),
+  ).toMatchObject({ ok: false })
+  expect(rejected).not.toHaveBeenCalled()
+  expect(stale.closed).toBe(true)
+  await stale.close()
+})
+
 it('allows resource recovery only after synchronization and outside a lifecycle transaction', async () => {
   const { runtime, loader } = fixture()
   const client = createManagerRendererLifecycleClient({ runtime: runtime as never, scope, loader })

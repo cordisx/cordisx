@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { createManagerRendererGraphSession } from '../packages/cli/src/cli/manager-renderer-graph-session.js'
 import { managerFixtureActivation, managerRendererGraphFixture } from './fixtures/manager-renderer-graph.js'
+import { EMPTY_PROJECTION } from '../packages/cli/src/renderer/channel-manager-projection.js'
 
 const forbidden = ['1'.repeat(64), '2'.repeat(64), '3'.repeat(64)]
 const rendererId = '4'.repeat(64)
@@ -57,6 +58,34 @@ it('forwards only a bounded owner quiescence fence', () => {
   expect(() => invalid.projectCommand(command('quiesce', 1, { fenceId: 'invalid' })))
     .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
   expect(invalid.closed).toBe(true)
+})
+
+it('forwards only the redacted Channel view for this exact renderer and revision', () => {
+  const projection = {
+    ...EMPTY_PROJECTION,
+    service: { ...EMPTY_PROJECTION.service, revision: 2, lastGoodRevision: 2, writable: true },
+  }
+  const payload = { rendererId, ownerGeneration: baseInput.generation, revision: 2, projection }
+  const session = createManagerRendererGraphSession(baseInput)
+  session.projectInitial([])
+  const value = command('channel-configuration', 1, payload)
+  expect(session.projectCommand(value)).toEqual(value)
+  session.acknowledge({ id: 'e'.repeat(64), sequence: 1, ok: true })
+  session.close()
+  for (
+    const bad of [
+      { ...payload, rendererId: '5'.repeat(64) },
+      { ...payload, ownerGeneration: 'stale' },
+      { ...payload, revision: 3 },
+      { ...payload, projection: { ...projection, secretRef: 'private' } },
+    ]
+  ) {
+    const target = createManagerRendererGraphSession(baseInput)
+    target.projectInitial([])
+    expect(() => target.projectCommand(command('channel-configuration', 1, bad)))
+      .toThrow('MANAGER_RENDERER_GRAPH_INVALID')
+    expect(target.closed).toBe(true)
+  }
 })
 
 it('keeps initial graphs active through staging and rollback, without exposing owner secrets', async () => {

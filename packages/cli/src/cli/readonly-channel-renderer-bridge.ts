@@ -10,7 +10,8 @@ type Entry = {
   readonly reads: Set<Promise<unknown>>
   readonly onAbort: () => void
 }
-type Suspension = { readonly rendererId: string; readonly entry: Entry }
+type Suspension = { readonly entries: ReadonlyMap<string, Entry> }
+type ViewReservation = { isCurrent(): boolean; replace(view: View): boolean }
 
 /**
  * Owner-private bridge for views created by openReadonlyHeadlessChannel.
@@ -69,36 +70,37 @@ export class ReadonlyChannelRendererBridge {
     entry.view.close()
   }
 
-  /**
-   * Stop new snapshots and drain the sole renderer before its service changes.
-   * The owner must separately reserve Manager writes and the profile lifecycle.
-   */
-  async suspend(rendererId: string, timeoutMs = 15_000): Promise<{
+  /** Stop and drain exactly the owner-supplied set before changing the service. */
+  async suspendAll(rendererIds: readonly string[], timeoutMs = 15_000): Promise<{
     isCurrent(): boolean
-    replace(view: View): boolean
+    forRenderer(rendererId: string): ViewReservation
     release(): boolean
     fence(): void
   }> {
-    const entry = this.entries.get(rendererId)
+    const entries = new Map(rendererIds.map(rendererId => [rendererId, this.entries.get(rendererId)] as const))
     if (
-      this.closed || this.suspended || this.entries.size !== 1 || !entry || !this.current(entry.context)
+      this.closed || this.suspended || rendererIds.length === 0 || entries.size !== rendererIds.length
+      || this.entries.size !== entries.size
+      || [...entries.values()].some(entry => !entry || !this.current(entry.context))
       || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000
     ) throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
-    const suspension: Suspension = { rendererId, entry }
+    const suspension: Suspension = { entries: entries as Map<string, Entry> }
     this.suspended = suspension
     const current = () =>
-      this.suspended === suspension && this.entries.size === 1
-      && this.entries.get(rendererId) === entry && this.current(entry.context)
+      !this.closed && this.suspended === suspension && this.entries.size === suspension.entries.size
+      && [...suspension.entries].every(([rendererId, entry]) =>
+        this.entries.get(rendererId) === entry && this.current(entry.context)
+      )
     const fence = () => {
       if (this.suspended !== suspension) return
-      this.retire(rendererId, entry)
+      for (const [rendererId, entry] of suspension.entries) this.retire(rendererId, entry)
       this.suspended = undefined
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     let drained: boolean
     try {
       drained = await Promise.race([
-        Promise.allSettled(entry.reads).then(() => true),
+        Promise.allSettled([...suspension.entries.values()].flatMap(entry => [...entry.reads])).then(() => true),
         new Promise<boolean>(resolve => {
           timer = setTimeout(() => resolve(false), timeoutMs)
         }),
@@ -110,18 +112,25 @@ export class ReadonlyChannelRendererBridge {
       fence()
       throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
     }
-    let replaced = false
+    const replaced = new Set<string>()
     return {
       isCurrent: current,
-      replace: view => {
-        if (!current() || replaced || view === entry.view) {
-          if (view !== entry.view) view.close()
-          return false
+      forRenderer: rendererId => {
+        const entry = suspension.entries.get(rendererId)
+        if (!entry) throw new Error('CHANNEL_RENDERER_UNAVAILABLE')
+        return {
+          isCurrent: current,
+          replace: view => {
+            if (!current() || replaced.has(rendererId) || view === entry.view) {
+              if (view !== entry.view) view.close()
+              return false
+            }
+            entry.view.close()
+            entry.view = view
+            replaced.add(rendererId)
+            return true
+          },
         }
-        entry.view.close()
-        entry.view = view
-        replaced = true
-        return true
       },
       release: () => {
         if (!current()) {
@@ -133,6 +142,17 @@ export class ReadonlyChannelRendererBridge {
       },
       fence,
     }
+  }
+
+  /** One-renderer compatibility; an unaccounted view still rejects the handoff. */
+  async suspend(rendererId: string, timeoutMs = 15_000): Promise<
+    ViewReservation & {
+      release(): boolean
+      fence(): void
+    }
+  > {
+    const fleet = await this.suspendAll([rendererId], timeoutMs)
+    return { ...fleet.forRenderer(rendererId), release: fleet.release, fence: fleet.fence }
   }
 
   readonly channel: ManagerRendererChannel = {

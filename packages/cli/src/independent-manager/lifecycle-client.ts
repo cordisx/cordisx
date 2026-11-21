@@ -1,7 +1,16 @@
 import type { CordisXPluginModule } from '../contracts.js'
 import type { CordisXRuntimeHandle, RendererPluginMutation } from '../renderer/runtime-shared.js'
 
-type Method = 'synchronize' | 'prepare' | 'stage' | 'publish' | 'complete' | 'finalize' | 'rollback' | 'quiesce'
+type Method =
+  | 'synchronize'
+  | 'prepare'
+  | 'stage'
+  | 'publish'
+  | 'complete'
+  | 'finalize'
+  | 'rollback'
+  | 'quiesce'
+  | 'channel-configuration'
 type Scope = Readonly<{ profileId: string; generation: string; rendererId: string }>
 
 export interface ManagerRendererLifecycleCommand {
@@ -73,6 +82,7 @@ const methods = new Set<Method>([
   'finalize',
   'rollback',
   'quiesce',
+  'channel-configuration',
 ])
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const epochPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
@@ -148,6 +158,8 @@ export function createManagerRendererLifecycleClient(input: {
   readonly onDisconnected?: () => void | Promise<void>
   /** Disable owner bindings and confirm local resource revocation before disposal. */
   readonly onQuiesce?: () => boolean | Promise<boolean>
+  /** Adopt only an owner-issued, redacted Channel view for this renderer. */
+  readonly onChannelConfiguration?: (projection: unknown, revision: number) => boolean | Promise<boolean>
 }): {
   readonly closed: boolean
   readonly quiesced: boolean
@@ -213,6 +225,21 @@ export function createManagerRendererLifecycleClient(input: {
   }
   const execute = async (method: Method, payload: unknown): Promise<unknown> => {
     assertLive()
+    if (method === 'channel-configuration') {
+      const item = record(payload)
+      exact(item, ['rendererId', 'ownerGeneration', 'revision', 'projection'])
+      if (
+        item.rendererId !== scope.rendererId || item.ownerGeneration !== scope.generation
+        || !Number.isSafeInteger(item.revision) || (item.revision as number) < 0
+        || !synchronized || transaction !== undefined || awaitingAdoption !== undefined
+        || !input.onChannelConfiguration
+      ) throw new Error('renderer-channel-configuration-unavailable')
+      if (!await input.onChannelConfiguration(item.projection, item.revision as number)) {
+        throw new Error('renderer-channel-configuration-unavailable')
+      }
+      assertLive()
+      return { rendererId: scope.rendererId, ownerGeneration: scope.generation, revision: item.revision, adopted: true }
+    }
     if (method === 'quiesce') {
       const item = record(payload)
       exact(item, ['fenceId'])
