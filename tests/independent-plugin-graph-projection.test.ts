@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import type { ChildProcess } from 'node:child_process'
+import { build } from 'esbuild'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CdpClient, stopChrome } from './fixtures/native-browser-cdp.js'
 import { launchChrome, waitForChromeTarget } from './fixtures/native-browser-launch.js'
@@ -18,6 +19,7 @@ import {
   MAX_PLUGIN_GENERATION_GRAPH_FILE_BYTES,
   type PluginGenerationArtifactServer,
   type PluginGenerationGraphLease,
+  resourceRegistryInstallSource,
   startPluginGenerationArtifactServer,
 } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
 
@@ -462,6 +464,7 @@ describe('independent renderer plugin graph projection', () => {
     const profile = await mkdtemp(path.join(os.tmpdir(), 'cordisx-projection-browser-'))
     directories.add(profile)
     let session: SessionPluginGraphProjection | undefined
+    let bootstrap = ''
     // This fixture explicitly bypasses authentication to test the resource
     // responses only. Production must authenticate and select its session first.
     const http = createServer((request, response) => {
@@ -471,7 +474,14 @@ describe('independent renderer plugin graph projection', () => {
           "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'",
         )
         response.setHeader('content-type', 'text/html')
-        response.end('<!doctype html><title>Projection fixture</title><div class="icon">fixture</div>')
+        response.end(
+          '<!doctype html><title>Projection fixture</title><div class="icon">fixture</div><script type="module" src="/bootstrap.js"></script>',
+        )
+        return
+      }
+      if (request.url === '/bootstrap.js') {
+        response.setHeader('content-type', 'text/javascript')
+        response.end(bootstrap)
         return
       }
       void (async () => {
@@ -488,21 +498,44 @@ describe('independent renderer plugin graph projection', () => {
       session = createSessionPluginGraphProjection({ managerOrigin: manager, artifactServer: input.server })
       projections.add(session)
       const graph = session.project(input.lease, () => true)
+      const { leaseId, pluginId, moduleGeneration, baseUrl, entryUrl, initialStyleUrls } = graph
+      const descriptor = { leaseId, pluginId, moduleGeneration, baseUrl, entryUrl, initialStyleUrls }
+      const loaderPath = path.resolve('packages/cli/src/independent-manager/graph-stage-loader.ts')
+      const bundle = await build({
+        stdin: {
+          contents: `import { createManagerRendererGraphLoader } from ${JSON.stringify(loaderPath)};
+            ${resourceRegistryInstallSource()};
+            const descriptor = ${JSON.stringify(descriptor)};
+            const graphLoader = createManagerRendererGraphLoader({
+              origin: location.origin, registry: globalThis.__cordisxPluginGenerationResourcesV1, initialGraphs: [],
+            });
+            const previous = { profileId: 'fixture', runtimeGeneration: 'owner-1', plugins: [] };
+            const candidate = { ...previous, plugins: [{ id: descriptor.pluginId, enabled: true, moduleGeneration: descriptor.moduleGeneration }] };
+            const rendererId = 'a'.repeat(64);
+            const stage = await graphLoader.load({ rendererId, operation: 'install', targetId: descriptor.pluginId,
+              previous, candidate, affectedPluginIds: [descriptor.pluginId], graphs: [descriptor] },
+              { rendererId, profileId: 'fixture', generation: 'owner-1', signal: new AbortController().signal });
+            await stage.publish();
+            const lazy = await stage.modules[descriptor.pluginId].load();
+            globalThis.__projectionResult = { value: lazy.value, color: getComputedStyle(document.querySelector('.icon')).color };`,
+          resolveDir: process.cwd(),
+          sourcefile: 'projection-bootstrap.ts',
+          loader: 'ts',
+        },
+        bundle: true,
+        format: 'esm',
+        platform: 'browser',
+        write: false,
+      })
+      bootstrap = bundle.outputFiles[0]!.text
       const launched = launchChrome(chrome, profile)
       browser = launched.browser
       cdp = await CdpClient.connect(await waitForChromeTarget(profile, browser, launched.stderr))
       await cdp.send('Page.enable')
       await cdp.send('Page.navigate', { url: manager })
       await expect.poll(() => cdp!.evaluate('document.readyState')).toBe('complete')
-      const value = await cdp.evaluate<{ value: number; color: string }>(
-        `(async () => {
-          const plugin = await (${graph.importSource});
-          ${graph.publishSource};
-          const lazy = await plugin.load();
-          return { value: lazy.value, color: getComputedStyle(document.querySelector('.icon')).color };
-        })()`,
-      )
-      expect(value).toEqual({ value: 2, color: 'rgb(1, 2, 3)' })
+      await expect.poll(() => cdp!.evaluate('globalThis.__projectionResult ?? null'))
+        .toEqual({ value: 2, color: 'rgb(1, 2, 3)' })
       await expect.poll(() => input.server.requestTrace().some(item => item.artifactPath === './assets/pixel.svg'))
         .toBe(true)
       // Opening a projected SVG as a document must not give it script execution.

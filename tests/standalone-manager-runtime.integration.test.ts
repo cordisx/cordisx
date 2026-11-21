@@ -1,8 +1,15 @@
 import { JSDOM } from 'jsdom'
+import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
+import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+} from '../packages/cli/src/contracts.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 it('does not expose the isolated presentation as a production attachment', async () => {
@@ -42,6 +49,7 @@ it('mounts the existing Manager and an actual registered plugin page without a n
     expect(root.querySelector('[data-cordisx-manager-trigger]')).toBeNull()
     const runtime = (dom.window as unknown as {
       __cordisxRuntime: {
+        activePluginGeneration(): unknown
         pluginRegistryEpoch(): number
         snapshot(): { navigation: { outlets: readonly { id: string; available: boolean }[] } }
         dispose(): Promise<void>
@@ -66,10 +74,155 @@ it('mounts the existing Manager and an actual registered plugin page without a n
     )
     dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }))
     expect(root.querySelector('[data-settings-navigation-demo-content="mounted"]')).not.toBeNull()
-    await runtime.dispose()
+    const lifecycle = createManagerRendererLifecycleClient({
+      runtime: runtime as never,
+      scope: { profileId: 'playground', generation: 'standalone-manager-test', rendererId: 'a'.repeat(64) },
+    })
+    const active = runtime.activePluginGeneration()
+    expect(
+      await lifecycle.handle({
+        id: 'b'.repeat(64),
+        sequence: 1,
+        method: 'synchronize',
+        payload: { active, registryEpoch: 0 },
+      }),
+    ).toMatchObject({ ok: true, value: { active, registryEpoch: 0 } })
+    await lifecycle.close()
     expect(doc.querySelector('[data-manager-surface="standalone"]')).toBeNull()
     expect(doc.getElementById('cordisx-react-manager-style')).toBeNull()
   } finally {
+    dom.window.close()
+  }
+}, 30_000)
+
+it('applies a fixture-projected install through the real standalone renderer lifecycle', async () => {
+  const generation = 'owner-test'
+  const active = {
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1 as const,
+    recordKind: 'active' as const,
+    profileId: 'work',
+    revision: 0,
+    lastGoodRevision: 0,
+    runtimeGeneration: generation,
+    plugins: [],
+  }
+  const config = {
+    version: 1 as const,
+    rootDir: path.resolve('.'),
+    codex: { debugPort: 9229 },
+    providers: [],
+    plugins: [],
+  }
+  const bundle = await buildRendererBundle(config, {
+    playground: true,
+    managerPresentationMode: 'standalone',
+    generation,
+    profileId: 'work',
+    pluginActivation: active,
+  })
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+    runScripts: 'dangerously',
+    url: 'http://127.0.0.1/',
+  })
+  let dispose!: () => Promise<void>
+  try {
+    Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+    Object.assign(dom.window, { TextEncoder, TextDecoder })
+    dom.window.eval(bundle)
+    await vi.waitFor(() => expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true'), {
+      timeout: 10_000,
+    })
+    const runtime = (dom.window as unknown as {
+      __cordisxRuntime: { snapshot(): { plugins: readonly { id: string; status: string }[] } }
+    }).__cordisxRuntime
+    const digest = `sha256:${'a'.repeat(64)}` as const
+    const manifest = {
+      $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+      schemaVersion: 1 as const,
+      id: 'renderer-demo',
+      version: '1.0.0',
+      entry: './index.ts',
+      compatibility: { runtimeAbi: 1 as const, protocol: 1 as const },
+      dependencies: [],
+      runtimeManifest: {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1 as const,
+        id: 'renderer-demo',
+        name: 'Renderer demo',
+        capabilities: [],
+      },
+    }
+    const candidate = {
+      ...active,
+      recordKind: 'candidate' as const,
+      transactionId: 'install-demo',
+      revision: 1,
+      plugins: [{
+        id: 'renderer-demo',
+        version: '1.0.0',
+        digest,
+        moduleGeneration: 'demo-1',
+        enabled: true,
+        dependencies: [],
+      }],
+    }
+    const mutation = {
+      transactionId: 'install-demo',
+      transactionEpoch: 'install-demo:epoch',
+      expectedRegistryEpoch: 0,
+      afterRegistryEpoch: 1,
+      operation: 'install' as const,
+      previous: active,
+      candidate,
+      targetId: 'renderer-demo',
+      affectedPluginIds: ['renderer-demo'],
+      package: { manifest, digest, identitySource: 'file:///verified/renderer-demo.js' },
+    }
+    const effects = { mounted: 0, disposed: 0 }
+    const module = {
+      apply(ctx: { effect(callback: () => () => void, label: string): void }) {
+        effects.mounted++
+        ctx.effect(() => () => {
+          effects.disposed++
+        }, 'fixture cleanup')
+      },
+    }
+    const loader = {
+      load: async () => ({ mutation, module, publish() {}, commit() {}, retire() {} }),
+      dispose() {},
+    }
+    const client = createManagerRendererLifecycleClient({
+      runtime: runtime as never,
+      scope: { profileId: 'work', generation, rendererId: 'a'.repeat(64) },
+      loader: loader as never,
+    })
+    dispose = client.close
+    const send = (sequence: number, method: string, payload: unknown) =>
+      client.handle({
+        id: sequence.toString(16).padStart(64, '0'),
+        sequence,
+        method,
+        payload,
+      })
+    expect(await send(1, 'synchronize', { active, registryEpoch: 0 })).toMatchObject({ ok: true })
+    expect(
+      await send(2, 'prepare', {
+        transactionId: 'install-demo',
+        transactionEpoch: 'install-demo:epoch',
+        expectedRegistryEpoch: 0,
+      }),
+    ).toMatchObject({ ok: true })
+    expect(await send(3, 'stage', { rendererId: 'a'.repeat(64), ...mutation })).toMatchObject({ ok: true })
+    expect(await send(4, 'publish', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
+    expect(await send(5, 'complete', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
+    expect(await send(6, 'finalize', { transactionId: 'install-demo' })).toMatchObject({ ok: true })
+    expect(runtime.snapshot().plugins.find(plugin => plugin.id === 'renderer-demo')).toMatchObject({ status: 'active' })
+    expect(effects).toEqual({ mounted: 1, disposed: 0 })
+    await dispose()
+    expect(effects).toEqual({ mounted: 1, disposed: 1 })
+  } finally {
+    await dispose?.()
     dom.window.close()
   }
 }, 30_000)
