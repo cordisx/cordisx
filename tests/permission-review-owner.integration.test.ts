@@ -166,7 +166,7 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
         body: JSON.stringify({}),
       })).json()
     expect(await post('/api/renderer/open')).toMatchObject({ status: 'ok' })
-    const supportsPolicyFence = process.platform === 'darwin' || process.platform === 'linux'
+    const supportsProfileFence = process.platform === 'darwin' || process.platform === 'linux'
     const policy = createPermissionPolicyRecord({
       profileId: profile,
       identity: { source: 'https://example.test/unrelated', id: 'unrelated' },
@@ -175,13 +175,17 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
       policy: 'deny',
     })
     const configPath = path.join(cordisxHome, 'config.json')
-    if (supportsPolicyFence) {
+    if (supportsProfileFence) {
       expect(await post('/api/renderer/bootstrap')).toMatchObject({ status: 'ok' })
       // The owner runs in another process; its renderer fence must stop the
       // normal Home writer rather than merely compare a cached snapshot.
       await expect(persistPermissionPolicies({ configPath }, [policy])).rejects.toThrow(
         'permission policy is in use',
       )
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), configPath)).rejects.toThrow('plugin configuration is in use')
     }
     expect(await request(operation)).toEqual({
       status: 'unavailable',
@@ -189,9 +193,15 @@ it('applies scoped deferred reviews for V5 and V4 manifests through the real ser
     })
     expect((await request({ kind: 'query' }) as PluginManagementSnapshot).activationRevision).toBe(0)
     expect(await post('/api/renderer/close')).toEqual({ closed: true })
-    if (supportsPolicyFence) {
+    if (supportsProfileFence) {
       await vi.waitFor(async () => await persistPermissionPolicies({ configPath }, [policy]))
-      await updateHomeConfigAtomic(current => ({ ...current, permissions: [] }), configPath)
+      await vi.waitFor(async () =>
+        await updateHomeConfigAtomic(current => ({
+          ...current,
+          plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+        }), configPath)
+      )
+      await updateHomeConfigAtomic(current => ({ ...current, permissions: [], plugins: [] }), configPath)
     }
 
     const applied = await Promise.all([request(operation), request(operation)])

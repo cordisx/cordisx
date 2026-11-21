@@ -18,6 +18,7 @@ import { createManagerRendererGatewayAuthenticator } from './manager-renderer-ga
 import { createManagerRendererManagementChannel } from './manager-renderer-management.js'
 import { dispatchManagerRendererOperation } from './manager-renderer-rpc.js'
 import { type ManagerRendererChannel, ManagerRendererSessions } from './manager-renderer-sessions.js'
+import type { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import type { ServiceRendererParticipants } from './service-renderer-participant.js'
 import type { ServiceRendererLifecycle } from '../launcher/service-renderer-lifecycle.js'
 import { fenceManagerConsumers } from './manager-consumer-fence.js'
@@ -53,6 +54,9 @@ export async function openProductionPluginManagementComposition(input: {
   readonly rendererLifecycle?: ServiceRendererLifecycle
   /** Private owner/sidecar bootstrap; it must not be exposed as a browser binding. */
   readonly rendererBootstrap?: ManagerRendererChannel
+  /** Owner resource retirement must finish before a renderer revocation is acknowledged. */
+  readonly rendererRetirement?: (rendererId: string) => Promise<boolean>
+  readonly rendererWriteLifetimes?: ManagerRendererWriteLifetimes
   /** Owner-issued, per-renderer read-only managed-service UI bridge. */
   readonly rendererManagedServiceUI?: ManagerRendererChannel
   /** Optional owner-created read-only Channel bridge; never enabled implicitly. */
@@ -87,6 +91,8 @@ export async function openProductionPluginManagementComposition(input: {
       ownerAppId: input.appId,
       ownerGeneration: input.runtimeGeneration,
     }),
+    ...(input.rendererRetirement === undefined ? {} : { waitForRetirement: input.rendererRetirement }),
+    ...(input.rendererWriteLifetimes === undefined ? {} : { writeLifetimes: input.rendererWriteLifetimes }),
     channels: new Map([
       ['plugin-management', createManagerRendererManagementChannel(service)],
       ...(input.rendererBootstrap === undefined

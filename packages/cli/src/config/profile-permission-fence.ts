@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persistence.js'
 import { acquireKernelOperationLock, KernelOperationBusyError } from '../launcher/kernel-operation-lock.js'
+import { SharedProfileFence } from './shared-profile-fence.js'
 
 /** A live renderer holds the same profile fence used by Home policy writers. */
 export class ProfilePermissionFenceBusyError extends Error {
@@ -67,62 +68,8 @@ export async function fenceChangedPermissionProfiles(
   return releaseAll
 }
 
-/** Share one owner-held kernel fence among that owner's live renderer sessions. */
-export class SharedProfilePermissionFence {
-  private queue: Promise<void> = Promise.resolve()
-  private readonly leases = new Set<symbol>()
-  private unlock: (() => Promise<void>) | undefined
-  private closed = false
-  private closing: Promise<void> | undefined
-
-  constructor(private readonly configPath: string, private readonly profileId: string) {}
-
-  private enqueue<T>(action: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(action)
-    this.queue = next.then(() => undefined, () => undefined)
-    return next
-  }
-
-  async acquire(): Promise<() => Promise<void>> {
-    const lease = Symbol('profile-permission-reader')
-    await this.enqueue(async () => {
-      if (this.closed) throw new Error('permission fence is closed')
-      if (!this.unlock) {
-        const release = await acquire(this.configPath, this.profileId)
-        if (this.closed) {
-          await release()
-          throw new Error('permission fence is closed')
-        }
-        this.unlock = release
-      }
-      this.leases.add(lease)
-    })
-    if (this.closed) {
-      await this.closing
-      throw new Error('permission fence is closed')
-    }
-    let ended = false
-    return async () => {
-      if (ended) return
-      ended = true
-      await this.enqueue(async () => {
-        if (!this.leases.delete(lease) || this.leases.size !== 0) return
-        const release = this.unlock
-        this.unlock = undefined
-        await release?.()
-      })
-    }
-  }
-
-  close(): Promise<void> {
-    if (this.closing) return this.closing
-    this.closed = true
-    this.closing = this.enqueue(async () => {
-      this.leases.clear()
-      const release = this.unlock
-      this.unlock = undefined
-      await release?.()
-    })
-    return this.closing
+export class SharedProfilePermissionFence extends SharedProfileFence {
+  constructor(configPath: string, profileId: string) {
+    super(async () => await acquire(configPath, profileId), 'permission fence is closed')
   }
 }

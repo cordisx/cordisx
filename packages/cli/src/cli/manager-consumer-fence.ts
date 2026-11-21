@@ -27,6 +27,10 @@ export async function fenceManagerConsumers(input: {
   }
   try {
     const consumers = await input.participants.quiesceManagers()
+    if (!await input.sessions.waitForRetirements(input.timeoutMs)) {
+      consumers.fence()
+      throw new Error('manager-consumer-fence-unavailable')
+    }
     let ended = false
     const current = () => !ended && writes.isCurrent() && consumers.isCurrent() && (lifecycle?.isCurrent() ?? true)
     return {

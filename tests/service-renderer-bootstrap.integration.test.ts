@@ -16,7 +16,7 @@ import { decodeManagerRendererBundle } from '../packages/cli/src/cli/manager-ren
 import { ManagerRendererSessions } from '../packages/cli/src/cli/manager-renderer-sessions.js'
 import { createProductionManagedServiceLifecycle } from '../packages/cli/src/cli/production-managed-services.js'
 import { createManagerManagedServiceUIBridge } from '../packages/cli/src/cli/manager-managed-service-ui.js'
-import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
+import { createDefaultHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createManagerRendererLifecycleClient } from '../packages/cli/src/independent-manager/lifecycle-client.js'
 import { PluginActivationStore } from '../packages/cli/src/launcher/plugin-activation.js'
@@ -44,7 +44,12 @@ function defer<T>() {
 }
 
 async function fixture(
-  options: { delayLease?: boolean; managedBackend?: boolean; protectPermissionWrites?: boolean } = {},
+  options: {
+    delayLease?: boolean
+    managedBackend?: boolean
+    protectProfileInputs?: boolean
+    writeDispatch?: () => Promise<unknown>
+  } = {},
 ) {
   const root = await mkdtemp('/tmp/cx-service-bootstrap-')
   const homeDir = path.join(root, 'home')
@@ -140,7 +145,7 @@ async function fixture(
     participants,
     store,
     managedServiceUI: managedUI,
-    protectPermissionWrites: options.protectPermissionWrites === true,
+    protectProfileInputs: options.protectProfileInputs === true,
   })
   const gateway = { pid: process.pid, processStartedAt: 'fixture', instanceToken: secret() }
   const sessions = new ManagerRendererSessions({
@@ -148,10 +153,20 @@ async function fixture(
     ownerGeneration: generation,
     ownerCurrent: () => true,
     authenticateGateway: async value => value.instanceToken === gateway.instanceToken,
+    writeLifetimes: bootstrap.writeLifetimes,
+    ...(options.protectProfileInputs
+      ? { waitForRetirement: async (rendererId: string) => await bootstrap.waitForRetirement(rendererId) }
+      : {}),
     participant: participants.participant,
     channels: new Map([
       ['manager-bootstrap', bootstrap.channel()],
       ['managed-service-ui', managedUI.channel],
+      ...(options.writeDispatch === undefined ? [] : [
+        [
+          'fixture-write',
+          { prepare: () => ({ mode: 'write' as const, dispatch: options.writeDispatch! }) },
+        ] as const,
+      ]),
     ]),
   })
   const browserSessionId = secret()
@@ -218,7 +233,7 @@ async function fixture(
 it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
   'holds one profile permission fence until both Manager bootstraps retire',
   async () => {
-    const f = await fixture({ protectPermissionWrites: true })
+    const f = await fixture({ protectProfileInputs: true })
     const secondId = secret()
     const secondHandle = (await f.sessions.open(f.gateway, secondId))!
     const second = { gateway: f.gateway, browserSessionId: secondId, handle: secondHandle }
@@ -237,12 +252,20 @@ it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
       await expect(persistPermissionPolicies({ configPath: f.configPath }, [policy])).rejects.toThrow(
         'permission policy is in use',
       )
+      const addPlugin = async () =>
+        await updateHomeConfigAtomic(current => ({
+          ...current,
+          plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+        }), f.configPath)
+      await expect(addPlugin()).rejects.toThrow('plugin configuration is in use')
       expect(await f.sessions.close(f.invocation)).toBe(true)
       await expect(persistPermissionPolicies({ configPath: f.configPath }, [policy])).rejects.toThrow(
         'permission policy is in use',
       )
+      await expect(addPlugin()).rejects.toThrow('plugin configuration is in use')
       expect(await f.sessions.close(second)).toBe(true)
       await vi.waitFor(async () => await persistPermissionPolicies({ configPath: f.configPath }, [policy]))
+      await vi.waitFor(addPlugin)
     } finally {
       await f.close()
     }
@@ -615,6 +638,73 @@ it('retires a late graph lease when the session is revoked during prepare', asyn
     await f.close()
   }
 }, 30_000)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'waits for a late bootstrap and profile locks before acknowledging renderer retirement',
+  async () => {
+    const f = await fixture({ delayLease: true, protectProfileInputs: true })
+    try {
+      expect(await f.install('late-protected-lease')).toMatchObject({ outcome: 'applied' })
+      const pending = f.call({ action: 'prepare' })
+      const lease = await f.leaseReady.promise
+      const closing = f.sessions.close(f.invocation)
+      await vi.waitFor(() => expect(f.sessions.hasLiveRenderers()).toBe(true))
+      expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+      await expect(updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), f.configPath)).rejects.toThrow('plugin configuration is in use')
+      f.releaseLease.resolve()
+      expect(await pending).toEqual({ status: 'unavailable' })
+      expect(await closing).toBe(true)
+      expect((await fetch(lease.entryUrl)).status).toBe(404)
+      expect(await f.sessions.open(f.gateway, secret())).toBeDefined()
+    } finally {
+      f.releaseLease.resolve()
+      await f.close()
+    }
+  },
+  30_000,
+)
+
+it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')(
+  'retains profile locks until a disconnected renderer write has finished',
+  async () => {
+    const started = defer<void>()
+    const finish = defer<void>()
+    const f = await fixture({
+      protectProfileInputs: true,
+      writeDispatch: async () => {
+        started.resolve()
+        await finish.promise
+        return 'possibly committed'
+      },
+    })
+    const addPlugin = async () =>
+      await updateHomeConfigAtomic(current => ({
+        ...current,
+        plugins: [{ id: 'fixture-config', entry: '/fixture/plugin.js' }],
+      }), f.configPath)
+    try {
+      expect(await f.call({ action: 'prepare' })).toMatchObject({ status: 'ok' })
+      const write = f.sessions.call(f.invocation, 'fixture-write', {})
+      await started.promise
+      const closing = f.sessions.close(f.invocation)
+      await new Promise<void>(resolve => setImmediate(resolve))
+      await expect(addPlugin()).rejects.toThrow('plugin configuration is in use')
+      expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+      finish.resolve()
+      expect(await write).toEqual({ status: 'unknown' })
+      expect(await closing).toBe(false)
+      await addPlugin()
+      expect(await f.sessions.open(f.gateway, secret())).toBeUndefined()
+    } finally {
+      finish.resolve()
+      await f.close()
+    }
+  },
+  30_000,
+)
 
 it('uses the owner projector for a real staged package after an authenticated renderer is admitted', async () => {
   const f = await fixture()

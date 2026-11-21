@@ -235,15 +235,15 @@ it.each(['read', 'write'] as const)('fences an in-flight %s when the browser ses
     })
     const pending = authority.call(invocation, 'fixture-only', 'allowed fixture')
     const signal = await started.promise
-    expect(await authority.close(invocation)).toBe(true)
+    const closing = authority.close(invocation)
     expect(signal.aborted).toBe(true)
     finish.resolve('private fixture data')
     expect(await pending).toEqual({ status: mode === 'write' ? 'unknown' : 'unavailable' })
+    expect(await closing).toBe(mode === 'read')
     expect(await authority.call(invocation, 'fixture-only', 'allowed fixture')).toEqual({ status: 'unavailable' })
-    expect(await authority.call(other, 'fixture-only', 'other browser')).toEqual({
-      status: 'ok',
-      value: 'still active',
-    })
+    expect(await authority.call(other, 'fixture-only', 'other browser')).toEqual(
+      mode === 'write' ? { status: 'unavailable' } : { status: 'ok', value: 'still active' },
+    )
   } finally {
     finish.resolve('cleanup')
     authority.dispose()

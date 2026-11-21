@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ManagerRendererGatewayProof } from './manager-renderer-gateway.js'
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
+import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 
 /** Private to the owner RPC and sidecar memory. Never serialize to the browser. */
 export interface ManagerRendererHandle {
@@ -52,6 +53,7 @@ interface Session {
   peer?: ManagerRendererCommandPeer
   admission?: Promise<boolean>
   admitted?: boolean
+  retirement?: Promise<boolean>
   inFlight: number
 }
 
@@ -72,13 +74,21 @@ function gatewayMatches(left: ManagerRendererGatewayProof, right: ManagerRendere
 export class ManagerRendererSessions {
   private readonly sessions = new Map<string, Session>()
   private readonly usedBrowserSessions = new Set<string>()
+  private readonly retiredSessions = new Map<
+    string,
+    { gateway: ManagerRendererGatewayProof; result: Promise<boolean> }
+  >()
+  private readonly pendingRetirements = new Set<Promise<boolean>>()
+  private readonly retirementWaiters = new Set<() => void>()
   private readonly channels: ReadonlyMap<string, ManagerRendererChannel>
+  private readonly writeLifetimes: ManagerRendererWriteLifetimes
   private disposed = false
   private monitor: ReturnType<typeof setInterval> | undefined
   private monitoring = false
   private mutationFence: symbol | undefined
   private mutationsFenced = false
   private mutationUncertain = false
+  private retirementUncertain = false
   private writesInFlight = 0
   private readonly writeWaiters = new Set<() => void>()
   private readonly writeContext = new AsyncLocalStorage<symbol>()
@@ -89,6 +99,10 @@ export class ManagerRendererSessions {
       readonly ownerGeneration: string
       readonly ownerCurrent: () => boolean
       readonly authenticateGateway: (proof: ManagerRendererGatewayProof) => Promise<boolean>
+      /** Wait for owner resources and profile fences belonging to this exact renderer. */
+      readonly waitForRetirement?: (rendererId: string) => Promise<boolean>
+      /** Shared with owner resources so their locks outlive a dispatched write. */
+      readonly writeLifetimes?: ManagerRendererWriteLifetimes
       readonly channels?: ReadonlyMap<string, ManagerRendererChannel>
       /** The owner alone may enable a lifecycle participant and its admission. */
       readonly participant?: {
@@ -106,6 +120,7 @@ export class ManagerRendererSessions {
   ) {
     // Copy the allowlist: a later mutation cannot silently add authority.
     this.channels = new Map(input.channels)
+    this.writeLifetimes = input.writeLifetimes ?? new ManagerRendererWriteLifetimes()
   }
 
   private alive(): boolean {
@@ -127,24 +142,57 @@ export class ManagerRendererSessions {
 
   /** Owner-only check before a sidecar action can discard a renderer's drafts. */
   hasLiveRenderers(): boolean {
-    return [...this.sessions.values()].some(session => this.current(session))
+    return this.pendingRetirements.size > 0 || this.retirementUncertain
+      || [...this.sessions.values()].some(session => this.current(session))
   }
 
   mutationAvailability(): 'available' | 'busy' | 'unavailable' {
-    if (!this.alive() || this.mutationsFenced || this.mutationUncertain) return 'unavailable'
+    if (!this.alive() || this.mutationsFenced || this.mutationUncertain || this.retirementUncertain) {
+      return 'unavailable'
+    }
+    if (this.pendingRetirements.size > 0) return 'busy'
     return this.mutationFence === undefined ? 'available' : 'busy'
   }
 
-  private retire(session: Session): void {
-    if (this.sessions.get(session.handle.rendererId) !== session) return
+  private retire(session: Session): Promise<boolean> {
+    if (session.retirement) return session.retirement
+    if (this.sessions.get(session.handle.rendererId) !== session) return Promise.resolve(true)
     this.sessions.delete(session.handle.rendererId)
     clearTimeout(session.timer)
     session.controller.abort()
-    session.peer?.close()
+    let finish!: (result: boolean) => void
+    const retirement = new Promise<boolean>(resolve => {
+      finish = resolve
+    })
+    session.retirement = retirement
+    this.pendingRetirements.add(retirement)
+    this.retiredSessions.set(session.browserSessionId, { gateway: session.gateway, result: retirement })
+    const writes = this.writeLifetimes.retire(session.handle.rendererId)
+    try {
+      session.peer?.close()
+      const resources = Promise.resolve().then(async () =>
+        this.input.waitForRetirement ? await this.input.waitForRetirement(session.handle.rendererId) : true
+      )
+      void Promise.all([writes, resources]).then(
+        ([settled, released]) => finish(settled && released),
+        () => finish(false),
+      )
+    } catch {
+      finish(false)
+    }
+    void retirement.then(result => {
+      this.pendingRetirements.delete(retirement)
+      if (!result) {
+        this.retirementUncertain = true
+        this.fenceMutations()
+      }
+      for (const notify of this.retirementWaiters) notify()
+    })
     if (this.sessions.size === 0 && this.monitor !== undefined) {
       clearInterval(this.monitor)
       this.monitor = undefined
     }
+    return session.retirement
   }
 
   private retireGateway(gateway: ManagerRendererGatewayProof): void {
@@ -194,7 +242,8 @@ export class ManagerRendererSessions {
     if (
       this.usedBrowserSessions.has(browserSessionId) || this.usedBrowserSessions.size >= 4096
       || this.sessions.size >= (this.input.maxSessions ?? 16)
-      || this.mutationsFenced || this.mutationFence !== undefined
+      || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined || this.retirementUncertain
+      || this.pendingRetirements.size > 0
     ) return undefined
     const handle: ManagerRendererHandle = {
       rendererId: randomBytes(32).toString('hex'),
@@ -342,8 +391,10 @@ export class ManagerRendererSessions {
     session.inFlight++
     let dispatched: 'read' | 'write' | undefined
     let trackedWrite = false
+    let finishWrite: (() => void) | undefined
     const unknown = (): ManagerRendererCallResult => {
       this.mutationUncertain = true
+      this.fenceMutations()
       return { status: 'unknown' }
     }
     try {
@@ -363,7 +414,12 @@ export class ManagerRendererSessions {
       })
       if (prepared.mode !== 'read' && prepared.mode !== 'write') return unavailable
       if (prepared.mode === 'write') {
-        if (this.mutationsFenced || this.mutationFence !== undefined) return unavailable
+        if (
+          this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
+          || this.retirementUncertain || this.pendingRetirements.size > 0
+        ) return unavailable
+        finishWrite = this.writeLifetimes.begin(session.handle.rendererId)
+        if (!finishWrite) return unavailable
         this.writesInFlight++
         trackedWrite = true
       }
@@ -385,6 +441,7 @@ export class ManagerRendererSessions {
       if (trackedWrite) {
         this.writesInFlight--
         if (this.writesInFlight === 0) { for (const notify of this.writeWaiters) notify() }
+        finishWrite?.()
       }
       session.inFlight--
     }
@@ -397,6 +454,7 @@ export class ManagerRendererSessions {
   async suspendMutations(timeoutMs = 15_000): Promise<{ isCurrent(): boolean; release(): boolean; fence(): void }> {
     if (
       !this.alive() || this.mutationsFenced || this.mutationUncertain || this.mutationFence !== undefined
+      || this.retirementUncertain || this.pendingRetirements.size > 0
       || this.writeContext.getStore() !== undefined
       || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000
     ) throw new Error('renderer-mutation-fence-unavailable')
@@ -412,7 +470,7 @@ export class ManagerRendererSessions {
     let ended = false
     const current = () =>
       !ended && this.alive() && !this.mutationsFenced && !this.mutationUncertain && this.mutationFence === reservation
-      && this.writesInFlight === 0
+      && !this.retirementUncertain && this.pendingRetirements.size === 0 && this.writesInFlight === 0
     return {
       isCurrent: current,
       release: () => {
@@ -452,6 +510,29 @@ export class ManagerRendererSessions {
     })
   }
 
+  /** Wait for all peer-specific resource and profile-fence release receipts. */
+  async waitForRetirements(timeoutMs = 15_000): Promise<boolean> {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) return false
+    if (this.disposed || this.retirementUncertain) return false
+    if (this.pendingRetirements.size === 0) return true
+    return await new Promise(resolve => {
+      const finish = (value: boolean) => {
+        clearTimeout(timer)
+        this.retirementWaiters.delete(check)
+        resolve(value)
+      }
+      const check = () => {
+        if (this.disposed || this.retirementUncertain || this.pendingRetirements.size === 0) {
+          finish(!this.disposed && !this.retirementUncertain && this.pendingRetirements.size === 0)
+        }
+      }
+      const timer = setTimeout(() => finish(false), timeoutMs)
+      timer.unref()
+      this.retirementWaiters.add(check)
+      check()
+    })
+  }
+
   private fenceMutations(): void {
     this.mutationsFenced = true
     for (const session of this.sessions.values()) this.retire(session)
@@ -462,8 +543,8 @@ export class ManagerRendererSessions {
     if (!session) return false
     // Retire before the asynchronous gateway check so in-flight work is fenced
     // immediately; an invalid caller cannot pass lookup without the private grant.
-    this.retire(session)
-    return await this.authenticated(session.gateway)
+    const retired = this.retire(session)
+    return await this.authenticated(session.gateway) && await retired
   }
 
   /** Retire a browser session even when its open request is still in flight. */
@@ -481,12 +562,15 @@ export class ManagerRendererSessions {
         this.retire(session)
       }
     }
-    return true
+    const retired = this.retiredSessions.get(browserSessionId)
+    if (!retired) return true
+    return gatewayMatches(gateway, retired.gateway) && await retired.result
   }
 
   dispose(): void {
     this.disposed = true
     for (const session of this.sessions.values()) this.retire(session)
     for (const notify of this.writeWaiters) notify()
+    for (const notify of this.retirementWaiters) notify()
   }
 }

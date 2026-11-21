@@ -77,9 +77,10 @@ it('permits mutations only for an admitted renderer and fences a lost write', as
       }),
     )
     await vi.waitFor(() => expect(service.execute).toHaveBeenCalledOnce())
-    expect(await authority.close(invocation)).toBe(true)
+    const closing = authority.close(invocation)
     finish({ status: 'applied' })
     expect(await write).toEqual({ status: 'unknown' })
+    expect(await closing).toBe(false)
     expect(service.execute).toHaveBeenCalledOnce()
   } finally {
     authority.dispose()

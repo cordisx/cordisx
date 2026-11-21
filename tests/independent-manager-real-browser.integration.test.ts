@@ -48,7 +48,7 @@ it.skipIf(chrome === undefined)(
       CORDISX_HOME: homeDir,
       CORDISX_MODEL_API_PORT: '0',
     })
-    await mkdir(homeDir)
+    await mkdir(homeDir, { mode: 0o700 })
     await writeFile(path.join(homeDir, 'config.json'), JSON.stringify(createDefaultHomeConfig()), { mode: 0o600 })
     let cli: string | undefined
     let browser: ChildProcess | undefined
@@ -58,30 +58,36 @@ it.skipIf(chrome === undefined)(
     const run = async (...args: string[]) =>
       await exec(process.execPath, [cli!, ...args], { env, cwd: root, timeout: 30_000 })
     try {
-      const packed = await exec('npm', [
-        'pack',
-        '--workspace',
-        'cordisx',
-        '--ignore-scripts',
-        '--json',
-        '--pack-destination',
-        root,
-        '--cache',
-        path.join(root, 'npm-cache'),
-      ], { env, cwd: process.cwd(), timeout: 30_000 })
-      const name = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename
-      expect(name).toBe(path.basename(name))
-      await exec('tar', ['-xzf', path.join(root, name), '-C', root], { env, timeout: 30_000 })
-      await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), 'dir')
-      const modules = path.join(root, 'package', 'node_modules')
-      await mkdir(modules, { recursive: true })
-      for (const name of ['@vitejs', 'vite']) {
-        await symlink(
-          path.resolve('packages/cli/node_modules', name),
-          path.join(modules, name),
-          'dir',
-        )
+      const fixturePackage = process.env.CORDISX_MANAGER_PACKAGE_FIXTURE
+      if (fixturePackage !== undefined) {
+        if (!path.isAbsolute(fixturePackage)) throw new Error('fixture package must be an absolute path')
+        await symlink(fixturePackage, path.join(root, 'package'), 'dir')
+      } else {
+        const packed = await exec('npm', [
+          'pack',
+          '--workspace',
+          'cordisx',
+          '--ignore-scripts',
+          '--json',
+          '--pack-destination',
+          root,
+          '--cache',
+          path.join(root, 'npm-cache'),
+        ], { env, cwd: process.cwd(), timeout: 30_000 })
+        const name = (JSON.parse(packed.stdout) as Array<{ filename: string }>)[0]!.filename
+        expect(name).toBe(path.basename(name))
+        await exec('tar', ['-xzf', path.join(root, name), '-C', root], { env, timeout: 30_000 })
+        const modules = path.join(root, 'package', 'node_modules')
+        await mkdir(modules, { recursive: true })
+        for (const name of ['@vitejs', 'vite']) {
+          await symlink(
+            path.resolve('packages/cli/node_modules', name),
+            path.join(modules, name),
+            'dir',
+          )
+        }
       }
+      await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), 'dir')
       cli = path.join(root, 'package', 'dist', 'src', 'cli.js')
       expect(JSON.parse((await run('start', '--mode', 'service', 'codex', 'default', '--json')).stdout))
         .toMatchObject({ status: 'ready', mode: 'service' })

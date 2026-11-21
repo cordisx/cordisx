@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { loadHomeConfig } from '../config/home-config.js'
 import { SharedProfilePermissionFence } from '../config/profile-permission-fence.js'
+import { SharedProfilePluginConfigFence } from '../config/profile-plugin-config-fence.js'
 import { buildRendererBundle } from '../launcher/bundle.js'
 import { type CordisXConfig, type CordisXConfigPlugin, loadConfig } from '../launcher/config.js'
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
@@ -18,6 +19,7 @@ import type { createManagerManagedServiceUIBridge } from './manager-managed-serv
 import type { ManagerRendererCommandPeer } from './manager-renderer-peer.js'
 import { encodeManagerRendererBundle, MANAGER_BUNDLE_RPC_LIMIT } from './manager-renderer-bundle-codec.js'
 import { ServiceRendererParticipants } from './service-renderer-participant.js'
+import { ManagerRendererWriteLifetimes } from './manager-renderer-write-lifetimes.js'
 import { loadServiceRendererInitialPackage, serviceRendererPrivateGraph } from './service-renderer-projection.js'
 
 type Snapshot = ReturnType<OwnerRendererLifecycle['snapshot']>
@@ -33,6 +35,9 @@ type Entry = {
   managedOwners?: ReadonlyMap<string, string>
   managedContext?: ManagerRendererChannelContext
   releasePermissionFence?: () => Promise<void>
+  releasePluginConfigFence?: () => Promise<void>
+  retirement?: Promise<boolean>
+  cleanupFailed?: boolean
   preparing?: Promise<unknown>
   completing?: Promise<unknown>
 }
@@ -48,9 +53,12 @@ function emptyConfig(value: unknown): boolean {
  * addresses are ever intended for the browser.
  */
 export class ServiceRendererBootstrap {
+  readonly writeLifetimes = new ManagerRendererWriteLifetimes()
   private readonly entries = new Map<string, Entry>()
+  private readonly retirements = new Map<string, Promise<boolean>>()
   private readonly unsubscribeFinalization: () => void
   private readonly permissionFence: SharedProfilePermissionFence | undefined
+  private readonly pluginConfigFence: SharedProfilePluginConfigFence | undefined
   private closed = false
 
   constructor(
@@ -64,12 +72,15 @@ export class ServiceRendererBootstrap {
       readonly participants: ServiceRendererParticipants
       readonly store: PluginActivationStore
       readonly managedServiceUI?: ReturnType<typeof createManagerManagedServiceUIBridge>
-      /** Service owner only: fence cooperative Home policy writers while a renderer is admitted. */
-      readonly protectPermissionWrites?: boolean
+      /** Service owner only: fence cooperative Home policy and configured-plugin writers. */
+      readonly protectProfileInputs?: boolean
     },
   ) {
-    this.permissionFence = input.protectPermissionWrites
+    this.permissionFence = input.protectProfileInputs
       ? new SharedProfilePermissionFence(input.configPath, input.profileId)
+      : undefined
+    this.pluginConfigFence = input.protectProfileInputs
+      ? new SharedProfilePluginConfigFence(input.configPath, input.profileId)
       : undefined
     this.unsubscribeFinalization = input.lifecycle.onActivationFinalized(active => {
       for (const entry of this.entries.values()) {
@@ -137,16 +148,46 @@ export class ServiceRendererBootstrap {
     // Drain this entry even if it has already been removed from the map.
     if (this.entries.get(rendererId) === entry) this.entries.delete(rendererId)
     entry.unsubscribe()
-    const releasePermissionFence = entry.releasePermissionFence
-    delete entry.releasePermissionFence
-    void releasePermissionFence?.().catch(() => entry.peer.close())
-    if (entry.managedContext) this.input.managedServiceUI?.retire(entry.managedContext)
-    for (const lease of entry.leases) lease.retire()
+    const hasWrite = this.writeLifetimes.hasActive(rendererId)
+    const writes = this.writeLifetimes.retire(rendererId)
+    if (hasWrite) entry.peer.close()
+    if (!entry.retirement) {
+      entry.retirement = (async () => {
+        // A disconnected renderer may still be finishing bootstrap and may
+        // acquire a late lease. Do not confirm retirement until that work and
+        // both profile locks have actually completed.
+        await Promise.allSettled([entry.preparing, entry.completing].filter(value => value !== undefined))
+        const writesSettled = await writes
+        const releases = [entry.releasePermissionFence, entry.releasePluginConfigFence]
+        delete entry.releasePermissionFence
+        delete entry.releasePluginConfigFence
+        const results = await Promise.allSettled(releases.map(async release => await release?.()))
+        return writesSettled && !entry.cleanupFailed && results.every(result => result.status === 'fulfilled')
+      })().catch(() => false)
+      this.retirements.set(rendererId, entry.retirement)
+    }
+    try {
+      if (entry.managedContext) this.input.managedServiceUI?.retire(entry.managedContext)
+    } catch {
+      entry.cleanupFailed = true
+    }
+    for (const lease of entry.leases) {
+      try {
+        lease.retire()
+      } catch {
+        entry.cleanupFailed = true
+      }
+    }
     entry.leases.length = 0
   }
 
+  /** Owner RPC calls this after closing the exact peer, before acknowledging revocation. */
+  async waitForRetirement(rendererId: string): Promise<boolean> {
+    return await (this.retirements.get(rendererId) ?? Promise.resolve(true))
+  }
+
   async prepare(rendererId: string): Promise<unknown> {
-    if (this.closed) throw new Error('renderer-bootstrap-unavailable')
+    if (this.closed || this.retirements.has(rendererId)) throw new Error('renderer-bootstrap-unavailable')
     const existing = this.entries.get(rendererId)
     if (existing?.preparing) {
       const result = await existing.preparing
@@ -176,6 +217,14 @@ export class ServiceRendererBootstrap {
             throw new Error('renderer-bootstrap-stale')
           }
           entry.releasePermissionFence = release
+        }
+        if (this.pluginConfigFence) {
+          const release = await this.pluginConfigFence.acquire()
+          if (!this.current(rendererId, entry)) {
+            await release()
+            throw new Error('renderer-bootstrap-stale')
+          }
+          entry.releasePluginConfigFence = release
         }
         const snapshot = this.input.lifecycle.snapshot()
         const [config, plugins, policies] = await Promise.all([
@@ -412,6 +461,9 @@ export class ServiceRendererBootstrap {
       entry.peer.close()
       this.retire(rendererId, entry)
     }
-    void this.permissionFence?.close().catch(() => undefined)
+    void Promise.all(this.retirements.values()).then(async results => {
+      if (!results.every(Boolean)) return
+      await Promise.all([this.permissionFence?.close(), this.pluginConfigFence?.close()])
+    }).catch(() => undefined)
   }
 }
