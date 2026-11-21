@@ -1,9 +1,11 @@
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { startManagerRendererLifecyclePump } from '../packages/cli/src/independent-manager/lifecycle-pump.js'
 
 const command = { id: 'a'.repeat(64), sequence: 1, method: 'synchronize', payload: {} }
 const receipt = { id: command.id, sequence: 1, ok: true as const, value: { verified: true } }
 const response = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
+
+afterEach(() => vi.useRealTimers())
 
 function waitForAbort(signal: AbortSignal): Promise<Response> {
   return new Promise((_, reject) => {
@@ -74,6 +76,30 @@ it('closes without replay when an acknowledgement response is lost', async () =>
   })
   await pump.stopped
   expect(client.handle).toHaveBeenCalledOnce()
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')).toHaveLength(1)
+  expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(1)
+  expect(client.close).toHaveBeenCalledOnce()
+  expect(failed).toHaveBeenCalledOnce()
+})
+
+it('bounds a stalled acknowledgement and retires the session without replay', async () => {
+  vi.useFakeTimers()
+  const fetch = vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/renderer/admit') return Promise.resolve(response({ admitted: true }))
+    if (path === '/api/renderer/acknowledge') return waitForAbort(options.signal!)
+    return Promise.resolve(response({ command }))
+  })
+  const client = { closed: false, handle: vi.fn(async () => receipt), close: vi.fn(async () => {}) }
+  const failed = vi.fn()
+  const pump = startManagerRendererLifecyclePump({
+    window: { fetch } as never,
+    sessionToken: 'b'.repeat(64),
+    client,
+    onFailure: failed,
+  })
+  expect(await pump.admitted).toBe(true)
+  await vi.advanceTimersByTimeAsync(20_000)
+  await pump.stopped
   expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/acknowledge')).toHaveLength(1)
   expect(fetch.mock.calls.filter(call => call[0] === '/api/renderer/poll')).toHaveLength(1)
   expect(client.close).toHaveBeenCalledOnce()

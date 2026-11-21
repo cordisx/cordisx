@@ -44,24 +44,30 @@ export function startManagerRendererLifecyclePump(input: {
     body: unknown,
   ) => {
     if (closed) throw new Error('renderer-pump-closed')
-    const response = await input.window.fetch(path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
-      body: JSON.stringify(body),
-      cache: 'no-store',
-      credentials: 'omit',
-      redirect: 'error',
-      referrerPolicy: 'no-referrer',
-      signal: controller.signal,
-    })
-    if (!response.ok || closed) throw new Error('renderer-pump-unavailable')
-    const content = await response.text()
-    if (content.length > 1_048_576 || closed) throw new Error('renderer-pump-invalid')
-    const result: unknown = JSON.parse(content)
-    if (result === null || typeof result !== 'object' || Array.isArray(result)) {
-      throw new Error('renderer-pump-invalid')
+    const timeout = new AbortController()
+    const timer = setTimeout(() => timeout.abort(), path === '/api/renderer/poll' ? 25_000 : 20_000)
+    try {
+      const response = await input.window.fetch(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${input.sessionToken}` },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'error',
+        referrerPolicy: 'no-referrer',
+        signal: AbortSignal.any([controller.signal, timeout.signal]),
+      })
+      if (!response.ok || closed || timeout.signal.aborted) throw new Error('renderer-pump-unavailable')
+      const content = await response.text()
+      if (content.length > 1_048_576 || closed || timeout.signal.aborted) throw new Error('renderer-pump-invalid')
+      const result: unknown = JSON.parse(content)
+      if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+        throw new Error('renderer-pump-invalid')
+      }
+      return result as Record<string, unknown>
+    } finally {
+      clearTimeout(timer)
     }
-    return result as Record<string, unknown>
   }
 
   // The owner may need this poll to deliver synchronize before admission can

@@ -294,6 +294,7 @@ try {
       'dist/skills/cordisx-feedback/agents/openai.yaml',
       'dist/skills/cordisx-feedback/version.json',
       'dist/assets/manager/manager-shell.js',
+      'dist/assets/manager/manager-standalone.js',
       'dist/assets/manager/manager-host.css',
       'dist/assets/manager/manager-resource-worker.js',
       'dist/assets/illustrations/model-services.svg',
