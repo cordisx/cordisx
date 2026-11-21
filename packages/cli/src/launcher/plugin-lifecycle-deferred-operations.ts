@@ -9,8 +9,6 @@ import type {
   CordisXPermissionAuthorizationPlanV4,
 } from '../permission-contracts.js'
 import {
-  assertBundlePolicyDecision,
-  assertDeferredPermissionDecision,
   type DeferredPermissionDecision,
   type DeferredPermissionPlan,
   deferValidatedPermissionPlan,
@@ -29,6 +27,7 @@ import {
   resultBase,
   safeError,
   validateDecisionV4,
+  validateDecisionV7,
 } from './plugin-lifecycle-model.js'
 import { PluginLifecycleCoordinatorTransaction } from './plugin-lifecycle-transaction.js'
 import { PermissionReviewGate } from './permission-review-gate.js'
@@ -199,11 +198,9 @@ export abstract class PluginLifecycleCoordinatorDeferred extends PluginLifecycle
     const reviewedPlan = decision.schemaVersion === 7 && bundlePolicySelections !== undefined
       ? withBundlePolicyIntent(plan as DeferredPermissionPlan, new Set(Object.keys(bundlePolicySelections)))
       : plan
-    if (decision.schemaVersion === 7 && bundlePolicySelections !== undefined) {
-      assertBundlePolicyDecision(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
-    } else if (decision.schemaVersion === 7) {
+    if (decision.schemaVersion === 7) {
       if (plan.schemaVersion !== 7) throw new Error('permission plan version mismatch')
-      assertDeferredPermissionDecision(plan, decision)
+      validateDecisionV7(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
     } else {
       if (plan.schemaVersion !== 4) throw new Error('permission plan version mismatch')
       validateDecisionV4(plan, decision)

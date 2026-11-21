@@ -9,15 +9,11 @@ import {
   requestPluginManagementRpc,
 } from '../packages/cli/src/launcher/management-rpc.js'
 import type { PluginManagementResult, PluginManagementSnapshot } from '../packages/cli/src/management/contracts.js'
-import {
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-} from '../packages/cli/src/permission-contracts.js'
 import { localPackageV4, localPackageV5 } from './suites/plugin-lifecycle.fixtures.js'
 
 const run = promisify(execFile)
 
-it('applies explicit scoped V4 and V2 reviews through the real service owner and socket', async () => {
+it('applies scoped deferred reviews for V5 and V4 manifests through the real service owner and socket', async () => {
   const root = await mkdtemp('/tmp/cx-permission-review-owner-')
   const cordisxHome = path.join(root, 'cordisx')
   const cli = path.resolve('packages/cli/dist/src/cli.js')
@@ -58,20 +54,23 @@ it('applies explicit scoped V4 and V2 reviews through the real service owner and
     }
     const before = await reviewPlan(v4Package)
     const plan = before.permissionPlan
-    if (plan.schemaVersion !== 4) throw new Error('expected V4 permission plan')
+    if (plan.schemaVersion !== 7) throw new Error('expected deferred permission plan')
     expect(plan.identity.pluginId).toBe('permission-v5')
     const declarations = plan.declarations.filter(item => item.decisionRequired)
-    expect(declarations.map(item => [item.capability, item.required])).toEqual([
-      ['models.read', true],
-      ['ui.host-dom.read', false],
-    ])
+    expect(declarations.map(item => [item.capability, item.required])).toEqual([['models.read', true]])
+    expect(plan.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
+      required: false,
+      decisionRequired: false,
+      authorizationMode: 'deferred',
+    })
     for (const declaration of declarations) {
       expect(declaration.allowedDecisions).toContain('allow-once')
       expect(declaration.allowedDecisions).toContain('deny-once')
     }
     const decision = {
-      $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
-      schemaVersion: 4 as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json' as const,
+      schemaVersion: 7 as const,
       origin: 'explicit-user' as const,
       planId: plan.planId,
       operation: plan.operation,
@@ -160,20 +159,27 @@ it('applies explicit scoped V4 and V2 reviews through the real service owner and
 
     const next = await reviewPlan(v2Package)
     const v2 = next.permissionPlan
-    if (v2.schemaVersion !== 2) throw new Error('expected V2 permission plan')
+    if (v2.schemaVersion !== 7) throw new Error('expected deferred permission plan')
+    expect(v2.declarations.find(item => item.capability === 'tasks.control')).toMatchObject({
+      required: false,
+      decisionRequired: false,
+      authorizationMode: 'deferred',
+    })
     const v2Operation = {
       kind: 'permission-review-apply' as const,
       userConfirmed: true as const,
       expectedRevision: next.snapshot.activationRevision,
       decision: {
-        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
-        schemaVersion: 2 as const,
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-authorization-decision.v7.schema.json' as const,
+        schemaVersion: 7 as const,
+        origin: 'explicit-user' as const,
         planId: v2.planId,
         operation: v2.operation,
         profileId: v2.profileId,
         identity: v2.identity,
         binding: v2.binding,
-        decisions: v2.declarations.map(item => ({
+        decisions: v2.declarations.filter(item => item.decisionRequired).map(item => ({
           capability: item.capability,
           scope: item.scope,
           securityFingerprint: item.securityFingerprint,
@@ -184,7 +190,7 @@ it('applies explicit scoped V4 and V2 reviews through the real service owner and
     expect(
       await request({
         ...v2Operation,
-        decision: { ...v2Operation.decision, decisions: v2Operation.decision.decisions.slice(0, 1) },
+        decision: { ...v2Operation.decision, decisions: [] },
       }),
     ).toEqual({ status: 'rejected', reason: 'permission-denied' })
     expect(await request(v2Operation)).toMatchObject({

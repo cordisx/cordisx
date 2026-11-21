@@ -3,8 +3,6 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  assertBundlePolicyDecision,
-  assertDeferredPermissionDecision,
   type DeferredPermissionDecision,
   type DeferredPermissionPlan,
   withBundlePolicyIntent,
@@ -141,6 +139,7 @@ import {
   validateDecision,
   validateDecisionV2,
   validateDecisionV4,
+  validateDecisionV7,
   withGenerations,
 } from './plugin-lifecycle-model.js'
 
@@ -236,10 +235,8 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
     const reviewedPlan = decision.schemaVersion === 7 && bundlePolicySelections !== undefined
       ? withBundlePolicyIntent(plan as DeferredPermissionPlan, new Set(Object.keys(bundlePolicySelections)))
       : plan
-    if (decision.schemaVersion === 7 && bundlePolicySelections !== undefined) {
-      assertBundlePolicyDecision(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
-    } else if (decision.schemaVersion === 7) {
-      assertDeferredPermissionDecision(reviewedPlan as DeferredPermissionPlan, decision)
+    if (decision.schemaVersion === 7) {
+      validateDecisionV7(reviewedPlan as DeferredPermissionPlan, decision, bundlePolicySelections)
     } else if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
     else if (decision.schemaVersion === 2) validateDecisionV2(plan as CordisXPermissionAuthorizationPlanV2, decision)
     else validateDecision(plan as CordisXPermissionAuthorizationPlanV1, decision)

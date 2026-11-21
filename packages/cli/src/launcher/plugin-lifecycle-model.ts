@@ -1,7 +1,12 @@
 import type { PluginRuntimeManifestV16 } from '@cordisx/protocol/plugin-manifest/v16'
 import type { PluginRuntimeManifestV15 } from '@cordisx/protocol/plugin-manifest/v15'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
-import type { DeferredPermissionDecision, DeferredPermissionPlan } from '../permission-deferral.js'
+import {
+  assertBundlePolicyDecision,
+  assertDeferredPermissionDecision,
+  type DeferredPermissionDecision,
+  type DeferredPermissionPlan,
+} from '../permission-deferral.js'
 import {
   type CordisXPluginManifestV12,
   type CordisXPluginManifestV13,
@@ -543,6 +548,20 @@ export function validateDecisionV2(
       && item.decision.startsWith('deny')
     ))
   ) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+}
+
+/** The exact v7 review is checked before any activation can begin. */
+export function validateDecisionV7(
+  plan: DeferredPermissionPlan,
+  decision: DeferredPermissionDecision,
+  selections?: Readonly<Record<string, 'allow' | 'deny'>>,
+): void {
+  try {
+    if (selections === undefined) assertDeferredPermissionDecision(plan, decision)
+    else assertBundlePolicyDecision(plan, decision, selections)
+  } catch {
+    throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+  }
 }
 
 export function validateDecisionV4(
