@@ -8,6 +8,7 @@ import { HOST_FORM_REACT_STYLES } from './host-ui/HostForm.js'
 import { HOST_TDESIGN_REACT_STYLES } from './host-ui/tdesign-styles.js'
 import { HostThemeProjection } from './host-theme.js'
 import { HostIcon } from './host-ui/HostIcon.js'
+import { useStandaloneDraftWarning } from './host-ui/HostFormRevision.js'
 import { channelCredentialFailure } from './channel-credential-fields.js'
 import {
   channelConnectionFormFields,
@@ -31,6 +32,7 @@ export function ChannelConnectionForm(props: {
   readonly account: ChannelCredentialRef
   readonly initial: ChannelConnectionFormSnapshot
   readonly credentialsAvailable: boolean
+  readonly externalStyles?: boolean
   readonly locale: string
   readonly signal: AbortSignal
   readonly read: () => Promise<ChannelConnectionFormSnapshot>
@@ -57,8 +59,10 @@ export function ChannelConnectionForm(props: {
   const values = useRef({ ...baselineValues.current }), submitting = useRef(false)
   const container = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false), [dirty, setDirty] = useState(false), [reset, setReset] = useState(0)
+  const [reviewRequired, setReviewRequired] = useState(false)
   const [secretReset, setSecretReset] = useState(0)
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
+  useStandaloneDraftWarning(container, dirty)
   const updateDirty = () =>
     setDirty(
       values.current.tenantId !== baselineValues.current.tenantId
@@ -72,6 +76,11 @@ export function ChannelConnectionForm(props: {
     const modeEdited = retain && values.current.groupMode !== prior.groupMode
     const tenantEdited = retain && !props.account.tenantId && values.current.tenantId !== prior.tenantId
     const secret = retain && snapshot.credentialWritable ? values.current.secret : ''
+    if (
+      retain && (nameEdited || modeEdited || tenantEdited || values.current.secret.length > 0)
+      && snapshot.serviceRevision !== baseline.current.serviceRevision
+    ) setReviewRequired(true)
+    if (!retain) setReviewRequired(false)
     values.current = {
       ...next,
       secret,
@@ -112,7 +121,7 @@ export function ChannelConnectionForm(props: {
     }
   }, [props.signal])
   const save = async () => {
-    if (!dirty || submitting.current || props.signal.aborted) return
+    if (!dirty || reviewRequired || submitting.current || props.signal.aborted) return
     const invalid = validateChannelConnectionForm(values.current, zh)
     setErrors(invalid)
     if (invalid.size) return
@@ -139,6 +148,7 @@ export function ChannelConnectionForm(props: {
           if (!props.signal.aborted) adopt(snapshot, false)
         } catch { /* Applied remains a real receipt even if refresh is unavailable. */ }
       } else if (result.status === 'conflict') {
+        setReviewRequired(true)
         try {
           const snapshot = await props.read()
           if (!props.signal.aborted) adopt(snapshot, true)
@@ -155,8 +165,24 @@ export function ChannelConnectionForm(props: {
       if (!props.signal.aborted) setBusy(false)
     }
   }
-  const retryTenant = async () => {
+  const review = async () => {
     if (submitting.current || props.signal.aborted) return
+    submitting.current = true
+    setBusy(true)
+    try {
+      const snapshot = await props.read()
+      if (props.signal.aborted) return
+      adopt(snapshot, true)
+      setReviewRequired(false)
+    } catch {
+      if (!props.signal.aborted) props.onResult({ status: 'unavailable', code: 'CONNECTION_CONFIGURATION_FAILED' })
+    } finally {
+      submitting.current = false
+      if (!props.signal.aborted) setBusy(false)
+    }
+  }
+  const retryTenant = async () => {
+    if (reviewRequired || submitting.current || props.signal.aborted) return
     submitting.current = true
     setBusy(true)
     try {
@@ -198,7 +224,7 @@ export function ChannelConnectionForm(props: {
   return (
     <ConfigProvider notSet globalConfig={{ attach: () => container.current ?? document.body }}>
       <div ref={container} className="cxh-tdesign-root cxf-react-form" data-channel-connection-form="inline">
-        <style>{HOST_TDESIGN_REACT_STYLES + HOST_FORM_REACT_STYLES}</style>
+        {props.externalStyles ? null : <style>{HOST_TDESIGN_REACT_STYLES + HOST_FORM_REACT_STYLES}</style>}
         <form
           onSubmit={event => {
             event.preventDefault()
@@ -210,18 +236,32 @@ export function ChannelConnectionForm(props: {
               footer={
                 <div className="cxf-form-actions">
                   <span className="cxf-status">
-                    {!props.account.tenantId
+                    {reviewRequired
+                      ? (zh
+                        ? '配置已更新，草稿已保留。请核对最新配置后继续。'
+                        : 'Configuration changed. Your draft was kept; review the latest values before saving.')
+                      : !props.account.tenantId
                       ? (zh
                         ? '租户待识别；识别后连接才会启动。'
                         : 'Tenant identification is pending; the connection starts after identification.')
                       : ''}
                   </span>
                   <div className="cxf-form-action-buttons">
+                    {reviewRequired && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void review()}
+                      >
+                        {zh ? '使用最新版本' : 'Use latest version'}
+                      </Button>
+                    )}
                     {!props.account.tenantId && (
                       <Button
                         type="button"
                         variant="outline"
-                        disabled={busy || !baseline.current.writable}
+                        disabled={busy || reviewRequired || !baseline.current.writable}
                         onClick={() => void retryTenant()}
                       >
                         {zh ? '重试自动查询' : 'Retry automatic lookup'}
@@ -244,7 +284,7 @@ export function ChannelConnectionForm(props: {
                       theme="primary"
                       icon={<HostIcon token="action.save" />}
                       loading={busy}
-                      disabled={!dirty || busy || !baseline.current.writable}
+                      disabled={!dirty || busy || reviewRequired || !baseline.current.writable}
                     >
                       {!props.account.tenantId ? (zh ? '保存租户 ID' : 'Save tenant ID') : (zh ? '保存' : 'Save')}
                     </Button>

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CHANNEL_COMMIT = '44f4bc9302e7acf4b9e34ae04de26a6c9034ae7b'
+const CHANNEL_COMMIT = '6ec5c8bf2649f2092358ad5e8ebf39ccc9e83b2d'
 const CHANNEL_DEPENDENCY = `github:cordisx/plugin-channel#${CHANNEL_COMMIT}`
 
 export function enableInstalledChannel(config) {

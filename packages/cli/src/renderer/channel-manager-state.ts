@@ -20,6 +20,7 @@ import {
 export interface ChannelManagerState {
   projection: ChannelManagerProjectionV1
   readonly snapshotOnly: boolean
+  readonly configurationOnly: boolean
   readonly credentialRequest?: ChannelManagerServiceInput['credentialRequest']
   readonly broker?: PermissionBroker
   credentials?: ChannelCredentialWorkflow
@@ -46,6 +47,7 @@ export interface ChannelManagerState {
 interface OwnedServiceFacade {
   readonly owner: RegisteredServiceCapabilityOwner
   readonly lifetime: AbortSignal
+  readonly scope: 'standard' | 'snapshot' | 'configuration'
 }
 const projections = new WeakMap<object, ChannelManagerState>()
 const ownedFacades = new WeakMap<object, OwnedServiceFacade>()
@@ -58,8 +60,9 @@ export function registerChannelServiceFacade(
   service: object,
   owner: RegisteredServiceCapabilityOwner,
   lifetime: AbortSignal,
+  scope: OwnedServiceFacade['scope'],
 ): void {
-  ownedFacades.set(service, { owner, lifetime })
+  ownedFacades.set(service, { owner, lifetime, scope })
 }
 export function originalService(service: object): object {
   const seen = new Set<object>()

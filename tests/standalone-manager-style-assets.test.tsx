@@ -7,6 +7,7 @@ import { buildManagerStyles } from '../packages/cli/scripts/build-manager-styles
 import { installStandaloneManager } from '../packages/cli/src/renderer/manager/install-standalone.js'
 import { PERMISSION_AUTHORIZATION_STYLES } from '../packages/cli/src/renderer/permission-authorization-styles.js'
 import { SHARED_REACT_STYLES } from '../packages/cli/src/renderer/react-runtime.js'
+import { HOST_FORM_REACT_STYLES } from '../packages/cli/src/renderer/host-ui/HostForm.js'
 import { managerModel, reactManagerFixture } from './helpers/react-manager.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
@@ -45,6 +46,8 @@ it('builds the Host and model-service styles in their existing cascade order', a
     const notifications = await readFile('packages/cli/src/renderer/notifications/styles.css', 'utf8')
     expect(actual.indexOf(notifications)).toBeGreaterThan(previous)
     expect(actual.indexOf(PERMISSION_AUTHORIZATION_STYLES)).toBeGreaterThan(actual.indexOf(notifications))
+    expect(actual.indexOf(HOST_FORM_REACT_STYLES)).toBeGreaterThan(0)
+    expect(actual.indexOf(HOST_FORM_REACT_STYLES)).toBeLessThan(actual.indexOf(notifications))
     expect(actual.endsWith(PERMISSION_AUTHORIZATION_STYLES)).toBe(true)
     await buildManagerStyles(output)
     expect(await readFile(output, 'utf8')).toBe(actual)

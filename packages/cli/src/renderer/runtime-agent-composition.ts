@@ -514,7 +514,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
           {
             profileId: runtimeScope.metadata()!.profileId,
             ...(runtimeScope.metadata()!.hostKind === 'standalone'
-              ? { presentationMode: 'snapshot-only' as const }
+              ? {
+                presentationMode: runtimeScope.serviceConfigBridge() !== undefined
+                    && runtimeScope.metadata()!.channelManager?.service.writable === true
+                  ? 'configuration-only' as const
+                  : 'snapshot-only' as const,
+              }
               : {}),
             document,
             broker: runtimeScope.broker()!,
@@ -528,7 +533,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
             ...(runtimeScope.metadata()!.channelManager === undefined
               ? {}
               : { projection: runtimeScope.metadata()!.channelManager }),
-            ...(runtimeScope.serviceConfigBridge()! === undefined || runtimeScope.metadata()!.hostKind === 'standalone'
+            ...(runtimeScope.serviceConfigBridge()! === undefined
+                || runtimeScope.metadata()!.hostKind === 'standalone'
+                  && runtimeScope.metadata()!.channelManager?.service.writable !== true
               ? {}
               : {
                 serviceConfig: {
@@ -536,9 +543,12 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope, sig
                   mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
                 },
               }),
-            ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
-              credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
-            }),
+            ...(runtimeScope.channelCredentialBridge()! === undefined
+                || runtimeScope.metadata()!.hostKind === 'standalone'
+              ? {}
+              : {
+                credentialRequest: async (input) => await runtimeScope.channelCredentialBridge()!.request(input),
+              }),
             ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
               actions: {
                 ...(runtimeScope.metadata()!.hostKind === 'standalone' ? { snapshotOnly: true as const } : {}),

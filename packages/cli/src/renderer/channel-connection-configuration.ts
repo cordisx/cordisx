@@ -32,7 +32,7 @@ export async function mutateChannelConnectionConfiguration(input: {
   ) {
     return { status: 'rejected', code: 'INVALID_REQUEST' }
   }
-  const config = descriptor.configuration as { connections: Array<Record<string, unknown>> }
+  const config = descriptor.configuration as { schemaVersion: number; connections: Array<Record<string, unknown>> }
   let found = false
   const connections = config.connections.map(item => {
     const ref = item.ref as ChannelCredentialRef
@@ -49,12 +49,22 @@ export async function mutateChannelConnectionConfiguration(input: {
     identity: descriptor.identity,
     scope: descriptor.scope,
     expectedRevision: descriptor.revision,
-    configuration: { ...config, connections } as HostServiceConfigMutation['configuration'],
+    configuration: {
+      ...config,
+      ...(config.schemaVersion === 1
+        ? { contract: 'cordisx.channel-service-config/v2', schemaVersion: 2 }
+        : {}),
+      connections,
+    } as HostServiceConfigMutation['configuration'],
   })
   return result.status === 'applied'
     ? { status: 'applied', code: 'APPLIED', revision: result.revision }
     : {
       status: result.status === 'conflict' ? 'conflict' : 'rejected',
-      code: result.status === 'conflict' ? 'REVISION_CONFLICT' : 'CONFIGURATION_FAILED',
+      code: result.status === 'conflict'
+        ? 'REVISION_CONFLICT'
+        : result.status === 'rejected' && result.error.code === 'stale-generation'
+        ? 'CONFIGURATION_UNAVAILABLE'
+        : 'CONFIGURATION_FAILED',
     }
 }

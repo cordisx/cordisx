@@ -41,6 +41,7 @@ import {
   mountLegacyChannelCredentialForm,
 } from './channel-connection-form-mount.js'
 import { mutateChannelConnectionConfiguration } from './channel-connection-configuration.js'
+import { adoptChannelConfigurationUpdate } from './channel-manager-configuration-update.js'
 import { managedConsoleSeatFor } from './managed-console-seats.js'
 import type {
   HostServiceConfigDescriptor,
@@ -56,6 +57,12 @@ import type { RequestedScope } from './platform/platform-permission-store.js'
 import { generationVisibilityFromContext } from './generation-visibility.js'
 import { generationFromContext, ownerFromContext, sourceFromContext } from './ownership.js'
 import { PublicChannelManagerController } from './channel-manager-public.js'
+import {
+  channelConfigurationAllowed,
+  channelPresentationSnapshot,
+  unavailableChannelOperation,
+  unavailableChannelTarget,
+} from './channel-manager-presentation-scope.js'
 import { type ChannelManagerActionsApi, restrictChannelManagerActions } from './channel-manager-actions.js'
 export type { ChannelManagerActionsApi } from './channel-manager-actions.js'
 import {
@@ -88,7 +95,7 @@ export interface ChannelManagerServiceConfigApi {
 
 export interface ChannelManagerServiceInput {
   readonly navigateConversation?: (sessionId: string) => Promise<void> | void
-  readonly presentationMode?: 'standard' | 'snapshot-only'
+  readonly presentationMode?: 'standard' | 'snapshot-only' | 'configuration-only'
   readonly profileId?: string
   readonly hostGeneration?: string
   readonly projection?: ChannelManagerProjectionV1
@@ -118,15 +125,18 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
         || 'presentationMode' in candidate || 'actions' in candidate
       ? candidate as ChannelManagerServiceInput
       : { projection: candidate as ChannelManagerProjectionV1 }
-    const snapshotOnly = wrapped.presentationMode === 'snapshot-only' || wrapped.actions?.snapshotOnly === true
+    const configurationOnly = wrapped.presentationMode === 'configuration-only'
+    const snapshotOnly = configurationOnly || wrapped.presentationMode === 'snapshot-only'
+      || wrapped.actions?.snapshotOnly === true
     if (
-      snapshotOnly && (wrapped.serviceConfig !== undefined || wrapped.credentialRequest !== undefined
-        || wrapped.createCredentialedConnection !== undefined)
+      snapshotOnly && (!configurationOnly && wrapped.serviceConfig !== undefined
+        || wrapped.credentialRequest !== undefined || wrapped.createCredentialedConnection !== undefined)
     ) throw new Error('snapshot-only Channel Manager cannot expose configuration or credentials')
     const actions = restrictChannelManagerActions(wrapped.actions, snapshotOnly)
     registerChannelManagerState(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       snapshotOnly,
+      configurationOnly,
       ...(wrapped.credentialRequest === undefined ? {} : { credentialRequest: wrapped.credentialRequest }),
       ...(wrapped.broker === undefined ? {} : { broker: wrapped.broker }),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
@@ -169,7 +179,9 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       hostGeneration: wrapped.hostGeneration ?? 'host-unavailable',
       projection: () => projectionFor(this),
       ...(state.credentials === undefined ? {} : { credentials: state.credentials }),
-      configurationAvailable: () => state.serviceConfig !== undefined && state.projection.service.writable,
+      configurationAvailable: connection =>
+        state.serviceConfig !== undefined && state.projection.service.writable
+        && (!state.configurationOnly || !connection.pendingTenant),
       update: (ref, patch) => this.updateConfiguration(ref, patch),
       actionsAvailable: () => stateFor(this).actions !== undefined && stateFor(this).actions!.snapshotOnly !== true,
       logsAvailable: () => !snapshotOnly,
@@ -203,11 +215,19 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   snapshot(): ChannelManagerSnapshotV3 {
     this.assertOwnedRead()
-    return stateFor(this).publicController!.snapshot()
+    return channelPresentationSnapshot(this, stateFor(this).publicController!.snapshot())
   }
 
   forOwnService(): ChannelManagerV4 | undefined {
+    return this.createOwnService()
+  }
+
+  protected createOwnService(configuration = false): ChannelManagerV4 | undefined {
     if (!this.operationLive()) return undefined
+    const state = stateFor(this)
+    if (configuration && (!state.configurationOnly || !state.serviceConfig || !state.projection.service.writable)) {
+      return undefined
+    }
     const id = ownerFromContext(this.ctx),
       source = sourceFromContext(this.ctx),
       generation = generationFromContext(this.ctx)
@@ -218,7 +238,15 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       'channel.accounts.read',
       generationVisibilityFromContext(this.ctx)?.view(this.ctx),
     )
-    if (!owner) return undefined
+    if (
+      !owner || configuration && !state.broker?.authorizeServiceOwner(
+          { id, source },
+          owner,
+          'channel.accounts.connect',
+          {},
+          generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+        )
+    ) return undefined
     const original = originalService(this)
     const facade = Object.create(original) as CordisXChannelManagerService
     // The caller property must be configurable for Cordis's tracing proxy to
@@ -226,7 +254,12 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     Object.defineProperty(facade, 'ctx', { value: this.ctx, configurable: true })
     const lifetime = new AbortController()
     this.ctx.effect(() => () => lifetime.abort(), 'channelManager owned service lifetime')
-    registerChannelServiceFacade(facade, owner, lifetime.signal)
+    registerChannelServiceFacade(
+      facade,
+      owner,
+      lifetime.signal,
+      configuration ? 'configuration' : state.snapshotOnly ? 'snapshot' : 'standard',
+    )
     // Cordis tracing carries the actual caller into every inherited method. A
     // borrowed facade never becomes a bearer grant for a different plugin.
     return facade
@@ -519,6 +552,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     options: ChannelManagerFormOptionsV1,
     combined: boolean,
   ): Promise<ChannelManagerFormMountResultV1> {
+    if (combined && !channelConfigurationAllowed(this)) return { status: 'unavailable', code: 'OPERATION_UNAVAILABLE' }
     const pageOwner = ownerFromContext(this.ctx)
     if (
       !managedConsoleSeatFor(target, pageOwner) || options.signal.aborted
@@ -578,7 +612,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   snapshotWithIdentity(): ChannelManagerSnapshotV4 {
     this.assertOwnedRead()
-    return stateFor(this).publicController!.snapshotWithIdentity()
+    return channelPresentationSnapshot(this, stateFor(this).publicController!.snapshotWithIdentity())
   }
 
   async bindingPage(request: Parameters<ChannelManagerV4['bindingPage']>[0], signal: AbortSignal) {
@@ -593,6 +627,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     connectionToken: string,
     signal: AbortSignal,
   ): Promise<ChannelManagerConnectionConfigurationV1> {
+    if (!channelConfigurationAllowed(this)) throw new Error('OPERATION_UNAVAILABLE')
     signal.throwIfAborted()
     if (!await this.authorizeChannel('channel.accounts.read')) throw new Error('PERMISSION_DENIED')
     const state = stateFor(this), target = state.publicController!.target(connectionToken)
@@ -690,6 +725,9 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   }
 
   async issue(request: ChannelManagerTargetRequestV1): Promise<ChannelManagerTargetResultV1> {
+    if (stateFor(this).snapshotOnly) {
+      return unavailableChannelTarget(request, stateFor(this).publicController!.currentRevision())
+    }
     const allowed = request.operation === 'target.connection.create'
       ? this.operationLive() && this.ownedReadAllowed()
       : await this.authorizeChannel('channel.accounts.read')
@@ -709,6 +747,11 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   }
 
   async execute(request: ChannelManagerRequestV2): Promise<ChannelManagerResultV2> {
+    if (
+      stateFor(this).snapshotOnly && (request.operation !== 'connection.update' || !channelConfigurationAllowed(this))
+    ) {
+      return unavailableChannelOperation(request, stateFor(this).publicController!.currentRevision())
+    }
     const credential = request.operation === 'credential.capture' || request.operation === 'connection.create'
       || request.operation === 'connection.rotate-credential'
     const capability = credential ? 'channel.accounts.read' : request.operation.startsWith('binding.')
@@ -840,33 +883,19 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
     patch: { displayName?: string; selectors?: readonly string[] },
     expectedRevision?: number,
   ) {
+    if (!channelConfigurationAllowed(this)) return { status: 'unavailable' as const, code: 'OPERATION_UNAVAILABLE' }
     const result = await mutateChannelConnectionConfiguration({
       descriptor: await this.serviceConfiguration(),
       account: ref,
       patch,
       ...(expectedRevision === undefined ? {} : { expectedRevision }),
-      live: () => this.operationLive() && this.ownedReadAllowed(),
+      live: () => channelConfigurationAllowed(this) && this.operationLive() && this.ownedReadAllowed(),
       mutate: mutation => this.mutateServiceConfiguration(mutation),
     })
     if (result.status !== 'applied') return result
-    const key = compositeRef(ref)
     if (!this.operationLive() || !this.ownedReadAllowed()) return { status: 'applied' as const, code: 'APPLIED' }
     const state = stateFor(this)
-    state.projection = normalizeProjection({
-      ...state.projection,
-      connections: state.projection.connections.map(item =>
-        compositeRef(item.ref) === key
-          ? { ...item, ...(patch.displayName === undefined ? {} : { displayName: patch.displayName }) }
-          : item
-      ),
-      accounts: state.projection.accounts.map(item =>
-        compositeRef(item.ref) === key
-          ? { ...item, ...(patch.displayName === undefined ? {} : { displayName: patch.displayName }) }
-          : item
-      ),
-      service: { ...state.projection.service, revision: result.revision!, lastGoodRevision: result.revision! },
-    })
-    state.publicController!.invalidate()
+    adoptChannelConfigurationUpdate(state, ref, patch, result.revision!)
     this.notifyListeners()
     return { status: 'applied' as const, code: 'APPLIED' }
   }
@@ -874,6 +903,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   async queryLogs(
     request: Extract<ChannelManagerRequestV2, { operation: 'logs.query' }>,
   ): Promise<ChannelManagerLogPageV2> {
+    if (stateFor(this).snapshotOnly) throw new Error('OPERATION_UNAVAILABLE')
     if (!await this.authorizeChannel('channel.accounts.read')) throw new Error('PERMISSION_DENIED')
     return stateFor(this).publicController!.queryLogs(request)
   }
@@ -881,6 +911,7 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   async exportLogs(
     request: Extract<ChannelManagerRequestV2, { operation: 'logs.export' }>,
   ): Promise<ChannelManagerLogExportResultV2> {
+    if (stateFor(this).snapshotOnly) throw new Error('OPERATION_UNAVAILABLE')
     if (!await this.authorizeChannel('channel.accounts.read')) throw new Error('PERMISSION_DENIED')
     return stateFor(this).publicController!.exportLogs(request)
   }

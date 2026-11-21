@@ -198,6 +198,112 @@ it.skipIf(
       const second = await CdpClient.connect(target.webSocketDebuggerUrl)
       pages.push(second)
       await showChannel(second)
+
+      await first.evaluate(
+        'document.querySelector("[data-manager-collection-item] .cxr-manager-collection-open").click()',
+      )
+      try {
+        await expect.poll(
+          () => first.evaluate('Boolean(document.querySelector("#channel-connection-displayName input"))'),
+          { timeout: 15_000 },
+        ).toBe(true)
+      } catch {
+        const state = await first.evaluate(`({
+          text: document.body.innerText.slice(0, 600),
+          tabs: [...document.querySelectorAll('[data-manager-content-tab]')].map(item => item.getAttribute('data-manager-content-tab')),
+          formError: document.querySelector('[data-channel-form-error]')?.getAttribute('data-channel-form-error'),
+        })`)
+        const descriptor = await first.evaluate(`(async () => {
+          try {
+            const value = await globalThis.__cordisxRuntime.listServiceConfigs('channel')
+            return { count: value.length, writable: value[0]?.writable, revision: value[0]?.revision }
+          } catch {
+            return { unavailable: true }
+          }
+        })()`)
+        throw new Error('Connection form did not mount: ' + JSON.stringify({ state, descriptor }))
+      }
+      expect(
+        await first.evaluate(`(() => ({
+        inlineStyle: Boolean(document.querySelector('[data-channel-connection-form] style')),
+        grid: getComputedStyle(document.querySelector('[data-channel-connection-form] .cxf-form-grid')).display,
+        credential: Boolean(document.querySelector('#channel-credential-secret input'))
+      }))()`),
+      ).toEqual({ inlineStyle: false, grid: 'grid', credential: false })
+      await first.evaluate(`(() => {
+        const input = document.querySelector('#channel-connection-displayName input')
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Configured Simulator')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      })()`)
+      await expect.poll(() =>
+        first.evaluate(`(() => {
+        const event = new Event('beforeunload', { cancelable: true })
+        window.dispatchEvent(event)
+        return event.defaultPrevented
+      })()`)
+      ).toBe(true)
+      const save = `(() => {
+        const button = [...document.querySelectorAll('[data-channel-connection-form] button')].find(item =>
+          ['Save', '保存'].includes(item.textContent.trim()))
+        if (!button || button.disabled) return false
+        button.click()
+        return true
+      })()`
+      await expect.poll(() => first.evaluate(save)).toBe(true)
+      await expect.poll(() =>
+        first.evaluate(
+          'document.body.textContent.includes("Your draft was kept") || document.body.textContent.includes("草稿已保留")',
+        ), { timeout: 15_000 }).toBe(true)
+      expect(await first.evaluate('document.querySelector("#channel-connection-displayName input").value'))
+        .toBe('Configured Simulator')
+      const serviceRevision = async () => {
+        const current = JSON.parse(await readFile(configPath, 'utf8'))
+        return current.plugins[0].services.runtime.profiles.default.revision as number
+      }
+      expect(await serviceRevision()).toBe(1)
+      await second.send('Page.enable')
+      await second.send('Page.navigate', { url: 'about:blank' })
+      await expect.poll(() => second.evaluate('location.href')).toBe('about:blank')
+      try {
+        await expect.poll(async () => {
+          if (await serviceRevision() === 2) return true
+          await first.evaluate(save).catch(() => false)
+          return false
+        }, { timeout: 30_000, interval: 500 }).toBe(true)
+      } catch {
+        const state = await first.evaluate(`({
+          text: document.body.innerText.slice(0, 600),
+          input: document.querySelector('#channel-connection-displayName input')?.value,
+          buttons: [...document.querySelectorAll('[data-channel-connection-form] button')].map(item => ({
+            label: item.textContent.trim(), disabled: item.disabled,
+          })),
+        })`)
+        throw new Error(
+          'Connection form did not save after retirement: '
+            + JSON.stringify({ state, revision: await serviceRevision() }),
+        )
+      }
+      const savedConfig = JSON.parse(await readFile(configPath, 'utf8'))
+        .plugins[0].services.runtime.profiles.default.config
+      expect(savedConfig).toMatchObject({
+        contract: 'cordisx.channel-service-config/v2',
+        schemaVersion: 2,
+        connections: [{ displayName: 'Configured Simulator' }],
+      })
+      await expect.poll(() =>
+        first.evaluate(
+          'document.body.textContent.includes("Operation completed") || document.body.textContent.includes("操作已完成")',
+        ), { timeout: 15_000 }).toBe(true)
+      await expect.poll(() =>
+        first.evaluate(
+          'document.querySelector("#channel-connection-displayName input")?.value',
+        )
+      ).toBe('Configured Simulator')
+      const replacementUrl = await open()
+      await second.send('Page.navigate', { url: replacementUrl })
+      await showChannel(second)
+      await showChannel(first)
       await first.evaluate('globalThis.__productionBeforeReload = true')
       await first.send('Page.reload')
       await expect.poll(
@@ -214,6 +320,10 @@ it.skipIf(
       await first.evaluate(
         'document.querySelector("[data-manager-collection-item] .cxr-manager-collection-open").click()',
       )
+      await expect.poll(() =>
+        first.evaluate(
+          'document.querySelector("#channel-connection-displayName input")?.value',
+        ), { timeout: 15_000 }).toBe('Configured Simulator')
       await expect.poll(() =>
         first.evaluate(`(() => {
         const shell = document.querySelector('[data-channel-manager]');

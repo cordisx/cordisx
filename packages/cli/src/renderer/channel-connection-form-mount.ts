@@ -116,6 +116,7 @@ export async function mountChannelConnectionForm(input: {
         account: input.account,
         initial,
         credentialsAvailable: input.credentials !== undefined,
+        externalStyles: input.target.closest('[data-manager-surface="standalone"]') !== null,
         locale: input.target.ownerDocument.documentElement.lang || 'en',
         signal,
         read: input.read,

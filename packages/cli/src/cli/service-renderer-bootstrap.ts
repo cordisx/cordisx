@@ -435,6 +435,7 @@ export class ServiceRendererBootstrap {
             selectedPlugin: channel.plugin,
             service: channel.service,
             bridge: channel.bridge,
+            allowConfiguration: this.input.experimentalChannelServiceConfig === true,
             server: await this.input.lifecycle.artifactServer(),
             current: () => this.current(rendererId, entry),
             unchanged: async () => await this.unchanged(rendererId, entry),

@@ -38,14 +38,17 @@ changes to those managed packages remain unavailable. A Desktop owner must own
 the profile exclusively, have a ready Desktop renderer, not be in attach mode,
 and have no installed plugin packages. It can admit an empty profile or one
 configured Channel archive. On macOS or Linux, either owner can project that
-Channel as a read-only page when its staged browser graph has an initial
+Channel when its staged browser graph has an initial
 stylesheet and its live service owner matches. An existing source-specific
-Manager UI permission or a separate one-tab review is required. Legacy Channel graphs without a standalone stylesheet are
-not admitted. Package and configuration mutations are unavailable while a
-Manager renderer is attached. The Host page does not yet support Channel credential or
-configuration writes. Other configured plugins, adapters, concurrent permission
-changes and recovery after an uncertain result are not yet supported. The
-isolated browser tests do not constitute real Codex App validation.
+Manager UI permission or a separate one-tab review is required. Legacy Channel
+graphs without a standalone stylesheet are not admitted. The service owner can
+also expose the existing connection form for a resolved Channel account's display
+name and reception selectors. The eligible Desktop owner remains read-only.
+Credential capture, creation, connection controls, policies, logs and sessions
+are not available through this restricted page. Other configured plugins,
+adapters, concurrent permission changes and recovery after an uncertain result
+are not yet supported. The isolated browser tests do not constitute real Codex
+App validation.
 
 The experimental Host page in service mode and the eligible Desktop mode can
 read and save shared model-service declarations through the
@@ -64,8 +67,8 @@ memory. On a normal refresh, a tab-local handle and an HttpOnly cookie can
 authorize a new session after the owner confirms retirement of the old renderer.
 The Host page also restores supported navigation destinations within that tab.
 Route parameters and unsaved form inputs are not stored; a transient edit page
-returns to a main section after refresh. A changed shared model-service form
-asks the browser to warn before the page is refreshed or closed.
+returns to a main section after refresh. Changed shared model-service and Channel
+connection forms ask the browser to warn before the page is refreshed or closed.
 If a write or lifecycle transaction is in progress, retirement is uncertain, or
 browser storage is unavailable, open a new manager entry and check any uncertain
 operation before retrying. When its resource worker loses its in-memory binding,
@@ -112,20 +115,28 @@ without reading them back into the page. The configured archive path has been
 exercised with a real isolated Channel service and a simulator; separate
 synthetic credentials exercise the write and recovery transactions. Real
 Feishu/Lark credentials have not been used in validation. This API is separate
-from the read-only Channel page and does not enable writes in that page.
+from the restricted Channel page and does not enable credential writes there.
 Unverified direct entries, other adapters, connection deletion, and remaining
 Channel management features are unavailable.
 
 The experimental service-owner composition projects an exact configured
-Channel archive and its already-running service into read-only renderer
-sessions. It forwards only matching existing Manager UI policies and does not
-provide credential or configuration actions. A two-page test exercises the
+Channel archive and its already-running service into renderer sessions. It
+forwards only matching existing Manager UI policies. The connection form may
+save ordinary settings for a resolved account through the owner-bound service
+configuration bridge. It does not capture credentials. A two-page test exercises the
 compiled service owner, actual isolated Codex app-server, authenticated sidecar,
 refresh, profile write fences and owner restart with an isolated simulator.
 This does not validate real Channel credentials, the current user's profile,
 the native Desktop renderer or another adapter. Archives without a staged
 browser graph and an initial Channel stylesheet are unavailable, and
 permissions from another source are not reused.
+
+The originating Manager reserves its own session and the owner lifecycle before
+a connection settings write. It drains old reads and waits for the new service
+generation and configuration readback before reporting success. A second
+Manager or unaccounted adapter makes the write unavailable without closing that
+session; the form retains its draft. Changed revisions require the user to
+review the new version before saving. This is not cross-client synchronization.
 
 When the owner-selected Channel has no matching UI allow, its Manager entry can
 lead to a Host permission review. The user may allow the navigation entry and

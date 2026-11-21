@@ -95,7 +95,12 @@ describe('unified Host Channel connection form', () => {
       expect(onResult).toHaveBeenLastCalledWith({ status: 'applied', code: 'APPLIED' })
       await f.type('#channel-connection-displayName input', 'Draft')
       await f.type('#channel-credential-secret input', 'test-secret')
-      await f.click('.cxf-form-action-buttons button[type="button"]')
+      const undo = [...f.document.querySelectorAll('button')].find(button =>
+        button.textContent?.includes('Undo changes')
+      )!
+      await act(async () => {
+        undo.click()
+      })
       expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('Updated')
       expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('')
       expect(apply).toHaveBeenCalledOnce()
@@ -145,6 +150,19 @@ describe('unified Host Channel connection form', () => {
       })
       expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('My edit')
       expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('test-secret')
+      expect(f.document.querySelector('.cxf-form-action-buttons')?.textContent).toContain('Use latest version')
+      await act(async () => {
+        f.document.querySelector('form')!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        )
+      })
+      expect(apply).not.toHaveBeenCalled()
+      const review = [...f.document.querySelectorAll('button')].find(button =>
+        button.textContent?.includes('Use latest version')
+      )!
+      await act(async () => {
+        review.click()
+      })
       await act(async () => {
         f.document.querySelector('form')!.dispatchEvent(
           new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
@@ -155,7 +173,12 @@ describe('unified Host Channel connection form', () => {
         snapshot,
       )
       expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('test-secret')
-      await f.click('.cxf-form-action-buttons button[type="button"]')
+      const undo = [...f.document.querySelectorAll('button')].find(button =>
+        button.textContent?.includes('Undo changes')
+      )!
+      await act(async () => {
+        undo.click()
+      })
       expect((f.element('#channel-connection-displayName input') as HTMLInputElement).value).toBe('Other window')
       expect((f.element('#channel-credential-secret input') as HTMLInputElement).value).toBe('')
       await act(async () => {
@@ -165,6 +188,49 @@ describe('unified Host Channel connection form', () => {
       lifetime.abort()
       await f.dispose()
       expect(refresh).toBeUndefined()
+    }
+  })
+
+  it('warns before refreshing a standalone page with an unsaved connection draft', async () => {
+    const f = reactManagerFixture(), lifetime = new AbortController()
+    f.document.getElementById('root')!.setAttribute('data-manager-surface', 'standalone')
+    const snapshot = {
+      displayName: 'Original',
+      selectors: ['direct'],
+      revision: 1,
+      serviceRevision: 1,
+      writable: true,
+      credentialWritable: false,
+    }
+    try {
+      await f.render(createElement(ChannelConnectionForm, {
+        account: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
+        initial: snapshot,
+        credentialsAvailable: false,
+        externalStyles: true,
+        locale: 'en',
+        signal: lifetime.signal,
+        subscribe: () => () => {},
+        read: async () => snapshot,
+        apply: vi.fn(),
+        resolveTenant: vi.fn(),
+        onResult: vi.fn(),
+      }))
+      expect(f.document.querySelector('[data-channel-connection-form] style')).toBeNull()
+      const clean = new f.dom.window.Event('beforeunload', { cancelable: true })
+      f.dom.window.dispatchEvent(clean)
+      expect(clean.defaultPrevented).toBe(false)
+      await f.type('#channel-connection-displayName input', 'Unsaved')
+      const warning = new f.dom.window.Event('beforeunload', { cancelable: true })
+      f.dom.window.dispatchEvent(warning)
+      expect(warning.defaultPrevented).toBe(true)
+      await f.click('.cxf-form-action-buttons button[type="button"]')
+      const reset = new f.dom.window.Event('beforeunload', { cancelable: true })
+      f.dom.window.dispatchEvent(reset)
+      expect(reset.defaultPrevented).toBe(false)
+    } finally {
+      lifetime.abort()
+      await f.dispose()
     }
   })
 })

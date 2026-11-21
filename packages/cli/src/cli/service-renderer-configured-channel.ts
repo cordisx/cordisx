@@ -34,6 +34,7 @@ export class ServiceRendererConfiguredChannel {
       readonly plugin: CordisXConfigPlugin
       readonly service: LocalChannelService
       readonly bridge: ReadonlyChannelRendererBridge
+      readonly allowConfiguration: boolean
       readonly current: () => boolean
       readonly unchanged: () => Promise<boolean>
       readonly retire: () => void
@@ -51,6 +52,7 @@ export class ServiceRendererConfiguredChannel {
     readonly selectedPlugin: CordisXConfigPlugin
     readonly service: LocalChannelService
     readonly bridge: ReadonlyChannelRendererBridge
+    readonly allowConfiguration: boolean
     readonly server: PluginGenerationArtifactServer
     readonly current: () => boolean
     readonly unchanged: () => Promise<boolean>
@@ -136,6 +138,12 @@ export class ServiceRendererConfiguredChannel {
       }
       this.view = view
       this.sourceAlias = source
+      const connect = this.input.allowConfiguration
+        ? this.owner.capabilities.find(capability =>
+          capability.name === 'channel.accounts.connect' && Object.keys(capability.scope).length === 0
+        )
+        : undefined
+      const configurationAvailable = connect !== undefined
       return {
         plugin: {
           id: this.input.plugin.id,
@@ -153,8 +161,16 @@ export class ServiceRendererConfiguredChannel {
           runtimeGraph: createStandaloneRuntimeGraph(graph, origin),
         } satisfies CordisXConfigPlugin,
         policies: identity.projectManagerPolicies(context, source, this.input.plugin.id, policies),
-        projection: view.initial.projection,
-        serviceOwner: { ...view.initial.owner, source },
+        projection: configurationAvailable
+          ? { ...view.initial.projection, service: { ...view.initial.projection.service, writable: true } }
+          : view.initial.projection,
+        serviceOwner: {
+          ...view.initial.owner,
+          source,
+          capabilities: connect === undefined
+            ? view.initial.owner.capabilities
+            : [...view.initial.owner.capabilities, connect],
+        },
       }
     } catch (error) {
       this.close()

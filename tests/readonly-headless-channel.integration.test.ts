@@ -7,6 +7,7 @@ import type { ChannelManagerV5 } from '@cordisx/protocol/channel-manager/v5'
 import { describe, expect, it, vi } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import { openReadonlyHeadlessChannel } from '../packages/cli/src/cli/readonly-headless-channel.js'
+import { channelConfigurationApi } from '../packages/cli/src/cli/renderer-channel-composition.js'
 import { createDefaultHomeConfig } from '../packages/cli/src/config/home-config.js'
 import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
@@ -81,6 +82,173 @@ async function fixture() {
 }
 
 describe('read-only independent manager for an existing configured Channel', () => {
+  it('does not offer configuration when the service owner lacks the connect capability', async () => {
+    const f = await fixture()
+    const view = (await openReadonlyHeadlessChannel(f.input))!
+    const moduleGeneration = 'fixture-read-only-module'
+    const identity = { id: 'channel', source: view.initial.owner.source }
+    const broker = new PermissionBroker(
+      ownerSnapshotPermissionStore([]),
+      { request: async () => 'deny' },
+      () => new Date(),
+      100,
+      'test',
+      'owner-generation',
+      undefined,
+      undefined,
+      undefined,
+      [{
+        ...view.initial.owner,
+        moduleGeneration,
+        runtimeGeneration: 'owner-generation',
+      }],
+    )
+    broker.register(identity, normalizePluginManifest(f.input.plugin.manifest, 'channel'), {
+      pluginId: 'channel',
+      moduleGeneration,
+    })
+    const root = new Context()
+    const fiber = root.plugin(CordisXChannelManagerPresentationService, {
+      presentationMode: 'configuration-only',
+      projection: { ...view.initial.projection, service: { ...view.initial.projection.service, writable: true } },
+      profileId: 'test',
+      hostGeneration: 'owner-generation',
+      broker,
+      serviceConfig: { list: async () => [], mutate: vi.fn() },
+      actions: {
+        snapshotOnly: true,
+        run: async () => ({ status: 'applied' as const, projection: view.initial.runtime }),
+      },
+    })
+    try {
+      await fiber
+      const ctx = root.extend({
+        [CORDISX_PLUGIN_ID]: identity.id,
+        [CORDISX_PLUGIN_SOURCE]: identity.source,
+        [CORDISX_PLUGIN_GENERATION]: moduleGeneration,
+      })
+      const manager = ctx.channelManager as unknown as CordisXChannelManagerPresentationService
+      expect(manager.forOwnConfigurationPresentationService()).toBeUndefined()
+      expect(manager.forOwnPresentationService()!.snapshot().accounts.flatMap(account => account.availableOperations))
+        .toEqual([])
+    } finally {
+      view.close()
+      await fiber.dispose()
+      broker.dispose()
+      await f.dispose()
+    }
+  })
+
+  it('keeps the old facade read-only while explicitly granting only the new configuration facade', async () => {
+    const f = await fixture()
+    const view = (await openReadonlyHeadlessChannel(f.input))!
+    const moduleGeneration = 'fixture-configuration-module'
+    const identity = { id: 'channel', source: view.initial.owner.source }
+    const connect = f.service.managementOwner()!.capabilities.find(item => item.name === 'channel.accounts.connect')!
+    const owner = {
+      ...view.initial.owner,
+      capabilities: [...view.initial.owner.capabilities, connect],
+      moduleGeneration,
+      runtimeGeneration: 'owner-generation',
+    }
+    const broker = new PermissionBroker(
+      ownerSnapshotPermissionStore([]),
+      { request: async () => 'deny' },
+      () => new Date(),
+      100,
+      'test',
+      'owner-generation',
+      undefined,
+      undefined,
+      undefined,
+      [owner],
+    )
+    const retire = broker.register(identity, normalizePluginManifest(f.input.plugin.manifest, 'channel'), {
+      pluginId: 'channel',
+      moduleGeneration,
+    })
+    const api = channelConfigurationApi({
+      token: 'a'.repeat(64),
+      profileId: 'test',
+      generation: 'owner-generation',
+      configPath: f.input.configPath,
+      plugin: f.input.plugin,
+      service: f.service,
+    })
+    const mutate = vi.fn(async (mutation: Parameters<typeof api.mutate>[0]) => ({
+      contract: 'cordisx.service-config-result/v1' as const,
+      schemaVersion: 1 as const,
+      identity: mutation.identity,
+      scope: mutation.scope,
+      status: 'applied' as const,
+      revision: mutation.expectedRevision + 1,
+      serviceGeneration: 'new-service-generation',
+    }))
+    const root = new Context()
+    const fiber = root.plugin(CordisXChannelManagerPresentationService, {
+      presentationMode: 'configuration-only',
+      projection: { ...view.initial.projection, service: { ...view.initial.projection.service, writable: true } },
+      profileId: 'test',
+      hostGeneration: 'owner-generation',
+      broker,
+      serviceConfig: { list: async () => [await api.descriptor()], mutate },
+      actions: {
+        snapshotOnly: true,
+        run: async () => ({ status: 'applied' as const, projection: view.initial.runtime }),
+      },
+    })
+    try {
+      await fiber
+      const ctx = root.extend({
+        [CORDISX_PLUGIN_ID]: identity.id,
+        [CORDISX_PLUGIN_SOURCE]: identity.source,
+        [CORDISX_PLUGIN_GENERATION]: moduleGeneration,
+      })
+      const manager = ctx.channelManager as unknown as CordisXChannelManagerPresentationService
+      const old = manager.forOwnPresentationService()!
+      const config = manager.forOwnConfigurationPresentationService()!
+      expect(old.presentationCapabilities().mode).toBe('snapshot-only')
+      expect(config.configurationPresentationCapabilities().mode).toBe('configuration-only')
+      expect(() => (config as unknown as CordisXChannelManagerPresentationService).presentationCapabilities())
+        .toThrow('OPERATION_UNAVAILABLE')
+      const before = config.snapshot()
+      const ready = before.accounts.find(account => account.adapterKind === 'simulator')!
+      const pending = before.accounts.find(account => account.lastErrorCode === 'TENANT_IDENTIFICATION_PENDING')!
+      expect(ready.availableOperations).toEqual(['connection.update'])
+      expect(pending.availableOperations).toEqual([])
+      expect(old.snapshot().accounts.flatMap(account => account.availableOperations)).toEqual([])
+      await expect(old.connectionConfiguration(ready.connectionToken, new AbortController().signal))
+        .rejects.toThrow('OPERATION_UNAVAILABLE')
+      await expect(config.connectionConfiguration(ready.connectionToken, new AbortController().signal))
+        .resolves.toMatchObject({ connectionToken: ready.connectionToken })
+      const request = {
+        contract: 'cordisx.channel-manager-request/v2' as const,
+        schemaVersion: 2 as const,
+        requestId: 'configuration-save',
+        profileId: before.profileId,
+        hostGeneration: before.hostGeneration,
+        expectedRevision: before.revision,
+        operation: 'connection.update' as const,
+        target: { kind: 'connection' as const, connectionToken: ready.connectionToken },
+        patch: { displayName: 'Updated', selectors: ['direct'] as const },
+      }
+      expect(await old.execute(request)).toMatchObject({ status: 'rejected', code: 'OPERATION_UNAVAILABLE' })
+      expect(mutate).not.toHaveBeenCalled()
+      expect(await config.execute({ ...request, operation: 'connection.disable' } as never))
+        .toMatchObject({ status: 'rejected', code: 'OPERATION_UNAVAILABLE' })
+      expect(await config.execute(request)).toMatchObject({ status: 'applied' })
+      expect(mutate).toHaveBeenCalledOnce()
+      expect(JSON.stringify(mutate.mock.calls)).not.toContain('fixture-private-reference')
+      retire()
+      expect(() => config.configurationPresentationCapabilities()).toThrow('PERMISSION_DENIED')
+    } finally {
+      view.close()
+      await fiber.dispose()
+      broker.dispose()
+      api.dispose()
+      await f.dispose()
+    }
+  })
   it('keeps the read-only descriptor even when its snapshot bridge is unavailable', () => {
     const ref = { adapterId: 'simulator', accountId: 'local', tenantId: 'test' }
     const connection = {

@@ -38,7 +38,7 @@ interface PublicChannelManagerInput {
   readonly hostGeneration: string
   readonly projection: () => ChannelManagerProjectionV1
   readonly credentials?: ChannelCredentialWorkflow
-  readonly configurationAvailable?: () => boolean
+  readonly configurationAvailable?: (connection: ChannelManagerConnectionProjection) => boolean
   readonly update?: (
     ref: ChannelManagerConnectionProjection['ref'],
     patch: { displayName?: string; selectors?: readonly string[] },
@@ -233,7 +233,7 @@ export class PublicChannelManagerController {
       const availableOperations = [
         ...actionOperations,
         ...credentialOperations,
-        ...(this.input.configurationAvailable?.() ? ['connection.update'] as const : []),
+        ...(this.input.configurationAvailable?.(connection) ? ['connection.update'] as const : []),
         ...(projection.logs === undefined || connection.pendingTenant || this.input.logsAvailable?.() === false
           ? []
           : ['logs.query'] as const),
