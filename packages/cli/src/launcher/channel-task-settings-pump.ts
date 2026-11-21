@@ -185,7 +185,11 @@ export class ChannelTaskSettingsPump {
             actual,
             result.status === 'rejected' ? 'applied' : 'unknown',
             request,
-            result.status === 'rejected' ? 'NATIVE_SELECTION_REJECTED' : 'NATIVE_EFFECT_UNCERTAIN',
+            result.status === 'rejected'
+              ? result.reason === 'provider-switch-unavailable'
+                ? 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE'
+                : 'NATIVE_SELECTION_REJECTED'
+              : 'NATIVE_EFFECT_UNCERTAIN',
             result.status === 'rejected' ? 'denied' : 'unknown',
           )}
       }))

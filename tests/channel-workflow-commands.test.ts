@@ -21,6 +21,39 @@ const event = {
 }
 const binding = (sessionId: string) => ({ id: sessionId, channel: event, sessionId, state: 'active' as const })
 describe('progressive Channel command experience', () => {
+  it('explains a definitive provider-switch refusal without deleting the existing chat', async () => {
+    const commands = new ChannelSessionCommands({
+      bindings: () => [binding('a')] as never,
+      native: () => ({ label: async () => '飞书 · 私聊' }) as never,
+      allowed: () => true,
+      unbind: async () => true,
+      tasks: {
+        boundTo: () => true,
+        read: async () => ({
+          revision: 1,
+          settings: { providerId: 'old', model: 'old-model' },
+          code: 'NATIVE_PROVIDER_SWITCH_UNAVAILABLE',
+        }),
+      } as never,
+    })
+    expect(await commands.handle(event, 'task-settings', ''))
+      .toContain('当前对话不能切换服务商；可保留此对话，新建对话并选择目标服务商。')
+    commands.dispose()
+  })
+  it('warns that an uncertain model change needs reconciliation', async () => {
+    const commands = new ChannelSessionCommands({
+      bindings: () => [binding('a')] as never,
+      native: () => ({ label: async () => '飞书 · 私聊' }) as never,
+      allowed: () => true,
+      unbind: async () => true,
+      tasks: {
+        boundTo: () => true,
+        read: async () => ({ revision: 1, settings: {}, application: 'unknown' }),
+      } as never,
+    })
+    expect(await commands.handle(event, 'task-settings', '')).toContain('不要重复提交')
+    commands.dispose()
+  })
   it('preserves Fast false and project selection through all/one choices and combined flags', async () => {
     const request = vi.fn(async () => ({ application: 'saved' }))
     const commands = new ChannelSessionCommands({

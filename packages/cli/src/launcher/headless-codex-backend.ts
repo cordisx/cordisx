@@ -1,12 +1,33 @@
 import { headlessConfiguredProviders } from './headless-configured-providers.js'
 import { type AgentBridgeCodexAuthority, createCodexBridgeHandler } from './agent-bridge.js'
 import { type CodexAppServerRpc, startLocalCodexAppServer } from '../providers/codex-app-server.js'
+import { JsonLineRpcError } from '../providers/json-line-rpc.js'
 import { parseModelReasoningCapabilities } from '../model-reasoning-capabilities.js'
 import { channelNativeIdle } from './channel-native-idle.js'
 import type { NativeBridgeMethod } from './native-submission-control-server.js'
 import { bindHeadlessCatalog } from './headless-catalog-binding.js'
 import { HeadlessContextCapture } from './headless-context-capture.js'
 import { HeadlessSettingsObserver } from './headless-settings-observer.js'
+
+/** A native preflight refusal is safe to report; transport failures remain uncertain. */
+function providerSwitchRefused(error: unknown, current: unknown, requested: string): boolean {
+  if (
+    !(error instanceof JsonLineRpcError) || error.rpcCode !== -32600
+    || typeof current !== 'string' || current === requested
+  ) return false
+  const data = error.rpcData && typeof error.rpcData === 'object' && !Array.isArray(error.rpcData)
+    ? error.rpcData as Record<string, unknown>
+    : undefined
+  if (
+    data?.type === 'modelProviderMismatch'
+    && data.modelProvider === current && data.currentModelProvider === requested
+  ) return true
+  // Codex 0.171 rejects an explicit provider override before loading the thread,
+  // but returns no structured data for this particular resume rejection.
+  const refusal = /cannot change this thread['’]s model provider from (.+?) to (.+?) on resume/iu.exec(error.message)
+  const unquote = (value: string) => value.replace(/^[`'"“”]+|[`'"“”]+$/gu, '')
+  return refusal !== null && unquote(refusal[1]!) === current && unquote(refusal[2]!) === requested
+}
 
 /** A launch-owned CLI app-server; it never attaches to a Desktop process. */
 export async function startHeadlessCodexBackend(input: {
@@ -166,6 +187,7 @@ export async function startHeadlessCodexBackend(input: {
       if (
         operation !== 'select'
         || typeof selection.threadId !== 'string' || typeof selection.model !== 'string'
+        || typeof selection.providerId !== 'string'
         || !(configuredProviders ?? [{ providerId: 'openai', models: catalog }]).some(provider =>
           provider.providerId === selection.providerId && provider.models.some(model => model.id === selection.model)
         )
@@ -195,10 +217,18 @@ export async function startHeadlessCodexBackend(input: {
               : { status: 'reconciliation-required', reason: 'native-selection-unconfirmed' }
           }
         }
-        const resumed = await authority.nativeRequest('thread/resume', {
-          threadId: selection.threadId,
-          ...(status === 'notLoaded' ? { modelProvider: selection.providerId, model: selection.model } : {}),
-        }) as { thread?: { id?: string }; model?: string; modelProvider?: string }
+        let resumed: { thread?: { id?: string }; model?: string; modelProvider?: string }
+        try {
+          resumed = await authority.nativeRequest('thread/resume', {
+            threadId: selection.threadId,
+            ...(status === 'notLoaded' ? { modelProvider: selection.providerId, model: selection.model } : {}),
+          }) as typeof resumed
+        } catch (error) {
+          if (status === 'notLoaded' && providerSwitchRefused(error, observed.modelProvider, selection.providerId)) {
+            return { status: 'rejected', reason: 'provider-switch-unavailable' }
+          }
+          throw error
+        }
         if (
           resumed.thread?.id !== selection.threadId || resumed.model !== selection.model
           || resumed.modelProvider !== selection.providerId
